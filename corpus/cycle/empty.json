@@ -1,0 +1,53 @@
+{
+  "corpus": "cycle",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "no-channels",
+      "note": "An empty command is not an error.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {}
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":null,\"tripped\":[]}"
+    }
+  ]
+}

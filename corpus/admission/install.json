@@ -1,0 +1,1058 @@
+{
+  "corpus": "admission",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "clean",
+      "note": "Everything declared, provided and granted.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[]}"
+    },
+    {
+      "id": "unsigned",
+      "note": "Bytes may be intact and nobody has attested to who produced them.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature_verified": false,
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"unsigned\",\"message\":\"No verified publisher signature. The bytes may be intact and nobody has attested to who produced them.\",\"severity\":\"error\"}]}"
+    },
+    {
+      "id": "digest-mismatch",
+      "note": "The contents do not hash to the manifest digest.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:other"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"digest_mismatch\",\"message\":\"The package contents do not hash to the digest in its manifest.\",\"severity\":\"error\",\"subjects\":[\"sha256:pkg\",\"sha256:other\"]}]}"
+    },
+    {
+      "id": "isolation-violation",
+      "note": "Only drivers touch hardware directly.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "native",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"isolation_violation\",\"message\":\"A policy package may not run unsandboxed. Only drivers touch hardware directly.\",\"severity\":\"error\"}]}"
+    },
+    {
+      "id": "driver-may-be-native",
+      "note": "A driver is the one kind that may.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "driver",
+          "digest": "sha256:pkg",
+          "isolation": "native",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[]}"
+    },
+    {
+      "id": "budget-ram",
+      "note": "A robot that cannot feed the package refuses it before it runs.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 256,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"budget_exceeded\",\"message\":\"This robot cannot supply the resources the package declares it needs.\",\"severity\":\"error\",\"subjects\":[\"RAM: needs 512 MB, has 256 MB\"]}]}"
+    },
+    {
+      "id": "budget-every-resource",
+      "note": "Each shortfall is named separately.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 128,
+          "vram_mb": 512,
+          "cpu_cores": 1,
+          "disk_mb": 100,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"budget_exceeded\",\"message\":\"This robot cannot supply the resources the package declares it needs.\",\"severity\":\"error\",\"subjects\":[\"RAM: needs 512 MB, has 128 MB\",\"VRAM: needs 2048 MB, has 512 MB\",\"Disk: needs 4096 MB, has 100 MB\",\"CPU: needs 2 cores, has 1\"]}]}"
+    },
+    {
+      "id": "budget-absent-capacity",
+      "note": "An undeclared capacity is zero, not unlimited.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"budget_exceeded\",\"message\":\"This robot cannot supply the resources the package declares it needs.\",\"severity\":\"error\",\"subjects\":[\"VRAM: needs 2048 MB, has 0 MB\",\"Disk: needs 4096 MB, has 0 MB\",\"CPU: needs 2 cores, has 0\"]}]}"
+    },
+    {
+      "id": "over-request",
+      "note": "A package cannot request what it never declared a need for.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp",
+            "locomotion.walk"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"over_request\",\"message\":\"The package requests permissions it never declared a need for.\",\"severity\":\"error\",\"subjects\":[\"locomotion.walk\"]}]}"
+    },
+    {
+      "id": "capability-denied",
+      "note": "The operator profile withholds it outright.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": [],
+          "denied": [
+            "manipulation.grasp"
+          ]
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"capability_denied\",\"message\":\"The operator profile withholds capabilities this package requires.\",\"severity\":\"error\",\"subjects\":[\"manipulation.grasp\"]}]}"
+    },
+    {
+      "id": "capability-unprovided",
+      "note": "The robot does not have it at all.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"capability_ungranted\",\"message\":\"This robot does not provide capabilities the package requires.\",\"severity\":\"error\",\"subjects\":[\"manipulation.grasp\"]}]}"
+    },
+    {
+      "id": "ungranted-is-a-warning",
+      "note": "The Android runtime-permission moment: it installs and waits.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [],
+          "installed": []
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":true,\"effective_grants\":[],\"findings\":[{\"code\":\"capability_ungranted\",\"message\":\"These capabilities are awaiting an operator grant. The package installs and cannot use them until it is given.\",\"severity\":\"warning\",\"subjects\":[\"manipulation.grasp\"]}]}"
+    },
+    {
+      "id": "missing-dependency",
+      "note": "A declared dependency that is not installed.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "depends_on": [
+            {
+              "id": "acme/vision",
+              "range": "^2.0.0"
+            }
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"missing_dependency\",\"message\":\"Requires acme/vision ^2.0.0, which is not installed.\",\"severity\":\"error\",\"subjects\":[\"acme/vision\"]}]}"
+    },
+    {
+      "id": "dependency-satisfied",
+      "note": "The same dependency, present.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "depends_on": [
+            {
+              "id": "acme/vision",
+              "range": "^2.0.0"
+            }
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": [
+            {
+              "id": "acme/vision",
+              "version": "2.1.0"
+            }
+          ]
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[]}"
+    },
+    {
+      "id": "os-too-old",
+      "note": "The robot predates the package minimum.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "min_os_version": "2.0.0"
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"os_too_old\",\"message\":\"Requires Skynet OS 2.0.0 or later; this robot runs 1.2.0.\",\"severity\":\"error\"}]}"
+    },
+    {
+      "id": "os-exactly-minimum",
+      "note": "Equal versions satisfy a minimum.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "min_os_version": "1.2.0"
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[]}"
+    },
+    {
+      "id": "transport-refused",
+      "note": "A policy that cannot reach this body cannot install onto it.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:pkg",
+        "transport_verdict": "refused"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"transport_refused\",\"message\":\"The policy's action space cannot be transported onto this body.\",\"severity\":\"error\"}]}"
+    },
+    {
+      "id": "transport-degraded-installs",
+      "note": "Degraded is a decision for the operator, not a refusal.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:pkg",
+        "transport_verdict": "degraded"
+      },
+      "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[]}"
+    },
+    {
+      "id": "executes-on-load",
+      "note": "Loading this package runs code the operator has not accepted.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:pkg",
+        "executes_on_load": true
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"executes_on_load_untrusted\",\"message\":\"This package contains files that execute code when read, and the operator has not accepted that. Install with trust_remote_code once you have decided the publisher is trustworthy.\",\"severity\":\"error\"}]}"
+    },
+    {
+      "id": "executes-on-load-trusted",
+      "note": "The same package, once the operator has decided.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature_verified": true,
+        "observed_digest": "sha256:pkg",
+        "executes_on_load": true,
+        "trust_remote_code": true
+      },
+      "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[]}"
+    },
+    {
+      "id": "every-finding-at-once",
+      "note": "Four problems reported together, because fixing them one deployment at a time is how people end up granting everything.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "native",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp",
+            "locomotion.walk"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 64,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature_verified": false,
+        "observed_digest": "sha256:other"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"unsigned\",\"message\":\"No verified publisher signature. The bytes may be intact and nobody has attested to who produced them.\",\"severity\":\"error\"},{\"code\":\"digest_mismatch\",\"message\":\"The package contents do not hash to the digest in its manifest.\",\"severity\":\"error\",\"subjects\":[\"sha256:pkg\",\"sha256:other\"]},{\"code\":\"isolation_violation\",\"message\":\"A policy package may not run unsandboxed. Only drivers touch hardware directly.\",\"severity\":\"error\"},{\"code\":\"budget_exceeded\",\"message\":\"This robot cannot supply the resources the package declares it needs.\",\"severity\":\"error\",\"subjects\":[\"RAM: needs 512 MB, has 64 MB\"]},{\"code\":\"over_request\",\"message\":\"The package requests permissions it never declared a need for.\",\"severity\":\"error\",\"subjects\":[\"locomotion.walk\"]}]}"
+    }
+  ]
+}

@@ -1,0 +1,153 @@
+{
+  "corpus": "cycle",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "forwards-unchanged",
+      "note": "At the guest tier the verdict is computed and the command still reaches the robot unchanged.",
+      "input": {
+        "limits": {
+          "tier": "guest",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "elbow": 120
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":true,\"clamped\":[{\"channel\":\"elbow\",\"from\":120,\"to\":80}],\"command\":{\"elbow\":120},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "stop-still-forwards",
+      "note": "There is nothing underneath a guest-tier deployment to stop.",
+      "input": {
+        "limits": {
+          "tier": "guest",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 0,
+          "sequence": 42,
+          "desired": {
+            "elbow": 10
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":true,\"clamped\":[],\"command\":{\"elbow\":10},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "certified-tier",
+      "note": "The certified tier resolves to redundant enforcement.",
+      "input": {
+        "limits": {
+          "tier": "certified",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "elbow": 120
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":120,\"to\":80}],\"command\":{\"elbow\":80},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    }
+  ]
+}

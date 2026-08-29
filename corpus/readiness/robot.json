@@ -1,0 +1,303 @@
+{
+  "corpus": "readiness",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "fully-declared",
+      "note": "Every declaration in place: the certified tier may be attempted.",
+      "input": {
+        "slug": "unitree-g1",
+        "name": "Unitree G1",
+        "dof": 23,
+        "capabilities": [
+          "safety.estop",
+          "platform.onboard_compute"
+        ],
+        "control_modes": [
+          "position",
+          "torque"
+        ],
+        "control_hz": 500,
+        "compute": {
+          "gpu": "Orin NX"
+        },
+        "limits": {
+          "joint_velocity_max_rad_s": 12,
+          "joint_torque_max_nm": 120,
+          "watchdog_ms": 50,
+          "estop": true,
+          "source": "https://example.invalid/g1.pdf"
+        },
+        "adapter_count": 2
+      },
+      "expected": "{\"attainable\":\"certified\",\"blockers\":[],\"checks\":[{\"check\":\"adapter\",\"detail\":\"2 published adapters.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"kinematics\",\"detail\":\"23 degrees of freedom declared.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_modes\",\"detail\":\"Accepts position, torque.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_rate\",\"detail\":\"Control loop runs at 500 Hz.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope\",\"detail\":\"A safety envelope has been declared.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope_source\",\"detail\":\"Limits cite https://example.invalid/g1.pdf.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"watchdog\",\"detail\":\"Controller faults after 50 ms without a command.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"joint_ratings\",\"detail\":\"Rated to 12 rad/s and 120 Nm.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"estop_software\",\"detail\":\"Exposes a software emergency stop.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"estop_hardware\",\"detail\":\"A hardware emergency stop is fitted.\",\"ok\":true,\"required_for\":\"certified\"},{\"check\":\"onboard_compute\",\"detail\":\"Runs inference onboard.\",\"ok\":true,\"required_for\":\"host\"}],\"completeness\":1,\"name\":\"Unitree G1\",\"slug\":\"unitree-g1\"}"
+    },
+    {
+      "id": "no-adapter",
+      "note": "Nothing can talk to this robot yet.",
+      "input": {
+        "slug": "unitree-g1",
+        "name": "Unitree G1",
+        "dof": 23,
+        "capabilities": [
+          "safety.estop",
+          "platform.onboard_compute"
+        ],
+        "control_modes": [
+          "position",
+          "torque"
+        ],
+        "control_hz": 500,
+        "compute": {
+          "gpu": "Orin NX"
+        },
+        "limits": {
+          "joint_velocity_max_rad_s": 12,
+          "joint_torque_max_nm": 120,
+          "watchdog_ms": 50,
+          "estop": true,
+          "source": "https://example.invalid/g1.pdf"
+        },
+        "adapter_count": 0
+      },
+      "expected": "{\"attainable\":null,\"blockers\":[{\"check\":\"adapter\",\"detail\":\"No published adapter, so nothing can talk to this robot yet.\",\"ok\":false,\"required_for\":\"guest\"}],\"checks\":[{\"check\":\"adapter\",\"detail\":\"No published adapter, so nothing can talk to this robot yet.\",\"ok\":false,\"required_for\":\"guest\"},{\"check\":\"kinematics\",\"detail\":\"23 degrees of freedom declared.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_modes\",\"detail\":\"Accepts position, torque.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_rate\",\"detail\":\"Control loop runs at 500 Hz.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope\",\"detail\":\"A safety envelope has been declared.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope_source\",\"detail\":\"Limits cite https://example.invalid/g1.pdf.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"watchdog\",\"detail\":\"Controller faults after 50 ms without a command.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"joint_ratings\",\"detail\":\"Rated to 12 rad/s and 120 Nm.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"estop_software\",\"detail\":\"Exposes a software emergency stop.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"estop_hardware\",\"detail\":\"A hardware emergency stop is fitted.\",\"ok\":true,\"required_for\":\"certified\"},{\"check\":\"onboard_compute\",\"detail\":\"Runs inference onboard.\",\"ok\":true,\"required_for\":\"host\"}],\"completeness\":0.9090909090909091,\"name\":\"Unitree G1\",\"slug\":\"unitree-g1\"}"
+    },
+    {
+      "id": "no-envelope",
+      "note": "There is nothing for the kernel to enforce.",
+      "input": {
+        "slug": "unitree-g1",
+        "name": "Unitree G1",
+        "dof": 23,
+        "capabilities": [
+          "safety.estop",
+          "platform.onboard_compute"
+        ],
+        "control_modes": [
+          "position",
+          "torque"
+        ],
+        "control_hz": 500,
+        "compute": {
+          "gpu": "Orin NX"
+        },
+        "limits": null,
+        "adapter_count": 2
+      },
+      "expected": "{\"attainable\":\"guest\",\"blockers\":[{\"check\":\"envelope\",\"detail\":\"No safety envelope declared. There is nothing for the kernel to enforce.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"envelope_source\",\"detail\":\"Limits cite no datasheet. A safety limit without provenance is a rumour.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"watchdog\",\"detail\":\"No watchdog window declared, so the watchdog guard cannot run.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"joint_ratings\",\"detail\":\"Velocity and torque ceilings are not both declared, so commands cannot be clamped.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"estop_hardware\",\"detail\":\"No hardware emergency stop declared. The certified tier needs a stop path off the application processor.\",\"ok\":false,\"required_for\":\"certified\"}],\"checks\":[{\"check\":\"adapter\",\"detail\":\"2 published adapters.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"kinematics\",\"detail\":\"23 degrees of freedom declared.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_modes\",\"detail\":\"Accepts position, torque.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_rate\",\"detail\":\"Control loop runs at 500 Hz.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope\",\"detail\":\"No safety envelope declared. There is nothing for the kernel to enforce.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"envelope_source\",\"detail\":\"Limits cite no datasheet. A safety limit without provenance is a rumour.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"watchdog\",\"detail\":\"No watchdog window declared, so the watchdog guard cannot run.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"joint_ratings\",\"detail\":\"Velocity and torque ceilings are not both declared, so commands cannot be clamped.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"estop_software\",\"detail\":\"Exposes a software emergency stop.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"estop_hardware\",\"detail\":\"No hardware emergency stop declared. The certified tier needs a stop path off the application processor.\",\"ok\":false,\"required_for\":\"certified\"},{\"check\":\"onboard_compute\",\"detail\":\"Runs inference onboard.\",\"ok\":true,\"required_for\":\"host\"}],\"completeness\":0.5454545454545454,\"name\":\"Unitree G1\",\"slug\":\"unitree-g1\"}"
+    },
+    {
+      "id": "empty-envelope",
+      "note": "Somebody looked and found nothing — different from nobody looking.",
+      "input": {
+        "slug": "unitree-g1",
+        "name": "Unitree G1",
+        "dof": 23,
+        "capabilities": [
+          "safety.estop",
+          "platform.onboard_compute"
+        ],
+        "control_modes": [
+          "position",
+          "torque"
+        ],
+        "control_hz": 500,
+        "compute": {
+          "gpu": "Orin NX"
+        },
+        "limits": {},
+        "adapter_count": 2
+      },
+      "expected": "{\"attainable\":\"guest\",\"blockers\":[{\"check\":\"envelope_source\",\"detail\":\"Limits cite no datasheet. A safety limit without provenance is a rumour.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"watchdog\",\"detail\":\"No watchdog window declared, so the watchdog guard cannot run.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"joint_ratings\",\"detail\":\"Velocity and torque ceilings are not both declared, so commands cannot be clamped.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"estop_hardware\",\"detail\":\"No hardware emergency stop declared. The certified tier needs a stop path off the application processor.\",\"ok\":false,\"required_for\":\"certified\"}],\"checks\":[{\"check\":\"adapter\",\"detail\":\"2 published adapters.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"kinematics\",\"detail\":\"23 degrees of freedom declared.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_modes\",\"detail\":\"Accepts position, torque.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_rate\",\"detail\":\"Control loop runs at 500 Hz.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope\",\"detail\":\"A safety envelope has been declared.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope_source\",\"detail\":\"Limits cite no datasheet. A safety limit without provenance is a rumour.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"watchdog\",\"detail\":\"No watchdog window declared, so the watchdog guard cannot run.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"joint_ratings\",\"detail\":\"Velocity and torque ceilings are not both declared, so commands cannot be clamped.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"estop_software\",\"detail\":\"Exposes a software emergency stop.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"estop_hardware\",\"detail\":\"No hardware emergency stop declared. The certified tier needs a stop path off the application processor.\",\"ok\":false,\"required_for\":\"certified\"},{\"check\":\"onboard_compute\",\"detail\":\"Runs inference onboard.\",\"ok\":true,\"required_for\":\"host\"}],\"completeness\":0.6363636363636364,\"name\":\"Unitree G1\",\"slug\":\"unitree-g1\"}"
+    },
+    {
+      "id": "no-watchdog",
+      "note": "Cumulative tiers: this stops the walk at guest.",
+      "input": {
+        "slug": "unitree-g1",
+        "name": "Unitree G1",
+        "dof": 23,
+        "capabilities": [
+          "safety.estop",
+          "platform.onboard_compute"
+        ],
+        "control_modes": [
+          "position",
+          "torque"
+        ],
+        "control_hz": 500,
+        "compute": {
+          "gpu": "Orin NX"
+        },
+        "limits": {
+          "joint_velocity_max_rad_s": 12,
+          "joint_torque_max_nm": 120,
+          "estop": true,
+          "source": "https://example.invalid/g1.pdf"
+        },
+        "adapter_count": 2
+      },
+      "expected": "{\"attainable\":\"guest\",\"blockers\":[{\"check\":\"watchdog\",\"detail\":\"No watchdog window declared, so the watchdog guard cannot run.\",\"ok\":false,\"required_for\":\"host\"}],\"checks\":[{\"check\":\"adapter\",\"detail\":\"2 published adapters.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"kinematics\",\"detail\":\"23 degrees of freedom declared.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_modes\",\"detail\":\"Accepts position, torque.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_rate\",\"detail\":\"Control loop runs at 500 Hz.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope\",\"detail\":\"A safety envelope has been declared.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope_source\",\"detail\":\"Limits cite https://example.invalid/g1.pdf.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"watchdog\",\"detail\":\"No watchdog window declared, so the watchdog guard cannot run.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"joint_ratings\",\"detail\":\"Rated to 12 rad/s and 120 Nm.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"estop_software\",\"detail\":\"Exposes a software emergency stop.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"estop_hardware\",\"detail\":\"A hardware emergency stop is fitted.\",\"ok\":true,\"required_for\":\"certified\"},{\"check\":\"onboard_compute\",\"detail\":\"Runs inference onboard.\",\"ok\":true,\"required_for\":\"host\"}],\"completeness\":0.9090909090909091,\"name\":\"Unitree G1\",\"slug\":\"unitree-g1\"}"
+    },
+    {
+      "id": "no-source",
+      "note": "A safety limit without provenance is a rumour.",
+      "input": {
+        "slug": "unitree-g1",
+        "name": "Unitree G1",
+        "dof": 23,
+        "capabilities": [
+          "safety.estop",
+          "platform.onboard_compute"
+        ],
+        "control_modes": [
+          "position",
+          "torque"
+        ],
+        "control_hz": 500,
+        "compute": {
+          "gpu": "Orin NX"
+        },
+        "limits": {
+          "joint_velocity_max_rad_s": 12,
+          "joint_torque_max_nm": 120,
+          "watchdog_ms": 50,
+          "estop": true
+        },
+        "adapter_count": 2
+      },
+      "expected": "{\"attainable\":\"guest\",\"blockers\":[{\"check\":\"envelope_source\",\"detail\":\"Limits cite no datasheet. A safety limit without provenance is a rumour.\",\"ok\":false,\"required_for\":\"host\"}],\"checks\":[{\"check\":\"adapter\",\"detail\":\"2 published adapters.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"kinematics\",\"detail\":\"23 degrees of freedom declared.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_modes\",\"detail\":\"Accepts position, torque.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_rate\",\"detail\":\"Control loop runs at 500 Hz.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope\",\"detail\":\"A safety envelope has been declared.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope_source\",\"detail\":\"Limits cite no datasheet. A safety limit without provenance is a rumour.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"watchdog\",\"detail\":\"Controller faults after 50 ms without a command.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"joint_ratings\",\"detail\":\"Rated to 12 rad/s and 120 Nm.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"estop_software\",\"detail\":\"Exposes a software emergency stop.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"estop_hardware\",\"detail\":\"A hardware emergency stop is fitted.\",\"ok\":true,\"required_for\":\"certified\"},{\"check\":\"onboard_compute\",\"detail\":\"Runs inference onboard.\",\"ok\":true,\"required_for\":\"host\"}],\"completeness\":0.9090909090909091,\"name\":\"Unitree G1\",\"slug\":\"unitree-g1\"}"
+    },
+    {
+      "id": "no-hardware-estop",
+      "note": "The certified tier needs a stop path off the application processor.",
+      "input": {
+        "slug": "unitree-g1",
+        "name": "Unitree G1",
+        "dof": 23,
+        "capabilities": [
+          "safety.estop",
+          "platform.onboard_compute"
+        ],
+        "control_modes": [
+          "position",
+          "torque"
+        ],
+        "control_hz": 500,
+        "compute": {
+          "gpu": "Orin NX"
+        },
+        "limits": {
+          "joint_velocity_max_rad_s": 12,
+          "joint_torque_max_nm": 120,
+          "watchdog_ms": 50,
+          "source": "https://example.invalid/g1.pdf"
+        },
+        "adapter_count": 2
+      },
+      "expected": "{\"attainable\":\"host\",\"blockers\":[{\"check\":\"estop_hardware\",\"detail\":\"No hardware emergency stop declared. The certified tier needs a stop path off the application processor.\",\"ok\":false,\"required_for\":\"certified\"}],\"checks\":[{\"check\":\"adapter\",\"detail\":\"2 published adapters.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"kinematics\",\"detail\":\"23 degrees of freedom declared.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_modes\",\"detail\":\"Accepts position, torque.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_rate\",\"detail\":\"Control loop runs at 500 Hz.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope\",\"detail\":\"A safety envelope has been declared.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope_source\",\"detail\":\"Limits cite https://example.invalid/g1.pdf.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"watchdog\",\"detail\":\"Controller faults after 50 ms without a command.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"joint_ratings\",\"detail\":\"Rated to 12 rad/s and 120 Nm.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"estop_software\",\"detail\":\"Exposes a software emergency stop.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"estop_hardware\",\"detail\":\"No hardware emergency stop declared. The certified tier needs a stop path off the application processor.\",\"ok\":false,\"required_for\":\"certified\"},{\"check\":\"onboard_compute\",\"detail\":\"Runs inference onboard.\",\"ok\":true,\"required_for\":\"host\"}],\"completeness\":0.9090909090909091,\"name\":\"Unitree G1\",\"slug\":\"unitree-g1\"}"
+    },
+    {
+      "id": "no-compute",
+      "note": "The OS cannot own the control loop without somewhere to run.",
+      "input": {
+        "slug": "unitree-g1",
+        "name": "Unitree G1",
+        "dof": 23,
+        "capabilities": [
+          "safety.estop"
+        ],
+        "control_modes": [
+          "position",
+          "torque"
+        ],
+        "control_hz": 500,
+        "compute": null,
+        "limits": {
+          "joint_velocity_max_rad_s": 12,
+          "joint_torque_max_nm": 120,
+          "watchdog_ms": 50,
+          "estop": true,
+          "source": "https://example.invalid/g1.pdf"
+        },
+        "adapter_count": 2
+      },
+      "expected": "{\"attainable\":\"guest\",\"blockers\":[{\"check\":\"onboard_compute\",\"detail\":\"No onboard compute declared, so the OS cannot own the control loop here.\",\"ok\":false,\"required_for\":\"host\"}],\"checks\":[{\"check\":\"adapter\",\"detail\":\"2 published adapters.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"kinematics\",\"detail\":\"23 degrees of freedom declared.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_modes\",\"detail\":\"Accepts position, torque.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_rate\",\"detail\":\"Control loop runs at 500 Hz.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope\",\"detail\":\"A safety envelope has been declared.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope_source\",\"detail\":\"Limits cite https://example.invalid/g1.pdf.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"watchdog\",\"detail\":\"Controller faults after 50 ms without a command.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"joint_ratings\",\"detail\":\"Rated to 12 rad/s and 120 Nm.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"estop_software\",\"detail\":\"Exposes a software emergency stop.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"estop_hardware\",\"detail\":\"A hardware emergency stop is fitted.\",\"ok\":true,\"required_for\":\"certified\"},{\"check\":\"onboard_compute\",\"detail\":\"No onboard compute declared, so the OS cannot own the control loop here.\",\"ok\":false,\"required_for\":\"host\"}],\"completeness\":0.9090909090909091,\"name\":\"Unitree G1\",\"slug\":\"unitree-g1\"}"
+    },
+    {
+      "id": "no-software-estop",
+      "note": "A guest-tier requirement.",
+      "input": {
+        "slug": "unitree-g1",
+        "name": "Unitree G1",
+        "dof": 23,
+        "capabilities": [
+          "platform.onboard_compute"
+        ],
+        "control_modes": [
+          "position",
+          "torque"
+        ],
+        "control_hz": 500,
+        "compute": {
+          "gpu": "Orin NX"
+        },
+        "limits": {
+          "joint_velocity_max_rad_s": 12,
+          "joint_torque_max_nm": 120,
+          "watchdog_ms": 50,
+          "estop": true,
+          "source": "https://example.invalid/g1.pdf"
+        },
+        "adapter_count": 2
+      },
+      "expected": "{\"attainable\":null,\"blockers\":[{\"check\":\"estop_software\",\"detail\":\"No software emergency stop capability declared.\",\"ok\":false,\"required_for\":\"guest\"}],\"checks\":[{\"check\":\"adapter\",\"detail\":\"2 published adapters.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"kinematics\",\"detail\":\"23 degrees of freedom declared.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_modes\",\"detail\":\"Accepts position, torque.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_rate\",\"detail\":\"Control loop runs at 500 Hz.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope\",\"detail\":\"A safety envelope has been declared.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope_source\",\"detail\":\"Limits cite https://example.invalid/g1.pdf.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"watchdog\",\"detail\":\"Controller faults after 50 ms without a command.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"joint_ratings\",\"detail\":\"Rated to 12 rad/s and 120 Nm.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"estop_software\",\"detail\":\"No software emergency stop capability declared.\",\"ok\":false,\"required_for\":\"guest\"},{\"check\":\"estop_hardware\",\"detail\":\"A hardware emergency stop is fitted.\",\"ok\":true,\"required_for\":\"certified\"},{\"check\":\"onboard_compute\",\"detail\":\"Runs inference onboard.\",\"ok\":true,\"required_for\":\"host\"}],\"completeness\":0.9090909090909091,\"name\":\"Unitree G1\",\"slug\":\"unitree-g1\"}"
+    },
+    {
+      "id": "nothing-declared",
+      "note": "A registry row with nothing in it.",
+      "input": {
+        "slug": "unknown",
+        "name": "Unknown",
+        "dof": null,
+        "capabilities": [],
+        "control_modes": [],
+        "control_hz": null,
+        "compute": null,
+        "limits": null,
+        "adapter_count": 0
+      },
+      "expected": "{\"attainable\":null,\"blockers\":[{\"check\":\"adapter\",\"detail\":\"No published adapter, so nothing can talk to this robot yet.\",\"ok\":false,\"required_for\":\"guest\"},{\"check\":\"kinematics\",\"detail\":\"No degree-of-freedom count declared.\",\"ok\":false,\"required_for\":\"guest\"},{\"check\":\"control_modes\",\"detail\":\"No control modes declared, so no policy can be matched to it.\",\"ok\":false,\"required_for\":\"guest\"},{\"check\":\"estop_software\",\"detail\":\"No software emergency stop capability declared.\",\"ok\":false,\"required_for\":\"guest\"},{\"check\":\"control_rate\",\"detail\":\"No control rate declared, so loop stability cannot be checked against a policy.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"envelope\",\"detail\":\"No safety envelope declared. There is nothing for the kernel to enforce.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"envelope_source\",\"detail\":\"Limits cite no datasheet. A safety limit without provenance is a rumour.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"watchdog\",\"detail\":\"No watchdog window declared, so the watchdog guard cannot run.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"joint_ratings\",\"detail\":\"Velocity and torque ceilings are not both declared, so commands cannot be clamped.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"onboard_compute\",\"detail\":\"No onboard compute declared, so the OS cannot own the control loop here.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"estop_hardware\",\"detail\":\"No hardware emergency stop declared. The certified tier needs a stop path off the application processor.\",\"ok\":false,\"required_for\":\"certified\"}],\"checks\":[{\"check\":\"adapter\",\"detail\":\"No published adapter, so nothing can talk to this robot yet.\",\"ok\":false,\"required_for\":\"guest\"},{\"check\":\"kinematics\",\"detail\":\"No degree-of-freedom count declared.\",\"ok\":false,\"required_for\":\"guest\"},{\"check\":\"control_modes\",\"detail\":\"No control modes declared, so no policy can be matched to it.\",\"ok\":false,\"required_for\":\"guest\"},{\"check\":\"control_rate\",\"detail\":\"No control rate declared, so loop stability cannot be checked against a policy.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"envelope\",\"detail\":\"No safety envelope declared. There is nothing for the kernel to enforce.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"envelope_source\",\"detail\":\"Limits cite no datasheet. A safety limit without provenance is a rumour.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"watchdog\",\"detail\":\"No watchdog window declared, so the watchdog guard cannot run.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"joint_ratings\",\"detail\":\"Velocity and torque ceilings are not both declared, so commands cannot be clamped.\",\"ok\":false,\"required_for\":\"host\"},{\"check\":\"estop_software\",\"detail\":\"No software emergency stop capability declared.\",\"ok\":false,\"required_for\":\"guest\"},{\"check\":\"estop_hardware\",\"detail\":\"No hardware emergency stop declared. The certified tier needs a stop path off the application processor.\",\"ok\":false,\"required_for\":\"certified\"},{\"check\":\"onboard_compute\",\"detail\":\"No onboard compute declared, so the OS cannot own the control loop here.\",\"ok\":false,\"required_for\":\"host\"}],\"completeness\":0,\"name\":\"Unknown\",\"slug\":\"unknown\"}"
+    },
+    {
+      "id": "one-adapter-singular",
+      "note": "The sentence agrees with the number.",
+      "input": {
+        "slug": "unitree-g1",
+        "name": "Unitree G1",
+        "dof": 23,
+        "capabilities": [
+          "safety.estop",
+          "platform.onboard_compute"
+        ],
+        "control_modes": [
+          "position",
+          "torque"
+        ],
+        "control_hz": 500,
+        "compute": {
+          "gpu": "Orin NX"
+        },
+        "limits": {
+          "joint_velocity_max_rad_s": 12,
+          "joint_torque_max_nm": 120,
+          "watchdog_ms": 50,
+          "estop": true,
+          "source": "https://example.invalid/g1.pdf"
+        },
+        "adapter_count": 1
+      },
+      "expected": "{\"attainable\":\"certified\",\"blockers\":[],\"checks\":[{\"check\":\"adapter\",\"detail\":\"1 published adapter.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"kinematics\",\"detail\":\"23 degrees of freedom declared.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_modes\",\"detail\":\"Accepts position, torque.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"control_rate\",\"detail\":\"Control loop runs at 500 Hz.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope\",\"detail\":\"A safety envelope has been declared.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"envelope_source\",\"detail\":\"Limits cite https://example.invalid/g1.pdf.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"watchdog\",\"detail\":\"Controller faults after 50 ms without a command.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"joint_ratings\",\"detail\":\"Rated to 12 rad/s and 120 Nm.\",\"ok\":true,\"required_for\":\"host\"},{\"check\":\"estop_software\",\"detail\":\"Exposes a software emergency stop.\",\"ok\":true,\"required_for\":\"guest\"},{\"check\":\"estop_hardware\",\"detail\":\"A hardware emergency stop is fitted.\",\"ok\":true,\"required_for\":\"certified\"},{\"check\":\"onboard_compute\",\"detail\":\"Runs inference onboard.\",\"ok\":true,\"required_for\":\"host\"}],\"completeness\":1,\"name\":\"Unitree G1\",\"slug\":\"unitree-g1\"}"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+[package]
+name = "skynet-corpus"
+description = "Runs the conformance corpus against this edition. An edition that has not passed it is not an edition."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+skynet-json = { path = "../skynet-json" }
+skynet-kernel = { path = "../skynet-kernel" }
+skynet-contracts = { path = "../skynet-contracts" }

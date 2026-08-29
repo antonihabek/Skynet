@@ -1,0 +1,741 @@
+{
+  "corpus": "certification",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "no-evidence",
+      "note": "Absence is not a pass — the loophole every self-certification scheme dies of.",
+      "input": {
+        "claimed": "guest",
+        "results": []
+      },
+      "expected": "{\"awarded\":\"none\",\"expires_in_days\":null,\"failures\":[],\"missing\":[\"rhal.abi.version\",\"rhal.state.completeness\",\"rhal.command.rejection\",\"embodiment.descriptor.valid\",\"safety.kernel.parity\",\"safety.policy.isolation\",\"package.signature.required\",\"package.grants.gate\",\"offline.control.independent\",\"security.credential.scope\"],\"reasons\":[\"guest: 0 failing, 10 unmeasured.\"]}"
+    },
+    {
+      "id": "guest-complete",
+      "note": "Every guest-tier test measured and passing.",
+      "input": {
+        "claimed": "guest",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ]
+      },
+      "expected": "{\"awarded\":\"guest\",\"expires_in_days\":null,\"failures\":[],\"missing\":[],\"reasons\":[]}"
+    },
+    {
+      "id": "one-skipped",
+      "note": "A skipped test is missing, not passing.",
+      "input": {
+        "claimed": "guest",
+        "results": [
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "skipped",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ]
+      },
+      "expected": "{\"awarded\":\"none\",\"expires_in_days\":null,\"failures\":[],\"missing\":[\"rhal.abi.version\"],\"reasons\":[\"guest: 0 failing, 1 unmeasured.\"]}"
+    },
+    {
+      "id": "one-failing",
+      "note": "A failing test is a failure, and it is named.",
+      "input": {
+        "claimed": "guest",
+        "results": [
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "fail",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ]
+      },
+      "expected": "{\"awarded\":\"none\",\"expires_in_days\":null,\"failures\":[\"rhal.abi.version\"],\"missing\":[],\"reasons\":[\"guest: 1 failing, 0 unmeasured.\"]}"
+    },
+    {
+      "id": "not-applicable-passes",
+      "note": "The balance guard on a wheeled base is genuinely inapplicable; forcing a fail would push vendors to fake a result.",
+      "input": {
+        "claimed": "guest",
+        "results": [
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "not_applicable",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ]
+      },
+      "expected": "{\"awarded\":\"guest\",\"expires_in_days\":null,\"failures\":[],\"missing\":[],\"reasons\":[]}"
+    },
+    {
+      "id": "downgraded",
+      "note": "Claimed certified with only guest evidence: downgraded, not refused.",
+      "input": {
+        "claimed": "certified",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ]
+      },
+      "expected": "{\"awarded\":\"guest\",\"expires_in_days\":null,\"failures\":[],\"missing\":[\"rhal.state.rate\",\"rhal.command.latency\",\"embodiment.descriptor.signed\",\"embodiment.limits.sourced\",\"embodiment.roles.coverage\",\"safety.watchdog.fires\",\"safety.envelope.clamps\",\"safety.estop.latency\",\"safety.ratelimit.enforced\",\"package.budget.enforced\",\"ota.rollback.works\",\"ota.safe_state.respected\",\"ota.safety_gate\",\"telemetry.blackbox.complete\",\"telemetry.replay.deterministic\",\"offline.reconcile.resumes\",\"security.identity.attested\"],\"reasons\":[\"host: 0 failing, 17 unmeasured.\",\"Claimed certified; the evidence supports guest.\"]}"
+    },
+    {
+      "id": "field-suspends",
+      "note": "Below the floor the certificate no longer describes the machine.",
+      "input": {
+        "claimed": "guest",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ],
+        "field_conformance": 0.99
+      },
+      "expected": "{\"awarded\":\"none\",\"expires_in_days\":null,\"failures\":[],\"missing\":[],\"reasons\":[\"Field conformance 99.000% is below the 99.9% floor; the award is suspended pending re-measurement.\"]}"
+    },
+    {
+      "id": "field-at-floor",
+      "note": "Exactly at the floor is not below it.",
+      "input": {
+        "claimed": "guest",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ],
+        "field_conformance": 0.999
+      },
+      "expected": "{\"awarded\":\"guest\",\"expires_in_days\":null,\"failures\":[],\"missing\":[],\"reasons\":[]}"
+    },
+    {
+      "id": "field-tolerates-noise",
+      "note": "The floor is 0.999 so sensor noise does not suspend an honest vendor.",
+      "input": {
+        "claimed": "guest",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ],
+        "field_conformance": 0.9995
+      },
+      "expected": "{\"awarded\":\"guest\",\"expires_in_days\":null,\"failures\":[],\"missing\":[],\"reasons\":[]}"
+    },
+    {
+      "id": "bench-lapsed",
+      "note": "A certificate that cannot expire lies with increasing confidence.",
+      "input": {
+        "claimed": "guest",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ],
+        "bench_age_days": 400
+      },
+      "expected": "{\"awarded\":\"none\",\"expires_in_days\":0,\"failures\":[],\"missing\":[],\"reasons\":[\"Bench results are older than a year; the award has lapsed.\"]}"
+    },
+    {
+      "id": "bench-fresh",
+      "note": "Remaining life is reported.",
+      "input": {
+        "claimed": "guest",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ],
+        "bench_age_days": 65
+      },
+      "expected": "{\"awarded\":\"guest\",\"expires_in_days\":300,\"failures\":[],\"missing\":[],\"reasons\":[]}"
+    },
+    {
+      "id": "bench-exactly-a-year",
+      "note": "A year old exactly has lapsed.",
+      "input": {
+        "claimed": "guest",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ],
+        "bench_age_days": 365
+      },
+      "expected": "{\"awarded\":\"none\",\"expires_in_days\":0,\"failures\":[],\"missing\":[],\"reasons\":[\"Bench results are older than a year; the award has lapsed.\"]}"
+    },
+    {
+      "id": "unknown-tier",
+      "note": "A tier nobody defined awards nothing.",
+      "input": {
+        "claimed": "platinum",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ]
+      },
+      "expected": "{\"awarded\":\"none\",\"expires_in_days\":null,\"failures\":[],\"missing\":[],\"reasons\":[]}"
+    }
+  ]
+}

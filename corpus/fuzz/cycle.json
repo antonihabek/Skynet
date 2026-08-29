@@ -1,0 +1,2022 @@
+{
+  "corpus": "fuzz",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "seeded-0",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "certified",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 768,
+          "sequence": 100,
+          "desired": {
+            "base": -24.73,
+            "waist": 96.01,
+            "wrist": -47.63
+          },
+          "previous": {
+            "base": -16.5,
+            "waist": -73.12,
+            "wrist": 86.95
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-1",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": null,
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 746,
+          "sequence": 100,
+          "desired": {
+            "base": 57.01,
+            "elbow": 197.67,
+            "waist": -58.01
+          },
+          "previous": {
+            "base": -58.66,
+            "elbow": 32.64,
+            "waist": -67.18
+          }
+        },
+        "last_sequence": 100
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"base\",\"from\":57.01,\"to\":1.5},{\"channel\":\"elbow\",\"from\":197.67,\"to\":80},{\"channel\":\"base\",\"from\":1.5,\"to\":-58.285},{\"channel\":\"elbow\",\"from\":80,\"to\":52.64}],\"command\":{\"base\":-58.285,\"elbow\":52.64,\"waist\":-58.01},\"response\":\"clamp\",\"tripped\":[\"envelope\",\"rate_limit\"]}"
+    },
+    {
+      "id": "seeded-2",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": null,
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 838,
+          "sequence": 100,
+          "desired": {
+            "base": 152.5,
+            "waist": 29.35
+          },
+          "previous": {
+            "base": -19.13,
+            "waist": -98.31
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-3",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "certified",
+          "envelope": null,
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 852,
+          "sequence": 100,
+          "desired": {
+            "base": 60.56,
+            "elbow": -128.26,
+            "shoulder": -94.78,
+            "wrist": 170.84
+          },
+          "previous": {
+            "base": 44.73,
+            "elbow": 91.57,
+            "shoulder": -50.68,
+            "wrist": 36.37
+          }
+        },
+        "last_sequence": 100
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"base\",\"from\":60.56,\"to\":1.5},{\"channel\":\"elbow\",\"from\":-128.26,\"to\":-80},{\"channel\":\"shoulder\",\"from\":-94.78,\"to\":-60},{\"channel\":\"base\",\"from\":1.5,\"to\":44.355},{\"channel\":\"elbow\",\"from\":-80,\"to\":71.57},{\"channel\":\"wrist\",\"from\":170.84,\"to\":45.4625}],\"command\":{\"base\":44.355,\"elbow\":71.57,\"shoulder\":-60,\"wrist\":45.4625},\"response\":\"clamp\",\"tripped\":[\"envelope\",\"rate_limit\"]}"
+    },
+    {
+      "id": "seeded-4",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": null,
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 837,
+          "sequence": 100,
+          "desired": {
+            "shoulder": 79.75
+          },
+          "previous": {
+            "shoulder": 79.12
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"shoulder\",\"from\":79.75,\"to\":60},{\"channel\":\"shoulder\",\"from\":60,\"to\":64.12}],\"command\":{\"shoulder\":64.12},\"response\":\"clamp\",\"tripped\":[\"envelope\",\"rate_limit\"]}"
+    },
+    {
+      "id": "seeded-5",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "certified",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 737,
+          "sequence": 100,
+          "desired": {
+            "elbow": -97.2,
+            "shoulder": -29.91
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-6",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 829,
+          "sequence": 100,
+          "desired": {
+            "wrist": -12.71
+          },
+          "previous": {
+            "wrist": -56.72
+          }
+        },
+        "last_sequence": 100
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-7",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "guest",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 706,
+          "sequence": 100,
+          "desired": {
+            "base": -19.17
+          },
+          "previous": {
+            "base": 41.6
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":true,\"clamped\":[],\"command\":{\"base\":-19.17},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-8",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 984,
+          "sequence": 100,
+          "desired": {
+            "base": -101.34,
+            "waist": -187.98
+          },
+          "previous": {
+            "base": 4.32,
+            "waist": 29.33
+          }
+        },
+        "last_sequence": 100
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-9",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 803,
+          "sequence": 100,
+          "desired": {
+            "shoulder": 51.36,
+            "wrist": -186.99
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-10",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": null,
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 788,
+          "sequence": 100,
+          "desired": {
+            "elbow": 64.11,
+            "waist": -107.66,
+            "wrist": 199.49
+          },
+          "previous": {
+            "elbow": 75.38,
+            "waist": 14.53,
+            "wrist": -36.04
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-11",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "guest",
+          "envelope": null,
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 974,
+          "sequence": 100,
+          "desired": {
+            "wrist": -19.12
+          },
+          "previous": {
+            "wrist": -70.33
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":true,\"clamped\":[{\"channel\":\"wrist\",\"from\":-19.12,\"to\":-52.7475}],\"command\":{\"wrist\":-19.12},\"response\":\"clamp\",\"tripped\":[\"rate_limit\"]}"
+    },
+    {
+      "id": "seeded-12",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "guest",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 729,
+          "sequence": 100,
+          "desired": {
+            "wrist": 46.87
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":true,\"clamped\":[],\"command\":{\"wrist\":46.87},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-13",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "guest",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 712,
+          "sequence": 100,
+          "desired": {
+            "shoulder": 151.14,
+            "waist": -92.16
+          },
+          "previous": {
+            "shoulder": 43.93,
+            "waist": 11.63
+          }
+        },
+        "last_sequence": 100
+      },
+      "expected": "{\"advisory\":true,\"clamped\":[],\"command\":{\"shoulder\":151.14,\"waist\":-92.16},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-14",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "certified",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 993,
+          "sequence": 100,
+          "desired": {
+            "base": -189.31,
+            "elbow": 77.11
+          },
+          "previous": {
+            "base": 64.17,
+            "elbow": -74.48
+          }
+        },
+        "last_sequence": 100
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-15",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "certified",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": null,
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 939,
+          "sequence": 100,
+          "desired": {
+            "elbow": 172.23,
+            "waist": 117.29
+          },
+          "previous": {
+            "elbow": -48.66,
+            "waist": 48.15
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":172.23,\"to\":80}],\"command\":{\"elbow\":80,\"waist\":117.29},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "seeded-16",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 728,
+          "sequence": 100,
+          "desired": {
+            "base": -135.41,
+            "wrist": 151.65
+          }
+        },
+        "last_sequence": 100
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-17",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 727,
+          "sequence": 100,
+          "desired": {
+            "elbow": -121.3,
+            "waist": -30.8
+          },
+          "previous": {
+            "elbow": 20.77,
+            "waist": -78.29
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-18",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 735,
+          "sequence": 100,
+          "desired": {
+            "shoulder": -181.7,
+            "waist": -177.38
+          },
+          "previous": {
+            "shoulder": 12.14,
+            "waist": 89.08
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-19",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 739,
+          "sequence": 100,
+          "desired": {
+            "shoulder": -48.89,
+            "waist": -166.94,
+            "wrist": 152.67
+          },
+          "previous": {
+            "shoulder": -48.13,
+            "waist": 8.33,
+            "wrist": -50.25
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-20",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "certified",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 818,
+          "sequence": 100,
+          "desired": {
+            "base": 107.4,
+            "shoulder": -172.45
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-21",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "certified",
+          "envelope": null,
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 780,
+          "sequence": 100,
+          "desired": {
+            "base": -163.04,
+            "wrist": -46.29
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"base\",\"from\":-163.04,\"to\":-1.5}],\"command\":{\"base\":-1.5,\"wrist\":-46.29},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "seeded-22",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 941,
+          "sequence": 100,
+          "desired": {
+            "elbow": -93.47,
+            "shoulder": -187.51,
+            "waist": 86.96
+          },
+          "previous": {
+            "elbow": 97.96,
+            "shoulder": -36.4,
+            "waist": -63.79
+          }
+        },
+        "last_sequence": 100
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-23",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "certified",
+          "envelope": null,
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 760,
+          "sequence": 100,
+          "desired": {
+            "wrist": 113.26
+          },
+          "previous": {
+            "wrist": -38.98
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"wrist\",\"from\":113.26,\"to\":-29.235}],\"command\":{\"wrist\":-29.235},\"response\":\"clamp\",\"tripped\":[\"rate_limit\"]}"
+    },
+    {
+      "id": "seeded-24",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "certified",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 809,
+          "sequence": 100,
+          "desired": {
+            "base": 16.18,
+            "wrist": 68.92
+          },
+          "previous": {
+            "base": 6.48,
+            "wrist": -99.68
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-25",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "certified",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": null,
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 851,
+          "sequence": 100,
+          "desired": {
+            "base": -40.56,
+            "waist": -72.92
+          },
+          "previous": {
+            "base": -2.82,
+            "waist": 96.97
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-26",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "guest",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 982,
+          "sequence": 100,
+          "desired": {
+            "shoulder": 194.09,
+            "waist": 43.68,
+            "wrist": 166.84
+          },
+          "previous": {
+            "shoulder": 31.26,
+            "waist": 71.27,
+            "wrist": 63.12
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":true,\"clamped\":[{\"channel\":\"shoulder\",\"from\":194.09,\"to\":60},{\"channel\":\"shoulder\",\"from\":60,\"to\":46.260000000000005},{\"channel\":\"waist\",\"from\":43.68,\"to\":53.4525},{\"channel\":\"wrist\",\"from\":166.84,\"to\":78.89999999999999}],\"command\":{\"shoulder\":194.09,\"waist\":43.68,\"wrist\":166.84},\"response\":\"clamp\",\"tripped\":[\"envelope\",\"rate_limit\"]}"
+    },
+    {
+      "id": "seeded-27",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": null,
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 967,
+          "sequence": 100,
+          "desired": {
+            "base": 103.6,
+            "shoulder": 171.17
+          },
+          "previous": {
+            "base": -49.14,
+            "shoulder": 51.2
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"base\",\"from\":103.6,\"to\":1.5},{\"channel\":\"shoulder\",\"from\":171.17,\"to\":60},{\"channel\":\"base\",\"from\":1.5,\"to\":-48.765}],\"command\":{\"base\":-48.765,\"shoulder\":60},\"response\":\"clamp\",\"tripped\":[\"envelope\",\"rate_limit\"]}"
+    },
+    {
+      "id": "seeded-28",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "certified",
+          "envelope": null,
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 844,
+          "sequence": 100,
+          "desired": {
+            "elbow": 120.58,
+            "shoulder": 164.09
+          },
+          "previous": {
+            "elbow": -18.12,
+            "shoulder": 22.73
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":120.58,\"to\":80},{\"channel\":\"shoulder\",\"from\":164.09,\"to\":60},{\"channel\":\"elbow\",\"from\":80,\"to\":1.879999999999999},{\"channel\":\"shoulder\",\"from\":60,\"to\":37.730000000000004}],\"command\":{\"elbow\":1.879999999999999,\"shoulder\":37.730000000000004},\"response\":\"clamp\",\"tripped\":[\"envelope\",\"rate_limit\"]}"
+    },
+    {
+      "id": "seeded-29",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": null,
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 784,
+          "sequence": 100,
+          "desired": {
+            "base": -17.05,
+            "elbow": -0.39,
+            "waist": -32.8,
+            "wrist": 142.67
+          },
+          "previous": {
+            "base": 88.9,
+            "elbow": 27.65,
+            "waist": -6.21,
+            "wrist": -38.83
+          }
+        },
+        "last_sequence": 100
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"base\",\"from\":-17.05,\"to\":-1.5},{\"channel\":\"base\",\"from\":-1.5,\"to\":88.525},{\"channel\":\"elbow\",\"from\":-0.39,\"to\":7.649999999999999},{\"channel\":\"waist\",\"from\":-32.8,\"to\":-7.7625},{\"channel\":\"wrist\",\"from\":142.67,\"to\":-29.1225}],\"command\":{\"base\":88.525,\"elbow\":7.649999999999999,\"waist\":-7.7625,\"wrist\":-29.1225},\"response\":\"clamp\",\"tripped\":[\"envelope\",\"rate_limit\"]}"
+    },
+    {
+      "id": "seeded-30",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "certified",
+          "envelope": null,
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 960,
+          "sequence": 100,
+          "desired": {
+            "base": -119.49,
+            "waist": 57.22,
+            "wrist": -175.23
+          },
+          "previous": {
+            "base": -17.98,
+            "waist": 46.07,
+            "wrist": 48.23
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"base\",\"from\":-119.49,\"to\":-1.5},{\"channel\":\"base\",\"from\":-1.5,\"to\":-17.605},{\"channel\":\"wrist\",\"from\":-175.23,\"to\":36.1725}],\"command\":{\"base\":-17.605,\"waist\":57.22,\"wrist\":36.1725},\"response\":\"clamp\",\"tripped\":[\"envelope\",\"rate_limit\"]}"
+    },
+    {
+      "id": "seeded-31",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": null,
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 979,
+          "sequence": 100,
+          "desired": {
+            "base": -119.64,
+            "elbow": 76.33,
+            "wrist": 148.15
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"base\",\"from\":-119.64,\"to\":-1.5}],\"command\":{\"base\":-1.5,\"elbow\":76.33,\"wrist\":148.15},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "seeded-32",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "guest",
+          "envelope": null,
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": null,
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 835,
+          "sequence": 100,
+          "desired": {
+            "waist": -30.91,
+            "wrist": 173.61
+          },
+          "previous": {
+            "waist": -74.43,
+            "wrist": 7.44
+          }
+        },
+        "last_sequence": 100
+      },
+      "expected": "{\"advisory\":true,\"clamped\":[],\"command\":{\"waist\":-30.91,\"wrist\":173.61},\"response\":null,\"tripped\":[]}"
+    },
+    {
+      "id": "seeded-33",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "certified",
+          "envelope": null,
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 974,
+          "sequence": 100,
+          "desired": {
+            "base": -19.22,
+            "wrist": -144.28
+          },
+          "previous": {
+            "base": -98.17,
+            "wrist": 55.85
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"base\",\"from\":-19.22,\"to\":-1.5},{\"channel\":\"base\",\"from\":-1.5,\"to\":-97.795},{\"channel\":\"wrist\",\"from\":-144.28,\"to\":41.8875}],\"command\":{\"base\":-97.795,\"wrist\":41.8875},\"response\":\"clamp\",\"tripped\":[\"envelope\",\"rate_limit\"]}"
+    },
+    {
+      "id": "seeded-34",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": null,
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 100,
+          "desired": {
+            "base": 4.76,
+            "elbow": -86.48,
+            "wrist": -25.09
+          },
+          "previous": {
+            "base": 0.84,
+            "elbow": -43.34,
+            "wrist": -81.09
+          }
+        },
+        "last_sequence": 100
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"base\",\"from\":4.76,\"to\":1.5},{\"channel\":\"elbow\",\"from\":-86.48,\"to\":-80},{\"channel\":\"base\",\"from\":1.5,\"to\":1.2149999999999999},{\"channel\":\"elbow\",\"from\":-80,\"to\":-63.34},{\"channel\":\"wrist\",\"from\":-25.09,\"to\":-60.8175}],\"command\":{\"base\":1.2149999999999999,\"elbow\":-63.34,\"wrist\":-60.8175},\"response\":\"clamp\",\"tripped\":[\"envelope\",\"rate_limit\"]}"
+    },
+    {
+      "id": "seeded-35",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "certified",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 811,
+          "sequence": 100,
+          "desired": {
+            "elbow": 107.43,
+            "wrist": -79.67
+          },
+          "previous": {
+            "elbow": -12.17,
+            "wrist": -21.45
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-36",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "certified",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 868,
+          "sequence": 100,
+          "desired": {
+            "elbow": 162.53,
+            "waist": 133.48
+          }
+        },
+        "last_sequence": 100
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-37",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "guest",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": null,
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 756,
+          "sequence": 100,
+          "desired": {
+            "elbow": 137.95,
+            "waist": 129.93
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":true,\"clamped\":[],\"command\":{\"elbow\":137.95,\"waist\":129.93},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "seeded-38",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": null,
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 868,
+          "sequence": 100,
+          "desired": {
+            "waist": 109.83
+          },
+          "previous": {
+            "waist": -64.17
+          }
+        },
+        "last_sequence": 100
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"waist\",\"from\":109.83,\"to\":-48.1275}],\"command\":{\"waist\":-48.1275},\"response\":\"clamp\",\"tripped\":[\"rate_limit\"]}"
+    },
+    {
+      "id": "seeded-39",
+      "note": "Generated from seed 0xd15ea5e.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": null,
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 701,
+          "sequence": 100,
+          "desired": {
+            "base": -98.29,
+            "elbow": -122.76,
+            "shoulder": -137.61
+          },
+          "previous": {
+            "base": -78.78,
+            "elbow": -33.44,
+            "shoulder": 44.67
+          }
+        },
+        "last_sequence": 99
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    }
+  ]
+}

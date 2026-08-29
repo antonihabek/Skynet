@@ -1,0 +1,13 @@
+/target
+**/*.rs.bk
+node_modules/
+*.o
+*.so
+*.dll
+*.dylib
+*.a
+/drivers/**/build/
+__pycache__/
+.DS_Store
+/drivers/mock/selftest
+/drivers/mock/selftest.exe

@@ -1,0 +1,103 @@
+{
+  "corpus": "readiness",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "mixed-fleet",
+      "note": "Where the ecosystem is actually stuck: missing adapters and missing datasheets are different problems.",
+      "input": {
+        "subjects": [
+          {
+            "slug": "unitree-g1",
+            "name": "Unitree G1",
+            "dof": 23,
+            "capabilities": [
+              "safety.estop",
+              "platform.onboard_compute"
+            ],
+            "control_modes": [
+              "position",
+              "torque"
+            ],
+            "control_hz": 500,
+            "compute": {
+              "gpu": "Orin NX"
+            },
+            "limits": {
+              "joint_velocity_max_rad_s": 12,
+              "joint_torque_max_nm": 120,
+              "watchdog_ms": 50,
+              "estop": true,
+              "source": "https://example.invalid/g1.pdf"
+            },
+            "adapter_count": 2
+          },
+          {
+            "slug": "a",
+            "name": "Unitree G1",
+            "dof": 23,
+            "capabilities": [
+              "safety.estop",
+              "platform.onboard_compute"
+            ],
+            "control_modes": [
+              "position",
+              "torque"
+            ],
+            "control_hz": 500,
+            "compute": {
+              "gpu": "Orin NX"
+            },
+            "limits": {
+              "joint_velocity_max_rad_s": 12,
+              "joint_torque_max_nm": 120,
+              "watchdog_ms": 50,
+              "estop": true,
+              "source": "https://example.invalid/g1.pdf"
+            },
+            "adapter_count": 0
+          },
+          {
+            "slug": "b",
+            "name": "Unitree G1",
+            "dof": 23,
+            "capabilities": [
+              "safety.estop",
+              "platform.onboard_compute"
+            ],
+            "control_modes": [
+              "position",
+              "torque"
+            ],
+            "control_hz": 500,
+            "compute": {
+              "gpu": "Orin NX"
+            },
+            "limits": null,
+            "adapter_count": 2
+          },
+          {
+            "slug": "c",
+            "name": "Unitree G1",
+            "dof": 23,
+            "capabilities": [
+              "safety.estop",
+              "platform.onboard_compute"
+            ],
+            "control_modes": [
+              "position",
+              "torque"
+            ],
+            "control_hz": 500,
+            "compute": {
+              "gpu": "Orin NX"
+            },
+            "limits": null,
+            "adapter_count": 0
+          }
+        ]
+      },
+      "expected": "{\"by_tier\":{\"certified\":1,\"guest\":1,\"host\":0,\"none\":2},\"common_blockers\":[{\"check\":\"adapter\",\"robots\":2},{\"check\":\"envelope\",\"robots\":2},{\"check\":\"envelope_source\",\"robots\":2},{\"check\":\"watchdog\",\"robots\":2},{\"check\":\"joint_ratings\",\"robots\":2},{\"check\":\"estop_hardware\",\"robots\":2}],\"total\":4}"
+    }
+  ]
+}

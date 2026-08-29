@@ -1,0 +1,310 @@
+{
+  "corpus": "roles",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "three-segment",
+      "note": "The full form: chain, link and axis.",
+      "input": {
+        "role": "left_arm.shoulder.pitch"
+      },
+      "expected": "{\"axis\":\"pitch\",\"chain\":\"left_arm\",\"index\":null,\"key\":\"left_arm.shoulder.pitch\",\"link\":\"shoulder\"}"
+    },
+    {
+      "id": "two-segment",
+      "note": "Two segments means the second is the link, not the axis.",
+      "input": {
+        "role": "torso.yaw"
+      },
+      "expected": "{\"axis\":null,\"chain\":\"torso\",\"index\":null,\"key\":\"torso.yaw\",\"link\":\"yaw\"}"
+    },
+    {
+      "id": "ordinal",
+      "note": "An ordinal distinguishes repeated links.",
+      "input": {
+        "role": "right_hand.finger.flex#2"
+      },
+      "expected": "{\"axis\":\"flex\",\"chain\":\"right_hand\",\"index\":2,\"key\":\"right_hand.finger.flex#2\",\"link\":\"finger\"}"
+    },
+    {
+      "id": "ordinal-zero",
+      "note": "Zero is a valid ordinal and must not read as absent.",
+      "input": {
+        "role": "base.wheel#0"
+      },
+      "expected": "{\"axis\":null,\"chain\":\"base\",\"index\":0,\"key\":\"base.wheel#0\",\"link\":\"wheel\"}"
+    },
+    {
+      "id": "normalised-case",
+      "note": "Input is lowercased before parsing.",
+      "input": {
+        "role": "LEFT_ARM.Shoulder.PITCH"
+      },
+      "expected": "{\"axis\":\"pitch\",\"chain\":\"left_arm\",\"index\":null,\"key\":\"left_arm.shoulder.pitch\",\"link\":\"shoulder\"}"
+    },
+    {
+      "id": "normalised-space",
+      "note": "Input is trimmed before parsing.",
+      "input": {
+        "role": "  base.wheel#1  "
+      },
+      "expected": "{\"axis\":null,\"chain\":\"base\",\"index\":1,\"key\":\"base.wheel#1\",\"link\":\"wheel\"}"
+    },
+    {
+      "id": "aux-chain",
+      "note": "A body plan the vocabulary did not anticipate still parses under aux.",
+      "input": {
+        "role": "aux.mast.pitch"
+      },
+      "expected": "{\"axis\":\"pitch\",\"chain\":\"aux\",\"index\":null,\"key\":\"aux.mast.pitch\",\"link\":\"mast\"}"
+    },
+    {
+      "id": "digit-in-link",
+      "note": "Links may carry digits; chains may not.",
+      "input": {
+        "role": "base.wheel2"
+      },
+      "expected": "{\"axis\":null,\"chain\":\"base\",\"index\":null,\"key\":\"base.wheel2\",\"link\":\"wheel2\"}"
+    },
+    {
+      "id": "unknown-chain",
+      "note": "An unrecognised chain is null, never a nearby guess.",
+      "input": {
+        "role": "tentacle.segment.flex"
+      },
+      "expected": "null"
+    },
+    {
+      "id": "chain-with-digit",
+      "note": "A digit in the chain fails the charset.",
+      "input": {
+        "role": "base2.wheel"
+      },
+      "expected": "null"
+    },
+    {
+      "id": "unknown-axis",
+      "note": "An unrecognised axis is null.",
+      "input": {
+        "role": "left_arm.shoulder.wiggle"
+      },
+      "expected": "null"
+    },
+    {
+      "id": "one-segment",
+      "note": "One segment is not a role.",
+      "input": {
+        "role": "left_arm"
+      },
+      "expected": "null"
+    },
+    {
+      "id": "four-segments",
+      "note": "The grammar has three segments.",
+      "input": {
+        "role": "a.b.c.d"
+      },
+      "expected": "null"
+    },
+    {
+      "id": "empty-link",
+      "note": "An empty segment fails.",
+      "input": {
+        "role": "left_arm..pitch"
+      },
+      "expected": "null"
+    },
+    {
+      "id": "empty-ordinal",
+      "note": "A bare # is not an ordinal.",
+      "input": {
+        "role": "base.wheel#"
+      },
+      "expected": "null"
+    },
+    {
+      "id": "non-numeric-ordinal",
+      "note": "An ordinal must be digits.",
+      "input": {
+        "role": "base.wheel#a"
+      },
+      "expected": "null"
+    },
+    {
+      "id": "double-ordinal",
+      "note": "Two ordinals cannot both be the last thing.",
+      "input": {
+        "role": "base.wheel#1#2"
+      },
+      "expected": "null"
+    },
+    {
+      "id": "hyphen",
+      "note": "Hyphens are outside every charset.",
+      "input": {
+        "role": "left_arm.shoulder-x.pitch"
+      },
+      "expected": "null"
+    },
+    {
+      "id": "digit-in-axis",
+      "note": "Axes are letters only.",
+      "input": {
+        "role": "left_arm.shoulder.pitch2"
+      },
+      "expected": "null"
+    },
+    {
+      "id": "null-role",
+      "note": "A joint with no declared role parses to null.",
+      "input": {
+        "role": null
+      },
+      "expected": "null"
+    },
+    {
+      "id": "empty-string",
+      "note": "An empty role is null, not an error.",
+      "input": {
+        "role": ""
+      },
+      "expected": "null"
+    },
+    {
+      "id": "whitespace-only",
+      "note": "Whitespace trims to nothing.",
+      "input": {
+        "role": "   "
+      },
+      "expected": "null"
+    },
+    {
+      "id": "chain-left_arm",
+      "note": "left_arm is in the vocabulary.",
+      "input": {
+        "role": "left_arm.link.pitch"
+      },
+      "expected": "{\"axis\":\"pitch\",\"chain\":\"left_arm\",\"index\":null,\"key\":\"left_arm.link.pitch\",\"link\":\"link\"}"
+    },
+    {
+      "id": "chain-right_leg",
+      "note": "right_leg is in the vocabulary.",
+      "input": {
+        "role": "right_leg.link.pitch"
+      },
+      "expected": "{\"axis\":\"pitch\",\"chain\":\"right_leg\",\"index\":null,\"key\":\"right_leg.link.pitch\",\"link\":\"link\"}"
+    },
+    {
+      "id": "chain-left_hand",
+      "note": "left_hand is in the vocabulary.",
+      "input": {
+        "role": "left_hand.link.pitch"
+      },
+      "expected": "{\"axis\":\"pitch\",\"chain\":\"left_hand\",\"index\":null,\"key\":\"left_hand.link.pitch\",\"link\":\"link\"}"
+    },
+    {
+      "id": "chain-neck",
+      "note": "neck is in the vocabulary.",
+      "input": {
+        "role": "neck.link.pitch"
+      },
+      "expected": "{\"axis\":\"pitch\",\"chain\":\"neck\",\"index\":null,\"key\":\"neck.link.pitch\",\"link\":\"link\"}"
+    },
+    {
+      "id": "chain-head",
+      "note": "head is in the vocabulary.",
+      "input": {
+        "role": "head.link.pitch"
+      },
+      "expected": "{\"axis\":\"pitch\",\"chain\":\"head\",\"index\":null,\"key\":\"head.link.pitch\",\"link\":\"link\"}"
+    },
+    {
+      "id": "chain-base",
+      "note": "base is in the vocabulary.",
+      "input": {
+        "role": "base.link.pitch"
+      },
+      "expected": "{\"axis\":\"pitch\",\"chain\":\"base\",\"index\":null,\"key\":\"base.link.pitch\",\"link\":\"link\"}"
+    },
+    {
+      "id": "chain-tail",
+      "note": "tail is in the vocabulary.",
+      "input": {
+        "role": "tail.link.pitch"
+      },
+      "expected": "{\"axis\":\"pitch\",\"chain\":\"tail\",\"index\":null,\"key\":\"tail.link.pitch\",\"link\":\"link\"}"
+    },
+    {
+      "id": "chain-aux",
+      "note": "aux is in the vocabulary.",
+      "input": {
+        "role": "aux.link.pitch"
+      },
+      "expected": "{\"axis\":\"pitch\",\"chain\":\"aux\",\"index\":null,\"key\":\"aux.link.pitch\",\"link\":\"link\"}"
+    },
+    {
+      "id": "axis-pitch",
+      "note": "pitch is in the vocabulary.",
+      "input": {
+        "role": "torso.link.pitch"
+      },
+      "expected": "{\"axis\":\"pitch\",\"chain\":\"torso\",\"index\":null,\"key\":\"torso.link.pitch\",\"link\":\"link\"}"
+    },
+    {
+      "id": "axis-yaw",
+      "note": "yaw is in the vocabulary.",
+      "input": {
+        "role": "torso.link.yaw"
+      },
+      "expected": "{\"axis\":\"yaw\",\"chain\":\"torso\",\"index\":null,\"key\":\"torso.link.yaw\",\"link\":\"link\"}"
+    },
+    {
+      "id": "axis-roll",
+      "note": "roll is in the vocabulary.",
+      "input": {
+        "role": "torso.link.roll"
+      },
+      "expected": "{\"axis\":\"roll\",\"chain\":\"torso\",\"index\":null,\"key\":\"torso.link.roll\",\"link\":\"link\"}"
+    },
+    {
+      "id": "axis-slide",
+      "note": "slide is in the vocabulary.",
+      "input": {
+        "role": "torso.link.slide"
+      },
+      "expected": "{\"axis\":\"slide\",\"chain\":\"torso\",\"index\":null,\"key\":\"torso.link.slide\",\"link\":\"link\"}"
+    },
+    {
+      "id": "axis-flex",
+      "note": "flex is in the vocabulary.",
+      "input": {
+        "role": "torso.link.flex"
+      },
+      "expected": "{\"axis\":\"flex\",\"chain\":\"torso\",\"index\":null,\"key\":\"torso.link.flex\",\"link\":\"link\"}"
+    },
+    {
+      "id": "axis-abduct",
+      "note": "abduct is in the vocabulary.",
+      "input": {
+        "role": "torso.link.abduct"
+      },
+      "expected": "{\"axis\":\"abduct\",\"chain\":\"torso\",\"index\":null,\"key\":\"torso.link.abduct\",\"link\":\"link\"}"
+    },
+    {
+      "id": "axis-rotate",
+      "note": "rotate is in the vocabulary.",
+      "input": {
+        "role": "torso.link.rotate"
+      },
+      "expected": "{\"axis\":\"rotate\",\"chain\":\"torso\",\"index\":null,\"key\":\"torso.link.rotate\",\"link\":\"link\"}"
+    },
+    {
+      "id": "axis-grip",
+      "note": "grip is in the vocabulary.",
+      "input": {
+        "role": "torso.link.grip"
+      },
+      "expected": "{\"axis\":\"grip\",\"chain\":\"torso\",\"index\":null,\"key\":\"torso.link.grip\",\"link\":\"link\"}"
+    }
+  ]
+}

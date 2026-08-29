@@ -1,0 +1,129 @@
+# Skynet OS — continuous integration.
+#
+# Four jobs, and the third is the one that matters. §31.4 requires differential checking in CI:
+# every edition runs the corpus on every commit, and a divergence blocks the release of the edition
+# that diverged and never of the others. Today there is one edition, so `corpus` is the whole of
+# that mechanism; when a second lands it becomes a matrix over editions and nothing else changes.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  # The Rust reference edition. No third-party dependencies anywhere in the workspace, so there is
+  # nothing to cache and nothing to audit — which is a property worth keeping.
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets
+      - name: Test
+        run: cargo test --workspace
+
+      # The kernel builds for a bare-metal target with no operating system under it. This is the
+      # certified tier's argument made mechanical: one source, two targets, and if the kernel ever
+      # acquires a dependency on `std` or an allocator, this is where it is caught rather than in a
+      # safety review a year later.
+      - name: Kernel builds for a safety MCU
+        run: |
+          rustup target add thumbv7em-none-eabihf
+          cargo build -p skynet-kernel --target thumbv7em-none-eabihf
+
+  # The vendor-facing ABI. A driver author reads these headers before deciding whether the platform
+  # is worth an afternoon, so they must compile cleanly from both C and C++.
+  abi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mock robot, sim conformance
+        working-directory: drivers/mock
+        run: make check
+      - name: The C++ wrapper still compiles
+        working-directory: drivers/mock
+        run: make cpp-header-check
+      # The C header is the ABI. Anything that stops it being includable from plain C99 — a C11-only
+      # construct, a compiler extension — narrows who can implement a driver.
+      - name: The C header is C99-includable
+        run: |
+          printf '#include "skynet_rhal.h"\nint main(void){return 0;}\n' > /tmp/c99.c
+          cc -std=c99 -Wall -Wextra -Wpedantic -Ibindings/c -o /tmp/c99 /tmp/c99.c
+
+  # The corpus, and the property that makes multiple editions survivable.
+  corpus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      # Regenerating must be a no-op. If it is not, the reference implementation's behaviour changed
+      # without the corpus being updated in the same commit — which is precisely the state §31.4
+      # forbids, because it means the editions are being measured against a stale specification.
+      - name: The corpus is up to date with the reference
+        run: |
+          node tools/corpus-gen/generate.ts
+          git diff --exit-code --stat corpus/ || {
+            echo "::error::The reference implementation's behaviour changed and corpus/ was not regenerated."
+            echo "Run: node tools/corpus-gen/generate.ts, and review the diff as the specification change it is."
+            exit 1
+          }
+
+      # Every edition sits the same exam. One row today.
+      - name: Rust edition reproduces the corpus
+        run: cargo test -p skynet-corpus -- --nocapture
+
+  # Claims this repository makes about itself, checked mechanically. Each of these is a sentence
+  # somewhere in the specification that would otherwise decay quietly.
+  invariants:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # §7.4. The sentence the product is not allowed to shorten. It lives in the kernel as a
+      # constant, and a surface that mentions the certified tier without it is a surface making a
+      # claim nobody sanctioned.
+      - name: The safety claim rule is intact
+        run: |
+          grep -q "It does not certify a machine" crates/skynet-kernel/src/lib.rs
+          grep -q "performed by a notified" crates/skynet-kernel/src/lib.rs
+
+      # §8.3. A policy is always sandboxed — no flag, no override. An escape hatch here would
+      # quietly undo the invariant the whole safety argument rests on.
+      - name: Only a driver may run native
+        run: grep -q 'manifest.kind != "driver" && manifest.isolation == "native"' crates/skynet-contracts/src/admission.rs
+
+      # §23.1. "This never allocates" is a compile-time property or it is a promise, and a promise
+      # is what code review produces on a good day.
+      - name: The kernel links no allocator
+        run: |
+          grep -q '#!\[no_std\]' crates/skynet-kernel/src/lib.rs
+          ! grep -q 'extern crate alloc' crates/skynet-kernel/src/lib.rs
+
+      # The workspace has no third-party dependencies. A vendor building a driver in 2036 should be
+      # able to build this with no network, and the kernel cannot reach most of the ecosystem
+      # anyway.
+      - name: No third-party dependencies
+        run: |
+          # Cargo.lock is the resolved graph, so this catches a transitive dependency as readily as
+          # a direct one. Every package in it must be one of ours.
+          if grep '^name = ' Cargo.lock | grep -v '^name = "skynet-'; then
+            echo "::error::A third-party dependency entered the workspace."
+            echo "The kernel is no_std without alloc and cannot reach most of the ecosystem; the"
+            echo "rest of the workspace stays dependency-free so a vendor can build it with no network."
+            exit 1
+          fi

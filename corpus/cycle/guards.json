@@ -1,0 +1,603 @@
+{
+  "corpus": "cycle",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "inside-every-ceiling",
+      "note": "A command inside every ceiling passes through untouched.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "elbow": 40,
+            "shoulder": 10
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{\"elbow\":40,\"shoulder\":10},\"response\":null,\"tripped\":[]}"
+    },
+    {
+      "id": "clamped-to-rating",
+      "note": "Above the joint rating, clamped to it.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "elbow": 120
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":120,\"to\":80}],\"command\":{\"elbow\":80},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "clamp-preserves-sign",
+      "note": "Clamping reduces magnitude and keeps direction.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "elbow": -120
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":-120,\"to\":-80}],\"command\":{\"elbow\":-80},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "stale-command-discarded",
+      "note": "A stale command is discarded, never clamped and forwarded at a legal magnitude.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 800,
+          "sequence": 42,
+          "desired": {
+            "elbow": 500
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "stalled-sequence",
+      "note": "A sequence that did not advance is a stalled producer.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "elbow": 10
+          }
+        },
+        "last_sequence": 42
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+    },
+    {
+      "id": "advancing-sequence",
+      "note": "An advancing sequence is not a stall.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "elbow": 10
+          }
+        },
+        "last_sequence": 41
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{\"elbow\":10},\"response\":null,\"tripped\":[]}"
+    },
+    {
+      "id": "no-watchdog-window",
+      "note": "A guard with no input cannot fire; it is reported unavailable instead.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 0,
+          "sequence": 42,
+          "desired": {
+            "elbow": 10
+          }
+        },
+        "last_sequence": 999
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{\"elbow\":10},\"response\":null,\"tripped\":[]}"
+    },
+    {
+      "id": "rate-limit-after-clamp",
+      "note": "Clamping creates a step change; the rate limiter is what turns it into a ramp.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "elbow": 400
+          },
+          "previous": {
+            "elbow": 0
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":400,\"to\":80},{\"channel\":\"elbow\",\"from\":80,\"to\":20}],\"command\":{\"elbow\":20},\"response\":\"clamp\",\"tripped\":[\"envelope\",\"rate_limit\"]}"
+    },
+    {
+      "id": "rate-limit-unbounded-channel",
+      "note": "A channel with no ceiling rate-limits against its own previous value.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "wrist": 100
+          },
+          "previous": {
+            "wrist": 10
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"wrist\",\"from\":100,\"to\":12.5}],\"command\":{\"wrist\":12.5},\"response\":\"clamp\",\"tripped\":[\"rate_limit\"]}"
+    },
+    {
+      "id": "rate-limit-not-configured",
+      "note": "With no jerk ceiling a single-cycle jump to the clamped maximum is permitted, and the notice says so.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": null,
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "elbow": 400
+          },
+          "previous": {
+            "elbow": 0
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":400,\"to\":80}],\"command\":{\"elbow\":80},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "base-channel",
+      "note": "The reserved base channel is bounded by the base velocity ceiling.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "base": 9
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"base\",\"from\":9,\"to\":1.5}],\"command\":{\"base\":1.5},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "multi-channel",
+      "note": "Several channels, some clamped and some not, in one cycle.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "collision_model": true,
+            "solvers": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "base": 4,
+            "elbow": 200,
+            "shoulder": 10,
+            "wrist": 3
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"base\",\"from\":4,\"to\":1.5},{\"channel\":\"elbow\",\"from\":200,\"to\":80}],\"command\":{\"base\":1.5,\"elbow\":80,\"shoulder\":10,\"wrist\":3},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    }
+  ]
+}

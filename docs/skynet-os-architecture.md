@@ -1,0 +1,3432 @@
+# Skynet OS — Technical Architecture
+
+> Skynet has two halves. **Skynet Hub** is where robot software is discovered, versioned,
+> reviewed, signed and sold — it is documented in `docs/skynet-architecture.md` and is largely
+> built. **Skynet OS** is what runs that software on the machine. This document designs the
+> second half end to end.
+>
+> The Hub can already tell you *whether* a policy fits a robot. Nothing yet makes it *fit*.
+
+---
+
+## 0. The thesis
+
+The comparison everyone reaches for is Android, and it is the right one — but almost always for
+the wrong reason. Android did not become universal because one binary boots on every phone. It
+never did and it still does not. Android became universal because of three separable inventions:
+
+1. **A stable vendor interface.** The HAL, and after 2017 Project Treble, let the OS and the
+   silicon ship on different schedules. Before it, an OS update required every chip vendor to
+   rebuild. After it, they were decoupled.
+2. **A conformance suite.** CTS turned "is this Android?" from a marketing sentence into a test
+   run with a pass or a fail at the end. Fail it and you lose the trademark and the app store.
+   This — not the kernel, not the UI — is the mechanism that makes app portability real.
+3. **A package format with declared permissions.** The APK let software be *installed* rather
+   than *ported*.
+
+Robotics has weak versions of the first (`ros2_control`'s `hardware_interface`, LeRobot's `Robot`
+class), and nothing at all resembling the second or third. So a policy published for one humanoid
+is a gamble on the humanoid standing next to it, and "ROS 2 compatible" is a phrase anybody may
+write about anything.
+
+And robots have a fourth problem Android never had. **The body is part of the API.** An app does
+not care whether the screen is 6.1" or 6.7". A policy cares enormously whether the arm has six
+joints or seven, whether joint 3 is rated for 80 Nm or 200 Nm, and whether what it calls
+`left_shoulder_pitch` is what this robot calls `J2`. A phone app that mismatches its hardware
+shows a squashed layout. A policy that mismatches its hardware destroys a wrist, or a person.
+
+Skynet OS is therefore built around two primitives that have no Android equivalent, plus the
+three that do:
+
+| | Android's answer | Skynet OS |
+|---|---|---|
+| Vendor decoupling | HAL / Treble | **RHAL** — a versioned, stable vendor ABI (§4) |
+| Conformance | CTS | **SCTS** — sim, bench and *continuous field* suites (§15) |
+| Package | APK + runtime permissions | **`.sky`** — signed, budgeted, capability-gated (§8) |
+| The body | *no equivalent* | **Embodiment Descriptor + Transport** (§5, §6) |
+| Untrusted code | app sandbox | **Safety Kernel as the sole actuator writer** (§7) |
+
+Those last two are the contribution. Everything else is careful engineering of ideas that already
+work elsewhere.
+
+---
+
+## 1. What "universal" is allowed to mean
+
+There is no binary that boots on a Unitree G1, an ABB arm, a Roomba and a warehouse AMR. Claiming
+otherwise would be exactly the sort of fiction this platform exists to displace, and the claim
+would collapse the first time somebody tried it.
+
+What *is* universal is the **contract**: the same packages, the same transport planner, the same
+Hub, the same conformance suite, the same CLI — reached at three depths of integration. Each tier
+states plainly what it can and cannot promise, and the OS refuses to display a promise the tier
+underneath it cannot keep (`resolveEnforcement()` in `lib/skynet/os/safety.ts` derives the
+enforcement mode from the tier rather than accepting one as input).
+
+| | **Guest** | **Host** | **Certified** |
+|---|---|---|---|
+| Runs on | A container or process on anything that can reach the robot over IP, serial or CAN | PREEMPT_RT Linux on the robot's application processor | Host, plus an independent safety MCU |
+| Owns the control loop | No — the vendor stack does | Yes | Yes |
+| Safety Kernel | **Advisory**: detects and records, enforces nothing | **Enforcing** | **Enforcing, redundant** |
+| Stop path independent of the app processor | No | No | Yes, wired to drive-enable |
+| Can be evidence in a safety case | No | No | Yes (§7.4) |
+| Effort to adopt | An afternoon | A vendor porting project | A vendor porting project plus hardware |
+| What it is for | Trying the catalogue, collecting data, evaluating a policy before trusting it | Production autonomy | Production autonomy around people |
+
+**Guest is how the ecosystem starts.** It is honest about being a passenger: it computes every
+verdict, logs every violation, raises every alarm — and the command still reaches the robot
+unchanged, because there is nothing underneath that Skynet controls. That is genuinely useful
+(an operator learns their policy commands 140% of rated torque *before* trusting it with
+anything) and it is not a safety function, and every surface says so in those words.
+
+This tiering is the load-bearing honesty of the whole design. An OS that displayed
+"safety enforced" over a best-effort userspace process would be lying about the one thing it must
+never lie about.
+
+---
+
+## 2. Decision summary
+
+| Layer | Decision | Why |
+|---|---|---|
+| Base OS | Yocto-built Linux, **PREEMPT_RT**, mainline since 6.12 | Real-time is now a kernel config rather than a patch stack. 20–200 µs worst case is enough for every loop above the joint controller. Sub-10 µs work stays on the vendor's MCU where it belongs. |
+| Init / supervision | `skynetd`, a single supervisor over systemd units | One thing owns lifecycle, health, reconciliation and the black box. Splitting it across shell scripts is how field fleets become unrecoverable. |
+| Vendor interface | **RHAL**, a C ABI with a semver contract, drivers as shared objects | The Treble lesson. A vendor's motor code and the OS must ship on different schedules or the OS never updates. C because every robotics vendor can produce and consume it. |
+| Middleware | ROS 2 is a **transport option, not a dependency** | ROS 2 is middleware, not an OS, and DDS discovery is a liability on a constrained robot. An RHAL driver may be implemented over ROS 2, EtherCAT, CANopen, gRPC or a vendor SDK; the OS does not care and does not require any of them. |
+| Policy execution | Sandboxed process, no actuator access, posts desired commands to a ring buffer | Most published checkpoints are pickles that execute code on load. Without this, every published model is remote code execution attached to a two-metre humanoid. |
+| Safety | **Safety Kernel is the only writer to an actuator**, always | The single invariant that lets the rest of the system be permissive. |
+| Real-time boundary | Kernel and RHAL in the RT path; policy inference is *not* | Inference jitter is unbounded. A design where a slow forward pass delays a torque command is a design that falls over. The kernel runs at the joint rate regardless of what the policy is doing. |
+| Cross-body portability | **Embodiment Transport**, resolved once at install, enforced every cycle | §6. The alternative — hand-porting each policy to each robot — is what the catalogue exists to end. |
+| Packages | Content-addressed `.sky` bundles reusing the Hub's digests, signatures and scan verdicts | A parallel artifact format would fork provenance. Everything the Hub already proves about bytes should keep meaning on the robot. |
+| Permissions | Capability tokens granted per package per robot by an operator, revocable, enforced by the `mode_gate` guard | Android runtime permissions, with physical consequences. `manipulation.grasp` is a permission, not a feature flag. |
+| Fleet model | **Desired state, pulled and reconciled** — never pushed | A robot offline for a week must converge on reconnect without anyone intervening. Push assumes a link that robots do not have. |
+| OTA | A/B slots + **RAUC**, signed by the Hub's existing Ed25519 keys, health-gated rollback | A/B costs storage and buys unattended recovery, which is the only property that matters when the device is in a warehouse at 3 a.m. |
+| Observability | **Black box** ring buffer: every cycle, sealed on fault | Aviation's answer. Also the only credible route to insurability and to answering a regulator. |
+| Conformance | **SCTS**, with a field suite that can suspend an award | A certificate that cannot expire is a certificate that lies with increasing confidence. |
+| Offline | **No control decision may require a network round trip.** A conformance test measures it | Stated as an invariant because it is the property everything else assumes. |
+| Identity | Existing `skd_` device tokens, upgraded with TPM/secure-element binding and image attestation | Reuse the Hub's credential class with the smallest blast radius; add proof of *what* is running. |
+
+### Rejected alternatives
+
+* **Build on ROS 2 as the foundation.** ROS 2 is a good transport and a poor foundation: it is
+  middleware, its security story (SROS 2) is optional in practice, DDS discovery misbehaves on
+  constrained and multi-homed networks, and depending on it would exclude every robot whose
+  vendor stack is not ROS. Supporting it as one RHAL transport gets the ecosystem without the
+  coupling.
+* **A microkernel or a certified RTOS (QNX, seL4, Zephyr) for the whole system.** Right for the
+  safety kernel, wrong for the system: the policy runtime needs CUDA, PyTorch, ONNX Runtime and
+  a package manager, and none of that exists on a certified RTOS. The design instead *splits* —
+  Linux for the runtime, a small kernel that can also be compiled for an MCU. This is what the
+  certified tier is.
+* **A "universal" ROS 2 message-level abstraction.** Tried repeatedly, and it collapses to a
+  lowest common denominator that no serious robot can use, because the interesting capabilities
+  are exactly the ones that differ. The Standard Robot Interface avoids this by making
+  capabilities *typed tokens* with an explicit extension channel, so a policy needing a vendor
+  feature declares the dependency instead of being silently degraded.
+* **Retargeting policies on the Hub and shipping per-robot variants.** Multiplies the catalogue
+  by the robot registry, and produces artifacts nobody signed. Transport is resolved from
+  declarations at install time on the robot, and the plan is reproducible because it is a pure
+  function of two digests.
+* **Trusting the vendor's declared limits without measurement.** The bench suite measures joint
+  ratings under load precisely because a datasheet is a marketing document until somebody checks
+  it. A safety kernel enforcing unverified numbers is a safety kernel enforcing a rumour.
+* **Self-certification.** Vendors run SCTS themselves — the results are signed telemetry, and the
+  field suite keeps measuring after the badge is issued. Absence of a result is never a pass
+  (`awardCertification()` returns it as `missing`), which is the loophole every self-certification
+  scheme otherwise dies of.
+
+---
+
+## 3. The stack
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  .sky packages          policy · skill · service             │  sandboxed
+│  no actuator access · declared budget · granted capabilities │  untrusted
+├──────────────────────────────────────────────────────────────┤
+│  Policy Runtime      inference · observation assembly        │
+│  Embodiment Transport   resolved at install, applied here    │  system
+│  skynetd             lifecycle · reconcile · OTA · blackbox  │  services
+├══════════════════════════════════════════════════════════════┤
+│  ███  SAFETY KERNEL  ███                                     │  real-time
+│  the only writer to an actuator · 8 guards · no allocation   │  no AI
+├══════════════════════════════════════════════════════════════┤
+│  RHAL — stable C ABI, semver, drivers as shared objects      │  vendor
+├──────────────────────────────────────────────────────────────┤
+│  Vendor driver: ROS 2 · EtherCAT · CANopen · SDK · simulator │  boundary
+├──────────────────────────────────────────────────────────────┤
+│  PREEMPT_RT Linux            (certified tier: + safety MCU)  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+The double rule is the trust boundary. Everything above it may be untrusted, downloaded five
+minutes ago, and written by a stranger. Nothing above it can move a joint except by asking the
+thing below it, which says no when the answer is no.
+
+---
+
+## 4. RHAL — the vendor interface
+
+A vendor implements one shared object exporting a small C ABI. That is the entire integration.
+
+```c
+typedef struct {
+  uint32_t abi_version;                  /* semver-major; refuse on mismatch */
+  int (*open)(const char *config, rhal_ctx **out);
+  int (*close)(rhal_ctx *);
+
+  /* Called at the joint rate. Must be wait-free and must not allocate. */
+  int (*read_state)(rhal_ctx *, rhal_state *out, uint64_t deadline_ns);
+  int (*write_command)(rhal_ctx *, const rhal_command *, uint64_t deadline_ns);
+
+  /* Must be callable from a signal handler and from a failing process. */
+  int (*emergency_stop)(rhal_ctx *);
+
+  int (*describe)(rhal_ctx *, char *json_out, size_t len);   /* the embodiment descriptor */
+  int (*read_sensor)(rhal_ctx *, const char *name, rhal_frame *out);
+  int (*extension)(rhal_ctx *, const char *token, const void *in, void *out, size_t len);
+} rhal_driver_v1;
+```
+
+Four properties make it a *contract* rather than an interface:
+
+* **`abi_version` is checked at load and mismatches refuse.** A driver built against v1 never
+  silently runs on v2. This is the whole Treble idea in one field: the OS ships weekly, the
+  driver ships when the vendor has something to say, and neither blocks the other.
+* **`read_state`/`write_command` are wait-free and non-allocating.** They run inside the real-time
+  path. A driver that takes a mutex held by a non-RT thread is a driver that causes a priority
+  inversion at 1 kHz, and `rhal.state.rate` in the bench suite measures the worst-case gap
+  precisely to catch it.
+* **`emergency_stop` must work from a failing process.** It is called from a signal handler on a
+  crashing runtime. A driver implementing it as "publish a ROS message and wait for an ack" fails
+  the test that matters most.
+* **`describe` returns the embodiment descriptor.** The body description is not a file somebody
+  maintains in a wiki — it comes out of the driver, so it cannot drift from the hardware it
+  describes without the driver being wrong.
+
+`extension` is the escape hatch, guarded by a token so a policy using a vendor feature declares
+the dependency rather than reaching for it. It mirrors `StandardRobotInterface.extension()` in
+`lib/skynet/robots/interface.ts`, which already exists on the Hub side.
+
+**Reference drivers ship with the OS** for ROS 2 (`ros2_control` resource manager), plain
+`ros2_control`, EtherCAT (SOEM), CANopen, MuJoCo and Isaac Sim (simulator drivers are how the sim
+suite runs at all), and — see §16 — LeRobot.
+
+---
+
+## 5. The Embodiment Descriptor
+
+*Implemented: `lib/skynet/os/embodiment.ts`.*
+
+The body, made explicit and typed: joints with vendor wire names, canonical roles, per-joint
+limits and accepted control modes; end effectors; sensors with modality and frame; control modes,
+rate bounds and **command latency**; the safety envelope; and the IK solvers actually resident on
+the robot. Digested with sha256 and signed by the vendor exactly as any other Skynet artifact, so
+`embodiment.descriptor.signed` in SCTS is a real check rather than a checkbox.
+
+### 5.1 The canonical role vocabulary
+
+This is the mechanism that makes cross-body work possible at all, and it is deliberately modest.
+
+```
+role  := chain "." link [ "." axis ] [ "#" index ]
+chain ∈ left_arm right_arm left_leg right_leg left_hand right_hand
+        torso neck head base tail aux
+axis  ∈ pitch yaw roll slide flex abduct rotate grip
+
+left_arm.shoulder.pitch    right_hand.finger.flex#2    base.wheel#0
+```
+
+Wire names stay vendor-specific; the *semantics* become shared. This is the USB descriptor move,
+and it is the smallest change that lets two vendors' naming schemes be related mechanically
+instead of by an engineer reading two URDFs side by side.
+
+`aux` exists so a body plan nobody anticipated — a snake robot's segments, a second mast, a
+sensor boom — can still declare roles that parse, rather than being pushed into a wrong-but-close
+chain because the vocabulary had no honest slot for it.
+
+**The extensibility rule is the important part:** `parseRole()` returns `null` for anything it
+does not recognise, and a joint with an unparseable role can only ever be matched by *exact
+name*. An unrecognised role never silently maps to something plausible. A body the vocabulary
+does not describe stays usable — it just cannot participate in remapping, which is truthful,
+because nobody has established what its joints mean.
+
+### 5.2 Why `command_latency_ms` is in the descriptor
+
+Almost nobody publishes it, and it is the number that decides whether a policy trained at 50 Hz
+is stable on this body. Requiring it costs a vendor one measurement (`rhal.command.latency` in the
+bench suite measures it for them) and turns "it feels sluggish on our robot" into an arithmetic
+check performed before download.
+
+---
+
+## 6. Embodiment Transport
+
+*Implemented: `resolveTransport()` in `lib/skynet/os/embodiment.ts`.*
+
+The heart of the system. For each channel of the policy's action space, what does this body do
+with it?
+
+| Method | Meaning |
+|---|---|
+| `direct` | The joint name matches exactly. |
+| `remap` | Different wire name, same canonical role. |
+| `retarget` | Different kinematics — driven through task space by an IK solver. |
+| `synthesize` | No comparable structure, but the command's *meaning* transfers (base velocity from a legged policy onto a wheeled base). |
+| `drop` | No equivalent, and the publisher declared the channel optional. |
+| `blocked` | No equivalent, and the policy requires it. |
+
+The plan's verdict is the worst binding in it: `refused` › `degraded` › `retargeted` › `direct`.
+One blocked required channel refuses the whole plan, because a policy missing an actuator it
+depends on does not do most of its job — it does something nobody has characterised.
+
+### 6.1 Four decisions worth defending
+
+**Retargeting is a chain-level decision, never per-joint.** You cannot send an elbow through task
+space while its shoulder goes direct. `decideRetargetChains()` therefore resolves whole chains
+first, and every channel on a retargeted chain is marked together.
+
+**Retargeting is off by default** (`allowRetarget`). It changes what the policy is doing. That
+should be a decision somebody made, not a fallback that happens quietly — and if the body has no
+solver installed, the request is refused rather than promised and discovered at the first command.
+
+**Scaling never guesses.** When a policy declares it peaked at 180 Nm and the target joint is
+rated for 80, `scaleFor()` returns 0.44 and raises a `scaled_down` warning naming the joint. When
+*either* number is missing it returns 1 and warns `unscalable_channel`. Inferring the missing side
+would be inventing a safety-relevant figure, which this codebase refuses to do anywhere —
+consistent with `skynet_robots.limits` being nullable rather than defaulted.
+
+**Control rate clamps down, never up.** Running a policy faster than it was trained changes its
+dynamics. And `rate_below_watchdog` is the warning that matters most: a loop slower than the
+controller's timeout faults *while the robot is moving*, which is worse than refusing to start.
+
+### 6.2 Why the planner is pure, and runs in two places
+
+`resolveTransport()` has no I/O, no clock and no database. It runs:
+
+* **on the Hub**, so a repository page answers "does this run on my G1, and how well?" *before*
+  anyone downloads forty gigabytes — served at
+  `GET /repos/{ns}/{name}/versions/{v}/transport?robot=`;
+* **on the robot**, at install time, with no network at all.
+
+Both compute the same function over the same declared facts, so neither is authoritative and they
+cannot disagree. This is the pattern `lib/skynet/loading.ts` already established for load plans,
+extended to bodies.
+
+> **Corrected in §23.2.** The implementation here is TypeScript, which a robot cannot run — so as
+> written this section assumes a second implementation on the robot, and two implementations can
+> drift. The contracts move to a Rust crate consumed as WASM by the Hub; the TypeScript stays as
+> the reference and differential-test oracle. One implementation compiled twice cannot disagree
+> with itself, which is a stronger guarantee than the one this section claims.
+
+### 6.3 What it deliberately does not do
+
+It does not *perform* the retargeting. Solving IK is the runtime's job, in the loop, in a
+real-time context. This module decides **what is possible and under what ceilings**, and hands the
+ceilings to the Safety Kernel — which is the only component that can enforce them. Deciding is
+complex and runs once; enforcing is trivial and runs at 1 kHz. Separating them is what makes both
+tractable.
+
+---
+
+## 7. The Safety Kernel
+
+*Implemented: `lib/skynet/os/safety.ts`.*
+
+> **The Safety Kernel is the only component with write access to an actuator.**
+
+A policy does not command a joint. It writes a *desired* command into a ring buffer the kernel
+reads. This is not a stylistic preference. The Hub's artifact scanner already reports that most
+published checkpoints are pickles, and unpickling executes code by construction. Any design where
+loading a model can move an arm makes every published model a remote code execution vulnerability
+bolted to a humanoid. Making the kernel the sole writer is what lets Skynet run untrusted policies
+*at all* — and running untrusted policies is the entire point of having a catalogue.
+
+### 7.1 The guards, in evaluation order
+
+Order is part of the specification, not an implementation detail.
+
+| # | Guard | Checks | Response on trip |
+|---|---|---|---|
+| 1 | `watchdog` | A command arrived inside the window and its sequence advanced | `stop_cat2` |
+| 2 | `envelope` | Per-joint position, velocity, torque vs. rating and transport clamp | `clamp` |
+| 3 | `rate_limit` | Change per cycle vs. the jerk ceiling | `clamp` |
+| 4 | `workspace` | Commanded pose vs. operator-defined allowed volumes, in the frames of §44 | `hold` |
+| 5 | `self_collision` | Commanded configuration vs. the body's collision model, one step lookahead | `hold` |
+| 6 | `balance` | Centre of pressure inside the support polygon; fall-arrest reflex takes the loop | `stop_cat2` |
+| 7 | `proximity` | Commanded speed vs. distance to the nearest detected person (speed and separation monitoring) | `stop_cat1` |
+| 8 | `mode_gate` | The command's capability is one the operator granted this package | `hold` |
+
+**The watchdog runs first** because a stale command must be *discarded*, never clamped and
+forwarded — clamping it would keep a dead producer's last intention alive at a legal magnitude,
+which is exactly the failure the watchdog exists to prevent.
+
+**Rate limiting runs after magnitude clamping** because clamping creates step changes of its own.
+Getting this order wrong yields a kernel that passes every unit test and still whipcracks an arm
+the first time it clamps.
+
+Responses are graduated — `clamp` › `hold` › `stop_cat2` › `stop_cat1` › `stop_cat0`, following
+IEC 60204-1 — because a kernel whose only response is a hard stop is a kernel operators disable.
+A humanoid that drops a crate whenever a velocity estimate blips is worse than no policy at all.
+
+### 7.2 Guards that cannot run say so
+
+> **Extended in §45.5.** An *expired calibration* is a cause of unavailability alongside a missing
+> input — a guard built on extrinsics nobody has re-measured since the robot hit something is not a
+> guard, and it names the expired parameter set rather than assuming the numbers still hold.
+
+`resolveLimits()` partitions the guard set into `active_guards` and `unavailable_guards`, each
+with the specific input that is missing — no IMU, no collision model, no person-detecting sensor,
+no configured jerk ceiling. A guard whose inputs are absent is reported as **unavailable**, never
+as passing. And the `balance` guard on a wheeled base reports "not applicable to this body" rather
+than "missing an IMU", so nobody reads a shape difference as a defect.
+
+### 7.3 Limits compose by minimum, always
+
+Three sources of ceilings — the robot's declared envelope, the transport plan's per-channel
+limits, and the operator's profile — and the rule between them is always the *narrowest*, never a
+precedence order. No source can raise what another lowered, including a mistaken or malicious
+operator profile, which is why the profile is folded in here rather than applied afterwards. An
+attempt to widen is recorded as a `profile_widened` notice and then discarded by the minimum:
+silently ignoring it would leave an operator believing a limit they set is in force.
+
+### 7.4 What the certified tier is and is not
+
+```
+SAFETY_CLAIM_RULE:
+  Skynet OS supplies evidence for a safety case. It does not certify a machine. Conformity
+  assessment against ISO 10218, ISO 13482 or any other standard is performed by a notified
+  body against a specific robot in a specific application.
+```
+
+This constant lives in the code and is rendered on every surface mentioning the certified tier.
+ISO 10218:2025 brought humanoids partly into scope (it no longer excludes them outright, though
+it does not govern their mobility hazards) and made functional-safety requirements explicit; ISO
+13482 covers service robots. Neither is something software confers. The tier is an architecture
+that makes a safety case *possible* — a stop path that survives the application processor dying,
+a kernel small enough to argue about, an audit trail. It is not a certificate, and shortening the
+sentence would be the most damaging thing this product could do.
+
+### 7.5 Reference implementation and parity
+
+The kernel on the robot is C, allocation-free, running against a preallocated frame. The
+TypeScript in `safety.ts` is the *reference*: the specification the C is written against, the
+thing the Hub runs to show an operator what will be enforced before they deploy, and one half of
+the `safety.kernel.parity` conformance test — which feeds identical cycle vectors to both and
+requires identical verdicts. Two implementations of one specification, held to each other by the
+suite.
+
+---
+
+## 8. Packages and permissions
+
+*Implemented: `lib/skynet/os/package.ts`.*
+
+A `.sky` package reuses everything the Hub already proves about bytes — content addressing, the
+version digest, the Ed25519 release signature that is never stored unverified, the scan verdict —
+and adds a declaration: capability tokens needed, embodiment requirements, a **resource budget**,
+and the permissions it asks the operator to grant.
+
+### 8.1 The budget is mandatory, and that is the point
+
+A phone that runs out of memory kills an app. A robot that runs out of memory mid-stride falls
+over. `admitPackage()` refuses a package the robot cannot feed rather than admitting it and
+discovering the shortfall at 60 kg of angular momentum. This is the one place the format is
+stricter than an APK and the reason is physics.
+
+`inference_budget_ms` is declared by the publisher and *measured* by the conformance suite, so a
+package that overruns its own claim on real hardware can be refused before it is trusted with a
+loop.
+
+### 8.2 Permissions are the Android runtime-permission moment
+
+`manipulation.grasp` is a permission, not a feature flag. An operator grants it, per package, per
+robot, revocably, and every grant is audit-logged. The `mode_gate` guard enforces it at every
+cycle — so revocation takes effect on the next command rather than on the next restart.
+
+Two rules keep it from decaying into "grant everything":
+
+* **A package cannot request what it did not declare a need for.** `requests` must be a subset of
+  `embodiment.capabilities`, or the install fails with `over_request`. This closes the
+  "declare a little, request a lot" path.
+* **Ungranted is a warning, not an error.** The package installs and simply cannot use the
+  capability until the operator says yes. Refusing the install would train operators to
+  pre-approve everything to make the error go away.
+
+And `admitPackage()` returns *all* findings rather than the first, because fixing four problems
+one deployment at a time is precisely how people end up granting everything.
+
+### 8.3 Isolation has no override
+
+Only a `driver` may run `native`. A `policy` is always sandboxed — no flag, no override, no
+`--privileged`. An escape hatch here would quietly undo the invariant §7 is built on, so there
+isn't one.
+
+---
+
+## 9. skynetd — the system
+
+> **Expanded in §33.** This section is a sketch; `skynetd` is the largest component in the system
+> and Part IV specifies it properly — the not-safety-critical property that licenses its
+> complexity, the level-triggered reconciler, reconcile ordering and the safe-state barrier,
+> restart and crash-loop policy, the liveness/readiness distinction, and its own failure modes.
+
+One supervisor, owning:
+
+* **lifecycle** — start, stop, restart and crash policy per package, with the kernel always
+  outliving whatever it supervises;
+* **reconciliation** — the loop in §11;
+* **health** — package liveness, budget accounting, thermal and battery state, guard trip rates;
+* **the black box** — §13;
+* **OTA** — §12;
+* **the local API** — a Unix socket carrying the same REST shapes as the Hub, so the CLI and SDK
+  work identically against a robot and against the cloud. `skynet ps`, `skynet logs`, `skynet
+  install`, `skynet estop` are the same verbs in both places.
+
+Units are systemd units; `skynetd` supervises above them rather than replacing them. Reinventing
+process supervision would be a year of work to reach parity with something already on the device.
+
+---
+
+## 10. Identity, pairing and attestation
+
+The Hub already has the right credential class. `skynet_devices` issues `skd_` tokens that
+**cannot read repositories or claim jobs** — deliberately, because a credential physically
+present on a robot in the field is the easiest one in the system to lose. Skynet OS keeps that
+and adds two things:
+
+* **Hardware binding.** Where a TPM or secure element exists, the device key is generated in it
+  and never leaves. `security.identity.attested` checks this.
+* **Image attestation.** Every check-in carries the digest of the running OS image, the running
+  policy and the embodiment descriptor. The Hub records not "robot X is online" but "robot X is
+  running image `sha256:…`, policy `sha256:…`, against body `sha256:…`" — which is the sentence an
+  incident investigation needs and nobody can currently produce.
+
+Pairing is a one-time operator action: `skynet pair <code>` on the robot, confirmed in the Hub UI,
+minting a device token shown exactly once.
+
+---
+
+## 11. Desired state and reconciliation
+
+**The Hub stores intent. The robot reconciles.** Never push.
+
+> **Mechanism in §33.3–33.4.** The loop is level-triggered rather than edge-triggered, which is
+> what lets a robot converge from any state including ones nobody anticipated, and the actions it
+> emits are ordered behind a safe-state barrier.
+
+```
+GET /devices/{id}/desired  →  { os: {channel, version}, packages: [...],
+                                policy: {digest, grants}, profile: {...}, generation: 41 }
+
+  robot: compare against local state → resolve transport → admit → stage → apply at safe state
+  robot: POST /devices/{id}/checkin { generation: 41, applied: true, health, attestation }
+```
+
+Pull-and-reconcile rather than push, for one reason: a robot offline for a week must converge on
+reconnect without anyone intervening. Push assumes a link robots do not have — in a basement, in a
+warehouse aisle, on a construction site. The `generation` counter makes it idempotent, and
+`offline.reconcile.resumes` in the bench suite measures the week-offline case directly.
+
+**The invariant this rests on:** *no control decision may require a network round trip.* The
+transport plan, the clamps, the packages and the grants are all resident. The Hub is for
+provisioning and reporting; it is never in the loop. `offline.control.independent` removes the
+network mid-task and requires the robot to finish.
+
+---
+
+## 12. OTA
+
+A/B slots managed by **RAUC** — chosen over SWUpdate for its breadth of flash backends, and over
+OSTree because A/B's storage cost buys a genuinely unattended recovery path, which is the only
+property that matters when the device is in a warehouse at 3 a.m. Bundles are signed with the same
+Ed25519 machinery the Hub already uses for release signatures, so there is one signing story
+across the product rather than two.
+
+Three rules that are not standard practice:
+
+1. **Never apply mid-task.** An update issued while the robot is holding something is staged and
+   applied at a declared safe state. `ota.safe_state.respected` measures it.
+2. **Health-gated rollback.** The new slot must pass a health check within a boot budget or the
+   bootloader returns to the previous slot unattended. `ota.rollback.works` stages a deliberately
+   broken image and requires unattended recovery.
+3. **OTA is not a route around certification.** An update that changes the Safety Kernel or the
+   envelope is **refused** without a fresh bench pass. Without this rule, every guarantee in §7
+   and §15 is one silent update away from being void — so `ota.safety_gate` tests it, and it is
+   the single most important test in the suite.
+
+Rollout is staged through deployment rings (canary → ring 1 → fleet) with automatic halt on a
+rise in guard trip rates, which the black box already measures.
+
+---
+
+## 13. The black box
+
+Every control cycle, appended to an on-disk ring buffer sized for roughly an hour:
+
+```
+tick · monotonic ns · observation hash · policy digest · policy output
+     · kernel verdict (guards tripped, clamps applied) · final command · RHAL result
+```
+
+Sealed and uploaded on any fault, estop, or operator request. Three things this makes possible
+that are impossible today:
+
+* **Deterministic replay.** Given the same policy digest, observation stream and embodiment
+  digest, replay reproduces the same actions. `telemetry.replay.deterministic` requires it. This
+  turns "the robot did something strange on Tuesday" from an anecdote into a regression test.
+* **Field conformance.** The ratio of cycles the kernel did not have to intervene in, computed by
+  `fieldConformance()`, aggregated per robot per fleet — the input that can suspend a
+  certification (§15).
+* **Insurability and regulatory answerability.** An underwriter or an inspector can be shown
+  exactly what was commanded, what was enforced, and why. This is a genuine commercial wedge and
+  not a feature anybody currently ships.
+
+Note the deliberate choice in `fieldConformance()`: a robot reporting zero cycles returns
+`undefined`, not a flattering 1.0. Measuring "violations detected" would reward a broken detector.
+
+---
+
+## 14. Fleet
+
+Fleet management is the same reconciliation loop, addressed to a set. A fleet is a saved query
+over devices (by robot model, site, tier, tag). Rollouts, profiles and grants apply to the set;
+each robot still pulls and reconciles independently, so a fleet operation is not an outage
+waiting to happen and there is no orchestrator whose failure stops a hundred robots.
+
+The console shows, per robot: tier and enforcement mode, running digests, guard trip rates, field
+conformance, certification state, OTA slot and generation lag. Nothing on that screen is inferred
+— every field is either reported by a check-in or explicitly absent.
+
+---
+
+## 15. SCTS — the Skynet Compatibility Test Suite
+
+*Implemented: `lib/skynet/os/conformance.ts`.*
+
+The mechanism that decides whether "universal" is a claim or a fact. Three suites, because they
+measure different kinds of truth:
+
+| Suite | Where | Cost | Proves |
+|---|---|---|---|
+| `sim` | CI, on every commit | free | **the contract** — the driver answers RHAL correctly, the descriptor parses, the kernel reaches the specified verdict |
+| `bench` | the physical robot, once, with a human present | a day | **the machine** — the estop actually cuts power within the claimed latency, the joint rated for 80 Nm refuses 90 |
+| `field` | continuous telemetry, forever | free | **that it stayed true** |
+
+The third is the one nobody else does, and it is where certification stops being a document and
+becomes a live property.
+
+29 tests across 8 areas, deliberately short. A suite that tests three hundred things is a suite
+nobody runs and every vendor games; one that tests the two dozen properties the rest of the system
+actually depends on is one that can be *required*. Every test exists because some other part of
+Skynet OS would be unsound without it.
+
+The measurements that matter most are the ones taken **at the joint rather than reported by the
+driver**: `safety.estop.latency`, `safety.envelope.clamps`, `embodiment.limits.honest`. A driver
+returning success is not evidence.
+
+### Award rules
+
+* **Absence is not a pass.** A required test with no result is `missing`, never a silent success.
+* **The evidence caps the award, not the claim.** A vendor claiming `certified` whose independent
+  stop path was never measured is awarded `host`, with the reason recorded — rather than refused.
+  Downgrading tells the truth and keeps them in the programme; refusing sends them off to write
+  "ROS 2 compatible" on a web page instead, which helps nobody.
+* **Field conformance suspends rather than downgrades.** Below 0.999 the award is suspended
+  pending re-measurement, because a robot whose commands have been leaving its envelope is not a
+  lower-tier robot — it is one whose certificate no longer describes it. The floor is 0.999 rather
+  than 1.0 because a hundred robots at 100 Hz produce tens of millions of cycles a day, and
+  demanding literal perfection would suspend every honest vendor on sensor noise.
+* **Bench results lapse after a year**, carried in between by field conformance.
+* **`not_applicable` passes.** The balance guard on a wheeled base is genuinely inapplicable, and
+  forcing a fail there would push vendors to fake a result rather than declare a shape.
+
+---
+
+## 16. LeRobot
+
+Hugging Face's LeRobot is the closest thing the field has to a shared robotics stack: a `Robot`
+class abstracting `connect / get_observation / send_action`, the `LeRobotDataset` format (MP4 for
+vision, Parquet for state and action), a policy zoo (ACT, Diffusion, π0, GR00T, SmolVLA), a
+teleoperator abstraction, and a CLI. Native support spans SO-100/101, Koch, LeKiwi, HopeJR,
+Reachy 2, Unitree G1 and others, with community packages for xArm, UR5e, Franka and AgileX.
+
+It is **complementary, not competitive**, and it is worth being precise about where the line falls.
+LeRobot is a *framework you write a program with*. Skynet OS is *the thing that runs programs*. It
+has no safety kernel, no package format, no permission model, no OTA, no fleet reconciliation, no
+conformance suite, no cross-embodiment transport as a service — because those are operating-system
+concerns and LeRobot is not trying to be an operating system.
+
+Three concrete integrations, in the order they pay off:
+
+1. **A LeRobot RHAL driver.** `Robot.connect/get_observation/send_action` is very nearly the
+   simplest possible RHAL. Wrapping it means **every robot LeRobot supports becomes a Guest-tier
+   Skynet robot on day one**, for the cost of one driver. This is the single fastest path from
+   zero to a real device fleet, and it should be built first.
+2. **`LeRobotDataset` as a first-class episode format.** `lib/skynet/loading.ts` already lists
+   `lerobot` as both a loader kind and a dataset reader, so the Hub anticipated this. The device
+   episode ingest path (`POST /episodes`) should emit LeRobotDataset natively, which makes every
+   hour of Skynet teleoperation immediately trainable with existing tooling.
+3. **LeRobot policies as the seed catalogue**, imported with their real provenance and run through
+   the transport planner — which is where Skynet adds something LeRobot cannot: an ACT policy
+   trained on an SO-101 gets a *typed, per-channel* answer about whether it runs on a G1, instead
+   of a fork of the repository.
+
+The honest framing for the ecosystem: Skynet OS should be the best place to *run* a LeRobot
+policy, and should say so.
+
+---
+
+## 17. The Hub contract
+
+Almost everything needed already exists. What the Hub has today that the OS consumes directly:
+content-addressed artifacts, version digests, verified Ed25519 signatures, scan verdicts, the
+load plan (`GET /versions/{v}/load`), the compatibility engine, `skynet_robots.limits`, device
+tokens, episode ingest, deployments pinned by digest that only a runtime check-in can promote,
+namespace secrets, and the audit log.
+
+New surface, and it is deliberately small:
+
+```
+GET  /repos/{ns}/{name}/versions/{v}/transport?robot=   transport plan (same pure fn as the robot)
+GET  /robots/{slug}/embodiment                          the signed embodiment descriptor
+POST /robots/{slug}/embodiment                          vendor publishes one
+GET  /devices/{id}/desired                              desired state; the robot reconciles to it
+POST /devices/{id}/checkin                              generation, health, attestation
+POST /devices/{id}/incidents                            sealed black box upload
+POST /devices/{id}/conformance                          signed SCTS results
+GET  /os/releases?channel=&tier=&arch=                  OTA bundle manifest
+GET  /certifications/{robot_slug}                       award, evidence, expiry, field conformance
+```
+
+New tables follow the existing `skynet_*` convention: `skynet_embodiments`,
+`skynet_device_state` (desired + reported + generation), `skynet_conformance_results`,
+`skynet_certifications`, `skynet_incidents`, `skynet_os_releases`. RLS on every one, and
+`scripts/skynet-verify-rls.mjs` extended to probe them by observation as it does the rest.
+
+Two rules carried over unchanged from the Hub, because they matter more here, not less: **the
+platform never claims a robot is running something it has not heard from** (a deployment is
+`pending` until a check-in), and **a stopped deployment stays stopped** (a robot reporting in does
+not undo an operator's stop).
+
+---
+
+## 18. Developer experience
+
+```bash
+skynet init my-policy --robot unitree-g1        # scaffold with a real embodiment descriptor
+skynet transport ./ --robot spot                # what would happen on a body you do not own
+skynet run ./ --sim mujoco                      # simulator RHAL driver; same OS, no hardware
+skynet pair ABCD-1234                           # bind this robot to a namespace
+skynet install openrobot/grasp-v2@1.4.0         # admission findings printed in full
+skynet grants add manipulation.grasp            # operator grant, audit-logged
+skynet ps · logs · estop · blackbox seal
+```
+
+Two properties are worth designing for explicitly:
+
+* **`skynet transport` needs no hardware.** Because the planner is pure and descriptors are
+  published, a developer can ask "would this run on a robot I do not own?" and get a per-channel
+  answer. This is the loop that makes cross-body publishing normal instead of heroic.
+* **Simulator-first is not a lesser path.** Isaac Sim, MuJoCo and Gazebo are RHAL drivers like any
+  other, so the *same* OS, packages, kernel and grants run in simulation. The sim conformance
+  suite depends on this being true, and it removes the usual gap where sim code and robot code
+  diverge.
+
+---
+
+## 19. Security posture
+
+Inherits the Hub's posture (§7 of `docs/skynet-architecture.md`) and adds what being on the robot
+requires:
+
+* **Untrusted policies are the design assumption, not an edge case.** Sandboxed, no actuator
+  descriptor, declared budget enforced, capabilities gated per cycle.
+* **Secure boot to the kernel.** Bootloader verifies the OS image; the OS verifies the Safety
+  Kernel and RHAL drivers before loading. A driver runs native and must therefore be signed by a
+  key the operator has trusted.
+* **A device credential is assumed lost.** It cannot read repositories, claim jobs, or write to
+  another namespace, and `security.credential.scope` tests exactly that.
+* **The blast radius of a compromised policy is bounded by the kernel**, not by the policy's good
+  behaviour. This is the property that makes the whole marketplace model defensible.
+* **Every grant, stop, install, OTA and certification change is audit-logged** to the Hub's
+  existing `skynet_audit_log`.
+
+---
+
+## 20. Distribution
+
+The Android structure, because it is the one that worked:
+
+* **Skynet OS Core** — open source, Apache 2.0. The kernel, RHAL, transport, package format, the
+  reference drivers, the CLI. Anyone may build it, fork it and ship it. A vendor interface nobody
+  can inspect is a vendor interface nobody adopts.
+* **Skynet Certified** — the trademark and the badge, gated on SCTS. Free for individuals and
+  research; commercial for fleets. This is CTS, and it is what makes the compatibility claim mean
+  something.
+* **Skynet Services** — the GMS analogue, per robot per month: Hub sync, hosted OTA, the fleet
+  console, black box retention, marketplace install and paid-package entitlement.
+
+The flywheel: more certified robots → more policies target them → more robots want certification.
+For a vendor the pitch is one sentence — *implement one driver, and the entire catalogue works on
+your robot on day one* — which is the same pitch that got silicon vendors to implement a HAL.
+
+---
+
+## 21. Hub and OS, side by side
+
+The original framing, answered:
+
+| | **Skynet Hub** | **Skynet OS** |
+|---|---|---|
+| Where it runs | Cloud | On the robot |
+| Models | Store, version, sign | Load and execute under a resolved transport plan |
+| Datasets | Store and version | Streams episodes out; stores no corpus |
+| Skills | Publish and discover | Install and execute as `.sky` packages |
+| Robots | Registry bound to `botindex` | Drives the machine through RHAL |
+| Compatibility | *Whether* X works with Y | **The transport plan that makes X work with Y** |
+| Benchmarks | Leaderboards | Runs evaluations on the robot and in the sim driver |
+| Deployment | Sends intent | Pulls desired state and reconciles to it |
+| Versioning | Central history | Manages installed versions and A/B slots |
+| Safety | Policies, provenance, envelopes | **Real-time enforcement; sole actuator writer** |
+| OTA | Manages releases and rings | Installs, health-gates, rolls back |
+| Telemetry | Stores and analyses | Black box every cycle; seals on fault |
+| Marketplace | Buy and sell | Install and run purchased software under grants |
+| Community | Stars, forks, discussions | None — deliberately |
+| Hardware | Metadata | **Drivers, HAL, device management** |
+
+---
+
+## 22. Build order
+
+**Buildable now, no robot required** — all pure, all testable, all shared with the Hub:
+
+* the Embodiment Descriptor, canonical roles, and `resolveTransport()` — *done*
+* the Safety Kernel reference implementation and limit resolution — *done*
+* the `.sky` manifest and `admitPackage()` — *done*
+* SCTS definitions and `awardCertification()` — *done*
+* the transport endpoint on the Hub, the embodiment tables, the descriptor publish path
+* the simulator RHAL driver (MuJoCo), which makes the sim suite runnable end to end
+* the **LeRobot RHAL driver**, which is the fastest path to a real device (§16)
+
+**Needs hardware, and will report honestly that it is waiting for it** — exactly as the Hub's
+training and simulation surfaces already do rather than displaying invented results:
+
+* the C Safety Kernel and its parity corpus
+* RHAL drivers for EtherCAT and CANopen
+* the bench conformance suite
+* OTA on a real A/B device
+* the safety MCU and the certified tier
+
+**The order matters.** Transport and the kernel are the parts that must be right before anything
+touches hardware, and they are the parts that can be written and tested without any. The
+temptation is to start with a driver because it produces visible motion; the result of starting
+there is a system whose safety argument is retrofitted, which is the failure mode this entire
+document is arranged to avoid.
+
+---
+---
+
+# Part II — Implementation stack
+
+Part I designs the system. This part commits to what it is built out of, and then closes the
+gaps Part I left open. Section 23 exists because a reader asked the obvious question — *what
+language is this actually written in?* — and Part I never answered it, which was a real omission
+rather than a deferral.
+
+---
+
+## 23. Languages and toolchain
+
+> **Superseded in Part III.** This section argues for a single implementation. That position was
+> overruled: Skynet OS ships as multiple language editions (§31), each with a tier ceiling set by
+> whether its runtime can promise a deadline, and all of them held to one conformance corpus.
+> Rust remains the reference edition, and everything below still describes it.
+
+One rule generates most of this table: **Skynet writes Rust; C is a boundary, not a language.**
+Every component Skynet owns is Rust. C appears exactly once, as the ABI at the vendor boundary,
+because a stable ABI is a compatibility requirement and C is the only one every language can both
+produce and consume. Python appears exactly once, where policies actually live.
+
+| Component | Language | Why this one |
+|---|---|---|
+| **Safety Kernel** | **Rust**, `#![no_std]`, no `alloc` | §23.1 — the decision the rest hangs on |
+| **RHAL — the interface** | **C ABI** (not a language choice) | Rust's ABI is unstable and C++'s is compiler-dependent. A vendor writing C, C++ or Rust must link against the same symbols in ten years. |
+| **RHAL — drivers we ship** | Rust | Same safety argument as the kernel; they run in the RT path. |
+| **RHAL — vendor drivers** | Their choice | We ship a C header, a C++ wrapper and a Rust crate. The vendor's existing motor code is C or C++ and rewriting it is not a precondition for adoption. |
+| **`skynetd`** | Rust | Long-running, must not crash, parses untrusted network input and verifies signatures. No GC, real error handling, and it shares the kernel's crates. |
+| **Policy Runtime** | Rust host + two backends | §23.3 |
+| **Shared contracts** (transport, admission, conformance) | **Rust core → WASM for the Hub** | §23.2 — this is a correction to Part I |
+| **On-robot CLI / agent** | Rust, single static binary | It must work on a robot with no Node, no Python and a broken network. |
+| **Python SDK** | Python | Already exists at `sdk/python/skynet`. It is how researchers work and that is not negotiable. |
+| **Hub** | TypeScript / Next.js | Unchanged. The Hub is a web application and rewriting it would be vandalism. |
+| **Existing Node CLI** | TypeScript | Stays for workstations; converges onto the Rust CLI's command surface rather than being maintained twice forever. |
+
+### 23.1 Why the Safety Kernel is Rust and not C
+
+Four requirements, and only one language satisfies all of them:
+
+1. **One source, two targets.** The same kernel must run as a Linux RT thread (host tier) and on a
+   bare-metal Cortex-M or R-series safety MCU (certified tier). `#![no_std]` Rust compiles for
+   both from one codebase. Two implementations of a safety kernel is two safety kernels, and the
+   one that gets less attention is the one on the MCU.
+2. **No heap, provably.** Omitting `alloc` entirely makes "this never allocates" a compile-time
+   property rather than a code-review promise.
+3. **Memory safety in the one place it is worth the most.** A buffer overrun in a web server
+   returns a 500. A buffer overrun between a policy's output buffer and a torque command is a
+   moving humanoid.
+4. **A qualified toolchain must exist.** This used to be the decisive objection to Rust and no
+   longer is: **Ferrocene** is TÜV SÜD-qualified for ISO 26262 **ASIL D**, IEC 61508 **SIL 3** and
+   IEC 62304 Class C, with a certified subset of `core` at SIL 2 / ASIL B.
+
+Two honest qualifications on that last point, because this is a safety claim and precision is the
+whole product:
+
+* Ferrocene is qualified to **SIL 3, not SIL 4**. Ferrous Systems supports customer qualification
+  efforts toward SIL 4; the toolchain itself has not achieved it. SIL 3 is above what a robot
+  safety function of this shape typically requires — ISO 10218:2025 lands around PL d / SIL 2 with
+  hardware fault tolerance of 1 — so this is sufficient, and overstating it would be exactly the
+  kind of lie `SAFETY_CLAIM_RULE` exists to prevent.
+* A qualified compiler is one input to a safety case. It is not a safety case.
+
+**The case for C**, stated fairly because it is not weak: MISRA C is the well-trodden path, every
+assessor has reviewed it, and every MCU vendor ships a C toolchain and a BSP. Choosing Rust means
+occasionally fighting a vendor's C-only ecosystem. The trade is accepted because the kernel is
+roughly two thousand lines that must be correct forever, which is precisely the shape of program
+where memory safety is worth an integration cost. **Ada/SPARK** would prove more and was rejected
+on talent pool alone.
+
+The C ABI is still exported (`skynet_sk_*` symbols), so a vendor may call the kernel from C
+without knowing Rust is underneath.
+
+### 23.2 A correction: the shared contracts belong in Rust
+
+Part I says the transport planner, package admission and certification logic are pure functions
+that run identically on the Hub and on the robot, and that this is what makes the two unable to
+disagree. Part I then implemented them in TypeScript.
+
+**A robot cannot run TypeScript.** As shipped, the design implies a second implementation on the
+robot — and two implementations of "will this policy destroy this arm" can drift, which is the
+exact failure the shared-function argument was introduced to prevent.
+
+The resolution:
+
+* The contracts move to a Rust crate, `skynet-contracts`, as the single implementation.
+* The Hub consumes it as **WASM** from a Next.js route handler. One implementation, compiled
+  twice, cannot disagree with itself — which is a stronger guarantee than the one Part I claimed.
+* **The existing TypeScript is kept, and its role changes.** It becomes the reference and the
+  differential-test oracle: the same corpus of cases runs against both, and they must agree. This
+  is the role `safety.ts` was already designed to play against the C kernel, applied consistently.
+
+Keeping the TypeScript is not sentiment. A specification written in a language the domain experts
+read, tested against the implementation, is worth more than a comment block — and it is what makes
+`safety.kernel.parity` meaningful.
+
+> **Amended by §31.** With language editions, "one implementation compiled twice" is no longer
+> available as a guarantee. What replaces it is stronger in one way and weaker in another: the
+> contracts are implemented per edition and held to a byte-identical conformance corpus, so
+> divergence becomes *detected* rather than *impossible*. The WASM build remains how the Hub
+> consumes the reference edition.
+
+### 23.3 The Policy Runtime is two backends behind one supervisor
+
+A Rust supervisor process owns the loop, the observation assembly and the ring buffer. What it
+hosts depends on the loader the Hub's load plan already identified from the *bytes* — the split
+falls out of `LOADER_KINDS` in `lib/skynet/loading.ts` rather than being invented here:
+
+| Load plan says | Backend | Notes |
+|---|---|---|
+| `safetensors`, `onnx`, `torchscript` | **In-process**, ONNX Runtime or LibTorch via Rust bindings | The production path. No Python, no GIL, no interpreter startup, bounded memory. |
+| `pickle`, `custom`, `lerobot` | **Sandboxed CPython subprocess** over shared memory | The compatibility path — and, not coincidentally, exactly the loaders the scanner flags `executes_on_load`. It is sandboxed hardest because it is the one that runs arbitrary code. |
+
+This is why the load plan is computed server-side from file headers rather than extensions: the
+runtime picks a backend from what the bytes actually are. `.pt` written by `torch.save` is a
+pickle and takes the subprocess path; `.pt` written by `torch.jit.save` is TorchScript and runs
+in-process. The extension cannot tell them apart and the header can.
+
+**Inference is never in the real-time path.** The kernel runs at the joint rate whatever the
+policy is doing; a slow forward pass produces a stale command, the watchdog catches it, and the
+robot stops in a controlled way. A design where a 40 ms inference spike delays a torque command
+is a design that falls over.
+
+### 23.4 The rest of the stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| Kernel | **Linux, PREEMPT_RT**, mainline since 6.12 | §23.5 |
+| Image build | **Yocto** + `meta-rauc`, `meta-tegra`/vendor BSP layers | Reproducible, minimal, and every SoC vendor already ships a Yocto BSP. Debian is easier and gives up reproducibility; Buildroot is simpler and has a thinner BSP ecosystem. |
+| Guest tier | An OCI container on whatever is already there | Guest explicitly runs beside somebody else's stack; requiring an image would defeat the tier. |
+| Init | systemd, with `skynetd` supervising above it | Reinventing process supervision is a year spent reaching parity with what is already installed. |
+| Policy sandbox | OCI runtime (`crun`/`youki`) + seccomp, no `CAP_*`, no device nodes | The sandbox's defining property is negative: there is no path to an actuator file descriptor. |
+| Hot-path IPC | **Lock-free SPSC ring in shared memory** (`memfd` + `mmap`), fixed-size frames | §25 |
+| Control-plane IPC | Unix socket, JSON, same shapes as the Hub REST API | One command surface for the CLI whether it is talking to a robot or the cloud. |
+| OTA | **RAUC**, A/B slots, Ed25519 bundle signatures | Reuses the Hub's existing signing machinery. Widest flash-backend support of the open engines. |
+| Black box | **MCAP** | §26 |
+| Simulation | Isaac Sim, MuJoCo and Gazebo as **RHAL drivers** | The same OS, kernel, packages and grants run in sim. This is what makes the sim conformance suite meaningful instead of a parallel universe. |
+| Safety MCU (certified) | Bare-metal Rust, or Zephyr where a scheduler is needed | Not Linux. §23.5 |
+
+### 23.5 Is Linux the right answer?
+
+**On the application processor, yes, and it is not close.** Nothing else has the GPU drivers, the
+ML runtimes, the camera stacks, the networking and the package ecosystem, and PREEMPT_RT has been
+mainline since 6.12 — real-time is a kernel config now, not a patch stack to rebase forever.
+Typical latencies of 1–50 µs with worst case in the low hundreds are comfortably inside what a
+100 Hz–1 kHz whole-body loop needs.
+
+**On the safety MCU, no.** The certified tier's whole argument is a stop path that survives the
+application processor hanging, and running that path on the same kernel would defeat it. Bare-metal
+Rust, or Zephyr where a scheduler is genuinely needed.
+
+**Below the RHAL, also usually no.** Joint-level current control at 10–20 kHz stays on the vendor's
+motor controller, where it already is. Skynet does not want that loop and should not pretend it
+could take it.
+
+Tuning that is part of the spec rather than an operator's problem: `isolcpus` + `nohz_full` for the
+RT core, `SCHED_FIFO` for the kernel thread, `mlockall(MCL_CURRENT|MCL_FUTURE)`, no swap, and the
+inference process pinned away from the RT core. `rhal.state.rate` in the bench suite measures the
+worst-case gap, which is what catches a driver that takes a lock held by a non-RT thread.
+
+---
+
+## 24. The RHAL data structures
+
+Part I sketched the vtable and left the structs undefined, which left the most latency-sensitive
+part of the system unspecified. Three properties matter: **no allocation**, **timestamps at
+acquisition**, and **an explicit hold mask**.
+
+```c
+#define RHAL_ABI_VERSION 1
+
+/* flags */
+#define RHAL_ESTOP     (1u << 0)   /* an emergency stop is asserted */
+#define RHAL_FAULT     (1u << 1)   /* the drive has faulted; commands are being ignored */
+#define RHAL_DEGRADED  (1u << 2)   /* running, but something is wrong — thermal, a dead encoder */
+
+typedef struct {
+  uint64_t stamp_ns;        /* CLOCK_MONOTONIC_RAW at ACQUISITION, never at return */
+  uint32_t seq;
+  uint16_t joint_count;
+  uint16_t flags;
+  float   *position_rad;    /* [joint_count] — caller-allocated, driver fills */
+  float   *velocity_rad_s;  /* NaN where the joint does not measure it */
+  float   *effort_nm;
+  float    base_pose[7];    /* x y z qx qy qz qw; NaN when the base is not localised */
+  float    base_twist[6];
+  uint32_t fault_code;      /* vendor-specific, surfaced verbatim to the black box */
+} rhal_state;
+
+typedef struct {
+  uint64_t stamp_ns;        /* when the command was produced, not when it was sent */
+  uint32_t seq;             /* MUST advance; the watchdog treats a repeat as a stalled producer */
+  uint8_t  mode;            /* RHAL_MODE_POSITION | _VELOCITY | _TORQUE */
+  uint8_t  _pad[3];
+  uint16_t joint_count;
+  const float   *values;    /* [joint_count]; units follow `mode` */
+  const uint8_t *mask;      /* [joint_count]; 0 = hold this joint at its current setpoint */
+} rhal_command;
+```
+
+Every buffer is caller-allocated and reused across cycles, so the hot path never touches an
+allocator. `stamp_ns` is taken at acquisition because a timestamp applied on return folds the
+driver's own latency into the measurement and quietly corrupts every downstream latency budget.
+
+**The `mask` is where the transport plan meets the wire.** A `drop` binding — a channel the policy
+emits that this body has no equivalent for — becomes a zero in the mask. Without it, a dropped
+channel would have to be encoded as some value, and every value is a command. The mask is how the
+OS says *nothing* rather than saying *zero*, which on a torque-controlled joint is the difference
+between holding position and going limp.
+
+Errors are negative `errno`-style. `write_command` returning `-EPERM` because the drive is faulted
+is a different fact from returning `-ETIMEDOUT`, and the black box records which.
+
+---
+
+## 25. The command path, and what crosses it
+
+```
+Policy backend                       Safety Kernel                     RHAL
+──────────────                       ─────────────                     ────
+observation frame  ──assembler──▶
+                   ◀── inference ──
+desired[]  ──▶ ┌──────────────────┐
+               │ SPSC ring, shm   │ ──▶ 8 guards ──▶ rhal_command ──▶ write_command()
+               │ fixed 4 KiB slots│      (§7.1)
+               └──────────────────┘
+```
+
+Single-producer / single-consumer, lock-free, fixed-size slots in a `memfd`-backed mapping. No
+serialisation, no sockets, no DDS, no allocation in the hot path.
+
+Two properties are load-bearing:
+
+* **The ring is the only channel from the policy to the kernel.** Not a convention — a
+  consequence of the sandbox, which holds no actuator descriptor and no other writable mapping.
+  The policy cannot reach the kernel except through the ring, and cannot reach the RHAL at all.
+* **The kernel never blocks on the producer.** If no fresh frame is ready, it does not wait. It
+  runs its cycle on what it has, the watchdog observes a non-advancing sequence, and the robot
+  stops in a controlled way. A kernel that waits for a policy is a kernel whose real-time
+  guarantee is the policy's tail latency.
+
+### 25.1 Observation assembly and time
+
+This was missing from Part I, and it is one of the harder parts of the whole system.
+
+A policy is trained on synchronised frames: image and joint state as of one instant. A real robot
+has three cameras at 30 Hz with 20–60 ms of pipeline latency, joint state at 1 kHz with 1 ms, and
+an IMU at 200 Hz — none of them aligned, none of them stamped the same way. Feed a policy the most
+recent value from each and it receives a frame that never existed, in which the arm is where it is
+*now* and the image shows where it was two frames ago. Policies degrade in ways that look like bad
+training.
+
+The design:
+
+* **One time base**: `CLOCK_MONOTONIC_RAW`, with PTP or gPTP where the hardware supports it. Every
+  sample carries an acquisition stamp, never an arrival stamp.
+* **Declared per-sensor latency** in the embodiment descriptor, so the assembler knows how far back
+  a camera's "now" actually is. This is why `command_latency_ms` is a descriptor field and why the
+  bench suite measures it rather than trusting it.
+* **The assembler targets an instant**, not a set of latest values: it picks the sample nearest the
+  target for each stream and reports the worst skew in the frame.
+* **A staleness budget** per stream, from the policy's declared observation requirements. Exceeding
+  it is a `hold`, not a silently older frame.
+* The frame's **skew and per-stream ages go into the black box**, so "the policy behaved oddly" can
+  be checked against "the frame it was given was 80 ms skewed" months later.
+
+This does not make an unsynchronised robot into a synchronised one. It makes the skew *measured
+and visible* instead of silently folded into the policy's behaviour.
+
+### 25.2 Two packages, one arm
+
+Also missing from Part I. Capability grants say a package *may* use the arm; they do not say what
+happens when two packages hold that grant simultaneously.
+
+**Capabilities are leased exclusively.** A running package holds a lease on each capability token
+it commands, `skynetd` is the arbiter, and a second package requesting a held token is refused
+rather than interleaved. Two policies alternating commands to the same joint produce a trajectory
+neither was trained on and neither can be held responsible for.
+
+Leases carry a priority, and exactly one pre-emption is allowed: a package registered as a **safety
+behaviour** (a fall-arrest reflex, a retreat) may pre-empt a lease. It is a distinct package kind,
+it is granted separately, and every pre-emption is a black box event. Sensing capabilities are
+shared freely — two policies reading the same camera is normal; two policies driving the same
+elbow is not.
+
+---
+
+## 26. Black box format
+
+**MCAP**, which is already the ROS 2 default bag format since Iron and is what the robotics
+tooling ecosystem reads. Choosing it means Foxglove opens an incident recording with no exporter,
+and it means `lib/skynet/loading.ts` — which already lists `mcap` among its dataset readers — can
+ingest a sealed recording as training data without a conversion step. Inventing a format here
+would have bought nothing and cost the entire existing toolchain.
+
+Channels, each with an embedded schema so the file stays readable without the code that wrote it:
+
+| Channel | Rate | Carries |
+|---|---|---|
+| `/sk/state` | joint rate | `rhal_state` verbatim |
+| `/sk/desired` | policy rate | what the policy asked for |
+| `/sk/verdict` | joint rate | guards tripped, clamps applied, response |
+| `/sk/command` | joint rate | what actually went to `write_command`, and its return |
+| `/sk/frame` | policy rate | observation hashes, per-stream ages, worst skew |
+| `/sk/event` | on change | lease grants, pre-emptions, estop, OTA, grant changes |
+
+Observation *hashes* rather than observation bytes: an hour of three-camera video is hundreds of
+gigabytes and the robot has neither the disk nor the uplink. The hash proves which frame was seen;
+full-fidelity capture is a separate, explicitly enabled recording mode for data collection.
+
+---
+
+## 27. Boot, and what happens when things break
+
+> **Extended in §48.** A power-on self-test and an `UNHOMED` state precede this sequence: a robot
+> with incremental encoders does not know its joint positions at power-on, so every pose-dependent
+> guard is unavailable until it is homed, and a failed self-test goes to `SAFE` rather than
+> `DEGRADED`.
+
+```
+bootloader (verifies slot signature)
+  → kernel + initramfs
+    → RHAL driver load, ABI check, describe() → embodiment descriptor
+      → Safety Kernel start, limits resolved, guards partitioned
+        → skynetd: verify installed packages, reconcile against last desired state
+          → policy runtime: transport plan resolved, leases granted
+            → RUNNING
+```
+
+The kernel starts **before** any policy and outlives all of them. A robot with no policy running is
+a robot that holds position safely; a robot with a policy and no kernel must not exist, so the
+runtime refuses to start if the kernel is not live.
+
+| State | Entered when | Behaviour |
+|---|---|---|
+| `HOLD` | No policy, or a guard `hold` | Setpoints held, brakes as configured. The safe resting state. |
+| `RUNNING` | Lease granted, plan resolved, kernel live | Normal operation. |
+| `DEGRADED` | A guard is unavailable, or the RHAL reports `RHAL_DEGRADED` | Runs, reports, and refuses any package whose grants depend on the failed guard. |
+| `STOPPING` | Watchdog, proximity, balance, or an operator stop | Controlled ramp per the stop category. |
+| `SAFE` | Stop complete, or the kernel lost the RHAL | Drives disabled. **Requires an explicit human action to leave.** |
+
+`SAFE` is deliberately sticky. A robot that recovers itself from a safety stop is a robot that
+resumes moving while somebody is standing next to it working out what happened.
+
+---
+
+## 28. Storage and minimum hardware
+
+```
+/boot        A/B, verified by the bootloader
+/rootfs.a    /rootfs.b     read-only squashfs, RAUC slots
+/data        persistent, survives updates
+  /packages    content-addressed .sky blobs, shared by digest across policies
+  /blackbox    ring buffer, preallocated at install so a full disk cannot silence it
+  /state       desired-state cache, grants, leases, operator profiles
+  /identity    device key (TPM/secure-element-backed where present)
+```
+
+`/blackbox` is preallocated on purpose: a black box that stops recording because a log filled the
+disk is a black box that fails exactly when something is going wrong.
+
+Targets, not measurements — these are what the design is aimed at, and the bench suite is what will
+say whether they hold:
+
+| Tier | CPU | RAM | Accelerator | Notes |
+|---|---|---|---|---|
+| Guest | any x86-64 / arm64 | 2 GB | none needed | Runs beside the vendor stack; may sit off-robot entirely. |
+| Host | 4 cores, one isolated for RT | 8 GB | optional | Enough for ONNX policies up to roughly 1 B parameters. |
+| Host + VLA | 8 cores | 16 GB | 16 GB unified or discrete | A 7 B VLA at int8 needs ~8 GB of weights plus activations and camera buffers. Jetson Orin NX 16 GB is the reference point. |
+| Certified | as above | as above | as above | Plus a Cortex-M/R safety MCU on the drive-enable line. |
+
+---
+
+## 29. Two things Part I referenced and never defined
+
+**The collision model.** `self_collision` and `workspace` need geometry that the descriptor did not
+carry. It is an optional block: convex hulls or capsules per link, a URDF or USD reference for the
+full mesh, and an allowed-pairs list (adjacent links touch by design and flagging them would make
+the guard unusable). Absent, the guard reports unavailable — it does not silently pass.
+
+**Teleoperation.** The episode schema already knows about `teleop_vr`, `teleop_mocap`,
+`teleop_gamepad` and `teleop_keyboard`, so the path exists on the Hub side. On the OS: a
+teleoperator is a **package kind**, holding the same capability leases and passing through the same
+eight guards as any policy. A human operator is not exempt from the envelope — an operator can
+command an arm through a wall as easily as a policy can, and the clamp is the same clamp. Intervention
+counts, which the episode schema already records, come from lease pre-emptions in the black box.
+
+---
+
+## 30. What is still open
+
+The architecture is complete: every subsystem has a shape, a contract and a reason. The
+engineering specification is not, and these are the parts that are genuinely undecided rather than
+merely unwritten.
+
+| Open question | Why it is not settled |
+|---|---|
+| **Retargeting fidelity** | The transport plan says a chain *can* go through task space. It does not say the resulting behaviour is any good. Whether a manipulation policy survives 7-DoF → 6-DoF retargeting is an empirical question per policy, and the honest answer today is a `retargeted` verdict plus a benchmark result, not a promise. Cross-embodiment VLA work is moving fast here and the planner should be able to consume its output rather than guess ahead of it. |
+| **Role vocabulary governance** | Twelve chains and eight axes cover humanoids, arms, quadrupeds and wheeled bases. They do not cover soft robots, continuum arms or anything with non-rigid kinematics, which fall to `aux` and exact-name matching. Who extends the vocabulary, and how a body plan is added without breaking existing descriptors, needs a process — probably versioned vocabularies pinned by descriptor, but that is unproven. |
+| **Kernel formal verification** | `#![no_std]` Rust plus a qualified toolchain is strong. Proving the guard set never emits a command outside the envelope — as opposed to testing that it does not — is a Kani or Creusot project that has not been scoped. |
+| **Field conformance privacy** | Continuous telemetry from a customer's robots to a vendor's certification badge is a data-governance question with a real conflict in it. Aggregating on-robot and reporting only conformance ratios is the likely answer; it has not been designed. |
+| **Multi-robot coordination** | Deliberately out of scope. Skynet OS runs one robot. Fleet coordination — shared maps, traffic, task allocation — is a different system and pretending otherwise would produce a bad version of both. |
+| **The certified tier is unbuilt** | Everything above the MCU is designed and testable. The MCU itself, its interlock wiring and the safety case around them need hardware, a partner and a notified body. No amount of further design substitutes for that, and the tier should keep saying so until it exists. |
+
+---
+---
+
+# Part III — Language editions and the interface
+
+Part II committed to Rust and argued that reimplementation should be forbidden above the vendor
+boundary. That argument was heard and overruled: **Skynet OS ships as multiple language editions,
+so an adopter can choose the one their team already writes.**
+
+This part designs that properly. The concern behind the original position was real — N
+implementations of a safety kernel is N sets of latent bugs — so the answer is not to drop the
+concern but to adopt the mechanism that other multi-implementation systems use to survive it.
+Protocol Buffers has implementations in twenty languages, WebAssembly has a dozen runtimes, SQL
+has hundreds of engines. None of them stays coherent by good intentions. They stay coherent
+because **the specification and its conformance corpus are the artifact, and every implementation
+is measured against it rather than against the others.**
+
+---
+
+## 31. Language editions
+
+### 31.1 The shape of the decision
+
+The normative artifact stops being a codebase and becomes a pair:
+
+* **The specification** — Parts I and II of this document, plus the machine-readable schemas.
+* **The conformance corpus** — golden input/output vectors that every edition must reproduce
+  exactly (§31.4).
+
+An edition is then any implementation that passes the corpus and SCTS. Rust remains the
+**reference edition**, which is a narrower claim than "the real one": it means that where the
+specification is ambiguous and two editions disagree, Rust's behaviour is what the specification
+is amended to say. It does not mean an edition is second class.
+
+### 31.2 What is per-edition, and what can never be
+
+Some things are *formats*, and a format with two implementations of its own definition is not a
+format. These stay single-source no matter how many editions exist:
+
+| Single-source, always | Why |
+|---|---|
+| The RHAL C ABI (`bindings/c/skynet_rhal.h`) | It is the ABI. Two definitions of a struct layout is a segfault. |
+| The `.sky` package format | A package installed by one edition must install identically under another. |
+| The embodiment descriptor schema | The body description must mean one thing. |
+| MCAP channel schemas | A black box sealed by one edition must be readable by every other. |
+| The Hub wire protocol | One API, many clients. |
+| **The conformance corpus** | The thing all editions are measured against cannot itself be per-edition. |
+
+Everything else is per-edition: the Safety Kernel, `skynetd`, the policy runtime, the contract
+implementations (transport, admission, certification), the CLI and the SDK.
+
+### 31.3 The edition matrix
+
+The honest part, and the one that makes this design hold together: **not every language can serve
+every tier.** A garbage-collected runtime cannot promise a clamp inside a 1 ms deadline, and an
+edition that shipped an "enforcing" kernel on one would be making exactly the claim the tier model
+exists to prevent. So each edition declares a **tier ceiling**, enforced the same way
+`resolveEnforcement()` enforces it today — derived from the edition, never chosen by it.
+
+| Edition | Ceiling | Kernel | Standing | Why the ceiling is there |
+|---|---|---|---|---|
+| **Rust** | Certified | Yes | **Reference** | `no_std`, no GC, Ferrocene qualified to ASIL D / SIL 3. |
+| **C** | Certified | Yes | Full | MISRA C is the most trodden certification path in the industry and the smallest MCU footprint. Strongest candidate for the safety-MCU build specifically. |
+| **C++** | Certified | Yes | Full | The largest population in robotics; ROS 2 is C++ and every vendor SDK is. Certified tier requires a MISRA C++:2023 or AUTOSAR C++14 subset — no exceptions, no RTTI, no dynamic allocation after init. |
+| **Zig** | Host | Yes | Community | Genuine systems language with a native C ABI story. No qualified toolchain exists, so it cannot reach the certified tier — a limitation of the ecosystem, not the language. |
+| **Go** | Guest | No | Full | GC pauses. Excellent for `skynetd`-equivalent fleet services *off* the robot, and for tooling. |
+| **Python** | Guest | No | Full | GIL and GC. Cannot host an enforcing kernel and should never claim to. Remains the best edition for simulator drivers, bench harnesses, research and the SDK. |
+| **Java / Kotlin** | Guest | No | Community | GC. Industrial automation shops with existing JVM stacks. |
+| **C# / .NET** | Guest | No | Community | GC. Windows-based cells and existing industrial tooling. |
+| **TypeScript** | Off-robot | No | Full | The Hub, the workstation CLI, and the WASM host for the contracts. Never runs on a robot. |
+
+Three rules keep the matrix honest:
+
+1. **An edition below its ceiling reports advisory enforcement**, exactly as the guest tier does
+   today. A Python edition is not a weaker kernel; it is an *observer*, and it says so in those
+   words on every surface.
+2. **An edition may not raise its own ceiling.** The ceiling is a property of the edition, checked
+   at build and reported at check-in, not a configuration flag.
+3. **A ceiling is not a judgement about the language.** Python's ceiling is about a GC, not about
+   Python. The matrix reads as a capability statement, never as a ranking.
+
+### 31.4 The conformance corpus — how N implementations stay one system
+
+This is the load-bearing addition, and without it the whole plan is unsound.
+
+The corpus is a set of versioned, signed test vectors — plain data, no code — living beside the
+specification:
+
+| Corpus | Input | Expected output |
+|---|---|---|
+| `cycle/` | Cycle vector + resolved limits + envelope | The exact `CycleVerdict`: guards tripped, clamps applied, response |
+| `transport/` | Source embodiment + descriptor + options | The exact `TransportPlan`: every binding, method, scale, limit, warning |
+| `admission/` | Package manifest + device capacity + flags | The exact finding list, in order, with severities |
+| `certification/` | SCTS results + field conformance + bench age | The exact award, failures, missing, reasons |
+| `roles/` | Role strings, valid and malformed | Parse result or null |
+| `readiness/` | Registry subject | Attainable tier and blocker list |
+
+Four rules govern it:
+
+* **Byte-identical output, not equivalent output.** Serialised to canonical JSON and compared
+  exactly. "Equivalent" is where drift hides — a warning in a different order today is a different
+  clamp tomorrow.
+* **Differential fuzzing in CI.** Generated inputs run through every edition and diffed on every
+  commit. A divergence is either a specification ambiguity or an implementation bug, and it blocks
+  the release of the edition that diverged — never of the others.
+* **A new case lands in the corpus before the fix lands in any edition.** This is the rule that
+  keeps the corpus ahead of the implementations rather than a retrospective description of them.
+* **`safety.kernel.parity` generalises.** The SCTS test that today holds a C kernel to the
+  TypeScript reference becomes "this edition reproduces the corpus", and every edition sits the
+  same exam.
+
+An edition that has not passed the corpus is not an edition. It cannot carry the name, appear in
+the matrix, or be installed by `skynetd` — which is the same mechanism SCTS applies to robots,
+pointed at implementations.
+
+### 31.5 The cost, stated plainly
+
+Because it should be visible rather than discovered:
+
+* **N× maintenance.** Every spec change is N implementations, N reviews, N releases.
+* **N× security surface.** A memory-safety bug in the C or C++ kernel is a bug the Rust edition
+  does not have, and adopters of that edition carry it.
+* **The corpus is permanent work.** It must grow with every feature, and a feature without corpus
+  coverage is a feature where editions may already disagree.
+* **Certification is per edition, not per product.** A vendor certifying on the C++ edition has
+  certified the C++ edition. The badge names it.
+
+The mitigation is scope discipline: the kernel is roughly two thousand lines. Editions are viable
+precisely because the component that must be identical is small. Should the kernel grow, the
+edition count must shrink — and that trade should be made deliberately rather than discovered
+three editions later.
+
+---
+
+## 32. The interface
+
+Two interfaces, and the split is not cosmetic. When the network is down the Hub is unreachable,
+and that is exactly the moment somebody needs to see the robot.
+
+### 32.1 Hub-side (`/skynet/os/*`)
+
+| Route | Shows | Needs |
+|---|---|---|
+| `/skynet/os` | Tier model, registry readiness, fleet-wide blockers | Nothing new — runs on the existing registry |
+| `/skynet/os/editions` | The §31.3 matrix: ceiling, kernel, standing, corpus status and downloads per edition | `skynet_os_editions`, `skynet_conformance_results` |
+| `/skynet/os/devices` | Fleet: tier, enforcement, running digests, generation lag, guard trip rate | `skynet_device_state` |
+| `/skynet/os/devices/[id]` | One robot: active and unavailable guards with the missing input named, resolved limits and their provenance, current transport plan, black box index | `skynet_device_state`, `skynet_incidents` |
+| `/skynet/os/transport` | Interactive: pick a policy version and a robot, get the per-channel plan before downloading anything | The transport endpoint |
+| `/skynet/os/certification/[slug]` | Award, the evidence behind it, expiry, live field conformance | `skynet_certifications` |
+| `/skynet/robots/[slug]` | An OS-readiness panel added to the page that already exists | Nothing new |
+
+**Registry readiness is the one to build first** because it needs no new tables and answers a
+question the ecosystem actually has. Its vocabulary is deliberately distinct from certification:
+it reports an **attainable** tier — the paperwork is in order, the measurements may now be taken —
+where SCTS reports an **awarded** one. Collapsing the two would put "host tier" over a robot
+nobody has ever measured, which is the precise failure this platform exists to avoid.
+
+Its most useful output is the fleet-wide blocker count, because "twelve robots have no published
+adapter" and "twelve robots have no sourced datasheet" describe completely different problems and
+imply completely different work.
+
+### 32.2 The on-robot console
+
+Served by `skynetd` over the LAN. Small, static, no build step, no CDN — it has to render on a
+robot with no internet, which rules out every fashionable way to build it.
+
+| Panel | Contents |
+|---|---|
+| **Status** | Tier, enforcement mode, state machine position (`HOLD` / `RUNNING` / `DEGRADED` / `STOPPING` / `SAFE`), uptime, edition and version |
+| **Stop** | A large, always-reachable software stop. Never below the fold, never behind a confirm dialog on a page whose purpose is stopping a robot. |
+| **Guards** | Live: which are active, which are unavailable and the exact input missing, trip counts this session |
+| **Plan** | The resolved transport plan and the clamps in force, with provenance for every number |
+| **Packages** | Installed packages, their grants, and grant/revoke — revocation taking effect on the next command, not the next restart |
+| **Black box** | Recent events, seal-and-download, upload state |
+
+Two constraints that are design decisions rather than details: **it must work with no network**,
+and **it must never show a value it did not receive**. A dashboard that renders a stale torque
+reading as a live one is worse than a blank panel, so every field carries its age and a stale
+field reads as stale.
+
+### 32.3 Constraints inherited from the project
+
+* Every string translatable — a key in `messages/en.json`, then `i18n-catalog.mjs sync`. Both
+  interfaces, all 35 locales.
+* Device and fleet routes are dashboard-shaped and take the `noindex` treatment in
+  `next.config.ts`, alongside `/dashboard` and `/settings`.
+* The public pages (`/skynet/os`, `/editions`) are SSR with canonical and hreflang via
+  `buildSkynetMetadata()`, like every other Skynet page.
+* Empty states say what is absent. "No robot has checked in" — never a demo fleet, never a
+  placeholder chart. The Hub already holds this line for training and simulation and the OS
+  surfaces hold it too.
+
+### 32.4 Order
+
+1. `/skynet/os` — readiness over the live registry. No new tables.
+2. `/skynet/os/editions` — as the first edition ships, and needed the moment there is more than one.
+3. The OS-readiness panel on the existing robot page — small, and puts the answer where people
+   already look.
+4. `/skynet/os/transport` — once the transport endpoint exists.
+5. Devices, certification, and the on-robot console — these follow their tables and their first
+   real device, and until then they would be showing invented state.
+
+---
+---
+
+# Part IV — The rest of the operating system
+
+Parts I to III designed the parts that are interesting: the kernel, transport, packages,
+conformance, editions. An audit of the document then found the obvious problem with that — of
+thirty-three sections, sixteen ran under 280 words, and the thinnest of all was `skynetd` at 129,
+which is the single largest component of the system. The safety-critical spine was specified and
+the plumbing was gestured at.
+
+Plumbing is what decides whether a robot works in a warehouse in February. This part closes it.
+
+The kernel is not revisited; §7, §23.1 and §25 stand.
+
+---
+
+## 33. skynetd
+
+### 33.1 The property that makes everything else possible
+
+> **`skynetd` is not safety-critical, and it is built that way on purpose.**
+
+It never touches an actuator. It supervises the policy runtime, which posts desired commands into
+a ring the Safety Kernel reads, and the kernel is what writes. So `skynetd` may crash, hang, leak,
+be killed by the OOM reaper, or be stopped by an operator, and the robot does not become dangerous
+— the kernel keeps running, sees no fresh commands, and holds.
+
+That single property is what licenses everything else in this section. `skynetd` can be a large,
+complex, allocating, network-facing Rust program with a JSON parser and an HTTP server in it,
+because none of that is in the path between a policy and a joint. Had the supervisor been on that
+path, every feature below would have had to be argued through a safety case, and the honest
+outcome would have been an OS with no fleet management.
+
+Two consequences are worth stating explicitly, because they are testable:
+
+* **The kernel and the RHAL driver survive a `skynetd` restart.** They are separate processes with
+  separate lifetimes; the kernel is started by systemd before `skynetd` and does not depend on it.
+* **A robot with no `skynetd` at all is a robot that holds position safely.** Not one that keeps
+  executing the last policy, and not one that goes limp.
+
+### 33.2 Structure
+
+One process, several long-lived tasks, none of them blocking another:
+
+```
+skynetd
+├── reconciler      desired → actual, level-triggered, one loop (§33.3)
+├── supervisor      process lifecycle, restart policy, crash-loop detection (§33.5)
+├── health          liveness and readiness aggregation (§33.6)
+├── blackbox        ring-buffer writer, sealing, upload (§13, §26)
+├── ota             stage, verify, apply at safe state, roll back (§12)
+├── connectivity    bearer selection, backoff, the outbound queue (§34)
+└── api             Unix socket (local tools) + LAN HTTP (the console) (§33.7)
+```
+
+### 33.3 The reconciler is level-triggered, and that is the whole design
+
+The reconciler compares a **desired state** against an **observed actual state** and emits actions
+to close the gap. It does this on a timer and on any event, and it is **level-triggered rather
+than edge-triggered**.
+
+That distinction is the most important sentence in this section. An edge-triggered supervisor acts
+on transitions — "a new package appeared, install it". Miss one edge, because the process was
+restarting or the disk was full or the network dropped mid-message, and the system stays wrong
+forever, because nothing will ever re-deliver that edge. A level-triggered supervisor asks "what
+is true, what should be true, what is the difference" and converges from *any* starting state,
+including states nobody anticipated. It is the lesson every large-scale orchestrator learned
+expensively, and a robot that spends days offline is exactly the case that punishes getting it
+wrong.
+
+So there is one loop, it is idempotent, and running it twice changes nothing the first run
+already did:
+
+```
+loop:
+  desired ← cached desired state on disk        (refreshed from the Hub when reachable)
+  actual  ← observe(): installed packages, running units, image slot, grants, leases
+  plan    ← diff(desired, actual)               ordered, §33.4
+  for action in plan:
+      if action.requires_safe_state and not at_safe_state(): defer(action); continue
+      apply(action); observe(); record()
+  report(generation, actual, health, attestation)
+```
+
+**Observation is never assumed.** `actual` is read from the system — the package store, systemd,
+the RAUC slot, the kernel's lease table — never from a memory of what `skynetd` believes it did
+earlier. A supervisor that trusts its own record of the past is a supervisor that disagrees with
+the machine it is supervising, and on a robot that disagreement is discovered by a person.
+
+### 33.4 Reconcile ordering, and the safe-state barrier
+
+Actions are not independent, so the plan is ordered rather than a set:
+
+| # | Stage | Requires safe state | Note |
+|---|---|---|---|
+| 1 | OS image | Yes, to *apply* | Staging is always safe; applying reboots |
+| 2 | RHAL drivers | Yes | Changing the driver changes the body |
+| 3 | Package installs and upgrades | No to stage, yes to activate | Fetching and verifying is free |
+| 4 | Profiles and grants | No | A *narrowing* takes effect immediately; a widening waits for a restart of the affected package |
+| 5 | Policy start and stop | Stop, no. Start, yes | Stopping is always allowed |
+| 6 | Leases | No | Follows from 5 |
+
+Two rules govern the barrier:
+
+* **Anything that changes what the robot is capable of waits for a safe state.** Swapping a driver
+  under a running policy would change the meaning of every command in flight.
+* **Anything that reduces what the robot may do applies immediately.** Revoking a grant, narrowing
+  a limit, and stopping a policy never wait, because making a robot less capable is never the
+  dangerous direction. This asymmetry appears throughout the design and it is deliberate.
+
+A deferred action is reported as deferred, with the reason, so an operator sees "waiting for a safe
+state" rather than an update that silently never happened.
+
+### 33.5 Supervision and crash policy
+
+Every package runs as a transient systemd unit that `skynetd` owns. Restart policy is per package
+kind, and the numbers are defaults an operator profile may narrow:
+
+| Kind | On exit | Backoff | Crash loop |
+|---|---|---|---|
+| `policy` | Restart | 1 s, ×2, jittered, capped at 60 s | 5 failures in 10 min → `failed`, stop retrying, report |
+| `service` | Restart | as above | as above |
+| `driver` | **Do not restart automatically** | — | A driver that crashed left hardware in an unknown state. Recovery is a deliberate act. |
+
+Three properties:
+
+* **The kernel holds through every restart.** A restarting policy stops posting commands, the
+  watchdog observes it, and the robot comes to a controlled stop. Restart is therefore never a
+  motion event, and this is the reason the restart policy can be liberal.
+* **Crash loops stop.** Infinite restart is how a robot spends a night power-cycling a driver and
+  logs ten million lines. After the threshold the package is marked `failed` and left alone.
+* **Every restart is a black box event** with the exit status and the last verdict before exit, so
+  a crash that correlates with a particular command is findable afterwards.
+
+### 33.6 Liveness is not readiness
+
+Two distinct health signals, and conflating them is a classic robotics failure:
+
+* **Liveness** — the process exists. Cheap, and nearly worthless on its own.
+* **Readiness** — the process is producing commands at its declared rate, with an advancing
+  sequence number.
+
+A policy that is alive but not ready is **worse** than one that has died, because a dead process
+is obvious and a live-but-stalled one looks fine on every dashboard while the robot stands still.
+The watchdog catches it in the control path; readiness is what catches it in the *reporting* path,
+so an operator sees "running, not producing" rather than a green tick.
+
+Aggregate health rolls up: per-package liveness and readiness, budget headroom, guard trip rates,
+thermal and battery state (§36), storage headroom, and generation lag against the Hub. It is
+reported at check-in and rendered on the console. Every field carries its age.
+
+### 33.7 The local API
+
+A Unix socket at `/run/skynetd.sock` and an HTTP listener on the LAN, both carrying **the same
+REST shapes as the Hub**. That is not tidiness for its own sake: it means `skynet ps`, `skynet
+logs`, `skynet install` and `skynet grants` are the same verbs whether they are pointed at a robot
+or at the cloud, and it means the on-robot console and the Hub console can share a client.
+
+The socket is root-and-`skynet`-group only. The LAN listener is subject to §39.
+
+### 33.8 When `skynetd` itself fails
+
+| Failure | Behaviour |
+|---|---|
+| Crash | systemd restarts it. It re-observes and reconciles from the on-disk desired state. Nothing is lost, because nothing important lived only in its memory. |
+| Hang | `WatchdogSec` in the unit file. `skynetd` pings it from the reconcile loop, so a hung loop — not merely a hung process — trips it. |
+| Disk full | The black box is preallocated (§28) and keeps recording. Package installs fail loudly and GC (§37.3) runs. Reconcile continues for everything that does not need disk. |
+| Corrupt desired state | Falls back to the last-known-good copy, then to "run nothing", which is the safe default. It never invents a desired state. |
+| Cannot reach the Hub | Not a failure. §34. |
+
+---
+
+## 34. Connectivity
+
+### 34.1 The robot is assumed offline
+
+Network is opportunistic, never assumed, and never in the control path — the invariant from §11.
+Everything here is about making the *reporting* path survive a link that is down most of the time.
+
+### 34.2 Outbound only
+
+**The robot never accepts an inbound connection from the Hub.** Every exchange is initiated by the
+robot: pull desired state, push check-ins, push telemetry, push incidents.
+
+This is a security decision before it is a networking one. It means no listening port exposed to
+the internet, no inbound firewall rule, no port forwarding, and no problem behind carrier-grade NAT
+on a 5G modem — which is where a large share of field robots actually live. It is what the
+pull-and-reconcile model in §11 buys, and it is worth more than the latency it costs.
+
+The LAN console (§39) is the sole listener, and it is bound to link-local interfaces only.
+
+### 34.3 Bearers and cost
+
+A robot may have ethernet on a dock, Wi-Fi in a building and 5G outdoors, and they are not
+interchangeable:
+
+| Bearer | Preference | Metered | Used for |
+|---|---|---|---|
+| Ethernet | 1 | No | Everything, including bulk upload and OS images |
+| Wi-Fi | 2 | Configurable | Everything unless marked metered |
+| Cellular | 3 | Assume yes | Check-ins and incidents only, by default |
+
+**Bulk transfer respects metering.** A sealed black box is tens of megabytes and an OS image is
+hundreds; pushing those over a metered link because it happened to be the only one up is how a
+fleet generates a surprise invoice. Bulk classes wait for an unmetered bearer, and the wait is
+visible rather than silent.
+
+### 34.4 The outbound queue
+
+Bounded, on disk, survives reboot, and — because it is bounded — has an explicit **drop policy**.
+Something must be discarded when a robot has been offline for three weeks, and deciding what
+*after* the disk fills means deciding it badly:
+
+| Class | Priority | Dropped |
+|---|---|---|
+| Incidents (sealed black box on a fault) | 1 | **Never.** Disk is reserved for them at install. |
+| Check-ins | 2 | Superseded — only the newest matters, so older ones are collapsed rather than queued |
+| Episodes | 3 | Oldest first, once above the episode quota |
+| Telemetry and metrics | 4 | Oldest first, aggressively |
+
+Check-in collapsing is worth noting: a week offline should produce one current check-in on
+reconnect, not ten thousand historical ones. State is level-triggered here too.
+
+Backoff on failure is exponential with jitter, capped at fifteen minutes. Jitter matters at fleet
+scale — a hundred robots that lost the same access point must not retry in lockstep and take down
+the endpoint the moment it returns.
+
+---
+
+## 35. Time
+
+### 35.1 Two clocks, and control reads only one
+
+| Clock | Property | Used for |
+|---|---|---|
+| `CLOCK_MONOTONIC_RAW` | Never adjusted, never steps, unaffected by NTP | **Every control decision.** Watchdog, deadlines, rate limits, black box ordering |
+| `CLOCK_REALTIME` | Wall time, may step, may go backwards | Logging, scheduling, correlation with the Hub |
+
+**No control decision ever reads wall time.** An NTP step, a leap second or an operator correcting
+the date must not be able to trip a watchdog or widen a deadline. Both clocks are recorded in the
+black box, so a wall-time jump is visible in replay rather than being a mystery in the timeline.
+
+### 35.2 The kernel takes no clock at all
+
+The Safety Kernel does not call any clock function. Its tick is **supplied** — `now_ms` is a
+parameter, which is why `evaluateCycle()` in the reference implementation takes one rather than
+reading a clock itself.
+
+Three things fall out of that, and the third is the reason for the design:
+
+1. The kernel is trivially testable — a cycle vector includes its own time.
+2. Deterministic replay works, because replay supplies the recorded timestamps.
+3. **Simulation works without a special case.**
+
+### 35.3 Sim time
+
+A simulator RHAL driver supplies its own clock, and simulation rarely runs at wall speed — Isaac
+Sim may run a 200 Hz control loop at a fifth of real time on a busy workstation, or ten times real
+time headless.
+
+Because the kernel's time is supplied by the RHAL rather than read from the OS, **sim time simply
+is the kernel's time**, and everything downstream follows: watchdogs, rate limits and deadlines are
+all measured in the same units the simulator is producing. Without this, every simulated run would
+trip the watchdog within a few cycles, and the usual workaround — disabling the watchdog in
+simulation — would mean the thing being tested is not the thing that ships.
+
+The rule that keeps it honest: **a simulator driver must declare itself one.** The tier is forced
+to `guest`, the enforcement mode to advisory-with-simulation noted, and check-ins carry the flag,
+so no simulated run can ever be presented as bench evidence in SCTS.
+
+### 35.4 Synchronisation
+
+NTP when a network exists, for wall time only. PTP or gPTP where the hardware supports it, which
+is what makes the multi-sensor alignment in §25.1 achievable rather than approximate. Where neither
+exists, the observation assembler reports larger skew, which is the honest degradation.
+
+---
+
+## 36. Power and thermal
+
+### 36.1 Low battery is a safety event
+
+A laptop at 3% shows a warning. A humanoid at 3% falls over. Power is therefore handled in the
+same register as the safety envelope, not as a user-experience concern.
+
+| State | Trigger | Behaviour |
+|---|---|---|
+| `normal` | Above reserve + margin | Full operation |
+| `low` | Approaching reserve | No new task leases granted; running task may finish; operator notified |
+| `reserve` | At the reserve budget | Controlled stop, then move to a safe state — park, sit, or dock |
+| `critical` | Below reserve | Immediate controlled stop. Drives disabled once at rest. |
+
+### 36.2 The reserve budget
+
+**The robot always retains enough energy to reach a safe state**, and how much that is depends on
+the body: a quadruped needs a second to sit, a humanoid holding a payload needs longer and needs
+more, an arm needs almost none.
+
+So the embodiment descriptor carries it: `time_to_safe_state_s` and `safe_stop_energy_wh`,
+declared by the vendor and — like every other declared figure in this system — measured by the
+bench suite rather than trusted. A body that declares two seconds and takes six has a reserve
+budget that is a third of what it needs, and that is exactly the kind of number that is discovered
+in an incident report if nobody measures it first.
+
+The reserve is not a fixed percentage. It is computed from the declared figures, the current
+payload, and the distance to the nearest safe state where the robot knows one.
+
+### 36.3 Thermal, and the degradation order
+
+Under thermal or power pressure, things are given up in a fixed order, weakest claim first:
+
+```
+telemetry  →  OTA  →  black box compression  →  policy inference rate
+           →  non-essential sensors  →  ...  and never: RHAL, kernel, control loop
+```
+
+**Inference is throttled before control.** A policy running at 20 Hz instead of 50 is degraded and
+says so; a control loop running late is a fault. And the kernel is never throttled at all — it is
+a few microseconds of arithmetic per cycle, and there is no thermal situation in which giving up
+the safety envelope is the right trade.
+
+Sustained thermal throttling raises `DEGRADED`, which is reported and which blocks any package
+whose declared `inference_budget_ms` can no longer be met. A policy quietly missing its own
+declared deadline is precisely what the budget exists to prevent.
+
+### 36.4 Brownout
+
+Voltage sag is reported by the RHAL as `RHAL_DEGRADED` with a vendor fault code. `skynetd` treats
+it as `critical` regardless of what the fuel gauge claims, because a gauge that disagrees with the
+bus is a gauge that is wrong.
+
+---
+
+## 37. Package lifecycle
+
+Distinct from OS updates (§12): packages are content-addressed blobs installed into a store, not
+filesystem images, and they move far more often.
+
+### 37.1 Install
+
+```
+resolve   the desired state names id, version and digest — already resolved, §37.4
+fetch     by sha256, skipping any blob already present (dedupe is free, §2 of Part I)
+verify    digest, then Ed25519 signature against a key the operator trusts
+admit     admitPackage() — budget, capabilities, grants, dependencies, scan verdict
+transport resolveTransport() against this body; a `refused` verdict fails the install
+stage     unpack into /data/packages/<digest>/, still inert
+activate  atomic symlink swap, then register with the supervisor
+```
+
+**Activation is a symlink swap**, so a crash at any point before it leaves the previous version
+running and a crash after it leaves the new one running. There is no window in which the robot has
+half a policy.
+
+Note the ordering: **transport is resolved at install, not at start.** A policy that cannot reach
+this body should fail while somebody is watching, not at the moment it is first asked to move.
+
+### 37.2 Upgrade and rollback
+
+The new version is installed alongside the old and activated by swapping the symlink. The old blobs
+stay. Rollback is therefore the same swap in reverse and completes in milliseconds without a
+network — which matters, because the moment you most need to roll back is the moment the new
+version broke something.
+
+The running version and the previous **N** (default 2) are **pinned** and never collected.
+
+### 37.3 Garbage collection
+
+The store is refcounted by digest. A blob with no referring version, not pinned, and older than a
+grace period is collectable. GC runs on a timer, on disk pressure, and after any activation.
+
+**GC never touches the rollback set**, even under disk pressure. A robot that frees space by
+deleting the version it would roll back to has optimised for the wrong failure.
+
+Under genuine pressure the order is: unreferenced blobs, then old episodes not yet uploaded (which
+are also droppable per §34.4), then a loud failure. Never the black box reserve, never the
+rollback set.
+
+### 37.4 Dependency resolution happens on the Hub
+
+The desired state carries a **flat, fully-pinned list** of packages with exact digests. The robot
+does no version solving.
+
+This is deliberate. A SAT solver on a robot is a source of unbounded work and non-reproducible
+outcomes — two robots with the same desired state could resolve differently, and neither operator
+could explain why. Resolving centrally makes the resolution reproducible, auditable, reviewable
+before rollout, and identical across a fleet.
+
+The robot's job is narrow: verify, admit, and install exactly what it was given, or refuse and say
+which check failed.
+
+---
+
+## 38. Configuration
+
+### 38.1 Safety configuration is signed
+
+Operator profiles carry the limits the kernel enforces (§7.3), so they are **signed with the same
+Ed25519 machinery as releases**, versioned, and delivered through desired state. An unsigned
+profile is not applied. A profile that fails signature verification is not applied *and* raises an
+incident, because the interesting case is not a corrupt file, it is somebody editing limits on a
+robot's disk.
+
+Non-safety configuration — log level, telemetry sampling, console theme — is unsigned and local.
+The line between the two is drawn by whether the value can reach the kernel.
+
+### 38.2 Layering, and it only ever narrows
+
+```
+vendor defaults  →  fleet profile  →  site profile  →  cell profile  →  session override
+```
+
+Each layer may only **narrow** what the layer above it allows, enforced by the same `narrowest()`
+rule as §7.3 rather than by convention. A site cannot raise a fleet ceiling; a session cannot raise
+a cell's. Attempted widenings are recorded and discarded, so an operator who believes they have
+raised a limit is told they have not.
+
+Session overrides are time-boxed and expire — a "maintenance mode, half speed" that outlives the
+maintenance is a hazard that looks like a setting.
+
+### 38.3 Where it lives
+
+`/data/state/profiles/`, each with its signature and its provenance. Every change is a black box
+event and an audit-log entry, carrying who, when, which layer, and the previous value.
+
+---
+
+## 39. Local access control
+
+### 39.1 Stop is never privileged
+
+> **The stop control on the on-robot console requires no authentication.**
+
+This inverts the usual rule, and it is correct. An authentication prompt between a person and a
+stop button is a hazard. The threat model — somebody on the robot's LAN maliciously stopping it —
+is a nuisance; the threat model it prevents — somebody watching a robot do something dangerous
+while hunting for a password — is an injury.
+
+Everything else requires a credential.
+
+| Role | May |
+|---|---|
+| *(unauthenticated)* | Stop. See status. |
+| Observer | Read health, guards, plan, packages, black box index |
+| Operator | Start and stop packages, grant and revoke capabilities, seal and download the black box, apply a staged update |
+| Admin | Pair and unpair with the Hub, install drivers, change profiles, factory reset |
+
+### 39.2 Provisioning
+
+Local credentials are issued at pairing (§10) and stored hashed. **There is no default password**,
+at any point in the lifecycle. An unprovisioned robot's console offers status and stop and nothing
+else, so the failure mode of never provisioning it is a useless console rather than an open one.
+
+Bootstrapping uses physical presence — a chassis button held during pairing, or a QR code printed
+on the robot — because possession of the machine is the only credential that means anything before
+any other credential exists.
+
+The LAN listener binds to link-local interfaces only and is never routed. Reaching a robot's
+console from outside its network is not a feature and is not a configuration option.
+
+---
+
+## 40. Resource enforcement
+
+### 40.1 The declared budget becomes the cgroup limit
+
+A package declares `ram_mb`, `vram_mb`, `cpu_cores` and `disk_mb` (§8.1), and those exact numbers
+become its cgroup v2 limits. This is what makes the declaration mean something: a package that
+under-declares to get admitted is killed at the number it declared, on the robot, in front of the
+person who installed it — rather than being admitted on a fiction and discovered later by
+exhausting a machine that is holding sixty kilograms.
+
+| Control | Setting | Why |
+|---|---|---|
+| `memory.max` | Declared `ram_mb` | **`max`, not `high`.** A policy thrashing at the high watermark misses its deadline every cycle while looking alive. A hard kill and a restart is a cleaner failure, and the kernel holds throughout. |
+| `cpu.max` | Declared `cpu_cores` | Quota, not shares — shares are relative and give no guarantee under load |
+| `pids.max` | Small, fixed | A fork bomb in a policy is a denial of service against the robot |
+| `io.max` | Class-based | Telemetry upload must not starve the black box writer |
+| `cpuset.cpus` | **Never the RT core** | §40.2 |
+
+### 40.2 The RT core is not shareable
+
+The core running the kernel and the RHAL is isolated at boot (`isolcpus`, `nohz_full`) and no
+package's cpuset may include it. This is not a tunable. A policy that could be scheduled onto the
+core running the safety kernel could delay the safety kernel, and the entire real-time argument
+in §23.5 would be void.
+
+### 40.3 Accelerators
+
+Where the GPU supports partitioning (MIG) or arbitration (MPS), `vram_mb` maps onto it. Where it
+does not — which is most embedded accelerators — **one policy holds the accelerator at a time**,
+and the second is refused at admission with that as the stated reason. Time-slicing an accelerator
+between two policies produces two policies that both miss their declared inference budgets, which
+is worse than one that runs and one that is honestly refused.
+
+### 40.4 On breach
+
+OOM kill, restart with backoff (§33.5), a black box event carrying the declared and observed
+figures. Repeated breach trips the crash-loop threshold and the package is marked `failed` — which
+is a more useful signal to a publisher than a robot that limps.
+
+---
+
+## 41. Logs and diagnostics
+
+### 41.1 The black box is not a log file
+
+Two streams that must never be conflated:
+
+| | Black box | Logs |
+|---|---|---|
+| Format | MCAP, structured, schema'd | journald, human-readable text |
+| Content | Every control cycle (§26) | Whatever the code chose to print |
+| Retention | Preallocated ring, sealed on fault | Rotated by size and age |
+| Purpose | Reconstructing what the robot did | Understanding what the software thought |
+| Guarantee | Complete, or the run is not conformant | Best effort |
+
+Debugging by grepping the black box is a category error, and letting ordinary logging write into it
+would break the completeness guarantee that `telemetry.blackbox.complete` tests. They stay
+separate.
+
+### 41.2 Remote access
+
+Off by default. When enabled it is **time-boxed, operator-approved on the robot, and audit-logged
+at both ends**, and it expires on its own rather than on somebody remembering. A permanently
+enabled remote shell on a fleet of robots is a fleet-wide vulnerability with a friendly name.
+
+### 41.3 `skynet doctor`
+
+One command producing one bundle: versions and edition, image slot and generation lag, active and
+unavailable guards with their missing inputs, resolved limits and provenance, package list with
+budgets versus observed usage, the last N black box events, connectivity and queue depth, thermal
+and battery history, and the last reconcile plan including anything deferred and why.
+
+It is the first thing to ask for in a support conversation, and it exists so that the answer to
+"what is wrong with this robot" is a file rather than an interview.
+
+---
+
+## 42. Amendment to §31.3 — edition levels
+
+Part III presented nine language editions as though they were peers. They are not, and the table
+understated the cost of the ones with a kernel by roughly an order of magnitude. The contracts
+alone are 2,430 lines measured; a full edition — kernel, `skynetd`, policy runtime, CLI, SDK — is
+closer to 40,000–60,000, and Part IV is a large part of why.
+
+So "edition" decomposes into levels, and an implementation declares which one it reaches:
+
+| Level | Scope | Rough size | Realistic count |
+|---|---|---|---|
+| **L1 — Bindings / SDK** | Write drivers and policies, call the local API, against an OS already running | ~2–3k | **All of them.** Cheap, and where nearly all demand actually is. |
+| **L2 — Contracts** | Transport, admission, certification and readiness computed natively, corpus-verified | ~2.4k | **3–4** |
+| **L3 — Runtime** | `skynetd` and the policy runtime — everything in Part IV | ~35k | **1**, for a long time |
+| **L4 — Kernel** | The Safety Kernel | ~2k lines, disproportionate assurance cost | **2 at most** |
+
+The correction that matters for planning: **almost everyone asking for their language wants L1.**
+A ROS 2 shop wants to write a driver and a policy in C++. They do not want to maintain a C++
+implementation of OTA rollback, and offering them one as though it were the same request would
+commit both sides to work neither wants.
+
+The tier ceilings in §31.3 are unchanged and apply to L3 and L4 only — a Go L1 binding is entirely
+unremarkable and carries no ceiling, because it is not hosting anything.
+
+A second L4 edition roughly doubles the certification bill and should be driven by a named
+customer's safety case rather than by preference.
+
+---
+
+## 43. What Part IV leaves open
+
+| Open | Why |
+|---|---|
+| **Multiple robots on one compute** | One Jetson driving two arms is common in cells and genuinely awkward: two RHAL drivers, two kernels or one, two black boxes, and a shared accelerator. Deliberately deferred rather than half-designed. |
+| **Safe-state discovery** | §36.2 assumes the robot knows where a safe state is. For an arm that is trivially true; for a mobile robot it is a navigation problem, and the reserve budget depends on solving it. |
+| **Package-level A/B for drivers** | Drivers do not auto-restart (§33.5), so a bad driver update needs a person. Whether drivers should get their own A/B slot is unresolved. |
+| **Console over the internet** | §39.2 forbids it, which is right for security and wrong for a robot in a customer's building with nobody on site. The answer is probably a Hub-brokered relay the robot dials out to, and it has not been designed. |
+| **Fleet-wide config convergence** | Profiles layer cleanly on one robot (§38.2). Rolling a fleet profile across a hundred robots with staged rings and automatic halt is the same problem as OTA and should probably share its machinery. |
+
+---
+---
+
+# Part V — The hardware-facing layer
+
+A second audit, prompted by asking whether the plan was complete, found that it was not. The
+platform layer — supervision, packaging, updates, fleet, security, conformance, editions — was
+thorough. The layer between the RHAL and the policy had holes, and three of them changed what the
+guards in §7.1 can actually promise:
+
+* `calibration` appeared **zero** times in the document.
+* `transform`, `tf2` and "coordinate frame" appeared **zero** times, while the `workspace` guard
+  checks poses that only mean something in a frame.
+* All sixteen occurrences of "watchdog" were software. The hardware watchdog — the thing that
+  catches the entire application processor wedging — was absent, while §7.4's certified-tier
+  argument quietly leaned on it.
+
+This part closes those, then the five functional and commercial gaps behind them.
+
+---
+
+## 44. Coordinate frames
+
+### 44.1 The problem the guards had
+
+`workspace` checks "commanded end-effector pose against operator-defined allowed volumes" and
+`self_collision` checks "commanded configuration against the body's collision model". Both operate
+on poses, and a pose without a frame is a number. Nothing in Parts I–IV said who resolves
+`head.camera_rgb` into the base frame, or where the end effector *is* given a joint vector.
+
+### 44.2 Two graphs, not one
+
+The important decision, and it is a split rather than a system:
+
+| | **Safety frame set** | **Perception tree** |
+|---|---|---|
+| Who computes it | The Safety Kernel, in-cycle | The policy runtime |
+| From what | Joint state, by forward kinematics | Everything, including estimated and filtered poses |
+| Contents | Link poses, end effectors, collision bodies, declared workspace volumes | The above plus map, odometry, detected objects, sensor frames |
+| Rate | Every control cycle | Whatever it manages |
+| Staleness | Zero by construction — computed from the state it just read | Bounded at best |
+| Delivery | None; it never leaves the kernel | Published, lossy, subscribable |
+
+**The kernel computes its own forward kinematics and subscribes to nothing.** This is the whole
+point. A transform tree distributed over a message bus — ROS `tf2` being the canonical example —
+has unbounded staleness and no delivery guarantee, and a `workspace` guard evaluating a 200 ms old
+transform is not a degraded guard, it is a confidently wrong one. The kernel already holds the
+joint vector it just read; FK over a fixed chain is a few hundred flops and is deterministic.
+
+The perception tree is allowed to be lossy precisely because nothing safety-critical reads it.
+
+### 44.3 The frame graph in the descriptor
+
+The embodiment descriptor gains a `frames` block: a tree of named frames, each with a parent and
+either a **static** transform or a declaration that it is **dynamic** (derived from a named joint).
+
+```
+base_link                              root, by convention
+├── torso.link              dynamic ← torso.yaw
+│   ├── left_arm.link0      dynamic ← left_arm.shoulder.pitch
+│   │   └── … left_arm.tool0
+│   └── head.link           dynamic ← neck.pitch
+│       └── head.camera_rgb static, from calibration (§45)
+└── base.footprint          static
+```
+
+Static transforms have two sources, and the distinction matters: those from the **descriptor** are
+nominal design values signed by the vendor, and those from **calibration** are measured values for
+this individual machine. Where both exist the calibrated one wins, and the frame records which it
+used — a workspace guard running on nominal extrinsics when a calibration exists is a guard using
+the wrong number, and one running on *expired* calibration is worse.
+
+### 44.4 Conventions, stated because a sign error here moves a robot the wrong way
+
+Right-handed throughout. **REP-103 axes**: x forward, y left, z up. Metres, radians, seconds, and
+kilograms. Quaternions ordered `xyzw`. Rotations are active, applied to points, not frames.
+`base_link` is the root and is defined by the vendor.
+
+These match ROS's conventions deliberately: a bridge to an existing ROS stack should be mechanical
+rather than a source of transposed axes, and the largest population of existing robot code assumes
+exactly these.
+
+### 44.5 What becomes possible
+
+`workspace` and `self_collision` move from "specified but underspecified" to implementable, and
+both gain an honest failure mode: a body whose descriptor declares no frame graph, or whose graph
+does not reach the end effector, reports those guards **unavailable** with the missing frame named
+— rather than evaluating them against a frame it guessed.
+
+---
+
+## 45. Calibration
+
+### 45.1 Why this is a safety subsystem and not a setup chore
+
+Calibration is the only state in the system that is **safety-relevant, individual to one machine,
+and drifts over time**. The descriptor is signed and static. Profiles are signed and operator-set.
+Calibration is neither: it is measured, it decays, and several guards are built on it.
+
+A camera extrinsic off by four centimetres means the `proximity` guard measures separation to the
+wrong place while reporting perfectly healthy. That is the failure this section exists to prevent,
+and it is invisible without an expiry policy.
+
+### 45.2 What is calibrated, and what it feeds
+
+| Parameter set | Drifts with | Feeds | Guard affected |
+|---|---|---|---|
+| Joint zero offsets | Re-homing, mechanical work, collisions | Forward kinematics, every pose | `workspace`, `self_collision` |
+| Camera intrinsics | Rarely; lens changes | Projection | `proximity` (indirectly) |
+| Camera extrinsics | Vibration, thermal cycling, knocks | Sensor → base transform | `proximity`, `workspace` |
+| Force/torque bias | **Temperature**, continuously | Force readings | `envelope` in torque mode, force control |
+| IMU bias | Temperature, ageing | Attitude, centre of pressure | `balance` |
+| Tool / TCP offset | Every tool change | End-effector pose | `workspace` |
+| Gravity vector | Base tilt | Gravity compensation | `balance`, torque envelope |
+
+That table is the deliverable. It converts "we should calibrate the cameras sometime" into "an
+expired extrinsic disables the proximity guard", which is a statement an operator can act on.
+
+### 45.3 The record
+
+Each parameter set is stored as a signed record in `/data/state/calibration/`, carrying:
+
+* the **values**, and the **method** that produced them (which procedure, which target, which pose set);
+* a **residual** — reprojection error, fit RMS, whatever the method yields;
+* **conditions**: timestamp, temperature, tool fitted, payload;
+* the **operator** who ran it;
+* a **validity policy** (§45.4).
+
+Signed for the same reason profiles are: it can reach the kernel. And provenance is mandatory for
+the same reason `limits.source` is — a calibration whose method nobody recorded is a rumour with
+six decimal places.
+
+**The residual is thresholded, not decorative.** A hand-eye calibration with twelve millimetres of
+reprojection error is a failed calibration, and accepting it silently produces a workspace guard
+that is precisely twelve millimetres wrong forever.
+
+### 45.4 Validity is a policy, not a date
+
+A calibration expires on whichever comes first:
+
+| Condition | Typical for |
+|---|---|
+| Elapsed time | Everything; the backstop |
+| Joint travel since calibration | Joint zeros, tool offsets |
+| Temperature delta from calibration conditions | F/T bias, IMU bias |
+| **An event** | A detected collision, an estop under load, a tool change, a driver replacement, a mainboard swap |
+
+The event triggers are the ones that matter. A robot that has just hit something has, by
+definition, possibly moved its cameras, and continuing to trust yesterday's extrinsics is exactly
+the wrong response to an impact. So a collision invalidates the calibrations the impact could
+plausibly have disturbed, and the affected guards go unavailable until re-measured.
+
+### 45.5 Expiry degrades; it never silently continues
+
+An expired calibration follows the rule already established in §7.2: **the guards that depend on it
+report unavailable, naming the expired parameter set.** Not "assume it is probably still fine",
+which is what every system without an expiry policy does by omission.
+
+The robot keeps running. It runs with fewer guards, says so on every surface, and the operator
+decides whether that is acceptable for the task — which is the same bargain the tier model offers
+everywhere else.
+
+### 45.6 Procedures ship as packages
+
+A calibration *procedure* is a package of kind `service` with a `calibration` role: it holds the
+capability lease, moves the robot through a pose set under a restricted envelope, computes the
+parameters, and writes a record. The *results* are state, not a package.
+
+This means a vendor can ship an improved hand-eye routine without an OS release, and a third party
+can publish a better one — which is the marketplace working as intended on a problem that is
+usually solved with a PDF and a spreadsheet.
+
+### 45.7 Conformance additions
+
+* `calibration.provenance` — every stored record carries a method and a residual, or it is refused.
+* `calibration.expiry_enforced` — a deliberately expired record disables its dependent guards, and
+  the guards report the parameter set by name.
+* `calibration.event_invalidation` — a simulated collision invalidates the affected sets.
+
+---
+
+## 46. Watchdogs, all four of them
+
+### 46.1 The chain
+
+Each layer catches a failure the one above it cannot see:
+
+| # | Watchdog | Catches | Response | Tier |
+|---|---|---|---|---|
+| 1 | Kernel `watchdog` guard (§7.1) | The policy stopped producing commands | `stop_cat2` | All |
+| 2 | systemd `WatchdogSec` on `skynetd` | The supervisor's reconcile loop hung | Restart `skynetd` | All |
+| 3 | **SoC hardware WDT** | The application processor wedged entirely | **Reset the SoC** | Host, Certified |
+| 4 | **Safety MCU independent timer** | The AP wedged *and* the reset did not recover it | **Cut drive enable** | Certified |
+
+Layer 3 is petted by the **Safety Kernel**, not by `skynetd`. That is what makes it meaningful: the
+WDT is satisfied only while the thing that actually enforces the envelope is running its cycle. A
+watchdog petted by a supervisor tells you the supervisor is alive, which is not the question.
+
+### 46.2 A reset is not a stop, and this has consequences
+
+The uncomfortable part. When the SoC resets, the drives lose their command source — and what they
+then do is a property of the **hardware**, not of anything in this document. Some hold. Some engage
+brakes. Some fault and disable. **Some coast.**
+
+So the descriptor gains a required field:
+
+```
+on_command_loss:  "hold" | "brake" | "fault" | "coast"
+```
+
+And it produces a finding that was not visible before Part V:
+
+> **A robot whose drives coast on command loss cannot safely reach the Host tier**, because the
+> hardware watchdog's own recovery path — reset the processor — is, on that machine, a fall.
+
+For such a body the only sound configuration is the Certified tier, where layer 4 cuts drive enable
+independently of the processor being reset. This is a genuine constraint that falls out of taking
+the watchdog chain seriously, and it belongs in the compatibility report rather than in an
+integration engineer's memory.
+
+`on_command_loss` is measured by the bench suite, not trusted: `safety.command_loss.behaviour`
+stops commands and observes what the joint actually does.
+
+### 46.3 Window nesting
+
+The windows must nest, and getting the order wrong makes an upper layer unreachable:
+
+```
+kernel cycle worst case  <  envelope.watchdog_ms  <  SoC WDT window  <  drive command timeout
+```
+
+If the SoC WDT is shorter than the kernel's own watchdog window, the processor resets before the
+kernel ever gets to execute a controlled stop — the harsher recovery pre-empts the gentler one.
+If it is longer than the drive's timeout, the drive faults first and the WDT never matters.
+
+The nesting is computed at boot from the descriptor and the resolved limits, and a body whose
+declared figures cannot be nested is reported at startup rather than discovered in the field.
+
+---
+
+## 47. The sensor and media pipeline
+
+### 47.1 What §25.1 assumed
+
+The observation assembler takes streams with acquisition timestamps and builds a frame at a target
+instant. It never said where those streams come from, how they are buffered, or who timestamps
+them — which is most of the work.
+
+### 47.2 Capture
+
+| Backend | For |
+|---|---|
+| V4L2 | USB and MIPI cameras — the common case |
+| GenICam / GigE Vision | Industrial cameras |
+| Vendor SDK | RealSense, ZED, and depth cameras with proprietary pipelines |
+| RHAL `read_sensor` | Anything only the driver can reach — joint-mounted tactile, in-hand sensors on a proprietary bus |
+
+**Timestamps come from the sensor, not from arrival.** V4L2 offers
+`V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC` and it is used; GenICam offers a device timestamp and it is
+used. Where a backend genuinely cannot supply one, the pipeline records an *estimated* latency and
+the frame carries a larger uncertainty, which flows into the skew the assembler already reports
+(§25.1). Estimating is acceptable. Silently substituting arrival time is not, because it folds a
+variable queue delay into a number the policy treats as ground truth.
+
+### 47.3 Zero copy
+
+Capture buffers are `dmabuf` handles passed by reference from the capture device to the GPU and to
+the hardware encoder. Three 1080p30 streams copied through userspace is roughly a core of memcpy
+and several milliseconds of added latency, spent achieving nothing.
+
+### 47.4 Two consumers, and they must not share a queue
+
+The design decision in this section:
+
+| Consumer | Wants | Gets |
+|---|---|---|
+| **Policy** | The freshest frame; an old frame is worthless | A **latest-wins slot**. New frames overwrite unconsumed ones. |
+| **Black box** | Every frame; completeness is the guarantee | A **bounded queue** feeding the hardware encoder |
+
+A single queue serving both is the classic error, and it fails in the direction nobody wants: the
+policy ends up reading queued frames, so a momentary encoder stall becomes permanent added latency
+in the control path. A queue in front of a policy is latency wearing the costume of reliability.
+
+Backpressure is resolved separately for each. If the encoder falls behind, recording frames are
+dropped **and the drop is recorded** — a gap in the black box that is annotated as a gap is
+honest; a gap that looks like a quiet period is not. Capture is never stalled, because stalling
+capture starves the policy to protect the recording, which is precisely backwards.
+
+### 47.5 Accounting
+
+Capture buffers are OS-owned rather than charged to a package's `vram_mb`, since several packages
+may read one camera. They are bounded, declared per stream, and surfaced in `skynet doctor` — an
+unbounded capture pool is a slow memory leak that presents as a policy OOM three hours in.
+
+---
+
+## 48. Homing and power-on self-test
+
+### 48.1 A robot may not know where it is
+
+With incremental encoders — still common on arms — joint positions at power-on are unknown.
+Forward kinematics is therefore meaningless, which means **every pose-dependent guard is
+unavailable**, which means the robot must not be permitted to run a policy.
+
+The state machine from §27 gains a state before `HOLD`:
+
+```
+boot → POST → UNHOMED → HOLD → RUNNING …
+                 ↓ (POST failure)
+               SAFE
+```
+
+### 48.2 Power-on self-test
+
+Before anything moves:
+
+| Check | Failure means |
+|---|---|
+| RHAL ABI version matches | Wrong driver for this OS |
+| `describe()` parses; joint count matches the descriptor | Driver and descriptor disagree about the body |
+| Estop asserted and observed | The stop path is not proven. **Nothing runs.** |
+| Encoder sanity — plausible values, no NaNs | Sensor or bus fault |
+| Calibration expiry evaluated (§45) | Guards that will be unavailable are known *before* start |
+| Black box writable, reserve intact | The recorder cannot record |
+| Kernel corpus self-check (a sample of §31.4) | The kernel on this machine is not the kernel that was certified |
+| Watchdog window nesting valid (§46.3) | A layer of the chain is unreachable |
+
+**A failed POST goes to `SAFE`, not `DEGRADED`.** `SAFE` is sticky and requires a human. A robot
+that failed its own self-test should not be talked into running by a reconcile loop, and
+`DEGRADED` is a state the system will happily operate in.
+
+The estop check is the one worth insisting on: asserting the stop and *observing* that the RHAL
+reported it is the only evidence the stop path works today, as opposed to having worked when it
+was installed.
+
+### 48.3 Homing
+
+Homing **moves the robot**, and it is the only motion permitted before `RUNNING`.
+
+* It is a **driver-provided procedure**, invoked via the RHAL extension channel, because only the
+  vendor knows the sequence for their hardware.
+* It runs under a **restricted homing envelope** declared in the descriptor — typically a small
+  fraction of rated velocity — enforced by the kernel like any other envelope. Homing is not an
+  exemption from the safety kernel; it is a narrower envelope.
+* It requires operator confirmation on any body where the homing sweep can leave the parked volume.
+* Completing it writes or confirms the joint-zero calibration record (§45.2), so homing and
+  calibration are the same fact rather than two.
+
+A body that needs no homing declares so and the state is skipped. A body that needs it and cannot
+complete it stays `UNHOMED`, which is a reported state, not a hang.
+
+---
+
+## 49. Audio
+
+Lower priority than everything above it, and included because one part of it is safety-relevant.
+
+### 49.1 The warning path belongs to the OS
+
+Standards for robots operating around people expect an audible indication before autonomous
+motion. That makes the warning tone a **system function, not an application feature**: `skynetd`
+owns it, it sounds on transition into `RUNNING` and on resumption after a stop, and **a package
+cannot suppress it.** A policy that could silence its own warning would be a policy that could
+remove a control the operator's risk assessment relied on.
+
+Packages may use the speaker for anything else only with an explicit `hri.speech` grant, and that
+grant never includes the warning channel.
+
+### 49.2 Microphones are a privacy surface
+
+`sensing.audio` is a capability token gated like any other, and it is one of the tokens an operator
+profile is most likely to deny outright. A microphone on a robot in a workplace records people who
+did not consent to a robot being there, let alone to it listening, so the default is denied and the
+grant is explicit and audit-logged.
+
+The genuinely useful non-HRI application is anomaly detection — a failing bearing sounds different
+long before it fails — and that runs equally well on a spectrum with speech discarded at the
+source, which is the configuration to prefer.
+
+---
+
+## 50. Factory provisioning
+
+### 50.1 Pairing assumes things a factory does not have
+
+§10 pairs a robot to a namespace with an operator, a Hub and a network. A robot on a production
+line has none of them, and it needs an identity before it has an owner.
+
+### 50.2 The birth certificate
+
+At manufacture:
+
+1. A device keypair is generated **inside the secure element** and the private key never leaves it.
+2. The vendor signs a **birth certificate** over the public key, binding: model, serial number, the
+   embodiment descriptor digest, hardware revision, manufacture date, and the factory calibration
+   records.
+3. The robot ships with the certificate and **no namespace**. It belongs to nobody yet.
+
+At the customer, first boot: the birth certificate proves **what it is**; pairing (§10) binds it to
+**whose it is**. Two separate facts, established by two separate parties, which is correct — the
+vendor is the only party who can attest to the first and has no business asserting the second.
+
+### 50.3 What this closes
+
+Without it, "this is a Unitree G1 with these joint ratings" is a claim the robot makes about
+itself, and the entire safety envelope rests on believing it. The vendor key is registered with the
+Hub using the existing Ed25519 machinery, so a robot presenting an unsigned or unknown descriptor
+is visible as exactly that.
+
+It also gives the factory calibration a provenance chain: the extrinsics measured on the line are
+signed by the party that measured them.
+
+### 50.4 Repair
+
+The identity is bound to the secure element, so replacing a mainboard produces a robot whose
+birth certificate no longer matches its hardware. That is the correct behaviour and not a bug —
+it is the same property that makes a phone's secure enclave meaningful. Re-issue is a
+vendor-signed operation, recorded, and it invalidates the calibrations a board swap could have
+disturbed (§45.4).
+
+---
+
+## 51. Offline entitlement
+
+### 51.1 One principle decides the whole design
+
+> **A licence check must never stop a running robot.**
+
+A billing system that can halt a humanoid mid-task has invented a safety hazard to protect
+revenue. Everything below follows from refusing that.
+
+### 51.2 Checked at install, not at run
+
+Entitlement is a signed, time-limited token delivered with the desired state and cached on disk. It
+is verified when a package is **installed or upgraded** — never in the loop, never at start, never
+periodically against a server the robot may not be able to reach.
+
+| Situation | Behaviour |
+|---|---|
+| Valid entitlement | Install, upgrade and run |
+| Expired, inside grace | Runs. Upgrades allowed. Reported as lapsed. |
+| Expired, past grace | **Keeps running.** New installs and upgrades of that package refused. |
+| Revoked | **Keeps running.** Reinstall refused, incident raised. |
+
+Grace is deliberately generous — ninety days by default — because the failure it guards against
+(a robot in a basement losing a feature because a token expired) is worse than the leakage it
+permits.
+
+### 51.3 Enforcement is commercial, not physical
+
+A revoked entitlement blocks distribution, not operation. The lever against genuine abuse is the
+Hub: no new installs, no upgrades, no support, and a record. Not a robot that stops moving in
+somebody's warehouse because a payment failed.
+
+This is a narrower enforcement posture than most commercial software takes, and it is the correct
+one for software that moves mass.
+
+---
+
+## 52. Descriptor additions from Parts IV and V
+
+The embodiment descriptor accumulated fields across these two parts. Collected, because they are a
+schema change vendors must implement and the bench suite must measure:
+
+| Field | From | Measured by |
+|---|---|---|
+| `frames` — the frame graph (§44.3) | Part V | `embodiment.frames.complete` |
+| `on_command_loss` — hold / brake / fault / coast (§46.2) | Part V | `safety.command_loss.behaviour` |
+| `homing` — required, procedure token, restricted envelope (§48.3) | Part V | `safety.homing.envelope` |
+| `time_to_safe_state_s`, `safe_stop_energy_wh` (§36.2) | Part IV | `power.safe_state.reachable` |
+| Per-sensor `latency_ms` (§25.2, §47.2) | Parts II, V | `rhal.sensor.latency` |
+| `command_latency_ms` (§5.2) | Part I | `rhal.command.latency` |
+
+Every one is nullable, and every one absent produces a named unavailability rather than an
+assumption — the rule from §7.2 applied consistently, which is what keeps the descriptor honest as
+it grows.
+
+---
+
+## 53. What Part V leaves open
+
+| Open | Why |
+|---|---|
+| **Multi-camera calibration at fleet scale** | Calibrating one robot is a solved procedure. Keeping two hundred robots' extrinsics valid, detecting drift from field data rather than from a schedule, and deciding which need a technician is a data problem nobody has designed here. |
+| **Automatic drift detection** | §45.4 expires calibration on time, travel, temperature and events. Detecting that an extrinsic has drifted *from the images themselves* would be far better and is a research problem, not a design one. |
+| **Audio beyond warning and anomaly** | Speech interaction, source localisation and noise-robust command recognition are an application domain, and treating them as one is the honest scope. |
+| **`on_command_loss` for mixed drivetrains** | A humanoid may brake on the legs and coast on the arms. The field is currently one value per body and probably needs to be per chain. |
+| **Entitlement for the OS itself** | §51 covers packages. Whether a Skynet Services subscription lapsing should change anything about a running robot is a commercial decision, and the answer implied by §51.1 is "no". |
+
+---
+---
+
+# Part VI — Skills, environments and on-robot evaluation
+
+A third audit, prompted by asking whether the OS is compatible with the Hub, found the largest
+remaining gap by counting how the document treats each of the Hub's five repository kinds:
+
+| Repo kind | Mentions in Parts I–V | State |
+|---|---|---|
+| `model` | 18 | Designed throughout — it is what transport, packages and the kernel are built around |
+| `dataset` | 6 | Designed via episodes and the black box |
+| `benchmark` | 2 | Named in a comparison table |
+| `skill` | **2** | **Both occurrences are the word in a list** |
+| `environment` | **0** | **Absent** |
+
+That is a compatibility gap, not an omission of detail. The Hub *sells* skills; `SkillManifest`
+declares `preconditions` as "preconditions that must hold before the skill is safe to run", and
+nothing in the operating system consumed them. §21 promised "Runs evaluations on the robot" and
+nothing designed it.
+
+---
+
+## 54. Skills
+
+### 54.1 A skill is not a policy
+
+The distinction the OS had been eliding:
+
+| | **Policy** | **Skill** |
+|---|---|---|
+| Shape | Observations → actions, continuously | Invoked with arguments, terminates |
+| Duration | As long as it holds the lease | Bounded, declared |
+| Outcome | None; it just runs | Succeeded, failed or aborted |
+| Guards | Envelope applies | Envelope applies, **plus preconditions** |
+| Composition | Runs alone | May wrap a policy, and may call other skills |
+
+`StandardRobotInterface.execute({ skill, arguments, timeout_s })` already existed on the Hub side
+as the invocation point. Nothing routed it.
+
+### 54.2 Preconditions become machine-evaluable, and the OS evaluates them
+
+The decision that matters most in this part.
+
+`preconditions` in `SkillManifest` is a list of strings — human prose describing what must hold
+before the skill is safe. Prose is documentation, and documentation does not stop a robot. So
+preconditions become **predicates**, and they are evaluated by the OS before the skill is allowed
+to start.
+
+This needs no new machinery: the Hub already has a pure predicate engine at
+`lib/skynet/compatibility/predicate.ts` with `and / or / not / eq / gte / lte / includes /
+includes_all / exists / semver_satisfies`. The compatibility engine evaluates predicates over a
+static context assembled from manifests; the skill runtime evaluates the *same predicate shape*
+over a **live** context:
+
+```
+robot.state.*        joint positions, gripper, battery percent, base pose
+robot.guards.active  which guards are actually running (§7.2)
+robot.calibration.*  which parameter sets are valid, and their age (§45)
+robot.frames.*       whether the frames the skill needs resolve (§44)
+robot.tier           guest | host | certified
+skill.grants.*       capability tokens the operator granted this package
+env.*                operator-declared facts about the cell — fixture present, door state
+```
+
+Three rules:
+
+* **A precondition that cannot be evaluated refuses the skill**, naming the path that was
+  unresolvable. Not "assume true", which is what free-text preconditions do by construction.
+* **Preconditions are re-checked, not just entry-checked.** A subset marked `hold` in the manifest
+  is evaluated every cycle; battery dropping below reserve mid-skill should stop the skill, not be
+  discovered at the end.
+* **The operator may add preconditions; the skill may not remove them.** Same narrowing-only rule
+  as profiles (§38.2). A site can require "door closed" on a skill whose publisher never imagined
+  that cell.
+
+`safety_notes` stops being decorative too: it is displayed at grant time and acknowledged once per
+skill per robot, recorded in the audit log. A safety note nobody has read is a safety note that
+does not exist.
+
+### 54.3 Success is judged by the OS, not by the skill
+
+`success_criteria` is evaluated the same way, over post-state, by the runtime rather than by the
+skill's own code. **A skill that judges its own success is a skill that always succeeds** — and on
+a platform where success rates feed a marketplace, self-reported outcomes are worth nothing.
+
+Where a criterion is not machine-evaluable (many genuinely are not — "the cup is upright" needs
+perception), the outcome is `unlabeled` rather than `success`, which is exactly the vocabulary the
+episode schema already carries. Honest ignorance beats an invented pass.
+
+### 54.4 Lifecycle
+
+```
+idle → preconditions → acquiring → running → verifying → succeeded | failed | aborted
+          ↓ refused        ↓ denied     ↓ timeout / guard trip / precondition lost
+```
+
+| Stage | What happens |
+|---|---|
+| `preconditions` | Predicates evaluated. A failure names the predicate and refuses. |
+| `acquiring` | Capability leases taken for `required_capabilities` (§25.2). Denied if held. |
+| `running` | The skill's policy runs under the transport plan and the resolved clamps, exactly like any other policy — a skill is not an exemption from the kernel |
+| `verifying` | `success_criteria` evaluated over post-state |
+| terminal | Leases released, outcome recorded, episode emitted |
+
+**Timeout is enforced by the OS.** `expected_duration_seconds` from the manifest, times a declared
+overrun factor, and past it the skill is stopped under a controlled stop and recorded as `aborted`
+— matching the Hub's `EpisodeOutcome` vocabulary, so an aborted skill becomes a labelled training
+example rather than a gap.
+
+Every transition is a black box event, and one episode is emitted per invocation, carrying the
+skill reference, arguments, outcome, duration and intervention count. Skills therefore generate
+training data as a side effect of being used, which is the flywheel the Hub was built for.
+
+### 54.5 Composition
+
+`SkillManifest.composition` names a model, dataset, environment and benchmark. On the OS only the
+model matters at runtime: it is the policy the skill runs, resolved at install, transport-planned
+against this body, and refused if the plan is refused. A skill whose model cannot reach the body is
+a skill that cannot be installed, and finding that out at install is the point.
+
+Skill-to-skill calls are permitted with three limits, because a composition system without them
+becomes a way to exhaust a robot:
+
+* **Depth-limited** (default 4) and **acyclic** — a cycle is refused at install by walking the
+  declared graph, not discovered at runtime.
+* **Leases are held by the root invocation**, not re-acquired per call. Nested acquisition is how
+  you get a skill deadlocking against its own child.
+* **The root's timeout bounds the whole tree.** A child cannot extend its parent's budget.
+
+### 54.6 Conformance additions
+
+* `skill.preconditions.enforced` — a skill whose precondition is false is refused, with the
+  predicate named.
+* `skill.preconditions.rechecked` — a `hold` precondition falsified mid-run stops the skill.
+* `skill.timeout.enforced` — an overrunning skill is stopped and recorded `aborted`.
+* `skill.success.independent` — a skill claiming success against a false criterion is recorded as
+  failed.
+
+---
+
+## 55. Environments, and what they are on a real robot
+
+### 55.1 An environment is a simulation artifact
+
+`EnvironmentManifest` carries simulators, a scene, assets, tasks, randomisation, `physics_hz` and
+`render_hz`. All of it describes a simulated world.
+
+So the rule is simple and worth stating because the alternative is confusing: **environments are
+loaded only by a simulator RHAL driver.** Installed onto a robot whose driver is physical, an
+environment package is inert, and the OS says so rather than silently accepting it. Its
+`required_capabilities` are still checked at admission, since an environment that needs a gripper
+is not runnable by a robot without one in sim either.
+
+### 55.2 The physical counterpart is the cell, and it is not a repo kind
+
+The real-world analogue of an environment — where the fixtures are, which volumes are forbidden,
+where the safe parking pose is, what the operator has declared about the space — is a **cell
+descriptor**, and it belongs in the operator profile (§38), not in the repository catalogue.
+
+The reason is ownership. An environment is published, versioned and shared; a cell is
+site-specific, changes when somebody moves a table, and is nobody's intellectual property. Making
+it a repo kind would invite people to publish their factory layout to a marketplace, and would put
+safety-relevant workspace volumes behind a fork-and-star workflow.
+
+The cell descriptor supplies `env.*` to the precondition context (§54.2) and the allowed volumes to
+the `workspace` guard, and is signed like every other safety-relevant profile.
+
+---
+
+## 56. On-robot evaluation
+
+### 56.1 The problem that decides the design
+
+§21 promises the OS "runs evaluations on the robot and in the sim driver", and the Hub publishes
+leaderboards from the results. **A leaderboard fed by self-reported on-robot numbers is trivially
+gameable** — a publisher evaluating their own policy on their own robot, choosing their own seeds,
+and reporting their own score is not producing evidence.
+
+So an on-robot evaluation result is only worth as much as its attestation.
+
+### 56.2 Signed results, and a provenance class
+
+A run produces a bundle the **device** signs with its secure-element key (§10, §50):
+
+```
+benchmark digest · policy digest · embodiment digest · OS image digest
+seeds used (supplied by the benchmark, never chosen by the robot)
+per-episode outcomes and metrics
+black box segment hash
+tier and enforcement mode at run time
+simulator flag (§35.3)
+```
+
+The Hub verifies the signature against the registered device and assigns a **provenance class**,
+which is what a leaderboard filters on:
+
+| Class | Means | Leaderboard |
+|---|---|---|
+| `field` | A real robot, valid birth certificate, attested image, non-simulator driver | Eligible |
+| `simulated` | A simulator RHAL driver, which must declare itself | Eligible, separately ranked |
+| `unattested` | No device signature, or a device the Hub does not know | **Accepted and never ranked** |
+
+`unattested` is accepted rather than refused because a researcher on a bench robot has a legitimate
+result worth recording — and it is never ranked, because it is not evidence.
+
+### 56.3 Seeds come from the benchmark
+
+`BenchmarkManifest.seeds` is supplied to the robot, never generated by it. A robot that picks its
+own seeds picks easy ones, and it need not do so dishonestly — an autocorrelated PRNG and a
+convenient starting pose is enough.
+
+### 56.4 The black box is what makes it checkable
+
+The bundle carries a hash of the black box segment covering the run, and the segment is uploadable
+on request. A disputed result is therefore **replayable**: the same policy digest, embodiment
+digest and recorded observation stream must reproduce the same actions
+(`telemetry.replay.deterministic`, §15).
+
+Nobody in robotics can currently do this, and it is the strongest argument for the whole black box
+subsystem existing. A benchmark number with a replayable recording behind it is a different class
+of claim from a number in a table.
+
+### 56.5 Scoring is computed twice
+
+Roll-up per `BenchmarkManifest.scoring` runs on the robot — so an offline robot sees its own score —
+and again on the Hub from the raw per-episode outcomes. **The Hub's number is authoritative.** They
+must agree, and a disagreement is a defect worth investigating rather than a rounding difference to
+paper over; it means the shared contract implementations diverged, which is precisely what the
+conformance corpus (§31.4) exists to catch.
+
+---
+
+## 57. The Hub surface, revised
+
+§17 listed eight new endpoints. Parts IV–VI added requirements, and most of them fold into surface
+that already exists rather than extending it — which is the useful finding:
+
+| Need | Resolution |
+|---|---|
+| Transport plan | New — `GET /repos/{ns}/{name}/versions/{v}/transport` |
+| Embodiment descriptor | New — `GET|POST /robots/{slug}/embodiment` |
+| Desired state and check-in | New — `GET /devices/{id}/desired`, `POST /devices/{id}/checkin` |
+| Incidents | New — `POST /devices/{id}/incidents` |
+| Conformance and certification | New — `POST /devices/{id}/conformance`, `GET /certifications/{slug}` |
+| OS releases | New — `GET /os/releases` |
+| **Calibration records** (§45) | New — `GET|POST /devices/{id}/calibration` |
+| **Vendor keys for birth certificates** (§50) | **Existing** — `POST /namespaces/{handle}/keys` already registers Ed25519 public keys |
+| **Birth certificate** (§50) | New — `POST /robots/{slug}/attestations` |
+| **Entitlement tokens** (§51) | **Existing** — a field in the desired-state document, not an endpoint |
+| **POST results** (§48.2) | **Existing** — part of the check-in payload |
+| **Skill invocation outcomes** (§54.4) | **Existing** — `POST /episodes`, unchanged |
+| **Attested evaluation results** (§56) | **Existing shape** — `POST /evaluations` with a device credential and a signature field |
+
+Nine new endpoints in total, four things that need only a new field, and no breaking change to any
+of the sixty routes that exist. The reason the delta is this small is that the OS was designed
+against the Hub's object model from the start rather than beside it.
+
+New tables follow the `skynet_*` convention: `skynet_embodiments`, `skynet_device_state`,
+`skynet_calibration_records`, `skynet_conformance_results`, `skynet_certifications`,
+`skynet_incidents`, `skynet_os_releases`, `skynet_os_editions`, `skynet_attestations`.
+
+---
+
+## 58. Compatibility, answered
+
+### 58.1 With the Hub
+
+| Hub concept | OS treatment |
+|---|---|
+| `model` | Loaded via the load plan, transported onto the body, run under the kernel |
+| `dataset` | Produced — episodes from skills and teleoperation, in LeRobotDataset form (§16) |
+| `skill` | Installed as a `.sky` package; preconditions and success criteria enforced by the OS (§54) |
+| `environment` | Loaded only by a simulator driver; the physical counterpart is the cell descriptor (§55) |
+| `benchmark` | Run on the robot, results signed and provenance-classed (§56) |
+| Artifacts, digests, signatures, scan verdicts | Reused unchanged — the OS adds no parallel format |
+| Devices, episodes, deployments, check-in, rollback | Reused unchanged |
+| Compatibility engine | Reused, and its predicate engine is reused again for skill preconditions |
+| Namespaces, teams, org membership, audit | Reused unchanged |
+
+### 58.2 With the robot
+
+The best-covered axis, and the one with the fewest open questions: the RHAL C ABI and its structs
+(§4, §24), the embodiment descriptor including frames, envelope, `on_command_loss` and homing
+(§5, §44, §46, §48, §52), capability tokens and extensions, transport (§6), the tier model (§1),
+and a conformance suite that measures rather than trusts (§15).
+
+### 58.3 What is still not designed
+
+| | Status |
+|---|---|
+| Multi-robot on one compute | Open (§43) |
+| Safe-state discovery for mobile robots | Open (§43) |
+| `on_command_loss` per chain rather than per body | Open (§53) |
+| Fleet-scale calibration drift detection | Open (§53) |
+| Perception as an OS service — detection, segmentation, pose estimation | **Deliberately out of scope.** These are packages, not operating system. The OS supplies frames, calibration, synchronised observations and capability grants; what a policy does with them is the policy's business. |
+| Motion planning as an OS service | **Deliberately out of scope**, for the same reason. IK solvers are declared by the body because the kernel needs them for retargeting and the `workspace` guard; a full planner is a package. |
+
+The last two are worth stating explicitly rather than leaving as absences. An operating system that
+also shipped perception and planning would be a robotics *framework*, and the market already has
+several. The line Skynet OS draws is: **the OS owns everything that must be correct for the robot
+to be safe, and nothing that is merely useful.**
+
+---
+---
+
+# Part VII — Limits
+
+Everything above describes what the system does when it works. This part is the honest answer to
+two questions a buyer will ask, and the answer to both is qualified rather than yes.
+
+§1 already refuses the strong claim — "there is no binary that boots on a Unitree G1, an ABB arm,
+a Roomba and a warehouse AMR" — but the word *universal* invites the strong reading anyway, and a
+document that only refuses it once, six hundred lines from the end, has not really refused it.
+
+---
+
+## 59. Will a robot work once this is installed?
+
+**No, not on its own, and not on every robot.** Six reasons, in descending order of how often they
+will bite.
+
+### 59.1 Nothing runs without an RHAL driver for that specific robot
+
+The universality claim is precisely: *any robot for which somebody has written a conformant
+driver*. That is a much weaker sentence than "any robot", and it is the true one. A driver needs
+the vendor's protocol, their timing behaviour and usually their SDK. For a closed robot with no
+documented interface — most consumer robots, plenty of industrial ones — no driver can be written
+without reverse engineering, and Skynet OS does nothing for it at all.
+
+### 59.2 A large class of robots cannot be commanded at joint level, and the design assumes they can
+
+The gap this part was written to record. "Joint" appears forty-three times in this document.
+`URScript`, `KRL`, `RAPID`, `Fanuc`, `KUKA` and "teach pendant" appear zero times. The whole design
+assumes it can send joint positions, velocities or torques at 50–1000 Hz.
+
+**Most of the world's installed industrial robots do not offer that.** Behind a Fanuc, KUKA, ABB or
+older Universal Robots controller you upload a *program* — the controller does the interpolation,
+owns the servo loop, and enforces its own safety. For those machines:
+
+* **Transport has almost nothing to map.** There are no joint channels to bind; the action space is
+  a set of named motions with parameters.
+* **The Safety Kernel cannot clamp**, because it never sees the commands. The vendor controller
+  generates them internally, and it is the safety-rated component — often genuinely certified,
+  which Skynet is not.
+* Only the `execute({ skill, arguments })` path applies. Skills, packaging, grants, fleet
+  reconciliation, OTA and the black box all still work; per-joint envelope enforcement does not.
+
+These robots are **Guest tier permanently**, and not because of a missing feature — because the
+architecture that makes them safe is somebody else's and is already there. That is a legitimate
+and useful product (fleet management, packaging, provenance, an audit trail for a cell that has
+none), and it is not what the rest of this document describes.
+
+### 59.3 Most robots have no sourced safety envelope
+
+The design refuses to invent limits, correctly. The consequence is that a robot whose vendor has
+never published joint torque ratings cannot reach Host tier, and lands at Guest with advisory
+enforcement. Honest, and not the same thing as safe.
+
+### 59.4 Transport makes a policy *execute*, not *succeed*
+
+A `retargeted` verdict means the commands are geometrically valid and inside the envelope. It says
+nothing about whether the policy still does the task. Retargeting fidelity is listed as open in
+§53 and it is the widest gap between "runs" and "works" — a policy transported onto a body with
+different link lengths may execute flawlessly and fail every attempt.
+
+### 59.5 None of it is built
+
+This is a design with its contracts implemented: roughly 2,430 lines of TypeScript covering
+transport, admission, certification and readiness, plus the RHAL headers. The Safety Kernel,
+`skynetd`, the policy runtime, every driver, OTA, the console and the conformance corpus are zero
+lines. The realistic figure is several engineer-years before a robot moves under this.
+
+### 59.6 Commissioning is human work
+
+Homing, calibration, the cell descriptor, workspace volumes, operator profiles, capability grants.
+Per robot, per site, by a person. "Upload the OS" is not a step that exists at Host tier — that
+tier is a vendor porting project — and at Guest tier the upload is the easy part.
+
+### 59.7 What actually works, by robot class
+
+| Robot class | Best tier | What Skynet OS delivers |
+|---|---|---|
+| Open real-time interface — Franka FCI, UR RTDE, `ros2_control`, Unitree SDK, most LeRobot-supported arms | Host; Certified with a safety MCU | Everything in this document |
+| High-level API only — Spot SDK, Fanuc/KUKA/ABB controllers, most cobots in program mode | **Guest, permanently** | Skills, packaging, grants, fleet, OTA, black box. **No transport, no clamping.** |
+| No documented interface — consumer appliances, closed platforms | None | Nothing, absent reverse engineering |
+| No onboard compute | Guest, from external compute | Observation and skill dispatch over the link, at link latency |
+
+---
+
+## 60. Compatibility with existing robot software
+
+### 60.1 Where it is genuinely free
+
+* **MCAP** (§26) is already the ROS 2 default bag format, so Foxglove opens a sealed black box with
+  no exporter and no conversion.
+* **REP-103 frame conventions** (§44.4) were adopted so a bridge to existing ROS code is mechanical
+  rather than a source of transposed axes.
+* **ROS 2 as an RHAL transport** — a `ros2_control` bridge driver is a very achievable first driver.
+* **LeRobot** (§16) — its `Robot` class is close enough to the RHAL that wrapping it is a small job
+  and brings a large fleet of supported arms with it.
+* **LeRobotDataset** — episodes emit in a format the existing training ecosystem already reads.
+
+### 60.2 The conflict, stated plainly
+
+> **At Host tier, Skynet OS replaces the thing it is said to be compatible with.**
+
+`ros2_control` and the Safety Kernel both want to be the component that writes to actuators. They
+cannot both be. At Host tier ROS 2 becomes a **client** of Skynet — a source of perception and
+planning that posts desired commands — rather than a peer, and porting an existing ROS 2
+application means every node that publishes to a controller must be restructured to go through the
+kernel. That is not a bridge. It is a rewrite of the application's control layer, and anyone
+evaluating adoption should be told so in the first conversation rather than the third month.
+
+Two smaller frictions in the same direction:
+
+* **Discovery.** ROS 2's DDS is multicast, peer-to-peer, with inbound connections everywhere.
+  §34.2 is outbound-only. Running both means the ROS side keeps its own network posture, and the
+  security property Skynet claims is true only of Skynet's own traffic.
+* **Timing.** Most ROS 2 stacks, Isaac ROS included, are not hard real-time. That is fine here —
+  they sit above the kernel as the policy runtime, which is exactly where §23.3 puts inference —
+  but it means "we run ROS 2" and "we are real-time" remain two separate claims after adoption,
+  just as they were before.
+
+### 60.3 The honest one-line statement
+
+**Skynet OS is compatible with the existing ecosystem as a consumer of its drivers and a producer
+of its data formats. It is not compatible with it as a peer at the control layer, because that
+layer is the one it exists to own.** At Guest tier it coexists with anything. At Host tier it
+supplants what was there.
+
+Every stack that has tried to own the control layer has faced this, and the ones that pretended
+otherwise were discovered to have pretended during integration. Saying it here costs a little
+enthusiasm early and saves a great deal of trust later.
+
+---
+
+## 61. What would have to be true for the strong claim to hold
+
+Not a roadmap — a list of what "any robot works" would actually require, so the distance is
+visible:
+
+| Requirement | Today |
+|---|---|
+| A conformant driver for the robot | One per robot, written by somebody. The LeRobot bridge is the cheapest way to many at once. |
+| A signed embodiment descriptor with sourced limits | Vendors do not publish these. SCTS is the lever; it has no adoption yet. |
+| Joint-level command access at rate | Unavailable on a large installed base (§59.2), and not fixable in software |
+| A policy that transfers to that body | An open research problem (§53), not an engineering one |
+| Commissioning | Human, per robot, per site |
+| The OS itself | Several engineer-years, unstarted |
+
+The first, second and fifth are work. The third is a property of hardware somebody else shipped.
+The fourth is a research result nobody has yet. A design that claimed to have solved all six would
+be the kind of document this project exists to be an alternative to.
+
+---
+---
+
+# Part VIII — Drivers and the developer path
+
+Two corrections and one gap, all found by asking who actually writes the drivers and how hard the
+first day is.
+
+The correction: Parts I–VII consistently implied that **vendors** write RHAL drivers, by analogy
+with Android's HAL. That understates what is achievable badly, and if believed it turns adoption
+into a waiting game for vendor goodwill. Most of the drivers that matter can be written by whoever
+is building this, from public documentation.
+
+The gap: §18 "Developer experience" is 185 words, and `driver template`, `mock robot`,
+`driver SDK` and `conformance harness` appear zero times in the document. The single largest
+practical barrier to this platform existing is that writing the first driver looks hard, and
+nothing was designed to make it easy.
+
+---
+
+## 62. Who writes the drivers
+
+### 62.1 Four generic drivers cover a large fraction of everything
+
+The leverage is in drivers that are not robot-specific at all:
+
+| Driver | Covers | Effort |
+|---|---|---|
+| **LeRobot bridge** | SO-100/101, Koch, LeKiwi, HopeJR, Reachy 2, Unitree G1, plus community packages for xArm, UR5e, Franka and AgileX Piper | Small — its `Robot` class is nearly the RHAL already (§16) |
+| **`ros2_control` bridge** | Every robot with a `hardware_interface` plugin, which is most of the ROS-supported industrial and research fleet | Medium — one adapter over the resource manager |
+| **EtherCAT (SOEM)** | CiA402 servo drives directly, which is most industrial servo hardware | Medium |
+| **CANopen / CiA402** | The same device class over a different bus, common on smaller robots | Medium |
+
+Four drivers, and the addressable set is already large. This is the same shape as a printer driver
+model where a handful of page-description languages cover most of the market and the long tail is
+handled individually.
+
+Simulator drivers — MuJoCo and Isaac Sim — are written regardless, because the sim conformance
+suite (§15) cannot run without them.
+
+### 62.2 Vendor SDK drivers are written from public documentation
+
+Unitree SDK2, Boston Dynamics Spot SDK, `libfranka` and the Franka Control Interface, Universal
+Robots RTDE — all publicly documented, all usable without a commercial agreement. Each is a
+contained project, days to weeks, and each is written by whoever wants that robot supported.
+
+**The vendor only *has* to write the driver when the interface is undocumented and closed.** That
+is a real category, and it is the long tail rather than the head.
+
+### 62.3 The honest ladder
+
+```
+4 generic drivers        →  a large share of the addressable fleet     (we write these)
+~6–10 vendor SDK drivers →  the named robots people actually ask for   (we write these)
+long tail                →  vendor or community                        (SCTS is the incentive)
+```
+
+Which reframes SCTS: it is not the mechanism that *gets* drivers written, it is the mechanism that
+keeps them honest once they exist. Adoption does not wait on vendor goodwill.
+
+---
+
+## 63. Bootstrapping a driver
+
+The path that decides whether this platform has an ecosystem.
+
+### 63.1 Scaffold
+
+```
+skynet driver new my-arm --lang rust|c|cpp|python
+```
+
+Produces a building, loading, failing-for-the-right-reasons driver: the vtable stubbed, the ABI
+version wired, a build file, and a descriptor skeleton. It fails conformance on day one and the
+failures are the to-do list.
+
+### 63.2 The mock robot
+
+A simulated body that answers the RHAL, shipped with the SDK. **A developer writes and tests a
+driver against it with no hardware at all** — and, more importantly, tests the *failure* paths
+that are impossible to provoke safely on a real robot: a stalled command stream, a joint reporting
+NaN, an estop during motion, a bus timeout mid-cycle.
+
+Being able to develop the dangerous cases without a robot present is the difference between a
+driver that has been exercised and one that has merely been run.
+
+### 63.3 Local conformance before hardware
+
+```
+skynet driver check ./my-arm
+```
+
+Runs the **sim half of SCTS** against the driver locally — ABI version handling, state
+completeness, command rejection, descriptor validity, kernel parity. It reports which tests fail
+and why, in the terms of §15, so the bench session is spent on the things only hardware can prove:
+estop latency, watchdog behaviour under load, real joint ratings.
+
+Turning up to a bench session with the sim suite already green is what makes bench time cheap.
+
+### 63.4 Generate the descriptor from the URDF
+
+The highest-leverage tool in this part, because **the work is largely already done and sitting in
+a file the robot already has.**
+
+```
+skynet descriptor from-urdf robot.urdf > embodiment.json
+```
+
+A URDF already contains the joint list and types, position, velocity and effort limits, the link
+tree, and collision geometry. That is most of an embodiment descriptor:
+
+| Descriptor field | From URDF |
+|---|---|
+| `joints[].name`, `.type` | Directly |
+| `joints[].limits.position_*`, `.velocity_max_rad_s`, `.effort_max_nm` | Directly, **as design values** — see below |
+| `frames` (§44.3) | Directly from the link tree |
+| Collision model (§29) | Directly |
+| `dof` | Counted |
+| **`joints[].role`** | **Left blank.** URDF carries no semantics; the tool *suggests* from name heuristics and a human confirms. |
+| **`envelope`** | **Left null.** |
+
+The last two rows are the design holding its own line. A URDF `effort` limit is a **design value
+from a CAD model**, not a datasheet safety rating, and copying it into `envelope.joint_torque_max_nm`
+would auto-populate a safety limit from a number nobody verified — precisely the "invent a
+plausible figure" failure that §5 of the safety envelope migration exists to prevent. The
+generator therefore emits `envelope: null` with a comment saying where sourced figures must come
+from, and the robot renders "no safety envelope declared" until a person supplies one.
+
+Roles are suggested rather than assigned for the same reason at lower stakes: `shoulder_pitch_joint`
+is *probably* `left_arm.shoulder.pitch`, and probably is not a basis for cross-body remapping.
+
+### 63.5 Time to each milestone
+
+Targets, stated so they can be measured and missed visibly:
+
+| Milestone | Target |
+|---|---|
+| Scaffold builds and loads | 5 minutes |
+| Descriptor drafted from URDF | 15 minutes |
+| Mock robot moving under the driver | 1 hour |
+| Sim conformance green | 1 day |
+| Real hardware, one joint under the kernel | 1 afternoon |
+| Full sim + bench conformance on real hardware | 1 week |
+
+If the first three do not hold, the platform has an adoption problem regardless of how good
+anything above this part is.
+
+---
+
+## 64. Errors are a design surface
+
+Every refusal in this system names the fix, and this is already how the implemented contracts
+behave rather than an aspiration:
+
+| Refusal | What it says |
+|---|---|
+| Transport refused | Which channel, its role, and what this body lacks |
+| Package refused | **Every** finding at once, not the first — fixing four problems one deploy at a time is how people end up granting everything (§8.2) |
+| Guard unavailable | The exact missing input, and "not applicable to this body" where that is the truth (§7.2) |
+| Precondition failed | The predicate path that was false or unresolvable (§54.2) |
+| Calibration expired | The parameter set, its age, and the guards now unavailable (§45.5) |
+| Conformance failed | The test id, the measured value, and the threshold |
+
+The rule behind them: **a refusal that does not tell you what to change is a bug report the user
+has to write themselves.**
+
+---
+
+## 65. The golden path
+
+What a developer reads, in order, and nothing else is required to get to a moving robot:
+
+1. **Concepts** — tiers, the kernel invariant, what a driver is. One page.
+2. **Write a driver** — scaffold, mock robot, `driver check`. §63.
+3. **Describe the body** — URDF import, roles, and where sourced limits come from. §63.4.
+4. **Run a policy** — install a package, read the transport plan, understand the clamps.
+5. **Go to bench** — what SCTS measures and how to prepare for it.
+
+Everything else in this document is reference. A vendor engineer should reach a moving robot
+without reading Parts II through VII, and if they cannot, the fault is in the golden path rather
+than in their patience.
+
+---
+---
+
+# Part IX — The driver set, and the ecosystem around it
+
+Part VIII established that most drivers can be written without waiting for vendors. This part
+designs them, because "we can write a `ros2_control` bridge" is a sentence and not a plan.
+
+Each driver is specified by what it maps onto the RHAL, the part that is genuinely hard, and the
+**tier ceiling it can reach** — which is a property of the driver, not only of the robot, and is
+derived rather than chosen for the same reason edition ceilings are (§31.3).
+
+---
+
+## 66. The set
+
+| Driver | Reaches | Ceiling | Why the ceiling |
+|---|---|---|---|
+| **LeRobot bridge** | SO-100/101, Koch, LeKiwi, HopeJR, Reachy 2, Unitree G1, plus community xArm, UR5e, Franka, AgileX Piper | **Guest** | Python. GIL and GC cannot hold an RT path (§31.3). |
+| **`ros2_control` bridge** | Every robot with a `hardware_interface` plugin | **Host** | Runs inside the controller manager's RT loop, on PREEMPT_RT |
+| **EtherCAT / CiA402** | Industrial servo drives directly | **Certified** | Distributed clocks, and STO over FSoE is a stop path off the application processor |
+| **CANopen / CiA402** | The same drives on a slower bus | **Host** | Bus bandwidth caps the joint count × rate product |
+| **MuJoCo** | Simulation | **Guest**, flagged simulated | §35.3 forces it |
+| **Isaac Sim** | Simulation | **Guest**, flagged simulated | §35.3 forces it |
+| **Unitree SDK2** | G1, H1, Go2 | **Host** | Low-level mode gives joint access at rate |
+| **`libfranka` / FCI** | Franka Research 3 | **Host** | 1 kHz torque control; among the best fits available |
+| **UR RTDE** | UR3/5/10/16e | **Host** | 500 Hz servo interface |
+| **Spot SDK** | Spot | **Guest** | gRPC, command-level; §59.2 applies |
+
+Two of these — the `ros2_control` bridge and EtherCAT — are worth more than the rest combined,
+because neither is robot-specific.
+
+---
+
+## 67. The LeRobot bridge
+
+### 67.1 Mapping
+
+LeRobot's `Robot` is nearly the RHAL already:
+
+| RHAL | LeRobot |
+|---|---|
+| `open(config)` | `robot.connect()` |
+| `read_state` | `robot.get_observation()` — proprioception split from camera frames |
+| `write_command` | `robot.send_action()` |
+| `close` | `robot.disconnect()` |
+| `describe` | Built from `observation_features` / `action_features` plus the motor bus config |
+| `read_sensor` | The camera entries of `get_observation()` |
+| `emergency_stop` | Torque-disable on the motor bus |
+
+`get_observation()` returns one dict mixing joint positions and camera frames; the bridge splits it,
+routing proprioception to `rhal_state` and images to `read_sensor`, and timestamps at read since
+LeRobot does not supply acquisition times (§47.2 — the estimated-latency path, reported honestly).
+
+### 67.2 Roles map cleanly, which is the point
+
+SO-100/101 motor names line up with the canonical vocabulary almost one to one:
+
+```
+shoulder_pan   → right_arm.shoulder.yaw      wrist_flex  → right_arm.wrist.flex
+shoulder_lift  → right_arm.shoulder.pitch    wrist_roll  → right_arm.wrist.roll
+elbow_flex     → right_arm.elbow.flex        gripper     → right_hand.gripper.grip
+```
+
+A hand-written mapping table per LeRobot robot class is a few dozen lines and unlocks
+cross-embodiment transport for the whole fleet. This is the cheapest large win available.
+
+### 67.3 The ceiling, stated plainly
+
+Python caps this at **Guest**. The bridge cannot host an enforcing kernel and should never claim
+to. What it still delivers is substantial and is most of why anyone would adopt early: the package
+system, skills with enforced preconditions, capability grants, fleet reconciliation, the black box,
+episode capture in LeRobotDataset form, and advisory violation reporting that tells an operator
+what a policy *would* have commanded before it is trusted with anything.
+
+A Rust or C++ reimplementation reaching Host tier is possible for specific LeRobot-supported arms
+by talking to their motor buses directly — Feetech and Dynamixel protocols are documented — and is
+a per-robot project rather than a bridge.
+
+---
+
+## 68. The `ros2_control` bridge
+
+### 68.1 It is a controller, not a node
+
+The decision that makes this driver viable.
+
+The obvious implementation — a ROS 2 node subscribing to joint states and publishing commands — is
+wrong. It puts DDS in the control path, inherits discovery latency and jitter, and gives up any
+real-time guarantee, which caps the driver at Guest for no good reason.
+
+Instead the bridge is a **`controller_interface::ControllerInterface` plugin**, loaded into the
+controller manager like any other controller:
+
+* `state_interface_configuration()` claims the position, velocity and effort state interfaces.
+* `command_interface_configuration()` claims the command interfaces **exclusively** — `ros2_control`
+  already enforces exclusive claims, so no other controller can write the same joint. That is
+  exactly the Safety Kernel's sole-writer invariant (§7), enforced by machinery that already exists.
+* `update(time, period)` runs in the controller manager's real-time loop, with direct memory access
+  to the interface handles. No messages, no serialisation, no DDS.
+
+### 68.2 Whose clock
+
+The controller manager owns the update rate, not Skynet. This would be a conflict except that
+§35.2 already resolved it: **the kernel takes no clock — its tick is supplied by the RHAL.** So the
+controller manager's `time` and `period` become the kernel's tick, and everything downstream —
+watchdog, rate limits, deadlines — is measured in the loop that is actually running.
+
+The property designed for simulation turns out to be exactly what is needed to sit inside somebody
+else's control loop. That is the design paying rent.
+
+### 68.3 Describe from the URDF that is already there
+
+`ros2_control` robots ship a URDF with `<ros2_control>` tags declaring interfaces and limits, so
+`describe()` is the §63.4 generator running in-process — joints, types, limits, frames and
+collision geometry directly, roles suggested, **envelope null** because a URDF effort limit is a
+design value and not a safety rating.
+
+### 68.4 What it does not fix
+
+ROS 2 above the bridge keeps its own network posture (§60.2), and the application's nodes that
+previously wrote to controllers must now post to the kernel instead. The bridge makes the *hardware*
+reachable; it does not make an existing ROS application Skynet-shaped.
+
+---
+
+## 69. EtherCAT and CANopen — the CiA402 drivers
+
+### 69.1 One profile, two transports
+
+Both speak **CiA402**, the drive profile the industrial servo world standardised on, so the two
+drivers share a core and differ in transport.
+
+Modes of operation map directly onto the RHAL:
+
+| CiA402 mode | RHAL |
+|---|---|
+| 8 — Cyclic Synchronous Position (CSP) | `SKR_MODE_POSITION` |
+| 9 — Cyclic Synchronous Velocity (CSV) | `SKR_MODE_VELOCITY` |
+| 10 — Cyclic Synchronous Torque (CST) | `SKR_MODE_TORQUE` |
+
+The drive state machine — Switch On Disabled → Ready to Switch On → Switched On → Operation
+Enabled, with Fault and Quick Stop — is driven by the driver's `open()` and torn down by `close()`.
+`emergency_stop()` triggers Quick Stop, which is a *drive-level* reaction that does not depend on
+the application processor still being healthy.
+
+### 69.2 Where `on_command_loss` gets real values
+
+§46.2 introduced `on_command_loss` and noted it decides whether a robot can safely reach Host tier.
+CiA402 is where the field stops being abstract: the drive's fault reaction is **configurable**, per
+drive, in its object dictionary. The driver reads it during `open()` and reports it in `describe()`
+rather than asking a human to type it in — so the descriptor's most safety-relevant field is
+populated from the hardware that will actually perform the behaviour.
+
+### 69.3 Distributed clocks
+
+EtherCAT's DC mechanism synchronises slaves to sub-microsecond, which does two things nothing else
+in this document can: it gives the observation assembler (§25.1) a genuinely common time base
+across joints, and it makes the cycle jitter that `rhal.state.rate` measures a property of the bus
+rather than of Linux scheduling.
+
+### 69.4 The route to Certified
+
+EtherCAT is the only driver here with a credible path to the certified tier, because **Safe Torque
+Off over FSoE** is a stop path wired into the drive's power stage and reached over a
+safety-rated protocol — independent of the application processor by construction, which is exactly
+what §1's certified tier requires. Skynet supplies the evidence; the safety case is still somebody
+else's to make (`SAFETY_CLAIM_RULE`).
+
+### 69.5 CANopen's ceiling
+
+Same profile, and bandwidth is the limit: a 1 Mbit/s bus carrying PDOs for many joints runs out
+before a whole-body humanoid rate is reached. The driver computes the achievable rate from joint
+count and PDO size at `open()` and declares it as `control.rate_hz_max`, so the transport planner
+clamps the loop honestly (§6.1) rather than a robot discovering it mid-motion.
+
+---
+
+## 70. Simulator drivers
+
+MuJoCo and Isaac Sim, and they are not a lesser path — the sim half of SCTS cannot run without
+them, so they are load-bearing infrastructure.
+
+* **They declare `simulator: true`**, which forces the tier to Guest and stamps every check-in and
+  every evaluation result (§35.3, §56.2). No simulated run can be presented as bench evidence.
+* **They supply the clock**, so a simulation running at a fifth of wall speed or ten times it is
+  simply the kernel's time (§35.3).
+* **Descriptors come from the scene**: MJCF for MuJoCo, USD for Isaac — the same generator shape as
+  §63.4, with the same refusal to populate an envelope from model values.
+* They are what makes the **mock robot** of §63.2 more than a stub, and what lets a driver author
+  reach green sim conformance before touching hardware.
+
+---
+
+## 71. Vendor SDK drivers
+
+Written from public documentation, each a contained project:
+
+| Driver | Interface | Notes |
+|---|---|---|
+| **`libfranka` / FCI** | 1 kHz torque and position control over UDP | The best fit available — real torque control, published joint limits, a documented fault reaction. The reference Host-tier driver. |
+| **UR RTDE** | 500 Hz servo interface | `servoj` for position streaming. URScript program mode is the §59.2 case and is Guest-only; RTDE is not. |
+| **Unitree SDK2** | DDS-based, high-level and low-level modes | Low-level gives joint access at rate. High-level mode is command-level and Guest-only, and the driver must report which mode it opened. |
+| **Spot SDK** | gRPC, command-level | Guest tier by §59.2 — the controller owns the servo loop and its own safety. Skills, packaging, fleet and black box all still apply. |
+
+The pattern worth noting: **several of these robots have two interfaces**, one command-level and
+one joint-level, reaching different tiers. The driver must report which it opened at check-in, and
+`describe()` must reflect that mode — a robot running in high-level mode is a Guest-tier robot
+whatever it is capable of in principle.
+
+---
+
+## 72. Repository and ecosystem structure
+
+Recorded here because it was decided in discussion and belongs in the design.
+
+### 72.1 Skynet OS lives in its own repository
+
+Not in the BotMarket repository. Four reasons, one decisive:
+
+1. **Licensing history.** §20 proposes Apache-2.0 for Core. A subdirectory of a private commercial
+   repository cannot be cleanly open-sourced later — it needs a history-scrubbing split, or it
+   publishes commit history that leaks marketplace internals. Git history is permanent, so the
+   licence boundary must exist before the code does.
+2. **Vendors must read the RHAL header** to implement against it.
+3. **The toolchains do not overlap** — a Rust workspace, C and C++ headers, Yocto layers and
+   cross-compilation against a Next.js application's CI.
+4. **Release cadence differs** — versioned A/B images against deploy-on-push.
+
+It begins **private and becomes public later**, which is a repository setting rather than a
+migration. That sequencing works only if the repository is separate from the outset.
+
+### 72.2 The split
+
+| Repository | Holds |
+|---|---|
+| **`skynet-os`** (new, private → public) | Spec, RHAL bindings, the conformance corpus, every edition, contracts (Rust plus the WASM build and the TypeScript reference oracle), drivers, CLI, Yocto layers, the on-robot console |
+| **`Botmarket`** (existing, private) | Hub API routes, Skynet OS UI pages, migrations, registry readiness — consuming the contracts as a published package |
+
+One repository rather than one per edition: §31.4's differential fuzzing needs every edition
+testable against one corpus in one CI run, and splitting them makes that a cross-repository problem
+on day one.
+
+### 72.3 Timing
+
+**Before the first Rust lands.** Moving a design document and a few contract files is minutes;
+moving that plus a 40,000-line workspace, a Yocto layer and a CI matrix is a week. The C header in
+`bindings/` is already vendor-facing code sitting in a private repository — the problem in
+miniature, and currently trivial to fix.
+
+---
+
+## 73. What version one covers
+
+| Area | Where | State |
+|---|---|---|
+| Thesis, tiers, the honest meaning of universal | §1–3 | Designed |
+| RHAL — ABI, structs, drivers | §4, §24, §66–71 | Designed; C and C++ headers written and compiling |
+| Embodiment descriptor and transport | §5–6, §44, §52 | Designed and implemented |
+| Safety Kernel — guards, limits, tiers | §7, §23.1, §25, §46 | Designed and implemented |
+| Packages, permissions, admission | §8, §37 | Designed and implemented |
+| skynetd — reconciliation, supervision, health | §9, §33 | Designed |
+| Identity, pairing, attestation, factory provisioning | §10, §50 | Designed |
+| Desired state, fleet, OTA | §11–12, §14, §33.3 | Designed |
+| Black box, telemetry, replay | §13, §26, §41 | Designed |
+| Conformance and certification | §15, §31.4, §56 | Designed and implemented |
+| LeRobot | §16, §67 | Designed |
+| Hub contract | §17, §57 | Designed — 9 new endpoints, no breaking change |
+| Developer experience, driver authoring, URDF import | §18, §63–65 | Designed |
+| Security, local access control | §19, §39 | Designed |
+| Distribution and business model | §20, §72 | Designed |
+| Languages, editions, levels | §23, §31, §42 | Designed |
+| IPC, observation assembly, arbitration | §25 | Designed |
+| Boot, faults, POST, homing | §27, §48 | Designed |
+| Networking, time, power, thermal | §34–36 | Designed |
+| Configuration, calibration | §38, §45 | Designed |
+| Resource enforcement | §40 | Designed |
+| Frames | §44 | Designed |
+| Sensor and media pipeline | §47 | Designed |
+| Audio | §49 | Designed |
+| Entitlement | §51 | Designed |
+| Skills, environments, on-robot evaluation | §54–56 | Designed |
+| Interface — Hub-side and on-robot | §32 | Designed |
+| Limits, and what is not true | §59–61 | Stated |
+
+Implemented means running, tested TypeScript in `lib/skynet/os/`: 2,430 lines across transport,
+admission, certification and readiness, with 80 unit tests inside a suite of 1,117.
+
+Open questions are collected in §43, §53, §58.3 and §61 rather than closed prematurely. The largest
+are not engineering: retargeting fidelity is a research result nobody has, joint-level access is a
+property of hardware other people already shipped, and the certified tier needs a notified body.
+
+Version one ends here.

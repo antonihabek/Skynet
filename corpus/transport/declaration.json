@@ -1,0 +1,972 @@
+{
+  "corpus": "transport",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "unverified-body",
+      "note": "An unsigned descriptor is usable and flagged.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 5,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "left_arm.elbow.flex"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-humanoid",
+          "digest": "sha256:humanoid",
+          "verified": false,
+          "base": "legged",
+          "dof": 5,
+          "joints": [
+            {
+              "name": "l_sh_p",
+              "role": "left_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 120
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "l_el_f",
+              "role": "left_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 90
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "r_sh_p",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 120
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "r_el_f",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 90
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "waist",
+              "role": "torso.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 200
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [
+            {
+              "name": "head_rgb",
+              "role": "head.camera.rotate",
+              "modality": "rgb",
+              "width": 1280,
+              "height": 720,
+              "fps": 30
+            },
+            {
+              "name": "torso_imu",
+              "role": "torso.imu",
+              "modality": "imu"
+            }
+          ],
+          "control": {
+            "modes": [
+              "torque"
+            ],
+            "rate_hz_max": 500,
+            "rate_hz_min": 50
+          },
+          "envelope": null,
+          "solvers": []
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":90,\"method\":\"remap\",\"reason\":\"Mapped by role left_arm.elbow.flex to \\\"l_el_f\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"left_arm.elbow.flex\",\"target\":\"l_el_f\"}],\"clamp\":{\"per_channel\":{\"l_el_f\":90}},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-humanoid\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:humanoid\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-humanoid\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-humanoid\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"},{\"code\":\"unmapped_roles\",\"message\":\"4 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"left_arm.shoulder.pitch\",\"right_arm.shoulder.pitch\",\"right_arm.elbow.flex\",\"torso.yaw\"]}]}"
+    },
+    {
+      "id": "no-envelope",
+      "note": "No whole-body envelope; per-joint ratings survive as the only ceilings.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 5,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "left_arm.elbow.flex"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-humanoid",
+          "digest": "sha256:humanoid",
+          "verified": false,
+          "base": "legged",
+          "dof": 5,
+          "joints": [
+            {
+              "name": "l_sh_p",
+              "role": "left_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 120
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "l_el_f",
+              "role": "left_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 90
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "r_sh_p",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 120
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "r_el_f",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 90
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "waist",
+              "role": "torso.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 200
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [
+            {
+              "name": "head_rgb",
+              "role": "head.camera.rotate",
+              "modality": "rgb",
+              "width": 1280,
+              "height": 720,
+              "fps": 30
+            },
+            {
+              "name": "torso_imu",
+              "role": "torso.imu",
+              "modality": "imu"
+            }
+          ],
+          "control": {
+            "modes": [
+              "torque"
+            ],
+            "rate_hz_max": 500,
+            "rate_hz_min": 50
+          },
+          "envelope": null,
+          "solvers": []
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":90,\"method\":\"remap\",\"reason\":\"Mapped by role left_arm.elbow.flex to \\\"l_el_f\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"left_arm.elbow.flex\",\"target\":\"l_el_f\"}],\"clamp\":{\"per_channel\":{\"l_el_f\":90}},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-humanoid\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:humanoid\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-humanoid\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-humanoid\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"},{\"code\":\"unmapped_roles\",\"message\":\"4 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"left_arm.shoulder.pitch\",\"right_arm.shoulder.pitch\",\"right_arm.elbow.flex\",\"torso.yaw\"]}]}"
+    },
+    {
+      "id": "no-clamp-at-all",
+      "note": "Neither an envelope nor a bound channel: no clamp, rather than an empty one.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 5,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "discrete",
+              "role": null
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-humanoid",
+          "digest": "sha256:humanoid",
+          "verified": false,
+          "base": "legged",
+          "dof": 5,
+          "joints": [
+            {
+              "name": "l_sh_p",
+              "role": "left_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 120
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "l_el_f",
+              "role": "left_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 90
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "r_sh_p",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 120
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "r_el_f",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 90
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "waist",
+              "role": "torso.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 200
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [
+            {
+              "name": "head_rgb",
+              "role": "head.camera.rotate",
+              "modality": "rgb",
+              "width": 1280,
+              "height": 720,
+              "fps": 30
+            },
+            {
+              "name": "torso_imu",
+              "role": "torso.imu",
+              "modality": "imu"
+            }
+          ],
+          "control": {
+            "modes": [
+              "torque"
+            ],
+            "rate_hz_max": 500,
+            "rate_hz_min": 50
+          },
+          "envelope": null,
+          "solvers": []
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":null,\"method\":\"direct\",\"reason\":\"Discrete command passed through; it commands no actuator directly.\",\"scale\":1,\"source_index\":0,\"source_role\":null,\"target\":null}],\"clamp\":null,\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-humanoid\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:humanoid\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-humanoid\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-humanoid\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"},{\"code\":\"unmapped_roles\",\"message\":\"5 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"left_arm.shoulder.pitch\",\"left_arm.elbow.flex\",\"right_arm.shoulder.pitch\",\"right_arm.elbow.flex\",\"torso.yaw\"]}]}"
+    },
+    {
+      "id": "dof-mismatch",
+      "note": "Both figures appear in the sentence.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 7,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "right_arm.elbow.flex"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-arm",
+          "digest": "sha256:arm",
+          "verified": true,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "J1",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J2",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J3",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":60,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"J2\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J2\"}],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J2\":60},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"dof_mismatch\",\"message\":\"The policy was trained on a 7 degree-of-freedom body; this one has 3.\"},{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.roll\"]}]}"
+    },
+    {
+      "id": "mode-unsupported",
+      "note": "The body does not accept the mode the policy emits.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "right_arm.elbow.flex"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-arm",
+          "digest": "sha256:arm",
+          "verified": true,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "J1",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J2",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J3",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":60,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"J2\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J2\"}],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J2\":60},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"trajectory\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"control_mode_unsupported\",\"message\":\"This body does not accept trajectory commands.\",\"subjects\":[\"trajectory\"]},{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.roll\"]}]}"
+    },
+    {
+      "id": "empty-action-space",
+      "note": "Nothing about the fit can be checked, and the plan says so.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-arm",
+          "digest": "sha256:arm",
+          "verified": true,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "J1",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J2",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J3",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"no_source_embodiment\",\"message\":\"The policy declares no action space, so nothing about its fit to this body can be checked.\"},{\"code\":\"unmapped_roles\",\"message\":\"3 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.elbow.flex\",\"right_arm.wrist.roll\"]}]}"
+    },
+    {
+      "id": "unmapped-roles",
+      "note": "Joints the policy does not drive are named, so the operator knows what the controller will hold.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "right_arm.elbow.flex"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-arm",
+          "digest": "sha256:arm",
+          "verified": true,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "J1",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J2",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J3",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":60,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"J2\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J2\"}],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J2\":60},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.roll\"]}]}"
+    },
+    {
+      "id": "null-digests",
+      "note": "A body and a policy with no digests still plan; the nulls are facts, not gaps.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": null,
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "right_arm.elbow.flex"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-arm",
+          "digest": null,
+          "verified": true,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "J1",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J2",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J3",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":60,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"J2\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J2\"}],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J2\":60},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":null,\"target_digest\":null,\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.roll\"]}]}"
+    }
+  ]
+}

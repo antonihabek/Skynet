@@ -1,0 +1,248 @@
+# Skynet OS
+
+A universal operating system for robots — where "universal" means something specific and defensible,
+and the specification spends a good deal of its length saying what it does not mean.
+
+Skynet has two halves. **Skynet Hub** is where robot software is discovered, versioned, reviewed,
+signed and sold. **Skynet OS** is what runs that software on the machine. This repository is the
+second half.
+
+> The Hub can already tell you *whether* a policy fits a robot. Nothing yet makes it *fit*.
+
+Licence: Apache-2.0. The trademark and the certification programme are what SCTS gates — not the
+interface. Implement it freely.
+
+---
+
+## The claim, stated exactly
+
+There is no binary that boots on a Unitree G1, an ABB arm, a Roomba and a warehouse AMR. What is
+universal is the **contract**: the same packages, the same transport planner, the same Hub, the same
+conformance suite, the same CLI — reached at three depths of integration, each stating plainly what
+it can and cannot promise.
+
+| | **Guest** | **Host** | **Certified** |
+|---|---|---|---|
+| Runs on | A container beside the vendor stack | PREEMPT_RT Linux on the robot | Host, plus an independent safety MCU |
+| Owns the control loop | No | Yes | Yes |
+| Safety Kernel | **Advisory** — detects and records, enforces nothing | **Enforcing** | **Enforcing, redundant** |
+| Stop path independent of the app processor | No | No | Yes |
+| Can be evidence in a safety case | No | No | Yes |
+| Effort to adopt | An afternoon | A vendor porting project | That, plus hardware |
+
+Guest is how the ecosystem starts, and it is honest about being a passenger: it computes every
+verdict, logs every violation, raises every alarm — and the command still reaches the robot
+unchanged, because there is nothing underneath that Skynet controls. That is genuinely useful, it is
+not a safety function, and every surface says so in those words.
+
+```
+SAFETY_CLAIM_RULE:
+  Skynet OS supplies evidence for a safety case. It does not certify a machine. Conformity
+  assessment against ISO 10218, ISO 13482 or any other standard is performed by a notified
+  body against a specific robot in a specific application.
+```
+
+That constant lives in the code and is rendered on every surface that mentions the certified tier.
+Shortening it would be the most damaging thing this product could do.
+
+---
+
+## The one invariant
+
+> **The Safety Kernel is the only component with write access to an actuator.**
+
+A policy does not command a joint. It writes a *desired* command into a ring the kernel reads, and
+the kernel decides what reaches the motors. This is not a stylistic preference: most published
+checkpoints are pickles, and unpickling executes code by construction. Without sole writership,
+every published model is a remote code execution vulnerability bolted to a two-metre humanoid. It is
+what lets Skynet run untrusted policies *at all* — which is the entire point of having a catalogue.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  .sky packages          policy · skill · service             │  sandboxed
+│  no actuator access · declared budget · granted capabilities │  untrusted
+├──────────────────────────────────────────────────────────────┤
+│  Policy Runtime      inference · observation assembly        │
+│  Embodiment Transport   resolved at install, applied here    │  system
+│  skynetd             lifecycle · reconcile · OTA · blackbox  │  services
+├══════════════════════════════════════════════════════════════┤
+│  ███  SAFETY KERNEL  ███                                     │  real-time
+│  the only writer to an actuator · 8 guards · no allocation   │  no AI
+├══════════════════════════════════════════════════════════════┤
+│  RHAL — stable C ABI, semver, drivers as shared objects      │  vendor
+├──────────────────────────────────────────────────────────────┤
+│  Vendor driver: ROS 2 · EtherCAT · CANopen · SDK · simulator │  boundary
+├──────────────────────────────────────────────────────────────┤
+│  PREEMPT_RT Linux            (certified tier: + safety MCU)  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+The double rule is the trust boundary. Everything above it may be untrusted, downloaded five minutes
+ago, and written by a stranger. Nothing above it can move a joint except by asking the thing below
+it, which says no when the answer is no.
+
+---
+
+## What is in this repository today
+
+| | State |
+|---|---|
+| `docs/` — the full specification, nine parts | Complete |
+| `bindings/c`, `bindings/cpp` — the RHAL ABI | Written, compiling, layout-checked from both sides |
+| `crates/skynet-kernel` — the Safety Kernel | `no_std`, no `alloc`, 8 guards, 45 tests |
+| `crates/skynet-contracts` — transport, admission, certification, readiness | Ported from the reference, 84 tests |
+| `crates/skynet-json` — canonical JSON | 16 tests |
+| `crates/skynet-rhal` — the Rust view of the ABI | 7 tests |
+| `corpus/` — the conformance corpus | 254 cases, 18 files |
+| `crates/skynet-corpus` — the corpus runner | Reproduces all 254 byte for byte |
+| `reference/typescript/` — the oracle | Vendored from the Hub; generates the corpus |
+| `drivers/mock` — the mock robot | 24 sim-conformance checks, no hardware |
+
+**Not built, and the specification says so on its own behalf:** `skynetd`, the policy runtime, OTA,
+the black box, every real driver, the on-robot console, the safety MCU. The realistic figure for a
+robot moving under this is several engineer-years. §59.5 states that plainly and this README does
+not improve on it.
+
+---
+
+## The golden path
+
+What a developer reads, in order, and nothing else is required to get to a moving robot (§65).
+
+### 1. Concepts
+
+The tiers, the kernel invariant, what a driver is. That is the section above, and
+[`docs/skynet-os-architecture.md`](docs/skynet-os-architecture.md) §1–§7 in full.
+
+### 2. Build it
+
+No network, no dependencies. The Rust workspace has none at all — not minimalism for its own sake,
+but because the kernel is `no_std` without `alloc` and a vendor building a driver in 2036 should not
+need a package registry to have survived.
+
+```bash
+cargo test --workspace
+```
+
+### 3. Run the mock robot
+
+A body that answers the RHAL with no hardware behind it, and — the part that matters more — one you
+can provoke the dangerous failures on: a stalled command stream, a joint reporting NaN, an estop
+mid-motion, a bus timeout inside a cycle.
+
+```bash
+cd drivers/mock && make check
+```
+
+### 4. Write a driver
+
+`drivers/mock/mock_robot.c` is the reference. A vendor implements one shared object exporting the C
+ABI in [`bindings/c/skynet_rhal.h`](bindings/c/skynet_rhal.h), and that is the entire integration.
+Four properties make it a contract rather than an interface:
+
+* **`abi_version` is checked at load and mismatches refuse.** The OS ships weekly, the driver ships
+  when the vendor has something to say, and neither blocks the other. This is Project Treble in one
+  field.
+* **`read_state` and `write_command` are wait-free and allocate nothing.** They run inside the
+  real-time path.
+* **`emergency_stop` must work from a signal handler and from a dying process.** A driver that
+  implements it as "publish a message and await an ack" fails the test that matters most.
+* **`describe` returns the embodiment descriptor.** The body description comes out of the driver, so
+  it cannot drift from the hardware it describes without the driver being wrong.
+
+### 5. Describe the body
+
+The role vocabulary is what makes cross-body work possible, and it is deliberately modest:
+
+```
+role  := chain "." link [ "." axis ] [ "#" index ]
+
+left_arm.shoulder.pitch    right_hand.finger.flex#2    base.wheel#0
+```
+
+Wire names stay vendor-specific; the semantics become shared. An unrecognised role parses to
+nothing and can then only be matched by exact name — it never silently maps to something plausible.
+
+**The `envelope` stays null until a person supplies a sourced figure.** A URDF effort limit is a
+design value from a CAD model, not a datasheet safety rating, and copying one into the other would
+auto-populate a safety limit nobody verified. The robot then renders "no safety envelope declared",
+which is correct and slightly annoying, and that is the right trade.
+
+### 6. Understand what will be enforced
+
+```rust
+let plan = skynet_contracts::resolve_transport(&policy, &body, Default::default());
+```
+
+Per channel, one of six answers — `direct`, `remap`, `retarget`, `synthesize`, `drop`, `blocked` —
+and the plan's verdict is the worst binding in it. The planner is pure: no I/O, no clock, no
+database. It runs on the Hub so a repository page can answer "does this run on my G1?" before
+anybody downloads forty gigabytes, and on the robot at install time with no network at all. Both
+compute the same function over the same declared facts, so neither is authoritative and they cannot
+disagree.
+
+---
+
+## The corpus is the specification
+
+An edition is any implementation that reproduces the conformance corpus and passes SCTS. Not "agrees
+with", not "is equivalent to" — **reproduces, byte for byte**, because equivalence is where drift
+hides. A warning in a different order today is a different clamp tomorrow.
+
+```bash
+node tools/corpus-gen/generate.ts   # regenerate from the reference oracle
+cargo test -p skynet-corpus          # hold this edition to it
+```
+
+254 cases across roles, transport, cycle verdicts, limit resolution, admission, certification and
+readiness — 100 of them generated from a seeded PRNG written out in full, so regenerating produces
+byte-identical files and a diff means a behaviour change rather than a reshuffle.
+
+A divergence is *either* a specification ambiguity *or* an implementation defect. It blocks the
+release of the edition that diverged and never of the others.
+
+---
+
+## Repository layout
+
+```
+docs/            The specification. Nine parts, and the Hub's architecture beside it.
+bindings/        The RHAL C ABI and its C++ wrapper. Single-source, always (§31.2).
+crates/          The Rust reference edition.
+  skynet-json        Canonical JSON — the rule the corpus comparison rests on.
+  skynet-rhal        The Rust view of the ABI. Layout-asserted against the header.
+  skynet-kernel      The Safety Kernel. no_std, no alloc, no clock.
+  skynet-contracts   L2: transport, admission, certification, readiness.
+  skynet-corpus      Holds this edition to the corpus.
+corpus/          The conformance corpus. Plain data, no code.
+reference/       The TypeScript oracle the corpus is generated from.
+tools/           The generator.
+drivers/         Drivers. `mock` today.
+```
+
+Why this is a separate repository from the Hub, and not a subdirectory (§72.1): a subdirectory of a
+private commercial repository cannot be cleanly open-sourced later without a history-scrubbing split
+or publishing commit history that leaks marketplace internals. Git history is permanent, so the
+licence boundary has to exist before the code does. It begins private and becomes public later, which
+is a repository setting rather than a migration — and that only works if the repository is separate
+from the outset.
+
+---
+
+## What this does not do, stated because the word "universal" invites the strong reading
+
+* **Nothing runs without an RHAL driver for that specific robot.** The claim is precisely: any robot
+  for which somebody has written a conformant driver.
+* **A large class of robots cannot be commanded at joint level.** Behind a Fanuc, KUKA, ABB or older
+  UR controller you upload a *program*; the controller owns the servo loop and enforces its own
+  safety. Those machines are Guest tier permanently — not because of a missing feature, but because
+  the architecture that makes them safe is somebody else's and is already there.
+* **Transport makes a policy execute, not succeed.** A `retargeted` verdict means the commands are
+  geometrically valid and inside the envelope. Whether the policy still does the task is an open
+  research question.
+* **At Host tier, Skynet OS replaces the thing it is said to be compatible with.** `ros2_control` and
+  the Safety Kernel both want to be the component that writes to actuators, and they cannot both be.
+  Anyone evaluating adoption should hear that in the first conversation rather than the third month.
+
+The full version of this list is Part VII of the specification, and it is worth reading before the
+rest.

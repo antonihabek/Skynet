@@ -1,0 +1,12 @@
+[package]
+name = "skynet-json"
+description = "Canonical JSON for the Skynet OS conformance corpus. No dependencies, no_std + alloc."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints.rust]
+missing_docs = "warn"
