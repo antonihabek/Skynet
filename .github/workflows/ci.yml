@@ -188,12 +188,31 @@ jobs:
       # Every other crate can be, and stays that way.
       - name: Everything but the ABI and the loader forbids unsafe
         run: |
-          for crate in skynet-json skynet-sha256 skynet-kernel skynet-contracts skynet-urdf; do
+          for crate in skynet-json skynet-sha256 skynet-kernel skynet-contracts skynet-urdf skynetd; do
             grep -q 'forbid(unsafe_code)' "crates/$crate/src/lib.rs" || {
               echo "::error::crates/$crate dropped forbid(unsafe_code)."
               exit 1
             }
           done
+
+      # §33.1. `skynetd` is not safety-critical and is built that way: it never touches an
+      # actuator, and that single property is what licenses it to be a large, allocating,
+      # network-facing program. A dependency edge to the hardware abstraction layer is the first
+      # step in quietly acquiring the ability to write a joint, so the edge is asserted absent
+      # rather than remembered absent.
+      - name: skynetd cannot reach the RHAL
+        run: |
+          # A dependency *line*, not the word: the manifest explains at length why the edge
+          # is absent, and a check that a comment saying "not skynet-rhal" trips is a check
+          # that punishes writing the reason down.
+          if grep -qE '^[[:space:]]*skynet-rhal[[:space:]]*=' crates/skynetd/Cargo.toml; then
+            echo "::error::skynetd took a dependency on skynet-rhal."
+            echo "§33.1: skynetd is not safety-critical *because* it never touches an actuator."
+            echo "Everything else in §33 — the reconciler, the network exposure, the JSON parser —"
+            echo "is licensed by that property, and this edge is how it would be lost."
+            exit 1
+          fi
+          ! grep -rq 'skynet_rhal' crates/skynetd/src/
 
       # The workspace has no third-party dependencies. A vendor building a driver in 2036 should be
       # able to build this with no network, and the kernel cannot reach most of the ecosystem

@@ -54,3 +54,10 @@ dependencies = [
  "skynet-json",
  "skynet-sha256",
 ]
+
+[[package]]
+name = "skynetd"
+version = "0.1.0"
+dependencies = [
+ "skynet-json",
+]
