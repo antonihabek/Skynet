@@ -1,0 +1,28 @@
+<!--
+  One body carrying two joints — a pan-tilt head, written the way MJCF allows and URDF does not.
+
+  A frame node carries one joint, so this scene's frame graph cannot be expressed in the shape §44.3
+  pins, and the driver emits `frames: null` rather than a tree with a hinge missing from it. The body
+  still drives: the refusal is of the graph, not of the robot, and §44.5 already says what a body
+  with no frame graph means — the pose guards report unavailable with the reason named.
+-->
+<mujoco model="pan_tilt">
+  <compiler angle="radian" autolimits="true"/>
+
+  <worldbody>
+    <light pos="0 0 2"/>
+    <body name="base_link" pos="0 0 0.1">
+      <geom name="base" type="box" size="0.04 0.04 0.02"/>
+      <body name="head" pos="0 0 0.06">
+        <joint name="pan" type="hinge" axis="0 0 1" range="-3 3"/>
+        <joint name="tilt" type="hinge" axis="0 1 0" range="-1 1"/>
+        <geom name="head_geom" type="sphere" size="0.03"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <position name="pan" joint="pan" kp="5" ctrlrange="-3 3"/>
+    <position name="tilt" joint="tilt" kp="5" ctrlrange="-1 1"/>
+  </actuator>
+</mujoco>
