@@ -1,0 +1,1091 @@
+{
+  "corpus": "kinematics",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "zero-configuration",
+      "note": "Every joint at zero: the chain lies along its own declared offsets.",
+      "input": {
+        "frames": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "base_link"
+            },
+            {
+              "parent": "base_link",
+              "kind": "dynamic",
+              "name": "upper",
+              "translation": [
+                0,
+                0,
+                1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "shoulder",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            },
+            {
+              "parent": "upper",
+              "kind": "dynamic",
+              "name": "tool",
+              "translation": [
+                1,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "elbow",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            }
+          ]
+        },
+        "joints": [
+          {
+            "joint": "shoulder",
+            "channel": "shoulder",
+            "measured": 0
+          },
+          {
+            "joint": "elbow",
+            "channel": "elbow",
+            "measured": 0
+          }
+        ],
+        "command": {
+          "elbow": 0,
+          "shoulder": 0
+        }
+      },
+      "expected": "{\"collision_pairs\":0,\"frames\":[{\"name\":\"base_link\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,0]},{\"name\":\"upper\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,1]},{\"name\":\"tool\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[1,0,1]}],\"lookahead\":true,\"unresolved\":[]}"
+    },
+    {
+      "id": "quarter-turn",
+      "note": "A quarter turn about z takes the first link from +x to +y, and the second continues along it.",
+      "input": {
+        "frames": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "base_link"
+            },
+            {
+              "parent": "base_link",
+              "kind": "dynamic",
+              "name": "upper",
+              "translation": [
+                0,
+                0,
+                1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "shoulder",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            },
+            {
+              "parent": "upper",
+              "kind": "dynamic",
+              "name": "tool",
+              "translation": [
+                1,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "elbow",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            }
+          ]
+        },
+        "joints": [
+          {
+            "joint": "shoulder",
+            "channel": "shoulder",
+            "measured": 0
+          },
+          {
+            "joint": "elbow",
+            "channel": "elbow",
+            "measured": 0
+          }
+        ],
+        "command": {
+          "elbow": 0,
+          "shoulder": 1.5707963267948966
+        }
+      },
+      "expected": "{\"collision_pairs\":0,\"frames\":[{\"name\":\"base_link\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,0]},{\"name\":\"upper\",\"resolved\":true,\"rotation\":[0,0,0.7071067811865475,0.7071067811865476],\"translation\":[0,0,1]},{\"name\":\"tool\",\"resolved\":true,\"rotation\":[0,0,0.7071067811865475,0.7071067811865476],\"translation\":[0.0000000000000002220446049250313,1,1]}],\"lookahead\":true,\"unresolved\":[]}"
+    },
+    {
+      "id": "two-joints",
+      "note": "Both joints turning: the composition is what makes a chain a chain and not a sum of offsets.",
+      "input": {
+        "frames": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "base_link"
+            },
+            {
+              "parent": "base_link",
+              "kind": "dynamic",
+              "name": "upper",
+              "translation": [
+                0,
+                0,
+                1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "shoulder",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            },
+            {
+              "parent": "upper",
+              "kind": "dynamic",
+              "name": "tool",
+              "translation": [
+                1,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "elbow",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            }
+          ]
+        },
+        "joints": [
+          {
+            "joint": "shoulder",
+            "channel": "shoulder",
+            "measured": 0
+          },
+          {
+            "joint": "elbow",
+            "channel": "elbow",
+            "measured": 0
+          }
+        ],
+        "command": {
+          "elbow": 0.7853981633974483,
+          "shoulder": 0.5235987755982988
+        }
+      },
+      "expected": "{\"collision_pairs\":0,\"frames\":[{\"name\":\"base_link\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,0]},{\"name\":\"upper\",\"resolved\":true,\"rotation\":[0,0,0.25881904510252074,0.9659258262890683],\"translation\":[0,0,1]},{\"name\":\"tool\",\"resolved\":true,\"rotation\":[0,0,0.6087614290087207,0.7933533402912352],\"translation\":[0.8660254037844387,0.49999999999999994,1]}],\"lookahead\":true,\"unresolved\":[]}"
+    },
+    {
+      "id": "irrational-angles",
+      "note": "Angles with no exact representation, which is where two libraries would part company.",
+      "input": {
+        "frames": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "base_link"
+            },
+            {
+              "parent": "base_link",
+              "kind": "dynamic",
+              "name": "upper",
+              "translation": [
+                0,
+                0,
+                1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "shoulder",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            },
+            {
+              "parent": "upper",
+              "kind": "dynamic",
+              "name": "tool",
+              "translation": [
+                1,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "elbow",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            }
+          ]
+        },
+        "joints": [
+          {
+            "joint": "shoulder",
+            "channel": "shoulder",
+            "measured": 0
+          },
+          {
+            "joint": "elbow",
+            "channel": "elbow",
+            "measured": 0
+          }
+        ],
+        "command": {
+          "elbow": -2.718281828459045,
+          "shoulder": 3.141592653589793
+        }
+      },
+      "expected": "{\"collision_pairs\":0,\"frames\":[{\"name\":\"base_link\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,0]},{\"name\":\"upper\",\"resolved\":true,\"rotation\":[0,0,1,0.00000000000000006123233995736766],\"translation\":[0,0,1]},{\"name\":\"tool\",\"resolved\":true,\"rotation\":[0,0,0.21007865814146248,0.9776844876510431],\"translation\":[-1,0.00000000000000012246467991473532,1]}],\"lookahead\":true,\"unresolved\":[]}"
+    },
+    {
+      "id": "many-revolutions",
+      "note": "Sixteen revolutions: the range reduction, not the polynomial.",
+      "input": {
+        "frames": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "base_link"
+            },
+            {
+              "parent": "base_link",
+              "kind": "dynamic",
+              "name": "upper",
+              "translation": [
+                0,
+                0,
+                1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "shoulder",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            },
+            {
+              "parent": "upper",
+              "kind": "dynamic",
+              "name": "tool",
+              "translation": [
+                1,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "elbow",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            }
+          ]
+        },
+        "joints": [
+          {
+            "joint": "shoulder",
+            "channel": "shoulder",
+            "measured": 0
+          },
+          {
+            "joint": "elbow",
+            "channel": "elbow",
+            "measured": 0
+          }
+        ],
+        "command": {
+          "elbow": -50,
+          "shoulder": 100
+        }
+      },
+      "expected": "{\"collision_pairs\":0,\"frames\":[{\"name\":\"base_link\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,0]},{\"name\":\"upper\",\"resolved\":true,\"rotation\":[0,0,-0.26237485370392877,0.9649660284921132],\"translation\":[0,0,1]},{\"name\":\"tool\",\"resolved\":true,\"rotation\":[0,0,-0.13235175009777303,0.9912028118634735],\"translation\":[0.862318872287684,-0.5063656411097587,1]}],\"lookahead\":true,\"unresolved\":[]}"
+    },
+    {
+      "id": "past-the-exact-reduction",
+      "note": "An angle past the range the specified reduction is exact over leaves the frame unresolved rather than placed wrongly.",
+      "input": {
+        "frames": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "base_link"
+            },
+            {
+              "parent": "base_link",
+              "kind": "dynamic",
+              "name": "upper",
+              "translation": [
+                0,
+                0,
+                1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "shoulder",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            },
+            {
+              "parent": "upper",
+              "kind": "dynamic",
+              "name": "tool",
+              "translation": [
+                1,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "elbow",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            }
+          ]
+        },
+        "joints": [
+          {
+            "joint": "shoulder",
+            "channel": "shoulder",
+            "measured": 0
+          },
+          {
+            "joint": "elbow",
+            "channel": "elbow",
+            "measured": 0
+          }
+        ],
+        "command": {
+          "elbow": 0,
+          "shoulder": 5000000
+        }
+      },
+      "expected": "{\"collision_pairs\":0,\"frames\":[{\"name\":\"base_link\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,0]},{\"name\":\"upper\",\"resolved\":false,\"rotation\":null,\"translation\":null},{\"name\":\"tool\",\"resolved\":false,\"rotation\":null,\"translation\":null}],\"lookahead\":true,\"unresolved\":[\"upper\",\"tool\"]}"
+    },
+    {
+      "id": "command-does-not-carry-the-joint",
+      "note": "A bound channel the command omits falls back to the measured state, and the lookahead flag says the check is the weaker one.",
+      "input": {
+        "frames": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "base_link"
+            },
+            {
+              "parent": "base_link",
+              "kind": "dynamic",
+              "name": "upper",
+              "translation": [
+                0,
+                0,
+                1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "shoulder",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            },
+            {
+              "parent": "upper",
+              "kind": "dynamic",
+              "name": "tool",
+              "translation": [
+                1,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "elbow",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            }
+          ]
+        },
+        "joints": [
+          {
+            "joint": "shoulder",
+            "channel": "shoulder",
+            "measured": 0
+          },
+          {
+            "joint": "elbow",
+            "channel": "elbow",
+            "measured": 0
+          }
+        ],
+        "command": {
+          "shoulder": 0.5
+        }
+      },
+      "expected": "{\"collision_pairs\":0,\"frames\":[{\"name\":\"base_link\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,0]},{\"name\":\"upper\",\"resolved\":true,\"rotation\":[0,0,0.24740395925452294,0.9689124217106447],\"translation\":[0,0,1]},{\"name\":\"tool\",\"resolved\":true,\"rotation\":[0,0,0.24740395925452294,0.9689124217106447],\"translation\":[0.8775825618903728,0.479425538604203,1]}],\"lookahead\":false,\"unresolved\":[]}"
+    },
+    {
+      "id": "no-binding-at-all",
+      "note": "A joint with no binding leaves its frame unresolved, and unresolved propagates down the chain.",
+      "input": {
+        "frames": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "base_link"
+            },
+            {
+              "parent": "base_link",
+              "kind": "dynamic",
+              "name": "upper",
+              "translation": [
+                0,
+                0,
+                1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "shoulder",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            },
+            {
+              "parent": "upper",
+              "kind": "dynamic",
+              "name": "tool",
+              "translation": [
+                1,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "elbow",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            }
+          ]
+        },
+        "joints": [],
+        "command": {
+          "elbow": 1,
+          "shoulder": 1
+        }
+      },
+      "expected": "{\"collision_pairs\":0,\"frames\":[{\"name\":\"base_link\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,0]},{\"name\":\"upper\",\"resolved\":false,\"rotation\":null,\"translation\":null},{\"name\":\"tool\",\"resolved\":false,\"rotation\":null,\"translation\":null}],\"lookahead\":true,\"unresolved\":[\"upper\",\"tool\"]}"
+    },
+    {
+      "id": "prismatic",
+      "note": "A prismatic joint slides along its axis rather than turning about it.",
+      "input": {
+        "frames": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "base_link"
+            },
+            {
+              "parent": "base_link",
+              "kind": "dynamic",
+              "name": "carriage",
+              "translation": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "rail",
+              "joint_type": "prismatic",
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            }
+          ]
+        },
+        "joints": [
+          {
+            "joint": "rail",
+            "channel": "rail",
+            "measured": 0
+          }
+        ],
+        "command": {
+          "rail": 0.35
+        }
+      },
+      "expected": "{\"collision_pairs\":0,\"frames\":[{\"name\":\"base_link\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,0]},{\"name\":\"carriage\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,0.35]}],\"lookahead\":true,\"unresolved\":[]}"
+    },
+    {
+      "id": "mimic-with-a-multiplier",
+      "note": "A parallel gripper: the second finger runs at −1, and a field that could only say \"follows\" would put it on the wrong side of the object.",
+      "input": {
+        "frames": {
+          "root": "palm",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "palm"
+            },
+            {
+              "parent": "palm",
+              "kind": "dynamic",
+              "name": "finger_left",
+              "translation": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "grip",
+              "joint_type": "prismatic",
+              "axis": [
+                0,
+                1,
+                0
+              ]
+            },
+            {
+              "parent": "palm",
+              "kind": "dynamic",
+              "name": "finger_right",
+              "translation": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "grip_mirror",
+              "joint_type": "prismatic",
+              "axis": [
+                0,
+                1,
+                0
+              ],
+              "mimics": "grip",
+              "mimic_multiplier": -1,
+              "mimic_offset": 0
+            }
+          ]
+        },
+        "joints": [
+          {
+            "joint": "grip",
+            "channel": "grip",
+            "measured": 0
+          },
+          {
+            "joint": "grip_mirror",
+            "channel": null,
+            "measured": 0
+          }
+        ],
+        "command": {
+          "grip": 0.02
+        }
+      },
+      "expected": "{\"collision_pairs\":0,\"frames\":[{\"name\":\"palm\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,0]},{\"name\":\"finger_left\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0.02,0]},{\"name\":\"finger_right\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,-0.02,0]}],\"lookahead\":true,\"unresolved\":[]}"
+    },
+    {
+      "id": "a-ball-joint-is-unresolved",
+      "note": "One scalar cannot say where a ball joint is, so the frame and everything below it report no pose rather than a guessed one.",
+      "input": {
+        "frames": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "base_link"
+            },
+            {
+              "parent": "base_link",
+              "kind": "dynamic",
+              "name": "shoulder",
+              "translation": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "ball",
+              "joint_type": "ball",
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            },
+            {
+              "parent": "shoulder",
+              "kind": "static",
+              "name": "tool",
+              "translation": [
+                1,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor"
+            }
+          ]
+        },
+        "joints": [
+          {
+            "joint": "ball",
+            "channel": "ball",
+            "measured": 0
+          }
+        ],
+        "command": {
+          "ball": 0
+        }
+      },
+      "expected": "{\"collision_pairs\":0,\"frames\":[{\"name\":\"base_link\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,0]},{\"name\":\"shoulder\",\"resolved\":false,\"rotation\":null,\"translation\":null},{\"name\":\"tool\",\"resolved\":false,\"rotation\":null,\"translation\":null}],\"lookahead\":true,\"unresolved\":[\"shoulder\",\"tool\"]}"
+    },
+    {
+      "id": "a-degenerate-axis-is-a-defect",
+      "note": "A zero-length axis is a body-description defect and not a fixed joint; reading it as one would weld a limb in the model while it moved in the world.",
+      "input": {
+        "frames": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "base_link"
+            },
+            {
+              "parent": "base_link",
+              "kind": "dynamic",
+              "name": "arm",
+              "translation": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "joint": "elbow",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                0
+              ]
+            }
+          ]
+        },
+        "joints": [
+          {
+            "joint": "elbow",
+            "channel": "elbow",
+            "measured": 0
+          }
+        ],
+        "command": {
+          "elbow": 1
+        }
+      },
+      "expected": "{\"collision_pairs\":0,\"frames\":[{\"name\":\"base_link\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,0]},{\"name\":\"arm\",\"resolved\":false,\"rotation\":null,\"translation\":null}],\"lookahead\":true,\"unresolved\":[\"arm\"]}"
+    },
+    {
+      "id": "a-rotated-static-frame",
+      "note": "A static rotation composes with everything below it, which is where an xyzw/wxyz mix-up would show.",
+      "input": {
+        "frames": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "base_link"
+            },
+            {
+              "parent": "base_link",
+              "kind": "static",
+              "name": "tilted",
+              "source": "descriptor",
+              "translation": [
+                0.1,
+                0.2,
+                0.3
+              ],
+              "rotation": [
+                0.2705980500730985,
+                0.2705980500730985,
+                0.6532814824381883,
+                0.6532814824381883
+              ]
+            },
+            {
+              "parent": "tilted",
+              "kind": "static",
+              "name": "tool",
+              "source": "descriptor",
+              "translation": [
+                1,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ]
+            }
+          ]
+        },
+        "joints": [],
+        "command": {}
+      },
+      "expected": "{\"collision_pairs\":0,\"frames\":[{\"name\":\"base_link\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,0]},{\"name\":\"tilted\",\"resolved\":true,\"rotation\":[0.2705980500730985,0.2705980500730985,0.6532814824381883,0.6532814824381883],\"translation\":[0.1,0.2,0.3]},{\"name\":\"tool\",\"resolved\":true,\"rotation\":[0.2705980500730985,0.2705980500730985,0.6532814824381883,0.6532814824381883],\"translation\":[0.1,1.2,0.3]}],\"lookahead\":true,\"unresolved\":[]}"
+    },
+    {
+      "id": "collision-pairs-are-counted",
+      "note": "Three capsules on one chain: the quadratic cost is reported rather than assumed small.",
+      "input": {
+        "frames": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "base_link"
+            },
+            {
+              "parent": "base_link",
+              "kind": "static",
+              "name": "a",
+              "source": "descriptor",
+              "translation": [
+                0,
+                0,
+                0.2
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "collision": true,
+              "collision_shape": {
+                "kind": "capsule",
+                "a": [
+                  0,
+                  0,
+                  0
+                ],
+                "b": [
+                  0,
+                  0,
+                  0.3
+                ],
+                "radius_m": 0.06
+              }
+            },
+            {
+              "parent": "a",
+              "kind": "static",
+              "name": "b",
+              "source": "descriptor",
+              "translation": [
+                0,
+                0,
+                0.2
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "collision": true,
+              "collision_shape": {
+                "kind": "capsule",
+                "a": [
+                  0,
+                  0,
+                  0
+                ],
+                "b": [
+                  0,
+                  0,
+                  0.3
+                ],
+                "radius_m": 0.06
+              }
+            },
+            {
+              "parent": "b",
+              "kind": "static",
+              "name": "c",
+              "source": "descriptor",
+              "translation": [
+                0,
+                0,
+                0.2
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "collision": true,
+              "collision_shape": {
+                "kind": "capsule",
+                "a": [
+                  0,
+                  0,
+                  0
+                ],
+                "b": [
+                  0,
+                  0,
+                  0.3
+                ],
+                "radius_m": 0.06
+              }
+            }
+          ]
+        },
+        "joints": [],
+        "command": {}
+      },
+      "expected": "{\"collision_pairs\":3,\"frames\":[{\"name\":\"base_link\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,0]},{\"name\":\"a\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,0.2]},{\"name\":\"b\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,0.4]},{\"name\":\"c\",\"resolved\":true,\"rotation\":[0,0,0,1],\"translation\":[0,0,0.6000000000000001]}],\"lookahead\":true,\"unresolved\":[]}"
+    }
+  ]
+}

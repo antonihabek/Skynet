@@ -89,18 +89,18 @@ it, which says no when the answer is no.
 |---|---|
 | `docs/` — the full specification, nine parts | Complete |
 | `bindings/c`, `bindings/cpp` — the RHAL ABI | Written, compiling, layout-checked from both sides |
-| `crates/skynet-kernel` — the Safety Kernel | `no_std`, no `alloc`, 8 guards, 45 tests |
+| `crates/skynet-kernel` — the Safety Kernel | `no_std`, no `alloc`, 8 guards, forward kinematics and its own arithmetic, 101 tests |
 | `crates/skynet-contracts` — transport, admission, certification, readiness | Ported from the reference, 84 tests |
 | `crates/skynet-json` — canonical JSON | 16 tests |
 | `crates/skynet-rhal` — the Rust view of the ABI | 7 tests |
 | `crates/skynet-sha256` — SHA-256 | Held to the FIPS 180-4 vectors, 4 tests |
-| `crates/skynet-urdf` — URDF import (§63.4) | XML reader, model, role suggestion, descriptor, 37 tests |
-| `crates/skynet-cli` — the `skynet` command | descriptor, transport, role, driver new/check, plus the robot commands over the local socket and `blackbox`; 36 tests |
+| `crates/skynet-urdf` — URDF import (§63.4) | XML reader, model, role suggestion, descriptor, collision geometry, 44 tests |
+| `crates/skynet-cli` — the `skynet` command | descriptor, transport, frames, role, driver new/check, plus the robot commands over the local socket and `blackbox`; 42 tests |
 | `crates/skynetd` — the supervisor's brain (§33) | Reconciler, supervision, health, leases; pure, 37 tests, and CI asserts it stays pure |
 | `crates/skynetd-io` — the I/O half, and the `skynetd` binary | Package store, systemd launcher, observation, local API, the black box on disk, the loop; 83 tests plus an end-to-end run against real systemd |
 | `crates/skynet-blackbox` — the black box (§13, §26) | The preallocated ring, the MCAP writer, sealing, deterministic replay; `no_std`, 29 tests |
-| `corpus/` — the conformance corpus | 306 cases, 24 files |
-| `crates/skynet-corpus` — the corpus runner | Reproduces all 306 byte for byte |
+| `corpus/` — the conformance corpus | 350 cases, 29 files |
+| `crates/skynet-corpus` — the corpus runner | Reproduces all 350 byte for byte |
 | `reference/typescript/` — the oracle | Vendored from the Hub; generates the corpus |
 | `bindings/python` — the Python RHAL | Driver protocol plus a ctypes ABI view, offset-asserted |
 | `drivers/mock` — the mock robot | 24 sim-conformance checks, no hardware |
@@ -270,7 +270,28 @@ design value from a CAD model, not a datasheet safety rating, and copying one in
 auto-populate a safety limit nobody verified. The robot then renders "no safety envelope declared",
 which is correct and slightly annoying, and that is the right trade.
 
-### 6. Understand what will be enforced
+### 6. Check the body's own geometry
+
+The descriptor carries a frame graph (§44.3), and the Safety Kernel walks it in cycle to decide two
+of the eight guards. What that walk can actually do is worth knowing before a robot is holding
+itself still for a reason nobody can see:
+
+```bash
+skynet frames embodiment.json --joints shoulder=1.5708,elbow=0
+```
+
+The tree, where that configuration puts every frame, and — the part that matters — what the
+`workspace` and `self_collision` guards will be able to do with it: how many frames can be
+constrained, how many carry geometry the kernel can place, and how many pairs that costs per cycle.
+A body with one collision capsule has nothing to collide with, and learning that here beats learning
+it from a guard silently doing nothing.
+
+Forward kinematics runs on the same code the robot runs, down to the sine: §31.2 makes the kernel's
+`sin`, `cos` and `sqrt` single-source across editions, because no platform library is required to
+round the way another one does and a redundant safety processor that disagrees with the primary
+about a clamp is the failure redundancy exists to detect.
+
+### 7. Understand what will be enforced
 
 ```bash
 skynet transport ./policy.json --robot embodiment.json
@@ -301,9 +322,14 @@ node tools/corpus-gen/generate.ts   # regenerate from the reference oracle
 cargo test -p skynet-corpus          # hold this edition to it
 ```
 
-254 cases across roles, transport, cycle verdicts, limit resolution, admission, certification and
-readiness — 100 of them generated from a seeded PRNG written out in full, so regenerating produces
-byte-identical files and a diff means a behaviour change rather than a reshuffle.
+350 cases across roles, transport, cycle verdicts, limit resolution, frame graphs, forward
+kinematics, the black box, admission, certification and readiness — 100 of them generated from two
+seeded PRNGs written out in full, so regenerating produces byte-identical files and a diff means a
+behaviour change rather than a reshuffle.
+
+The newest of them freeze **poses**, not only verdicts. A guard trip is a boolean, and two editions
+could agree on every trip in the corpus while disagreeing about where the arm is by a millimetre —
+right up to the day one of them clamps and the other does not.
 
 A divergence is *either* a specification ambiguity *or* an implementation defect. It blocks the
 release of the edition that diverged and never of the others.
@@ -319,7 +345,7 @@ crates/          The Rust reference edition.
   skynet-json        Canonical JSON — the rule the corpus comparison rests on.
   skynet-sha256      SHA-256, for the digests the specification already names.
   skynet-rhal        The Rust view of the ABI. Layout-asserted against the header.
-  skynet-kernel      The Safety Kernel. no_std, no alloc, no clock.
+  skynet-kernel      The Safety Kernel. no_std, no alloc, no clock, its own sin/cos/sqrt.
   skynet-contracts   L2: transport, admission, certification, readiness.
   skynet-urdf        URDF import. The only crate that links std, because it is a tool.
   skynet-cli         The `skynet` command, and the only unsafe outside the ABI.

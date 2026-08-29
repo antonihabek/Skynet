@@ -3,6 +3,569 @@
   "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
   "cases": [
     {
+      "id": "pose-guards-active",
+      "note": "A body with frames, geometry and volumes runs both pose guards.",
+      "input": {
+        "tier": "host",
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "transport": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "min_control_hz": 10,
+          "per_channel": {
+            "elbow": 80,
+            "shoulder": 60
+          },
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "profile": {
+          "name": "cell-a",
+          "max_delta_per_cycle": 0.25,
+          "workspace": [
+            {
+              "name": "cell",
+              "volumes": [
+                {
+                  "frame": "tool",
+                  "shape": {
+                    "kind": "sphere",
+                    "centre": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "radius_m": 2
+                  }
+                }
+              ]
+            }
+          ],
+          "self_collision_margin_m": 0.05
+        },
+        "available": {
+          "imu": true,
+          "people_detection": true,
+          "legged": true
+        },
+        "frames": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "base_link"
+            },
+            {
+              "parent": "base_link",
+              "kind": "dynamic",
+              "name": "upper",
+              "translation": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "joint": "shoulder",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ],
+              "collision": true,
+              "collision_shape": {
+                "kind": "capsule",
+                "a": [
+                  0,
+                  0,
+                  0
+                ],
+                "b": [
+                  1,
+                  0,
+                  0
+                ],
+                "radius_m": 0.05
+              }
+            },
+            {
+              "parent": "upper",
+              "kind": "static",
+              "name": "tool",
+              "translation": [
+                1,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor"
+            }
+          ]
+        }
+      },
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"workspace\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames[].collision, on two or more frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames[].collision, on two or more frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+    },
+    {
+      "id": "workspace-without-volumes",
+      "note": "Frames but no volumes: the guard names the setting it wants.",
+      "input": {
+        "tier": "host",
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "transport": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "min_control_hz": 10,
+          "per_channel": {
+            "elbow": 80,
+            "shoulder": 60
+          },
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "profile": {
+          "name": "cell-a",
+          "max_delta_per_cycle": 0.25
+        },
+        "available": {
+          "imu": true,
+          "people_detection": true,
+          "legged": true
+        },
+        "frames": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "base_link"
+            },
+            {
+              "parent": "base_link",
+              "kind": "dynamic",
+              "name": "upper",
+              "translation": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "joint": "shoulder",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ],
+              "collision": true,
+              "collision_shape": {
+                "kind": "capsule",
+                "a": [
+                  0,
+                  0,
+                  0
+                ],
+                "b": [
+                  1,
+                  0,
+                  0
+                ],
+                "radius_m": 0.05
+              }
+            },
+            {
+              "parent": "upper",
+              "kind": "static",
+              "name": "tool",
+              "translation": [
+                1,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor"
+            }
+          ]
+        }
+      },
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames[].collision, on two or more frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames[].collision, on two or more frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+    },
+    {
+      "id": "workspace-names-an-absent-frame",
+      "note": "A volume naming a frame the body does not have reports that frame, per §44.5.",
+      "input": {
+        "tier": "host",
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "transport": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "min_control_hz": 10,
+          "per_channel": {
+            "elbow": 80,
+            "shoulder": 60
+          },
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "profile": {
+          "name": "cell-a",
+          "max_delta_per_cycle": 0.25,
+          "workspace": [
+            {
+              "name": "cell",
+              "volumes": [
+                {
+                  "frame": "left_hand.tool0",
+                  "shape": {
+                    "kind": "sphere",
+                    "centre": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "radius_m": 1
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "available": {
+          "imu": true,
+          "people_detection": true,
+          "legged": true
+        },
+        "frames": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "base_link"
+            },
+            {
+              "parent": "base_link",
+              "kind": "dynamic",
+              "name": "upper",
+              "translation": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "joint": "shoulder",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ],
+              "collision": true,
+              "collision_shape": {
+                "kind": "capsule",
+                "a": [
+                  0,
+                  0,
+                  0
+                ],
+                "b": [
+                  1,
+                  0,
+                  0
+                ],
+                "radius_m": 0.05
+              }
+            },
+            {
+              "parent": "upper",
+              "kind": "static",
+              "name": "tool",
+              "translation": [
+                1,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor"
+            }
+          ]
+        }
+      },
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"left_hand.tool0\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames[].collision, on two or more frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"left_hand.tool0\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames[].collision, on two or more frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+    },
+    {
+      "id": "one-collision-body",
+      "note": "One capsule has nothing to collide with, so the guard is unavailable.",
+      "input": {
+        "tier": "host",
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "transport": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "min_control_hz": 10,
+          "per_channel": {
+            "elbow": 80,
+            "shoulder": 60
+          },
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "profile": {
+          "name": "cell-a",
+          "max_delta_per_cycle": 0.25
+        },
+        "available": {
+          "imu": true,
+          "people_detection": true,
+          "legged": true
+        },
+        "frames": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "base_link"
+            },
+            {
+              "parent": "base_link",
+              "kind": "dynamic",
+              "name": "upper",
+              "translation": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "joint": "shoulder",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                0,
+                1
+              ],
+              "collision": true,
+              "collision_shape": {
+                "kind": "capsule",
+                "a": [
+                  0,
+                  0,
+                  0
+                ],
+                "b": [
+                  1,
+                  0,
+                  0
+                ],
+                "radius_m": 0.05
+              }
+            },
+            {
+              "parent": "upper",
+              "kind": "static",
+              "name": "tool",
+              "translation": [
+                1,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor"
+            }
+          ]
+        }
+      },
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames[].collision, on two or more frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames[].collision, on two or more frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+    },
+    {
+      "id": "no-collision-margin",
+      "note": "The guard runs and the margin is unset, which is a notice of its own.",
+      "input": {
+        "tier": "host",
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "transport": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "min_control_hz": 10,
+          "per_channel": {
+            "elbow": 80,
+            "shoulder": 60
+          },
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "profile": {
+          "name": "cell-a",
+          "max_delta_per_cycle": 0.25
+        },
+        "available": {
+          "imu": true,
+          "people_detection": true,
+          "legged": true
+        },
+        "frames": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "vendor",
+          "nodes": [
+            {
+              "parent": null,
+              "kind": "root",
+              "name": "base_link"
+            },
+            {
+              "parent": "base_link",
+              "kind": "static",
+              "name": "left",
+              "translation": [
+                0,
+                0.5,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "collision_shape": {
+                "kind": "capsule",
+                "a": [
+                  0,
+                  0,
+                  0
+                ],
+                "b": [
+                  0.5,
+                  0,
+                  0
+                ],
+                "radius_m": 0.1
+              }
+            },
+            {
+              "parent": "base_link",
+              "kind": "static",
+              "name": "right",
+              "translation": [
+                0,
+                -0.5,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "collision_shape": {
+                "kind": "capsule",
+                "a": [
+                  0,
+                  0,
+                  0
+                ],
+                "b": [
+                  0.5,
+                  0,
+                  0
+                ],
+                "radius_m": 0.1
+              }
+            }
+          ]
+        }
+      },
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"self_collision\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"no_collision_margin\",\"message\":\"No self-collision margin is configured, so two of this robot's own bodies must actually meet before the guard holds. Set self_collision_margin_m to stop the command that would bring them together.\"},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+    },
+    {
       "id": "host-complete",
       "note": "Everything declared, every guard available.",
       "input": {
@@ -33,12 +596,10 @@
         "available": {
           "imu": true,
           "people_detection": true,
-          "collision_model": true,
-          "solvers": true,
           "legged": true
         }
       },
-      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"workspace\",\"self_collision\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
     },
     {
       "id": "guest-advisory",
@@ -71,12 +632,10 @@
         "available": {
           "imu": true,
           "people_detection": true,
-          "collision_model": true,
-          "solvers": true,
           "legged": true
         }
       },
-      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"workspace\",\"self_collision\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"advisory\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"advisory_only\",\"message\":\"At the guest tier Skynet OS does not own the control loop. Violations are detected and recorded; commands still reach the robot unchanged. This is not a safety function.\"},{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"guest\",\"unavailable_guards\":[{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"advisory\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"advisory_only\",\"message\":\"At the guest tier Skynet OS does not own the control loop. Violations are detected and recorded; commands still reach the robot unchanged. This is not a safety function.\"},{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"guest\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
     },
     {
       "id": "certified",
@@ -109,12 +668,10 @@
         "available": {
           "imu": true,
           "people_detection": true,
-          "collision_model": true,
-          "solvers": true,
           "legged": true
         }
       },
-      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"workspace\",\"self_collision\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing_redundant\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"certified\",\"unavailable_guards\":[{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing_redundant\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"certified\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
     },
     {
       "id": "no-envelope",
@@ -130,12 +687,10 @@
         "available": {
           "imu": true,
           "people_detection": true,
-          "collision_model": true,
-          "solvers": true,
           "legged": true
         }
       },
-      "expected": "{\"active_guards\":[\"envelope\",\"rate_limit\",\"workspace\",\"self_collision\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":null,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":null,\"joint_velocity_max_rad_s\":null,\"max_delta_per_cycle\":0.25,\"min_control_hz\":null,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"no_envelope\",\"message\":\"No safety envelope has been declared for this robot. Only per-joint ratings from the body description are available, and whole-body ceilings are unenforced.\"},{\"code\":\"guard_unavailable\",\"message\":\"The watchdog guard cannot run on this robot.\",\"subjects\":[\"envelope.watchdog_ms\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{},\"source\":null,\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"watchdog\",\"missing\":[\"envelope.watchdog_ms\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+      "expected": "{\"active_guards\":[\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":null,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":null,\"joint_velocity_max_rad_s\":null,\"max_delta_per_cycle\":0.25,\"min_control_hz\":null,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"no_envelope\",\"message\":\"No safety envelope has been declared for this robot. Only per-joint ratings from the body description are available, and whole-body ceilings are unenforced.\"},{\"code\":\"guard_unavailable\",\"message\":\"The watchdog guard cannot run on this robot.\",\"subjects\":[\"envelope.watchdog_ms\"]},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{},\"source\":null,\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"watchdog\",\"missing\":[\"envelope.watchdog_ms\"]},{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
     },
     {
       "id": "unsourced",
@@ -167,12 +722,10 @@
         "available": {
           "imu": true,
           "people_detection": true,
-          "collision_model": true,
-          "solvers": true,
           "legged": true
         }
       },
-      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"workspace\",\"self_collision\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"unsourced_limits\",\"message\":\"The declared limits cite no datasheet. A safety limit without provenance is a rumour.\"},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"unsourced_limits\",\"message\":\"The declared limits cite no datasheet. A safety limit without provenance is a rumour.\"},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
     },
     {
       "id": "profile-narrows",
@@ -206,12 +759,10 @@
         "available": {
           "imu": true,
           "people_detection": true,
-          "collision_model": true,
-          "solvers": true,
           "legged": true
         }
       },
-      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"workspace\",\"self_collision\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":0.5,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":0.5,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
     },
     {
       "id": "profile-widens",
@@ -245,12 +796,10 @@
         "available": {
           "imu": true,
           "people_detection": true,
-          "collision_model": true,
-          "solvers": true,
           "legged": true
         }
       },
-      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"workspace\",\"self_collision\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"profile_widened\",\"message\":\"The operator profile \\\"faster-please\\\" asks to raise limits above the declared envelope. Those values are ignored.\",\"subjects\":[\"joint_torque_max_nm\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"profile_widened\",\"message\":\"The operator profile \\\"faster-please\\\" asks to raise limits above the declared envelope. Those values are ignored.\",\"subjects\":[\"joint_torque_max_nm\"]},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
     },
     {
       "id": "profile-widens-all-three",
@@ -286,12 +835,10 @@
         "available": {
           "imu": true,
           "people_detection": true,
-          "collision_model": true,
-          "solvers": true,
           "legged": true
         }
       },
-      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"workspace\",\"self_collision\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"profile_widened\",\"message\":\"The operator profile \\\"greedy\\\" asks to raise limits above the declared envelope. Those values are ignored.\",\"subjects\":[\"joint_velocity_max_rad_s\",\"joint_torque_max_nm\",\"base_velocity_max_m_s\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"profile_widened\",\"message\":\"The operator profile \\\"greedy\\\" asks to raise limits above the declared envelope. Those values are ignored.\",\"subjects\":[\"joint_velocity_max_rad_s\",\"joint_torque_max_nm\",\"base_velocity_max_m_s\"]},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
     },
     {
       "id": "nothing-available",
@@ -323,7 +870,7 @@
         },
         "available": {}
       },
-      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"an inverse-kinematics solver\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"a collision model in the body description\"]},{\"code\":\"guard_unavailable\",\"message\":\"The balance guard cannot run on this robot.\",\"subjects\":[\"a legged base — not applicable to this body\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"an inverse-kinematics solver\"]},{\"guard\":\"self_collision\",\"missing\":[\"a collision model in the body description\"]},{\"guard\":\"balance\",\"missing\":[\"a legged base — not applicable to this body\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The balance guard cannot run on this robot.\",\"subjects\":[\"a legged base — not applicable to this body\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"balance\",\"missing\":[\"a legged base — not applicable to this body\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
     },
     {
       "id": "wheeled-base",
@@ -356,12 +903,10 @@
         "available": {
           "imu": true,
           "people_detection": true,
-          "collision_model": true,
-          "solvers": true,
           "legged": false
         }
       },
-      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"workspace\",\"self_collision\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The balance guard cannot run on this robot.\",\"subjects\":[\"a legged base — not applicable to this body\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"balance\",\"missing\":[\"a legged base — not applicable to this body\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The balance guard cannot run on this robot.\",\"subjects\":[\"a legged base — not applicable to this body\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"balance\",\"missing\":[\"a legged base — not applicable to this body\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
     },
     {
       "id": "legged-no-imu",
@@ -394,12 +939,10 @@
         "available": {
           "imu": false,
           "people_detection": true,
-          "collision_model": true,
-          "solvers": true,
           "legged": true
         }
       },
-      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"workspace\",\"self_collision\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The balance guard cannot run on this robot.\",\"subjects\":[\"an IMU\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"balance\",\"missing\":[\"an IMU\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The balance guard cannot run on this robot.\",\"subjects\":[\"an IMU\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"balance\",\"missing\":[\"an IMU\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
     },
     {
       "id": "proximity-configured",
@@ -437,12 +980,10 @@
         "available": {
           "imu": true,
           "people_detection": true,
-          "collision_model": true,
-          "solvers": true,
           "legged": true
         }
       },
-      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"workspace\",\"self_collision\",\"balance\",\"proximity\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[]}"
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"proximity\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]}]}"
     },
     {
       "id": "proximity-unsensed",
@@ -480,12 +1021,10 @@
         "available": {
           "imu": true,
           "people_detection": false,
-          "collision_model": true,
-          "solvers": true,
           "legged": true
         }
       },
-      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"workspace\",\"self_collision\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"a sensor that detects people\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"proximity\",\"missing\":[\"a sensor that detects people\"]}]}"
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"a sensor that detects people\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"a sensor that detects people\"]}]}"
     },
     {
       "id": "transport-only",
@@ -511,12 +1050,10 @@
         "available": {
           "imu": true,
           "people_detection": true,
-          "collision_model": true,
-          "solvers": true,
           "legged": true
         }
       },
-      "expected": "{\"active_guards\":[\"envelope\",\"rate_limit\",\"workspace\",\"self_collision\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"no_envelope\",\"message\":\"No safety envelope has been declared for this robot. Only per-joint ratings from the body description are available, and whole-body ceilings are unenforced.\"},{\"code\":\"guard_unavailable\",\"message\":\"The watchdog guard cannot run on this robot.\",\"subjects\":[\"envelope.watchdog_ms\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"watchdog\",\"missing\":[\"envelope.watchdog_ms\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+      "expected": "{\"active_guards\":[\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"no_envelope\",\"message\":\"No safety envelope has been declared for this robot. Only per-joint ratings from the body description are available, and whole-body ceilings are unenforced.\"},{\"code\":\"guard_unavailable\",\"message\":\"The watchdog guard cannot run on this robot.\",\"subjects\":[\"envelope.watchdog_ms\"]},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"watchdog\",\"missing\":[\"envelope.watchdog_ms\"]},{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
     }
   ]
 }

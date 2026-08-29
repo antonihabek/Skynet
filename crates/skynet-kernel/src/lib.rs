@@ -41,6 +41,8 @@
 #![warn(missing_docs)]
 
 pub mod fixed;
+pub mod kinematics;
+pub mod real;
 
 use fixed::FixedVec;
 
@@ -323,6 +325,17 @@ pub struct OperatorProfile<'a> {
     pub max_delta_per_cycle: Option<f64>,
     /// Speed and separation monitoring thresholds.
     pub proximity: Option<Proximity>,
+    /// Where the operator will allow named frames to be (§7.1's fourth guard).
+    ///
+    /// Layers compose by conjunction, so an added layer can only narrow — see
+    /// [`kinematics::WorkspaceLayer`], where the reasoning lives with the geometry.
+    pub workspace: &'a [kinematics::WorkspaceLayer<'a>],
+    /// How close two collision bodies may come before the fifth guard holds, in metres.
+    ///
+    /// Absent means zero, which is a legal setting and a late one: the surfaces have to actually
+    /// meet before anything happens, and by then the command that put them there has been sent.
+    /// [`NoticeCode::NoCollisionMargin`] says so, in the same way the missing jerk ceiling does.
+    pub self_collision_margin_m: Option<f64>,
 }
 
 /// The ceilings a transport plan derived from the body and the policy's declared peaks.
@@ -343,16 +356,23 @@ pub struct TransportClamp<'a> {
 }
 
 /// What this robot can actually supply, for deciding which guards can run.
+///
+/// Three flags, and it used to be five. `solvers` and `collision_model` were removed when §44's
+/// frame graph arrived, and the reason is worth more than the two lines it saves: both were
+/// **claims about the body that nothing checked**. A descriptor could say `collision_model: true`
+/// with no geometry in it and the guard would report itself active while having nothing to
+/// evaluate — which is §7.2's failure in its most damaging form, a guard reported as running that
+/// is not. The frame set is the evidence, so the frame set is what is asked.
+///
+/// `solvers` was worse than unchecked, it was wrong: it named an *inverse*-kinematics solver, and
+/// §44.2 gives the `workspace` guard forward kinematics computed in-cycle by the kernel itself.
+/// A robot with no IK solver at all can run the guard perfectly well.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Available {
     /// An inertial measurement unit is fitted and reporting.
     pub imu: bool,
     /// Some sensor detects people.
     pub people_detection: bool,
-    /// The descriptor carries a collision model.
-    pub collision_model: bool,
-    /// At least one inverse-kinematics solver is resident.
-    pub solvers: bool,
     /// The body has legs, so balance is applicable at all.
     pub legged: bool,
 }
@@ -370,6 +390,13 @@ pub struct ResolveLimitsParams<'a> {
     pub profile: Option<OperatorProfile<'a>>,
     /// What the robot can supply.
     pub available: Available,
+    /// The body's frames, flattened and ordered (§44.3), or `None` where it declares no tree.
+    ///
+    /// Absent, null and empty are three different bodies in the descriptor and all three arrive
+    /// here as `None`, because all three mean the same thing to a guard: there is nothing to
+    /// compute a pose from. Which of the three it was is the descriptor validator's story to tell,
+    /// and it tells it once rather than in every cycle.
+    pub frames: Option<kinematics::FrameSet<'a>>,
 }
 
 // ── Output ───────────────────────────────────────────────────────────────────
@@ -391,6 +418,8 @@ pub enum NoticeCode {
     ProfileWidened,
     /// No jerk ceiling is configured.
     NoRateLimit,
+    /// No self-collision margin is configured, so surfaces must meet before the guard trips.
+    NoCollisionMargin,
 }
 
 impl NoticeCode {
@@ -404,6 +433,7 @@ impl NoticeCode {
             NoticeCode::GuardUnavailable => "guard_unavailable",
             NoticeCode::ProfileWidened => "profile_widened",
             NoticeCode::NoRateLimit => "no_rate_limit",
+            NoticeCode::NoCollisionMargin => "no_collision_margin",
         }
     }
 }
@@ -465,6 +495,12 @@ pub struct ResolvedLimits<'a> {
     pub notices: FixedVec<SafetyNotice<'a>, MAX_NOTICES>,
     /// Capability tokens the operator granted the running package, for the mode gate.
     pub grants: &'a [&'a str],
+    /// The body's frames, when it declares a tree the kernel can walk.
+    pub frames: Option<kinematics::FrameSet<'a>>,
+    /// The operator's allowed volumes, layered.
+    pub workspace: &'a [kinematics::WorkspaceLayer<'a>],
+    /// The configured self-collision margin, in metres. `None` is zero, with a notice.
+    pub self_collision_margin_m: Option<f64>,
 }
 
 impl<'a> ResolvedLimits<'a> {
@@ -541,6 +577,8 @@ pub fn resolve_limits<'a>(params: &ResolveLimitsParams<'a>) -> ResolvedLimits<'a
     let ResolveLimitsParams {
         tier,
         envelope,
+        // Read by `partition_guards`, alongside `available`, for the same reason.
+        frames: _,
         transport,
         profile,
         // `available` is read by `partition_guards`, which takes the whole params struct so the
@@ -623,6 +661,21 @@ pub fn resolve_limits<'a>(params: &ResolveLimitsParams<'a>) -> ResolvedLimits<'a
     }
 
     let (active, unavailable) = partition_guards(params, max_delta);
+
+    // Emitted only when the guard it is about will actually run. A robot with no collision geometry
+    // is already being told the guard is unavailable, and adding "and its margin is unset" to that
+    // is a second sentence about a thing that is not happening.
+    if active.contains(&Guard::SelfCollision)
+        && profile.and_then(|p| p.self_collision_margin_m).is_none()
+    {
+        push_notice(
+            &mut notices,
+            NoticeCode::NoCollisionMargin,
+            Some(Guard::SelfCollision),
+            &[],
+        );
+    }
+
     for entry in unavailable.iter() {
         let mut list: FixedVec<&'a str, MAX_SUBJECTS> = FixedVec::new();
         for missing in entry.missing.iter() {
@@ -652,6 +705,9 @@ pub fn resolve_limits<'a>(params: &ResolveLimitsParams<'a>) -> ResolvedLimits<'a
             .or_else(|| transport.and_then(|t| t.source)),
         notices,
         grants: &[],
+        frames: params.frames,
+        workspace: params.profile.map(|p| p.workspace).unwrap_or(&[]),
+        self_collision_margin_m: params.profile.and_then(|p| p.self_collision_margin_m),
     }
 }
 
@@ -694,16 +750,62 @@ fn partition_guards<'a>(
                     missing.push("profile.max_delta_per_cycle");
                 }
             }
+            // §44.5: a body whose descriptor declares no frame graph, or whose graph does not
+            // reach the frame the operator constrained, reports these two unavailable **with the
+            // missing frame named** — rather than evaluating them against a frame it guessed.
             Guard::Workspace => {
-                if !params.available.solvers {
-                    missing.push("an inverse-kinematics solver");
+                let volumes: usize = params
+                    .profile
+                    .map(|profile| {
+                        profile
+                            .workspace
+                            .iter()
+                            .map(|layer| layer.volumes.len())
+                            .sum()
+                    })
+                    .unwrap_or(0);
+                if volumes == 0 {
+                    missing.push("profile.workspace");
+                }
+                match params.frames {
+                    None => {
+                        missing.push("embodiment.frames");
+                    }
+                    Some(set) => {
+                        if let Some(profile) = params.profile {
+                            for layer in profile.workspace {
+                                for volume in layer.volumes {
+                                    // Absent, or present and behind a joint one scalar cannot
+                                    // describe. Both are "the tree does not reach the frame the
+                                    // operator constrained", and both are better said now than by
+                                    // holding the robot on every cycle for the life of the lease.
+                                    let reachable =
+                                        set.index_of(volume.frame).is_some_and(|index| {
+                                            set.statically_resolvable(index as usize)
+                                        });
+                                    if !reachable && !missing.contains(&volume.frame) {
+                                        missing.push(volume.frame);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
-            Guard::SelfCollision => {
-                if !params.available.collision_model {
-                    missing.push("a collision model in the body description");
+            Guard::SelfCollision => match params.frames {
+                None => {
+                    missing.push("embodiment.frames");
                 }
-            }
+                Some(set) => {
+                    // Two, not one. A single collision body has nothing to collide with, and a
+                    // guard reported active with no pair to test is a guard that passes by not
+                    // looking — the same failure as a conformance suite treating an absent result
+                    // as a pass.
+                    if set.collision_bodies() < 2 {
+                        missing.push("embodiment.frames[].collision, on two or more frames");
+                    }
+                }
+            },
             Guard::Balance => {
                 // Not applicable rather than missing on a wheeled base, and the wording says which,
                 // so nobody reads a shape difference as a defect (§7.2).
@@ -769,10 +871,75 @@ pub struct Clamped<'a> {
     pub to: f64,
 }
 
+/// One pose-guard finding, with the frames it is about.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PoseTrip<'a> {
+    /// [`Guard::Workspace`] or [`Guard::SelfCollision`].
+    pub guard: Guard,
+    /// The frame that left its volume, or the first of the colliding pair.
+    pub frame: &'a str,
+    /// The second of the pair, on a self-collision. `None` on a workspace excursion.
+    pub other: Option<&'a str>,
+    /// **Negative is a violation**, in metres — one sign convention across both guards, so a reader
+    /// of a verdict does not have to remember which one measures which way.
+    ///
+    /// `None` when the frame had no pose this cycle. That is a trip in its own right: a guard that
+    /// cannot establish where a constrained frame is has not shown the command to be safe, and
+    /// §7.2's rule is that it says so rather than passing.
+    pub margin_m: Option<f64>,
+}
+
+/// What the two pose guards found, and what they were able to look at.
+///
+/// Present on every verdict, empty or not, and that is deliberate. If it were omitted when nothing
+/// tripped, an edition that has not implemented the pose guards at all would emit bytes identical
+/// to an edition that ran them and found nothing — which is the "passes by not looking" failure
+/// §31.4's corpus exists to make impossible.
+#[derive(Debug, Clone, Default)]
+pub struct PoseOutcome<'a> {
+    /// Whether forward kinematics ran this cycle.
+    ///
+    /// False when no body was supplied, or when neither pose guard is active — in which case there
+    /// is nothing for a few thousand floating-point operations to decide.
+    pub evaluated: bool,
+    /// Whether every joint value came from this cycle's command.
+    ///
+    /// §7.1 specifies these guards on the *commanded* configuration, one step ahead. On a body
+    /// commanded in velocity or torque there is no such configuration to compute, and what ran was
+    /// a check of where the robot is now — a real check, and a weaker claim, so the verdict makes
+    /// the difference visible rather than letting a log imply the stronger one.
+    pub lookahead: bool,
+    /// Whether more trips occurred than [`kinematics::MAX_POSE_TRIPS`] could carry.
+    ///
+    /// The response is unaffected — one trip and twenty both `hold` — so this qualifies the report
+    /// and never the decision.
+    pub truncated: bool,
+    /// Frames whose pose could not be computed this cycle, named (§44.5).
+    pub unresolved: FixedVec<&'a str, { kinematics::MAX_UNRESOLVED }>,
+    /// What tripped, in frame order.
+    pub trips: FixedVec<PoseTrip<'a>, { kinematics::MAX_POSE_TRIPS }>,
+}
+
+/// The body the pose guards read, and the scratch they write into.
+///
+/// Passed at cycle time rather than carried on [`ResolvedLimits`] because two of its three parts
+/// change every cycle: the measured joint state is this cycle's, and [`kinematics::Kinematics`] is
+/// a buffer the caller owns so that the kernel allocates nothing. The runtime holds one of these
+/// for the life of a lease and hands it back on each cycle.
+pub struct Body<'a, 'k> {
+    /// How each joint in the frame graph is driven, and where it is now.
+    ///
+    /// The runtime builds this from the transport plan, which is the only place that knows whether
+    /// a channel carries a position, a velocity or a torque. The kernel does not guess.
+    pub joints: &'k [kinematics::JointBinding<'a>],
+    /// Caller-owned scratch, reused every cycle.
+    pub scratch: &'k mut kinematics::Kinematics,
+}
+
 /// What the kernel decided this cycle.
 #[derive(Debug, Clone)]
 pub struct CycleVerdict<'a> {
-    /// What the kernel will send. Empty under a stop.
+    /// What the kernel will send. Empty under a hold or a stop.
     pub command: FixedVec<(&'a str, f64), MAX_CHANNELS>,
     /// The strongest response any tripped guard demanded, or `None` when nothing tripped.
     pub response: Option<FaultResponse>,
@@ -786,6 +953,8 @@ pub struct CycleVerdict<'a> {
     /// Always false at host and certified. The field exists so a guest-tier log cannot be mistaken
     /// for an enforcement record.
     pub advisory: bool,
+    /// What the two pose guards found.
+    pub pose: PoseOutcome<'a>,
 }
 
 /// Evaluate one control cycle.
@@ -799,9 +968,34 @@ pub fn evaluate_cycle<'a>(
     envelope: Option<&Envelope<'a>>,
     last_sequence: Option<u64>,
 ) -> CycleVerdict<'a> {
+    evaluate_cycle_with_body(cycle, limits, envelope, last_sequence, None)
+}
+
+/// Evaluate one control cycle, with the body the pose guards need.
+///
+/// The same hot path. [`evaluate_cycle`] is this with no body, which is the honest description of
+/// a robot whose descriptor declares no frame graph: guards four and five reported themselves
+/// unavailable when the lease was granted, and there is nothing here for them to do.
+pub fn evaluate_cycle_with_body<'a>(
+    cycle: &CommandCycle<'a>,
+    limits: &ResolvedLimits<'a>,
+    envelope: Option<&Envelope<'a>>,
+    last_sequence: Option<u64>,
+    body: Option<Body<'a, '_>>,
+) -> CycleVerdict<'a> {
     let mut tripped: FixedVec<Guard, MAX_TRIPPED> = FixedVec::new();
     let mut clamped: FixedVec<Clamped<'a>, MAX_CHANNELS> = FixedVec::new();
     let advisory = limits.enforcement == Enforcement::Advisory;
+
+    // The strongest response any guard *demanded this cycle* — not the strongest response any
+    // tripped guard is capable of demanding, which is a different and weaker thing.
+    //
+    // The difference is `proximity`, whose §7.1 row reads `stop_cat1` because that is what it does
+    // when separation falls below the stop distance. Between the two distances it does something
+    // else: it scales the command and lets it through. Deriving the verdict from the guard's row
+    // reported `stop_cat1` on a cycle where the robot kept moving at half speed — a verdict that
+    // says "stopped" about a robot that was not is the one thing a black box must never record.
+    let mut demanded: Option<FaultResponse> = None;
 
     // 1. Watchdog. A stale command is discarded, never clamped and forwarded — clamping it would
     //    keep a dead producer's last intention alive at a legal magnitude, which is the failure
@@ -812,7 +1006,17 @@ pub fn evaluate_cycle<'a>(
     let stalled = last_sequence.is_some_and(|last| cycle.sequence <= last);
     if limits.is_active(Guard::Watchdog) && (stale || stalled) {
         tripped.push(Guard::Watchdog);
-        return stop_verdict(cycle, FaultResponse::StopCat2, tripped, clamped, advisory);
+        // The one guard that still short-circuits. Everything below evaluates a command; a stale
+        // one is not a command, and running the pose guards on values the producer has stopped
+        // updating would report where a robot would be if it were still being driven.
+        return stop_verdict(
+            cycle,
+            FaultResponse::StopCat2,
+            tripped,
+            clamped,
+            advisory,
+            PoseOutcome::default(),
+        );
     }
 
     let mut command: FixedVec<(&'a str, f64), MAX_CHANNELS> = FixedVec::new();
@@ -825,6 +1029,7 @@ pub fn evaluate_cycle<'a>(
             if value.abs() > ceiling {
                 next = signum(*value) * ceiling;
                 tripped.push_unique(Guard::Envelope);
+                demand(&mut demanded, FaultResponse::Clamp);
                 clamped.push(Clamped {
                     channel,
                     from: *value,
@@ -857,6 +1062,7 @@ pub fn evaluate_cycle<'a>(
             if delta.abs() > max_step && max_step > 0.0 {
                 let next = prior + signum(delta) * max_step;
                 tripped.push_unique(Guard::RateLimit);
+                demand(&mut demanded, FaultResponse::Clamp);
                 clamped.push(Clamped {
                     channel,
                     from: value,
@@ -869,7 +1075,46 @@ pub fn evaluate_cycle<'a>(
         }
     }
 
-    // 4. Proximity — speed and separation monitoring, when something is measuring separation.
+    // 4 and 5. The pose guards, on the configuration the command above would produce.
+    //
+    //    After clamping and rate limiting, and that ordering is the whole point: the pose that
+    //    matters is the one the robot will actually be commanded into, not the one the policy
+    //    asked for and the envelope refused. Checking the desired values would report an excursion
+    //    the kernel had already prevented, on every cycle a clamp fired.
+    let mut pose = PoseOutcome::default();
+    let evaluate_pose =
+        limits.is_active(Guard::Workspace) || limits.is_active(Guard::SelfCollision);
+    if let (true, Some(set), Some(body)) = (evaluate_pose, limits.frames, body) {
+        body.scratch.solve(&set, body.joints, |name| {
+            command
+                .iter()
+                .find(|(channel, _)| *channel == name)
+                .map(|(_, value)| *value)
+        });
+        pose.evaluated = true;
+        pose.lookahead = body.scratch.lookahead();
+        for index in body.scratch.unresolved().iter() {
+            pose.unresolved.push(set.frames()[*index as usize].name);
+        }
+        if limits.is_active(Guard::Workspace) {
+            check_workspace(&set, body.scratch, limits.workspace, &mut pose);
+        }
+        if limits.is_active(Guard::SelfCollision) {
+            check_self_collision(
+                &set,
+                body.scratch,
+                limits.self_collision_margin_m.unwrap_or(0.0),
+                &mut pose,
+            );
+        }
+        pose.truncated = pose.trips.overflowed();
+        for trip in pose.trips.iter() {
+            tripped.push_unique(trip.guard);
+            demand(&mut demanded, trip.guard.response());
+        }
+    }
+
+    // 7. Proximity — speed and separation monitoring, when something is measuring separation.
     //
     //    Evaluated after the magnitude and rate guards because it scales the command those two
     //    produced: applying it first would let a clamp raise a speed the separation had already
@@ -878,11 +1123,22 @@ pub fn evaluate_cycle<'a>(
     if limits.is_active(Guard::Proximity) {
         if let (Some(distance), Some(prox)) = (cycle.nearest_person_m, limits.proximity) {
             if distance <= prox.stop_distance_m {
-                tripped.push(Guard::Proximity);
-                return stop_verdict(cycle, FaultResponse::StopCat1, tripped, clamped, advisory);
+                tripped.push_unique(Guard::Proximity);
+                return stop_verdict(
+                    cycle,
+                    FaultResponse::StopCat1,
+                    tripped,
+                    clamped,
+                    advisory,
+                    pose,
+                );
             }
             if distance <= prox.slow_distance_m && prox.slow_factor < 1.0 {
                 tripped.push_unique(Guard::Proximity);
+                // A reduction, not a stop. §7.1's row for this guard is what it does *inside* the
+                // stop distance; between the two distances it is speed-and-separation monitoring
+                // doing exactly its job, and the command it produced goes out.
+                demand(&mut demanded, FaultResponse::Clamp);
                 for index in 0..command.len() {
                     let (channel, value) = match command.get(index) {
                         Some(entry) => *entry,
@@ -904,15 +1160,15 @@ pub fn evaluate_cycle<'a>(
         }
     }
 
-    // 5. Mode gate — the capability this command exercises must be one the operator granted.
+    // 8. Mode gate — the capability this command exercises must be one the operator granted.
     //
     //    Enforced at every cycle rather than at start, so a revocation takes effect on the next
     //    command rather than on the next restart (§8.2).
     if limits.is_active(Guard::ModeGate) {
         if let Some(capability) = cycle.capability {
             if !limits.grants.contains(&capability) {
-                tripped.push(Guard::ModeGate);
-                return stop_verdict(cycle, FaultResponse::Hold, tripped, clamped, advisory);
+                tripped.push_unique(Guard::ModeGate);
+                demand(&mut demanded, FaultResponse::Hold);
             }
         }
     }
@@ -920,16 +1176,33 @@ pub fn evaluate_cycle<'a>(
     // A frame carrying more channels than the kernel can evaluate is a fault, not a truncation.
     if command.overflowed() || clamped.overflowed() {
         tripped.push_unique(Guard::Envelope);
-        return stop_verdict(cycle, FaultResponse::StopCat2, tripped, clamped, advisory);
+        return stop_verdict(
+            cycle,
+            FaultResponse::StopCat2,
+            tripped,
+            clamped,
+            advisory,
+            pose,
+        );
     }
 
-    let response = strongest(&tripped);
+    let response = demanded;
+
+    // A hold means the command does not go out. That rule lives here, once, rather than at each
+    // guard that demands one: `hold` is defined as the last safe command being held while the
+    // policy is given a cycle to recover, and a kernel that forwarded a clamped command alongside
+    // a `hold` verdict would be doing the opposite of what it reported. Making it a property of the
+    // response also means a later guard can only ever strengthen the outcome — a workspace `hold`
+    // no longer hides a proximity `stop_cat1` behind an early return.
+    let withheld = response.is_some_and(|response| response >= FaultResponse::Hold);
 
     CycleVerdict {
         // In advisory mode the desired command is what reaches the robot. Returning the clamped
         // values here would make a guest-tier deployment look enforced in its own logs.
         command: if advisory {
             copy_of(cycle.desired)
+        } else if withheld {
+            FixedVec::new()
         } else {
             command
         },
@@ -937,6 +1210,125 @@ pub fn evaluate_cycle<'a>(
         tripped,
         clamped,
         advisory,
+        pose,
+    }
+}
+
+/// §7.1's fourth guard: every constrained frame inside its operator-defined volumes.
+fn check_workspace<'a>(
+    set: &kinematics::FrameSet<'a>,
+    solved: &kinematics::Kinematics,
+    layers: &'a [kinematics::WorkspaceLayer<'a>],
+    pose: &mut PoseOutcome<'a>,
+) {
+    for (index, frame) in set.frames().iter().enumerate() {
+        // Layers compose by conjunction: the frame must satisfy every layer that names it, and the
+        // reported margin is the worst of them. A layer that does not name this frame says nothing
+        // about it, so a site rule about one arm does not confine the other.
+        let mut constrained = false;
+        let mut worst: Option<f64> = None;
+        for layer in layers {
+            let mut best: Option<f64> = None;
+            for volume in layer.volumes {
+                if volume.frame != frame.name {
+                    continue;
+                }
+                constrained = true;
+                if let Some(pose) = solved.pose(index) {
+                    let margin = volume.shape.margin(&pose.translation);
+                    best = Some(match best {
+                        Some(current) if current >= margin => current,
+                        _ => margin,
+                    });
+                }
+            }
+            if let Some(best) = best {
+                worst = Some(match worst {
+                    Some(current) if current <= best => current,
+                    _ => best,
+                });
+            }
+        }
+
+        if !constrained {
+            continue;
+        }
+        match (solved.pose(index), worst) {
+            // Constrained and unlocatable. Not a pass: the guard has not shown the command safe,
+            // and §7.2 is explicit that a guard whose input is absent reports rather than passes.
+            (None, _) => pose.trips.push(PoseTrip {
+                guard: Guard::Workspace,
+                frame: frame.name,
+                other: None,
+                margin_m: None,
+            }),
+            (Some(_), Some(margin)) if margin < 0.0 => pose.trips.push(PoseTrip {
+                guard: Guard::Workspace,
+                frame: frame.name,
+                other: None,
+                margin_m: Some(margin),
+            }),
+            _ => false,
+        };
+    }
+}
+
+/// §7.1's fifth guard: no two collision bodies closer than the operator's margin.
+///
+/// Quadratic, and the pairs are visited in index order so that the reported list is the same on
+/// every edition. Adjacent frames and declared exceptions are skipped before any arithmetic — a
+/// humanoid's torso and pelvis overlap by design, and a guard that tripped on the robot standing
+/// still is a guard an operator switches off.
+fn check_self_collision<'a>(
+    set: &kinematics::FrameSet<'a>,
+    solved: &kinematics::Kinematics,
+    margin_m: f64,
+    pose: &mut PoseOutcome<'a>,
+) {
+    let frames = set.frames();
+    let margin_m = if margin_m > 0.0 { margin_m } else { 0.0 };
+
+    for i in 0..frames.len() {
+        let Some(first) = frames[i].collision else {
+            continue;
+        };
+        for j in (i + 1)..frames.len() {
+            let Some(second) = frames[j].collision else {
+                continue;
+            };
+            if kinematics::adjacent(frames, i, j) || kinematics::ignores(frames, i, j) {
+                continue;
+            }
+
+            let (Some(pose_i), Some(pose_j)) = (solved.pose(i), solved.pose(j)) else {
+                // One of the pair has no pose. Reported once, against the pair, rather than
+                // silently skipped — a collision test that quietly excludes a limb is a test that
+                // passes because it did not look.
+                pose.trips.push(PoseTrip {
+                    guard: Guard::SelfCollision,
+                    frame: frames[i].name,
+                    other: Some(frames[j].name),
+                    margin_m: None,
+                });
+                continue;
+            };
+
+            let (a1, b1) = kinematics::capsule_in_world(pose_i, &first);
+            let (a2, b2) = kinematics::capsule_in_world(pose_j, &second);
+            let squared = kinematics::segment_distance_squared(&a1, &b1, &a2, &b2);
+            let threshold = first.radius_m + second.radius_m + margin_m;
+            // The decision is taken in squared distance, so no square root can move a verdict. The
+            // root is taken only for the number the report carries.
+            if squared < threshold * threshold {
+                let separation = kinematics::distance(squared);
+                pose.trips.push(PoseTrip {
+                    guard: Guard::SelfCollision,
+                    frame: frames[i].name,
+                    other: Some(frames[j].name),
+                    margin_m: Some(separation - first.radius_m - second.radius_m - margin_m),
+                });
+            }
+        }
     }
 }
 
@@ -946,6 +1338,7 @@ fn stop_verdict<'a>(
     tripped: FixedVec<Guard, MAX_TRIPPED>,
     clamped: FixedVec<Clamped<'a>, MAX_CHANNELS>,
     advisory: bool,
+    pose: PoseOutcome<'a>,
 ) -> CycleVerdict<'a> {
     CycleVerdict {
         command: if advisory {
@@ -957,6 +1350,7 @@ fn stop_verdict<'a>(
         tripped,
         clamped,
         advisory,
+        pose,
     }
 }
 
@@ -968,16 +1362,11 @@ fn copy_of<'a>(source: &'a [(&'a str, f64)]) -> FixedVec<(&'a str, f64), MAX_CHA
     out
 }
 
-fn strongest(tripped: &FixedVec<Guard, MAX_TRIPPED>) -> Option<FaultResponse> {
-    let mut best: Option<FaultResponse> = None;
-    for guard in tripped.iter() {
-        let response = guard.response();
-        best = Some(match best {
-            Some(current) if current >= response => current,
-            _ => response,
-        });
+/// Record a demand, keeping the strongest.
+fn demand(current: &mut Option<FaultResponse>, response: FaultResponse) {
+    if current.is_none_or(|held| held < response) {
+        *current = Some(response);
     }
-    best
 }
 
 /// `core::f64::signum` returns 1.0 for +0.0 and -1.0 for -0.0, which would turn a zero command

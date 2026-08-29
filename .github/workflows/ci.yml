@@ -290,6 +290,81 @@ jobs:
           grep -q 'pub enum EventCode' crates/skynet-blackbox/src/record.rs
           grep -q 'A closed enum rather than a free string' crates/skynet-blackbox/src/record.rs
 
+      # §31.2 and §7.4. The kernel's sine, cosine and square root are the specification's, not the
+      # platform's, and the whole certified-tier argument for mirroring this kernel onto a second
+      # processor rests on that. A `use std::f64` or a call into a math library here would make two
+      # editions — and the two channels of a redundant pair — disagree about a clamp, and the
+      # disagreement would present as a specification dispute rather than as a build change.
+      - name: The kernel computes its own transcendentals
+        run: |
+          grep -q 'pub fn sin' crates/skynet-kernel/src/real.rs
+          grep -q 'pub fn cos' crates/skynet-kernel/src/real.rs
+          grep -q 'pub fn sqrt' crates/skynet-kernel/src/real.rs
+          if grep -rnE '\.(sin|cos|sqrt|tan|atan2|hypot)\(' crates/skynet-kernel/src/ \
+              | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|/\*|[*])' \
+              | grep -vE 'crates/skynet-kernel/src/real\.rs'; then
+            echo "::error::the kernel reached for a platform math function."
+            echo "§31.2: sin, cos and sqrt are single-source across editions. ECMAScript permits"
+            echo "Math.sin an implementation-defined error and every libm rounds its own way, so a"
+            echo "pose computed through one would diverge from a pose computed through another —"
+            echo "including between the two channels of a certified-tier pair."
+            exit 1
+          fi
+          # And the second edition implements the same routine rather than calling the platform's.
+          if grep -nE 'Math\.(sin|cos|sqrt)\(' reference/typescript/kinematics.ts; then
+            echo "::error::the reference edition called Math.sin, Math.cos or Math.sqrt."
+            exit 1
+          fi
+
+      # §7.2, from the direction it would actually be lost. The pose guards ask the frame graph for
+      # evidence — volumes that name reachable frames, two or more placeable collision shapes — and
+      # never a descriptor's own claim that it has a collision model. A boolean is a claim, and a
+      # guard reported as running because a document asserted it could is the most damaging form of
+      # the failure §7.2 exists to prevent.
+      - name: The pose guards ask for evidence and not for a claim
+        run: |
+          if grep -nE 'available\.(solvers|collision_model)' crates/skynet-kernel/src/lib.rs; then
+            echo "::error::a pose guard is gated on a descriptor's self-assessment again."
+            echo "§7.2: the frame graph is the evidence. `collision_model: true` with no geometry"
+            echo "in it produced a guard reported as active that had nothing to evaluate, and"
+            echo "`solvers` named an inverse-kinematics solver for a guard that does forward"
+            echo "kinematics (§44.2)."
+            exit 1
+          fi
+          grep -q 'embodiment.frames\[\].collision, on two or more frames' crates/skynet-kernel/src/lib.rs
+
+      # §44.5. A frame below a ball or floating joint can never be placed from one scalar per joint,
+      # and that is knowable when the lease is granted. Losing the static check turns "the guard
+      # reported itself unavailable, naming the frame" into "the robot holds still every cycle for
+      # the life of the lease" — the same outcome with the reason removed.
+      - name: Unreachable frames are refused at lease time, not every cycle
+        run: |
+          grep -q 'pub fn statically_resolvable' crates/skynet-kernel/src/kinematics.rs
+          grep -q 'statically_resolvable' crates/skynet-kernel/src/lib.rs
+
+      # §31.4, and the lesson of this repository's own blind spot. Two of the eight guards were
+      # implemented in one edition and absent from the other for four sessions, and nothing caught
+      # it because no corpus *input* carried a capability token or a separation distance. A corpus
+      # grows a hole wherever an input field is missing, not only where an implementation is.
+      - name: Every guard the kernel implements appears in the corpus
+        run: |
+          for field in capability nearest_person_m; do
+            grep -q "$field" corpus/fuzz/cycle.json || {
+              echo "::error::no corpus case supplies $field, so the guard reading it is pinned by"
+              echo "one edition's own suite and by nothing else — the arrangement §31.4 prevents."
+              exit 1
+            }
+          done
+          # Matched inside the `tripped` list of an expected verdict, not anywhere in the file:
+          # `workspace` also names a profile setting in the *input*, and a check satisfied by the
+          # question rather than by the answer is the shape of blind spot this step exists to close.
+          for guard in workspace self_collision proximity mode_gate; do
+            grep -rq "tripped[^]]*$guard" corpus/cycle/ || {
+              echo "::error::no cycle case trips $guard."
+              exit 1
+            }
+          done
+
       # The workspace has no third-party dependencies. A vendor building a driver in 2036 should be
       # able to build this with no network, and the kernel cannot reach most of the ecosystem
       # anyway.

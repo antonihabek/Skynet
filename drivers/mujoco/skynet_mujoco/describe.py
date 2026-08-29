@@ -396,6 +396,9 @@ def build_frames(mujoco: Any, model: Any, root_body: int) -> tuple[Any, list[Not
             node["source"] = "descriptor"
 
         node["collision"] = _has_collision(model, body)
+        shape = _collision_shape(mujoco, model, body)
+        if shape is not None:
+            node["collision_shape"] = shape
         mass = float(model.body_mass[body])
         node["mass_kg"] = mass if mass > 0.0 else None
         nodes.append(node)
@@ -415,6 +418,70 @@ def _in_subtree(model: Any, body: int, root: int) -> bool:
             return True
         body = int(model.body_parentid[body])
     return root == 0
+
+
+def _collision_shape(mujoco: Any, model: Any, body: int) -> dict[str, Any] | None:
+    """§44.3's `collision_shape`: this body's contact geometry as one sphere-swept segment.
+
+    A body may carry several geoms and the kernel evaluates one capsule per frame, so what is
+    emitted is a capsule that contains **all** of them: the segment through the two most distant
+    geom centres, with a radius large enough to swallow every geom's own bound. That is loose for a
+    body made of scattered small geoms, and loose in the only direction a collision bound may err —
+    the shape contains what it stands for, so the guard trips early rather than late.
+
+    `None` where nothing can be bounded: a mesh or a height field has no radius here to reason
+    about, and inventing one produces a guard that either trips constantly or misses the geometry.
+    §44.3 keeps "there is collision geometry" and "here is its shape" as two facts for exactly this
+    case.
+    """
+    geom_type = mujoco.mjtGeom
+    start = int(model.body_geomadr[body])
+    bounds: list[tuple[list[float], float]] = []
+    for geom in range(start, start + int(model.body_geomnum[body])):
+        if int(model.geom_contype[geom]) == 0 and int(model.geom_conaffinity[geom]) == 0:
+            continue
+        kind = int(model.geom_type[geom])
+        size = [float(v) for v in model.geom_size[geom]]
+        if kind == int(geom_type.mjGEOM_SPHERE):
+            radius = size[0]
+        elif kind in (int(geom_type.mjGEOM_CAPSULE), int(geom_type.mjGEOM_CYLINDER)):
+            # MuJoCo's size is (radius, half-length) about the geom's own z.
+            radius = size[0] + size[1]
+        elif kind == int(geom_type.mjGEOM_BOX):
+            radius = (size[0] ** 2 + size[1] ** 2 + size[2] ** 2) ** 0.5
+        else:
+            # Mesh, plane, height field, ellipsoid: nothing this reduction can bound honestly.
+            return None
+        if not (radius > 0.0):
+            return None
+        bounds.append(([float(v) for v in model.geom_pos[geom]], radius))
+
+    if not bounds:
+        return None
+
+    # The two most distant centres carry the segment; every geom's bound sets the radius.
+    a, b = bounds[0][0], bounds[0][0]
+    span = -1.0
+    for i, (pi, _) in enumerate(bounds):
+        for pj, _ in bounds[i:]:
+            d = sum((pi[k] - pj[k]) ** 2 for k in range(3)) ** 0.5
+            if d > span:
+                span, a, b = d, pi, pj
+    # A geom whose centre is off the segment needs the radius widened by how far off it is. The
+    # smaller distance to an endpoint bounds the perpendicular distance from above, so this
+    # certainly contains every geom and may be looser than necessary — the permitted direction.
+    radius = 0.0
+    for p, r in bounds:
+        to_a = sum((p[k] - a[k]) ** 2 for k in range(3)) ** 0.5
+        to_b = sum((p[k] - b[k]) ** 2 for k in range(3)) ** 0.5
+        radius = max(radius, r + min(to_a, to_b))
+
+    return {
+        "kind": "capsule",
+        "a": [_round12(v) for v in a],
+        "b": [_round12(v) for v in b],
+        "radius_m": _round12(radius),
+    }
 
 
 def _has_collision(model: Any, body: int) -> bool:

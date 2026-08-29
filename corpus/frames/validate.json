@@ -692,6 +692,356 @@
         }
       },
       "expected": "{\"fault\":null}"
+    },
+    {
+      "id": "collision-shape-well-formed",
+      "note": "A capsule on a frame that says it carries geometry.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "upper",
+              "parent": "base_link",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "collision_shape": {
+                "kind": "capsule",
+                "a": [
+                  0,
+                  0,
+                  0
+                ],
+                "b": [
+                  0,
+                  0,
+                  0.3
+                ],
+                "radius_m": 0.06
+              }
+            }
+          ]
+        }
+      },
+      "expected": "{\"fault\":null}"
+    },
+    {
+      "id": "collision-shape-unknown-kind",
+      "note": "A shape this edition cannot evaluate is named, never ignored.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "upper",
+              "parent": "base_link",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "collision_shape": {
+                "kind": "mesh",
+                "a": [
+                  0,
+                  0,
+                  0
+                ],
+                "b": [
+                  0,
+                  0,
+                  0.3
+                ],
+                "radius_m": 0.06
+              }
+            }
+          ]
+        }
+      },
+      "expected": "{\"fault\":{\"code\":\"unknown_shape\",\"detail\":\"Frame upper declares collision geometry of kind mesh, which this edition cannot evaluate.\",\"subjects\":[\"upper\"]}}"
+    },
+    {
+      "id": "collision-shape-no-radius",
+      "note": "A capsule of no radius bounds nothing, and would report clearance it has not established.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "upper",
+              "parent": "base_link",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "collision_shape": {
+                "kind": "capsule",
+                "a": [
+                  0,
+                  0,
+                  0
+                ],
+                "b": [
+                  0,
+                  0,
+                  0.3
+                ],
+                "radius_m": 0
+              }
+            }
+          ]
+        }
+      },
+      "expected": "{\"fault\":{\"code\":\"unknown_shape\",\"detail\":\"Frame upper's collision geometry has radius 0. A capsule of no radius bounds nothing, and a guard built on it would report clearance it has not established.\",\"subjects\":[\"upper\"]}}"
+    },
+    {
+      "id": "collision-shape-contradicted",
+      "note": "A shape on a frame that says it carries no geometry is two statements that disagree.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "upper",
+              "parent": "base_link",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": false,
+              "collision_shape": {
+                "kind": "capsule",
+                "a": [
+                  0,
+                  0,
+                  0
+                ],
+                "b": [
+                  0,
+                  0,
+                  0.3
+                ],
+                "radius_m": 0.06
+              }
+            }
+          ]
+        }
+      },
+      "expected": "{\"fault\":{\"code\":\"collision_mismatch\",\"detail\":\"Frame upper declares a collision shape and says it carries no collision geometry. One of the two is wrong and nothing here can tell which.\",\"subjects\":[\"upper\"]}}"
+    },
+    {
+      "id": "collision-ignore-well-formed",
+      "note": "An exception naming a frame that exists.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "torso",
+              "parent": "base_link",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "collision_shape": {
+                "kind": "capsule",
+                "a": [
+                  0,
+                  0,
+                  0
+                ],
+                "b": [
+                  0,
+                  0,
+                  0.3
+                ],
+                "radius_m": 0.06
+              },
+              "collision_ignore": [
+                "pelvis"
+              ]
+            },
+            {
+              "name": "pelvis",
+              "parent": "base_link",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "collision_shape": {
+                "kind": "capsule",
+                "a": [
+                  0,
+                  0,
+                  0
+                ],
+                "b": [
+                  0,
+                  0,
+                  0.3
+                ],
+                "radius_m": 0.06
+              }
+            }
+          ]
+        }
+      },
+      "expected": "{\"fault\":null}"
+    },
+    {
+      "id": "collision-ignore-missing",
+      "note": "An exception naming nothing excludes nothing, and says so.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "torso",
+              "parent": "base_link",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "collision_shape": {
+                "kind": "capsule",
+                "a": [
+                  0,
+                  0,
+                  0
+                ],
+                "b": [
+                  0,
+                  0,
+                  0.3
+                ],
+                "radius_m": 0.06
+              },
+              "collision_ignore": [
+                "pelvis"
+              ]
+            }
+          ]
+        }
+      },
+      "expected": "{\"fault\":{\"code\":\"ignore_missing\",\"detail\":\"Frame torso is permitted to touch pelvis, which is not one of the frames. An exception naming nothing excludes nothing.\",\"subjects\":[\"torso\",\"pelvis\"]}}"
     }
   ]
 }

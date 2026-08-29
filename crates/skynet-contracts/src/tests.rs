@@ -703,6 +703,7 @@ fn a_transport_clamp_becomes_the_ceiling_the_kernel_enforces() {
         envelope: Some(envelope),
         transport: Some(kernel_clamp),
         profile: None,
+        frames: None,
         available: Available::default(),
     });
 

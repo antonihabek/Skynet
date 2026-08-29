@@ -1,0 +1,496 @@
+{
+  "corpus": "cycle",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "clear",
+      "note": "Two bodies well apart do not trip, and the guard is active rather than silent.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25,
+            "self_collision_margin_m": 0.05
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true
+          },
+          "frames": {
+            "root": "base_link",
+            "convention": "rep103",
+            "generator": "vendor",
+            "nodes": [
+              {
+                "parent": null,
+                "kind": "root",
+                "name": "base_link"
+              },
+              {
+                "parent": "base_link",
+                "kind": "static",
+                "name": "left",
+                "translation": [
+                  0,
+                  0.5,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "source": "descriptor",
+                "collision": true,
+                "collision_shape": {
+                  "kind": "capsule",
+                  "a": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "b": [
+                    0.5,
+                    0,
+                    0
+                  ],
+                  "radius_m": 0.1
+                }
+              },
+              {
+                "parent": "base_link",
+                "kind": "static",
+                "name": "right",
+                "translation": [
+                  0,
+                  -0.5,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "source": "descriptor",
+                "collision": true,
+                "collision_shape": {
+                  "kind": "capsule",
+                  "a": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "b": [
+                    0.5,
+                    0,
+                    0
+                  ],
+                  "radius_m": 0.1
+                }
+              }
+            ]
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {}
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"pose\":{\"evaluated\":true,\"lookahead\":true,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":null,\"tripped\":[]}"
+    },
+    {
+      "id": "inside-the-margin",
+      "note": "Inside the configured margin the command is held and both frames are named.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25,
+            "self_collision_margin_m": 0.05
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true
+          },
+          "frames": {
+            "root": "base_link",
+            "convention": "rep103",
+            "generator": "vendor",
+            "nodes": [
+              {
+                "parent": null,
+                "kind": "root",
+                "name": "base_link"
+              },
+              {
+                "parent": "base_link",
+                "kind": "static",
+                "name": "left",
+                "translation": [
+                  0,
+                  0.1,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "source": "descriptor",
+                "collision": true,
+                "collision_shape": {
+                  "kind": "capsule",
+                  "a": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "b": [
+                    0.5,
+                    0,
+                    0
+                  ],
+                  "radius_m": 0.1
+                }
+              },
+              {
+                "parent": "base_link",
+                "kind": "static",
+                "name": "right",
+                "translation": [
+                  0,
+                  -0.1,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "source": "descriptor",
+                "collision": true,
+                "collision_shape": {
+                  "kind": "capsule",
+                  "a": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "b": [
+                    0.5,
+                    0,
+                    0
+                  ],
+                  "radius_m": 0.1
+                }
+              }
+            ]
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {}
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"pose\":{\"evaluated\":true,\"lookahead\":true,\"trips\":[{\"frame\":\"left\",\"guard\":\"self_collision\",\"margin_m\":-0.05,\"other\":\"right\"}],\"truncated\":false,\"unresolved\":[]},\"response\":\"hold\",\"tripped\":[\"self_collision\"]}"
+    },
+    {
+      "id": "declared-exception",
+      "note": "A pair the body declares may touch is skipped, however the exception was written.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25,
+            "self_collision_margin_m": 0.05
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true
+          },
+          "frames": {
+            "root": "base_link",
+            "convention": "rep103",
+            "generator": "vendor",
+            "nodes": [
+              {
+                "parent": null,
+                "kind": "root",
+                "name": "base_link"
+              },
+              {
+                "parent": "base_link",
+                "kind": "static",
+                "name": "left",
+                "translation": [
+                  0,
+                  0.1,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "source": "descriptor",
+                "collision": true,
+                "collision_shape": {
+                  "kind": "capsule",
+                  "a": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "b": [
+                    0.5,
+                    0,
+                    0
+                  ],
+                  "radius_m": 0.1
+                },
+                "collision_ignore": [
+                  "right"
+                ]
+              },
+              {
+                "parent": "base_link",
+                "kind": "static",
+                "name": "right",
+                "translation": [
+                  0,
+                  -0.1,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "source": "descriptor",
+                "collision": true,
+                "collision_shape": {
+                  "kind": "capsule",
+                  "a": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "b": [
+                    0.5,
+                    0,
+                    0
+                  ],
+                  "radius_m": 0.1
+                }
+              }
+            ]
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {}
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"pose\":{\"evaluated\":true,\"lookahead\":true,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":null,\"tripped\":[]}"
+    },
+    {
+      "id": "no-margin-configured",
+      "note": "With no margin the surfaces must actually meet, which is legal and late; the notice is on the limits.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true
+          },
+          "frames": {
+            "root": "base_link",
+            "convention": "rep103",
+            "generator": "vendor",
+            "nodes": [
+              {
+                "parent": null,
+                "kind": "root",
+                "name": "base_link"
+              },
+              {
+                "parent": "base_link",
+                "kind": "static",
+                "name": "left",
+                "translation": [
+                  0,
+                  0.1,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "source": "descriptor",
+                "collision": true,
+                "collision_shape": {
+                  "kind": "capsule",
+                  "a": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "b": [
+                    0.5,
+                    0,
+                    0
+                  ],
+                  "radius_m": 0.1
+                }
+              },
+              {
+                "parent": "base_link",
+                "kind": "static",
+                "name": "right",
+                "translation": [
+                  0,
+                  -0.1,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "source": "descriptor",
+                "collision": true,
+                "collision_shape": {
+                  "kind": "capsule",
+                  "a": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "b": [
+                    0.5,
+                    0,
+                    0
+                  ],
+                  "radius_m": 0.1
+                }
+              }
+            ]
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {}
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"pose\":{\"evaluated\":true,\"lookahead\":true,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":null,\"tripped\":[]}"
+    }
+  ]
+}
