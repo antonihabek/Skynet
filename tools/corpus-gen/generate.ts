@@ -28,12 +28,14 @@ import { fileURLToPath } from 'node:url'
 
 import { canonical } from '../../reference/typescript/canonical.ts'
 import {
-  parseRole, resolveTransport, roleKey,
-  type ActionChannel, type EmbodimentDescriptor, type ResolveTransportOptions,
-  type SourceEmbodiment,
+  parseRole, resolveTransport, roleKey, validateFrames,
+  type ActionChannel, type EmbodimentDescriptor, type FrameGraph, type FrameNode,
+  type ResolveTransportOptions, type SourceEmbodiment,
 } from '../../reference/typescript/embodiment.ts'
 import { admitPackage, type AdmissionParams } from '../../reference/typescript/package.ts'
-import { awardCertification, type CertificationInput } from '../../reference/typescript/conformance.ts'
+import {
+  awardCertification, testsRequiredFor, type CertificationInput,
+} from '../../reference/typescript/conformance.ts'
 import {
   evaluateReadiness, summarizeReadiness, type ReadinessSubject,
 } from '../../reference/typescript/readiness.ts'
@@ -43,8 +45,8 @@ import {
 } from '../../reference/typescript/safety.ts'
 import type { SafetyEnvelope } from '../../reference/typescript/types.ts'
 import {
-  shapeAdmission, shapeCertification, shapeFleet, shapeLimits, shapePlan, shapeReadiness,
-  shapeVerdict,
+  shapeAdmission, shapeCertification, shapeFleet, shapeFrameFault, shapeLimits, shapePlan,
+  shapeReadiness, shapeVerdict,
 } from '../../reference/typescript/shape.ts'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -734,6 +736,99 @@ certificationCase('bench-exactly-a-year', 'A year old exactly has lapsed.',
   { claimed: 'guest', results: results(GUEST_TESTS), bench_age_days: 365 })
 certificationCase('unknown-tier', 'A tier nobody defined awards nothing.',
   { claimed: 'platinum' as CertificationInput['claimed'], results: results(GUEST_TESTS) })
+
+// §35.3 and §70. A simulator declares itself one and the declaration caps the award, so that no
+// simulated run is ever presented as bench evidence.
+const HOST_TESTS = testsRequiredFor('host').map(test => test.id)
+
+certificationCase('host-on-a-real-body', 'The same evidence, on a body that exists.',
+  { claimed: 'host', results: results(HOST_TESTS) })
+certificationCase('simulated-caps-at-guest',
+  'A simulator declares itself one (§35.3), and the declaration caps the award at guest — while the verdict still records what the evidence would have supported.',
+  { claimed: 'host', results: results(HOST_TESTS), simulator: true })
+certificationCase('simulated-guest-unchanged',
+  'The cap only ever lowers. A guest claim on a simulated body is already at the ceiling and gains no reason.',
+  { claimed: 'guest', results: results(GUEST_TESTS), simulator: true })
+certificationCase('simulated-no-evidence',
+  'The cap never manufactures an award: nothing measured is still nothing awarded, simulated or not.',
+  { claimed: 'host', results: [], simulator: true })
+certificationCase('simulated-and-lapsed',
+  'The cap runs before expiry, so a simulated body with year-old bench results still lapses to none rather than resting at guest.',
+  { claimed: 'host', results: results(HOST_TESTS), simulator: true, bench_age_days: 400 })
+
+// ── frames, §44.3 ────────────────────────────────────────────────────────────
+//
+// The frame graph is pinned here rather than left to whichever generator wrote a file first. Two
+// emit it — `skynet descriptor from-urdf` and the MuJoCo driver — and the kernel will read it, so
+// a second edition emitting a different spelling of the same tree would be a divergence no test
+// catches. These cases are that test.
+
+function frameNode(name: string, parent: string | null, extra: Partial<FrameNode> = {}): FrameNode {
+  return {
+    name,
+    parent,
+    kind: parent === null ? 'root' : 'static',
+    ...(parent === null ? {} : { translation: [0, 0, 0.1] as [number, number, number],
+                                 rotation: [0, 0, 0, 1] as [number, number, number, number],
+                                 source: 'descriptor' as const }),
+    collision: true,
+    ...extra,
+  }
+}
+
+function graph(nodes: FrameNode[], root = 'base_link'): FrameGraph {
+  return { root, convention: 'rep103', generator: 'urdf', nodes }
+}
+
+function framesCase(id: string, note: string, input: FrameGraph): void {
+  add('frames', 'validate', {
+    id, note,
+    input: { graph: input },
+    expected: canonical(shapeFrameFault(validateFrames(input))),
+  })
+}
+
+const ARM_FRAMES = graph([
+  frameNode('base_link', null),
+  frameNode('shoulder', 'base_link', {
+    kind: 'dynamic', joint: 'right_arm.shoulder.pitch', joint_type: 'revolute',
+    axis: [0, 1, 0], mass_kg: 1.4,
+  }),
+  frameNode('forearm', 'shoulder', {
+    kind: 'dynamic', joint: 'right_arm.elbow.flex', joint_type: 'revolute', axis: [0, 1, 0],
+  }),
+  frameNode('tool0', 'forearm'),
+])
+
+framesCase('well-formed', 'A tree with a root, two dynamic frames and a static tool frame.',
+  ARM_FRAMES)
+framesCase('empty', 'A body with no frames at all is a claim nobody should be making.',
+  graph([]))
+framesCase('root-missing', 'The declared root is not one of the frames, so nothing is relative to anything.',
+  graph(ARM_FRAMES.nodes, 'torso'))
+framesCase('several-roots', 'Two parentless frames is a forest, and forward kinematics over a forest is undefined.',
+  graph([...ARM_FRAMES.nodes, frameNode('trolley', null)]))
+framesCase('duplicate-name', 'Two frames with one name make every parent reference to it ambiguous.',
+  graph([...ARM_FRAMES.nodes, frameNode('forearm', 'base_link')]))
+framesCase('parent-missing', 'A parent nobody declared would silently resolve to identity.',
+  graph([...ARM_FRAMES.nodes, frameNode('gripper', 'wrist')]))
+framesCase('cycle', 'Following parents must terminate; a cycle is a hang in the middle of a control cycle.',
+  graph([
+    frameNode('base_link', null),
+    frameNode('a', 'b'),
+    frameNode('b', 'a'),
+  ]))
+framesCase('dynamic-without-a-joint', 'A dynamic frame that names no joint has no way to move.',
+  graph([frameNode('base_link', null), frameNode('shoulder', 'base_link', { kind: 'dynamic' })]))
+framesCase('static-with-a-joint', 'A static frame that names one is two statements that disagree.',
+  graph([
+    frameNode('base_link', null),
+    frameNode('shoulder', 'base_link', { joint: 'right_arm.shoulder.pitch' }),
+  ]))
+framesCase('unknown-kind', 'A kind outside the three is a schema this edition does not implement.',
+  graph([frameNode('base_link', null), frameNode('shoulder', 'base_link', { kind: 'floating' as FrameNode['kind'] })]))
+framesCase('root-only', 'One frame, no joints. A fixed body with nothing on it is still a valid tree.',
+  graph([frameNode('base_link', null)]))
 
 // ── readiness ────────────────────────────────────────────────────────────────
 

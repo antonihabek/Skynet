@@ -17,7 +17,7 @@
  * a safety envelope" is not "the safety envelope is null".
  */
 
-import type { TransportPlan } from './embodiment.ts'
+import type { FrameFault, TransportPlan } from './embodiment.ts'
 import type { AdmissionResult } from './package.ts'
 import type { CertificationVerdict } from './conformance.ts'
 import type { CheckResult, FleetReadiness, ReadinessReport } from './readiness.ts'
@@ -161,5 +161,17 @@ export function shapeVerdict(verdict: CycleVerdict): unknown {
       to: entry.to,
     })),
     advisory: verdict.advisory,
+  }
+}
+
+/**
+ * A frame-graph verdict.
+ *
+ * `fault` is nullable rather than optional: "this graph is usable" is a fact worth stating, and a
+ * consumer reading an absent key cannot tell it from a producer that forgot to run the check.
+ */
+export function shapeFrameFault(fault: FrameFault | null): unknown {
+  return {
+    fault: fault === null ? null : { code: fault.code, subjects: fault.subjects, detail: fault.detail },
   }
 }

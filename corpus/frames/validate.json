@@ -1,0 +1,697 @@
+{
+  "corpus": "frames",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "well-formed",
+      "note": "A tree with a root, two dynamic frames and a static tool frame.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "shoulder",
+              "parent": "base_link",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.shoulder.pitch",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ],
+              "mass_kg": 1.4
+            },
+            {
+              "name": "forearm",
+              "parent": "shoulder",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.elbow.flex",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ]
+            },
+            {
+              "name": "tool0",
+              "parent": "forearm",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true
+            }
+          ]
+        }
+      },
+      "expected": "{\"fault\":null}"
+    },
+    {
+      "id": "empty",
+      "note": "A body with no frames at all is a claim nobody should be making.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": []
+        }
+      },
+      "expected": "{\"fault\":{\"code\":\"empty\",\"detail\":\"The graph declares no frames.\",\"subjects\":[]}}"
+    },
+    {
+      "id": "root-missing",
+      "note": "The declared root is not one of the frames, so nothing is relative to anything.",
+      "input": {
+        "graph": {
+          "root": "torso",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "shoulder",
+              "parent": "base_link",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.shoulder.pitch",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ],
+              "mass_kg": 1.4
+            },
+            {
+              "name": "forearm",
+              "parent": "shoulder",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.elbow.flex",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ]
+            },
+            {
+              "name": "tool0",
+              "parent": "forearm",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true
+            }
+          ]
+        }
+      },
+      "expected": "{\"fault\":{\"code\":\"root_missing\",\"detail\":\"The declared root torso is not one of the frames.\",\"subjects\":[\"torso\"]}}"
+    },
+    {
+      "id": "several-roots",
+      "note": "Two parentless frames is a forest, and forward kinematics over a forest is undefined.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "shoulder",
+              "parent": "base_link",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.shoulder.pitch",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ],
+              "mass_kg": 1.4
+            },
+            {
+              "name": "forearm",
+              "parent": "shoulder",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.elbow.flex",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ]
+            },
+            {
+              "name": "tool0",
+              "parent": "forearm",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true
+            },
+            {
+              "name": "trolley",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            }
+          ]
+        }
+      },
+      "expected": "{\"fault\":{\"code\":\"several_roots\",\"detail\":\"2 frames have no parent, so this is a forest and not a tree.\",\"subjects\":[\"base_link\",\"trolley\"]}}"
+    },
+    {
+      "id": "duplicate-name",
+      "note": "Two frames with one name make every parent reference to it ambiguous.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "shoulder",
+              "parent": "base_link",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.shoulder.pitch",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ],
+              "mass_kg": 1.4
+            },
+            {
+              "name": "forearm",
+              "parent": "shoulder",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.elbow.flex",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ]
+            },
+            {
+              "name": "tool0",
+              "parent": "forearm",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true
+            },
+            {
+              "name": "forearm",
+              "parent": "base_link",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true
+            }
+          ]
+        }
+      },
+      "expected": "{\"fault\":{\"code\":\"duplicate_name\",\"detail\":\"Two frames are named forearm, so a parent reference is ambiguous.\",\"subjects\":[\"forearm\"]}}"
+    },
+    {
+      "id": "parent-missing",
+      "note": "A parent nobody declared would silently resolve to identity.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "shoulder",
+              "parent": "base_link",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.shoulder.pitch",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ],
+              "mass_kg": 1.4
+            },
+            {
+              "name": "forearm",
+              "parent": "shoulder",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.elbow.flex",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ]
+            },
+            {
+              "name": "tool0",
+              "parent": "forearm",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true
+            },
+            {
+              "name": "gripper",
+              "parent": "wrist",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true
+            }
+          ]
+        }
+      },
+      "expected": "{\"fault\":{\"code\":\"parent_missing\",\"detail\":\"Frame gripper names the parent wrist, which is not in the graph.\",\"subjects\":[\"gripper\",\"wrist\"]}}"
+    },
+    {
+      "id": "cycle",
+      "note": "Following parents must terminate; a cycle is a hang in the middle of a control cycle.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "a",
+              "parent": "b",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true
+            },
+            {
+              "name": "b",
+              "parent": "a",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true
+            }
+          ]
+        }
+      },
+      "expected": "{\"fault\":{\"code\":\"cycle\",\"detail\":\"Following parents from a never reaches the root.\",\"subjects\":[\"a\"]}}"
+    },
+    {
+      "id": "dynamic-without-a-joint",
+      "note": "A dynamic frame that names no joint has no way to move.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "shoulder",
+              "parent": "base_link",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true
+            }
+          ]
+        }
+      },
+      "expected": "{\"fault\":{\"code\":\"joint_mismatch\",\"detail\":\"Frame shoulder is dynamic and names no joint.\",\"subjects\":[\"shoulder\"]}}"
+    },
+    {
+      "id": "static-with-a-joint",
+      "note": "A static frame that names one is two statements that disagree.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "shoulder",
+              "parent": "base_link",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.shoulder.pitch"
+            }
+          ]
+        }
+      },
+      "expected": "{\"fault\":{\"code\":\"joint_mismatch\",\"detail\":\"Frame shoulder is static and names a joint.\",\"subjects\":[\"shoulder\"]}}"
+    },
+    {
+      "id": "unknown-kind",
+      "note": "A kind outside the three is a schema this edition does not implement.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "shoulder",
+              "parent": "base_link",
+              "kind": "floating",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true
+            }
+          ]
+        }
+      },
+      "expected": "{\"fault\":{\"code\":\"unknown_kind\",\"detail\":\"Frame shoulder has kind floating, which is not root, static or dynamic.\",\"subjects\":[\"shoulder\"]}}"
+    },
+    {
+      "id": "root-only",
+      "note": "One frame, no joints. A fixed body with nothing on it is still a valid tree.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            }
+          ]
+        }
+      },
+      "expected": "{\"fault\":null}"
+    }
+  ]
+}

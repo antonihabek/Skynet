@@ -244,6 +244,11 @@ pub struct CertificationInput {
     pub field_conformance: Option<f64>,
     /// Age of the oldest bench result in days.
     pub bench_age_days: Option<f64>,
+    /// Whether the body is simulated — [`crate::embodiment::EmbodimentDescriptor::simulator`].
+    ///
+    /// §35.3 and §70. Read from the descriptor rather than from the driver's declared ceiling,
+    /// because a simulator driver written in C++ has no language ceiling to fall back on.
+    pub simulator: bool,
 }
 
 /// What was awarded, and why.
@@ -362,6 +367,23 @@ pub fn award_certification(input: &CertificationInput) -> CertificationVerdict {
         ));
     }
 
+    // §35.3 and §70: a simulator RHAL driver declares itself one, and the declaration caps the
+    // award at guest. Not because a simulated run is worthless — the sim half of SCTS is
+    // load-bearing infrastructure and cannot run without these drivers — but because no simulated
+    // run may ever be presented as bench evidence, and a `host` badge on a body that does not exist
+    // is exactly that.
+    //
+    // Applied *after* the evidence walk rather than by refusing to walk, so the verdict still
+    // records which tier the tests would have supported. "The evidence supports host; the body is
+    // simulated, so guest" is a more useful sentence to a vendor than a silent guest, and it is the
+    // same downgrade-and-say-why rule the whole award is built on.
+    if input.simulator && (best == "host" || best == "certified") {
+        reasons.push(format!(
+            "The body is simulated (§35.3), so the award is capped at guest; the evidence supports {best}."
+        ));
+        best = "guest".to_string();
+    }
+
     // Field conformance suspends an award rather than lowering it. A robot whose commands have
     // been leaving its envelope is not a lower-tier robot — it is one whose certificate no longer
     // describes it, and the honest state is suspended pending re-measurement.
@@ -463,12 +485,68 @@ mod tests {
     }
 
     #[test]
+    fn a_simulated_body_is_capped_at_guest_and_told_why() {
+        // §35.3, §70. The cap is the body's, not the edition's: it applies whatever the driver was
+        // written in, and it applies after the walk so the vendor still learns what their evidence
+        // was worth.
+        let host_tests: Vec<SctsResult> = tests_required_for("host")
+            .iter()
+            .map(|test| SctsResult {
+                test_id: test.id.to_string(),
+                outcome: SctsOutcome::Pass,
+                value: None,
+                ran_at: "2026-08-29T00:00:00Z".to_string(),
+                detail: None,
+            })
+            .collect();
+
+        let real = award_certification(&CertificationInput {
+            claimed: "host".to_string(),
+            results: host_tests.clone(),
+            field_conformance: None,
+            bench_age_days: None,
+            simulator: false,
+        });
+        assert_eq!(real.awarded, "host");
+
+        let simulated = award_certification(&CertificationInput {
+            claimed: "host".to_string(),
+            results: host_tests,
+            field_conformance: None,
+            bench_age_days: None,
+            simulator: true,
+        });
+        assert_eq!(simulated.awarded, "guest");
+        assert!(
+            simulated
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("simulated") && reason.contains("host")),
+            "the verdict must still say what the evidence supported: {:?}",
+            simulated.reasons
+        );
+    }
+
+    #[test]
+    fn the_simulator_cap_never_manufactures_an_award() {
+        let verdict = award_certification(&CertificationInput {
+            claimed: "host".to_string(),
+            results: Vec::new(),
+            field_conformance: None,
+            bench_age_days: None,
+            simulator: true,
+        });
+        assert_eq!(verdict.awarded, "none", "a cap lowers; it does not award");
+    }
+
+    #[test]
     fn absence_is_not_a_pass() {
         let verdict = award_certification(&CertificationInput {
             claimed: "guest".to_string(),
             results: Vec::new(),
             field_conformance: None,
             bench_age_days: None,
+            simulator: false,
         });
         assert_eq!(verdict.awarded, "none");
         assert!(!verdict.missing.is_empty());
@@ -484,6 +562,7 @@ mod tests {
             results,
             field_conformance: None,
             bench_age_days: None,
+            simulator: false,
         });
         assert_eq!(verdict.awarded, "none");
         assert_eq!(verdict.missing.len(), 1);
@@ -498,6 +577,7 @@ mod tests {
             results,
             field_conformance: None,
             bench_age_days: None,
+            simulator: false,
         });
         assert_eq!(verdict.awarded, "guest");
     }
@@ -510,6 +590,7 @@ mod tests {
             results: passing(&all_ids_for("guest")),
             field_conformance: None,
             bench_age_days: None,
+            simulator: false,
         });
         assert_eq!(verdict.awarded, "guest", "downgraded, not refused");
         assert!(verdict
@@ -525,6 +606,7 @@ mod tests {
             results: passing(&all_ids_for("guest")),
             field_conformance: Some(0.99),
             bench_age_days: None,
+            simulator: false,
         });
         assert_eq!(verdict.awarded, "none");
         assert!(verdict.reasons.iter().any(|r| r.contains("suspended")));
@@ -537,6 +619,7 @@ mod tests {
             results: passing(&all_ids_for("guest")),
             field_conformance: Some(0.9995),
             bench_age_days: None,
+            simulator: false,
         });
         assert_eq!(verdict.awarded, "guest");
     }
@@ -548,6 +631,7 @@ mod tests {
             results: passing(&all_ids_for("guest")),
             field_conformance: None,
             bench_age_days: Some(400.0),
+            simulator: false,
         });
         assert_eq!(verdict.awarded, "none");
         assert_eq!(verdict.expires_in_days, Some(0.0));
@@ -564,6 +648,7 @@ mod tests {
             results: passing(&all_ids_for("guest")),
             field_conformance: None,
             bench_age_days: Some(65.0),
+            simulator: false,
         });
         assert_eq!(verdict.expires_in_days, Some(300.0));
     }
@@ -596,6 +681,7 @@ mod tests {
             results: passing(&all_ids_for("certified")),
             field_conformance: None,
             bench_age_days: None,
+            simulator: false,
         });
         assert_eq!(verdict.awarded, "none");
     }
