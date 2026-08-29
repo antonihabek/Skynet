@@ -1,0 +1,82 @@
+<!--
+  A six-joint arm with a parallel gripper and a wrist camera, shaped like the SO-101 that §67.2's
+  role table is written for.
+
+  It is deliberately *not* a model of an SO-101. The joint names match, because that is what makes
+  it useful for exercising the role path, and every dimension, mass and gain in it was chosen to
+  make a stable simulation rather than to describe a product. Nothing measured here is a fact about
+  anybody's robot, and the descriptor this scene produces says so.
+
+  It exists so `make check` runs with no downloads: a driver whose test suite needs an asset from
+  the internet is a driver whose test suite stops working the day that URL moves.
+-->
+<mujoco model="so_arm_shaped">
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.002" gravity="0 0 -9.81"/>
+
+  <default>
+    <joint damping="1.5" armature="0.02"/>
+    <geom rgba="0.7 0.7 0.75 1" density="800"/>
+    <position kp="30" dampratio="1"/>
+  </default>
+
+  <worldbody>
+    <light pos="0 0 2" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
+    <geom name="floor" type="plane" size="2 2 0.05" rgba="0.3 0.3 0.35 1"/>
+
+    <body name="base_link" pos="0 0 0.05">
+      <geom name="base" type="cylinder" size="0.05 0.05"/>
+
+      <body name="shoulder_link" pos="0 0 0.05">
+        <joint name="shoulder_pan" type="hinge" axis="0 0 1" range="-3.14 3.14"/>
+        <geom name="shoulder" type="capsule" fromto="0 0 0 0 0 0.06" size="0.035"/>
+
+        <body name="upper_arm_link" pos="0 0 0.06">
+          <joint name="shoulder_lift" type="hinge" axis="0 1 0" range="-1.9 1.9"/>
+          <geom name="upper_arm" type="capsule" fromto="0 0 0 0 0 0.14" size="0.028"/>
+
+          <body name="forearm_link" pos="0 0 0.14">
+            <joint name="elbow_flex" type="hinge" axis="0 1 0" range="-2.5 2.5"/>
+            <geom name="forearm" type="capsule" fromto="0 0 0 0 0 0.12" size="0.024"/>
+
+            <body name="wrist_link" pos="0 0 0.12">
+              <joint name="wrist_flex" type="hinge" axis="0 1 0" range="-1.8 1.8"/>
+              <geom name="wrist" type="capsule" fromto="0 0 0 0 0 0.05" size="0.02"/>
+
+              <body name="wrist_roll_link" pos="0 0 0.05">
+                <joint name="wrist_roll" type="hinge" axis="0 0 1" range="-3.0 3.0"/>
+                <geom name="wrist_roll_body" type="capsule" fromto="0 0 0 0 0 0.03" size="0.018"/>
+                <camera name="wrist_cam" pos="0.05 0 0.03" xyaxes="0 -1 0 0 0 1" fovy="58"/>
+
+                <body name="gripper_link" pos="0 0 0.03">
+                  <joint name="gripper" type="hinge" axis="1 0 0" range="0 1.1"/>
+                  <geom name="finger" type="box" size="0.005 0.012 0.03" pos="0 0.015 0.03"/>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <contact>
+    <!--
+      `base_link` is welded to the world (it has no joint), and MuJoCo's parent-child contact filter
+      makes an exception when the parent is the world body — so the base and the link above it
+      collide with each other, the shoulder actuator saturates fighting a contact, and the joint
+      does not track. It is a five-minute bug that costs an afternoon, and every fixed-base arm in
+      MJCF has it.
+    -->
+    <exclude body1="base_link" body2="shoulder_link"/>
+  </contact>
+
+  <actuator>
+    <position name="shoulder_pan"  joint="shoulder_pan"  ctrlrange="-3.14 3.14" forcerange="-12 12"/>
+    <position name="shoulder_lift" joint="shoulder_lift" ctrlrange="-1.9 1.9"   forcerange="-18 18"/>
+    <position name="elbow_flex"    joint="elbow_flex"    ctrlrange="-2.5 2.5"   forcerange="-12 12"/>
+    <position name="wrist_flex"    joint="wrist_flex"    ctrlrange="-1.8 1.8"   forcerange="-6 6"/>
+    <position name="wrist_roll"    joint="wrist_roll"    ctrlrange="-3.0 3.0"   forcerange="-4 4"/>
+    <position name="gripper"       joint="gripper"       ctrlrange="0 1.1"      forcerange="-3 3"/>
+  </actuator>
+</mujoco>

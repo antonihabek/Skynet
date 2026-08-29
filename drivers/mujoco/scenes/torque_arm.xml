@@ -1,0 +1,36 @@
+<!--
+  A two-joint arm driven by `<motor>` actuators — direct force in, direct force out.
+
+  It exists so the harness can exercise the torque path, which is the one where the command mask has
+  no correct answer: holding a torque-controlled joint means computing gravity compensation, and
+  commanding zero torque drops the arm. The driver refuses rather than approximating, and this scene
+  is what that refusal is tested against.
+-->
+<mujoco model="torque_arm">
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.002" gravity="0 0 -9.81"/>
+
+  <worldbody>
+    <light pos="0 0 2"/>
+    <body name="base_link" pos="0 0 0.2">
+      <geom name="base" type="box" size="0.03 0.03 0.03"/>
+      <body name="link1" pos="0 0 0.09">
+        <joint name="j1" type="hinge" axis="0 1 0" range="-2 2"/>
+        <geom name="g1" type="capsule" fromto="0 0 0 0 0 0.1" size="0.02"/>
+        <body name="link2" pos="0 0 0.1">
+          <joint name="j2" type="hinge" axis="0 1 0" range="-2 2"/>
+          <geom name="g2" type="capsule" fromto="0 0 0 0 0 0.08" size="0.016"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <contact>
+    <exclude body1="base_link" body2="link1"/>
+  </contact>
+
+  <actuator>
+    <motor name="j1" joint="j1" forcerange="-10 10"/>
+    <motor name="j2" joint="j2" forcerange="-5 5"/>
+  </actuator>
+</mujoco>
