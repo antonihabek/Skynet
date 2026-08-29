@@ -1,0 +1,57 @@
+<!--
+  Three actuators the RHAL cannot carry, and one it can.
+
+  Each of the three is a real thing a modeller writes, and each would become a joint index whose
+  commands do not mean what the control mode says they mean:
+
+  * a **tendon** actuator drives a routed cable, not a joint, so there is no joint index for it;
+  * an **intvelocity** actuator has internal state, so `ctrl` is a rate for an integrator rather than
+    a position, a velocity or a torque;
+  * a **ball** joint is three degrees of freedom behind one name, and the RHAL's arrays carry one
+    scalar per joint.
+
+  The driver names each one and leaves it out, and the harness asserts that the body that comes back
+  has exactly one joint rather than four.
+-->
+<mujoco model="oddities">
+  <compiler angle="radian" autolimits="true"/>
+
+  <worldbody>
+    <light pos="0 0 2"/>
+    <body name="base_link" pos="0 0 0.2">
+      <geom name="base" type="box" size="0.03 0.03 0.03"/>
+      <site name="anchor" pos="0 0 0.03"/>
+      <body name="link1" pos="0 0 0.06">
+        <joint name="plain" type="hinge" axis="0 1 0" range="-1 1"/>
+        <geom name="g1" type="capsule" fromto="0 0 0 0 0 0.08" size="0.015"/>
+        <site name="tip" pos="0 0 0.08"/>
+        <body name="link2" pos="0 0 0.1">
+          <joint name="rolling" type="hinge" axis="1 0 0" range="-1 1"/>
+          <geom name="g2" type="sphere" size="0.02"/>
+        </body>
+        <body name="link3" pos="0 0.08 0.04">
+          <joint name="wobble" type="ball"/>
+          <geom name="g3" type="sphere" size="0.015"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <contact>
+    <exclude body1="base_link" body2="link1"/>
+  </contact>
+
+  <tendon>
+    <spatial name="cable">
+      <site site="anchor"/>
+      <site site="tip"/>
+    </spatial>
+  </tendon>
+
+  <actuator>
+    <position name="plain" joint="plain" kp="4" ctrlrange="-1 1"/>
+    <motor name="cable_pull" tendon="cable" forcerange="-5 5"/>
+    <intvelocity name="rolling" joint="rolling" kp="2" actrange="-1 1"/>
+    <motor name="wobble" joint="wobble" gear="0 0 1" forcerange="-1 1"/>
+  </actuator>
+</mujoco>

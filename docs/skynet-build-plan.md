@@ -1158,6 +1158,101 @@ Prepare the architecture for:
 - robot data collection
 - fleet management
 
+### Phase 8 — Production evidence gate
+
+Before expanding the public surface, prove the deployed Hub path end to end:
+
+- migrations, RLS, private artifact storage, signed upload/download, scanning, and reconciliation
+- public/private repository authorization for session, API-token, worker, and device credentials
+- immutable draft → upload → scan → publish → authorized download → digest/signature verification
+- lease expiry, retry/idempotency, audit logs, monitoring, backup/restore, and incident alerts
+
+Do not call a repository, artifact, worker, or security feature operational only because its schema,
+route, or UI exists. Require deploy-path integration evidence.
+
+### Phase 9 — Repository and dataset completion
+
+Complete the workflows expected from a serious repository hub while keeping immutable artifact
+releases as the physical-AI source of truth:
+
+- Git interoperability or an external-Git mirror for source code, with commit/branch/tag provenance
+- protected release channels, review approvals, required checks, release policy, and source-to-release traceability
+- file/manifest diffs and line-level source review where the artifact is text/code
+- scalable dataset preview, sample/trajectory/video viewer, split/shard manifest, range/stream access,
+  quality reports, consent/license lineage, retention, deletion, and reproducibility links
+- CLI, SDK, and API contract tests covering repository, artifact, release, pull-request, evaluation,
+  device, and deployment workflows
+
+If native Git clone/push/pull is required, implement it in a dedicated Git service rather than a
+Next.js route handler.
+
+### Phase 10 — Real worker, simulation, and evaluation execution
+
+Convert the durable job control plane into real, reproducible execution:
+
+- signed reference worker images, ephemeral sandboxed workspaces, least-privilege leases, resource
+  limits, cancellation, structured logs, artifact/result upload, and validated completion
+- one real first simulator integration and deterministic replay fixtures
+- simulator/runtime/hardware attestation, result validation, leaderboard eligibility, and quarantine
+  for unverifiable runs
+- worker health, capacity, queue depth, cost, and stale-lease monitoring
+
+A non-seeded evaluation must run from immutable inputs on a registered worker and survive retry
+without double-writing before it is represented as a real result.
+
+### Phase 11 — Managed compute and interactive Spaces
+
+Build on the verified worker path instead of creating separate execution systems:
+
+- GPU training with reviewed recipes, quotas, hardware attestation, checkpoints, resume, metrics,
+  cancellation, retention, and verifiable output-version publication
+- version-pinned inference endpoints with supported-runtime declarations, authentication, metering,
+  resource limits, audit boundaries, and teardown
+- browser Spaces as isolated short-lived worker sessions with declared image/policy/environment
+  versions, session authorization, WebSocket transport, resource caps, queue visibility, and no
+  actuator credentials
+
+Never execute untrusted uploaded code in the web tier.
+
+### Phase 12 — Device agent, fleet, deployment, and teleoperation
+
+Start in a simulator, then use a controlled physical test device:
+
+- device enrollment, rotating credentials, hardware/image attestation, offline-safe local state,
+  buffered telemetry, and explicit capability declarations
+- desired-state reconciliation, signed package install, canary rollout, readiness/health acknowledgement,
+  pause, rollback, drift detection, and auditable deployment events
+- teleoperation and episode ingestion with time synchronization, calibration metadata, operator
+  intervention identity, consent/retention, encrypted upload, integrity verification, and dataset finalization
+- fleet inventory, rollout, health, logs, black-box artifacts, and incident workflows
+
+The platform must never treat an optimistic API write as a successful robot deployment.
+
+### Phase 13 — Skynet OS, RHAL, and hardware safety
+
+Implement the runtime specified in `docs/skynet-os-architecture.md` as hardware-backed software,
+not as Hub-side TypeScript alone:
+
+- shared Rust contracts for embodiment, transport, package admission, and safety, compiled for Hub/WASM
+  and device use with differential tests against the TypeScript reference
+- allocation-free C/Rust Safety Kernel and an RHAL simulator driver, then one real driver under bench supervision
+- `skynetd`, black-box recording, calibration expiry, signed A/B OTA, measured boot/secure-element identity,
+  conformance suites, and an independent safety-MCU path for the Certified tier
+- clear Guest/Host/Certified enforcement labels; Guest observation never becomes a safety claim
+
+No Certified-tier or real-safety claim is allowed until hardware tests demonstrate independent stop,
+watchdog/envelope protection, package provenance enforcement, rollback, and Hub/device plan parity.
+
+### Phase 14 — Governance and commercial readiness
+
+Only after the verified execution and fleet paths exist:
+
+- workload accounting, tenant quotas, artifact/data retention, privacy/export/deletion, takedown,
+  abuse reporting, incident response, and published service-level objectives
+- marketplace entitlements for paid artifacts, compute, inference, and enterprise fleet access that
+  cannot bypass repository authorization, provenance, worker isolation, device grants, or safety gates
+- clear evidence levels on compatibility, benchmark, deployment, and conformance badges
+
 ---
 
 # 32. Most important product principle

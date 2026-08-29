@@ -96,19 +96,21 @@ it, which says no when the answer is no.
 | `crates/skynet-sha256` — SHA-256 | Held to the FIPS 180-4 vectors, 4 tests |
 | `crates/skynet-urdf` — URDF import (§63.4) | XML reader, model, role suggestion, descriptor, 37 tests |
 | `crates/skynet-cli` — the `skynet` command | descriptor, transport, role, driver new/check, 31 tests |
-| `corpus/` — the conformance corpus | 254 cases, 18 files |
-| `crates/skynet-corpus` — the corpus runner | Reproduces all 254 byte for byte |
+| `crates/skynetd` — the supervisor's brain (§33) | Reconciler, supervision, health, leases; pure, 35 tests. The I/O half is not written |
+| `corpus/` — the conformance corpus | 270 cases, 19 files |
+| `crates/skynet-corpus` — the corpus runner | Reproduces all 270 byte for byte |
 | `reference/typescript/` — the oracle | Vendored from the Hub; generates the corpus |
 | `bindings/python` — the Python RHAL | Driver protocol plus a ctypes ABI view, offset-asserted |
 | `drivers/mock` — the mock robot | 24 sim-conformance checks, no hardware |
 | `drivers/python-host` — the Python driver host | Runs a Python driver out of process, so its stop path is real |
 | `drivers/lerobot` — the LeRobot bridge (§67) | Role tables, 70 checks against a fake; Guest tier |
+| `drivers/mujoco` — the MuJoCo simulator driver (§70) | 103 checks against real physics; Guest tier, twice over |
 
-**Not built, and the specification says so on its own behalf:** `skynetd`, the policy runtime, OTA,
-the black box, the on-robot console, the safety MCU, and every driver that talks to real hardware —
-`ros2_control`, EtherCAT, CANopen, the simulators and the vendor SDKs. The realistic figure for a
-robot moving under this is several engineer-years. §59.5 states that plainly and this README does
-not improve on it.
+**Not built, and the specification says so on its own behalf:** everything in `skynetd` that touches
+the machine, the policy runtime, the SPSC ring, OTA, the black box, the on-robot console, the safety
+MCU, and every driver that talks to real hardware — `ros2_control`, EtherCAT, CANopen and the vendor
+SDKs. The realistic figure for a robot moving under this is several engineer-years. §59.5 states that
+plainly and this README does not improve on it.
 
 ---
 
@@ -171,6 +173,12 @@ ABI in [`bindings/c/skynet_rhal.h`](bindings/c/skynet_rhal.h), and that is the e
 [`drivers/python-host`](drivers/python-host/) is what loads it. Guest tier — Python's GIL and garbage
 collector cannot hold a real-time path, and the host refuses to load a Python driver that claims
 otherwise.
+
+**And if you have no robot at all**, [`drivers/mujoco`](drivers/mujoco/) turns an MJCF scene into
+one: a descriptor built from the scene, a clock that is the simulator's (§35.3), a camera where the
+machine can render, and `simulator: true` on the descriptor so nothing it produces can be presented
+as bench evidence. That is what makes the sim half of SCTS runnable against physics rather than
+against a mock, which is why §70 calls simulator drivers load-bearing rather than a lesser path.
 Four properties make it a contract rather than an interface:
 
 * **`abi_version` is checked at load and mismatches refuse.** The OS ships weekly, the driver ships
@@ -271,6 +279,7 @@ crates/          The Rust reference edition.
   skynet-contracts   L2: transport, admission, certification, readiness.
   skynet-urdf        URDF import. The only crate that links std, because it is a tool.
   skynet-cli         The `skynet` command, and the only unsafe outside the ABI.
+  skynetd            The supervisor's brain: reconcile, supervise, health, leases. Pure.
   skynet-corpus      Holds this edition to the corpus.
 corpus/          The conformance corpus. Plain data, no code.
 reference/       The TypeScript oracle the corpus is generated from.
@@ -279,6 +288,7 @@ drivers/
   mock               A body that answers the RHAL with no hardware, and injects the faults.
   python-host        Runs a Python driver out of process. One shared object, one symbol.
   lerobot            The LeRobot bridge (§67). Guest tier, and it says so everywhere.
+  mujoco             The MuJoCo simulator driver (§70). A scene file becomes a body.
 ```
 
 Why this is a separate repository from the Hub, and not a subdirectory (§72.1): a subdirectory of a

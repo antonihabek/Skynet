@@ -736,6 +736,515 @@
         ]
       },
       "expected": "{\"awarded\":\"none\",\"expires_in_days\":null,\"failures\":[],\"missing\":[],\"reasons\":[]}"
+    },
+    {
+      "id": "host-on-a-real-body",
+      "note": "The same evidence, on a body that exists.",
+      "input": {
+        "claimed": "host",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.rate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.latency",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.signed",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.limits.sourced",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.roles.coverage",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.watchdog.fires",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.envelope.clamps",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.estop.latency",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.ratelimit.enforced",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.budget.enforced",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "ota.rollback.works",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "ota.safe_state.respected",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "ota.safety_gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "telemetry.blackbox.complete",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "telemetry.replay.deterministic",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.reconcile.resumes",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.identity.attested",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ]
+      },
+      "expected": "{\"awarded\":\"host\",\"expires_in_days\":null,\"failures\":[],\"missing\":[],\"reasons\":[]}"
+    },
+    {
+      "id": "simulated-caps-at-guest",
+      "note": "A simulator declares itself one (§35.3), and the declaration caps the award at guest — while the verdict still records what the evidence would have supported.",
+      "input": {
+        "claimed": "host",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.rate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.latency",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.signed",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.limits.sourced",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.roles.coverage",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.watchdog.fires",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.envelope.clamps",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.estop.latency",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.ratelimit.enforced",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.budget.enforced",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "ota.rollback.works",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "ota.safe_state.respected",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "ota.safety_gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "telemetry.blackbox.complete",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "telemetry.replay.deterministic",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.reconcile.resumes",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.identity.attested",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ],
+        "simulator": true
+      },
+      "expected": "{\"awarded\":\"guest\",\"expires_in_days\":null,\"failures\":[],\"missing\":[],\"reasons\":[\"The body is simulated (§35.3), so the award is capped at guest; the evidence supports host.\"]}"
+    },
+    {
+      "id": "simulated-guest-unchanged",
+      "note": "The cap only ever lowers. A guest claim on a simulated body is already at the ceiling and gains no reason.",
+      "input": {
+        "claimed": "guest",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ],
+        "simulator": true
+      },
+      "expected": "{\"awarded\":\"guest\",\"expires_in_days\":null,\"failures\":[],\"missing\":[],\"reasons\":[]}"
+    },
+    {
+      "id": "simulated-no-evidence",
+      "note": "The cap never manufactures an award: nothing measured is still nothing awarded, simulated or not.",
+      "input": {
+        "claimed": "host",
+        "results": [],
+        "simulator": true
+      },
+      "expected": "{\"awarded\":\"none\",\"expires_in_days\":null,\"failures\":[],\"missing\":[\"rhal.abi.version\",\"rhal.state.completeness\",\"rhal.command.rejection\",\"embodiment.descriptor.valid\",\"safety.kernel.parity\",\"safety.policy.isolation\",\"package.signature.required\",\"package.grants.gate\",\"offline.control.independent\",\"security.credential.scope\"],\"reasons\":[\"guest: 0 failing, 10 unmeasured.\"]}"
+    },
+    {
+      "id": "simulated-and-lapsed",
+      "note": "The cap runs before expiry, so a simulated body with year-old bench results still lapses to none rather than resting at guest.",
+      "input": {
+        "claimed": "host",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.rate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.latency",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.signed",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.limits.sourced",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.roles.coverage",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.watchdog.fires",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.envelope.clamps",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.estop.latency",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.ratelimit.enforced",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.budget.enforced",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "ota.rollback.works",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "ota.safe_state.respected",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "ota.safety_gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "telemetry.blackbox.complete",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "telemetry.replay.deterministic",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.reconcile.resumes",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.identity.attested",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ],
+        "simulator": true,
+        "bench_age_days": 400
+      },
+      "expected": "{\"awarded\":\"none\",\"expires_in_days\":0,\"failures\":[],\"missing\":[],\"reasons\":[\"The body is simulated (§35.3), so the award is capped at guest; the evidence supports host.\",\"Bench results are older than a year; the award has lapsed.\"]}"
     }
   ]
 }

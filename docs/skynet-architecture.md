@@ -341,3 +341,138 @@ Robot deployment is treated as higher-risk than ordinary web software:
   browser Spaces rendering, physical deployment rollout, teleoperation capture, fleet management.
   Each has its schema, API, job kind, permission model and UI — and reports honestly that it is
   waiting on a registered worker rather than displaying invented results.
+
+## 9. Completion roadmap and evidence gates
+
+The repository/control plane above is not enough to call Skynet a complete GitHub/Hugging
+Face-style physical-AI platform. The following phases close the remaining gaps in dependency
+order. A feature is **not** described as operational, publicly launched, or safety-enforcing until
+its phase's exit gate has evidence from the deployed path.
+
+### Phase A — prove the existing Hub in production
+
+Before adding more surface area, verify the deployed foundation:
+
+* the Skynet migrations, private `skynet-artifacts` bucket, Storage policies, CSP, signed upload
+  URLs, signed download URLs, scanner, and artifact deletion/reconciliation path;
+* RLS and service-role authorization for public/private repositories, API tokens, worker tokens,
+  device tokens, teams, secrets, and gated repository access;
+* a real end-to-end release: authenticated draft → direct upload → scan → publish → authorized
+  download → signed digest/signature verification;
+* rate limits, audit records, worker-lease expiry, retry/idempotency, backup/restore, and alerting.
+
+**Exit gate:** automated integration tests against the deployed project pass these flows, and an
+operator can produce their evidence without seeding fake models, benchmark results, or workers.
+
+### Phase B — complete repository and data-product workflows
+
+Keep immutable artifact releases as Skynet's source of truth, but add the developer workflows a
+repository hub still lacks:
+
+* Git interoperability for source repositories: clone/push/pull transport or a proven external-Git
+  mirror, commit/branch/tag provenance, protected release channels, review approvals, required
+  status checks, and source-to-release traceability. Do not implement a Git smart-HTTP server in
+  a Next.js route; isolate it as a dedicated service if native transport is required.
+* repository review UX: file and manifest diffs, line-level review for text/source artifacts,
+  review assignments, checks, release approval records, and policy-controlled merge/publish.
+* dataset product workflows: schema previews, sample/trajectory/video viewing, split and shard
+  manifests, resumable/ranged download or streaming, quality reports, licensing/consent lineage,
+  deletion/takedown, and dataset-to-training/evaluation provenance.
+* real SDK and CLI contract tests for login, upload, download, release, pull-request, evaluation,
+  device, and deployment paths; generated OpenAPI/API compatibility checks for public clients.
+
+**Exit gate:** a developer can reproduce a published release from its source revision and artifact
+digest, review it through a protected release workflow, and consume a dataset without moving the
+entire dataset through the web application.
+
+### Phase C — make workers, simulation, and evaluation real
+
+The job protocol becomes a product only when an external worker can execute safely and report a
+reproducible result:
+
+* ship a reference worker image with pinned runtime versions, signed image digest, least-privilege
+  worker credentials, sandboxed ephemeral workspaces, resource limits, cancellation, structured
+  logs, result/artifact upload, and secret access only for its verified live lease;
+* register a first real simulator adapter — start with MuJoCo or another CI-feasible simulator —
+  and run one published policy/environment/robot evaluation end to end;
+* add deterministic replay fixtures, simulator-version and hardware/driver attestation, result
+  validation, leaderboard eligibility rules, and a quarantine path for failed or unverifiable runs;
+* add worker health, queue depth, capacity, cost, and stale-lease monitoring before admitting
+  unbounded user workloads.
+
+**Exit gate:** a non-seeded evaluation starts from immutable versions, runs on a registered worker,
+produces signed provenance and artifacts, survives a worker crash/retry without double-writing, and
+appears on a leaderboard only after result validation.
+
+### Phase D — managed training, inference, and Spaces
+
+After one verified worker path exists, expand it rather than creating parallel execution systems:
+
+* GPU training workers for declared, reviewed recipes with quota, hardware attestation,
+  checkpoint/resume, metric streaming, experiment comparison, cancellation, retention, and
+  output-version publication;
+* inference workers behind version-pinned endpoints with explicit supported runtimes, hardware
+  limits, authentication, metering, rate limits, request/response audit boundaries, and teardown;
+* browser Spaces as isolated, short-lived worker sessions with a declared image, policy/environment
+  versions, WebSocket/session authorization, resource caps, queue position, user-visible failure
+  state, and no direct actuator credential;
+* tenant quotas and budgets before public submission, so simulations, training, and inference cannot
+  consume unbounded GPU capacity.
+
+**Exit gate:** an approved workload can train or run from pinned inputs, resume after an interruption,
+publish a verifiable output version, and expose a bounded interactive demo without executing
+untrusted uploaded code in the web tier.
+
+### Phase E — robot agent, fleet control plane, and data collection
+
+Build the edge path in a simulator first, then on a controlled physical test robot:
+
+* a minimal Skynet agent with device enrollment, hardware/image attestation, rotating credentials,
+  offline-safe local state, telemetry buffering, and explicit capabilities;
+* desired-state reconciliation for signed package install, capability grant, health/readiness,
+  canary waves, pause, rollback, and audit trails; deployment status must be derived from device
+  acknowledgement, never from an optimistic API write;
+* episode/teleoperation ingestion with clock synchronization, calibrated sensor metadata, operator
+  identity/intervention records, consent/retention controls, encrypted upload, and dataset
+  finalization only after integrity checks;
+* fleet dashboards for device inventory, version drift, rollout progress, health, logs, black-box
+  artifacts, and incident handling.
+
+**Exit gate:** a test device can enroll, pull a signed desired state after reconnecting, reject an
+unauthorized or incompatible package, complete a canary deployment, roll back from a failed health
+check, and upload an integrity-verified episode without a network dependency in its control loop.
+
+### Phase F — Skynet OS and the safety/runtime boundary
+
+The TypeScript Hub-side reference modules are not a robot OS. Implement and verify the runtime in
+layers described by `docs/skynet-os-architecture.md`:
+
+* move shared embodiment, transport, package, and safety contracts into a Rust crate with Hub/WASM
+  and device consumers plus differential tests against the TypeScript reference;
+* build the allocation-free C or Rust Safety Kernel and an RHAL simulator driver first; prove that
+  the kernel is the only actuator writer, guards stale/over-limit commands, and fails safely;
+* add one real vendor or ROS 2/RHAL driver under bench supervision, then a hardware-backed
+  conformance suite for timing, command latency, stop path, embodiment signatures, and transport;
+* add `skynetd`, signed A/B OTA, measured boot/secure-element device identity, black-box logging,
+  calibration expiry, and a safety-MCU path before any certified-tier claim;
+* keep Guest, Host, and Certified enforcement tiers visibly distinct. Guest monitoring is not
+  safety enforcement, and no Hub UI may imply otherwise.
+
+**Exit gate:** a hardware-backed test demonstrates independent safe stop, watchdog/envelope
+protection, package provenance enforcement, deterministic rollback, and parity between the Hub's
+reported plan and the device's enforced plan. Certification claims require independent assessment;
+Skynet only supplies evidence.
+
+### Phase G — operations, governance, and commercial readiness
+
+Only after the verified execution and fleet paths exist:
+
+* define workload cost accounting, tenant quotas, retention, legal/privacy controls for robot data,
+  abuse reporting, artifact takedown, export/deletion, and incident response;
+* add marketplace entitlements for paid artifacts, compute, inference, and enterprise fleet access
+  without weakening immutable provenance, authorization, or the safety boundary;
+* set service-level objectives for Hub APIs, workers, artifact availability, fleet reconciliation,
+  and incident recovery; publish the evidence level of every verification badge.
+
+**Exit gate:** paid or enterprise capabilities cannot bypass repository permissions, signed release
+provenance, worker isolation, device capability grants, or rollout safety gates.
