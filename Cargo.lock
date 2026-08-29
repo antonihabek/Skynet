@@ -3,6 +3,15 @@
 version = 3
 
 [[package]]
+name = "skynet-blackbox"
+version = "0.1.0"
+dependencies = [
+ "skynet-json",
+ "skynet-kernel",
+ "skynet-sha256",
+]
+
+[[package]]
 name = "skynet-cli"
 version = "0.1.0"
 dependencies = [
@@ -11,6 +20,7 @@ dependencies = [
  "skynet-rhal",
  "skynet-sha256",
  "skynet-urdf",
+ "skynetd-io",
 ]
 
 [[package]]
@@ -19,15 +29,18 @@ version = "0.1.0"
 dependencies = [
  "skynet-json",
  "skynet-kernel",
+ "skynet-sha256",
 ]
 
 [[package]]
 name = "skynet-corpus"
 version = "0.1.0"
 dependencies = [
+ "skynet-blackbox",
  "skynet-contracts",
  "skynet-json",
  "skynet-kernel",
+ "skynet-sha256",
 ]
 
 [[package]]
@@ -60,4 +73,15 @@ name = "skynetd"
 version = "0.1.0"
 dependencies = [
  "skynet-json",
+]
+
+[[package]]
+name = "skynetd-io"
+version = "0.1.0"
+dependencies = [
+ "skynet-blackbox",
+ "skynet-contracts",
+ "skynet-json",
+ "skynet-sha256",
+ "skynetd",
 ]

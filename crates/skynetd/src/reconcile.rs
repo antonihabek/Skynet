@@ -437,8 +437,14 @@ pub fn plan(desired: &DesiredState, actual: &Actual) -> Plan {
     for entry in &actual.units {
         let wanted = desired.package(&entry.id).map(|package| package.state);
         let should_run = wanted == Some(RunState::Running);
+        // A running package whose activation is pending has to be stopped, or the swap its own
+        // gate is waiting for never becomes possible. Without this an upgrade to a *running*
+        // policy is a plan that defers for ever: nothing wants it stopped, so nothing stops it,
+        // so the activation never opens. Found by upgrading one on a machine with real systemd,
+        // where it is the ordinary case rather than the interesting one.
+        let swap_pending = swap_pending(desired, actual, &entry.id);
         match entry.state {
-            UnitState::Running if !should_run => actions.push(Action::new(
+            UnitState::Running if !should_run || swap_pending => actions.push(Action::new(
                 5,
                 ActionKind::StopPackage {
                     id: entry.id.clone(),
@@ -514,6 +520,22 @@ pub fn plan(desired: &DesiredState, actual: &Actual) -> Plan {
     actions.sort_by_key(|action| action.stage);
 
     Plan { actions }
+}
+
+/// Whether this package has an activation waiting on it stopping.
+///
+/// The stop is emitted for it rather than the gate being relaxed, and the difference matters. §33.4
+/// gates an activation on a safe state; this edition additionally waits for the package to stop,
+/// because a `current` link pointing at a version different from the one executing is a report that
+/// lies to every operator who reads it. §33.5 is what makes that affordable: a restart is never a
+/// motion event, because the kernel holds throughout.
+fn swap_pending(desired: &DesiredState, actual: &Actual, id: &str) -> bool {
+    let Some(package) = desired.package(id) else {
+        return false;
+    };
+    actual
+        .installed(id)
+        .is_some_and(|entry| !entry.activated || entry.digest != package.digest)
 }
 
 /// What gates activating a package of this kind.

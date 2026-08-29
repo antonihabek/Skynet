@@ -17,7 +17,9 @@ members = [
   "crates/skynet-contracts",
   "crates/skynet-urdf",
   "crates/skynet-cli",
+  "crates/skynet-blackbox",
   "crates/skynetd",
+  "crates/skynetd-io",
   "crates/skynet-corpus",
 ]
 

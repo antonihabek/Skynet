@@ -32,6 +32,26 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      # The daemon, against the machine rather than against a model. `skynetd-io`'s suite proves
+      # the store and the reconciler over a temporary directory; this proves the pieces fit: a
+      # package is staged, verified, activated through a symlink, launched as a transient systemd
+      # unit under its declared cgroup limits, and driven through a Unix socket by the CLI.
+      #
+      # The launch step needs a systemd manager. Where there is one the run is *required* to reach
+      # it, so a runner that quietly lost systemd fails the job rather than passing a shorter exam —
+      # which is the failure mode §15 spends a whole rule on, and which this repository has already
+      # found in its own CI once.
+      - name: The daemon, end to end
+        run: |
+          cargo build -p skynetd-io -p skynet-cli
+          if systemd-run --user --unit=skynet-ci-probe --collect /bin/true 2>/dev/null; then
+            echo "a user systemd manager is here; the launch step is required to run"
+            export SKYNET_REQUIRE_SYSTEMD=1
+          else
+            echo "::warning::no user systemd manager on this runner — the launch step will be reported as not run"
+          fi
+          SKYNET_BIN=target/debug sh crates/skynetd-io/e2e.sh
+
       # The kernel builds for a bare-metal target with no operating system under it. This is the
       # certified tier's argument made mechanical: one source, two targets, and if the kernel ever
       # acquires a dependency on `std` or an allocator, this is where it is caught rather than in a
@@ -188,7 +208,7 @@ jobs:
       # Every other crate can be, and stays that way.
       - name: Everything but the ABI and the loader forbids unsafe
         run: |
-          for crate in skynet-json skynet-sha256 skynet-kernel skynet-contracts skynet-urdf skynetd; do
+          for crate in skynet-json skynet-sha256 skynet-kernel skynet-contracts skynet-urdf skynetd skynetd-io skynet-blackbox; do
             grep -q 'forbid(unsafe_code)' "crates/$crate/src/lib.rs" || {
               echo "::error::crates/$crate dropped forbid(unsafe_code)."
               exit 1
@@ -202,17 +222,73 @@ jobs:
       # rather than remembered absent.
       - name: skynetd cannot reach the RHAL
         run: |
-          # A dependency *line*, not the word: the manifest explains at length why the edge
+          # Both halves. §33.1 is a property of the *daemon*: "it never touches an actuator" stops
+          # being true the moment either crate can, and the I/O half is the one that can actually
+          # open things.
+          #
+          # A dependency *line*, not the word: both manifests explain at length why the edge
           # is absent, and a check that a comment saying "not skynet-rhal" trips is a check
           # that punishes writing the reason down.
-          if grep -qE '^[[:space:]]*skynet-rhal[[:space:]]*=' crates/skynetd/Cargo.toml; then
-            echo "::error::skynetd took a dependency on skynet-rhal."
-            echo "§33.1: skynetd is not safety-critical *because* it never touches an actuator."
-            echo "Everything else in §33 — the reconciler, the network exposure, the JSON parser —"
-            echo "is licensed by that property, and this edge is how it would be lost."
+          # `skynet-blackbox` is in the list because `skynetd-io` depends on it, and a transitive
+          # edge reaches an actuator exactly as well as a direct one. The black box records
+          # `rhal_state` (§26), so the crate that declares those structs is the obvious dependency
+          # to take and the one that would quietly restore what §33.1 removed.
+          for crate in skynetd skynetd-io skynet-blackbox; do
+            if grep -qE '^[[:space:]]*skynet-rhal[[:space:]]*=' "crates/$crate/Cargo.toml"; then
+              echo "::error::$crate took a dependency on skynet-rhal."
+              echo "§33.1: skynetd is not safety-critical *because* it never touches an actuator."
+              echo "Everything else in §33 — the reconciler, the network exposure, the JSON parser —"
+              echo "is licensed by that property, and this edge is how it would be lost."
+              exit 1
+            fi
+            # The identifier in *code*, not in prose. The manifests and the modules explain at
+            # length why the edge is absent, and a check that trips on a comment saying "not
+            # skynet-rhal" is a check that punishes writing the reason down — which is how the
+            # reason stops being written down.
+            if grep -rnE 'skynet_rhal' "crates/$crate/src/" | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|[*])'; then
+              echo "::error::$crate names skynet_rhal outside a comment."
+              exit 1
+            fi
+          done
+
+      # §33.3's two claims — converges from any starting state, idempotent — are properties of a
+      # *function*. They are only assertable because `skynetd` is pure, so the purity is asserted
+      # rather than remembered: the brain does not read a clock, open a socket, spawn a process or
+      # touch the filesystem. Everything that does lives in `skynetd-io`.
+      - name: The reconciler stays a pure function
+        run: |
+          if grep -rnE 'std::(fs|net|process|thread)|SystemTime|Instant::now|std::os::' crates/skynetd/src/; then
+            echo "::error::skynetd reached for I/O."
+            echo "§33.3 claims the reconciler converges from any starting state and is idempotent."
+            echo "Those are properties of a function; about a program that also talks to systemd"
+            echo "they are a hope. The I/O half is crates/skynetd-io."
             exit 1
           fi
-          ! grep -rq 'skynet_rhal' crates/skynetd/src/
+
+      # §13 and §41.1. The black box's guarantee is completeness, and the shape of that guarantee is
+      # that a window with a hole in it *says so* rather than being refused. Sealing an incomplete
+      # recording must stay possible: the recording most likely to have a hole in it is the one
+      # covering the fault that made the hole, and refusing to produce it would destroy the only
+      # evidence at the moment it is worth something.
+      - name: An incomplete recording is still sealed, and still says it is incomplete
+        run: |
+          grep -q 'pub fn complete' crates/skynet-blackbox/src/seal.rs
+          if grep -nE 'return .*(Err|None).*incomplete|if !continuity.complete\(\)' \
+              crates/skynet-blackbox/src/seal.rs; then
+            echo "::error::seal() grew a path that refuses an incomplete window."
+            echo "§41.1: the guarantee is 'complete, or the run is not conformant' — which is a"
+            echo "statement about conformance, not a licence to withhold the evidence."
+            exit 1
+          fi
+
+      # §41.1's other half, from the direction it would actually be lost. The event vocabulary is a
+      # closed enum so that ordinary logging cannot reach the black box; an open one — a free string
+      # subject, a formatted message as a code — is how a recorder becomes a log file and the
+      # completeness guarantee stops meaning anything.
+      - name: The black box event vocabulary stays closed
+        run: |
+          grep -q 'pub enum EventCode' crates/skynet-blackbox/src/record.rs
+          grep -q 'A closed enum rather than a free string' crates/skynet-blackbox/src/record.rs
 
       # The workspace has no third-party dependencies. A vendor building a driver in 2036 should be
       # able to build this with no network, and the kernel cannot reach most of the ecosystem
@@ -220,10 +296,17 @@ jobs:
       - name: No third-party dependencies
         run: |
           # Cargo.lock is the resolved graph, so this catches a transitive dependency as readily as
-          # a direct one. Every package in it must be one of ours.
-          if grep '^name = ' Cargo.lock | grep -v '^name = "skynet-'; then
-            echo "::error::A third-party dependency entered the workspace."
+          # a direct one. Every package in it must be a workspace member, and the member list is
+          # read from Cargo.toml rather than matched against a prefix — the prefix version of this
+          # check reported `skynetd` as a third-party crate, because `skynetd` does not begin with
+          # `skynet-`, and it had been failing since that crate landed.
+          members=$(sed -n 's#^  "crates/\(.*\)",$#\1#p' Cargo.toml | sort)
+          locked=$(sed -n 's#^name = "\(.*\)"$#\1#p' Cargo.lock | sort)
+          if [ "$members" != "$locked" ]; then
+            echo "::error::Cargo.lock does not hold exactly the workspace members."
             echo "The kernel is no_std without alloc and cannot reach most of the ecosystem; the"
             echo "rest of the workspace stays dependency-free so a vendor can build it with no network."
+            echo "members:"; echo "$members" | sed 's/^/  /'
+            echo "locked:";  echo "$locked"  | sed 's/^/  /'
             exit 1
           fi

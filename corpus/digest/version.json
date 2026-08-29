@@ -1,0 +1,360 @@
+{
+  "corpus": "digest",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "empty",
+      "note": "No files and an empty manifest — the degenerate case, pinned so the framing cannot drift unnoticed.",
+      "input": {
+        "kind": "policy",
+        "version": "0.0.0",
+        "manifest": {},
+        "files": []
+      },
+      "expected": "{\"digest\":\"1d8c0a748d16664e6c98886e388e9e02442f5681b63b55fc0167e8e3aeb70cf0\",\"error\":null}"
+    },
+    {
+      "id": "one-file",
+      "note": "One file. The list contributes a single line with no trailing separator.",
+      "input": {
+        "kind": "policy",
+        "version": "1.0.0",
+        "manifest": {},
+        "files": [
+          {
+            "path": "policy.onnx",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      },
+      "expected": "{\"digest\":\"c2fdbc2b4ff18e62ca992ffd0a1a0faccbc94644099143a1423dff65f5b86355\",\"error\":null}"
+    },
+    {
+      "id": "manifest-key-order",
+      "note": "Keys given in a deliberately unhelpful order. Canonicalisation is what makes the digest a property of the content rather than of the editor that wrote it.",
+      "input": {
+        "kind": "policy",
+        "version": "1.4.0",
+        "manifest": {
+          "isolation": "wasm",
+          "budget": {
+            "control_hz": 50,
+            "cpu_cores": 1.5,
+            "ram_mb": 512
+          },
+          "kind": "policy",
+          "version": "1.4.0",
+          "id": "openrobot/grasp",
+          "schema_version": 1
+        },
+        "files": [
+          {
+            "path": "policy.onnx",
+            "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          },
+          {
+            "path": "manifest.json",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      },
+      "expected": "{\"digest\":\"b72a043fd3c52ad86160f67b77b6467618c2e10ae92706992d29a26711db2bf0\",\"error\":null}"
+    },
+    {
+      "id": "manifest-canonical-equivalent",
+      "note": "The same manifest written the natural way, and the same two files. Must produce the identical digest to `manifest-key-order`, which is the whole claim.",
+      "input": {
+        "kind": "policy",
+        "version": "1.4.0",
+        "manifest": {
+          "schema_version": 1,
+          "id": "openrobot/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "isolation": "wasm",
+          "budget": {
+            "ram_mb": 512,
+            "cpu_cores": 1.5,
+            "control_hz": 50
+          }
+        },
+        "files": [
+          {
+            "path": "manifest.json",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "path": "policy.onnx",
+            "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          }
+        ]
+      },
+      "expected": "{\"digest\":\"b72a043fd3c52ad86160f67b77b6467618c2e10ae92706992d29a26711db2bf0\",\"error\":null}"
+    },
+    {
+      "id": "kind-separates",
+      "note": "Same manifest and files, different repository kind. A dataset and a policy holding identical bytes are not the same artifact.",
+      "input": {
+        "kind": "dataset",
+        "version": "1.4.0",
+        "manifest": {
+          "schema_version": 1,
+          "id": "openrobot/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "isolation": "wasm",
+          "budget": {
+            "ram_mb": 512,
+            "cpu_cores": 1.5,
+            "control_hz": 50
+          }
+        },
+        "files": [
+          {
+            "path": "manifest.json",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "path": "policy.onnx",
+            "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          }
+        ]
+      },
+      "expected": "{\"digest\":\"6e5b401be7f4d77f0f78d7e7d1615799448202dd54e47d17ece6095ad18067cd\",\"error\":null}"
+    },
+    {
+      "id": "nested-paths",
+      "note": "Nested paths, ordered by UTF-16 code unit — byte order for every path anybody has, pinned here so an edition that reached for its own collation is caught.",
+      "input": {
+        "kind": "policy",
+        "version": "2.0.0",
+        "manifest": {
+          "schema_version": 1,
+          "id": "openrobot/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "isolation": "wasm",
+          "budget": {
+            "ram_mb": 512,
+            "cpu_cores": 1.5,
+            "control_hz": 50
+          }
+        },
+        "files": [
+          {
+            "path": "weights/b.bin",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "path": "weights/a.bin",
+            "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          },
+          {
+            "path": "README.md",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "path": "weights.bin",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      },
+      "expected": "{\"digest\":\"80784ed57a284c62e5cae2176d1bebab891c4ba4f198abca93a69029b66a787e\",\"error\":null}"
+    },
+    {
+      "id": "null-is-not-absent",
+      "note": "A null field is present and null. Collapsing it to absent would give two different manifests one identity.",
+      "input": {
+        "kind": "policy",
+        "version": "1.0.0",
+        "manifest": {
+          "envelope": null
+        },
+        "files": []
+      },
+      "expected": "{\"digest\":\"3ebd3f5c26cbd28e5782ba6c3470f97e57762176b47804b81d7cfe27e4a63a94\",\"error\":null}"
+    },
+    {
+      "id": "traversal-refused",
+      "note": "A path that leaves the package root. Refused before hashing, because a digest computed over a traversal is a digest that attests to one.",
+      "input": {
+        "kind": "policy",
+        "version": "1.0.0",
+        "manifest": {},
+        "files": [
+          {
+            "path": "../../etc/systemd/system/evil.service",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      },
+      "expected": "{\"digest\":null,\"error\":{\"detail\":\"has a `..` component, which leaves the package root\",\"kind\":\"path\",\"subject\":\"../../etc/systemd/system/evil.service\"}}"
+    },
+    {
+      "id": "absolute-refused",
+      "note": "An absolute path.",
+      "input": {
+        "kind": "policy",
+        "version": "1.0.0",
+        "manifest": {},
+        "files": [
+          {
+            "path": "/etc/passwd",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      },
+      "expected": "{\"digest\":null,\"error\":{\"detail\":\"absolute; paths are relative to the package root\",\"kind\":\"path\",\"subject\":\"/etc/passwd\"}}"
+    },
+    {
+      "id": "backslash-refused",
+      "note": "A backslash: a separator on one filesystem and an ordinary filename character on another.",
+      "input": {
+        "kind": "policy",
+        "version": "1.0.0",
+        "manifest": {},
+        "files": [
+          {
+            "path": "weights\\a.bin",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      },
+      "expected": "{\"digest\":null,\"error\":{\"detail\":\"contains a backslash, which is a separator on one filesystem and an ordinary filename character on another\",\"kind\":\"path\",\"subject\":\"weights\\\\a.bin\"}}"
+    },
+    {
+      "id": "trailing-dot-refused",
+      "note": "A component ending in a dot, which some filesystems silently strip — so two paths would name one file after unpacking.",
+      "input": {
+        "kind": "policy",
+        "version": "1.0.0",
+        "manifest": {},
+        "files": [
+          {
+            "path": "weights./a.bin",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      },
+      "expected": "{\"digest\":null,\"error\":{\"detail\":\"has a component ending in a space or a dot, which some filesystems silently strip\",\"kind\":\"path\",\"subject\":\"weights./a.bin\"}}"
+    },
+    {
+      "id": "duplicate-path-refused",
+      "note": "Two entries for one path. Which bytes the digest attests to would depend on a sort being stable.",
+      "input": {
+        "kind": "policy",
+        "version": "1.0.0",
+        "manifest": {},
+        "files": [
+          {
+            "path": "a.bin",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "path": "a.bin",
+            "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          }
+        ]
+      },
+      "expected": "{\"digest\":null,\"error\":{\"detail\":null,\"kind\":\"duplicate_path\",\"subject\":\"a.bin\"}}"
+    },
+    {
+      "id": "uppercase-hash-refused",
+      "note": "An uppercase hash. One digest with two spellings makes every string comparison downstream a coin toss.",
+      "input": {
+        "kind": "policy",
+        "version": "1.0.0",
+        "manifest": {},
+        "files": [
+          {
+            "path": "a.bin",
+            "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          }
+        ]
+      },
+      "expected": "{\"digest\":null,\"error\":{\"detail\":null,\"kind\":\"sha256\",\"subject\":\"a.bin\"}}"
+    },
+    {
+      "id": "short-hash-refused",
+      "note": "A truncated hash.",
+      "input": {
+        "kind": "policy",
+        "version": "1.0.0",
+        "manifest": {},
+        "files": [
+          {
+            "path": "a.bin",
+            "sha256": "abc"
+          }
+        ]
+      },
+      "expected": "{\"digest\":null,\"error\":{\"detail\":null,\"kind\":\"sha256\",\"subject\":\"a.bin\"}}"
+    },
+    {
+      "id": "huge-number-refused",
+      "note": "A manifest number at 1e21, where the Hub reaches for an exponent and the canonical rule forbids one. Refused rather than digested into an identity only one side reproduces.",
+      "input": {
+        "kind": "dataset",
+        "version": "1.0.0",
+        "manifest": {
+          "bytes": 1e+21
+        },
+        "files": []
+      },
+      "expected": "{\"digest\":null,\"error\":{\"detail\":null,\"kind\":\"number_out_of_range\",\"subject\":\"bytes\"}}"
+    },
+    {
+      "id": "tiny-number-refused",
+      "note": "The same divergence at the other end: below 1e-6.",
+      "input": {
+        "kind": "policy",
+        "version": "1.0.0",
+        "manifest": {
+          "tolerance": 1e-7
+        },
+        "files": []
+      },
+      "expected": "{\"digest\":null,\"error\":{\"detail\":null,\"kind\":\"number_out_of_range\",\"subject\":\"tolerance\"}}"
+    },
+    {
+      "id": "boundary-numbers-accepted",
+      "note": "Both boundaries from the inside. 1e-6 and a shade under 1e21 are spelled identically by both, so they are digested rather than refused.",
+      "input": {
+        "kind": "policy",
+        "version": "1.0.0",
+        "manifest": {
+          "tolerance": 0.000001,
+          "bytes": 999999999999999900000
+        },
+        "files": []
+      },
+      "expected": "{\"digest\":\"f9246f502f47a2f3d63bb3e7b091d9f2df30fa998e8f0b19cda7d5e9170804d3\",\"error\":null}"
+    },
+    {
+      "id": "astral-key-refused",
+      "note": "An object key above U+FFFF. UTF-16 order and UTF-8 order disagree there, so the two editions would sort the manifest differently.",
+      "input": {
+        "kind": "policy",
+        "version": "1.0.0",
+        "manifest": {
+          "🚀": "launch"
+        },
+        "files": []
+      },
+      "expected": "{\"digest\":null,\"error\":{\"detail\":null,\"kind\":\"key_outside_bmp\",\"subject\":\"(root) :: 🚀\"}}"
+    },
+    {
+      "id": "astral-value-accepted",
+      "note": "The same character in a value. Nothing sorts on a value, so there is nothing to disagree about.",
+      "input": {
+        "kind": "policy",
+        "version": "1.0.0",
+        "manifest": {
+          "note": "🚀"
+        },
+        "files": []
+      },
+      "expected": "{\"digest\":\"a0e3af90cd6b4ed4a3ce44f02d34c92f250668e1865c7112bf53ad5ada9b87d1\",\"error\":null}"
+    }
+  ]
+}

@@ -562,14 +562,38 @@ rise in guard trip rates, which the black box already measures.
 
 ## 13. The black box
 
-Every control cycle, appended to an on-disk ring buffer sized for roughly an hour:
+Every control cycle, appended to an on-disk ring buffer:
 
 ```
-tick · monotonic ns · observation hash · policy digest · policy output
+sequence · tick · monotonic ns · observation hash · policy digest · policy output
      · kernel verdict (guards tripped, clamps applied) · final command · RHAL result
+     · capability token · nearest-person distance
 ```
 
-Sealed and uploaded on any fault, estop, or operator request. Three things this makes possible
+Sealed and uploaded on any fault, estop, or operator request.
+
+> **Amended by the implementation.** Three additions, each of which the first version of the record
+> made impossible rather than merely awkward.
+>
+> **The last two fields exist so that replay can reach all eight guards.** The mode gate evaluates
+> the capability the command exercised and the proximity guard evaluates the distance to the nearest
+> person (§7.1); neither is derivable from the other fields, so a recording without them cannot
+> recompute a verdict that turned on either, and a replay would report a divergence on correct
+> behaviour. A capability is recorded as an index into a table in the ring header, alongside the
+> policy digests, because both are fixed for the life of a lease and neither survives being written
+> into a record the next wrap overwrites.
+>
+> **Every record carries a sequence number and a CRC.** The sequence numbers are dense and
+> increasing, which is what makes `telemetry.blackbox.complete` a check rather than a claim: a hole
+> inside the window is visible as a hole. The CRC is what makes a write interrupted by power loss
+> report itself as damaged instead of deserialising into a plausible cycle.
+>
+> **"Roughly an hour" is a consequence, not a setting.** The ring is sized by a **byte budget**, and
+> what that buys is computed and reported. The conversion is not a detail: a 30-joint humanoid
+> writes about 936 bytes a cycle, so an hour at a 1 kHz joint rate is roughly **3.4 GB**, and a
+> 512 MB ring holds about ten minutes of it. An operator who asked for an hour and got ten minutes
+> should be told ten minutes; a constant named `ONE_HOUR` in front of a ring that holds a fraction
+> of one is the class of invented number this specification exists to prevent. Three things this makes possible
 that are impossible today:
 
 * **Deterministic replay.** Given the same policy digest, observation stream and embodiment
@@ -1136,6 +1160,50 @@ Observation *hashes* rather than observation bytes: an hour of three-camera vide
 gigabytes and the robot has neither the disk nor the uplink. The hash proves which frame was seen;
 full-fidelity capture is a separate, explicitly enabled recording mode for data collection.
 
+### 26.1 The ring is not itself an MCAP file
+
+Written in during implementation, because it was tried the other way first and does not work. MCAP
+is a linear container — a magic, a header, records, a data-end, a summary computed over everything
+before it, a footer — and a ring overwrites its oldest bytes, so the file's own framing is the first
+casualty of the second hour. A black box whose format breaks precisely when it wraps works only
+during the incidents short enough not to need it.
+
+So the two roles are separated:
+
+* **The ring is the recording.** Fixed-size records, one slot each, a sequence number that only ever
+  increases, and no structure a wrap can invalidate. A record is [§13's line] laid out to a byte
+  offset. The size is a function of the body's joint and channel counts, so a ring is created for a
+  particular shape of robot and re-created — after sealing what it holds — when that shape changes.
+* **MCAP is the artifact.** Produced once, at seal, from whatever the ring holds at that instant.
+  §26 chose MCAP so that an incident opens in Foxglove with no exporter, and that is a property of
+  the file handed to an investigator rather than of the bytes being written a thousand times a
+  second.
+
+Three consequences worth naming:
+
+**One cycle becomes four messages.** The table above splits a control cycle across `/sk/state`,
+`/sk/desired`, `/sk/verdict` and `/sk/command`; the ring holds it as one record. That is not a
+redundancy to collapse. The ring is optimised for writing at joint rate and the file for somebody
+asking a question, and "what did the hardware report" and "what did the policy want" are different
+questions.
+
+**Every message carries `mono_ns` as well as MCAP's `log_time`.** `log_time` is nanoseconds since
+the epoch because that is what a general reader can render; every control decision was made against
+`CLOCK_MONOTONIC_RAW` (§35.1). Carrying both means a wall-clock step is *visible* in the file — the
+two disagree across it — rather than silently displacing an hour of the timeline.
+
+**Message bodies are canonical JSON, with a JSON Schema on each channel.** §31.2 requires a black
+box sealed by one edition to be readable by every other, and canonical JSON is already the one
+serialisation every edition implements identically and the corpus already tests (§31.4). A CDR body
+would need a second format specified and held identical across editions, and would need a generator
+and an IDL to be anything but bytes. The compactness argument for CDR applies to a bag written at
+line rate; this file is written once, after an incident, from a bounded ring.
+
+**Gaps appear on `/sk/event`.** §47.4 requires a dropped frame to be recorded as a drop. A gap
+consumes a sequence number of its own, so the numbering stays dense and a reader can distinguish
+"the ring wrapped past these" — normal; the window moved on — from "these were never written", which
+is not.
+
 ---
 
 ## 27. Boot, and what happens when things break
@@ -1522,6 +1590,17 @@ the RAUC slot, the kernel's lease table — never from a memory of what `skynetd
 earlier. A supervisor that trusts its own record of the past is a supervisor that disagrees with
 the machine it is supervising, and on a robot that disagreement is discovered by a person.
 
+**Convergence is one plan being empty, not one pass succeeding.** The loop computes a single plan
+from a single observation, so an action that *enables* a later one — activating a package the next
+stage would start — does not put that later action in the same pass. A supervisor that reported
+"converged" because every action it applied succeeded would stamp the generation on a robot that
+has not started the policy yet, which is precisely the claim §17 forbids the platform from making.
+The test is the level-triggered question asked again: given what is true now, is there anything
+left to do?
+
+Several passes may therefore be needed, bounded by the six stages below, and running them back to
+back rather than one per timer tick is a faster loop rather than a different one.
+
 ### 33.4 Reconcile ordering, and the safe-state barrier
 
 Actions are not independent, so the plan is ordered rather than a set:
@@ -1545,6 +1624,17 @@ Two rules govern the barrier:
 
 A deferred action is reported as deferred, with the reason, so an operator sees "waiting for a safe
 state" rather than an update that silently never happened.
+
+One consequence is worth stating because leaving it implicit produced a plan that deferred for ever.
+**An upgrade to a package that is running emits a stop for it.** Activation waits for the package to
+stop — so that `current` never points at a version other than the one executing, which would make
+every report of what a robot is running a lie — and nothing else in the plan would ever stop a
+package the desired state wants running. §33.5 is what makes that affordable: a restart is never a
+motion event, because the kernel holds throughout.
+
+A *grant* being widened is the opposite case and correctly waits without forcing anything: §33.4's
+table says a widening "waits for a restart of the affected package", so the action stays deferred,
+visibly, until something else restarts it.
 
 ### 33.5 Supervision and crash policy
 
@@ -1794,10 +1884,56 @@ activate  atomic symlink swap, then register with the supervisor
 
 **Activation is a symlink swap**, so a crash at any point before it leaves the previous version
 running and a crash after it leaves the new one running. There is no window in which the robot has
-half a policy.
+half a policy. The swap is `symlink` to a temporary name and then `rename` over the live one,
+because `rename` is atomic and unlink-then-symlink is not: between those two calls the package has
+no current version at all.
 
 Note the ordering: **transport is resolved at install, not at start.** A policy that cannot reach
 this body should fail while somebody is watching, not at the moment it is first asked to move.
+
+#### The on-disk shape, pinned
+
+An edition that laid a package out differently would install packages the others could not read, so
+the layout is part of the contract rather than an implementation choice:
+
+```
+/data/packages
+  /blobs/<digest>/…                    the package, content-addressed
+    manifest.json                      the .sky manifest — the Hub's `manifest` column
+    …                                  every other file is a version file — the Hub's artifacts
+  /active/<ns>/<name>/current          symlink -> ../../../blobs/<digest>
+  /active/<ns>/<name>/prev.1           the version a rollback returns to (§37.2)
+  /active/<ns>/<name>/prev.2           and the one before that
+```
+
+Four rules, each of which is a way two editions could otherwise disagree about the same bytes:
+
+* **`<digest>` is the Hub's version digest**, bare lowercase hex, computed by `versionDigest()` over
+  the manifest as a *value* and the remaining files as a `(path, sha256)` list. A manifest that also
+  appeared in that list would be hashed twice and no version the Hub published would verify.
+* **The links are the rollback set.** §37.3 says garbage collection never touches it, and the
+  cheapest way to guarantee that is to have no second record of what "previous" means: `prev.N` are
+  links like `current`, collection removes a blob nothing points at, and rollback reads `prev.1`. A
+  history file kept beside the links is a history file that can disagree with them.
+* **The links live in a directory named for the package**, not beside it as `<name>.prev.1`, because
+  a package legitimately named `grasp.prev.1` would otherwise have its blobs collected when `grasp`
+  is upgraded.
+* **Exactly one file is executable: the one `runtime.entrypoint` names.** Everything else is `0644`.
+  A file's mode is not part of the digest — the Hub stores artifacts as bytes and a `(path, sha256)`
+  pair carries no permission — so a store that preserved whatever mode it found would let two robots
+  holding one digest disagree about which files may be executed. Deriving the mode from the manifest
+  makes it a function of the digest, because the manifest is digested, and it is the smaller
+  privilege besides. A package needing a second executable cannot express that today; that is a real
+  limit and it is recorded as one.
+
+#### Identifiers are path components, and therefore a security boundary
+
+A desired state arrives over the network and names packages and digests, and both become path
+components under `/data`. A package id is `namespace/name` with each segment matching
+`[a-z0-9][a-z0-9._-]*`; a digest is 64 lowercase hex characters and nothing else — no `sha256:`
+prefix, because a second accepted spelling is a string comparison that answers "different" about
+identical bytes. Neither is normalised into legality: a validator that repairs its input is one
+whose callers stop believing the value was ever checked.
 
 ### 37.2 Upgrade and rollback
 
