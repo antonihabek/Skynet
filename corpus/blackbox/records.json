@@ -1,0 +1,400 @@
+{
+  "corpus": "blackbox",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "cycle-quiet",
+      "note": "A cycle nothing tripped on. Unmeasured velocity and effort are NaN in the ring, which is not zero (§24), and the hold mask says nothing rather than saying zero on the second channel.",
+      "input": {
+        "shape": {
+          "joints": 2,
+          "channels": 2
+        },
+        "sequence": "5",
+        "mono_ns": "1234",
+        "entry": {
+          "kind": "cycle",
+          "tick": "7",
+          "observation": "abababababababababababababababababababababababababababababababab",
+          "policy": 0,
+          "state_flags": 1,
+          "fault_code": 0,
+          "rhal_result": 0,
+          "state_seq": 3,
+          "state_stamp_ns": "100",
+          "command_stamp_ns": "90",
+          "command_seq": 4,
+          "mode": 0,
+          "advisory": false,
+          "response": null,
+          "tripped": [],
+          "capability": 65535,
+          "nearest_person_m": null,
+          "base_pose": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "base_twist": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "desired": [
+            0.25,
+            -0.5
+          ],
+          "command": [
+            0.25,
+            -0.5
+          ],
+          "mask": [
+            1,
+            0
+          ],
+          "clamped": [
+            false,
+            false
+          ],
+          "position": [
+            0.1,
+            0.2
+          ],
+          "velocity": [
+            0,
+            null
+          ],
+          "effort": [
+            1.5,
+            null
+          ]
+        }
+      },
+      "expected": "{\"hex\":\"724a3b29010100000500000000000000d2040000000000000700000000000000abababababababababababababababababababababababababababababababab0000010000000000000000000300000064000000000000005a0000000000000004000000000000000000000000000000ffff00000000c07f0000c07f0000c07f0000c07f0000c07f0000c07f0000c07f0000c07f000000000000000000000000000000000000000000000000000000000000803e000000bf000000000000d03f000000000000e0bf010000cdcccc3dcdcc4c3e000000000000c07f0000c03f0000c07f0000000000\",\"size\":232}"
+    },
+    {
+      "id": "cycle-clamped",
+      "note": "A clamp. `desired` is f32 because it came through the RHAL; `command` is f64 because the kernel computed it, and rounding it would make every clamped cycle report a false divergence on replay.",
+      "input": {
+        "shape": {
+          "joints": 2,
+          "channels": 2
+        },
+        "sequence": "6",
+        "mono_ns": "2234",
+        "entry": {
+          "kind": "cycle",
+          "tick": "7",
+          "observation": "abababababababababababababababababababababababababababababababab",
+          "policy": 0,
+          "state_flags": 1,
+          "fault_code": 0,
+          "rhal_result": -110,
+          "state_seq": 3,
+          "state_stamp_ns": "100",
+          "command_stamp_ns": "90",
+          "command_seq": 4,
+          "mode": 1,
+          "advisory": false,
+          "response": "clamp",
+          "tripped": [
+            "envelope"
+          ],
+          "capability": 65535,
+          "nearest_person_m": null,
+          "base_pose": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "base_twist": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "desired": [
+            2.5,
+            -0.5
+          ],
+          "command": [
+            1,
+            -0.5
+          ],
+          "mask": [
+            1,
+            0
+          ],
+          "clamped": [
+            true,
+            false
+          ],
+          "position": [
+            0.1,
+            0.2
+          ],
+          "velocity": [
+            0,
+            null
+          ],
+          "effort": [
+            1.5,
+            null
+          ]
+        }
+      },
+      "expected": "{\"hex\":\"1b78050e010100000600000000000000ba080000000000000700000000000000abababababababababababababababababababababababababababababababab000001000000000092ffffff0300000064000000000000005a0000000000000004000000010001010200000000000000ffff00000000c07f0000c07f0000c07f0000c07f0000c07f0000c07f0000c07f0000c07f0000000000000000000000000000000000000000000000000000000000002040000000bf000000000000f03f000000000000e0bf010001cdcccc3dcdcc4c3e000000000000c07f0000c03f0000c07f0000000000\",\"size\":232}"
+    },
+    {
+      "id": "cycle-stopped",
+      "note": "A watchdog stop: the kernel sends nothing, so the command array is the zeroes a fixed-size slot already holds. The tripped guard is what distinguishes this from a cycle that asked for zero.",
+      "input": {
+        "shape": {
+          "joints": 2,
+          "channels": 2
+        },
+        "sequence": "7",
+        "mono_ns": "3234",
+        "entry": {
+          "kind": "cycle",
+          "tick": "7",
+          "observation": "abababababababababababababababababababababababababababababababab",
+          "policy": 0,
+          "state_flags": 1,
+          "fault_code": 0,
+          "rhal_result": 0,
+          "state_seq": 3,
+          "state_stamp_ns": "100",
+          "command_stamp_ns": "90",
+          "command_seq": 4,
+          "mode": 0,
+          "advisory": false,
+          "response": "stop_cat2",
+          "tripped": [
+            "watchdog"
+          ],
+          "capability": 65535,
+          "nearest_person_m": null,
+          "base_pose": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "base_twist": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "desired": [
+            2.5,
+            2.5
+          ],
+          "command": [
+            0,
+            0
+          ],
+          "mask": [
+            1,
+            0
+          ],
+          "clamped": [
+            false,
+            false
+          ],
+          "position": [
+            0.1,
+            0.2
+          ],
+          "velocity": [
+            0,
+            null
+          ],
+          "effort": [
+            1.5,
+            null
+          ]
+        }
+      },
+      "expected": "{\"hex\":\"9ba23975010100000700000000000000a20c0000000000000700000000000000abababababababababababababababababababababababababababababababab0000010000000000000000000300000064000000000000005a0000000000000004000000000003010100000000000000ffff00000000c07f0000c07f0000c07f0000c07f0000c07f0000c07f0000c07f0000c07f00000000000000000000000000000000000000000000000000000000000020400000204000000000000000000000000000000000010000cdcccc3dcdcc4c3e000000000000c07f0000c03f0000c07f0000000000\",\"size\":232}"
+    },
+    {
+      "id": "frame-two-streams",
+      "note": "An assembled observation frame. The worst skew and the per-stream ages are what make \"the frame it was given was 80 ms skewed\" checkable months later (§25.1).",
+      "input": {
+        "shape": {
+          "joints": 2,
+          "channels": 2
+        },
+        "sequence": "8",
+        "mono_ns": "4234",
+        "entry": {
+          "kind": "frame",
+          "observation": "abababababababababababababababababababababababababababababababab",
+          "target_ns": "4230",
+          "worst_skew_us": 31000,
+          "streams_omitted": 0,
+          "streams": [
+            {
+              "name": "wrist_cam",
+              "age_us": 31000,
+              "stale": true
+            },
+            {
+              "name": "joints",
+              "age_us": 900,
+              "stale": false
+            }
+          ]
+        }
+      },
+      "expected": "{\"hex\":\"73b299e50201000008000000000000008a10000000000000abababababababababababababababababababababababababababababababab8610000000000000187900000200000077726973745f63616d0000000000000018790000010000006a6f696e747300000000000000000000840300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\",\"size\":232}"
+    },
+    {
+      "id": "frame-overflowing",
+      "note": "Eight streams into a record that carries six. The two it cannot hold are counted, because a record that silently dropped them would be partial without saying so.",
+      "input": {
+        "shape": {
+          "joints": 2,
+          "channels": 2
+        },
+        "sequence": "9",
+        "mono_ns": "5234",
+        "entry": {
+          "kind": "frame",
+          "observation": "abababababababababababababababababababababababababababababababab",
+          "target_ns": "5230",
+          "worst_skew_us": 12,
+          "streams_omitted": 0,
+          "streams": [
+            {
+              "name": "a",
+              "age_us": 10,
+              "stale": false
+            },
+            {
+              "name": "b",
+              "age_us": 10,
+              "stale": false
+            },
+            {
+              "name": "c",
+              "age_us": 10,
+              "stale": false
+            },
+            {
+              "name": "d",
+              "age_us": 10,
+              "stale": false
+            },
+            {
+              "name": "e",
+              "age_us": 10,
+              "stale": false
+            },
+            {
+              "name": "f",
+              "age_us": 10,
+              "stale": false
+            },
+            {
+              "name": "g",
+              "age_us": 10,
+              "stale": false
+            },
+            {
+              "name": "h",
+              "age_us": 10,
+              "stale": false
+            }
+          ]
+        }
+      },
+      "expected": "{\"hex\":\"f3c3452e0201000009000000000000007214000000000000abababababababababababababababababababababababababababababababab6e140000000000000c00000006000200610000000000000000000000000000000a00000000000000620000000000000000000000000000000a00000000000000630000000000000000000000000000000a00000000000000640000000000000000000000000000000a00000000000000650000000000000000000000000000000a00000000000000660000000000000000000000000000000a0000000000000000000000000000000000000000000000\",\"size\":232}"
+    },
+    {
+      "id": "frame-astral-stream-name",
+      "note": "A stream name that does not fit, cut on a character boundary. A cut inside a multi-byte sequence would put invalid UTF-8 in the ring and every reader would have to guess.",
+      "input": {
+        "shape": {
+          "joints": 2,
+          "channels": 2
+        },
+        "sequence": "10",
+        "mono_ns": "6234",
+        "entry": {
+          "kind": "frame",
+          "observation": "abababababababababababababababababababababababababababababababab",
+          "target_ns": "6230",
+          "worst_skew_us": 0,
+          "streams_omitted": 0,
+          "streams": [
+            {
+              "name": "ααααααααα",
+              "age_us": 1,
+              "stale": false
+            }
+          ]
+        }
+      },
+      "expected": "{\"hex\":\"6d7c76f0020100000a000000000000005a18000000000000abababababababababababababababababababababababababababababababab56180000000000000000000001000000ceb1ceb1ceb1ceb1ceb1ceb1ceb1ceb1010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\",\"size\":232}"
+    },
+    {
+      "id": "event-estop",
+      "note": "An estop, on the channel §26 gives lease grants, pre-emptions, OTA and grant changes. The vocabulary is closed, so ordinary logging cannot reach the black box (§41.1).",
+      "input": {
+        "shape": {
+          "joints": 2,
+          "channels": 2
+        },
+        "sequence": "11",
+        "mono_ns": "7234",
+        "entry": {
+          "kind": "event",
+          "code": "estop",
+          "subject": "operator",
+          "detail": "the button on the chassis"
+        }
+      },
+      "expected": "{\"hex\":\"43f9b96f030100000b00000000000000421c000000000000040000006f70657261746f72000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000074686520627574746f6e206f6e20746865206368617373697300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\",\"size\":232}"
+    },
+    {
+      "id": "gap-encoder-behind",
+      "note": "A gap annotated as a gap (§47.4). It consumes a sequence number of its own, so the numbering stays dense and a reader can tell \"the ring wrapped past these\" from \"these were never written\".",
+      "input": {
+        "shape": {
+          "joints": 2,
+          "channels": 2
+        },
+        "sequence": "12",
+        "mono_ns": "8234",
+        "entry": {
+          "kind": "gap",
+          "dropped": "150",
+          "first_tick": "900",
+          "reason": "encoder_behind"
+        }
+      },
+      "expected": "{\"hex\":\"56ec3833040100000c000000000000002a2000000000000096000000000000008403000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\",\"size\":232}"
+    }
+  ]
+}

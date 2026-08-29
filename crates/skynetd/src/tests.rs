@@ -558,6 +558,74 @@ fn an_unsigned_profile_produces_no_action_at_all() {
     assert!(plan(&want, &actual).is_empty());
 }
 
+/// A running policy being upgraded, which is the ordinary case and was the one that did not work.
+///
+/// The activation waits for the package to stop, and until this the plan emitted nothing that would
+/// stop it: the desired state wants it *running*, so stage 5 had no reason to. The result was an
+/// upgrade that deferred for ever while reporting itself as merely waiting. Found by upgrading a
+/// policy on a machine with real systemd, where a package that is genuinely running is the normal
+/// state rather than the interesting one.
+#[test]
+fn a_running_policy_can_be_upgraded() {
+    let mut machine = Machine::new(true);
+    let first = desired(vec![package(
+        "openrobot/grasp",
+        "aaa",
+        PackageKind::Policy,
+        RunState::Running,
+    )]);
+    machine.converge(&first);
+    assert!(machine.actual.is_running("openrobot/grasp"));
+
+    let second = desired(vec![package(
+        "openrobot/grasp",
+        "bbb",
+        PackageKind::Policy,
+        RunState::Running,
+    )]);
+    machine.applied.clear();
+    let rounds = machine.converge(&second);
+
+    assert!(
+        machine.applied.contains(&ActionKind::StopPackage {
+            id: "openrobot/grasp".to_string()
+        }),
+        "the swap needs the package stopped, so the plan has to ask for it: {:?}",
+        machine.applied
+    );
+    assert_eq!(
+        machine
+            .actual
+            .installed("openrobot/grasp")
+            .map(|e| e.digest.as_str()),
+        Some("bbb")
+    );
+    assert!(
+        machine.actual.is_running("openrobot/grasp"),
+        "and it comes back up"
+    );
+    assert!(rounds <= 5, "converged in {rounds} passes");
+    assert!(plan(&second, &machine.actual).is_empty());
+}
+
+/// The same shape without the upgrade: a running package the desired state is happy with is not
+/// stopped, and a supervisor that restarted one on every pass would be a supervisor that never let
+/// a robot work.
+#[test]
+fn a_running_policy_at_the_right_digest_is_left_alone() {
+    let mut machine = Machine::new(true);
+    let state = desired(vec![package(
+        "openrobot/grasp",
+        "aaa",
+        PackageKind::Policy,
+        RunState::Running,
+    )]);
+    machine.converge(&state);
+    machine.applied.clear();
+    assert_eq!(machine.pass(&state), 0, "{:?}", machine.applied);
+    assert!(machine.applied.is_empty());
+}
+
 #[test]
 fn a_driver_upgrade_always_waits_for_a_safe_state() {
     let want = desired(vec![package(

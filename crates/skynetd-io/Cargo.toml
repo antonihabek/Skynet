@@ -1,0 +1,28 @@
+[package]
+name = "skynetd-io"
+description = "The I/O half of skynetd: the package store, the systemd launcher, observation, and the local API."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "skynetd"
+path = "src/main.rs"
+
+[dependencies]
+skynetd = { path = "../skynetd" }
+skynet-contracts = { path = "../skynet-contracts" }
+skynet-json = { path = "../skynet-json" }
+skynet-sha256 = { path = "../skynet-sha256" }
+skynet-blackbox = { path = "../skynet-blackbox" }
+
+# Deliberately **not** `skynet-rhal`, for the same reason `skynetd` is not — and it matters more
+# here, because this is the half that can actually open things. §33.1's property is about the
+# daemon, not about one of its crates: "it never touches an actuator" stops being true the moment
+# either half can. CI asserts the edge is absent from both.
+
+[lints.rust]
+missing_docs = "warn"

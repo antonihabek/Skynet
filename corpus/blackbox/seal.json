@@ -1,0 +1,39 @@
+{
+  "corpus": "blackbox",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "two-messages",
+      "note": "One sealed file: magic, header, six schemas, six channels, one metadata record, two messages, data end, the summary repeated, three summary offsets, footer, magic. The digest is what holds the framing; the bytes of every component are pinned by the other three corpora.",
+      "input": {
+        "library": "skynet-blackbox rust-edition 0.1.0",
+        "metadata": {
+          "name": "skynet.blackbox",
+          "pairs": [
+            [
+              "robot_id",
+              "dev-0001"
+            ],
+            [
+              "sealed_reason",
+              "operator"
+            ]
+          ]
+        },
+        "messages": [
+          {
+            "channel_id": 6,
+            "log_time": "1700000000000001000",
+            "payload": "{\"detail\":\"the ring was opened\",\"event\":\"recording_started\",\"mono_ns\":1000,\"subject\":\"dev-0001\"}"
+          },
+          {
+            "channel_id": 1,
+            "log_time": "1700000000000002000",
+            "payload": "{\"base_pose\":[null,null,null,null,null,null,null],\"base_twist\":[0,0,0,0,0,0],\"effort_nm\":[1.5,null],\"fault_code\":0,\"flags\":1,\"mono_ns\":2000,\"position_rad\":[0.1,0.2],\"seq\":3,\"stamp_ns\":100,\"velocity_rad_s\":[0,null]}"
+          }
+        ]
+      },
+      "expected": "{\"opcodes\":\"01,03,03,03,03,03,03,04,04,04,04,04,04,0c,05,05,0f,03,03,03,03,03,03,04,04,04,04,04,04,0b,0e,0e,0e,02\",\"sha256\":\"81fe9e94c711a774c90a548a76f8b10e8aaef74669521c512fa068711d5e636e\",\"size\":18613}"
+    }
+  ]
+}

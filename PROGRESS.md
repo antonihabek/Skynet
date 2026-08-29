@@ -856,3 +856,516 @@ drivers that talk to real hardware — `ros2_control`, EtherCAT, CANopen and the
    stop reporting unavailable on a body that declares a tree.
 5. **Run the LeRobot bridge against the real library**, and against an SO-101 if one can be found.
    Everything it says about itself is provisional until then.
+
+## 2026-08-29 (fifth) — the I/O half, and a daemon that runs on a real machine
+
+Item 1 from the previous session's list. `skynetd`'s brain was written and tested against a model;
+what was missing was everything that touches the machine — the systemd launcher, the package store,
+the socket — and the eight commands that named themselves absent because none of it existed.
+
+It runs. The end of this entry is a robot's package being staged, verified, activated through a
+symlink, launched as a transient systemd unit under the cgroup limits its manifest declared, and
+driven over a Unix socket by `skynet ps`. Not on a model of a machine: on one, with `memory.max`
+read back out of `/sys/fs/cgroup`.
+
+### `crates/skynetd-io` — the half that can be wrong about the world
+
+A second crate rather than more modules in `skynetd`, and the reason is the same one that keeps the
+daemon away from `skynet-rhal`. §33.3 claims the reconciler converges from any starting state and is
+idempotent, and those are properties you can assert about a *function*; about a program that also
+talks to systemd they are a hope. Keeping the brain pure is therefore worth a crate boundary, and
+now worth a CI check too: **`crates/skynetd/src` may not name `std::fs`, `std::net`, `std::process`,
+`std::thread`, `Instant::now` or `std::os`**, and the RHAL invariant covers both halves rather than
+one, because §33.1's property is about the daemon and "it never touches an actuator" stops being
+true the moment either crate can.
+
+Eleven modules, 4,700 lines, 73 tests. The parts worth naming:
+
+**The store (§37) keeps its rollback set in the links themselves.** §37.2 pins "the running version
+and the previous N" and §37.3 says collection never touches them, so something has to know what
+"previous" means. It could have been a history file; it is `prev.1` and `prev.2` beside `current`,
+symlinks like any other. Collection is then "remove a blob nothing points at" and *cannot* reach the
+rollback set — not because a flag says so but because there is no path through the function that
+looks at anything else. The links live in a directory named for the package rather than beside it as
+`<name>.prev.1`, because a package legitimately called `grasp.prev.1` would otherwise have its blobs
+deleted when `grasp` is upgraded.
+
+**Activation is `symlink` then `rename`.** §37.1's guarantee — no window in which the robot has half
+a policy — is exactly what `rename` gives and exactly what unlink-then-symlink does not: between
+those two calls the package has no current version at all.
+
+**The launcher writes `Restart=no` into every unit**, which looks like throwing the feature away and
+is the point. §33.5's policy is per package *kind* and counts failures in a window, and both live in
+`skynetd::Supervision`, which is a pure state machine with a suite. Two supervisors with two
+opinions about when to restart is one supervisor too many.
+
+**`AllowedCPUs=` is refused rather than omitted when every core is isolated.** An omitted cpuset is
+*every* core including the one the safety kernel is on, so the failure mode of a misconfigured
+isolation list would be precisely the thing §40.2 says is not a tunable.
+
+**The HTTP is hand-written and refuses more than it accepts.** Chunked encoding is answered `411`, a
+duplicated header is `400` — last-wins is how a second `Authorization` overrides the first — and a
+path with a `..` in it never reaches routing even though nothing today maps a path onto the
+filesystem, because that is the kind of thing a later handler adds without re-reading the parser.
+
+**§39.1's table is data, and the suite asserts it has exactly two open entries.** `GET /status` and
+`POST /stop`, and an unrecognised route needs *admin* rather than nothing, so a route added without
+a table entry fails closed.
+
+### `version_digest` — the check that could not be performed
+
+`admitPackage` has always taken `observed_digest` as an argument: the digest the bytes on disk
+actually hash to. Nothing computed it. A verification step whose input comes from whoever is calling
+is decoration, and the store cannot verify a package without one — so this session added the
+function, in Rust, in the reference TypeScript, and in the Hub, with 19 corpus cases holding the
+first two together.
+
+It is the Hub's `computeVersionDigest` rather than a new rule, because a digest is only useful if
+two parties compute the same one. Two things follow.
+
+**A refusal where the two could disagree.** The Hub canonicalises with `JSON.stringify`, which
+reaches for an exponent at 10²¹ and below 10⁻⁶ where §31.4's rule forbids one; and it orders object
+keys by UTF-16 code unit where the canonical rule orders by UTF-8 byte, which differ only above
+U+FFFF. Rather than hope no manifest ever lands there, both implementations **refuse** — a package
+that does not install and a person reading a reason is a better outcome than one whose identity is
+one thing on the robot and another in the registry.
+
+**The separator is a NUL, and finding that out was the whole exercise.** The first implementation
+used a space, because `lib/skynet/digest.ts` holds a raw `\0` byte in a template literal and a
+terminal draws it as nothing at all. Every case with no files matched the Hub; every case with files
+did not. It is now written `\u0000` in both copies, and `lib/__tests__/skynet-os-digest.test.ts`
+compares the OS rule against the Hub's production function on eight inputs so the next divergence is
+found by a test rather than by a fleet deciding its packages have been tampered with.
+
+### Four bugs the machine found that the suite did not
+
+The suite was written first and passed. Then the daemon ran, and each of these came out of running
+it — which is the argument for `e2e.sh` existing at all.
+
+1. **A staged package's entry point was not executable.** systemd reported `203/EXEC`, which is
+   `EACCES`. `fs::write` makes a file `0644` and a policy has to be run. The fix is not to preserve
+   the source's mode: a mode is not part of the digest, so a mode-preserving unpack would let two
+   robots holding one digest disagree about which files may be executed. It is derived from
+   `runtime.entrypoint` — which *is* digested — so exactly one file is executable and the manifest
+   says which. A package needing a second executable cannot express that today; recorded as a limit
+   rather than papered over.
+2. **A running policy could never be upgraded.** The activation waits for the package to stop, and
+   nothing in the plan would stop it — the desired state wants it *running*, so stage 5 had no
+   reason to. The plan deferred for ever while reporting itself as merely waiting. `plan` now emits
+   the stop, §33.4 is amended to say so, and the pure suite gained the case. A widened *grant* is
+   the opposite and correctly waits without forcing anything, because §33.4 says a widening "waits
+   for a restart" rather than causing one.
+3. **A pass could report convergence before the start it had just enabled.** `Pass::converged` asked
+   whether every action succeeded. §33.3 computes one plan from one observation, so activating a
+   package does not put the start in the same pass — and the daemon stamped generation 42 on a robot
+   that was not running anything. The predicate is now "a plan taken from a fresh observation is
+   empty", which is one condition instead of three and cannot be made to answer yes by an outcome
+   nobody enumerated. §33.3 says so now.
+4. **The CPU topology was read through the layout root.** A `Layout` roots `/data` and `/run` so the
+   store can be exercised against a temporary directory; `/sys` is not part of that. A daemon under
+   a test root found no CPUs and refused to launch anything — a plausible shape for a real failure
+   on a robot whose `/data` is a separate mount.
+
+And two gaps that were not bugs so much as absences: nothing could declare the robot at a safe state,
+so no policy could ever start; and nothing could issue a credential, so no authenticated route was
+reachable at all.
+
+The first is `/data/state/safe-state`, read every pass, and **everything that reports it says
+`declared`**. Whether a robot is at a safe state is a fact about the body, the body is the kernel's,
+and §33.1 keeps this daemon away from it — so §33.4's barrier is standing on an operator's word and
+the console says so rather than letting it read as measured. Anything but an exact `yes` is `no`.
+
+The second is `skynetd credential add`, which is §39.2's bootstrap in the form a machine with no
+chassis button has: you are on the robot and you can write `/data/state`, and that is the presence.
+The token comes from `/dev/urandom` or the command **fails** — a robot that cannot generate a
+credential must not issue a weak one — and it is printed once, with only a salted hash stored.
+
+### The commands that named themselves absent
+
+`skynet status · ps · plan · logs · grants · estop · rollback · install` are real, over
+`/run/skynetd.sock` or `--host`. `pair` and `blackbox` are still absent and still named as absent:
+pairing needs §10's attestation and the black box needs §13's recorder.
+
+`skynet install` stages locally rather than over the API, which is the honest shape while §34's
+fetcher does not exist — there is no way to hand a robot bytes over the network, so the bytes are
+already there and the reconciler finds the blob present on its next pass. That is the same
+"skipping any blob already present" path §37.1 describes, reached from the other direction.
+
+`skynet logs` reads journald, and `GET /logs` says so: §41.1 spends a section on the black box *not*
+being a log file, and a console offering one under the other's name would send somebody looking for
+a command trace in a stack trace.
+
+### Two checks in our own CI that were not running
+
+Both are the failure §15 spends a rule on, found in the place least likely to be looked at.
+
+1. **The no-third-party-dependency check had been failing since `skynetd` landed.** It grepped
+   `Cargo.lock` for names not matching `^name = "skynet-`, and `skynetd` does not begin with
+   `skynet-`. It now compares the lock against the workspace member list read from `Cargo.toml`,
+   which also catches a member missing from the lock and needs no maintenance.
+2. **`tools/check-mirrors.mjs` reported two identical documents as diverged, permanently.** The
+   working tree had CRLF in 43 files that came from a checkout and LF in everything written since,
+   because `core.autocrlf=true`. A repository built around byte-identical artifacts should not have
+   that, so there is now a `.gitattributes` pinning `eol=lf`, and the two mirrored documents were
+   normalised so the check is green. The other 41 files keep their endings until somebody runs
+   `git add --renormalize .`, which is a whitespace-only change best made on its own.
+
+### Verification
+
+* **348 Rust tests**, up from 268. `cargo fmt --all --check` clean, `cargo clippy --workspace
+  --all-targets` clean at `-D warnings`.
+* **289 corpus cases reproduce byte for byte**, up from 270. The nineteen new digest cases agreed
+  between Rust and the reference oracle on the first run.
+* **The Hub's Skynet OS suites: 112 tests**, up from 90. `npx tsc --noEmit` clean.
+* **`crates/skynetd-io/e2e.sh`, twice.** In a container with no systemd: 24 checks, and the launch
+  step correctly reported as not run. On a machine with a real systemd manager, with
+  `SKYNET_REQUIRE_SYSTEMD=1` so a silent skip fails the run: **all checks passed, including the
+  package actually starting.**
+* **The cgroup limits, read back from the kernel.** A manifest declaring `ram_mb: 64` and
+  `cpu_cores: 0.5` produced `memory.max 67108864`, `cpu.max 50000 100000`, `pids.max 128` and
+  `Restart=no` in `/sys/fs/cgroup`. §40.1 demonstrated rather than asserted.
+* Unchanged and re-run: the mock's 24 checks, the LeRobot bridge's 70, the LeRobot chain through the
+  C host, and the scaffold's build-load-and-reach-guest-tier test.
+* `Cargo.lock` holds ten packages, all ours. The no-dependency property is intact.
+
+### What was changed in the Hub
+
+`lib/skynet/os/digest.ts` and `lib/skynet/os/canonical.ts` are new and are mirrors of the reference
+oracle; `lib/__tests__/skynet-os-digest.test.ts` holds the OS digest rule against the Hub's
+production `computeVersionDigest`. The raw NUL in `lib/skynet/digest.ts` became `\u0000`, which
+changes no bytes and makes the algorithm readable. The specification was amended in both copies and
+`node tools/check-mirrors.mjs` reports all three documents identical.
+
+### What is still zero lines
+
+The policy runtime, the SPSC ring and observation assembly, OTA (§12), the outbound queue (§34.4),
+the black box (§13, §26), the on-robot console's HTML (§32.2 — the API behind it exists), the frame
+graph *consumer*, calibration, the watchdog chain, POST and homing, the safety MCU, Ed25519 (so
+every package this edition stages reports `signature: not_checked` and carries admission's `unsigned`
+finding), and the drivers that talk to real hardware.
+
+The reconciler's `apply` reports `StageOsImage` and `ApplyOsImage` as **unimplemented** and leaves
+them in the plan, and the generation is not advanced past them. A supervisor that dropped them would
+converge on a lie.
+
+§59.5's several-engineer-years figure is unchanged.
+
+### Three findings recorded rather than fixed
+
+1. **`admit_package` is not called on the install path.** The store verifies the digest and stages;
+   nothing runs admission or `resolve_transport` against the staged manifest, which §37.1 puts
+   between `verify` and `stage`. Both functions exist and are corpus-tested; what is missing is the
+   robot's `DeviceCapacity` — its RAM, its capability tokens, its embodiment descriptor — and
+   inventing one to get a call site would be inventing exactly the numbers admission exists to
+   check. It should land with the descriptor, as one change.
+2. **A package gets one executable, and the manifest names it.** Enough for a policy behind a
+   loader; not enough for a driver shipping a helper binary. The alternative — preserving the
+   source's modes — takes the reproducibility with it, so this needs a manifest field rather than a
+   relaxation.
+3. **The safe state is an operator's declaration in a file.** It is labelled as one everywhere it is
+   reported, which is the most that can be done without a kernel channel — and it is the single
+   largest piece of standing-on-a-promise in the daemon. It should become a read of the kernel's
+   state the moment there is one to read.
+
+### Next
+
+1. **The black box (§13, §26)**, which is the largest remaining component and the one every incident
+   path depends on. The preallocated ring, the fixed schema, sealing on a fault, and the replay that
+   makes `blackbox.replay.deterministic` mean something.
+2. **The on-robot console (§32.2)** — the API is written and tested; what is missing is the small
+   static page in front of it, with the stop control that is never below the fold.
+3. **The Hub side** (§32.4): `/skynet/os` readiness over the live registry, the transport endpoint,
+   the embodiment tables. Needs no new tables for step one.
+4. **The §52 SCTS expansion**, as one reviewed change with the corpus regenerated. Carried from the
+   previous session's list and still worth doing on purpose rather than as a side effect.
+5. **A frame graph consumer**: forward kinematics in the kernel, so `workspace` and `self_collision`
+   stop reporting unavailable on a body that declares a tree.
+
+---
+
+## 2026-08-29 (sixth) — the black box
+
+The largest remaining component and the one every incident path depends on. §13 gives it eight
+words a line; §26 gives it a format and six channels; §15 asks two conformance tests of it —
+`telemetry.blackbox.complete` and `telemetry.replay.deterministic` — and neither could be answered
+by anything that existed this morning. It is now a crate, a corpus, a daemon subsystem, three CLI
+subcommands and three routes, and the two tests have something to be true of.
+
+### The decision the whole design rests on: the ring is not an MCAP file
+
+It was tried the other way first, which is the only reason it is worth a paragraph. MCAP is a linear
+container — magic, header, records, a data-end, a summary computed over everything before it, a
+footer — and a ring overwrites its oldest bytes, so the file's own framing is the first casualty of
+the second hour. A black box whose format breaks precisely when it wraps works only during the
+incidents short enough not to need it.
+
+So the roles are split. **The ring is the recording**: fixed-size records, one slot each, a sequence
+number that only increases, no structure a wrap can invalidate. **MCAP is the artifact**: produced
+once, at seal, from whatever the ring holds at that instant. §26 chose MCAP so an incident opens in
+Foxglove with no exporter, and that is a property of the file handed to an investigator rather than
+of the bytes being written a thousand times a second. §26.1 says so now.
+
+### `crates/skynet-blackbox` — 4,400 lines, 29 tests, `no_std`
+
+`no_std` not because the recorder runs on the safety MCU — it does not, `skynetd` owns it (§33.2) —
+but because a crate that cannot reach `std` cannot quietly acquire a file handle, a clock or a
+thread in its hot path. `Ring::append` writes into a caller-provided `&mut [u8]`: a memcpy and some
+integer arithmetic, no allocation, no clock read. Sealing allocates freely, because sealing happens
+after the incident and no control deadline is waiting on it.
+
+The parts worth naming:
+
+**`desired` is `f32` and `command` is `f64`, and the asymmetry is what makes replay checkable.**
+`desired` is what the policy produced and it reached the kernel through the RHAL, whose values are
+`f32` (§24) — recording it as `f32` records exactly what happened, and widening it back is lossless.
+`command` is what the kernel decided, and the kernel computes in `f64`: a clamp emits
+`signum(v) * ceiling`, which in general has no `f32` that represents it. Recording *that* as `f32`
+would round the verdict, and a replay comparing a recomputed `f64` against a rounded `f32` would
+report a divergence on every clamped cycle — an alarm that fires on correct behaviour, which is the
+fastest way to make a conformance test ignored.
+
+**The policy digest is a `u16` index into a table in the ring header.** §13's line says "policy
+digest", which is 32 bytes identical for hours at a time; at 1 kHz that is 115 MB an hour of one
+repeated constant. It is in the *header* rather than in a preceding event record because an event
+record is overwritten on the next wrap, and the recording would then know it had a policy without
+knowing which.
+
+**Every record carries a CRC.** Power fails mid-write. Without a check the next reader deserialises
+whatever the drive happened to persist, and a half-written cycle is not obviously wrong: the numbers
+are plausible, the timestamps are nearly right, and the incident report is confidently false.
+
+**Sealing never refuses.** §41.1's guarantee is "complete, or the run is not conformant", and the
+temptation is for `seal` to refuse an incomplete window. It does not: the recording most likely to
+have a hole in it is the one covering the fault that made the hole, and refusing to produce it would
+destroy the only evidence at the moment it is worth something. The truth travels with the file
+instead — `Continuity` reports records, sequence range, holes, damaged slots and dropped records,
+and the same facts are in the file's own metadata so a recording separated from this API still says
+what it is. CI asserts the refusal has not been added.
+
+**A gap is not a hole and neither is a wrap.** Three distinct facts, and collapsing any two would
+mislead. *Overwritten* is the window moving on — normal, and not a defect. *A hole* is a sequence
+number missing inside the window — a defect. *A gap* is §47.4's dropped frames, recorded by the
+producer as a `Gap` record that consumes a sequence number of its own, so the numbering stays dense
+and a reader can tell "the ring wrapped past these" from "these were never written".
+
+### Two fields §13 did not have, and the reason they had to be added
+
+The record now carries the **capability token** the command exercised and the **distance to the
+nearest person**. Neither is derivable from anything else in the line, and without them the mode gate
+and the proximity guard — two of the eight — cannot be recomputed. A recording that cannot reproduce
+its own verdicts is a recording that reports a divergence on correct behaviour, so the alternative
+was a replay that quietly excluded two guards from the property it claims to check.
+
+The capability is an index into a second header table, for the same reason the policy digest is: it
+is fixed for the life of a lease, and a value written into a record does not survive the wrap.
+
+§13 is amended in both copies of the specification, and `node tools/check-mirrors.mjs` reports all
+three shared documents identical.
+
+### "Roughly an hour" turned out to be a number nobody had computed
+
+§13 says the ring is "sized for roughly an hour". An hour is not a size, and the conversion is the
+part worth writing down: a 30-joint humanoid with 30 action channels has a 936-byte record, so an
+hour at a 1 kHz joint rate is **3.4 GB** — most of a small disk, against §28's storage budget — and
+a 512 MB ring holds about ten minutes of it.
+
+So the ring is sized by a **byte budget** and what that buys is computed: `Geometry::seconds_covered`
+answers "how long a window is this, at this rate", and `budget_for` inverts it. An operator who asked
+for an hour and got ten minutes is told ten minutes. A constant named `ONE_HOUR` in front of a ring
+that holds a fraction of one is exactly the invented number this specification exists to prevent, and
+§13 now says so rather than implying otherwise.
+
+### Replay, and what it actually claims
+
+Not "the policy would produce the same output" — that is a claim about a neural network on a
+particular accelerator, and this crate cannot make it. The policy's output is *recorded*. What
+`replay` verifies is the half of the cycle that is deterministic by construction: **given the
+recorded desired values, the recorded timing and the same resolved limits, does this edition's
+Safety Kernel reach the recorded verdict?**
+
+Narrower, and much stronger, because it is checkable. It fails when the kernel changed behaviour
+between the recording and the replay — an OS upgrade that quietly altered a clamp, the regression
+nobody catches in the field — when two editions disagree, or when the limits handed to the replay
+are not the ones that were in force, which is itself worth knowing.
+
+Three details that took getting right:
+
+* **`previous` is threaded.** The rate-limit guard compares against what was actually sent last
+  cycle, so replay walks the window in order carrying the previous *command* forward, exactly as the
+  control loop did. The recorded command, not the recomputed one: carrying the recomputed value
+  forward would compare cycle two against a world the robot never entered, and one divergence would
+  cascade into every cycle after it.
+* **The first cycle has no predecessor**, so `Replay::warmed` reports how many cycles were compared
+  soundly rather than pretending the first one was.
+* **A skipped cycle is not an agreement.** `deterministic()` is false when anything was skipped, and
+  false for an empty window — vacuous truth is the failure mode of every conformance predicate, and
+  the same instinct that makes `field_conformance` return `undefined` for zero cycles.
+
+### The corpus grew by seventeen, and caught a real divergence on the first run
+
+Four new corpora: `schemas` (the six MCAP channel schemas, byte for byte — §31.2 puts them in the
+short list of artifacts that stay single-source however many editions exist), `records` (eight, the
+ring's record layout), `header` (two, including both tables) and `seal` (one whole file).
+
+Two decisions made this cheap rather than expensive:
+
+**The schemas are built and serialised through canonical JSON rather than written as literals.**
+Canonical JSON is already dual-implemented, already corpus-tested, and already required to be
+byte-identical across editions. Two editions constructing the same document emit the same bytes
+because the form leaves them no choice, rather than because two people kept two literals in step.
+The same reasoning makes MCAP message bodies canonical JSON: §26 asks for embedded schemas so the
+file stays readable without the code that wrote it, and a JSON Schema with a JSON body meets that
+literally where CDR would need an IDL and a generator to be anything but bytes.
+
+**Every 64-bit field in a corpus input is a decimal string.** A wall-clock epoch in nanoseconds is
+about 1.7e18, past 2^53. A corpus whose inputs went through a JSON number would be comparing two
+editions on a value neither of them received intact. For the same reason the TypeScript oracle uses
+`bigint` throughout.
+
+`reference/typescript/blackbox.ts` is the second implementation — 753 lines, and the first file in
+`reference/` that is *not* a copy of a Hub module, because the Hub does not write black boxes. The
+README there says so rather than leaving a reader to assume it is vendored.
+
+**Fifteen of the seventeen agreed on the first run.** The sixteenth and seventeenth were the seal,
+and the two editions disagreed on **record order**: the Rust wrote schema, channel, schema, channel
+in the data section, and the oracle wrote every schema then every channel. Both are legal MCAP — the
+format only asks that a schema precede the channel referring to it — which is exactly the kind of
+divergence that would never be noticed until two tools disagreed about a file. The Rust now groups
+them, matching the summary section's own grouping.
+
+Finding it took one minute, and the reason is worth recording: the case's expected value was the
+file's SHA-256, which says *that* two editions disagree and not *where*. Temporarily emitting the
+full hex let the runner point at byte 1566. The case now pins **the sequence of record opcodes**
+beside the digest permanently — the digest holds the bytes, the opcode list says where, and eighty
+kilobytes of hex in a file a human is supposed to review holds neither better.
+
+### The daemon records, seals and serves it
+
+`crates/skynetd-io/src/blackbox.rs` is the half that opens files. It preallocates the ring at
+`/data/blackbox/ring` by **writing its whole length, zeroes included** — a sparse file would report
+the same size and fail at the first write after the disk filled, which is precisely the failure §28
+spends a paragraph on. One positioned write per record; sealing into `/data/blackbox/sealed/`, named
+by the monotonic clock rather than the wall clock so that a robot whose clock was set between two
+incidents does not produce two files whose names imply the wrong order.
+
+Three routes, with the roles §39.1 gives them: `GET /blackbox` (observer — "the black box index"),
+`POST /blackbox/seal` and `GET /blackbox/{name}` (operator — "seal and download the black box"). The
+download name is validated rather than joined, because a route that joins a caller's path segment
+onto a directory is how a download becomes a way to read `/etc/shadow`; the CLI checks the same rule
+on its side so a mistyped name fails at the keyboard.
+
+`skynet blackbox`, `blackbox seal` and `blackbox get` are real. `blackbox` was one of the two
+commands the CLI named as absent; `pair` still is, and still needs §10's attestation path.
+
+Adding a binary route meant the CLI's transport had to stop assuming JSON: the response body is now
+split on the raw bytes rather than on a lossy string, because decoding an MCAP file as UTF-8 replaces
+every invalid sequence with U+FFFD — which is to say, hands back a corrupted recording that looks
+like a recording. A download refuses to overwrite an existing file: a recording is evidence.
+
+### The honest part, stated everywhere it could be missed
+
+**This robot records events and nothing else.** §26 gives the black box six channels; four of them
+carry control cycles, and there is no control loop — the policy runtime, the SPSC ring and
+observation assembly (§25) are unwritten. So the ring `skynetd` opens has a shape of zero joints and
+zero channels, which is the honest description of a supervisor that is managing packages and not
+commanding a body.
+
+It is said in the module's own documentation, in `GET /blackbox`'s response as a
+`cycles_unavailable` sentence, in `skynet blackbox`'s output, in the README, and in a test that
+asserts the sentence is there. An incident report that looked complete because nobody had noticed the
+cycles were missing would be worse than no incident report.
+
+The ring is **recreated** when the shape changes — a record's size is a function of the body — and
+what it held is sealed first, so turning on a control loop later costs the previous window a file
+rather than costing it existence.
+
+### A portability defect, found by trying to build
+
+The workspace did not compile on Windows, and had not since `skynetd-io` landed. The crate is careful
+about `cfg(unix)`; its *binary* was not, and reached for `serve` and `auth::random_hex`
+unconditionally. Fixed properly rather than by a feature flag: `skynetd once` is `plan` and `apply`
+over a directory and works anywhere, so the split is around the serving loop rather than around the
+whole binary, and a developer can run a pass against a fixture root on any machine. `random_hex`
+gained a non-POSIX arm that **refuses** — the alternative is a token derived from a clock or a
+process id, which is fine on a workstation and catastrophic on a fleet.
+
+This matters more than a convenience: "a vendor building a driver in 2036 should be able to
+`cargo build` this with no network" is a property this workspace claims, and it was false for every
+vendor on Windows.
+
+### Verification
+
+* **363 Rust tests pass on this machine**, up from 324. The 24 POSIX-gated tests in `skynetd-io` did
+  not run here and are not counted; on Linux the total is 387.
+* `cargo fmt --all --check` clean. `cargo clippy --workspace --all-targets` clean at `-D warnings`,
+  with one `#[allow]` that carries its reason: `Body`'s large variant is the cycle, and boxing it
+  would put an allocation on the common path to save bytes on the rare one.
+* **306 corpus cases reproduce byte for byte**, up from 289.
+* `node tools/check-mirrors.mjs`: all three shared documents identical.
+* `Cargo.lock` holds eleven packages, all ours. The no-dependency property is intact — the MCAP
+  writer and the CRC-32 are ours for that reason.
+* **Not verified here: `crates/skynetd-io/e2e.sh`.** Ten checks were added to it — the ring is
+  preallocated and is a real file rather than a hole, the index reports its window and says the cycle
+  channels are empty, sealing names a file that exists and begins with the MCAP magic, the download
+  arrives byte for byte, and a path in a name is refused. The script parses (`sh -n`) and the pieces
+  it drives are unit-tested, but it needs a POSIX daemon and has only run in CI's hands.
+
+### Four checks added to CI
+
+1. `skynet-blackbox` joins the crates forbidden to depend on `skynet-rhal`. `skynetd-io` depends on
+   it now, and a transitive edge reaches an actuator exactly as well as a direct one — and the black
+   box records `rhal_state`, so that crate is the obvious dependency to take.
+2. The same check stopped punishing prose. It grepped for the identifier anywhere under `src/`, which
+   would have failed on a comment explaining why the edge is absent — the CI file already says a
+   check that trips on the written reason is how the reason stops being written. It now ignores
+   comment lines.
+3. `seal()` may not grow a path that refuses an incomplete window.
+4. The event vocabulary stays a closed enum, which is what keeps ordinary logging out of the black
+   box (§41.1).
+
+`skynet-blackbox` also joins the crates that must keep `forbid(unsafe_code)`.
+
+### What is still zero lines
+
+The policy runtime, the SPSC ring and observation assembly, OTA (§12), the outbound queue (§34.4),
+the on-robot console's HTML (§32.2 — the API behind it exists), the frame graph *consumer*,
+calibration, the watchdog chain, POST and homing, the safety MCU, Ed25519, and the drivers that talk
+to real hardware.
+
+The black box has moved out of this list and into a partial one: the format, the ring, the seal and
+the replay exist and are held to the corpus; the four cycle channels wait on a control loop, and
+every surface that reports the recording says so.
+
+§59.5's several-engineer-years figure is unchanged.
+
+### Three findings recorded rather than fixed
+
+1. **The recording carries no embodiment digest and no OS image digest.** Both are zero, because this
+   daemon has no descriptor and no attested image — the same absence that keeps `admit_package` off
+   the install path. It is not a placeholder to tidy: a recording carrying invented digests could be
+   replayed against the wrong body without anybody noticing, and §56.4's whole argument is that a
+   replayable recording settles a dispute. It should land with the descriptor, as one change.
+2. **Sealing reads the whole ring into memory.** Bounded by the ring, so it is correct rather than
+   dangerous, and at the default 64 MiB it is fine. A ring sized in gigabytes would want a streaming
+   reader — though the better answer is a smaller ring, since §34 already says a sealed recording is
+   uploaded and a gigabyte of one is not crossing a metered bearer.
+3. **A record is written with a `seek` and a `write`, not an `O_APPEND` or a `pwrite`.** Correct for
+   one writer, which is what §33.2 gives it, and it would not survive two. If the control loop ever
+   writes cycles from its own thread while the supervisor writes events, this needs the positioned
+   write it is already shaped for — `Ring::stage` hands back the offset precisely so that the change
+   is a syscall swap rather than a redesign.
+
+### Next
+
+1. **The on-robot console (§32.2)** — the API is now complete enough to sit behind one, including
+   the black box index and the stop control that is never below the fold. What is missing is the
+   small static page.
+2. **The frame graph consumer**: forward kinematics in the kernel, so `workspace` and
+   `self_collision` stop reporting unavailable on a body that declares a tree.
+3. **The Hub side** (§32.4): `/skynet/os` readiness over the live registry, the transport endpoint,
+   the embodiment tables — and now also the incident upload (§17's `POST /devices/{id}/incidents`),
+   which has a file to receive for the first time.
+4. **The §52 SCTS expansion**, as one reviewed change with the corpus regenerated. Carried from two
+   sessions ago and still worth doing on purpose.
+5. **The embodiment descriptor on the robot**, which unblocks three recorded findings at once:
+   admission on the install path, the black box's real shape, and its provenance digests.

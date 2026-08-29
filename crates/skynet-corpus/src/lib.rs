@@ -35,6 +35,7 @@ use skynet_contracts::roles::parse_role;
 use skynet_contracts::transport::resolve_transport;
 use skynet_json::Json;
 
+mod blackbox;
 mod limits;
 
 pub use limits::{BorrowedChannels, CycleOwned, LimitsOwned};
@@ -252,9 +253,39 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             skynet_contracts::safety::limits_to_json(&limits, owned.profile_name())
         }
 
+        // The black box's four corpora. Dispatched on the file rather than only on the corpus
+        // name, because they hold four different kinds of artifact — a schema document, a record,
+        // a header, a whole file — and one arm reaching for all four would have to guess from the
+        // input's shape.
+        "blackbox" if label.contains("schemas") => return blackbox::schemas(input),
+        "blackbox" if label.contains("records") => return blackbox::records(input),
+        "blackbox" if label.contains("header") => return blackbox::header(input),
+        "blackbox" if label.contains("seal") => return blackbox::seal(input),
+
         "admission" => {
             let params = json::admission_params_from_json(input).map_err(|e| e.to_string())?;
             json::admission_to_json(&admit_package(&params))
+        }
+
+        "digest" => {
+            let kind = input
+                .get_present("kind")
+                .and_then(Json::as_str)
+                .unwrap_or("");
+            let version = input
+                .get_present("version")
+                .and_then(Json::as_str)
+                .unwrap_or("");
+            // An absent manifest is `{}` rather than an error: the Hub's `manifest ?? {}` says the
+            // same thing, and a version with nothing declared still has an identity.
+            let manifest = input
+                .get_present("manifest")
+                .cloned()
+                .unwrap_or(Json::obj());
+            let files = json::digest_files_from_json(input.get_present("files"));
+            json::digest_to_json(&skynet_contracts::digest::version_digest(
+                kind, version, &manifest, &files,
+            ))
         }
 
         "frames" => {

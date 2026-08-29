@@ -22,6 +22,7 @@ import type { AdmissionResult } from './package.ts'
 import type { CertificationVerdict } from './conformance.ts'
 import type { CheckResult, FleetReadiness, ReadinessReport } from './readiness.ts'
 import type { CycleVerdict, ResolvedLimits } from './safety.ts'
+import type { DigestOutcome } from './digest.ts'
 
 /** Present-and-null, for a nullable field. */
 function nullable<T>(value: T | null | undefined): T | null {
@@ -174,4 +175,29 @@ export function shapeFrameFault(fault: FrameFault | null): unknown {
   return {
     fault: fault === null ? null : { code: fault.code, subjects: fault.subjects, detail: fault.detail },
   }
+}
+
+/**
+ * The wire shape of a digest outcome (§37.1).
+ *
+ * An outcome rather than a string that might be empty: "this package hashes to X" and "this
+ * package has no computable identity" are the two answers an installer acts on differently, and a
+ * caller must not be able to confuse them. `subject` names the offending thing — a path, a dotted
+ * field, a key — and `detail` carries a reason only where the kind alone does not identify one.
+ */
+export function shapeDigest(outcome: DigestOutcome): unknown {
+  if (outcome.ok) return { digest: outcome.digest, error: null }
+
+  const error = outcome.error
+  const subject =
+    error.kind === 'path' || error.kind === 'duplicate_path' || error.kind === 'sha256'
+      ? error.path
+      : error.kind === 'number_out_of_range'
+        ? error.field
+        : error.kind === 'key_outside_bmp'
+          ? `${error.at} :: ${error.key}`
+          : null
+  const detail = error.kind === 'path' ? error.detail : error.kind === 'manifest' ? error.detail : null
+
+  return { digest: null, error: { kind: error.kind, subject, detail } }
 }
