@@ -8,7 +8,10 @@ use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 
+use skynet_json::Json;
+
 use crate::embodiment::*;
+use crate::json;
 use crate::transport::*;
 
 fn joint(name: &str, role: Option<&str>, effort: Option<f64>, modes: &[&str]) -> EmbodimentJoint {
@@ -86,6 +89,8 @@ fn body() -> EmbodimentDescriptor {
             source: Some("https://example.invalid/arm.pdf".to_string()),
         }),
         solvers: vec!["trac_ik".to_string()],
+        simulator: false,
+        frames: None,
     }
 }
 
@@ -773,4 +778,74 @@ fn a_plan_serialises_to_a_stable_shape() {
     }
     let text: String = json.to_canonical().unwrap();
     assert!(text.starts_with('{') && text.ends_with('}'));
+}
+
+// ── The frame graph, §44.3 ───────────────────────────────────────────────────
+//
+// The corpus holds this edition to the oracle's answers case by case. These are the edition's own
+// tests of the decoder around it, which the corpus cannot reach: the corpus feeds a graph, and the
+// question here is what a *descriptor* carrying one, or not carrying one, decodes to.
+
+#[test]
+fn a_descriptor_with_no_frames_decodes_to_none() {
+    let json = Json::parse(
+        r#"{"schema_version":1,"robot_slug":"arm","base":"fixed","dof":1,"joints":[]}"#,
+    )
+    .unwrap();
+    let descriptor = json::descriptor_from_json(&json).unwrap();
+    assert!(descriptor.frames.is_none());
+    assert!(!descriptor.simulator, "absent means not a simulator");
+}
+
+#[test]
+fn a_null_frame_graph_is_the_same_fact_as_an_absent_one() {
+    // Different provenance — a generator that declined versus a schema that predates the field —
+    // and the same consequence: there is no tree to compute kinematics from. §44.5's failure is the
+    // same either way, so the decoder does not manufacture a distinction it cannot act on.
+    let json = Json::parse(
+        r#"{"schema_version":1,"robot_slug":"arm","base":"fixed","dof":1,"joints":[],"frames":null}"#,
+    )
+    .unwrap();
+    assert!(json::descriptor_from_json(&json).unwrap().frames.is_none());
+}
+
+#[test]
+fn a_frame_graph_decodes_field_by_field() {
+    let json = Json::parse(
+        r#"{"schema_version":1,"robot_slug":"arm","base":"fixed","dof":1,"joints":[],
+            "simulator":true,
+            "frames":{"root":"base_link","convention":"rep103","generator":"mjcf","nodes":[
+              {"name":"base_link","parent":null,"kind":"root","collision":true},
+              {"name":"link1","parent":"base_link","kind":"dynamic","joint":"j1",
+               "joint_type":"revolute","axis":[0,1,0],"translation":[0,0,0.1],
+               "rotation":[0,0,0,1],"source":"descriptor","collision":true,"mass_kg":1.5}]}}"#,
+    )
+    .unwrap();
+    let descriptor = json::descriptor_from_json(&json).unwrap();
+    assert!(descriptor.simulator);
+
+    let graph = descriptor.frames.expect("a graph was declared");
+    assert_eq!(graph.root, "base_link");
+    assert_eq!(graph.generator.as_deref(), Some("mjcf"));
+    assert_eq!(graph.nodes.len(), 2);
+    assert!(graph.nodes[0].parent.is_none());
+    assert_eq!(graph.nodes[1].axis, Some([0.0, 1.0, 0.0]));
+    assert_eq!(graph.nodes[1].rotation, Some([0.0, 0.0, 0.0, 1.0]));
+    assert_eq!(graph.nodes[1].mass_kg, Some(1.5));
+    assert!(validate_frames(&graph).is_none());
+}
+
+#[test]
+fn a_vector_of_the_wrong_length_is_absent_rather_than_padded() {
+    // A three-element rotation is not a quaternion missing a component; it is a field somebody got
+    // wrong, and inventing the fourth number would produce a rotation nobody wrote.
+    let json = Json::parse(
+        r#"{"schema_version":1,"robot_slug":"arm","base":"fixed","dof":1,"joints":[],
+            "frames":{"root":"a","convention":"rep103","nodes":[
+              {"name":"a","parent":null,"kind":"root"},
+              {"name":"b","parent":"a","kind":"static","rotation":[0,0,1]}]}}"#,
+    )
+    .unwrap();
+    let graph = json::descriptor_from_json(&json).unwrap().frames.unwrap();
+    assert_eq!(graph.nodes[1].rotation, None);
 }

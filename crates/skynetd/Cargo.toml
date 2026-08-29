@@ -1,0 +1,24 @@
+[package]
+name = "skynetd"
+description = "The supervisor: desired state, the level-triggered reconciler, supervision, health and leases."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+skynet-json = { path = "../skynet-json" }
+
+# `skynet-contracts` is deliberately absent for now. `admitPackage` and `resolveTransport` belong to
+# the *apply* half of the install path (§37.1) — verify, admit, resolve transport, stage, activate —
+# and that half is not written. Adding the dependency before there is code that calls it would make
+# the manifest a statement about what somebody intends rather than about what this crate does.
+
+# Deliberately **not** `skynet-rhal`, and there is a CI invariant asserting it stays that way.
+#
+# §33.1: "skynetd is not safety-critical, and it is built that way on purpose. It never touches an
+# actuator." That is the property licensing everything else in the daemon — the JSON parser, the
+# HTTP server, the allocation, the network exposure — and a dependency edge to the hardware
+# abstraction layer would be the first step in quietly acquiring the ability to write a joint.

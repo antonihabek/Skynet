@@ -167,6 +167,15 @@ export interface CertificationInput {
   field_conformance?: number
   /** Age of the oldest bench result in days. */
   bench_age_days?: number
+  /**
+   * Whether the body is simulated — `EmbodimentDescriptor.simulator` (§35.3, §70).
+   *
+   * Absent means false: a real robot should not have to declare what it is not, and the obligation
+   * to declare sits on the simulator driver. Read from the descriptor rather than from the driver's
+   * declared ceiling, because a simulator driver written in C++ has no language ceiling to fall
+   * back on.
+   */
+  simulator?: boolean
 }
 
 export interface CertificationVerdict {
@@ -266,6 +275,22 @@ export function awardCertification(input: CertificationInput): CertificationVerd
 
   if (best !== 'none' && input.claimed !== best) {
     reasons.push(`Claimed ${input.claimed}; the evidence supports ${best}.`)
+  }
+
+  // §35.3 and §70: a simulator RHAL driver declares itself one, and the declaration caps the award
+  // at guest. Not because a simulated run is worthless — the sim half of SCTS is load-bearing
+  // infrastructure and cannot run without these drivers — but because no simulated run may ever be
+  // presented as bench evidence, and a `host` badge on a body that does not exist is exactly that.
+  //
+  // Applied *after* the evidence walk rather than by refusing to walk, so the verdict still records
+  // which tier the tests would have supported. "The evidence supports host; the body is simulated,
+  // so guest" is a more useful sentence to a vendor than a silent guest, and it is the same
+  // downgrade-and-say-why rule the award is built on.
+  if (input.simulator === true && (best === 'host' || best === 'certified')) {
+    reasons.push(
+      `The body is simulated (§35.3), so the award is capped at guest; the evidence supports ${best}.`,
+    )
+    best = 'guest'
   }
 
   // Field conformance suspends an award rather than lowering it. A robot whose commands have

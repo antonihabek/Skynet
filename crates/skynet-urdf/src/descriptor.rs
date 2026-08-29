@@ -212,6 +212,10 @@ pub fn build(model: &UrdfModel, options: &ImportOptions) -> Result<Import, Impor
         .set("control", control)
         .set("envelope", Json::Null)
         .set("solvers", Json::arr())
+        // A URDF describes a machine somebody built. §35.3 puts the obligation to declare on the
+        // simulator driver, so this is `false` rather than absent for the same reason the nulls
+        // above are nulls: a person reads this file.
+        .set("simulator", Json::Bool(false))
         .set("frames", frames)
         .set("provenance", provenance(options));
 
@@ -458,7 +462,11 @@ fn build_frames(model: &UrdfModel) -> Json {
                     }
                 }
                 node.set("translation", vector(&joint.origin_xyz))
-                    .set("rotation", quaternion(joint.origin_rpy));
+                    .set("rotation", quaternion(joint.origin_rpy))
+                    // §44.3: a static transform is either the vendor's nominal design value or one
+                    // measured on this individual machine, and the frame records which. A URDF is
+                    // nominal by definition; calibration writes the other value later (§45).
+                    .set("source", Json::Str("descriptor".to_string()));
             }
         }
 
@@ -473,7 +481,10 @@ fn build_frames(model: &UrdfModel) -> Json {
         // §44.4, stated in the artifact rather than only in the specification, because a sign error
         // here moves a robot the wrong way and the file is what a driver author reads.
         .set("convention", Json::Str("rep103".to_string()))
-        .set("source", Json::Str("urdf".to_string()))
+        // `generator`, not `source`: §44.3 gives `source` to the per-node descriptor-versus-
+        // calibration distinction, and one name meaning two things in one object is how a consumer
+        // reads the wrong one.
+        .set("generator", Json::Str("urdf".to_string()))
         .set("nodes", nodes);
     frames
 }

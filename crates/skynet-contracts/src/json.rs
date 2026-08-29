@@ -475,7 +475,93 @@ pub fn descriptor_from_json(value: &Json) -> Result<EmbodimentDescriptor, Decode
         },
         envelope: envelope_from_json(value, "envelope"),
         solvers: value.str_arr("solvers"),
+        simulator: flag(value, "simulator"),
+        frames: frames_from_json(value.get("frames")),
     })
+}
+
+/// The wire shape of a frame-graph verdict.
+///
+/// `fault` is present-and-null rather than absent when the graph is usable: "this graph is usable"
+/// is a fact worth stating, and a consumer reading an absent key cannot tell it from a producer
+/// that forgot to run the check.
+pub fn frame_fault_to_json(fault: &Option<FrameFault>) -> Json {
+    let mut out = Json::obj();
+    match fault {
+        None => {
+            out.set("fault", Json::Null);
+        }
+        Some(fault) => {
+            let mut body = Json::obj();
+            body.set("code", Json::Str(fault.code.clone()))
+                .set(
+                    "subjects",
+                    Json::Arr(fault.subjects.iter().cloned().map(Json::Str).collect()),
+                )
+                .set("detail", Json::Str(fault.detail.clone()));
+            out.set("fault", body);
+        }
+    }
+    out
+}
+
+/// Read a [`FrameGraph`] (§44.3).
+///
+/// Absent and null both produce `None`, which is the same fact to every consumer: there is no tree
+/// to compute kinematics from. A malformed one produces a graph that [`validate_frames`] then
+/// rejects with the offending frame named, rather than a decode error with a byte offset — the
+/// caller needs to tell an operator which frame is wrong, not which character.
+pub fn frames_from_json(value: Option<&Json>) -> Option<FrameGraph> {
+    let value = value?;
+    if matches!(value, Json::Null) {
+        return None;
+    }
+
+    let mut nodes = Vec::new();
+    for item in value.arr_or_empty("nodes") {
+        nodes.push(FrameNode {
+            name: opt_string(item, "name").unwrap_or_default(),
+            parent: opt_string(item, "parent"),
+            kind: opt_string(item, "kind").unwrap_or_else(|| "static".to_string()),
+            translation: vec3(item, "translation"),
+            rotation: vec4(item, "rotation"),
+            source: opt_string(item, "source"),
+            joint: opt_string(item, "joint"),
+            joint_type: opt_string(item, "joint_type"),
+            axis: vec3(item, "axis"),
+            mimics: opt_string(item, "mimics"),
+            collision: flag(item, "collision"),
+            mass_kg: opt_f64(item, "mass_kg"),
+        });
+    }
+
+    Some(FrameGraph {
+        root: opt_string(value, "root").unwrap_or_default(),
+        convention: opt_string(value, "convention").unwrap_or_default(),
+        generator: opt_string(value, "generator"),
+        nodes,
+    })
+}
+
+fn vec3(value: &Json, key: &str) -> Option<[f64; 3]> {
+    let items = value.get(key)?.as_arr()?;
+    if items.len() != 3 {
+        return None;
+    }
+    Some([items[0].as_f64()?, items[1].as_f64()?, items[2].as_f64()?])
+}
+
+fn vec4(value: &Json, key: &str) -> Option<[f64; 4]> {
+    let items = value.get(key)?.as_arr()?;
+    if items.len() != 4 {
+        return None;
+    }
+    Some([
+        items[0].as_f64()?,
+        items[1].as_f64()?,
+        items[2].as_f64()?,
+        items[3].as_f64()?,
+    ])
 }
 
 /// Read a [`SourceEmbodiment`].
@@ -637,6 +723,7 @@ pub fn certification_input_from_json(value: &Json) -> Result<CertificationInput,
         results,
         field_conformance: opt_f64(value, "field_conformance"),
         bench_age_days: opt_f64(value, "bench_age_days"),
+        simulator: flag(value, "simulator"),
     })
 }
 

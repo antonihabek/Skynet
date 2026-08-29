@@ -257,6 +257,14 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             json::admission_to_json(&admit_package(&params))
         }
 
+        "frames" => {
+            // An absent or null graph is a body with no tree, which is a question for the guard
+            // that wanted one rather than for the validator — so it is a broken case file here
+            // rather than a silent pass.
+            let graph = json::frames_from_json(input.get("graph")).ok_or("no `graph`")?;
+            json::frame_fault_to_json(&skynet_contracts::embodiment::validate_frames(&graph))
+        }
+
         "certification" => {
             let cert_input =
                 json::certification_input_from_json(input).map_err(|e| e.to_string())?;

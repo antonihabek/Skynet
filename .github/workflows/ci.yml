@@ -89,6 +89,20 @@ jobs:
         working-directory: drivers/python-host
         run: make check PYTHON=python3
 
+      # The MuJoCo simulator driver (§70), against real physics. `libosmesa6` is the software GL
+      # implementation that makes the camera path exercisable on a machine with no display; without
+      # it the driver correctly declares no sensors, which is a real branch and a weaker test.
+      - name: MuJoCo
+        run: |
+          python3 -m pip install --quiet mujoco
+          sudo apt-get update -qq && sudo apt-get install -y -qq libosmesa6
+      - name: MuJoCo driver, sim conformance against physics
+        working-directory: drivers/mujoco
+        run: MUJOCO_GL=osmesa make check PYTHON=python3
+      - name: And the same driver through the C host
+        working-directory: drivers/python-host
+        run: MUJOCO_GL=osmesa make check-mujoco PYTHON=python3
+
   # The corpus, and the property that makes multiple editions survivable.
   corpus:
     runs-on: ubuntu-latest
@@ -158,17 +172,47 @@ jobs:
             exit 1
           fi
 
+      # §35.3 and §70. A simulator declares itself one, and the declaration has to *do* something
+      # or it is a comment. The cap lives in the contracts and in the CLI's tier walk, and the
+      # corpus holds both to the oracle's answers; this is the check that the rule was not quietly
+      # removed from either place while the corpus cases were removed with it.
+      - name: A simulated body is capped at guest
+        run: |
+          grep -q 'input.simulator && (best == "host" || best == "certified")' \
+            crates/skynet-contracts/src/certification.rs
+          grep -q 'self.simulated && tier_rank(attained) > tier_rank("guest")' \
+            crates/skynet-cli/src/check.rs
+
       # §23.1 again, from the other side. Two crates cannot be safe by construction: `skynet-rhal`
       # declares a C vtable of raw function pointers, and `skynet-cli` loads arbitrary native code.
       # Every other crate can be, and stays that way.
       - name: Everything but the ABI and the loader forbids unsafe
         run: |
-          for crate in skynet-json skynet-sha256 skynet-kernel skynet-contracts skynet-urdf; do
+          for crate in skynet-json skynet-sha256 skynet-kernel skynet-contracts skynet-urdf skynetd; do
             grep -q 'forbid(unsafe_code)' "crates/$crate/src/lib.rs" || {
               echo "::error::crates/$crate dropped forbid(unsafe_code)."
               exit 1
             }
           done
+
+      # §33.1. `skynetd` is not safety-critical and is built that way: it never touches an
+      # actuator, and that single property is what licenses it to be a large, allocating,
+      # network-facing program. A dependency edge to the hardware abstraction layer is the first
+      # step in quietly acquiring the ability to write a joint, so the edge is asserted absent
+      # rather than remembered absent.
+      - name: skynetd cannot reach the RHAL
+        run: |
+          # A dependency *line*, not the word: the manifest explains at length why the edge
+          # is absent, and a check that a comment saying "not skynet-rhal" trips is a check
+          # that punishes writing the reason down.
+          if grep -qE '^[[:space:]]*skynet-rhal[[:space:]]*=' crates/skynetd/Cargo.toml; then
+            echo "::error::skynetd took a dependency on skynet-rhal."
+            echo "§33.1: skynetd is not safety-critical *because* it never touches an actuator."
+            echo "Everything else in §33 — the reconciler, the network exposure, the JSON parser —"
+            echo "is licensed by that property, and this edge is how it would be lost."
+            exit 1
+          fi
+          ! grep -rq 'skynet_rhal' crates/skynetd/src/
 
       # The workspace has no third-party dependencies. A vendor building a driver in 2036 should be
       # able to build this with no network, and the kernel cannot reach most of the ecosystem
