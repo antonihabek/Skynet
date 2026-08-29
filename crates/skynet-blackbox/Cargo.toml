@@ -1,0 +1,27 @@
+[package]
+name = "skynet-blackbox"
+description = "The black box: the preallocated cycle ring, sealing to MCAP, and deterministic replay (§13, §26)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+skynet-kernel = { path = "../skynet-kernel" }
+skynet-json = { path = "../skynet-json" }
+skynet-sha256 = { path = "../skynet-sha256" }
+
+# Deliberately **not** `skynet-rhal`, and this crate is the one where that needs saying twice.
+#
+# The black box records `rhal_state` verbatim (§26), so the obvious move is to depend on the crate
+# that declares it. But `skynetd` is what owns the recorder (§33.2), and §33.1's licence for
+# everything else about the daemon — that it is large, allocating and network-facing — is that it
+# *cannot touch an actuator*. A dependency edge from the daemon to the vtable, even one arriving
+# through here, is how that stops being true, and CI would not see it: the check greps `skynetd`'s
+# own manifest and sources. So this crate records joint values as the numbers they are, and the
+# conversion from the ABI's structs happens in the process that already holds them.
+
+[lints.rust]
+missing_docs = "warn"

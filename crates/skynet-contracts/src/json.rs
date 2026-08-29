@@ -746,6 +746,73 @@ pub fn readiness_subject_from_json(value: &Json) -> Result<ReadinessSubject, Dec
     })
 }
 
+// ── Digests (§37.1) ──────────────────────────────────────────────────────────
+
+/// Write a digest outcome.
+///
+/// Shaped as an outcome rather than as a `String` that might be empty, because "this package hashes
+/// to X" and "this package has no computable identity" are the two answers an installer acts on
+/// differently and a caller must not be able to confuse them. `error.subject` names the offending
+/// thing — a path, a dotted field, a key — and `error.detail` carries a reason only where the kind
+/// alone does not identify one, which is the path rules.
+pub fn digest_to_json(outcome: &Result<String, crate::digest::DigestError>) -> Json {
+    use crate::digest::DigestError as E;
+
+    let mut out = Json::obj();
+    match outcome {
+        Ok(digest) => {
+            out.set("digest", Json::Str(digest.clone()))
+                .set("error", Json::Null);
+        }
+        Err(error) => {
+            let (kind, subject, detail) = match error {
+                E::Path { path, detail } => {
+                    ("path", Some(path.clone()), Some((*detail).to_string()))
+                }
+                E::DuplicatePath { path } => ("duplicate_path", Some(path.clone()), None),
+                E::Sha256 { path, .. } => ("sha256", Some(path.clone()), None),
+                E::Manifest { detail } => ("manifest", None, Some(detail.clone())),
+                E::NumberOutOfRange { field, .. } => {
+                    ("number_out_of_range", Some(field.clone()), None)
+                }
+                E::KeyOutsideBmp { at, key } => {
+                    ("key_outside_bmp", Some(format!("{at} :: {key}")), None)
+                }
+            };
+            let mut body = Json::obj();
+            body.set("kind", Json::Str(kind.to_string()))
+                .set("subject", subject.map_or(Json::Null, Json::Str))
+                .set("detail", detail.map_or(Json::Null, Json::Str));
+            out.set("digest", Json::Null).set("error", body);
+        }
+    }
+    out
+}
+
+/// Read a [`crate::digest::DigestFile`] list from a corpus case.
+pub fn digest_files_from_json(value: Option<&Json>) -> Vec<crate::digest::DigestFile> {
+    let Some(value) = value else {
+        return Vec::new();
+    };
+    value
+        .as_arr()
+        .unwrap_or(&[])
+        .iter()
+        .map(|item| crate::digest::DigestFile {
+            path: item
+                .get_present("path")
+                .and_then(Json::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            sha256: item
+                .get_present("sha256")
+                .and_then(Json::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

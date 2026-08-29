@@ -26,13 +26,21 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { createHash } from 'node:crypto'
+
 import { canonical } from '../../reference/typescript/canonical.ts'
+import {
+  encodeHeader, encodeRecord, hex, opcodes, recordSize, wire, writeMcap,
+  type Cycle, type Entry as BlackboxEntry, type Geometry as RingGeometry,
+  type Meta as RingMeta, type Shape as RingShape,
+} from '../../reference/typescript/blackbox.ts'
 import {
   parseRole, resolveTransport, roleKey, validateFrames,
   type ActionChannel, type EmbodimentDescriptor, type FrameGraph, type FrameNode,
   type ResolveTransportOptions, type SourceEmbodiment,
 } from '../../reference/typescript/embodiment.ts'
 import { admitPackage, type AdmissionParams } from '../../reference/typescript/package.ts'
+import { versionDigest, type DigestFile } from '../../reference/typescript/digest.ts'
 import {
   awardCertification, testsRequiredFor, type CertificationInput,
 } from '../../reference/typescript/conformance.ts'
@@ -46,7 +54,7 @@ import {
 import type { SafetyEnvelope } from '../../reference/typescript/types.ts'
 import {
   shapeAdmission, shapeCertification, shapeFleet, shapeFrameFault, shapeLimits, shapePlan,
-  shapeReadiness, shapeVerdict,
+  shapeDigest, shapeReadiness, shapeVerdict,
 } from '../../reference/typescript/shape.ts'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -1032,6 +1040,520 @@ for (let n = 0; n < 40; n += 1) {
     input: { limits: params, cycle: c, last_sequence: lastSequence },
     expected: canonical(shapeVerdict(evaluateCycle(c, limits, params.envelope, lastSequence))),
   })
+}
+
+// ── Digests (§37.1) ──────────────────────────────────────────────────────────
+//
+// The identity a package is verified against. These cases exist because the digest is the one
+// contract where a divergence is not a wrong answer but a *different package* — two editions that
+// disagreed here would each be certain the other had been tampered with.
+
+const HASH_A = 'a'.repeat(64)
+const HASH_B = '0123456789abcdef'.repeat(4)
+
+function file(path: string, sha256 = HASH_A): DigestFile {
+  return { path, sha256 }
+}
+
+function digestCase(
+  id: string,
+  note: string,
+  input: { kind: string; version: string; manifest: unknown; files: DigestFile[] },
+): void {
+  add('digest', 'version', {
+    id,
+    note,
+    input,
+    expected: canonical(shapeDigest(versionDigest(input))),
+  })
+}
+
+const POLICY_MANIFEST = {
+  schema_version: 1,
+  id: 'openrobot/grasp',
+  version: '1.4.0',
+  kind: 'policy',
+  isolation: 'wasm',
+  budget: { ram_mb: 512, cpu_cores: 1.5, control_hz: 50 },
+}
+
+digestCase(
+  'empty',
+  'No files and an empty manifest — the degenerate case, pinned so the framing cannot drift unnoticed.',
+  { kind: 'policy', version: '0.0.0', manifest: {}, files: [] },
+)
+
+digestCase(
+  'one-file',
+  'One file. The list contributes a single line with no trailing separator.',
+  { kind: 'policy', version: '1.0.0', manifest: {}, files: [file('policy.onnx')] },
+)
+
+digestCase(
+  'manifest-key-order',
+  'Keys given in a deliberately unhelpful order. Canonicalisation is what makes the digest a property of the content rather than of the editor that wrote it.',
+  {
+    kind: 'policy',
+    version: '1.4.0',
+    manifest: {
+      isolation: 'wasm',
+      budget: { control_hz: 50, cpu_cores: 1.5, ram_mb: 512 },
+      kind: 'policy',
+      version: '1.4.0',
+      id: 'openrobot/grasp',
+      schema_version: 1,
+    },
+    files: [file('policy.onnx', HASH_B), file('manifest.json')],
+  },
+)
+
+digestCase(
+  'manifest-canonical-equivalent',
+  'The same manifest written the natural way, and the same two files. Must produce the identical digest to `manifest-key-order`, which is the whole claim.',
+  {
+    kind: 'policy',
+    version: '1.4.0',
+    manifest: POLICY_MANIFEST,
+    files: [file('manifest.json'), file('policy.onnx', HASH_B)],
+  },
+)
+
+digestCase(
+  'kind-separates',
+  'Same manifest and files, different repository kind. A dataset and a policy holding identical bytes are not the same artifact.',
+  {
+    kind: 'dataset',
+    version: '1.4.0',
+    manifest: POLICY_MANIFEST,
+    files: [file('manifest.json'), file('policy.onnx', HASH_B)],
+  },
+)
+
+digestCase(
+  'nested-paths',
+  'Nested paths, ordered by UTF-16 code unit — byte order for every path anybody has, pinned here so an edition that reached for its own collation is caught.',
+  {
+    kind: 'policy',
+    version: '2.0.0',
+    manifest: POLICY_MANIFEST,
+    files: [file('weights/b.bin'), file('weights/a.bin', HASH_B), file('README.md'), file('weights.bin')],
+  },
+)
+
+digestCase(
+  'null-is-not-absent',
+  'A null field is present and null. Collapsing it to absent would give two different manifests one identity.',
+  { kind: 'policy', version: '1.0.0', manifest: { envelope: null }, files: [] },
+)
+
+digestCase(
+  'traversal-refused',
+  'A path that leaves the package root. Refused before hashing, because a digest computed over a traversal is a digest that attests to one.',
+  { kind: 'policy', version: '1.0.0', manifest: {}, files: [file('../../etc/systemd/system/evil.service')] },
+)
+
+digestCase('absolute-refused', 'An absolute path.', {
+  kind: 'policy',
+  version: '1.0.0',
+  manifest: {},
+  files: [file('/etc/passwd')],
+})
+
+digestCase(
+  'backslash-refused',
+  'A backslash: a separator on one filesystem and an ordinary filename character on another.',
+  { kind: 'policy', version: '1.0.0', manifest: {}, files: [file('weights\\a.bin')] },
+)
+
+digestCase(
+  'trailing-dot-refused',
+  'A component ending in a dot, which some filesystems silently strip — so two paths would name one file after unpacking.',
+  { kind: 'policy', version: '1.0.0', manifest: {}, files: [file('weights./a.bin')] },
+)
+
+digestCase(
+  'duplicate-path-refused',
+  'Two entries for one path. Which bytes the digest attests to would depend on a sort being stable.',
+  { kind: 'policy', version: '1.0.0', manifest: {}, files: [file('a.bin', HASH_A), file('a.bin', HASH_B)] },
+)
+
+digestCase(
+  'uppercase-hash-refused',
+  'An uppercase hash. One digest with two spellings makes every string comparison downstream a coin toss.',
+  { kind: 'policy', version: '1.0.0', manifest: {}, files: [file('a.bin', 'A'.repeat(64))] },
+)
+
+digestCase('short-hash-refused', 'A truncated hash.', {
+  kind: 'policy',
+  version: '1.0.0',
+  manifest: {},
+  files: [file('a.bin', 'abc')],
+})
+
+digestCase(
+  'huge-number-refused',
+  'A manifest number at 1e21, where the Hub reaches for an exponent and the canonical rule forbids one. Refused rather than digested into an identity only one side reproduces.',
+  { kind: 'dataset', version: '1.0.0', manifest: { bytes: 1e21 }, files: [] },
+)
+
+digestCase('tiny-number-refused', 'The same divergence at the other end: below 1e-6.', {
+  kind: 'policy',
+  version: '1.0.0',
+  manifest: { tolerance: 1e-7 },
+  files: [],
+})
+
+digestCase(
+  'boundary-numbers-accepted',
+  'Both boundaries from the inside. 1e-6 and a shade under 1e21 are spelled identically by both, so they are digested rather than refused.',
+  { kind: 'policy', version: '1.0.0', manifest: { tolerance: 1e-6, bytes: 999999999999999900000 }, files: [] },
+)
+
+digestCase(
+  'astral-key-refused',
+  'An object key above U+FFFF. UTF-16 order and UTF-8 order disagree there, so the two editions would sort the manifest differently.',
+  { kind: 'policy', version: '1.0.0', manifest: { '\u{1F680}': 'launch' }, files: [] },
+)
+
+digestCase(
+  'astral-value-accepted',
+  'The same character in a value. Nothing sorts on a value, so there is nothing to disagree about.',
+  { kind: 'policy', version: '1.0.0', manifest: { note: '\u{1F680}' }, files: [] },
+)
+
+// ── The black box (§13, §26) ─────────────────────────────────────────────────
+//
+// Three corpora, and they hold three different kinds of thing.
+//
+// `schemas` pins the six MCAP channel schemas byte for byte. §31.2 puts them in the short list of
+// artifacts that stay single-source however many editions exist, because *a black box sealed by one
+// edition must be readable by every other*, and the only way to hold that is to freeze the bytes.
+//
+// `records` pins the ring's record layout. It is the format's hot path and the part with no
+// external specification to fall back on: get an offset wrong and a recording deserialises into
+// plausible nonsense rather than failing.
+//
+// `header` pins the ring header, including both of its tables.
+//
+// **Every 64-bit field is a decimal string in these inputs.** A wall-clock epoch in nanoseconds is
+// about 1.7e18, which is past 2^53, and a corpus whose inputs went through a JSON number would be
+// comparing two editions on a value neither of them received intact.
+
+function blackboxCase(file: string, id: string, note: string, input: unknown, expected: string): void {
+  add('blackbox', file, { id, note, input, expected })
+}
+
+for (const channel of wire()) {
+  blackboxCase(
+    'schemas',
+    channel.name,
+    `The embedded schema for ${channel.topic}. §31.2 keeps these single-source across editions: a black box sealed by one must be readable by every other.`,
+    { channel: channel.topic },
+    canonical({ id: channel.id, topic: channel.topic, name: channel.name, definition: channel.definition }),
+  )
+}
+
+const BB_SHAPE: RingShape = { joints: 2, channels: 2 }
+const BB_OBSERVATION = new Uint8Array(32).fill(0xab)
+
+function bbCycle(overrides: Partial<Cycle> = {}): Cycle {
+  return {
+    tick: 7n,
+    observation: BB_OBSERVATION,
+    policy: 0,
+    stateFlags: 1,
+    faultCode: 0,
+    rhalResult: 0,
+    stateSeq: 3,
+    stateStampNs: 100n,
+    commandStampNs: 90n,
+    commandSeq: 4,
+    mode: 0,
+    advisory: false,
+    response: null,
+    tripped: [],
+    capability: 0xffff,
+    nearestPersonM: Number.NaN,
+    basePose: [Number.NaN, Number.NaN, Number.NaN, Number.NaN, Number.NaN, Number.NaN, Number.NaN],
+    baseTwist: [0, 0, 0, 0, 0, 0],
+    desired: [0.25, -0.5],
+    command: [0.25, -0.5],
+    mask: [1, 0],
+    clamped: [false, false],
+    position: [0.1, 0.2],
+    velocity: [0.0, Number.NaN],
+    effort: [1.5, Number.NaN],
+    ...overrides,
+  }
+}
+
+/** The JSON shape a corpus input uses for one cycle. 64-bit fields are decimal strings. */
+function cycleInput(cycle: Cycle): unknown {
+  const orNull = (value: number) => (Number.isFinite(value) ? value : null)
+  return {
+    kind: 'cycle',
+    tick: String(cycle.tick),
+    observation: hex(cycle.observation),
+    policy: cycle.policy,
+    state_flags: cycle.stateFlags,
+    fault_code: cycle.faultCode,
+    rhal_result: cycle.rhalResult,
+    state_seq: cycle.stateSeq,
+    state_stamp_ns: String(cycle.stateStampNs),
+    command_stamp_ns: String(cycle.commandStampNs),
+    command_seq: cycle.commandSeq,
+    mode: cycle.mode,
+    advisory: cycle.advisory,
+    response: cycle.response,
+    tripped: cycle.tripped,
+    capability: cycle.capability,
+    nearest_person_m: orNull(cycle.nearestPersonM),
+    base_pose: cycle.basePose.map(orNull),
+    base_twist: cycle.baseTwist.map(orNull),
+    desired: cycle.desired,
+    command: cycle.command,
+    mask: cycle.mask,
+    clamped: cycle.clamped,
+    position: cycle.position.map(orNull),
+    velocity: cycle.velocity.map(orNull),
+    effort: cycle.effort.map(orNull),
+  }
+}
+
+function recordCase(
+  id: string, note: string, shape: RingShape, sequence: bigint, monoNs: bigint,
+  entry: BlackboxEntry, entryInput: unknown,
+): void {
+  const bytes = encodeRecord(shape, sequence, monoNs, entry)
+  blackboxCase('records', id, note,
+    { shape, sequence: String(sequence), mono_ns: String(monoNs), entry: entryInput },
+    canonical({ size: bytes.length, hex: hex(bytes) }))
+}
+
+recordCase(
+  'cycle-quiet',
+  'A cycle nothing tripped on. Unmeasured velocity and effort are NaN in the ring, which is not zero (§24), and the hold mask says nothing rather than saying zero on the second channel.',
+  BB_SHAPE, 5n, 1234n,
+  { kind: 'cycle', cycle: bbCycle() }, cycleInput(bbCycle()),
+)
+
+{
+  const clamped = bbCycle({
+    desired: [2.5, -0.5],
+    command: [1.0, -0.5],
+    clamped: [true, false],
+    tripped: ['envelope'],
+    response: 'clamp',
+    rhalResult: -110,
+    mode: 1,
+  })
+  recordCase(
+    'cycle-clamped',
+    'A clamp. `desired` is f32 because it came through the RHAL; `command` is f64 because the kernel computed it, and rounding it would make every clamped cycle report a false divergence on replay.',
+    BB_SHAPE, 6n, 2234n,
+    { kind: 'cycle', cycle: clamped }, cycleInput(clamped),
+  )
+}
+
+{
+  const stopped = bbCycle({
+    desired: [2.5, 2.5],
+    command: [0, 0],
+    tripped: ['watchdog'],
+    response: 'stop_cat2',
+    commandSeq: 4,
+  })
+  recordCase(
+    'cycle-stopped',
+    'A watchdog stop: the kernel sends nothing, so the command array is the zeroes a fixed-size slot already holds. The tripped guard is what distinguishes this from a cycle that asked for zero.',
+    BB_SHAPE, 7n, 3234n,
+    { kind: 'cycle', cycle: stopped }, cycleInput(stopped),
+  )
+}
+
+recordCase(
+  'frame-two-streams',
+  'An assembled observation frame. The worst skew and the per-stream ages are what make "the frame it was given was 80 ms skewed" checkable months later (§25.1).',
+  BB_SHAPE, 8n, 4234n,
+  {
+    kind: 'frame',
+    frame: {
+      observation: BB_OBSERVATION,
+      targetNs: 4230n,
+      worstSkewUs: 31000,
+      streamsOmitted: 0,
+      streams: [
+        { name: 'wrist_cam', ageUs: 31000, stale: true },
+        { name: 'joints', ageUs: 900, stale: false },
+      ],
+    },
+  },
+  {
+    kind: 'frame',
+    observation: hex(BB_OBSERVATION),
+    target_ns: '4230',
+    worst_skew_us: 31000,
+    streams_omitted: 0,
+    streams: [
+      { name: 'wrist_cam', age_us: 31000, stale: true },
+      { name: 'joints', age_us: 900, stale: false },
+    ],
+  },
+)
+
+recordCase(
+  'frame-overflowing',
+  'Eight streams into a record that carries six. The two it cannot hold are counted, because a record that silently dropped them would be partial without saying so.',
+  BB_SHAPE, 9n, 5234n,
+  {
+    kind: 'frame',
+    frame: {
+      observation: BB_OBSERVATION,
+      targetNs: 5230n,
+      worstSkewUs: 12,
+      streamsOmitted: 0,
+      streams: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map(name => ({ name, ageUs: 10, stale: false })),
+    },
+  },
+  {
+    kind: 'frame',
+    observation: hex(BB_OBSERVATION),
+    target_ns: '5230',
+    worst_skew_us: 12,
+    streams_omitted: 0,
+    streams: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map(name => ({ name, age_us: 10, stale: false })),
+  },
+)
+
+recordCase(
+  'frame-astral-stream-name',
+  'A stream name that does not fit, cut on a character boundary. A cut inside a multi-byte sequence would put invalid UTF-8 in the ring and every reader would have to guess.',
+  BB_SHAPE, 10n, 6234n,
+  {
+    kind: 'frame',
+    frame: {
+      observation: BB_OBSERVATION,
+      targetNs: 6230n,
+      worstSkewUs: 0,
+      streamsOmitted: 0,
+      streams: [{ name: 'ααααααααα', ageUs: 1, stale: false }],
+    },
+  },
+  {
+    kind: 'frame',
+    observation: hex(BB_OBSERVATION),
+    target_ns: '6230',
+    worst_skew_us: 0,
+    streams_omitted: 0,
+    streams: [{ name: 'ααααααααα', age_us: 1, stale: false }],
+  },
+)
+
+recordCase(
+  'event-estop',
+  'An estop, on the channel §26 gives lease grants, pre-emptions, OTA and grant changes. The vocabulary is closed, so ordinary logging cannot reach the black box (§41.1).',
+  BB_SHAPE, 11n, 7234n,
+  { kind: 'event', event: { code: 'estop', subject: 'operator', detail: 'the button on the chassis' } },
+  { kind: 'event', code: 'estop', subject: 'operator', detail: 'the button on the chassis' },
+)
+
+recordCase(
+  'gap-encoder-behind',
+  'A gap annotated as a gap (§47.4). It consumes a sequence number of its own, so the numbering stays dense and a reader can tell "the ring wrapped past these" from "these were never written".',
+  BB_SHAPE, 12n, 8234n,
+  { kind: 'gap', gap: { dropped: 150n, firstTick: 900n, reason: 'encoder_behind' } },
+  { kind: 'gap', dropped: '150', first_tick: '900', reason: 'encoder_behind' },
+)
+
+const BB_GEOMETRY: RingGeometry = { shape: BB_SHAPE, capacity: 8, digests: 2, capabilities: 2 }
+const BB_META: RingMeta = {
+  robotId: 'dev-0001',
+  embodiment: new Uint8Array(32).fill(0x11),
+  osImage: new Uint8Array(32).fill(0x22),
+  tier: 1,
+  enforcement: 1,
+  simulator: false,
+  wallEpochNs: 1700000000000000000n,
+  monoNs: 5000000000n,
+  channels: ['right_arm.shoulder.pitch', 'right_arm.elbow.pitch'],
+}
+
+function metaInput(meta: RingMeta): unknown {
+  return {
+    robot_id: meta.robotId,
+    embodiment: hex(meta.embodiment),
+    os_image: hex(meta.osImage),
+    tier: meta.tier,
+    enforcement: meta.enforcement,
+    simulator: meta.simulator,
+    wall_epoch_ns: String(meta.wallEpochNs),
+    mono_ns: String(meta.monoNs),
+    channels: meta.channels,
+  }
+}
+
+function headerCase(
+  id: string, note: string, geometry: RingGeometry, meta: RingMeta,
+  digests: Uint8Array[], capabilities: string[],
+): void {
+  const bytes = encodeHeader(geometry, meta, digests, capabilities)
+  blackboxCase('header', id, note, {
+    geometry: {
+      shape: geometry.shape,
+      capacity: geometry.capacity,
+      digests: geometry.digests,
+      capabilities: geometry.capabilities,
+    },
+    meta: metaInput(meta),
+    digests: digests.map(hex),
+    capabilities,
+  }, canonical({ size: bytes.length, record_size: recordSize(geometry.shape), hex: hex(bytes) }))
+}
+
+headerCase(
+  'empty-tables',
+  'A freshly created ring. The tables are zero, which is how a reader knows where they end, and the header carries its own CRC because damaged metadata makes every record below it unreadable.',
+  BB_GEOMETRY, BB_META, [], [],
+)
+
+headerCase(
+  'filled-tables',
+  'One policy digest and one capability token interned. Both live in the header rather than in a record, because a record is overwritten on the next wrap and the recording would then know it had a policy without knowing which.',
+  BB_GEOMETRY, BB_META, [new Uint8Array(32).fill(0x33)], ['manipulation.grasp'],
+)
+
+// One whole sealed file, which is the artifact §26 is actually about.
+//
+// The expected value is the file's length, its SHA-256 and its sequence of record opcodes, rather
+// than its hex. Every *component* is already pinned exactly — the schemas by the `schemas` corpus,
+// the records by `records`, the header by `header` — so what is left for this case to hold is the
+// framing and the order. The digest holds them; the opcode list says *where* a divergence is,
+// which a digest cannot, and it is the string that made the first one — schemas interleaved with
+// channels in one edition and grouped in the other — legible in a second.
+{
+  const channels = wire()
+  const messages = [
+    { channelId: 6, logTime: 1700000000000001000n, payload: canonical({ mono_ns: 1000, event: 'recording_started', subject: 'dev-0001', detail: 'the ring was opened' }) },
+    { channelId: 1, logTime: 1700000000000002000n, payload: canonical({ mono_ns: 2000, stamp_ns: 100, seq: 3, flags: 1, fault_code: 0, position_rad: [0.1, 0.2], velocity_rad_s: [0, null], effort_nm: [1.5, null], base_pose: [null, null, null, null, null, null, null], base_twist: [0, 0, 0, 0, 0, 0] }) },
+  ]
+  const bytes = writeMcap(
+    'skynet-blackbox rust-edition 0.1.0',
+    channels.map(channel => ({ id: channel.id, name: channel.name, definition: channel.definition })),
+    channels.map(channel => ({ id: channel.id, schemaId: channel.id, topic: channel.topic })),
+    [{ name: 'skynet.blackbox', pairs: [['robot_id', 'dev-0001'], ['sealed_reason', 'operator']] }],
+    messages,
+  )
+  blackboxCase('seal', 'two-messages', 'One sealed file: magic, header, six schemas, six channels, one metadata record, two messages, data end, the summary repeated, three summary offsets, footer, magic. The digest is what holds the framing; the bytes of every component are pinned by the other three corpora.',
+    {
+      library: 'skynet-blackbox rust-edition 0.1.0',
+      metadata: { name: 'skynet.blackbox', pairs: [['robot_id', 'dev-0001'], ['sealed_reason', 'operator']] },
+      messages: messages.map(message => ({
+        channel_id: message.channelId,
+        log_time: String(message.logTime),
+        payload: message.payload,
+      })),
+    },
+    canonical({ size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), opcodes: opcodes(bytes) }))
 }
 
 // ── Write ────────────────────────────────────────────────────────────────────

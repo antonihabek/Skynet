@@ -11,10 +11,16 @@
 //! skynet role left_arm.shoulder.pitch                        §5.1
 //! ```
 //!
-//! Everything else in §18 — `pair`, `install`, `grants`, `ps`, `logs`, `estop`, `blackbox` — talks
-//! to a running `skynetd` or to the Hub, and neither exists yet. They are absent rather than
-//! stubbed, because a command that prints a plausible answer from nothing is the failure this
-//! project is arranged to avoid.
+//! and, since `skynetd` exists, the commands that need a robot on the other end (§33.7):
+//!
+//! ```text
+//! skynet status · ps · plan · logs · grants · estop · rollback     §18, over the local socket
+//! skynet install ./package --id ns/name --kind policy …            §37.1, into the store
+//! ```
+//!
+//! Two are still absent, and are absent rather than stubbed: `pair` needs §10's attestation and
+//! `blackbox` needs §13's recorder, and neither is written. A command that printed a plausible
+//! answer from nothing is the failure this project is arranged to avoid.
 //!
 //! # `std`, and one `unsafe` module
 //!
@@ -30,6 +36,7 @@ mod check;
 mod descriptor_cmd;
 mod dl;
 mod driver_cmd;
+mod robot_cmd;
 mod scaffold;
 mod term;
 mod transport_cmd;
@@ -49,11 +56,16 @@ skynet — Skynet OS workstation tools
   role <role>...                  Parse canonical roles (§5.1)
   version                         Version, ABI version and contract version
 
+  Talking to a robot (§33.7), over /run/skynetd.sock or --host:
+
+  status · ps · plan · logs · grants · estop · rollback
+  install <dir> --id <ns/name> --kind <k> --version <v> --digest <hex>
+  blackbox [index] · blackbox seal · blackbox get <name>
+
   --help after any command prints its options.
 
-  The commands that talk to a running robot — pair, install, grants, ps, logs,
-  estop, blackbox — are not here, because skynetd is not written. They are absent
-  rather than stubbed.";
+  pair is not here: it needs the attestation path (§10), which is not written,
+  so it is absent rather than stubbed.";
 
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -93,6 +105,8 @@ fn dispatch(argv: &[String]) -> i32 {
         "driver" => driver_cmd::run(rest),
         "transport" => run_or_help(rest, transport_cmd::USAGE, transport_cmd::run),
         "role" => role(rest),
+        "status" | "ps" | "plan" | "logs" | "grants" | "estop" | "rollback" | "install"
+        | "blackbox" => robot_cmd::run(command, rest),
         other => term::fail(&format!("`{other}` is not a skynet command.\n\n{USAGE}")),
     }
 }
@@ -181,19 +195,33 @@ mod tests {
         assert!(USAGE.contains("driver check"));
     }
 
-    /// The commands §18 lists that need a running robot are absent, and the usage says why. A
-    /// stub that printed a plausible fleet status would be the exact failure the project is
+    /// The two §18 commands that still have nothing behind them are absent, and the usage says
+    /// why. A stub that printed a plausible fleet status would be the exact failure the project is
     /// arranged to avoid.
     #[test]
-    fn the_commands_that_need_a_running_robot_are_absent_and_named_as_absent() {
-        for absent in [
-            "pair", "install", "grants", "ps", "logs", "estop", "blackbox",
-        ] {
-            assert_eq!(dispatch(&argv(&[absent])), 1, "`{absent}` should not run");
+    fn pair_is_absent_and_named_as_absent() {
+        // One command, where there were two: `blackbox` became real this session. The loop stays,
+        // because the property is about the *set* of commands named as absent rather than about
+        // whichever of them is currently in it.
+        let absent = ["pair"];
+        for command in absent {
+            assert_eq!(dispatch(&argv(&[command])), 1, "`{command}` should not run");
             assert!(
-                USAGE.contains(absent),
-                "usage should name `{absent}` as absent"
+                USAGE.contains(command),
+                "usage should name `{command}` as absent"
             );
+        }
+    }
+
+    /// And the ones that now have a daemon behind them are dispatched rather than refused. They
+    /// fail here because there is no robot on the other end of the socket, which is a different
+    /// answer from "no such command" — and the message says which.
+    #[test]
+    fn the_robot_commands_are_dispatched_and_fail_by_not_reaching_a_robot() {
+        for command in ["status", "ps", "plan", "grants", "estop"] {
+            let code = dispatch(&argv(&[command, "--socket", "/nonexistent/skynetd.sock"]));
+            assert_eq!(code, 1, "`{command}` has nothing to talk to here");
+            assert!(USAGE.contains(command), "usage should name `{command}`");
         }
     }
 
