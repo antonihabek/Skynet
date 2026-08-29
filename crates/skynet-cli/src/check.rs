@@ -28,6 +28,7 @@
 use std::ffi::{c_char, CStr};
 
 use skynet_contracts::certification::SCTS_TESTS;
+use skynet_contracts::embodiment::validate_frames;
 use skynet_contracts::json::descriptor_from_json;
 use skynet_contracts::parse_role;
 use skynet_json::Json;
@@ -110,6 +111,12 @@ pub struct Report {
     pub driver_version: Option<String>,
     /// The descriptor the driver returned, when it returned a parseable one.
     pub descriptor: Option<Json>,
+    /// Whether the body declared itself simulated (§35.3, §70).
+    ///
+    /// Not a check outcome, because it is not a defect. It is a fact about the body that caps the
+    /// tier, and the report says so rather than letting a reader wonder why a driver that passed
+    /// everything is still at guest.
+    pub simulated: bool,
 }
 
 impl Report {
@@ -176,6 +183,15 @@ impl Report {
                 blockers = tier_blockers;
                 break;
             }
+        }
+
+        // §35.3 and §70. A simulator declares itself one and the declaration caps the award at
+        // guest, whatever the driver's own ceiling is — a simulator driver written in C++ has no
+        // language ceiling to fall back on, so the cap has to come from the body rather than from
+        // the edition. Applied after the walk, so the report can still say what the evidence would
+        // have supported.
+        if self.simulated && tier_rank(attained) > tier_rank("guest") {
+            attained = "guest";
         }
 
         (attained, blockers)
@@ -472,6 +488,40 @@ fn descriptor_checks(
                 !descriptor.joints.is_empty(),
                 "joints[] is empty, so there is nothing for a policy to be bound to.",
             ));
+
+            report.simulated = descriptor.simulator;
+
+            // §44.3's frame graph, checked against the shape the specification pins rather than
+            // against whichever generator wrote this file. Absent is not a failure — most bodies
+            // have no graph yet, and §44.5 already says what that means: the pose guards report
+            // unavailable with the frame they wanted named.
+            match &descriptor.frames {
+                None => report.push(CheckResult::new(
+                    "embodiment.descriptor.valid",
+                    "the frame graph, where there is one",
+                    Outcome::NotApplicable,
+                    "no frame graph is declared. The workspace and self-collision guards will \
+                     report unavailable rather than run against a tree they guessed (§44.5).",
+                )),
+                Some(graph) => match validate_frames(graph) {
+                    None => report.push(CheckResult::new(
+                        "embodiment.descriptor.valid",
+                        "the frame graph, where there is one",
+                        Outcome::Pass,
+                        format!(
+                            "{} frames, rooted at `{}`, {}.",
+                            graph.nodes.len(),
+                            graph.root,
+                            graph.convention
+                        ),
+                    )),
+                    Some(fault) => report.push(CheckResult::fail(
+                        "embodiment.descriptor.valid",
+                        "the frame graph, where there is one",
+                        format!("{} [{}]", fault.detail, fault.code),
+                    )),
+                },
+            }
             report.push(CheckResult::assert(
                 "embodiment.descriptor.valid",
                 "dof agrees with the joint list",
@@ -1024,6 +1074,21 @@ pub fn print(report: &Report) -> i32 {
             } else {
                 term::bold(&term::ok(tier))
             }
+        );
+    }
+    if report.simulated {
+        // Said here rather than left to be inferred from a driver that passed everything and is
+        // still at guest. §35.3 forces the cap so that no simulated run reaches bench evidence,
+        // and a vendor reading this needs to know the cap is the body rather than their code.
+        let _ = writeln!(
+            out,
+            "    {} {}",
+            term::warn("↑"),
+            term::dim(&term::wrap(
+                "the body declares simulator: true, which caps the tier at guest whatever the \
+                 evidence supports (§35.3). No simulated run is bench evidence.",
+                6
+            ))
         );
     }
     for (id, outcome) in &blockers {

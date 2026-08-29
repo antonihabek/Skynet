@@ -1703,6 +1703,15 @@ The rule that keeps it honest: **a simulator driver must declare itself one.** T
 to `guest`, the enforcement mode to advisory-with-simulation noted, and check-ins carry the flag,
 so no simulated run can ever be presented as bench evidence in SCTS.
 
+The field is **`simulator`** on the embodiment descriptor: a boolean whose absence means `false`,
+because a real robot should not have to declare what it is not and the obligation to declare sits on
+the simulator driver, where this section puts it. `awardCertification()` reads it from the
+descriptor rather than from the driver's declared ceiling, because a simulator driver written in C++
+has no language ceiling to fall back on — the Python one is capped twice and that is a coincidence
+of the first two we happen to have. The cap is applied *after* the evidence walk, so the verdict
+still records which tier the tests would have supported: "the evidence supports host; the body is
+simulated, so guest" is a more useful sentence to a vendor than a silent guest.
+
 ### 35.4 Synchronisation
 
 NTP when a network exists, for wall time only. PTP or gPTP where the hardware supports it, which
@@ -2082,6 +2091,60 @@ nominal design values signed by the vendor, and those from **calibration** are m
 this individual machine. Where both exist the calibrated one wins, and the frame records which it
 used — a workspace guard running on nominal extrinsics when a calibration exists is a guard using
 the wrong number, and one running on *expired* calibration is worse.
+
+**The shape, pinned.** Two generators emit this block — `skynet descriptor from-urdf` and the MuJoCo
+driver — and the kernel will read it. So the field names belong to the specification rather than to
+whichever tool happened to write one first. A second edition emitting a different spelling of the
+same tree is a divergence that no test catches, precisely because nothing consumes `frames` yet and
+there is therefore nothing to fail.
+
+```json
+"frames": {
+  "root": "base_link",
+  "convention": "rep103",
+  "generator": "urdf" | "mjcf" | "vendor" | null,
+  "nodes": [
+    {
+      "name": "left_arm.link0",
+      "parent": "torso.link",
+      "kind": "root" | "static" | "dynamic",
+      "translation": [x, y, z],
+      "rotation": [x, y, z, w],
+      "source": "descriptor" | "calibration",
+      "joint": "left_arm.shoulder.pitch",
+      "joint_type": "revolute" | "continuous" | "prismatic" | "ball" | "floating",
+      "axis": [x, y, z],
+      "mimics": "left_hand.finger.flex#0",
+      "collision": true,
+      "mass_kg": 1.42
+    }
+  ]
+}
+```
+
+| Field | Rule |
+|---|---|
+| `root` | Names the node whose `parent` is null. `base_link` by convention (§44.4), not by requirement. |
+| `convention` | `rep103` today. The field exists so a body that is *not* REP-103 has to say so rather than be silently misread. |
+| `generator` | What produced the tree. Provenance, never a licence to read the other fields differently. |
+| `translation`, `rotation` | The transform from the parent frame: metres, and a quaternion ordered `xyzw` (§44.4). Both absent on the root, which has nothing to be relative to. |
+| `source` | Which of the two sources above this transform came from. Absent on the root. |
+| `joint`, `joint_type`, `axis` | Present exactly when `kind` is `dynamic`. The axis is expressed in this frame, before the joint is applied. |
+| `mimics` | The joint this one follows, where it is a linkage rather than a degree of freedom. Optional. |
+| `collision`, `mass_kg` | What the geometry declares, for `self_collision` and for anyone estimating dynamics. `mass_kg` is nullable — a frame with no geometry has no mass. |
+
+**A node carries at most one joint.** That is what keeps forward kinematics a walk rather than a
+solver, and it is also a real restriction: URDF cannot express anything else, MJCF can, and a body
+with two joints on one link therefore has no representable frame graph. Such a body emits
+`frames: null` rather than a tree with a hinge missing from it, and §44.5 already says what that
+means — the pose guards report unavailable with the reason named. Whether a node should instead
+carry an ordered *list* of joints is open, and it is a change to every consumer of a field no
+consumer reads yet.
+
+**Absent, null and empty are three different bodies.** Absent means the vendor's schema predates the
+field. `null` means the generator could not express this body's tree and said so. An empty `nodes`
+array is a body with no frames at all, which is a claim nobody should be making. All three leave the
+pose guards unavailable; only the middle one names a reason.
 
 ### 44.4 Conventions, stated because a sign error here moves a robot the wrong way
 
@@ -2478,6 +2541,7 @@ schema change vendors must implement and the bench suite must measure:
 | Field | From | Measured by |
 |---|---|---|
 | `frames` — the frame graph (§44.3) | Part V | `embodiment.frames.complete` |
+| `simulator` — the body is simulated (§35.3, §70) | Part IV | `embodiment.descriptor.valid` |
 | `on_command_loss` — hold / brake / fault / coast (§46.2) | Part V | `safety.command_loss.behaviour` |
 | `homing` — required, procedure token, restricted envelope (§48.3) | Part V | `safety.homing.envelope` |
 | `time_to_safe_state_s`, `safe_stop_energy_wh` (§36.2) | Part IV | `power.safe_state.reachable` |
@@ -2487,6 +2551,11 @@ schema change vendors must implement and the bench suite must measure:
 Every one is nullable, and every one absent produces a named unavailability rather than an
 assumption — the rule from §7.2 applied consistently, which is what keeps the descriptor honest as
 it grows.
+
+`simulator` is the single exception, and deliberately so: absent means `false`. Made nullable it
+would produce "nobody said whether this robot is real", which is a question about a physical machine
+that the machine's own existence answers. The obligation is asymmetric because the risk is —
+a simulator presented as a robot is the failure; a robot presented as a robot is not.
 
 ---
 

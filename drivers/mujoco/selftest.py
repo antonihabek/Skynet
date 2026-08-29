@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python"))
@@ -47,10 +48,12 @@ SCENES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scenes")
 _PASSED = 0
 _SKIPPED: list[str] = []
 _FAILED: list[str] = []
+_USED_IDS: set[str] = set()
 
 
 def check(scts_id: str, what: str, held: bool, detail: str = "") -> None:
     global _PASSED
+    _USED_IDS.add(scts_id)
     if held:
         _PASSED += 1
         print(f"ok   {scts_id:<28} {what}")
@@ -62,6 +65,7 @@ def check(scts_id: str, what: str, held: bool, detail: str = "") -> None:
 
 
 def skip(scts_id: str, what: str, why: str) -> None:
+    _USED_IDS.add(scts_id)
     _SKIPPED.append(f"{scts_id}: {what} — {why}")
     print(f"skip {scts_id:<28} {what}")
     print(f"     {why}")
@@ -695,7 +699,7 @@ def sensor_checks() -> None:
         # The headless branch, and it is the one a CI runner and a container actually take. The
         # driver must decline to declare rather than declare and fail the reads.
         skip(
-            "rhal.sensor.latency",
+            "embodiment.descriptor.valid",
             "camera frames",
             "no OpenGL context on this machine, so the driver declares no sensors. "
             "Set MUJOCO_GL=osmesa or =egl with the matching library installed to exercise it.",
@@ -738,29 +742,29 @@ def sensor_checks() -> None:
     rc, state = read(bridge)
     frame = Frame()
     check(
-        "rhal.sensor.latency",
+        "embodiment.descriptor.valid",
         "a declared camera reads",
         bridge.read_sensor("wrist_cam", frame) == rhal.SKR_OK,
     )
     check(
-        "rhal.sensor.latency",
+        "embodiment.descriptor.valid",
         "the frame's declared geometry fits the bytes behind it",
         frame.stride * frame.height <= len(frame.data) and len(frame.data) > 0,
         f"{frame.width}x{frame.height} stride {frame.stride}, {len(frame.data)} bytes",
     )
     check(
-        "rhal.sensor.latency",
+        "embodiment.descriptor.valid",
         "and matches what the descriptor declared",
         (frame.width, frame.height) == (sensors[0]["width"], sensors[0]["height"]),
     )
     check(
-        "rhal.sensor.latency",
+        "embodiment.descriptor.valid",
         "the frame is stamped in the same clock as the state it accompanies",
         frame.stamp_ns == state.stamp_ns,
         f"frame {frame.stamp_ns} vs state {state.stamp_ns}",
     )
     check(
-        "rhal.sensor.latency",
+        "embodiment.descriptor.valid",
         "an unknown sensor is no such device",
         bridge.read_sensor("nose", Frame()) == rhal.SKR_ENODEV,
     )
@@ -774,7 +778,7 @@ def sensor_checks() -> None:
     moved = Frame()
     bridge.read_sensor("wrist_cam", moved)
     check(
-        "rhal.sensor.latency",
+        "embodiment.descriptor.valid",
         "the frame is rendered from the state it is stamped with, not from a cached scene",
         bytes(moved.data) != first,
     )
@@ -902,6 +906,43 @@ def protocol_checks() -> None:
     check("rhal.abi.version", "close is acknowledged and ends the loop", lines[7] == "R 0", lines[7])
 
 
+def scts_ids() -> set[str] | None:
+    """The SCTS ids `skynet-contracts` defines, or None where that source is not beside us.
+
+    Reading the Rust rather than restating the list: a harness naming a test that does not exist
+    reads exactly like one naming a test that does, and this session started by making that mistake.
+    A vendor who cloned only `drivers/` gets `None` and no check, which is the right trade — their
+    tree is not broken because a crate is missing.
+    """
+    source = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..", "..", "crates", "skynet-contracts", "src", "certification.rs",
+    )
+    if not os.path.exists(source):
+        return None
+    with open(source, encoding="utf-8") as handle:
+        body = handle.read()
+    return set(re.findall(r'(?:test|quant)\(\s*"([a-z][a-z0-9_.]+)"', body))
+
+
+def id_checks() -> None:
+    known = scts_ids()
+    if known is None:
+        skip("rhal.abi.version", "the ids named here are real SCTS tests",
+             "crates/skynet-contracts is not beside this driver, so there is nothing to check "
+             "against.")
+        return
+    used = {line.split(":")[0] for line in _FAILED} | _USED_IDS
+    unknown = sorted(id for id in used if id not in known)
+    check(
+        "rhal.abi.version",
+        "every SCTS id this harness names is one SCTS defines",
+        not unknown,
+        f"not in SCTS_TESTS: {unknown}. §52 reserves some ids for measures that do not exist yet; "
+        "naming one here reads exactly like naming one that does.",
+    )
+
+
 def main() -> int:
     print("skynet-mujoco — sim conformance against MuJoCo physics\n")
     abi_checks()
@@ -914,6 +955,7 @@ def main() -> int:
     sensor_checks()
     probe_checks()
     protocol_checks()
+    id_checks()
 
     total = _PASSED + len(_FAILED)
     print(f"\n{total} checks, {len(_FAILED)} failed, {len(_SKIPPED)} skipped")

@@ -206,6 +206,188 @@ export interface EmbodimentDescriptor {
   envelope: SafetyEnvelope | null
   /** IK solvers resident on this robot. Empty means task-space retargeting is not available. */
   solvers: string[]
+  /**
+   * Whether this body is simulated (§35.3, §70).
+   *
+   * The one field on this descriptor whose absence means `false` rather than "nobody said". A real
+   * robot should not have to declare what it is not, and the obligation to declare sits on the
+   * simulator driver, where §35.3 puts it. Made nullable it would produce "nobody said whether this
+   * robot is real", which is a question a physical machine's existence answers.
+   *
+   * It caps the certification award at `guest` — see `awardCertification` — and it is read from
+   * here rather than from the driver's declared ceiling, because a simulator driver written in C++
+   * has no language ceiling to fall back on.
+   */
+  simulator?: boolean
+  /**
+   * The frame graph (§44.3), or `null` where the generator could not express this body's tree.
+   *
+   * Absent, null and empty are three different bodies: absent is a schema that predates the field,
+   * null is a generator that said it could not, and an empty `nodes` array is a body with no frames
+   * at all — a claim nobody should make. All three leave the pose guards unavailable; only the
+   * middle one names a reason.
+   */
+  frames?: FrameGraph | null
+}
+
+// ── The frame graph, §44.3 ───────────────────────────────────────────────────
+//
+// Pinned here rather than left to whichever tool wrote a file first. Two generators emit it —
+// `skynet descriptor from-urdf` and the MuJoCo driver — and the kernel will read it; a second
+// edition emitting a different spelling of the same tree is a divergence no test catches, precisely
+// because nothing consumes `frames` yet and there is therefore nothing to fail.
+
+/** Where a frame's transform came from. Calibrated wins over nominal, and the frame records which. */
+export type FrameSource = 'descriptor' | 'calibration'
+
+export interface FrameNode {
+  name: string
+  /** Null on the root, and on nothing else. */
+  parent: string | null
+  kind: 'root' | 'static' | 'dynamic'
+  /** Metres, from the parent frame. Absent on the root, which has nothing to be relative to. */
+  translation?: [number, number, number]
+  /** Ordered `xyzw` (§44.4). Absent on the root. */
+  rotation?: [number, number, number, number]
+  source?: FrameSource
+  /** Present exactly when `kind` is `dynamic`. */
+  joint?: string
+  joint_type?: 'revolute' | 'continuous' | 'prismatic' | 'ball' | 'floating'
+  /** In this frame, before the joint is applied. */
+  axis?: [number, number, number]
+  /** The joint this one follows, where it is a linkage rather than a degree of freedom. */
+  mimics?: string
+  collision?: boolean
+  /** Null where the frame carries no geometry. */
+  mass_kg?: number | null
+}
+
+export interface FrameGraph {
+  /** Names the node whose parent is null. `base_link` by convention (§44.4), not by requirement. */
+  root: string
+  /** `rep103` today. The field exists so a body that is *not* REP-103 has to say so. */
+  convention: string
+  /** What produced the tree. Provenance, never a licence to read the other fields differently. */
+  generator?: string | null
+  nodes: FrameNode[]
+}
+
+/**
+ * Why a frame graph cannot be used.
+ *
+ * Returned rather than thrown, and carrying the frames it is about, because §44.5 requires the pose
+ * guards to report unavailable **with the missing frame named**. "The frame graph is malformed" is
+ * not a sentence an operator can act on.
+ */
+export interface FrameFault {
+  code:
+    | 'empty'
+    | 'root_missing'
+    | 'several_roots'
+    | 'duplicate_name'
+    | 'parent_missing'
+    | 'cycle'
+    | 'joint_mismatch'
+    | 'unknown_kind'
+  /** The frames this is about, in the order they matter. */
+  subjects: string[]
+  /** One sentence naming what is wrong. */
+  detail: string
+}
+
+const FRAME_KINDS = ['root', 'static', 'dynamic']
+
+/**
+ * Check a frame graph against the rules §44.3 pins.
+ *
+ * Called before anything derives kinematics from it. Every fault here would otherwise present far
+ * from its cause: a missing parent as a frame that silently resolves to identity, a cycle as a hang
+ * in the middle of a control cycle, a duplicate name as a limb that moves when a different limb is
+ * commanded.
+ *
+ * Returns null when the graph is usable. It does **not** check that the graph reaches any
+ * particular frame — "the tree does not reach the end effector" is a question about a specific
+ * guard's needs, and §44.5 has that guard report it with the frame it wanted named.
+ */
+export function validateFrames(graph: FrameGraph): FrameFault | null {
+  if (graph.nodes.length === 0) {
+    return { code: 'empty', subjects: [], detail: 'The graph declares no frames.' }
+  }
+
+  const seen = new Set<string>()
+  for (const node of graph.nodes) {
+    if (seen.has(node.name)) {
+      return {
+        code: 'duplicate_name',
+        subjects: [node.name],
+        detail: `Two frames are named ${node.name}, so a parent reference is ambiguous.`,
+      }
+    }
+    seen.add(node.name)
+  }
+
+  const roots = graph.nodes.filter(node => node.parent === null).map(node => node.name)
+  if (roots.length > 1) {
+    return {
+      code: 'several_roots',
+      subjects: roots,
+      detail: `${roots.length} frames have no parent, so this is a forest and not a tree.`,
+    }
+  }
+  if (!seen.has(graph.root)) {
+    return {
+      code: 'root_missing',
+      subjects: [graph.root],
+      detail: `The declared root ${graph.root} is not one of the frames.`,
+    }
+  }
+
+  for (const node of graph.nodes) {
+    if (!FRAME_KINDS.includes(node.kind)) {
+      return {
+        code: 'unknown_kind',
+        subjects: [node.name],
+        detail: `Frame ${node.name} has kind ${node.kind}, which is not root, static or dynamic.`,
+      }
+    }
+    if ((node.kind === 'dynamic') !== (node.joint !== undefined && node.joint !== null)) {
+      return {
+        code: 'joint_mismatch',
+        subjects: [node.name],
+        detail:
+          node.kind === 'dynamic'
+            ? `Frame ${node.name} is dynamic and names no joint.`
+            : `Frame ${node.name} is ${node.kind} and names a joint.`,
+      }
+    }
+    if (node.parent !== null && !seen.has(node.parent)) {
+      return {
+        code: 'parent_missing',
+        subjects: [node.name, node.parent],
+        detail: `Frame ${node.name} names the parent ${node.parent}, which is not in the graph.`,
+      }
+    }
+  }
+
+  // Every frame reaches the root by following parents. The walk is bounded by the node count, so a
+  // cycle is a walk that ran out of frames rather than one that ran forever.
+  const byName = new Map(graph.nodes.map(node => [node.name, node]))
+  for (const node of graph.nodes) {
+    let here = node
+    for (let step = 0; step <= graph.nodes.length; step += 1) {
+      if (here.parent === null) break
+      here = byName.get(here.parent)!
+    }
+    if (here.parent !== null) {
+      return {
+        code: 'cycle',
+        subjects: [node.name],
+        detail: `Following parents from ${node.name} never reaches the root.`,
+      }
+    }
+  }
+
+  return null
 }
 
 // ── The source side: what the policy was trained on ──────────────────────────
