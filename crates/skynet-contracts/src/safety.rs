@@ -16,10 +16,11 @@ use alloc::vec::Vec;
 use skynet_json::Json;
 
 pub use skynet_kernel::{
-    can_start, evaluate_cycle, resolve_limits, Available, Clamped, CommandCycle, CycleVerdict,
-    Enforcement, Envelope, FaultResponse, Guard, NoticeCode, OperatorProfile, Proximity,
-    ResolveLimitsParams, ResolvedLimits, SafetyNotice, Tier, TransportClamp, UnavailableGuard,
-    GUARDS, MAX_CHANNELS, SAFETY_CLAIM_RULE,
+    can_start, evaluate_cycle, evaluate_cycle_with_body, kinematics, resolve_limits, Available,
+    Body, Clamped, CommandCycle, CycleVerdict, Enforcement, Envelope, FaultResponse, Guard,
+    NoticeCode, OperatorProfile, PoseOutcome, PoseTrip, Proximity, ResolveLimitsParams,
+    ResolvedLimits, SafetyNotice, Tier, TransportClamp, UnavailableGuard, GUARDS, MAX_CHANNELS,
+    SAFETY_CLAIM_RULE,
 };
 
 /// The English for a notice, given its code and what it names.
@@ -54,6 +55,12 @@ pub fn notice_message(notice: &SafetyNotice<'_>, profile_name: Option<&str>) -> 
         NoticeCode::NoRateLimit => concat!(
             "No jerk ceiling is configured, so a single-cycle jump from zero to the clamped ",
             "maximum is permitted. Set max_delta_per_cycle before running a policy near people."
+        )
+        .to_string(),
+        NoticeCode::NoCollisionMargin => concat!(
+            "No self-collision margin is configured, so two of this robot's own bodies must ",
+            "actually meet before the guard holds. Set self_collision_margin_m to stop the command ",
+            "that would bring them together."
         )
         .to_string(),
         NoticeCode::GuardUnavailable => format!(
@@ -173,7 +180,43 @@ pub fn verdict_to_json(verdict: &CycleVerdict<'_>) -> Json {
     }
     out.set("clamped", clamped);
     out.set("advisory", Json::Bool(verdict.advisory));
+    out.set("pose", pose_to_json(&verdict.pose));
 
+    out
+}
+
+/// Serialise what the two pose guards found.
+///
+/// Emitted on every verdict, empty or not. Omitting it when nothing tripped would make an edition
+/// that has not implemented §44 byte-identical to one that ran the guards and found nothing, which
+/// is the "passes by not looking" failure the corpus exists to make impossible.
+pub fn pose_to_json(pose: &PoseOutcome<'_>) -> Json {
+    let mut out = Json::obj();
+    out.set("evaluated", Json::Bool(pose.evaluated));
+    out.set("lookahead", Json::Bool(pose.lookahead));
+    out.set("truncated", Json::Bool(pose.truncated));
+    let unresolved: Vec<&str> = pose.unresolved.iter().copied().collect();
+    out.set("unresolved", subjects_json(&unresolved));
+
+    let mut trips = Json::arr();
+    for trip in pose.trips.iter() {
+        let mut item = Json::obj();
+        item.set("guard", Json::from(trip.guard.as_str()));
+        item.set("frame", Json::from(trip.frame));
+        // Present and null on a workspace excursion rather than absent: "this finding is about one
+        // frame" is a fact, and a reader of an absent key cannot tell it from a producer that
+        // forgot the field.
+        item.set(
+            "other",
+            match trip.other {
+                Some(other) => Json::from(other),
+                None => Json::Null,
+            },
+        );
+        item.set("margin_m", nullable(trip.margin_m));
+        trips.push(item);
+    }
+    out.set("trips", trips);
     out
 }
 
@@ -252,6 +295,7 @@ mod tests {
             envelope: None,
             transport: None,
             profile: None,
+            frames: None,
             available: Available::default(),
         });
         let json = limits_to_json(&limits, None);
@@ -284,6 +328,7 @@ mod tests {
             envelope: Some(envelope),
             transport: None,
             profile: Some(profile),
+            frames: None,
             available: Available::default(),
         });
         let json = limits_to_json(&limits, Some("night-shift"));
@@ -307,6 +352,7 @@ mod tests {
             envelope: Some(envelope),
             transport: Some(clamp),
             profile: None,
+            frames: None,
             available: Available::default(),
         });
         let desired = [("elbow", 120.0)];
@@ -323,7 +369,7 @@ mod tests {
         let rendered = verdict_to_json(&verdict).to_canonical().unwrap();
         assert_eq!(
             rendered,
-            r#"{"advisory":false,"clamped":[{"channel":"elbow","from":120,"to":80}],"command":{"elbow":80},"response":"clamp","tripped":["envelope"]}"#
+            r#"{"advisory":false,"clamped":[{"channel":"elbow","from":120,"to":80}],"command":{"elbow":80},"pose":{"evaluated":false,"lookahead":false,"trips":[],"truncated":false,"unresolved":[]},"response":"clamp","tripped":["envelope"]}"#
         );
     }
 }

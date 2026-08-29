@@ -718,9 +718,12 @@ fn limits_params<'a>(
             ..TransportClamp::default()
         }),
         profile: None,
-        // A body that measures nothing beyond its joints: the guards needing a collision model, a
-        // support polygon or a person detector report unavailable, which is what §7.2 requires and
-        // what keeps this suite about the black box rather than about the kernel.
+        // No frame graph, so the two pose guards report unavailable rather than running against a
+        // body this suite has not described.
+        frames: None,
+        // A body that measures nothing beyond its joints: the guards needing a support polygon or a
+        // person detector report unavailable, which is what §7.2 requires and what keeps this suite
+        // about the black box rather than about the kernel.
         available: Available::default(),
     }
 }

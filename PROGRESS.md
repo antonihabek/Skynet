@@ -1369,3 +1369,288 @@ every surface that reports the recording says so.
    sessions ago and still worth doing on purpose.
 5. **The embodiment descriptor on the robot**, which unblocks three recorded findings at once:
    admission on the install path, the black box's real shape, and its provenance digests.
+
+---
+
+## 2026-08-29 (seventh) — the frame graph consumed: forward kinematics, and the two pose guards
+
+`frames` had been in the descriptor since Part V and nothing read it. Two of the eight guards were
+specified against it — `workspace` and `self_collision` — and both reported unavailable on every
+robot, one of them for a reason that was wrong. This session made the kernel walk the tree.
+
+It also closed a hole in the corpus that had been open for four sessions, and the hole turned out
+to be more interesting than the feature.
+
+### The kernel needed arithmetic, and the arithmetic had to be the specification's
+
+Forward kinematics needs a sine and a square root. `core` has neither — they are `std`, which this
+crate cannot link (§23.1) — so something had to supply them, and *what* is not a packaging question.
+
+Three requirements point the same way and each alone would settle it. §31.4 demands byte-identical
+output across editions, and ECMAScript permits `Math.sin` an implementation-defined error while
+every C library rounds its own way, so two editions calling their own libraries diverge on the first
+revolute joint — presenting as a specification disagreement rather than as what it is. §7.4's
+certified tier mirrors this kernel onto a **separate safety processor with a different toolchain**,
+where a libm difference makes the redundant channel disagree with the primary about a clamp: exactly
+the event redundancy exists to detect, fired by correct behaviour, which is the fastest way to have
+redundancy switched off. And the workspace has no third-party dependencies and builds for bare
+metal, where there is no library to call.
+
+So `crates/skynet-kernel/src/real.rs` writes `sin`, `cos` and `sqrt` out as an explicit sequence of
+IEEE-754 binary64 operations — Cody–Waite reduction onto `[-π/4, π/4]` and fdlibm's minimax
+polynomials, a fixed five-step Newton iteration for the root. Addition, subtraction, multiplication
+and division *are* correctly rounded on every conforming platform, so the same sequence produces the
+same bits everywhere. That is a weaker claim than "accurate" and a much stronger one than what a
+platform library offers, because accuracy varies by platform and this does not.
+
+Three details are load-bearing and each is a place an edition could quietly differ:
+
+* **The branch count cannot depend on the input.** fdlibm takes its second Cody–Waite step only when
+  the first cancelled badly; this takes it always. A specification that says "sometimes three
+  multiplications and sometimes six" is one two editions can implement differently without noticing.
+* **The Newton iteration count is fixed at five**, not run to a convergence test. Two editions taking
+  different numbers of correctly rounded steps can land on different bits.
+* **Rounding half away from zero is written out.** ECMAScript's `Math.round` sends −0.5 to −0 and
+  Rust's `f64::round` sends it to −1; two editions differing there differ by a whole quadrant.
+
+**809 values cross-checked between the two editions: zero divergences**, NaN cases included. §31.2
+gains a row, because this is now a thing that can never be per-edition.
+
+The reduction is exact for `|angle| < 1.65 × 10⁶` radians — a quarter of a million revolutions —
+and past that returns NaN, which the kinematics reads as an unresolved frame and names. A wheel that
+has turned 250 000 times is told rather than placed wrongly.
+
+### `crates/skynet-kernel/src/kinematics.rs` — 907 lines, and the shape is the design
+
+§44.3's graph names parents by string, which is right for a signed document and wrong for a control
+cycle: resolving a parent by name is a string comparison against every other frame, on every frame,
+on every cycle. So it is **flattened once**, at lease time, into frames carrying a parent index
+strictly smaller than their own. Three things fall out, and each removes a failure mode rather than
+only some work:
+
+* Forward kinematics is one forward pass over a slice. No recursion, so no stack depth to bound on a
+  safety MCU.
+* **A cycle in the graph becomes unrepresentable** rather than a hang in the middle of a control
+  cycle. `FrameSet::new` refuses an order without the property, once, and no cycle checks again.
+* A parent's pose is always computed before its child is reached.
+
+What it refuses is as important as what it computes. A **ball or floating joint** cannot be
+parameterised by one scalar, so a frame driven by one is unresolvable and so is everything below it
+— reported, never approximated by assuming the shoulder has not rolled. A **zero-length axis** is a
+body-description defect and not a fixed joint: reading it as one would silently weld a limb in the
+guard's model while it moved in the world. And unresolvability is a **static** property, so
+`statically_resolvable` answers it when the lease is granted rather than by holding the robot on
+every cycle for the life of the lease with the reason removed.
+
+### The two guards, and the three things they cannot do
+
+`workspace` checks every frame an operator constrained against volumes in the root frame.
+`self_collision` tests every pair of collision capsules that is neither adjacent nor declared an
+exception, in squared distance so that **no square root can move a verdict** — the root is taken
+only for the number the report carries.
+
+Layers compose by **conjunction**: a frame must lie inside at least one volume of every layer that
+names it. That is §38.2's "each layer may only narrow" as a predicate rather than as geometry.
+Intersecting a box with a sphere is a shape that is neither, and a composition rule producing a
+third shape would be one no operator could check by reading their own configuration.
+
+Three limits, now in §44.5 rather than waiting to be discovered:
+
+1. **A volume is in the robot's own root frame**, and for a mobile base that is not the cell. §44.2
+   gives the kernel a tree rooted at `base_link` and no world pose; localisation lives in the
+   perception tree, which it deliberately does not subscribe to. For a fixed-base arm the
+   distinction is empty. For a mobile base the "stay inside this region" volume travels with the
+   robot, and fixing it needs a pose the kernel would have to trust from outside itself.
+2. **The commanded configuration exists only on a position-commanded body.** §7.1 specifies both
+   guards one step ahead; on a velocity- or torque-commanded body there is no next configuration to
+   compute, so what runs is a check of where the robot is *now*. A real check and a weaker claim,
+   and the verdict carries `lookahead` so a log cannot imply the stronger one.
+3. **The cost is quadratic**, and this is the first part of the kernel where that matters. Forty
+   collision bodies is 780 pairs and roughly fifty thousand operations per cycle — comfortable on an
+   application processor, and *not* obviously comfortable on a safety MCU without double-precision
+   hardware, where each is a software routine. `FrameSet::collision_pairs` reports the number and
+   `skynet frames` prints it, so §7.4's certified tier has something to answer before mirroring this
+   guard onto a second processor.
+
+### A verdict that said "stopped" about a robot that kept moving
+
+Found while wiring the new guards in, and it predates them. `proximity`'s §7.1 row is `stop_cat1`,
+and the verdict's response was derived from the rows of whichever guards had tripped. But between
+the two separation distances the proximity guard does not stop anything — it scales the command and
+lets it through. So every speed-reduction cycle produced a verdict reading `stop_cat1` while the
+robot moved on at half speed, and a black box recording that is a black box recording something that
+did not happen.
+
+Fixed at the root rather than special-cased: the cycle now accumulates the response each guard
+**actually demanded**, and `hold` or stronger is what withholds the command. That also removed three
+early returns whose ordering was a latent bug — a `workspace` hold returning immediately would have
+hidden a `proximity` stop behind it, reporting the weaker of the two. §7.1 says so now.
+
+### `available.solvers` was checking the wrong thing, and `available.collision_model` was checking nothing
+
+The `workspace` guard was gated on the descriptor declaring an **inverse**-kinematics solver. §44.2
+gives it forward kinematics computed in-cycle by the kernel itself; a robot with no IK solver at all
+can run the guard perfectly well, and one with three cannot run it without a frame graph.
+
+`collision_model` was worse in kind: a boolean the descriptor asserts about itself. A descriptor
+could say `true` with no geometry in it and the guard would report itself **active** while having
+nothing to evaluate — §7.2's failure in its most damaging form, since the whole point of that
+paragraph is that a guard which cannot run says so. Both fields are gone. The guards ask the frame
+graph: volumes naming frames the tree actually reaches, two or more placeable collision shapes. CI
+asserts neither field comes back.
+
+### The corpus had a hole, and the hole was in the *inputs*
+
+`proximity` and `mode_gate` have been implemented in the Rust edition since the first session and
+absent from the reference edition ever since. It was recorded at the time — "three guards go
+slightly beyond the reference… with reference-derived vectors, none of the three has its input, so
+behaviour is bit-identical and the corpus still holds" — and that reasoning was correct and the
+conclusion was too comfortable. Two of the eight guards were pinned by one edition's own suite and
+by nothing else, which is precisely the arrangement §31.4 exists to prevent.
+
+Nothing caught it because the generator never produced a cycle carrying a capability token or a
+separation distance. **A corpus grows a blind spot wherever an input field is missing, not only
+where an implementation is** — and that generalises past this instance, which is why it is written
+down here and in `corpus/README.md`.
+
+Closing it exposed a second defect immediately: the reference's `ResolvedLimits` had **no
+`proximity` field at all**. `partitionGuards` reported the guard active from the profile while
+`evaluateCycle` had no thresholds to compare against, so the reference's proximity guard had been
+inert since it was written. One corpus case with a distance in it found that in a minute.
+
+The reference edition now implements all eight guards, `reference/typescript/kinematics.ts` is its
+second implementation of the kernel's arithmetic and geometry (753 lines, and the second file in
+`reference/` that is not vendored from the Hub — the Hub computes no forward kinematics), and the
+fuzz generator draws capabilities, separation distances and proximity profiles.
+
+The fuzz corpus was also **not testing what it claimed**. A uniform command lag over 300 ms against
+a 100 ms watchdog window made two cases in three a watchdog stop, and a watchdog stop returns before
+any other guard runs — so most of forty cases exercised one guard while the file reported coverage
+of eight. Staleness is now drawn deliberately: **six of the eight guards appear in the fuzz
+verdicts**, up from three.
+
+### The corpus grew by 44, and the new ones freeze poses rather than verdicts
+
+350 cases, 29 files. `kinematics/solve` is a new corpus and it exists because `cycle` cannot do its
+job: a guard trip is a boolean, and two editions could agree on every trip in the corpus while
+disagreeing about where the arm is by a millimetre — right up to the day one of them clamps and the
+other does not. Fourteen cases freeze the poses themselves, thirty digits at a time, which is what
+holds the two editions' sine, cosine and square root to each other.
+
+**All 350 reproduced byte for byte on the first run**, including a translation of
+`0.0000000000000002220446049250313` — one ulp of 1, in canonical positional form, computed
+independently in two languages.
+
+### Everything that reads or writes a frame graph now knows about the geometry
+
+* **§44.3 gains four fields**, amended in both copies of the specification: `collision_shape` (a
+  sphere-swept segment — one primitive, a sphere when its endpoints coincide, bounding a cylinder
+  exactly and a link's real geometry conservatively), `collision_ignore` (SRDF's
+  `disable_collisions`, without which the guard trips on a humanoid standing still and gets switched
+  off), and `mimic_multiplier` / `mimic_offset` (the commonest linkage in robotics is a parallel
+  gripper whose second finger runs at −1, and a field that could only say "follows" would put that
+  finger on the wrong side of the object).
+* **`collision: true` and `collision_shape` stay two different facts.** A vendor's model is usually
+  meshes and no honest reduction of a mesh to a primitive exists without reading the mesh, so a
+  frame may declare geometry and offer no shape — and `self_collision` then reports unavailable
+  naming those frames, rather than testing a body with limbs quietly missing from it.
+* **The URDF importer converts three of URDF's four geometries** and declines the fourth. A sphere
+  is exact; a cylinder is the primitive itself; a box becomes a segment along its longest axis with
+  a radius of half the cross-section's diagonal, which is loose — for a cube it is the circumscribed
+  sphere — and loose is the only direction of error a collision bound may have. A mesh produces
+  nothing.
+* **The MuJoCo driver** emits a capsule containing all of a body's contact geoms, and `null` for a
+  mesh or height field. Verified against the four scenes in the repository with real MuJoCo
+  installed.
+* **`skynet frames`** is a new command: the tree, where a configuration puts it, and — the part that
+  matters — what the two guards will be able to do with it. A body with one collision capsule has
+  nothing to collide with, and reading that on a workstation beats inferring it from a guard
+  silently doing nothing on a robot.
+* **`skynet driver check`** reports the same thing as its own result, because the report prints
+  detail only for a result that is not a plain pass and "the guard cannot run" must not be swallowed.
+
+### Verification
+
+* **456 Rust tests pass on this machine**, up from 374. The kernel went from 45 to 101; `skynet-urdf`
+  from 37 to 44; the CLI's integration suite from 10 to 16.
+* **350 corpus cases reproduce byte for byte**, up from 306, and regenerating is idempotent.
+* `cargo fmt --all --check` clean. `cargo clippy --workspace --all-targets` clean at `-D warnings`.
+* The kernel still builds for `thumbv7em-none-eabihf` — one source, two targets.
+* `node tools/check-mirrors.mjs`: all three shared documents identical.
+* `Cargo.lock` still holds eleven packages, all ours. The `real` module is why: a `libm` dependency
+  was the obvious alternative and it would have been the first third-party crate in the workspace.
+* The drivers: mock 24 checks, LeRobot 70, MuJoCo 96 (one skipped for want of a GL context), the
+  Python ABI view offset-asserted, and `skynet driver check` driven through the C host against real
+  MuJoCo physics.
+* **Not verified here: `crates/skynetd-io/e2e.sh`**, which needs a POSIX daemon under systemd. It
+  was not changed this session.
+
+### Three defects found in passing, each fixed rather than noted
+
+1. **`tools/check-mirrors.mjs` could not find the Hub.** It looked for `../BotMarket` and the
+   checkout is `../Botmarket`; on a case-sensitive filesystem those are different directories, so
+   the script reported "not found — nothing to compare" and exited zero. Its own file already says
+   a check that cannot run is not a check. It now tries several spellings and says which it used —
+   and with it working it immediately reported the divergence this session created.
+2. **The workspace had not compiled clean under a current clippy.** `is_link_local` carried
+   `|| v4 == Ipv4Addr::UNSPECIFIED && false`, which reads as a rule and is a comment the compiler
+   deletes. The rule it was trying to state — `0.0.0.0` is a request to bind *every* address,
+   including the routable one §34.2 forbids — is now a comment, which is what it always was.
+3. **A test failed on any machine without an IPv6 stack.** It asserted `[::1]` binds, which is a
+   claim about the machine and not about the policy. It now distinguishes the two: a bind that fails
+   for want of a stack is fine, and one refused by our own §34.2 check is not. Skipping the case
+   would have been the shorter exam §15 spends a rule on.
+
+### What was changed in the Hub
+
+`docs/skynet-os-architecture.md` only, and only because the mirroring rule requires it: §7.1's
+response column, §7.2's evidence rule, §7.3's workspace composition, §31.2's single-source table,
+§38.2's layering, §44.3's four new fields, §44.5's three limits and §52's table. The change was made
+here first and carried across by hand; `node tools/check-mirrors.mjs` reports all three identical.
+No Hub code was touched.
+
+### What is still zero lines
+
+The policy runtime, the SPSC ring and observation assembly, OTA (§12), the outbound queue (§34.4),
+the on-robot console's HTML (§32.2 — the API behind it exists), calibration (§45), the watchdog
+chain (§46), POST and homing (§48), the safety MCU, Ed25519, and the drivers that talk to real
+hardware.
+
+The frame graph has moved out of this list. `balance` is now the only guard of the eight that
+neither edition implements — there is no centre-of-pressure input in either `CommandCycle` — and it
+reports itself unavailable rather than passing.
+
+§59.5's several-engineer-years figure is unchanged.
+
+### Three findings recorded rather than fixed
+
+1. **§52 now names `embodiment.frames.complete` in three rows and no such SCTS test exists.** It
+   named it in one row before this session and the gap was already carried; adding two more rows
+   pointing at an absent test makes the case for closing it stronger rather than weaker. The §52
+   expansion has been on the Next list for three sessions and should be done as one reviewed change
+   with the corpus regenerated, not folded into a feature.
+2. **Self-collision excludes only parent–child pairs and whatever the descriptor declares.** That is
+   the right rule and it puts the whole burden on `collision_ignore`. A real humanoid needs a
+   populated exception list before this guard is usable, and nothing generates one: the URDF
+   importer cannot, because URDF does not carry it, and reading an SRDF is a second file format this
+   importer does not open. Until then, `skynet frames` showing the pair count is the honest warning.
+3. **One capsule per frame is a coarse model, and the MuJoCo path shows how coarse.** A body with
+   several scattered geoms gets a capsule containing all of them, which for the arm scenes in this
+   repository is a sphere considerably larger than the link. It is conservative, so it trips early
+   rather than late — but "early" on a body modelled that way may mean "constantly". A list of
+   shapes per frame is the fix and it changes the kernel's inner loop from quadratic in frames to
+   quadratic in shapes, which is exactly the cost §44.5 already flags.
+
+### Next
+
+1. **The §52 SCTS expansion**, as one reviewed change. It is now overdue by three sessions and this
+   session made the gap wider.
+2. **The on-robot console (§32.2)** — the API is complete enough to sit behind one; what is missing
+   is the small static page.
+3. **The embodiment descriptor on the robot**, which still unblocks three recorded findings at once:
+   admission on the install path, the black box's real shape, and its provenance digests.
+4. **The Hub side** (§32.4): `/skynet/os` readiness over the live registry, the transport endpoint,
+   the embodiment tables, and the incident upload.
+5. **Calibration (§45)**, which is what makes `source: "calibration"` in a frame node mean anything.
+   Every extrinsic in every descriptor this repository can generate today says `descriptor`, and
+   §44.3 is explicit that where both exist the measured one wins.

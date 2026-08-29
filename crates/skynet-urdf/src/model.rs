@@ -70,6 +70,14 @@ pub struct UrdfJoint {
     /// `<mimic joint="…">` — this joint is driven by another one and is not independently
     /// commandable.
     pub mimic: Option<String>,
+    /// `<mimic multiplier="…">`. URDF's default is 1.
+    ///
+    /// Carried because the commonest linkage in robotics is a parallel gripper whose second finger
+    /// runs at −1, and a frame graph that could only record "follows" would put that finger on the
+    /// wrong side of the object — inside the guard whose whole job is knowing where things are.
+    pub mimic_multiplier: Option<f64>,
+    /// `<mimic offset="…">`. URDF's default is 0.
+    pub mimic_offset: Option<f64>,
 }
 
 impl UrdfJoint {
@@ -97,8 +105,30 @@ pub struct UrdfLink {
     pub name: String,
     /// Whether the link declares collision geometry, which is what §29's collision model needs.
     pub has_collision: bool,
+    /// That geometry reduced to a sphere-swept segment, where it is one this kernel can evaluate.
+    ///
+    /// `None` alongside `has_collision: true` is a real and common link: the vendor's model is a
+    /// mesh and nothing here will invent a bound for it. §44.3 keeps the two facts separate, and
+    /// the `self_collision` guard reports itself unavailable naming those frames rather than
+    /// testing a body with limbs missing from it.
+    pub collision: Option<UrdfCapsule>,
     /// `<inertial><mass value>`, kilograms.
     pub mass_kg: Option<f64>,
+}
+
+/// A link's collision geometry, as the one primitive the kernel evaluates.
+///
+/// Every conversion below is **conservative**: the capsule contains the shape it stands for, so the
+/// guard trips early rather than late. That is the only direction of error a collision bound is
+/// allowed to have.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UrdfCapsule {
+    /// One end of the segment, in the link frame.
+    pub a: [f64; 3],
+    /// The other end. Equal to `a` for a sphere.
+    pub b: [f64; 3],
+    /// Metres.
+    pub radius_m: f64,
 }
 
 /// A parsed URDF.
@@ -219,8 +249,10 @@ pub fn parse(input: &str) -> Result<UrdfModel, UrdfError> {
                  and must be unique."
             )));
         }
+        let collision_element = element.child("collision");
         links.push(UrdfLink {
-            has_collision: element.child("collision").is_some(),
+            has_collision: collision_element.is_some(),
+            collision: collision_element.and_then(collision_capsule),
             mass_kg: element
                 .child("inertial")
                 .and_then(|inertial| inertial.child("mass"))
@@ -387,6 +419,14 @@ fn parse_joint(element: &Element) -> Result<UrdfJoint, UrdfError> {
             .child("mimic")
             .and_then(|node| node.attr("joint"))
             .map(str::to_string),
+        mimic_multiplier: element
+            .child("mimic")
+            .and_then(|node| node.attr("multiplier"))
+            .and_then(|raw| parse_number(raw).ok()),
+        mimic_offset: element
+            .child("mimic")
+            .and_then(|node| node.attr("offset"))
+            .and_then(|raw| parse_number(raw).ok()),
         name,
     };
 
@@ -464,6 +504,95 @@ fn find_root_link(links: &[UrdfLink], joints: &[UrdfJoint]) -> Result<String, Ur
             roots.len()
         ))),
     }
+}
+
+/// Reduce a `<collision>` element to a capsule, or decline.
+///
+/// URDF offers four geometries and this handles three of them:
+///
+/// * **`<sphere radius>`** is a segment of no length. Exact.
+/// * **`<cylinder radius length>`** is the primitive itself: a segment along the link frame's z,
+///   which is the axis URDF gives a cylinder. A capsule of the same radius contains the cylinder
+///   and adds two hemispherical caps, so it is conservative by two half-spheres.
+/// * **`<box size>`** becomes a segment along its longest axis, with a radius equal to half the
+///   diagonal of the cross-section perpendicular to it. That is the tightest capsule that certainly
+///   contains the box, and it is loose — for a cube it is the circumscribed sphere. A body modelled
+///   entirely in boxes will trip this guard sooner than its geometry requires, which is the error
+///   in the direction a safety bound is allowed to make.
+/// * **`<mesh>`** produces nothing. Bounding a mesh needs the mesh, which is a file this importer
+///   does not read and may not have; a guessed bound around a hand is a guard that either trips
+///   constantly or misses the hand entirely, and both are worse than saying so.
+///
+/// The `<origin>` offset is applied; its `rpy` is **not**, and that is a limitation worth naming: a
+/// rotated cylinder is bounded here as though it pointed along z. §53 carries it as open.
+fn collision_capsule(element: &Element) -> Option<UrdfCapsule> {
+    let geometry = element.child("geometry")?;
+    let origin = element.child("origin");
+    let centre = vector3(origin.and_then(|node| node.attr("xyz")), [0.0; 3], "", "").ok()?;
+    let offset = |v: [f64; 3]| [centre[0] + v[0], centre[1] + v[1], centre[2] + v[2]];
+
+    if let Some(sphere) = geometry.child("sphere") {
+        let radius = parse_number(sphere.attr("radius")?).ok()?;
+        if !(radius.is_finite() && radius > 0.0) {
+            return None;
+        }
+        return Some(UrdfCapsule {
+            a: centre,
+            b: centre,
+            radius_m: radius,
+        });
+    }
+
+    if let Some(cylinder) = geometry.child("cylinder") {
+        let radius = parse_number(cylinder.attr("radius")?).ok()?;
+        let length = parse_number(cylinder.attr("length")?).ok()?;
+        if !(radius.is_finite() && radius > 0.0 && length.is_finite() && length >= 0.0) {
+            return None;
+        }
+        let half = 0.5 * length;
+        return Some(UrdfCapsule {
+            a: offset([0.0, 0.0, -half]),
+            b: offset([0.0, 0.0, half]),
+            radius_m: radius,
+        });
+    }
+
+    if let Some(shape) = geometry.child("box") {
+        let size = vector3(shape.attr("size"), [0.0; 3], "", "").ok()?;
+        if size.iter().any(|v| !v.is_finite() || *v < 0.0) {
+            return None;
+        }
+        // The longest axis carries the segment; the other two set the radius.
+        let mut longest = 0;
+        for (axis, extent) in size.iter().enumerate() {
+            if *extent > size[longest] {
+                longest = axis;
+            }
+        }
+        let mut cross = [0.0f64; 2];
+        let mut slot = 0;
+        for (axis, extent) in size.iter().enumerate() {
+            if axis != longest {
+                cross[slot] = *extent;
+                slot += 1;
+            }
+        }
+        let radius = 0.5 * (cross[0] * cross[0] + cross[1] * cross[1]).sqrt();
+        if !(radius.is_finite() && radius > 0.0) {
+            return None;
+        }
+        let half = 0.5 * size[longest];
+        let mut ends = [[0.0f64; 3]; 2];
+        ends[0][longest] = -half;
+        ends[1][longest] = half;
+        return Some(UrdfCapsule {
+            a: offset(ends[0]),
+            b: offset(ends[1]),
+            radius_m: radius,
+        });
+    }
+
+    None
 }
 
 fn required_attr(element: &Element, attribute: &str, kind: &str) -> Result<String, UrdfError> {
@@ -708,5 +837,109 @@ mod tests {
             .map(|link| link.name.as_str())
             .collect();
         assert_eq!(order, ["base_link", "link1", "tool"]);
+    }
+}
+
+#[cfg(test)]
+mod collision_tests {
+    use super::*;
+
+    fn link(xml: &str) -> UrdfLink {
+        let model = parse(&format!(
+            "<robot name=\"r\"><link name=\"base_link\">{xml}</link></robot>"
+        ))
+        .expect("parses");
+        model.links[0].clone()
+    }
+
+    #[test]
+    fn a_sphere_is_a_segment_of_no_length() {
+        let capsule = link("<collision><geometry><sphere radius=\"0.12\"/></geometry></collision>")
+            .collision
+            .expect("a sphere converts exactly");
+        assert_eq!(capsule.a, capsule.b);
+        assert_eq!(capsule.radius_m, 0.12);
+    }
+
+    #[test]
+    fn a_cylinder_becomes_a_capsule_about_its_own_axis() {
+        // URDF puts a cylinder's length along z. A capsule of the same radius contains it and adds
+        // two hemispherical caps, which is conservative — the direction of error a bound may have.
+        let capsule =
+            link("<collision><geometry><cylinder radius=\"0.05\" length=\"0.4\"/></geometry></collision>")
+                .collision
+                .expect("a cylinder converts");
+        assert_eq!(capsule.a, [0.0, 0.0, -0.2]);
+        assert_eq!(capsule.b, [0.0, 0.0, 0.2]);
+        assert_eq!(capsule.radius_m, 0.05);
+    }
+
+    #[test]
+    fn a_box_takes_its_segment_along_its_longest_axis() {
+        let capsule =
+            link("<collision><geometry><box size=\"0.1 0.6 0.2\"/></geometry></collision>")
+                .collision
+                .expect("a box converts");
+        assert_eq!(capsule.a, [0.0, -0.3, 0.0]);
+        assert_eq!(capsule.b, [0.0, 0.3, 0.0]);
+        // Half the diagonal of the 0.1 × 0.2 cross-section.
+        let expected = 0.5 * (0.1f64 * 0.1 + 0.2 * 0.2).sqrt();
+        assert!((capsule.radius_m - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_origin_offset_moves_the_capsule() {
+        let capsule = link(
+            "<collision><origin xyz=\"0 0 0.5\"/><geometry><sphere radius=\"0.1\"/></geometry></collision>",
+        )
+        .collision
+        .expect("converts");
+        assert_eq!(capsule.a, [0.0, 0.0, 0.5]);
+    }
+
+    #[test]
+    fn a_mesh_declares_geometry_and_no_shape() {
+        // Two different facts, and §44.3 keeps them apart: there is collision geometry here, and
+        // this kernel cannot evaluate it. Inventing a bound around a hand would produce a guard
+        // that either trips constantly or misses the hand, and both are worse than saying so.
+        let link =
+            link("<collision><geometry><mesh filename=\"hand.stl\"/></geometry></collision>");
+        assert!(link.has_collision);
+        assert!(link.collision.is_none());
+    }
+
+    #[test]
+    fn a_sphere_of_no_radius_is_declined_rather_than_emitted() {
+        let link = link("<collision><geometry><sphere radius=\"0\"/></geometry></collision>");
+        assert!(link.has_collision);
+        assert!(
+            link.collision.is_none(),
+            "a capsule of no radius bounds nothing"
+        );
+    }
+
+    #[test]
+    fn a_mimic_carries_its_ratio() {
+        let model = parse(
+            "<robot name=\"r\">\
+               <link name=\"base_link\"/><link name=\"a\"/><link name=\"b\"/>\
+               <joint name=\"finger_left\" type=\"prismatic\">\
+                 <parent link=\"base_link\"/><child link=\"a\"/>\
+               </joint>\
+               <joint name=\"finger_right\" type=\"prismatic\">\
+                 <parent link=\"base_link\"/><child link=\"b\"/>\
+                 <mimic joint=\"finger_left\" multiplier=\"-1\" offset=\"0.002\"/>\
+               </joint>\
+             </robot>",
+        )
+        .expect("parses");
+        let right = model
+            .joints
+            .iter()
+            .find(|joint| joint.name == "finger_right")
+            .unwrap();
+        assert_eq!(right.mimic.as_deref(), Some("finger_left"));
+        assert_eq!(right.mimic_multiplier, Some(-1.0));
+        assert_eq!(right.mimic_offset, Some(0.002));
     }
 }

@@ -50,12 +50,33 @@ Four properties, each load-bearing:
 |---|---|---|
 | `roles/` | Role strings, valid and malformed | Parse result or null |
 | `transport/` | Source embodiment + descriptor + options | The exact `TransportPlan` |
-| `cycle/` | Cycle vector + resolved limits + envelope | The exact `CycleVerdict` |
-| `limits/` | Tier, envelope, transport clamp, profile, availability | The exact `ResolvedLimits` |
+| `cycle/` | Cycle vector + resolved limits + envelope + body | The exact `CycleVerdict` |
+| `limits/` | Tier, envelope, transport clamp, profile, availability, frames | The exact `ResolvedLimits` |
+| `frames/` | A §44.3 frame graph | The fault, or null when it is usable |
+| `kinematics/` | A frame graph + joint bindings + a command | Every frame's pose, to the last bit |
+| `blackbox/` | Ring records, headers, MCAP schemas, a whole sealed file | The exact bytes, by digest |
 | `admission/` | Package manifest + device capacity + flags | The exact finding list, in order |
 | `certification/` | SCTS results + field conformance + bench age | The exact award |
 | `readiness/` | Registry subject | Attainable tier and blocker list |
 | `fuzz/` | Generated transport and cycle inputs | Their outputs |
+
+`kinematics/` is the newest, and it exists because `cycle/` cannot do its job. A guard trip is a
+boolean, and two editions could agree on every trip in the corpus while disagreeing about every pose
+by a millimetre — right up to the day one of them clamps and the other does not. Freezing the poses
+themselves is what makes the agreement mean something, and it is what holds the two editions' sine,
+cosine and square root to each other. Those three are written out in
+`crates/skynet-kernel/src/real.rs` and `reference/typescript/kinematics.ts` rather than taken from a
+platform library, because no platform library is required to round the way another one does, and
+§31.4 asks for identical bytes.
+
+**A corpus can also fail by not looking, and this one did.** `proximity` and `mode_gate` were
+implemented in the Rust edition and absent from the reference, and nothing caught it for four
+sessions: the generator never produced a cycle carrying a separation distance or a capability token,
+so every case compared two editions on inputs where both did nothing. Two of the eight guards were
+pinned by one edition's own suite and by nothing else — which is the arrangement §31.4 exists to
+prevent. Both fields are now in the reference's cycle vector, in curated cases and in the fuzz
+generator, and six of the eight guards appear in `fuzz/cycle`'s verdicts. The lesson generalises: a
+corpus grows a blind spot wherever an *input* field is missing, not only where an implementation is.
 
 `limits/` is not one of the six §31.4 lists. Limit resolution is contract behaviour with a
 serialisable output and three composition rules — the minimum rule, the widening refusal, the guard

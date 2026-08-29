@@ -530,7 +530,11 @@ pub fn frames_from_json(value: Option<&Json>) -> Option<FrameGraph> {
             joint_type: opt_string(item, "joint_type"),
             axis: vec3(item, "axis"),
             mimics: opt_string(item, "mimics"),
+            mimic_multiplier: opt_f64(item, "mimic_multiplier"),
+            mimic_offset: opt_f64(item, "mimic_offset"),
             collision: flag(item, "collision"),
+            collision_shape: collision_shape_from_json(item.get_present("collision_shape")),
+            collision_ignore: item.str_arr("collision_ignore"),
             mass_kg: opt_f64(item, "mass_kg"),
         });
     }
@@ -540,6 +544,27 @@ pub fn frames_from_json(value: Option<&Json>) -> Option<FrameGraph> {
         convention: opt_string(value, "convention").unwrap_or_default(),
         generator: opt_string(value, "generator"),
         nodes,
+    })
+}
+
+/// Read a frame's collision geometry (§44.3).
+///
+/// A shape whose `kind` is unrecognised is decoded and carried rather than dropped, because
+/// [`validate_frames`] refuses it by name and a silently dropped shape is a limb that disappears
+/// from the collision test with nobody told.
+fn collision_shape_from_json(value: Option<&Json>) -> Option<CollisionShape> {
+    let value = value?;
+    if matches!(value, Json::Null) {
+        return None;
+    }
+    Some(CollisionShape {
+        kind: opt_string(value, "kind").unwrap_or_default(),
+        a: vec3(value, "a").unwrap_or([0.0, 0.0, 0.0]),
+        b: vec3(value, "b").unwrap_or([0.0, 0.0, 0.0]),
+        // `NAN` rather than a plausible default: a shape with no radius bounds nothing, and
+        // `validate_frames` refuses it. Inventing a radius here is exactly the "invent a number"
+        // failure the whole contract layer exists to prevent.
+        radius_m: opt_f64(value, "radius_m").unwrap_or(f64::NAN),
     })
 }
 

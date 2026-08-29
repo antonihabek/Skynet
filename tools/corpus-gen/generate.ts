@@ -48,14 +48,18 @@ import {
   evaluateReadiness, summarizeReadiness, type ReadinessSubject,
 } from '../../reference/typescript/readiness.ts'
 import {
-  evaluateCycle, resolveLimits,
+  evaluateCycle, resolveLimits, withGrants,
   type CommandCycle, type ResolveLimitsParams,
 } from '../../reference/typescript/safety.ts'
 import type { SafetyEnvelope } from '../../reference/typescript/types.ts'
 import {
   shapeAdmission, shapeCertification, shapeFleet, shapeFrameFault, shapeLimits, shapePlan,
-  shapeDigest, shapeReadiness, shapeVerdict,
+  shapeDigest, shapeReadiness, shapeSolved, shapeVerdict,
 } from '../../reference/typescript/shape.ts'
+import {
+  flatten, solve,
+  type Frame, type JointBinding, type WorkspaceLayer,
+} from '../../reference/typescript/kinematics.ts'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const CORPUS = join(ROOT, 'corpus')
@@ -415,20 +419,47 @@ transportCase('declaration', 'null-digests',
 
 // ── cycle ────────────────────────────────────────────────────────────────────
 
+/**
+ * A body, as a corpus case carries it.
+ *
+ * The **graph** goes into the input, not the flattened frames: a case file is read by a human and
+ * consumed by every edition, and §44.3's graph is the shape a descriptor actually has. Flattening
+ * is itself part of what the corpus checks, so a case that pre-flattened would be skipping the step
+ * two editions are most likely to disagree about.
+ */
+interface Body {
+  frames?: FrameGraph
+  joints?: JointBinding[]
+  grants?: string[]
+}
+
+function flattenOrThrow(graph: FrameGraph): Frame[] {
+  const result = flatten(graph)
+  if ('fault' in result) {
+    throw new Error(`fixture frame graph is invalid: ${result.fault.code} — ${result.fault.detail}`)
+  }
+  return result.frames
+}
+
 function cycleCase(
   file: string, id: string, note: string,
   limitsParams: ResolveLimitsParams, cycle: CommandCycle,
-  lastSequence?: number,
+  lastSequence?: number, body: Body = {},
 ): void {
-  const limits = resolveLimits(limitsParams)
-  const verdict = evaluateCycle(cycle, limits, limitsParams.envelope, lastSequence)
+  const frames = body.frames ? flattenOrThrow(body.frames) : null
+  const limits = withGrants(
+    resolveLimits({ ...limitsParams, frames }),
+    body.grants ?? [],
+  )
+  const verdict = evaluateCycle(cycle, limits, limitsParams.envelope, lastSequence, body.joints ?? [])
   add('cycle', file, {
     id,
     note,
     input: {
-      limits: limitsParams,
+      limits: { ...limitsParams, ...(body.frames ? { frames: body.frames } : {}), ...(body.grants ? { grants: body.grants } : {}) },
       cycle,
       last_sequence: lastSequence === undefined ? null : lastSequence,
+      ...(body.joints ? { joints: body.joints } : {}),
     },
     expected: canonical(shapeVerdict(verdict)),
   })
@@ -452,9 +483,7 @@ const CLAMP = {
   source: 'https://example.invalid/datasheet.pdf',
 }
 
-const ALL_AVAILABLE = {
-  imu: true, people_detection: true, collision_model: true, solvers: true, legged: true,
-}
+const ALL_AVAILABLE = { imu: true, people_detection: true, legged: true }
 
 function hostParams(overrides: Partial<ResolveLimitsParams> = {}): ResolveLimitsParams {
   return {
@@ -536,6 +565,212 @@ cycleCase('empty', 'no-channels',
   'An empty command is not an error.',
   hostParams(), cycle({}))
 
+// ── The two guards the reference could not previously exercise ──────────────
+//
+// `proximity` and `mode_gate` were implemented in the Rust edition and absent from this one, and
+// nothing caught it: the generator never produced a cycle carrying a capability token or a
+// separation distance, so the corpus compared the two editions on inputs where both did nothing.
+// Two of the eight guards were therefore pinned by one edition's own suite, which is the
+// arrangement §31.4 exists to prevent. The `CommandCycle` now carries both fields.
+
+const SHARED_SPACE = {
+  name: 'shared-space',
+  max_delta_per_cycle: 0.25,
+  proximity: { stop_distance_m: 0.3, slow_distance_m: 1, slow_factor: 0.5 },
+}
+
+cycleCase('proximity', 'inside-the-stop-distance',
+  'A person inside the protective separation distance is a category 1 stop, and nothing is sent.',
+  hostParams({ profile: SHARED_SPACE }), cycle({ elbow: 40 }, { nearest_person_m: 0.2 }))
+
+cycleCase('proximity', 'between-the-two-distances',
+  'Speed and separation monitoring scales the command and forwards it — a reduction, reported as a clamp and not as a stop.',
+  hostParams({ profile: SHARED_SPACE }), cycle({ elbow: 40 }, { nearest_person_m: 0.8 }))
+
+cycleCase('proximity', 'beyond-the-slow-distance',
+  'Outside both distances the guard is active and does nothing.',
+  hostParams({ profile: SHARED_SPACE }), cycle({ elbow: 40 }, { nearest_person_m: 4 }))
+
+cycleCase('proximity', 'scales-after-clamping',
+  'The separation factor applies to the clamped command, so a clamp cannot raise a speed the separation reduced.',
+  hostParams({ profile: SHARED_SPACE }), cycle({ elbow: 400 }, { nearest_person_m: 0.8 }))
+
+cycleCase('proximity', 'unsensed',
+  'Configured but nothing measures separation: the guard is unavailable and the distance field is ignored.',
+  hostParams({ profile: SHARED_SPACE, available: { ...ALL_AVAILABLE, people_detection: false } }),
+  cycle({ elbow: 40 }, { nearest_person_m: 0.1 }))
+
+cycleCase('mode-gate', 'granted',
+  'A capability the operator granted passes.',
+  hostParams(), cycle({ elbow: 40 }, { capability: 'motion.arm' }), undefined,
+  { grants: ['motion.arm'] })
+
+cycleCase('mode-gate', 'not-granted',
+  'A capability the operator did not grant holds the command; the revocation takes effect on the next cycle, not the next restart.',
+  hostParams(), cycle({ elbow: 40 }, { capability: 'motion.base' }), undefined,
+  { grants: ['motion.arm'] })
+
+cycleCase('mode-gate', 'no-capability-named',
+  'A cycle that names no capability does not evaluate the gate — absent is not "no capability".',
+  hostParams(), cycle({ elbow: 40 }), undefined, { grants: ['motion.arm'] })
+
+// ── The pose guards (§7.1 rows four and five, §44) ──────────────────────────
+
+function poseFrame(node: Partial<FrameNode> & { name: string }): FrameNode {
+  return { parent: null, kind: 'root', ...node } as FrameNode
+}
+
+/** A one-metre arm: a hinge about z, a tool at its end, and a capsule down its length. */
+const POSE_ARM: FrameGraph = {
+  root: 'base_link',
+  convention: 'rep103',
+  generator: 'urdf',
+  nodes: [
+    poseFrame({ name: 'base_link' }),
+    poseFrame({
+      name: 'upper', parent: 'base_link', kind: 'dynamic',
+      translation: [0, 0, 0], rotation: [0, 0, 0, 1],
+      joint: 'shoulder', joint_type: 'revolute', axis: [0, 0, 1],
+      collision: true,
+      collision_shape: { kind: 'capsule', a: [0, 0, 0], b: [1, 0, 0], radius_m: 0.05 },
+    }),
+    poseFrame({
+      name: 'tool', parent: 'upper', kind: 'static',
+      translation: [1, 0, 0], rotation: [0, 0, 0, 1], source: 'descriptor',
+    }),
+  ],
+}
+
+const POSE_ARM_JOINTS: JointBinding[] = [
+  { joint: 'shoulder', channel: 'shoulder', measured: 0 },
+]
+
+function layer(name: string, volumes: WorkspaceLayer['volumes']): WorkspaceLayer {
+  return { name, volumes }
+}
+
+const INSIDE = layer('cell', [
+  { frame: 'tool', shape: { kind: 'sphere', centre: [0, 0, 0], radius_m: 2 } },
+])
+const TIGHT = layer('cell', [
+  { frame: 'tool', shape: { kind: 'sphere', centre: [0, 0, 0], radius_m: 0.5 } },
+])
+const SLAB = layer('cell', [
+  { frame: 'tool', shape: { kind: 'box', min: [0.5, -0.2, -0.2], max: [1.5, 0.2, 0.2] } },
+])
+
+function poseProfile(overrides: Record<string, unknown> = {}) {
+  return { name: 'cell-a', max_delta_per_cycle: 0.25, ...overrides }
+}
+
+cycleCase('workspace', 'inside-the-volume',
+  'A commanded pose inside the allowed volume passes, and the verdict records that a lookahead was what ran.',
+  hostParams({ profile: poseProfile({ workspace: [INSIDE] }) }),
+  cycle({ shoulder: 0 }), undefined, { frames: POSE_ARM, joints: POSE_ARM_JOINTS })
+
+cycleCase('workspace', 'outside-every-volume',
+  'Outside every allowed volume the command is held, and the margin says by how far.',
+  hostParams({ profile: poseProfile({ workspace: [TIGHT] }) }),
+  cycle({ shoulder: 0 }), undefined, { frames: POSE_ARM, joints: POSE_ARM_JOINTS })
+
+cycleCase('workspace', 'rotated-out-of-the-slab',
+  'A quarter turn takes the tool out of a box that contained it, and the box reports the distance to its face.',
+  hostParams({ profile: poseProfile({ workspace: [SLAB] }) }),
+  cycle({ shoulder: 1.5707963267948966 }), undefined, { frames: POSE_ARM, joints: POSE_ARM_JOINTS })
+
+cycleCase('workspace', 'layers-compose-by-conjunction',
+  'A wide layer cannot re-permit what a narrow one forbade; layering only ever narrows (§38.2).',
+  hostParams({ profile: poseProfile({
+    workspace: [layer('site', INSIDE.volumes), layer('cell', TIGHT.volumes)],
+  }) }),
+  cycle({ shoulder: 0 }), undefined, { frames: POSE_ARM, joints: POSE_ARM_JOINTS })
+
+cycleCase('workspace', 'alternatives-within-one-layer',
+  'Within a layer the volumes are alternatives — an operator drawing two allowed regions means either.',
+  hostParams({ profile: poseProfile({ workspace: [layer('cell', [
+    { frame: 'tool', shape: { kind: 'sphere', centre: [5, 0, 0], radius_m: 0.5 } },
+    { frame: 'tool', shape: { kind: 'sphere', centre: [1, 0, 0], radius_m: 0.5 } },
+  ])] }) }),
+  cycle({ shoulder: 0 }), undefined, { frames: POSE_ARM, joints: POSE_ARM_JOINTS })
+
+cycleCase('workspace', 'judged-after-clamping',
+  'The pose checked is the one the clamped command produces, not the one the policy asked for.',
+  hostParams({
+    transport: { ...CLAMP, per_channel: { shoulder: 0 } },
+    profile: poseProfile({ workspace: [SLAB] }),
+  }),
+  cycle({ shoulder: 1.5707963267948966 }), undefined, { frames: POSE_ARM, joints: POSE_ARM_JOINTS })
+
+cycleCase('workspace', 'no-lookahead-on-a-velocity-body',
+  'With no position channel bound the guard checks where the body is, which is a weaker claim than §7.1 makes — and the verdict says so.',
+  hostParams({ profile: poseProfile({ workspace: [TIGHT] }) }),
+  cycle({ shoulder_velocity: 3 }), undefined,
+  { frames: POSE_ARM, joints: [{ joint: 'shoulder', channel: null, measured: 0 }] })
+
+/** Two capsules on a shared root, close enough that a margin decides. */
+function pairFrames(offset: number, ignore: string[] = []): FrameGraph {
+  const capsule = { kind: 'capsule', a: [0, 0, 0] as [number, number, number], b: [0.5, 0, 0] as [number, number, number], radius_m: 0.1 }
+  return {
+    root: 'base_link',
+    convention: 'rep103',
+    generator: 'vendor',
+    nodes: [
+      poseFrame({ name: 'base_link' }),
+      poseFrame({
+        name: 'left', parent: 'base_link', kind: 'static',
+        translation: [0, offset, 0], rotation: [0, 0, 0, 1], source: 'descriptor',
+        collision: true, collision_shape: capsule,
+        ...(ignore.length > 0 ? { collision_ignore: ignore } : {}),
+      }),
+      poseFrame({
+        name: 'right', parent: 'base_link', kind: 'static',
+        translation: [0, -offset, 0], rotation: [0, 0, 0, 1], source: 'descriptor',
+        collision: true, collision_shape: capsule,
+      }),
+    ],
+  }
+}
+
+cycleCase('collision', 'clear',
+  'Two bodies well apart do not trip, and the guard is active rather than silent.',
+  hostParams({ profile: poseProfile({ self_collision_margin_m: 0.05 }) }),
+  cycle({}), undefined, { frames: pairFrames(0.5) })
+
+cycleCase('collision', 'inside-the-margin',
+  'Inside the configured margin the command is held and both frames are named.',
+  hostParams({ profile: poseProfile({ self_collision_margin_m: 0.05 }) }),
+  cycle({}), undefined, { frames: pairFrames(0.1) })
+
+cycleCase('collision', 'declared-exception',
+  'A pair the body declares may touch is skipped, however the exception was written.',
+  hostParams({ profile: poseProfile({ self_collision_margin_m: 0.05 }) }),
+  cycle({}), undefined, { frames: pairFrames(0.1, ['right']) })
+
+cycleCase('collision', 'no-margin-configured',
+  'With no margin the surfaces must actually meet, which is legal and late; the notice is on the limits.',
+  hostParams({ profile: poseProfile() }),
+  cycle({}), undefined, { frames: pairFrames(0.1) })
+
+limitsCase('pose-guards-active', 'A body with frames, geometry and volumes runs both pose guards.',
+  hostParams({ profile: poseProfile({ workspace: [INSIDE], self_collision_margin_m: 0.05 }) }),
+  { frames: POSE_ARM })
+
+limitsCase('workspace-without-volumes', 'Frames but no volumes: the guard names the setting it wants.',
+  hostParams({ profile: poseProfile() }), { frames: POSE_ARM })
+
+limitsCase('workspace-names-an-absent-frame',
+  'A volume naming a frame the body does not have reports that frame, per §44.5.',
+  hostParams({ profile: poseProfile({ workspace: [layer('cell', [
+    { frame: 'left_hand.tool0', shape: { kind: 'sphere', centre: [0, 0, 0], radius_m: 1 } },
+  ])] }) }),
+  { frames: POSE_ARM })
+
+limitsCase('one-collision-body', 'One capsule has nothing to collide with, so the guard is unavailable.',
+  hostParams({ profile: poseProfile() }), { frames: POSE_ARM })
+
+limitsCase('no-collision-margin', 'The guard runs and the margin is unset, which is a notice of its own.',
+  hostParams({ profile: poseProfile() }), { frames: pairFrames(0.5) })
+
 // ── limits ───────────────────────────────────────────────────────────────────
 //
 // Not one of the six corpora §31.4 lists. Limit resolution is contract behaviour with a
@@ -543,11 +778,12 @@ cycleCase('empty', 'no-channels',
 // through the cycle vectors that consume it — so it gets its own corpus, per the rule that the
 // corpus grows with every feature.
 
-function limitsCase(id: string, note: string, params: ResolveLimitsParams): void {
+function limitsCase(id: string, note: string, params: ResolveLimitsParams, body: Body = {}): void {
+  const frames = body.frames ? flattenOrThrow(body.frames) : null
   add('limits', 'resolution', {
     id, note,
-    input: params,
-    expected: canonical(shapeLimits(resolveLimits(params))),
+    input: { ...params, ...(body.frames ? { frames: body.frames } : {}) },
+    expected: canonical(shapeLimits(resolveLimits({ ...params, frames }))),
   })
 }
 
@@ -838,6 +1074,195 @@ framesCase('unknown-kind', 'A kind outside the three is a schema this edition do
 framesCase('root-only', 'One frame, no joints. A fixed body with nothing on it is still a valid tree.',
   graph([frameNode('base_link', null)]))
 
+// The collision geometry §44.3 gained so that the `self_collision` guard has something to evaluate.
+// Each of these presents far from its cause if it is not caught here: a shape nobody can read looks
+// like a limb quietly missing from the collision test, and an exception naming a frame that does
+// not exist looks like a pair that trips when the operator believed they had excluded it.
+
+const CAPSULE = { kind: 'capsule', a: [0, 0, 0] as [number, number, number], b: [0, 0, 0.3] as [number, number, number], radius_m: 0.06 }
+
+framesCase('collision-shape-well-formed', 'A capsule on a frame that says it carries geometry.',
+  graph([
+    frameNode('base_link', null),
+    frameNode('upper', 'base_link', { collision_shape: CAPSULE }),
+  ]))
+framesCase('collision-shape-unknown-kind', 'A shape this edition cannot evaluate is named, never ignored.',
+  graph([
+    frameNode('base_link', null),
+    frameNode('upper', 'base_link', { collision_shape: { ...CAPSULE, kind: 'mesh' } }),
+  ]))
+framesCase('collision-shape-no-radius', 'A capsule of no radius bounds nothing, and would report clearance it has not established.',
+  graph([
+    frameNode('base_link', null),
+    frameNode('upper', 'base_link', { collision_shape: { ...CAPSULE, radius_m: 0 } }),
+  ]))
+framesCase('collision-shape-contradicted', 'A shape on a frame that says it carries no geometry is two statements that disagree.',
+  graph([
+    frameNode('base_link', null),
+    frameNode('upper', 'base_link', { collision: false, collision_shape: CAPSULE }),
+  ]))
+framesCase('collision-ignore-well-formed', 'An exception naming a frame that exists.',
+  graph([
+    frameNode('base_link', null),
+    frameNode('torso', 'base_link', { collision_shape: CAPSULE, collision_ignore: ['pelvis'] }),
+    frameNode('pelvis', 'base_link', { collision_shape: CAPSULE }),
+  ]))
+framesCase('collision-ignore-missing', 'An exception naming nothing excludes nothing, and says so.',
+  graph([
+    frameNode('base_link', null),
+    frameNode('torso', 'base_link', { collision_shape: CAPSULE, collision_ignore: ['pelvis'] }),
+  ]))
+
+// ── kinematics ───────────────────────────────────────────────────────────────
+//
+// Forward kinematics on its own, with the **poses themselves** as the expected value.
+//
+// A separate corpus from `cycle` because it pins something `cycle` cannot. A trip is a boolean, and
+// two editions could agree on every one of them while disagreeing about every pose by a millimetre.
+// Thirty digits of translation do not permit that — and they are what hold the two editions' sine,
+// cosine and square root to each other, which is the reason those three are written out in
+// `crates/skynet-kernel/src/real.rs` and `reference/typescript/kinematics.ts` rather than taken from
+// a platform library that rounds its own way.
+
+function kinematicsCase(
+  id: string, note: string, frames: FrameGraph,
+  joints: JointBinding[], command: Record<string, number>,
+): void {
+  const flat = flattenOrThrow(frames)
+  add('kinematics', 'solve', {
+    id, note,
+    input: { frames, joints, command: sortedRecord(command) },
+    expected: canonical(shapeSolved(flat, solve(flat, joints, command))),
+  })
+}
+
+/** A two-link planar arm: shoulder a metre up, elbow a metre out, both about z. */
+const PLANAR_ARM: FrameGraph = graph([
+  poseFrame({ name: 'base_link' }),
+  poseFrame({
+    name: 'upper', parent: 'base_link', kind: 'dynamic',
+    translation: [0, 0, 1], rotation: [0, 0, 0, 1], source: 'descriptor',
+    joint: 'shoulder', joint_type: 'revolute', axis: [0, 0, 1],
+  }),
+  poseFrame({
+    name: 'tool', parent: 'upper', kind: 'dynamic',
+    translation: [1, 0, 0], rotation: [0, 0, 0, 1], source: 'descriptor',
+    joint: 'elbow', joint_type: 'revolute', axis: [0, 0, 1],
+  }),
+])
+
+const PLANAR_JOINTS: JointBinding[] = [
+  { joint: 'shoulder', channel: 'shoulder', measured: 0 },
+  { joint: 'elbow', channel: 'elbow', measured: 0 },
+]
+
+kinematicsCase('zero-configuration', 'Every joint at zero: the chain lies along its own declared offsets.',
+  PLANAR_ARM, PLANAR_JOINTS, { elbow: 0, shoulder: 0 })
+kinematicsCase('quarter-turn', 'A quarter turn about z takes the first link from +x to +y, and the second continues along it.',
+  PLANAR_ARM, PLANAR_JOINTS, { elbow: 0, shoulder: 1.5707963267948966 })
+kinematicsCase('two-joints', 'Both joints turning: the composition is what makes a chain a chain and not a sum of offsets.',
+  PLANAR_ARM, PLANAR_JOINTS, { elbow: 0.7853981633974483, shoulder: 0.5235987755982988 })
+kinematicsCase('irrational-angles', 'Angles with no exact representation, which is where two libraries would part company.',
+  PLANAR_ARM, PLANAR_JOINTS, { elbow: -2.718281828459045, shoulder: 3.141592653589793 })
+kinematicsCase('many-revolutions', 'Sixteen revolutions: the range reduction, not the polynomial.',
+  PLANAR_ARM, PLANAR_JOINTS, { elbow: -50, shoulder: 100 })
+kinematicsCase('past-the-exact-reduction',
+  'An angle past the range the specified reduction is exact over leaves the frame unresolved rather than placed wrongly.',
+  PLANAR_ARM, PLANAR_JOINTS, { elbow: 0, shoulder: 5e6 })
+kinematicsCase('command-does-not-carry-the-joint',
+  'A bound channel the command omits falls back to the measured state, and the lookahead flag says the check is the weaker one.',
+  PLANAR_ARM, PLANAR_JOINTS, { shoulder: 0.5 })
+kinematicsCase('no-binding-at-all',
+  'A joint with no binding leaves its frame unresolved, and unresolved propagates down the chain.',
+  PLANAR_ARM, [], { elbow: 1, shoulder: 1 })
+
+kinematicsCase('prismatic', 'A prismatic joint slides along its axis rather than turning about it.',
+  graph([
+    poseFrame({ name: 'base_link' }),
+    poseFrame({
+      name: 'carriage', parent: 'base_link', kind: 'dynamic',
+      translation: [0, 0, 0], rotation: [0, 0, 0, 1], source: 'descriptor',
+      joint: 'rail', joint_type: 'prismatic', axis: [0, 0, 1],
+    }),
+  ]),
+  [{ joint: 'rail', channel: 'rail', measured: 0 }], { rail: 0.35 })
+
+kinematicsCase('mimic-with-a-multiplier',
+  'A parallel gripper: the second finger runs at −1, and a field that could only say "follows" would put it on the wrong side of the object.',
+  graph([
+    poseFrame({ name: 'palm' }),
+    poseFrame({
+      name: 'finger_left', parent: 'palm', kind: 'dynamic',
+      translation: [0, 0, 0], rotation: [0, 0, 0, 1], source: 'descriptor',
+      joint: 'grip', joint_type: 'prismatic', axis: [0, 1, 0],
+    }),
+    poseFrame({
+      name: 'finger_right', parent: 'palm', kind: 'dynamic',
+      translation: [0, 0, 0], rotation: [0, 0, 0, 1], source: 'descriptor',
+      joint: 'grip_mirror', joint_type: 'prismatic', axis: [0, 1, 0],
+      mimics: 'grip', mimic_multiplier: -1, mimic_offset: 0,
+    }),
+  ], 'palm'),
+  [
+    { joint: 'grip', channel: 'grip', measured: 0 },
+    { joint: 'grip_mirror', channel: null, measured: 0 },
+  ],
+  { grip: 0.02 })
+
+kinematicsCase('a-ball-joint-is-unresolved',
+  'One scalar cannot say where a ball joint is, so the frame and everything below it report no pose rather than a guessed one.',
+  graph([
+    poseFrame({ name: 'base_link' }),
+    poseFrame({
+      name: 'shoulder', parent: 'base_link', kind: 'dynamic',
+      translation: [0, 0, 0], rotation: [0, 0, 0, 1], source: 'descriptor',
+      joint: 'ball', joint_type: 'ball', axis: [0, 0, 1],
+    }),
+    poseFrame({
+      name: 'tool', parent: 'shoulder', kind: 'static',
+      translation: [1, 0, 0], rotation: [0, 0, 0, 1], source: 'descriptor',
+    }),
+  ]),
+  [{ joint: 'ball', channel: 'ball', measured: 0 }], { ball: 0 })
+
+kinematicsCase('a-degenerate-axis-is-a-defect',
+  'A zero-length axis is a body-description defect and not a fixed joint; reading it as one would weld a limb in the model while it moved in the world.',
+  graph([
+    poseFrame({ name: 'base_link' }),
+    poseFrame({
+      name: 'arm', parent: 'base_link', kind: 'dynamic',
+      translation: [0, 0, 0], rotation: [0, 0, 0, 1], source: 'descriptor',
+      joint: 'elbow', joint_type: 'revolute', axis: [0, 0, 0],
+    }),
+  ]),
+  [{ joint: 'elbow', channel: 'elbow', measured: 0 }], { elbow: 1 })
+
+kinematicsCase('a-rotated-static-frame',
+  'A static rotation composes with everything below it, which is where an xyzw/wxyz mix-up would show.',
+  graph([
+    poseFrame({ name: 'base_link' }),
+    poseFrame({
+      name: 'tilted', parent: 'base_link', kind: 'static', source: 'descriptor',
+      translation: [0.1, 0.2, 0.3],
+      rotation: [0.2705980500730985, 0.2705980500730985, 0.6532814824381883, 0.6532814824381883],
+    }),
+    poseFrame({
+      name: 'tool', parent: 'tilted', kind: 'static', source: 'descriptor',
+      translation: [1, 0, 0], rotation: [0, 0, 0, 1],
+    }),
+  ]),
+  [], {})
+
+kinematicsCase('collision-pairs-are-counted',
+  'Three capsules on one chain: the quadratic cost is reported rather than assumed small.',
+  graph([
+    poseFrame({ name: 'base_link' }),
+    poseFrame({ name: 'a', parent: 'base_link', kind: 'static', source: 'descriptor', translation: [0, 0, 0.2], rotation: [0, 0, 0, 1], collision: true, collision_shape: CAPSULE }),
+    poseFrame({ name: 'b', parent: 'a', kind: 'static', source: 'descriptor', translation: [0, 0, 0.2], rotation: [0, 0, 0, 1], collision: true, collision_shape: CAPSULE }),
+    poseFrame({ name: 'c', parent: 'b', kind: 'static', source: 'descriptor', translation: [0, 0, 0.2], rotation: [0, 0, 0, 1], collision: true, collision_shape: CAPSULE }),
+  ]),
+  [], {})
+
 // ── readiness ────────────────────────────────────────────────────────────────
 
 function subject(overrides: Partial<ReadinessSubject> = {}): ReadinessSubject {
@@ -1019,25 +1444,49 @@ for (let n = 0; n < 40; n += 1) {
   }
   const desired = sortedRecord(rawDesired)
   const previous = sortedRecord(rawPrevious)
+  // The profile now sometimes carries separation thresholds, and the cycle sometimes carries a
+  // capability token and a distance. Without them the generator produced forty cases in which two
+  // of the eight guards could not fire, which is how those two came to be pinned by one edition.
+  const wantsProximity = cycleRand() < 0.4
   const params = hostParams({
     tier: (['guest', 'host', 'certified'] as const)[Math.floor(cycleRand() * 3)],
     ...(cycleRand() < 0.3 ? { envelope: null } : {}),
-    ...(cycleRand() < 0.3 ? { profile: null } : {}),
+    ...(cycleRand() < 0.3
+      ? { profile: null }
+      : wantsProximity
+        ? {
+            profile: {
+              name: 'shared-space',
+              max_delta_per_cycle: 0.25,
+              proximity: { stop_distance_m: 0.3, slow_distance_m: 1, slow_factor: 0.5 },
+            },
+          }
+        : {}),
   })
+  const capability = cycleRand() < 0.4
+    ? (['motion.arm', 'motion.base', 'gripper'] as const)[Math.floor(cycleRand() * 3)]
+    : undefined
+  // Staleness is drawn deliberately rather than uniformly. A uniform lag over 300 ms against a
+  // 100 ms window made two cases in three a watchdog stop, and a watchdog stop returns before any
+  // other guard runs — so most of the fuzz corpus was exercising one guard and reporting coverage
+  // of eight.
   const c: CommandCycle = {
     now_ms: 1000,
-    command_ms: 1000 - Math.round(cycleRand() * 300),
+    command_ms: cycleRand() < 0.2 ? 1000 - Math.round(200 + cycleRand() * 300) : 1000 - Math.round(cycleRand() * 90),
     sequence: 100,
     desired,
     ...(cycleRand() < 0.6 ? { previous } : {}),
+    ...(capability === undefined ? {} : { capability }),
+    ...(cycleRand() < 0.6 ? { nearest_person_m: Math.round(cycleRand() * 150) / 100 } : {}),
   }
   const lastSequence = cycleRand() < 0.3 ? 100 : 99
+  const grants = cycleRand() < 0.5 ? ['motion.arm'] : []
 
-  const limits = resolveLimits(params)
+  const limits = withGrants(resolveLimits(params), grants)
   add('fuzz', 'cycle', {
     id: `seeded-${n}`,
     note: 'Generated from seed 0xd15ea5e.',
-    input: { limits: params, cycle: c, last_sequence: lastSequence },
+    input: { limits: { ...params, grants }, cycle: c, last_sequence: lastSequence },
     expected: canonical(shapeVerdict(evaluateCycle(c, limits, params.envelope, lastSequence))),
   })
 }

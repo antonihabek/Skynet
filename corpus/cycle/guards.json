@@ -34,8 +34,6 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "collision_model": true,
-            "solvers": true,
             "legged": true
           }
         },
@@ -50,7 +48,7 @@
         },
         "last_sequence": null
       },
-      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{\"elbow\":40,\"shoulder\":10},\"response\":null,\"tripped\":[]}"
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{\"elbow\":40,\"shoulder\":10},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":null,\"tripped\":[]}"
     },
     {
       "id": "clamped-to-rating",
@@ -84,8 +82,6 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "collision_model": true,
-            "solvers": true,
             "legged": true
           }
         },
@@ -99,7 +95,7 @@
         },
         "last_sequence": null
       },
-      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":120,\"to\":80}],\"command\":{\"elbow\":80},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":120,\"to\":80}],\"command\":{\"elbow\":80},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
     },
     {
       "id": "clamp-preserves-sign",
@@ -133,8 +129,6 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "collision_model": true,
-            "solvers": true,
             "legged": true
           }
         },
@@ -148,7 +142,7 @@
         },
         "last_sequence": null
       },
-      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":-120,\"to\":-80}],\"command\":{\"elbow\":-80},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":-120,\"to\":-80}],\"command\":{\"elbow\":-80},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
     },
     {
       "id": "stale-command-discarded",
@@ -182,8 +176,6 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "collision_model": true,
-            "solvers": true,
             "legged": true
           }
         },
@@ -197,7 +189,7 @@
         },
         "last_sequence": null
       },
-      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
     },
     {
       "id": "stalled-sequence",
@@ -231,8 +223,6 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "collision_model": true,
-            "solvers": true,
             "legged": true
           }
         },
@@ -246,7 +236,7 @@
         },
         "last_sequence": 42
       },
-      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
     },
     {
       "id": "advancing-sequence",
@@ -280,8 +270,6 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "collision_model": true,
-            "solvers": true,
             "legged": true
           }
         },
@@ -295,7 +283,7 @@
         },
         "last_sequence": 41
       },
-      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{\"elbow\":10},\"response\":null,\"tripped\":[]}"
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{\"elbow\":10},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":null,\"tripped\":[]}"
     },
     {
       "id": "no-watchdog-window",
@@ -328,8 +316,6 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "collision_model": true,
-            "solvers": true,
             "legged": true
           }
         },
@@ -343,7 +329,7 @@
         },
         "last_sequence": 999
       },
-      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{\"elbow\":10},\"response\":null,\"tripped\":[]}"
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{\"elbow\":10},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":null,\"tripped\":[]}"
     },
     {
       "id": "rate-limit-after-clamp",
@@ -377,8 +363,6 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "collision_model": true,
-            "solvers": true,
             "legged": true
           }
         },
@@ -395,7 +379,7 @@
         },
         "last_sequence": null
       },
-      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":400,\"to\":80},{\"channel\":\"elbow\",\"from\":80,\"to\":20}],\"command\":{\"elbow\":20},\"response\":\"clamp\",\"tripped\":[\"envelope\",\"rate_limit\"]}"
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":400,\"to\":80},{\"channel\":\"elbow\",\"from\":80,\"to\":20}],\"command\":{\"elbow\":20},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\",\"rate_limit\"]}"
     },
     {
       "id": "rate-limit-unbounded-channel",
@@ -429,8 +413,6 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "collision_model": true,
-            "solvers": true,
             "legged": true
           }
         },
@@ -447,7 +429,7 @@
         },
         "last_sequence": null
       },
-      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"wrist\",\"from\":100,\"to\":12.5}],\"command\":{\"wrist\":12.5},\"response\":\"clamp\",\"tripped\":[\"rate_limit\"]}"
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"wrist\",\"from\":100,\"to\":12.5}],\"command\":{\"wrist\":12.5},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"rate_limit\"]}"
     },
     {
       "id": "rate-limit-not-configured",
@@ -478,8 +460,6 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "collision_model": true,
-            "solvers": true,
             "legged": true
           }
         },
@@ -496,7 +476,7 @@
         },
         "last_sequence": null
       },
-      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":400,\"to\":80}],\"command\":{\"elbow\":80},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":400,\"to\":80}],\"command\":{\"elbow\":80},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
     },
     {
       "id": "base-channel",
@@ -530,8 +510,6 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "collision_model": true,
-            "solvers": true,
             "legged": true
           }
         },
@@ -545,7 +523,7 @@
         },
         "last_sequence": null
       },
-      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"base\",\"from\":9,\"to\":1.5}],\"command\":{\"base\":1.5},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"base\",\"from\":9,\"to\":1.5}],\"command\":{\"base\":1.5},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
     },
     {
       "id": "multi-channel",
@@ -579,8 +557,6 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "collision_model": true,
-            "solvers": true,
             "legged": true
           }
         },
@@ -597,7 +573,7 @@
         },
         "last_sequence": null
       },
-      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"base\",\"from\":4,\"to\":1.5},{\"channel\":\"elbow\",\"from\":200,\"to\":80}],\"command\":{\"base\":1.5,\"elbow\":80,\"shoulder\":10,\"wrist\":3},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"base\",\"from\":4,\"to\":1.5},{\"channel\":\"elbow\",\"from\":200,\"to\":80}],\"command\":{\"base\":1.5,\"elbow\":80,\"shoulder\":10,\"wrist\":3},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
     }
   ]
 }

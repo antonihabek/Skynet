@@ -1,0 +1,271 @@
+{
+  "corpus": "cycle",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "inside-the-stop-distance",
+      "note": "A person inside the protective separation distance is a category 1 stop, and nothing is sent.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "shared-space",
+            "max_delta_per_cycle": 0.25,
+            "proximity": {
+              "stop_distance_m": 0.3,
+              "slow_distance_m": 1,
+              "slow_factor": 0.5
+            }
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "elbow": 40
+          },
+          "nearest_person_m": 0.2
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"stop_cat1\",\"tripped\":[\"proximity\"]}"
+    },
+    {
+      "id": "between-the-two-distances",
+      "note": "Speed and separation monitoring scales the command and forwards it — a reduction, reported as a clamp and not as a stop.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "shared-space",
+            "max_delta_per_cycle": 0.25,
+            "proximity": {
+              "stop_distance_m": 0.3,
+              "slow_distance_m": 1,
+              "slow_factor": 0.5
+            }
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "elbow": 40
+          },
+          "nearest_person_m": 0.8
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":40,\"to\":20}],\"command\":{\"elbow\":20},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"proximity\"]}"
+    },
+    {
+      "id": "beyond-the-slow-distance",
+      "note": "Outside both distances the guard is active and does nothing.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "shared-space",
+            "max_delta_per_cycle": 0.25,
+            "proximity": {
+              "stop_distance_m": 0.3,
+              "slow_distance_m": 1,
+              "slow_factor": 0.5
+            }
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "elbow": 40
+          },
+          "nearest_person_m": 4
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{\"elbow\":40},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":null,\"tripped\":[]}"
+    },
+    {
+      "id": "scales-after-clamping",
+      "note": "The separation factor applies to the clamped command, so a clamp cannot raise a speed the separation reduced.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "shared-space",
+            "max_delta_per_cycle": 0.25,
+            "proximity": {
+              "stop_distance_m": 0.3,
+              "slow_distance_m": 1,
+              "slow_factor": 0.5
+            }
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "elbow": 400
+          },
+          "nearest_person_m": 0.8
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":400,\"to\":80},{\"channel\":\"elbow\",\"from\":80,\"to\":40}],\"command\":{\"elbow\":40},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\",\"proximity\"]}"
+    },
+    {
+      "id": "unsensed",
+      "note": "Configured but nothing measures separation: the guard is unavailable and the distance field is ignored.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "shared-space",
+            "max_delta_per_cycle": 0.25,
+            "proximity": {
+              "stop_distance_m": 0.3,
+              "slow_distance_m": 1,
+              "slow_factor": 0.5
+            }
+          },
+          "available": {
+            "imu": true,
+            "people_detection": false,
+            "legged": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "elbow": 40
+          },
+          "nearest_person_m": 0.1
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{\"elbow\":40},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":null,\"tripped\":[]}"
+    }
+  ]
+}
