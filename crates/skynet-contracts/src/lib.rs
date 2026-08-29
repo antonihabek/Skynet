@@ -42,6 +42,7 @@ extern crate alloc;
 
 pub mod admission;
 pub mod certification;
+pub mod digest;
 pub mod embodiment;
 pub mod json;
 pub mod readiness;
@@ -58,6 +59,7 @@ pub const CONTRACTS_VERSION: &str = "1.0.0";
 
 pub use admission::{admit_package, AdmissionParams, AdmissionResult};
 pub use certification::{award_certification, field_conformance, CertificationInput};
+pub use digest::{version_digest, DigestError, DigestFile};
 pub use readiness::{evaluate_readiness, summarize_readiness, ReadinessSubject};
 pub use roles::{parse_role, ParsedRole};
 pub use transport::{resolve_transport, ResolveTransportOptions, TransportPlan};

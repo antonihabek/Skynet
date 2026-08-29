@@ -30,11 +30,12 @@ against the implementation, is worth more than a comment block — and it is wha
 | `package.ts` | The `.sky` manifest and `admitPackage` |
 | `conformance.ts` | SCTS and `awardCertification` |
 | `readiness.ts` | `evaluateReadiness` and `summarizeReadiness` |
+| `digest.ts` | `versionDigest` — the identity a package is verified against at install |
 | `types.ts` | `SafetyEnvelope`, restated so the oracle is standalone |
 | `canonical.ts` | Canonical JSON — a deliberate reimplementation of `crates/skynet-json` |
 | `shape.ts` | The wire shape of every output: which fields are nullable and which are optional |
 
-The first five are the Hub's `lib/skynet/os/*.ts`, changed only in their import paths. That is
+The first six, and `canonical.ts`, are the Hub's `lib/skynet/os/*.ts`, changed only in their import paths. That is
 deliberate: a vendored oracle that has been tidied is an oracle that no longer describes the thing
 it is the reference for. When the Hub's copy changes, this copy is updated and the corpus is
 regenerated, and the diff in `corpus/` is the review.

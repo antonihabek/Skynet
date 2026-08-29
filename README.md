@@ -95,10 +95,12 @@ it, which says no when the answer is no.
 | `crates/skynet-rhal` — the Rust view of the ABI | 7 tests |
 | `crates/skynet-sha256` — SHA-256 | Held to the FIPS 180-4 vectors, 4 tests |
 | `crates/skynet-urdf` — URDF import (§63.4) | XML reader, model, role suggestion, descriptor, 37 tests |
-| `crates/skynet-cli` — the `skynet` command | descriptor, transport, role, driver new/check, 31 tests |
-| `crates/skynetd` — the supervisor's brain (§33) | Reconciler, supervision, health, leases; pure, 35 tests. The I/O half is not written |
-| `corpus/` — the conformance corpus | 270 cases, 19 files |
-| `crates/skynet-corpus` — the corpus runner | Reproduces all 270 byte for byte |
+| `crates/skynet-cli` — the `skynet` command | descriptor, transport, role, driver new/check, plus the robot commands over the local socket and `blackbox`; 36 tests |
+| `crates/skynetd` — the supervisor's brain (§33) | Reconciler, supervision, health, leases; pure, 37 tests, and CI asserts it stays pure |
+| `crates/skynetd-io` — the I/O half, and the `skynetd` binary | Package store, systemd launcher, observation, local API, the black box on disk, the loop; 83 tests plus an end-to-end run against real systemd |
+| `crates/skynet-blackbox` — the black box (§13, §26) | The preallocated ring, the MCAP writer, sealing, deterministic replay; `no_std`, 29 tests |
+| `corpus/` — the conformance corpus | 306 cases, 24 files |
+| `crates/skynet-corpus` — the corpus runner | Reproduces all 306 byte for byte |
 | `reference/typescript/` — the oracle | Vendored from the Hub; generates the corpus |
 | `bindings/python` — the Python RHAL | Driver protocol plus a ctypes ABI view, offset-asserted |
 | `drivers/mock` — the mock robot | 24 sim-conformance checks, no hardware |
@@ -106,11 +108,53 @@ it, which says no when the answer is no.
 | `drivers/lerobot` — the LeRobot bridge (§67) | Role tables, 70 checks against a fake; Guest tier |
 | `drivers/mujoco` — the MuJoCo simulator driver (§70) | 103 checks against real physics; Guest tier, twice over |
 
-**Not built, and the specification says so on its own behalf:** everything in `skynetd` that touches
-the machine, the policy runtime, the SPSC ring, OTA, the black box, the on-robot console, the safety
-MCU, and every driver that talks to real hardware — `ros2_control`, EtherCAT, CANopen and the vendor
-SDKs. The realistic figure for a robot moving under this is several engineer-years. §59.5 states that
-plainly and this README does not improve on it.
+**Not built, and the specification says so on its own behalf:** the policy runtime, the SPSC ring,
+OTA, the outbound queue, the on-robot console's page, Ed25519 (so a staged package reports its
+signature as *not checked* rather than as unsigned), the safety MCU, and every driver that talks to
+real hardware — `ros2_control`, EtherCAT, CANopen and the vendor SDKs. The realistic figure for a
+robot moving under this is several engineer-years. §59.5 states that plainly and this README does not
+improve on it.
+
+The black box is a partial entry rather than either column. The ring, the format, the seal and the
+replay are written and held to the corpus; what a *supervisor* can put in one is §26's event channel
+and no more, because the four cycle channels carry control cycles and there is no control loop to
+produce them. `skynet blackbox` says so on every robot it is pointed at, rather than showing a
+healthy-looking recording of a body that has never been commanded.
+
+---
+
+## Running the daemon
+
+`skynetd` is the supervisor (§33) and `skynet` is the CLI in front of it. Nothing here needs a robot;
+`--root` puts `/data` and `/run` wherever you like.
+
+```bash
+# Stage a package. The digest is verified against the content, not taken on trust.
+skynet install ./my-policy --root /tmp/robot \
+  --id openrobot/grasp --kind policy --version 1.0.0 --digest <hex>
+
+# Say what the robot should be running, then reconcile once and read the plan.
+skynetd once --root /tmp/robot
+
+# Or run it, with the local API in front (§33.7).
+skynetd --root /tmp/robot &
+skynet status --socket /tmp/robot/run/skynetd.sock     # needs no credential (§39.1)
+skynet estop  --socket /tmp/robot/run/skynetd.sock     # nor does this
+skynetd credential add --root /tmp/robot --label laptop --role operator
+skynet ps --socket /tmp/robot/run/skynetd.sock --token <token>
+```
+
+Two things it will not do, and says so rather than pretending:
+
+* **nothing starts until somebody declares a safe state.** §33.4 gates it, and this edition has no
+  channel to the kernel to ask — so an operator writes `yes` into `/data/state/safe-state` and every
+  report of the safe state says `declared` beside it.
+* **there is no default password.** An unprovisioned robot answers status and stop and nothing else
+  (§39.2), and that is the specified behaviour rather than a state to be fixed by a fallback.
+
+`sh crates/skynetd-io/e2e.sh` runs the whole chain — install, verify, activate, launch, socket,
+rollback — and reports the systemd launch step as not run where there is no systemd, rather than
+passing a shorter exam.
 
 ---
 
@@ -280,6 +324,8 @@ crates/          The Rust reference edition.
   skynet-urdf        URDF import. The only crate that links std, because it is a tool.
   skynet-cli         The `skynet` command, and the only unsafe outside the ABI.
   skynetd            The supervisor's brain: reconcile, supervise, health, leases. Pure.
+  skynetd-io         Where it meets the machine: store, launcher, socket, loop. The daemon.
+  skynet-blackbox    The black box: the ring, MCAP, sealing, replay. no_std, no I/O.
   skynet-corpus      Holds this edition to the corpus.
 corpus/          The conformance corpus. Plain data, no code.
 reference/       The TypeScript oracle the corpus is generated from.

@@ -12,3 +12,5 @@ authors.workspace = true
 skynet-json = { path = "../skynet-json" }
 skynet-kernel = { path = "../skynet-kernel" }
 skynet-contracts = { path = "../skynet-contracts" }
+skynet-blackbox = { path = "../skynet-blackbox" }
+skynet-sha256 = { path = "../skynet-sha256" }

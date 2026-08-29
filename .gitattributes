@@ -1,0 +1,27 @@
+# Line endings, pinned.
+#
+# This repository is built around byte-identical artifacts. §31.4 asks every edition to reproduce
+# the conformance corpus byte for byte, `tools/check-mirrors.mjs` asserts that a shared document is
+# the same file in both repositories, and `versionDigest()` hashes source bytes into a package's
+# identity. All three of those are decided by the exact contents of a file, and on a machine with
+# `core.autocrlf=true` a checkout rewrites every line ending on the way in.
+#
+# So the working tree is LF everywhere, on every platform. Without this, the mirror check reports
+# two identical documents as diverged — which it did, permanently, until this file existed, and a
+# check that is always red is a check nobody reads.
+#
+# Existing files keep whatever endings they were committed with until they are renormalised:
+#
+#     git add --renormalize .
+#
+# which is a whitespace-only change and is best made on its own.
+
+* text=auto eol=lf
+
+# Anything whose bytes are its meaning is never touched.
+*.png binary
+*.jpg binary
+*.so binary
+*.a binary
+*.stl binary
+*.dae binary
