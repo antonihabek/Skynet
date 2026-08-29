@@ -638,3 +638,221 @@ unverified.
 4. **`frames` into the specification and the oracle** — still open from the previous session, and
    still the thing most likely to bite a second edition.
 5. **`skynetd`**, once there is a driver for it to supervise. There are now two.
+
+---
+
+## 2026-08-29 (fourth) — the simulator, the schema, and the supervisor's brain
+
+Three items from the previous session's list, and the environment is what decided the order: MuJoCo
+installs and runs headless on this machine, so item 1 stopped being a driver whose only evidence
+would be that it type-checks and became one that can be held to physics.
+
+### `drivers/mujoco` — the simulator driver (§70)
+
+> MuJoCo and Isaac Sim, and they are not a lesser path — the sim half of SCTS cannot run without
+> them, so they are **load-bearing infrastructure**.
+
+A scene file becomes a Skynet body: a descriptor built from the MJCF, a clock, a command path, a
+camera, and five scenes in `scenes/` of which four exist only to be refused in a particular way.
+
+**The design decision everything else follows from is that `read_state` advances the clock**, not
+`write_command`. §35.3 makes the simulator's clock the kernel's clock so that watchdogs, rate limits
+and deadlines are all measured in the units the simulator is producing — without which every
+simulated run trips the watchdog in a few cycles and the usual workaround, disabling it in
+simulation, means the thing being tested is not the thing that ships. That leaves the question of
+what makes time move, and the reader is the right answer twice over:
+
+* a **stalled policy still has time passing**, the last command keeps being applied, and
+  `safety.watchdog.fires` stays testable in simulation — which is half the reason to have a
+  simulator driver at all. Had the world advanced only on a command, a stalled policy would freeze
+  the universe;
+* it is what a real robot does. `read_state` returns a stamp that has moved whether or not anybody
+  commanded anything.
+
+One consequence, stated so nobody derives it from a surprising number: a command written at cycle
+*N* is integrated during cycle *N+1*, so **`command_latency_ms` is exactly one control period**. It
+is the one descriptor field a simulator fills in with more confidence than any hardware vendor, and
+it is filled in by construction rather than by measurement.
+
+**In a simulator the model is the body**, which sharpens the envelope rule rather than softening it.
+Per-joint ranges read out of the scene are not design values that might be wrong about some
+hardware — they are exactly what this body does, and the descriptor says so. `envelope` is still
+null, and simulation is the strongest reason for it yet: a safety envelope bounds what a machine may
+do to the people near it, there is no machine and there are no people, and a policy validated against
+an envelope minted from a scene file would carry that validation to hardware — the exact transfer
+§70 forbids when it says no simulated run may be presented as bench evidence.
+
+**It assigns no roles at all.** Not "suggests them behind a flag" — none, unless the configuration
+hands it a mapping. Role suggestion already exists, once, in `skynet descriptor from-urdf`, with the
+human-accept step §63.4 requires, and a second implementation of "which joint is this, really" is a
+second answer to one question. `skynet driver check` reports `embodiment.roles.coverage` at 0% for a
+MuJoCo body, and that is the designed outcome; the README names the two ways to fix it.
+
+**Cameras are declared only if one actually rendered.** The rule `skynet driver check` produced when
+it caught the same bug in the LeRobot bridge a session ago: *a declared stream that cannot be read
+binds a policy's observation to nothing*. On a machine with no GL the descriptor declares no sensors
+and `read_sensor` reports `ENOSYS`, with the reason on stderr.
+
+Four things the RHAL cannot carry are named on stderr and left out of `joints[]` rather than dropped
+quietly — a tendon actuator, an actuator with internal state, a ball joint, and (for the frame graph
+only) a body carrying two joints. Each is a real thing a modeller writes and each would otherwise
+become a joint index whose commands do not mean what the mode says they mean.
+
+### Two bugs found by building it, both worth the record
+
+1. **A diverged MuJoCo resets itself.** A driver checking only for non-finite values sees a robot
+   that teleported to its home pose at full speed and reports it as a perfectly good state — with no
+   error anywhere and a policy above it reacting to a body that jumped. Divergence is detected from
+   the warning counters instead, and reported as `SKR_EPROTO`. A full contact or constraint buffer
+   is a different fact and sets `FLAG_DEGRADED`: contacts were dropped, so collisions in that run
+   are not reliable.
+2. **A failed GL probe cannot be retried in one process.** The first attempt with no context raises,
+   which is fine; the *second* aborts the interpreter from inside the native library, with no
+   exception to catch. A supervisor restarting a body on a headless machine would take the whole
+   process down. The answer is that whether this machine can render is a property of the process,
+   decided once and remembered.
+
+And one gap in the repository: **`drivers/python-host/Makefile` did not exist**, so CI's step
+"A Python driver loads through the host and reaches guest tier" could never have run. Written, and
+it now drives the MuJoCo driver too. A check that quietly does not run is the failure mode §15
+spends a whole rule on, and this one was in our own CI.
+
+### `frames` and `simulator`, pinned — and made checkable
+
+Two sessions ago the URDF importer emitted a `frames` block whose field names were the tool's rather
+than the specification's, and the finding was recorded as the thing most likely to bite a second
+edition. The MuJoCo driver is that second edition, so this session closed it — mechanically rather
+than in prose.
+
+**§44.3 now pins the shape field by field**, with a rule that turned out to matter: *a node carries
+at most one joint.* URDF cannot express anything else, MJCF can, and a body with two joints on one
+link therefore emits `frames: null` rather than a tree with a hinge missing from it — §44.5 already
+says what that means. Whether a node should instead carry an ordered list is open and named as open.
+
+One rename while nothing consumes the field: `frames.source` became `frames.generator`, because
+§44.3 gives `source` to the per-node descriptor-versus-calibration distinction, and one name meaning
+two things in one object is how a consumer reads the wrong one.
+
+**§35.3 gained the field name for the simulator declaration** and says where the cap is enforced.
+`awardCertification` reads `simulator` off the *descriptor* rather than off the driver's declared
+ceiling, because a simulator driver written in C++ has no language ceiling to fall back on — the
+Python one being capped twice is a coincidence of the first two drivers we happen to have. The cap
+runs after the evidence walk, so a vendor reads "the evidence supports host; the body is simulated,
+so guest" rather than a silent guest.
+
+Both are now **checkable**: `validateFrames` in the oracle and `validate_frames` in Rust, with 11
+corpus cases holding them to each other, plus 5 for the certification cap. All **270 corpus cases
+reproduce byte for byte**, and the sixteen new ones did so on the first run — the two
+implementations agreed without adjustment, which is the corpus working in the pleasant direction for
+once. `skynet driver check` validates the graph and reports a simulated body's cap where a vendor
+will see it.
+
+### `crates/skynetd` — the supervisor's brain (§33)
+
+The largest remaining component, built as far as it can be built without lying. Everything in it is
+pure: `plan` is a function of the desired state and the observed state, supervision is a state
+machine that takes a clock reading rather than reading one, health is an aggregation, leases are a
+table with one pre-emption rule. **The I/O half is not written** — the systemd launcher, the RAUC
+slot reader, the package store, the Unix socket — and is named as absent rather than stubbed.
+
+That split is not tidiness. §33.3 claims the reconciler converges from any starting state and is
+idempotent, and those are properties you can only assert about a *function*; about a program that
+also talks to systemd they are a hope. So the suite carries a model of the machine, applies plans to
+it and observes it again — including from a starting state nobody would arrange on purpose:
+half-installed, half-running, an image staged for a version nobody wants, a package the desired state
+has never heard of, and a lease held by a package that does not exist. It converges.
+
+**§33.1's property is now mechanical rather than remembered.** *skynetd is not safety-critical
+because it never touches an actuator*, and everything else in §33 — the reconciler, the network
+exposure, the JSON parser, the allocation — is licensed by that one sentence. So the crate does not
+depend on `skynet-rhal` and CI asserts the edge is absent, because acquiring the ability to write a
+joint would begin with exactly that dependency and nobody would notice.
+
+Three things the writing settled rather than transcribed:
+
+1. **The plan does not take the safe state.** §33.3's sketch puts the check inside the loop; writing
+   it that way produced an unused parameter, and the reason turned out to be a property rather than
+   an oversight. What an action *requires* is a fact about the action; whether the robot is there is
+   a fact about now. Separating them means reaching a safe state needs no re-plan, and two operators
+   reading the same plan are reading the same plan.
+2. **Dropping a ceiling from a profile is a widening.** §33.4's asymmetry reads naturally as
+   "smaller number, apply now", and the case that matters is the edit that *deletes* a field. That
+   removes a limit, and treating it as the harmless direction would apply it under a running policy.
+3. **Removing a running package takes two passes, and that is correct.** The removal is emitted only
+   once the stop has been observed. A reconciler that did both in one pass would be acting on what
+   it intends to be true rather than on what it observed — the discipline §33.3 forbids.
+
+The rest is the specification made executable: the six-stage ordering and the safe-state barrier, a
+deferred action that stays in the plan carrying its reason, exponential backoff whose jitter only
+ever *reduces* the delay (jitter that adds can exceed its own cap, and a cap that is sometimes
+exceeded is not a cap), a crash window that forgets by time rather than by a successful start, a
+driver that is never restarted automatically, liveness told from readiness, and exclusive leases
+with exactly one pre-emption and no priority number — because a numeric priority invites a second
+package to be given a slightly higher one.
+
+### Verification
+
+* **268 Rust tests**, up from 227. `cargo fmt --all --check` clean, `cargo clippy --workspace
+  --all-targets` clean at `-D warnings`.
+* **270 corpus cases reproduce byte for byte**, up from 254.
+* **`drivers/mujoco`: 103 checks against real physics** with `MUJOCO_GL=osmesa`; 96 with no OpenGL,
+  one skipped, which is the branch a container takes.
+* **The whole chain, on Linux**: `skynet driver check` → the C host → a forked interpreter → the
+  MuJoCo bridge → a six-joint arm with a wrist camera under physics. 23 pass, 1 fail (roles at 0%,
+  as designed), 1 not measured, guest tier — with the simulated cap named in the report.
+* Unchanged and re-run: the mock's 24 checks, the LeRobot bridge's 70, the scaffold's
+  build-load-and-reach-guest-tier test, and the LeRobot chain through the host.
+* `Cargo.lock` holds nine packages, all ours. The no-dependency property is intact.
+
+### What was changed in the Hub
+
+The oracle is mirrored, so the frame graph and the simulator cap were made in both copies:
+`lib/skynet/os/embodiment.ts` and `lib/skynet/os/conformance.ts`, plus the specification. The Hub's
+Skynet OS suites went from 80 tests to 90 and pass; `npm run typecheck` is clean.
+
+This repository's copies of the other two mirrored documents were **stale** — the Hub had added a
+completion roadmap to both since the last session — and were synced from the Hub, which is the
+origin. `node tools/check-mirrors.mjs` now reports all three identical.
+
+### What is still zero lines
+
+The I/O half of `skynetd`: the systemd launcher, cgroup enforcement (§40), the RAUC slot reader, the
+package store and installer, the outbound queue, the Unix socket and the LAN listener. And,
+unchanged: the policy runtime, the SPSC ring and observation assembly, OTA, the black box, the
+on-robot console, the frame graph *consumer* (two emitters and a validator now exist; nothing
+computes FK from it), calibration, the watchdog chain, POST and homing, the safety MCU, and the
+drivers that talk to real hardware — `ros2_control`, EtherCAT, CANopen and the vendor SDKs.
+
+§59.5's several-engineer-years figure is unchanged.
+
+### Three findings recorded rather than fixed
+
+1. **§52 names five SCTS ids that do not exist**: `embodiment.frames.complete`,
+   `safety.command_loss.behaviour`, `safety.homing.envelope`, `power.safe_state.reachable` and
+   `rhal.sensor.latency`. This session's MuJoCo harness named one of them by accident and it read
+   exactly like naming a real one, so the harness now checks its ids against `SCTS_TESTS` and fails
+   if it invents one. The ids themselves should land as **one deliberate SCTS expansion** with the
+   corpus regenerated and reviewed, because adding a required test changes every certification
+   verdict that carries no result for it — which is correct, and is a change worth making on
+   purpose rather than as a side effect.
+2. **The frame graph has two emitters, a validator and no consumer.** Nothing computes forward
+   kinematics from it yet, so `workspace` and `self_collision` still report unavailable. The shape
+   is now pinned and tested, which was the point — but a pinned shape nobody reads is still a shape
+   nobody has been forced to get right.
+3. **`skynet driver check` opens a driver with an empty configuration**, which is why the MuJoCo
+   driver needs `SKYNET_MUJOCO_SCENE`. That is a workable seam and it is also the reason a body's
+   roles cannot be supplied to the check. Worth revisiting when the command grows a way to pass one.
+
+### Next
+
+1. **The I/O half of `skynetd`**, and the local API with it (§33.7) — at which point `skynet ps`,
+   `logs`, `install`, `grants` and `estop` stop being commands that name themselves absent. The
+   brain they drive is written and tested; what is missing is the systemd launcher, the package
+   store and the socket.
+2. **The Hub side** (§32.4): `/skynet/os` readiness over the live registry, the transport endpoint,
+   the embodiment tables. Needs no new tables for step one and answers a question the ecosystem has.
+3. **The §52 SCTS expansion**, as one reviewed change with the corpus regenerated.
+4. **A frame graph consumer**: forward kinematics in the kernel, so `workspace` and `self_collision`
+   stop reporting unavailable on a body that declares a tree.
+5. **Run the LeRobot bridge against the real library**, and against an SO-101 if one can be found.
+   Everything it says about itself is provisional until then.
