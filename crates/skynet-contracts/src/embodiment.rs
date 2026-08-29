@@ -217,11 +217,57 @@ pub struct FrameNode {
     pub axis: Option<[f64; 3]>,
     /// The joint this one follows, where it is a linkage rather than a degree of freedom.
     pub mimics: Option<String>,
+    /// `value = multiplier * driver + offset`. `None` means one.
+    ///
+    /// Added because the commonest linkage in robotics is a parallel gripper whose second finger
+    /// runs at −1, and a field that could only say "follows" would put that finger on the wrong
+    /// side of the object — inside the guard whose whole job is knowing where things are.
+    pub mimic_multiplier: Option<f64>,
+    /// Radians or metres, matching the joint kind. `None` means zero.
+    pub mimic_offset: Option<f64>,
     /// Whether this frame carries collision geometry.
     pub collision: bool,
+    /// The geometry, where it is a shape the Safety Kernel can check.
+    ///
+    /// `collision: true` with no shape is a real and common body: the vendor's model has meshes and
+    /// nobody has reduced them to a primitive. It is not the same as `collision: false`, and it is
+    /// not the same as a shape — the first says "there is geometry here that this kernel cannot
+    /// evaluate", and the `self_collision` guard reports itself unavailable naming those frames
+    /// rather than testing a body with limbs missing from it.
+    pub collision_shape: Option<CollisionShape>,
+    /// Frames this one may touch.
+    ///
+    /// Every real body has some. A humanoid's pelvis and torso overlap by design; URDF cannot say
+    /// so and SRDF's `disable_collisions` exists for exactly this. Without it the guard trips on
+    /// the robot standing still, and a guard that does that is one an operator switches off — the
+    /// failure §7.1 spends a paragraph avoiding.
+    pub collision_ignore: Vec<String>,
     /// Mass, where the geometry declares one.
     pub mass_kg: Option<f64>,
 }
+
+/// Collision geometry, as a sphere-swept segment.
+///
+/// One primitive, and it is the right one for a kernel that must finish inside a control cycle: a
+/// capsule is a sphere when its endpoints coincide, it bounds a cylinder exactly and a link's real
+/// geometry conservatively, and the distance between two of them is a closed form. Conservative is
+/// the correct direction of error — the shape contains what it stands for, so the guard trips early
+/// rather than late.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CollisionShape {
+    /// `capsule` today. The field exists so a body that is something else has to say so rather than
+    /// be read as a capsule with strange numbers.
+    pub kind: String,
+    /// One end of the segment, in the frame's own coordinates.
+    pub a: [f64; 3],
+    /// The other end. Equal to `a` for a sphere.
+    pub b: [f64; 3],
+    /// Metres.
+    pub radius_m: f64,
+}
+
+/// Shapes the kernel can evaluate.
+pub const COLLISION_SHAPES: [&str; 1] = ["capsule"];
 
 /// The tree.
 #[derive(Debug, Clone, PartialEq)]
@@ -244,7 +290,8 @@ pub struct FrameGraph {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameFault {
     /// One of `empty`, `root_missing`, `several_roots`, `duplicate_name`, `parent_missing`,
-    /// `cycle`, `joint_mismatch`, `unknown_kind`.
+    /// `cycle`, `joint_mismatch`, `unknown_kind`, `unknown_shape`, `collision_mismatch`,
+    /// `ignore_missing`.
     pub code: String,
     /// The frames this is about, in the order they matter.
     pub subjects: Vec<String>,
@@ -376,6 +423,62 @@ pub fn validate_frames(graph: &FrameGraph) -> Option<FrameFault> {
                     node.name
                 ),
             ));
+        }
+    }
+
+    // The collision geometry. Checked here rather than by the guard that consumes it, for the same
+    // reason as everything above: a shape nobody can read presents as a limb quietly missing from
+    // the collision test, and an ignore list naming a frame that does not exist presents as a pair
+    // that trips when the operator believed they had excluded it.
+    for node in &graph.nodes {
+        if let Some(shape) = &node.collision_shape {
+            if !COLLISION_SHAPES.contains(&shape.kind.as_str()) {
+                return Some(fault(
+                    "unknown_shape",
+                    &[&node.name],
+                    format!(
+                        "Frame {} declares collision geometry of kind {}, which this edition \
+                         cannot evaluate.",
+                        node.name, shape.kind
+                    ),
+                ));
+            }
+            if !(shape.radius_m.is_finite() && shape.radius_m > 0.0) {
+                return Some(fault(
+                    "unknown_shape",
+                    &[&node.name],
+                    format!(
+                        "Frame {}'s collision geometry has radius {}. A capsule of no radius \
+                         bounds nothing, and a guard built on it would report clearance it has \
+                         not established.",
+                        node.name, shape.radius_m
+                    ),
+                ));
+            }
+            if !node.collision {
+                return Some(fault(
+                    "collision_mismatch",
+                    &[&node.name],
+                    format!(
+                        "Frame {} declares a collision shape and says it carries no collision \
+                         geometry. One of the two is wrong and nothing here can tell which.",
+                        node.name
+                    ),
+                ));
+            }
+        }
+        for ignored in &node.collision_ignore {
+            if !graph.nodes.iter().any(|other| &other.name == ignored) {
+                return Some(fault(
+                    "ignore_missing",
+                    &[&node.name, ignored],
+                    format!(
+                        "Frame {} is permitted to touch {}, which is not one of the frames. An \
+                         exception naming nothing excludes nothing.",
+                        node.name, ignored
+                    ),
+                ));
+            }
         }
     }
 

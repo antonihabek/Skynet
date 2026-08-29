@@ -1,0 +1,1022 @@
+{
+  "corpus": "cycle",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "inside-the-volume",
+      "note": "A commanded pose inside the allowed volume passes, and the verdict records that a lookahead was what ran.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25,
+            "workspace": [
+              {
+                "name": "cell",
+                "volumes": [
+                  {
+                    "frame": "tool",
+                    "shape": {
+                      "kind": "sphere",
+                      "centre": [
+                        0,
+                        0,
+                        0
+                      ],
+                      "radius_m": 2
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true
+          },
+          "frames": {
+            "root": "base_link",
+            "convention": "rep103",
+            "generator": "urdf",
+            "nodes": [
+              {
+                "parent": null,
+                "kind": "root",
+                "name": "base_link"
+              },
+              {
+                "parent": "base_link",
+                "kind": "dynamic",
+                "name": "upper",
+                "translation": [
+                  0,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "joint": "shoulder",
+                "joint_type": "revolute",
+                "axis": [
+                  0,
+                  0,
+                  1
+                ],
+                "collision": true,
+                "collision_shape": {
+                  "kind": "capsule",
+                  "a": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "b": [
+                    1,
+                    0,
+                    0
+                  ],
+                  "radius_m": 0.05
+                }
+              },
+              {
+                "parent": "upper",
+                "kind": "static",
+                "name": "tool",
+                "translation": [
+                  1,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "source": "descriptor"
+              }
+            ]
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "shoulder": 0
+          }
+        },
+        "last_sequence": null,
+        "joints": [
+          {
+            "joint": "shoulder",
+            "channel": "shoulder",
+            "measured": 0
+          }
+        ]
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{\"shoulder\":0},\"pose\":{\"evaluated\":true,\"lookahead\":true,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":null,\"tripped\":[]}"
+    },
+    {
+      "id": "outside-every-volume",
+      "note": "Outside every allowed volume the command is held, and the margin says by how far.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25,
+            "workspace": [
+              {
+                "name": "cell",
+                "volumes": [
+                  {
+                    "frame": "tool",
+                    "shape": {
+                      "kind": "sphere",
+                      "centre": [
+                        0,
+                        0,
+                        0
+                      ],
+                      "radius_m": 0.5
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true
+          },
+          "frames": {
+            "root": "base_link",
+            "convention": "rep103",
+            "generator": "urdf",
+            "nodes": [
+              {
+                "parent": null,
+                "kind": "root",
+                "name": "base_link"
+              },
+              {
+                "parent": "base_link",
+                "kind": "dynamic",
+                "name": "upper",
+                "translation": [
+                  0,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "joint": "shoulder",
+                "joint_type": "revolute",
+                "axis": [
+                  0,
+                  0,
+                  1
+                ],
+                "collision": true,
+                "collision_shape": {
+                  "kind": "capsule",
+                  "a": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "b": [
+                    1,
+                    0,
+                    0
+                  ],
+                  "radius_m": 0.05
+                }
+              },
+              {
+                "parent": "upper",
+                "kind": "static",
+                "name": "tool",
+                "translation": [
+                  1,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "source": "descriptor"
+              }
+            ]
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "shoulder": 0
+          }
+        },
+        "last_sequence": null,
+        "joints": [
+          {
+            "joint": "shoulder",
+            "channel": "shoulder",
+            "measured": 0
+          }
+        ]
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"pose\":{\"evaluated\":true,\"lookahead\":true,\"trips\":[{\"frame\":\"tool\",\"guard\":\"workspace\",\"margin_m\":-0.5,\"other\":null}],\"truncated\":false,\"unresolved\":[]},\"response\":\"hold\",\"tripped\":[\"workspace\"]}"
+    },
+    {
+      "id": "rotated-out-of-the-slab",
+      "note": "A quarter turn takes the tool out of a box that contained it, and the box reports the distance to its face.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25,
+            "workspace": [
+              {
+                "name": "cell",
+                "volumes": [
+                  {
+                    "frame": "tool",
+                    "shape": {
+                      "kind": "box",
+                      "min": [
+                        0.5,
+                        -0.2,
+                        -0.2
+                      ],
+                      "max": [
+                        1.5,
+                        0.2,
+                        0.2
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true
+          },
+          "frames": {
+            "root": "base_link",
+            "convention": "rep103",
+            "generator": "urdf",
+            "nodes": [
+              {
+                "parent": null,
+                "kind": "root",
+                "name": "base_link"
+              },
+              {
+                "parent": "base_link",
+                "kind": "dynamic",
+                "name": "upper",
+                "translation": [
+                  0,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "joint": "shoulder",
+                "joint_type": "revolute",
+                "axis": [
+                  0,
+                  0,
+                  1
+                ],
+                "collision": true,
+                "collision_shape": {
+                  "kind": "capsule",
+                  "a": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "b": [
+                    1,
+                    0,
+                    0
+                  ],
+                  "radius_m": 0.05
+                }
+              },
+              {
+                "parent": "upper",
+                "kind": "static",
+                "name": "tool",
+                "translation": [
+                  1,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "source": "descriptor"
+              }
+            ]
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "shoulder": 1.5707963267948966
+          }
+        },
+        "last_sequence": null,
+        "joints": [
+          {
+            "joint": "shoulder",
+            "channel": "shoulder",
+            "measured": 0
+          }
+        ]
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"pose\":{\"evaluated\":true,\"lookahead\":true,\"trips\":[{\"frame\":\"tool\",\"guard\":\"workspace\",\"margin_m\":-0.9433981132056604,\"other\":null}],\"truncated\":false,\"unresolved\":[]},\"response\":\"hold\",\"tripped\":[\"workspace\"]}"
+    },
+    {
+      "id": "layers-compose-by-conjunction",
+      "note": "A wide layer cannot re-permit what a narrow one forbade; layering only ever narrows (§38.2).",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25,
+            "workspace": [
+              {
+                "name": "site",
+                "volumes": [
+                  {
+                    "frame": "tool",
+                    "shape": {
+                      "kind": "sphere",
+                      "centre": [
+                        0,
+                        0,
+                        0
+                      ],
+                      "radius_m": 2
+                    }
+                  }
+                ]
+              },
+              {
+                "name": "cell",
+                "volumes": [
+                  {
+                    "frame": "tool",
+                    "shape": {
+                      "kind": "sphere",
+                      "centre": [
+                        0,
+                        0,
+                        0
+                      ],
+                      "radius_m": 0.5
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true
+          },
+          "frames": {
+            "root": "base_link",
+            "convention": "rep103",
+            "generator": "urdf",
+            "nodes": [
+              {
+                "parent": null,
+                "kind": "root",
+                "name": "base_link"
+              },
+              {
+                "parent": "base_link",
+                "kind": "dynamic",
+                "name": "upper",
+                "translation": [
+                  0,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "joint": "shoulder",
+                "joint_type": "revolute",
+                "axis": [
+                  0,
+                  0,
+                  1
+                ],
+                "collision": true,
+                "collision_shape": {
+                  "kind": "capsule",
+                  "a": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "b": [
+                    1,
+                    0,
+                    0
+                  ],
+                  "radius_m": 0.05
+                }
+              },
+              {
+                "parent": "upper",
+                "kind": "static",
+                "name": "tool",
+                "translation": [
+                  1,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "source": "descriptor"
+              }
+            ]
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "shoulder": 0
+          }
+        },
+        "last_sequence": null,
+        "joints": [
+          {
+            "joint": "shoulder",
+            "channel": "shoulder",
+            "measured": 0
+          }
+        ]
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"pose\":{\"evaluated\":true,\"lookahead\":true,\"trips\":[{\"frame\":\"tool\",\"guard\":\"workspace\",\"margin_m\":-0.5,\"other\":null}],\"truncated\":false,\"unresolved\":[]},\"response\":\"hold\",\"tripped\":[\"workspace\"]}"
+    },
+    {
+      "id": "alternatives-within-one-layer",
+      "note": "Within a layer the volumes are alternatives — an operator drawing two allowed regions means either.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25,
+            "workspace": [
+              {
+                "name": "cell",
+                "volumes": [
+                  {
+                    "frame": "tool",
+                    "shape": {
+                      "kind": "sphere",
+                      "centre": [
+                        5,
+                        0,
+                        0
+                      ],
+                      "radius_m": 0.5
+                    }
+                  },
+                  {
+                    "frame": "tool",
+                    "shape": {
+                      "kind": "sphere",
+                      "centre": [
+                        1,
+                        0,
+                        0
+                      ],
+                      "radius_m": 0.5
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true
+          },
+          "frames": {
+            "root": "base_link",
+            "convention": "rep103",
+            "generator": "urdf",
+            "nodes": [
+              {
+                "parent": null,
+                "kind": "root",
+                "name": "base_link"
+              },
+              {
+                "parent": "base_link",
+                "kind": "dynamic",
+                "name": "upper",
+                "translation": [
+                  0,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "joint": "shoulder",
+                "joint_type": "revolute",
+                "axis": [
+                  0,
+                  0,
+                  1
+                ],
+                "collision": true,
+                "collision_shape": {
+                  "kind": "capsule",
+                  "a": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "b": [
+                    1,
+                    0,
+                    0
+                  ],
+                  "radius_m": 0.05
+                }
+              },
+              {
+                "parent": "upper",
+                "kind": "static",
+                "name": "tool",
+                "translation": [
+                  1,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "source": "descriptor"
+              }
+            ]
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "shoulder": 0
+          }
+        },
+        "last_sequence": null,
+        "joints": [
+          {
+            "joint": "shoulder",
+            "channel": "shoulder",
+            "measured": 0
+          }
+        ]
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{\"shoulder\":0},\"pose\":{\"evaluated\":true,\"lookahead\":true,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":null,\"tripped\":[]}"
+    },
+    {
+      "id": "judged-after-clamping",
+      "note": "The pose checked is the one the clamped command produces, not the one the policy asked for.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "shoulder": 0
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25,
+            "workspace": [
+              {
+                "name": "cell",
+                "volumes": [
+                  {
+                    "frame": "tool",
+                    "shape": {
+                      "kind": "box",
+                      "min": [
+                        0.5,
+                        -0.2,
+                        -0.2
+                      ],
+                      "max": [
+                        1.5,
+                        0.2,
+                        0.2
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true
+          },
+          "frames": {
+            "root": "base_link",
+            "convention": "rep103",
+            "generator": "urdf",
+            "nodes": [
+              {
+                "parent": null,
+                "kind": "root",
+                "name": "base_link"
+              },
+              {
+                "parent": "base_link",
+                "kind": "dynamic",
+                "name": "upper",
+                "translation": [
+                  0,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "joint": "shoulder",
+                "joint_type": "revolute",
+                "axis": [
+                  0,
+                  0,
+                  1
+                ],
+                "collision": true,
+                "collision_shape": {
+                  "kind": "capsule",
+                  "a": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "b": [
+                    1,
+                    0,
+                    0
+                  ],
+                  "radius_m": 0.05
+                }
+              },
+              {
+                "parent": "upper",
+                "kind": "static",
+                "name": "tool",
+                "translation": [
+                  1,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "source": "descriptor"
+              }
+            ]
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "shoulder": 1.5707963267948966
+          }
+        },
+        "last_sequence": null,
+        "joints": [
+          {
+            "joint": "shoulder",
+            "channel": "shoulder",
+            "measured": 0
+          }
+        ]
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"shoulder\",\"from\":1.5707963267948966,\"to\":0}],\"command\":{\"shoulder\":0},\"pose\":{\"evaluated\":true,\"lookahead\":true,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "no-lookahead-on-a-velocity-body",
+      "note": "With no position channel bound the guard checks where the body is, which is a weaker claim than §7.1 makes — and the verdict says so.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "elbow": 80,
+              "shoulder": 60
+            },
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25,
+            "workspace": [
+              {
+                "name": "cell",
+                "volumes": [
+                  {
+                    "frame": "tool",
+                    "shape": {
+                      "kind": "sphere",
+                      "centre": [
+                        0,
+                        0,
+                        0
+                      ],
+                      "radius_m": 0.5
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true
+          },
+          "frames": {
+            "root": "base_link",
+            "convention": "rep103",
+            "generator": "urdf",
+            "nodes": [
+              {
+                "parent": null,
+                "kind": "root",
+                "name": "base_link"
+              },
+              {
+                "parent": "base_link",
+                "kind": "dynamic",
+                "name": "upper",
+                "translation": [
+                  0,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "joint": "shoulder",
+                "joint_type": "revolute",
+                "axis": [
+                  0,
+                  0,
+                  1
+                ],
+                "collision": true,
+                "collision_shape": {
+                  "kind": "capsule",
+                  "a": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "b": [
+                    1,
+                    0,
+                    0
+                  ],
+                  "radius_m": 0.05
+                }
+              },
+              {
+                "parent": "upper",
+                "kind": "static",
+                "name": "tool",
+                "translation": [
+                  1,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "source": "descriptor"
+              }
+            ]
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "shoulder_velocity": 3
+          }
+        },
+        "last_sequence": null,
+        "joints": [
+          {
+            "joint": "shoulder",
+            "channel": null,
+            "measured": 0
+          }
+        ]
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"pose\":{\"evaluated\":true,\"lookahead\":false,\"trips\":[{\"frame\":\"tool\",\"guard\":\"workspace\",\"margin_m\":-0.5,\"other\":null}],\"truncated\":false,\"unresolved\":[]},\"response\":\"hold\",\"tripped\":[\"workspace\"]}"
+    }
+  ]
+}

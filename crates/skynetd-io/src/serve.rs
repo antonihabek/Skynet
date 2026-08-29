@@ -27,7 +27,7 @@
 //! the API for [`READ_TIMEOUT`] and not for ever.
 
 use std::io::{ErrorKind, Read, Write};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
@@ -133,12 +133,11 @@ impl std::error::Error for NotLinkLocal {}
 /// §34.2 is actually asking for.
 pub fn is_link_local(address: IpAddr) -> bool {
     match address {
-        IpAddr::V4(v4) => {
-            v4.is_loopback()
-                || v4.is_link_local()
-                || v4.is_private()
-                || v4 == Ipv4Addr::UNSPECIFIED && false
-        }
+        // `0.0.0.0` is deliberately absent: it is not an address a robot has, it is a request to
+        // bind every address the robot has — including the routable one §34.2 forbids. The clause
+        // that used to say so was `v4 == Ipv4Addr::UNSPECIFIED && false`, which reads as a rule and
+        // is a comment the compiler deletes; a newer clippy calls it a logic bug and is right.
+        IpAddr::V4(v4) => v4.is_loopback() || v4.is_link_local() || v4.is_private(),
         IpAddr::V6(v6) => v6.is_loopback() || is_v6_link_local(v6) || is_v6_unique_local(v6),
     }
 }

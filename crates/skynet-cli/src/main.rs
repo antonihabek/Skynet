@@ -18,9 +18,9 @@
 //! skynet install ./package --id ns/name --kind policy …            §37.1, into the store
 //! ```
 //!
-//! Two are still absent, and are absent rather than stubbed: `pair` needs §10's attestation and
-//! `blackbox` needs §13's recorder, and neither is written. A command that printed a plausible
-//! answer from nothing is the failure this project is arranged to avoid.
+//! One is still absent, and is absent rather than stubbed: `pair` needs §10's attestation path,
+//! which is not written. A command that printed a plausible answer from nothing is the failure this
+//! project is arranged to avoid.
 //!
 //! # `std`, and one `unsafe` module
 //!
@@ -36,6 +36,7 @@ mod check;
 mod descriptor_cmd;
 mod dl;
 mod driver_cmd;
+mod frames_cmd;
 mod robot_cmd;
 mod scaffold;
 mod term;
@@ -53,6 +54,8 @@ skynet — Skynet OS workstation tools
   driver new <name>               Scaffold a driver that builds and fails honestly (§63.1)
   driver check <library>          Run the sim half of SCTS against a driver (§63.3)
   transport <policy> --robot <d>  What this body would do with this policy (§18)
+  frames <descriptor>             The frame graph, its poses, and what the pose
+                                  guards can do with it (§44)
   role <role>...                  Parse canonical roles (§5.1)
   version                         Version, ABI version and contract version
 
@@ -104,6 +107,7 @@ fn dispatch(argv: &[String]) -> i32 {
         },
         "driver" => driver_cmd::run(rest),
         "transport" => run_or_help(rest, transport_cmd::USAGE, transport_cmd::run),
+        "frames" => run_or_help(rest, frames_cmd::USAGE, frames_cmd::run),
         "role" => role(rest),
         "status" | "ps" | "plan" | "logs" | "grants" | "estop" | "rollback" | "install"
         | "blackbox" => robot_cmd::run(command, rest),

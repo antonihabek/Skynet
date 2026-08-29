@@ -468,3 +468,151 @@ fn repository_root() -> PathBuf {
         .expect("the crate lives two levels below the workspace root")
         .to_path_buf()
 }
+
+// ── `skynet frames` (§44) ────────────────────────────────────────────────────
+
+/// A two-link planar arm with geometry, written as a URDF so the whole path is exercised: the
+/// importer reads it, the descriptor carries §44.3's block, and the kernel walks it.
+const GEOMETRY_URDF: &str = r#"<?xml version="1.0"?>
+<robot name="Bench Arm">
+  <link name="base_link">
+    <collision><geometry><cylinder radius="0.06" length="0.1"/></geometry></collision>
+  </link>
+  <link name="upper">
+    <collision><origin xyz="0.25 0 0"/><geometry><box size="0.5 0.08 0.08"/></geometry></collision>
+  </link>
+  <link name="tool"/>
+  <joint name="shoulder" type="revolute">
+    <parent link="base_link"/><child link="upper"/>
+    <origin xyz="0 0 0.5"/><axis xyz="0 0 1"/>
+    <limit lower="-3" upper="3" effort="80" velocity="2"/>
+  </joint>
+  <joint name="tool_mount" type="fixed">
+    <parent link="upper"/><child link="tool"/><origin xyz="0.5 0 0"/>
+  </joint>
+</robot>"#;
+
+fn descriptor_from(dir: &Path, urdf: &str) -> PathBuf {
+    let source = dir.join("robot.urdf");
+    std::fs::write(&source, urdf).expect("write urdf");
+    let out = skynet(&["descriptor", "from-urdf", source.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let path = dir.join("robot.json");
+    std::fs::write(&path, stdout(&out)).expect("write descriptor");
+    path
+}
+
+#[test]
+fn the_whole_path_from_a_urdf_to_a_pose() {
+    // The point of the command: a developer with a URDF and no robot can see where a configuration
+    // puts the tool, using the same kinematics the kernel will run in cycle.
+    let dir = scratch("frames-pose");
+    let descriptor = descriptor_from(&dir, GEOMETRY_URDF);
+
+    let out = skynet(&[
+        "frames",
+        descriptor.to_str().unwrap(),
+        "--joints",
+        "shoulder=1.5707963267948966",
+        "--json",
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+
+    // A quarter turn about z takes the tool from (0.5, 0, 0.5) to (0, 0.5, 0.5).
+    let json = stdout(&out);
+    assert!(json.contains("\"collision_pairs\":1"), "{json}");
+    assert!(json.contains("\"lookahead\":true"), "{json}");
+    assert!(
+        json.contains("\"name\":\"tool\",\"resolved\":true"),
+        "the tool resolved: {json}"
+    );
+    assert!(
+        json.contains(",1,0.5]") || json.contains("0.5,0.5]"),
+        "{json}"
+    );
+}
+
+#[test]
+fn a_joint_with_no_value_is_unresolved_rather_than_assumed_to_be_at_zero() {
+    // A limb assumed straight is a limb in a place it is not, and the report says which frame and
+    // why rather than printing a pose nobody supplied the inputs for.
+    let dir = scratch("frames-unresolved");
+    let descriptor = descriptor_from(&dir, GEOMETRY_URDF);
+
+    let out = skynet(&["frames", descriptor.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let report = stderr(&out);
+    assert!(report.contains("no value for shoulder"), "{report}");
+    assert!(
+        report.contains("upper above it has none"),
+        "the frame below names its parent rather than its own joint: {report}"
+    );
+}
+
+#[test]
+fn the_report_says_what_the_pose_guards_will_be_able_to_do() {
+    let dir = scratch("frames-guards");
+    let descriptor = descriptor_from(&dir, GEOMETRY_URDF);
+    let out = skynet(&["frames", descriptor.to_str().unwrap()]);
+    let report = stderr(&out);
+    assert!(
+        report.contains("3 of 3 frames can be constrained"),
+        "{report}"
+    );
+    assert!(report.contains("2 collision bodies, 1 pairs"), "{report}");
+}
+
+#[test]
+fn one_collision_body_is_reported_as_a_guard_that_cannot_run() {
+    // §7.2, on a workstation: a body with one capsule has nothing to collide with, and learning
+    // that here is better than learning it from a guard silently doing nothing.
+    let dir = scratch("frames-one-body");
+    let descriptor = descriptor_from(&dir, ARM_URDF);
+    let out = skynet(&["frames", descriptor.to_str().unwrap()]);
+    let report = stderr(&out);
+    assert!(report.contains("the guard reports unavailable"), "{report}");
+}
+
+#[test]
+fn a_descriptor_with_no_frame_block_says_which_of_the_two_absences_it_is() {
+    let dir = scratch("frames-absent");
+    let path = dir.join("bare.json");
+    std::fs::write(&path, r#"{"robot_slug":"x","base":"fixed","dof":0}"#).expect("write");
+    let out = skynet(&["frames", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr(&out).contains("has no `frames` block"),
+        "{}",
+        stderr(&out)
+    );
+
+    let path = dir.join("null.json");
+    std::fs::write(
+        &path,
+        r#"{"robot_slug":"x","base":"fixed","dof":0,"frames":null}"#,
+    )
+    .expect("write");
+    let out = skynet(&["frames", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr(&out).contains("could not express this body's tree"),
+        "null is the generator saying so, which is a different fact: {}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn a_malformed_graph_is_refused_with_the_frame_named() {
+    let dir = scratch("frames-bad");
+    let path = dir.join("bad.json");
+    std::fs::write(
+        &path,
+        r#"{"robot_slug":"x","base":"fixed","dof":0,"frames":{"root":"base_link","convention":"rep103","nodes":[{"name":"base_link","parent":null,"kind":"root"},{"name":"arm","parent":"nowhere","kind":"static"}]}}"#,
+    )
+    .expect("write");
+    let out = skynet(&["frames", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let message = stderr(&out);
+    assert!(message.contains("parent_missing"), "{message}");
+    assert!(message.contains("arm"), "the frame is named: {message}");
+}

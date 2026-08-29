@@ -9,7 +9,11 @@
 //! ceremony, and it is the same ceremony `skynetd` will perform for real — the runtime owns the
 //! command frame, the kernel reads it, and nothing in the hot path allocates.
 
+use skynet_contracts::embodiment::FrameGraph;
+use skynet_contracts::json::frames_from_json;
+use skynet_contracts::kinematics::{flatten, workspace_from_json, FlatFrames, WorkspaceOwned};
 use skynet_json::Json;
+use skynet_kernel::kinematics::{Frame, FrameSet, JointBinding, Volume, WorkspaceLayer};
 use skynet_kernel::{
     Available, CommandCycle, Envelope, OperatorProfile, Proximity, ResolveLimitsParams, Tier,
     TransportClamp,
@@ -22,6 +26,10 @@ pub struct LimitsOwned {
     transport: Option<ClampOwned>,
     profile: Option<ProfileOwned>,
     available: Available,
+    grants: Vec<String>,
+    /// The body's frames, flattened. `None` where the case declared none, and the two pose guards
+    /// then report unavailable exactly as they would on a robot whose descriptor has no tree.
+    frames: Option<FlatFrames>,
 }
 
 struct EnvelopeOwned {
@@ -43,6 +51,8 @@ struct ClampOwned {
 }
 
 struct ProfileOwned {
+    workspace: WorkspaceOwned,
+    self_collision_margin_m: Option<f64>,
     name: String,
     joint_velocity_max_rad_s: Option<f64>,
     joint_torque_max_nm: Option<f64>,
@@ -100,6 +110,8 @@ impl LimitsOwned {
         });
 
         let profile = value.get_present("profile").map(|node| ProfileOwned {
+            workspace: workspace_from_json(node.get_present("workspace")),
+            self_collision_margin_m: num(node, "self_collision_margin_m"),
             name: text(node, "name").unwrap_or_default(),
             joint_velocity_max_rad_s: num(node, "joint_velocity_max_rad_s"),
             joint_torque_max_nm: num(node, "joint_torque_max_nm"),
@@ -122,12 +134,25 @@ impl LimitsOwned {
                     .get("people_detection")
                     .and_then(Json::as_bool)
                     .unwrap_or(false),
-                collision_model: node
-                    .get("collision_model")
-                    .and_then(Json::as_bool)
-                    .unwrap_or(false),
-                solvers: node.get("solvers").and_then(Json::as_bool).unwrap_or(false),
                 legged: node.get("legged").and_then(Json::as_bool).unwrap_or(false),
+            })
+            .unwrap_or_default();
+
+        // A case that declares a frame graph the flattener refuses is a broken case, not a silent
+        // pass: the corpus is where a malformed body is supposed to be noticed.
+        let frames = match frames_from_json(value.get_present("frames")) {
+            None => None,
+            Some(graph) => Some(flatten_or_report(&graph)?),
+        };
+
+        let grants = value
+            .get_present("grants")
+            .and_then(Json::as_arr)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(str::to_string))
+                    .collect()
             })
             .unwrap_or_default();
 
@@ -137,6 +162,8 @@ impl LimitsOwned {
             transport,
             profile,
             available,
+            grants,
+            frames,
         })
     }
 
@@ -150,6 +177,32 @@ impl LimitsOwned {
             estop: owned.estop,
             source: owned.source.as_deref(),
         })
+    }
+
+    /// Capability tokens the case granted the running package.
+    pub fn grant_refs(&self) -> Vec<&str> {
+        self.grants.iter().map(String::as_str).collect()
+    }
+
+    /// The frames, borrowed, for [`FrameSet::new`].
+    pub fn frame_refs(&self) -> Option<Vec<Frame<'_>>> {
+        self.frames.as_ref().map(FlatFrames::frames)
+    }
+
+    /// The workspace volumes, borrowed one level.
+    pub fn volume_refs(&self) -> Vec<Vec<Volume<'_>>> {
+        self.profile
+            .as_ref()
+            .map(|profile| profile.workspace.volumes())
+            .unwrap_or_default()
+    }
+
+    /// The workspace layers, over a view produced by [`Self::volume_refs`].
+    pub fn layer_refs<'a>(&'a self, volumes: &'a [Vec<Volume<'a>>]) -> Vec<WorkspaceLayer<'a>> {
+        match &self.profile {
+            Some(profile) => profile.workspace.layers(volumes),
+            None => Vec::new(),
+        }
     }
 
     /// Per-channel ceilings as the kernel wants them.
@@ -172,8 +225,19 @@ impl LimitsOwned {
     }
 
     /// Assemble the borrowed parameter struct.
-    pub fn params<'a>(&'a self, per_channel: &'a [(&'a str, f64)]) -> ResolveLimitsParams<'a> {
+    ///
+    /// Four borrowed views go in and one struct comes out. It is more ceremony than a corpus runner
+    /// would like, and it is the same ceremony `skynetd` performs for real: the runtime owns the
+    /// frame set, the volume lists and the channel map for the length of a lease, and the kernel
+    /// borrows all three without allocating.
+    pub fn params<'a>(
+        &'a self,
+        per_channel: &'a [(&'a str, f64)],
+        frames: Option<&'a [Frame<'a>]>,
+        layers: &'a [WorkspaceLayer<'a>],
+    ) -> ResolveLimitsParams<'a> {
         ResolveLimitsParams {
+            frames: frames.and_then(|frames| FrameSet::new(frames).ok()),
             tier: self.tier,
             envelope: self.envelope(),
             transport: self.transport.as_ref().map(|clamp| TransportClamp {
@@ -191,9 +255,55 @@ impl LimitsOwned {
                 base_velocity_max_m_s: profile.base_velocity_max_m_s,
                 max_delta_per_cycle: profile.max_delta_per_cycle,
                 proximity: profile.proximity,
+                workspace: layers,
+                self_collision_margin_m: profile.self_collision_margin_m,
             }),
             available: self.available,
         }
+    }
+}
+
+/// Flatten, or turn the fault into the runner's error string.
+fn flatten_or_report(graph: &FrameGraph) -> Result<FlatFrames, String> {
+    flatten(graph).map_err(|fault| format!("frames: {} — {}", fault.code, fault.detail))
+}
+
+/// The joint bindings a cycle case declares.
+///
+/// Owned for the same reason everything else here is: the kernel borrows.
+pub struct BindingsOwned {
+    entries: Vec<(String, Option<String>, f64)>,
+}
+
+impl BindingsOwned {
+    /// Decode a `joints` list: which channel drives each joint, and where it is now.
+    pub fn from_json(value: Option<&Json>) -> BindingsOwned {
+        let mut entries = Vec::new();
+        for item in value.and_then(Json::as_arr).unwrap_or(&[]) {
+            let Some(joint) = item.get("joint").and_then(Json::as_str) else {
+                continue;
+            };
+            entries.push((
+                joint.to_string(),
+                item.get_present("channel")
+                    .and_then(Json::as_str)
+                    .map(str::to_string),
+                item.get("measured").and_then(Json::as_f64).unwrap_or(0.0),
+            ));
+        }
+        BindingsOwned { entries }
+    }
+
+    /// The borrowed view.
+    pub fn refs(&self) -> Vec<JointBinding<'_>> {
+        self.entries
+            .iter()
+            .map(|(joint, channel, measured)| JointBinding {
+                joint: joint.as_str(),
+                channel: channel.as_deref(),
+                measured: *measured,
+            })
+            .collect()
     }
 }
 
@@ -204,6 +314,8 @@ pub struct CycleOwned {
     sequence: u64,
     desired: Vec<(String, f64)>,
     previous: Option<Vec<(String, f64)>>,
+    capability: Option<String>,
+    nearest_person_m: Option<f64>,
 }
 
 /// The desired channel map and, when the case supplied one, last cycle's.
@@ -215,6 +327,16 @@ pub type BorrowedChannels<'a> = (Vec<(&'a str, f64)>, Option<Vec<(&'a str, f64)>
 
 fn borrow_channels(list: &[(String, f64)]) -> Vec<(&str, f64)> {
     list.iter().map(|(k, v)| (k.as_str(), *v)).collect()
+}
+
+/// A channel map as an ordered list of pairs.
+///
+/// Sorted by name, because the underlying JSON object is a map and the kernel is handed a slice —
+/// two editions iterating a map in different orders would produce verdicts whose `clamped` lists
+/// differ only in order, which the corpus would report as a divergence and a reader would spend an
+/// afternoon on.
+pub fn channel_pairs(value: Option<&Json>) -> Vec<(String, f64)> {
+    channel_map(value)
 }
 
 fn channel_map(value: Option<&Json>) -> Vec<(String, f64)> {
@@ -246,6 +368,8 @@ impl CycleOwned {
                 .ok_or("no `sequence`")? as u64,
             desired: channel_map(value.get("desired")),
             previous: value.get_present("previous").map(|p| channel_map(Some(p))),
+            capability: text(value, "capability"),
+            nearest_person_m: num(value, "nearest_person_m"),
         })
     }
 
@@ -259,13 +383,12 @@ impl CycleOwned {
 
     /// Assemble the borrowed cycle.
     ///
-    /// `capability` and `nearest_person_m` are always `None`: the reference implementation's cycle
-    /// vector carries neither, so a corpus case cannot exercise the mode gate or the proximity
-    /// guard. Those two are covered by this edition's own suite instead — and until the reference
-    /// grows the fields, a corpus case that set them would be comparing against an expectation
-    /// nobody computed.
+    /// `capability` and `nearest_person_m` are read from the case. They were hard-wired to `None`
+    /// for as long as the reference edition's cycle vector had no such fields, which meant two of
+    /// the eight guards were pinned by this edition's own suite and by nothing else — the
+    /// arrangement §31.4 exists to prevent. The reference now carries both.
     pub fn cycle<'a>(
-        &self,
+        &'a self,
         desired: &'a [(&'a str, f64)],
         previous: Option<&'a [(&'a str, f64)]>,
     ) -> CommandCycle<'a> {
@@ -275,8 +398,8 @@ impl CycleOwned {
             sequence: self.sequence,
             desired,
             previous,
-            capability: None,
-            nearest_person_m: None,
+            capability: self.capability.as_deref(),
+            nearest_person_m: self.nearest_person_m,
         }
     }
 }

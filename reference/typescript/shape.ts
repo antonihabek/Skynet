@@ -21,7 +21,8 @@ import type { FrameFault, TransportPlan } from './embodiment.ts'
 import type { AdmissionResult } from './package.ts'
 import type { CertificationVerdict } from './conformance.ts'
 import type { CheckResult, FleetReadiness, ReadinessReport } from './readiness.ts'
-import type { CycleVerdict, ResolvedLimits } from './safety.ts'
+import type { CycleVerdict, PoseOutcome, ResolvedLimits } from './safety.ts'
+import { collisionPairs, type Frame, type Solved } from './kinematics.ts'
 import type { DigestOutcome } from './digest.ts'
 
 /** Present-and-null, for a nullable field. */
@@ -162,6 +163,55 @@ export function shapeVerdict(verdict: CycleVerdict): unknown {
       to: entry.to,
     })),
     advisory: verdict.advisory,
+    pose: shapePose(verdict.pose),
+  }
+}
+
+/**
+ * What the two pose guards found.
+ *
+ * Emitted on every verdict, empty or not. Omitting it when nothing tripped would make an edition
+ * that has not implemented §44 byte-identical to one that ran the guards and found nothing.
+ */
+export function shapePose(pose: PoseOutcome): unknown {
+  return {
+    evaluated: pose.evaluated,
+    lookahead: pose.lookahead,
+    truncated: pose.truncated,
+    unresolved: pose.unresolved,
+    trips: pose.trips.map(trip => ({
+      guard: trip.guard,
+      frame: trip.frame,
+      // Present and null on a workspace excursion rather than absent: "this finding is about one
+      // frame" is a fact, and a reader of an absent key cannot tell it from a producer that forgot.
+      other: nullable(trip.other),
+      margin_m: nullable(trip.margin_m),
+    })),
+  }
+}
+
+/**
+ * A solved pose set.
+ *
+ * The corpus pins this, which holds two editions to the same *arithmetic* and not only to the same
+ * verdicts. A trip is a boolean and two implementations could agree on every one of them while
+ * disagreeing about every pose by a millimetre; thirty digits of translation do not permit that.
+ */
+export function shapeSolved(frames: Frame[], solved: Solved): unknown {
+  return {
+    frames: frames.map((frame, index) => {
+      const pose = solved.poses[index]
+      return {
+        name: frame.name,
+        resolved: pose !== null && pose !== undefined,
+        // Present and null, not absent. "This frame has no pose" is the fact the guards act on.
+        translation: pose ? pose.translation : null,
+        rotation: pose ? pose.rotation : null,
+      }
+    }),
+    lookahead: solved.lookahead,
+    unresolved: solved.unresolved.map(index => frames[index].name),
+    collision_pairs: collisionPairs(frames),
   }
 }
 

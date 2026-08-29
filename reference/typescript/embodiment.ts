@@ -257,10 +257,58 @@ export interface FrameNode {
   axis?: [number, number, number]
   /** The joint this one follows, where it is a linkage rather than a degree of freedom. */
   mimics?: string
+  /**
+   * `value = multiplier * driver + offset`. Absent means one.
+   *
+   * Present because the commonest linkage in robotics is a parallel gripper whose second finger
+   * runs at −1, and a field that could only say "follows" would put that finger on the wrong side
+   * of the object — inside the guard whose whole job is knowing where things are.
+   */
+  mimic_multiplier?: number
+  /** Radians or metres, matching the joint kind. Absent means zero. */
+  mimic_offset?: number
   collision?: boolean
+  /**
+   * The geometry, where it is a shape the Safety Kernel can check.
+   *
+   * `collision: true` with no shape is a real and common body: the vendor's model has meshes and
+   * nobody has reduced them to a primitive. It is not the same as `collision: false` and not the
+   * same as a shape — the first says "there is geometry here this kernel cannot evaluate", and the
+   * `self_collision` guard reports itself unavailable naming those frames rather than testing a
+   * body with limbs missing from it.
+   */
+  collision_shape?: CollisionShape | null
+  /**
+   * Frames this one may touch.
+   *
+   * Every real body has some. A humanoid's pelvis and torso overlap by design; URDF cannot say so
+   * and SRDF's `disable_collisions` exists for exactly this. Without it the guard trips on the
+   * robot standing still, and a guard that does that is one an operator switches off.
+   */
+  collision_ignore?: string[]
   /** Null where the frame carries no geometry. */
   mass_kg?: number | null
 }
+
+/**
+ * Collision geometry, as a sphere-swept segment.
+ *
+ * One primitive, and the right one for a kernel that must finish inside a control cycle: a capsule
+ * is a sphere when its endpoints coincide, it bounds a cylinder exactly and a link's real geometry
+ * conservatively, and the distance between two of them is a closed form. Conservative is the
+ * correct direction of error — the shape contains what it stands for, so the guard trips early
+ * rather than late.
+ */
+export interface CollisionShape {
+  /** `capsule` today. A body that is something else has to say so rather than be misread. */
+  kind: string
+  a: [number, number, number]
+  b: [number, number, number]
+  radius_m: number
+}
+
+/** Shapes the kernel can evaluate. */
+export const COLLISION_SHAPES = ['capsule']
 
 export interface FrameGraph {
   /** Names the node whose parent is null. `base_link` by convention (§44.4), not by requirement. */
@@ -289,6 +337,13 @@ export interface FrameFault {
     | 'cycle'
     | 'joint_mismatch'
     | 'unknown_kind'
+    | 'unknown_shape'
+    | 'collision_mismatch'
+    | 'ignore_missing'
+    // Raised by `flatten`, once indices exist, rather than by `validateFrames`.
+    | 'too_large'
+    | 'unreachable'
+    | 'unknown_joint_type'
   /** The frames this is about, in the order they matter. */
   subjects: string[]
   /** One sentence naming what is wrong. */
@@ -383,6 +438,55 @@ export function validateFrames(graph: FrameGraph): FrameFault | null {
         code: 'cycle',
         subjects: [node.name],
         detail: `Following parents from ${node.name} never reaches the root.`,
+      }
+    }
+  }
+
+  // The collision geometry. Checked here rather than by the guard that consumes it, for the same
+  // reason as everything above: a shape nobody can read presents as a limb quietly missing from the
+  // collision test, and an ignore list naming a frame that does not exist presents as a pair that
+  // trips when the operator believed they had excluded it.
+  for (const node of graph.nodes) {
+    const shape = node.collision_shape
+    if (shape !== undefined && shape !== null) {
+      if (!COLLISION_SHAPES.includes(shape.kind)) {
+        return {
+          code: 'unknown_shape',
+          subjects: [node.name],
+          detail:
+            `Frame ${node.name} declares collision geometry of kind ${shape.kind}, which this ` +
+            `edition cannot evaluate.`,
+        }
+      }
+      if (!(Number.isFinite(shape.radius_m) && shape.radius_m > 0)) {
+        return {
+          code: 'unknown_shape',
+          subjects: [node.name],
+          detail:
+            `Frame ${node.name}'s collision geometry has radius ${shape.radius_m}. A capsule of ` +
+            `no radius bounds nothing, and a guard built on it would report clearance it has not ` +
+            `established.`,
+        }
+      }
+      if (node.collision !== true) {
+        return {
+          code: 'collision_mismatch',
+          subjects: [node.name],
+          detail:
+            `Frame ${node.name} declares a collision shape and says it carries no collision ` +
+            `geometry. One of the two is wrong and nothing here can tell which.`,
+        }
+      }
+    }
+    for (const ignored of node.collision_ignore ?? []) {
+      if (!graph.nodes.some(other => other.name === ignored)) {
+        return {
+          code: 'ignore_missing',
+          subjects: [node.name, ignored],
+          detail:
+            `Frame ${node.name} is permitted to touch ${ignored}, which is not one of the frames. ` +
+            `An exception naming nothing excludes nothing.`,
+        }
       }
     }
   }
