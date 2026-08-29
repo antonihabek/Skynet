@@ -53,12 +53,41 @@ jobs:
       - name: The C++ wrapper still compiles
         working-directory: drivers/mock
         run: make cpp-header-check
+
+      # The Python binding is the third view of the same ABI (§31.2). Its ctypes structs assert the
+      # same offsets the Rust crate and the mock assert from their side, so a layout that moves
+      # fails three suites rather than making one robot behave oddly.
+      - name: The Python ABI view matches the header
+        run: PYTHONPATH=bindings/python python3 -c "import skynet_rhal; skynet_rhal.assert_abi_layout()"
+
+      # The LeRobot bridge, against its fake. This is the whole of what can be verified without the
+      # library installed, and the harness says so on every run rather than implying more.
+      - name: LeRobot bridge, sim conformance
+        working-directory: drivers/lerobot
+        run: make check PYTHON=python3
       # The C header is the ABI. Anything that stops it being includable from plain C99 — a C11-only
       # construct, a compiler extension — narrows who can implement a driver.
       - name: The C header is C99-includable
         run: |
           printf '#include "skynet_rhal.h"\nint main(void){return 0;}\n' > /tmp/c99.c
           cc -std=c99 -Wall -Wextra -Wpedantic -Ibindings/c -o /tmp/c99 /tmp/c99.c
+
+      # §63.5's first milestone, measured rather than asserted: a fresh scaffold compiles clean,
+      # loads through dlopen, and reaches guest tier with exactly the two blockers its own README
+      # names. It lives here rather than in the `rust` job because it needs a C compiler, and it is
+      # `#[ignore]`d by default so that running it is a scheduling decision rather than a silent
+      # skip on a machine that happens to lack one.
+      - name: Toolchain
+        run: rustup toolchain install stable --profile minimal
+      - name: A fresh scaffold builds, loads and reaches guest tier
+        run: cargo test -p skynet-cli -- --ignored --nocapture
+
+      # The whole Python path, end to end and on the POSIX side of the host — which is the half that
+      # cannot be exercised on the machine it was written on. `skynet driver check` dlopens the C
+      # host, which forks an interpreter, which serves the LeRobot bridge over a pipe.
+      - name: A Python driver loads through the host and reaches guest tier
+        working-directory: drivers/python-host
+        run: make check PYTHON=python3
 
   # The corpus, and the property that makes multiple editions survivable.
   corpus:
@@ -113,6 +142,33 @@ jobs:
         run: |
           grep -q '#!\[no_std\]' crates/skynet-kernel/src/lib.rs
           ! grep -q 'extern crate alloc' crates/skynet-kernel/src/lib.rs
+
+      # §63.4. The line the URDF importer exists to hold: a URDF effort limit is a design value from
+      # a CAD model, not a datasheet safety rating, and no flag may turn one into the other. The
+      # rule is a property of the code rather than of a default, so the check is that the emitter
+      # writes a literal null and nothing else can reach the field.
+      - name: A generated descriptor never carries an envelope
+        run: |
+          grep -q '\.set("envelope", Json::Null)' crates/skynet-urdf/src/descriptor.rs
+          if grep -n 'set("envelope"' crates/skynet-urdf/src/descriptor.rs | grep -v 'Json::Null'; then
+            echo "::error::skynet-urdf writes an envelope from somewhere other than a literal null."
+            echo "§63.4: a URDF carries design values, not sourced safety ratings. Populating the"
+            echo "envelope from a model figure is the 'invent a plausible number' failure the whole"
+            echo "design exists to prevent."
+            exit 1
+          fi
+
+      # §23.1 again, from the other side. Two crates cannot be safe by construction: `skynet-rhal`
+      # declares a C vtable of raw function pointers, and `skynet-cli` loads arbitrary native code.
+      # Every other crate can be, and stays that way.
+      - name: Everything but the ABI and the loader forbids unsafe
+        run: |
+          for crate in skynet-json skynet-sha256 skynet-kernel skynet-contracts skynet-urdf; do
+            grep -q 'forbid(unsafe_code)' "crates/$crate/src/lib.rs" || {
+              echo "::error::crates/$crate dropped forbid(unsafe_code)."
+              exit 1
+            }
+          done
 
       # The workspace has no third-party dependencies. A vendor building a driver in 2036 should be
       # able to build this with no network, and the kernel cannot reach most of the ecosystem

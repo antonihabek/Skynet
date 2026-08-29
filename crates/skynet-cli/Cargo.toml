@@ -1,0 +1,23 @@
+[package]
+name = "skynet-cli"
+description = "The `skynet` workstation CLI: descriptor import, transport planning, driver scaffolding and local conformance."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "skynet"
+path = "src/main.rs"
+
+[dependencies]
+skynet-contracts = { path = "../skynet-contracts" }
+skynet-json = { path = "../skynet-json" }
+skynet-rhal = { path = "../skynet-rhal" }
+skynet-sha256 = { path = "../skynet-sha256" }
+skynet-urdf = { path = "../skynet-urdf" }
+
+[lints.rust]
+missing_docs = "warn"

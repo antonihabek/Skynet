@@ -1,0 +1,17 @@
+[package]
+name = "skynet-urdf"
+description = "URDF import: the descriptor work that is already done and sitting in a file the robot has (§63.4)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+skynet-contracts = { path = "../skynet-contracts" }
+skynet-json = { path = "../skynet-json" }
+skynet-sha256 = { path = "../skynet-sha256" }
+
+[lints.rust]
+missing_docs = "warn"

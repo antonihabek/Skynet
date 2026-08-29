@@ -3,6 +3,17 @@
 version = 3
 
 [[package]]
+name = "skynet-cli"
+version = "0.1.0"
+dependencies = [
+ "skynet-contracts",
+ "skynet-json",
+ "skynet-rhal",
+ "skynet-sha256",
+ "skynet-urdf",
+]
+
+[[package]]
 name = "skynet-contracts"
 version = "0.1.0"
 dependencies = [
@@ -30,3 +41,16 @@ version = "0.1.0"
 [[package]]
 name = "skynet-rhal"
 version = "0.1.0"
+
+[[package]]
+name = "skynet-sha256"
+version = "0.1.0"
+
+[[package]]
+name = "skynet-urdf"
+version = "0.1.0"
+dependencies = [
+ "skynet-contracts",
+ "skynet-json",
+ "skynet-sha256",
+]

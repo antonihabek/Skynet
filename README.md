@@ -93,13 +93,20 @@ it, which says no when the answer is no.
 | `crates/skynet-contracts` — transport, admission, certification, readiness | Ported from the reference, 84 tests |
 | `crates/skynet-json` — canonical JSON | 16 tests |
 | `crates/skynet-rhal` — the Rust view of the ABI | 7 tests |
+| `crates/skynet-sha256` — SHA-256 | Held to the FIPS 180-4 vectors, 4 tests |
+| `crates/skynet-urdf` — URDF import (§63.4) | XML reader, model, role suggestion, descriptor, 37 tests |
+| `crates/skynet-cli` — the `skynet` command | descriptor, transport, role, driver new/check, 31 tests |
 | `corpus/` — the conformance corpus | 254 cases, 18 files |
 | `crates/skynet-corpus` — the corpus runner | Reproduces all 254 byte for byte |
 | `reference/typescript/` — the oracle | Vendored from the Hub; generates the corpus |
+| `bindings/python` — the Python RHAL | Driver protocol plus a ctypes ABI view, offset-asserted |
 | `drivers/mock` — the mock robot | 24 sim-conformance checks, no hardware |
+| `drivers/python-host` — the Python driver host | Runs a Python driver out of process, so its stop path is real |
+| `drivers/lerobot` — the LeRobot bridge (§67) | Role tables, 70 checks against a fake; Guest tier |
 
 **Not built, and the specification says so on its own behalf:** `skynetd`, the policy runtime, OTA,
-the black box, every real driver, the on-robot console, the safety MCU. The realistic figure for a
+the black box, the on-robot console, the safety MCU, and every driver that talks to real hardware —
+`ros2_control`, EtherCAT, CANopen, the simulators and the vendor SDKs. The realistic figure for a
 robot moving under this is several engineer-years. §59.5 states that plainly and this README does
 not improve on it.
 
@@ -136,8 +143,34 @@ cd drivers/mock && make check
 
 ### 4. Write a driver
 
+Start from a scaffold rather than from a blank file (§63.1):
+
+```bash
+skynet driver new my-arm --lang c      # or --lang rust
+cd my-arm && make
+skynet driver check ./libmy_arm.so
+```
+
+The scaffold builds, loads, and **fails conformance in exactly the places where only you know the
+answer** — the roles are null, so `embodiment.roles.coverage` fails at 0%, and a driver cannot sign
+its own descriptor, so `embodiment.descriptor.signed` is not measured. Those two plus the `TODO`s in
+the generated source are the to-do list.
+
+`skynet driver check` runs the driver-facing half of the sim suite against the built shared object
+and reports, in the terms of §15, **the tier the evidence supports** rather than a pass or a fail.
+The sim tests that are properties of the runtime rather than of a driver are listed as not covered,
+by name, on every run — a vendor arriving at certification believing they had evidence they do not
+have is a failure of that list. Turning up to a bench session with this already green is what makes
+bench time cheap.
+
 `drivers/mock/mock_robot.c` is the reference. A vendor implements one shared object exporting the C
 ABI in [`bindings/c/skynet_rhal.h`](bindings/c/skynet_rhal.h), and that is the entire integration.
+
+**If your robot is one LeRobot already supports, the driver exists**:
+[`drivers/lerobot`](drivers/lerobot/) wraps `Robot.connect / get_observation / send_action`, and
+[`drivers/python-host`](drivers/python-host/) is what loads it. Guest tier — Python's GIL and garbage
+collector cannot hold a real-time path, and the host refuses to load a Python driver that claims
+otherwise.
 Four properties make it a contract rather than an interface:
 
 * **`abi_version` is checked at load and mismatches refuse.** The OS ships weekly, the driver ships
@@ -152,6 +185,16 @@ Four properties make it a contract rather than an interface:
 
 ### 5. Describe the body
 
+Most of the descriptor is already written and sitting in a file the robot has (§63.4):
+
+```bash
+skynet descriptor from-urdf robot.urdf > embodiment.json
+```
+
+The descriptor goes to stdout and the reasoning goes to stderr, so the redirect above captures a
+file and not a lecture. Joints, types, limits, the frame graph and the degrees of freedom come
+straight out of the URDF. Two things never do, and the report says so every time.
+
 The role vocabulary is what makes cross-body work possible, and it is deliberately modest:
 
 ```
@@ -162,6 +205,13 @@ left_arm.shoulder.pitch    right_hand.finger.flex#2    base.wheel#0
 
 Wire names stay vendor-specific; the semantics become shared. An unrecognised role parses to
 nothing and can then only be matched by exact name — it never silently maps to something plausible.
+`skynet role left_arm.shoulder.pitch` checks one at the keyboard.
+
+**Roles are suggested, never assigned.** A URDF carries no semantics, so `shoulder_pitch_joint` is
+*probably* `left_arm.shoulder.pitch` — and probably is not a basis for cross-body remapping, because
+a wrong role does not fail loudly, it binds a policy's elbow channel to a wrist. The importer prints
+every suggestion and how it reached it; `--accept-suggested-roles` is the human-confirms step and is
+a separate action precisely so that it is one.
 
 **The `envelope` stays null until a person supplies a sourced figure.** A URDF effort limit is a
 design value from a CAD model, not a datasheet safety rating, and copying one into the other would
@@ -170,6 +220,10 @@ which is correct and slightly annoying, and that is the right trade.
 
 ### 6. Understand what will be enforced
 
+```bash
+skynet transport ./policy.json --robot embodiment.json
+```
+
 ```rust
 let plan = skynet_contracts::resolve_transport(&policy, &body, Default::default());
 ```
@@ -177,8 +231,9 @@ let plan = skynet_contracts::resolve_transport(&policy, &body, Default::default(
 Per channel, one of six answers — `direct`, `remap`, `retarget`, `synthesize`, `drop`, `blocked` —
 and the plan's verdict is the worst binding in it. The planner is pure: no I/O, no clock, no
 database. It runs on the Hub so a repository page can answer "does this run on my G1?" before
-anybody downloads forty gigabytes, and on the robot at install time with no network at all. Both
-compute the same function over the same declared facts, so neither is authoritative and they cannot
+anybody downloads forty gigabytes, on the robot at install time with no network at all, and on a
+workstation so a developer can ask what a body they do not own would do with their policy. All three
+compute the same function over the same declared facts, so none is authoritative and they cannot
 disagree.
 
 ---
@@ -210,14 +265,20 @@ docs/            The specification. Nine parts, and the Hub's architecture besid
 bindings/        The RHAL C ABI and its C++ wrapper. Single-source, always (§31.2).
 crates/          The Rust reference edition.
   skynet-json        Canonical JSON — the rule the corpus comparison rests on.
+  skynet-sha256      SHA-256, for the digests the specification already names.
   skynet-rhal        The Rust view of the ABI. Layout-asserted against the header.
   skynet-kernel      The Safety Kernel. no_std, no alloc, no clock.
   skynet-contracts   L2: transport, admission, certification, readiness.
+  skynet-urdf        URDF import. The only crate that links std, because it is a tool.
+  skynet-cli         The `skynet` command, and the only unsafe outside the ABI.
   skynet-corpus      Holds this edition to the corpus.
 corpus/          The conformance corpus. Plain data, no code.
 reference/       The TypeScript oracle the corpus is generated from.
 tools/           The generator.
-drivers/         Drivers. `mock` today.
+drivers/
+  mock               A body that answers the RHAL with no hardware, and injects the faults.
+  python-host        Runs a Python driver out of process. One shared object, one symbol.
+  lerobot            The LeRobot bridge (§67). Guest tier, and it says so everywhere.
 ```
 
 Why this is a separate repository from the Hub, and not a subdirectory (§72.1): a subdirectory of a
