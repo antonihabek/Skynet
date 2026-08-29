@@ -369,6 +369,14 @@ Responses are graduated — `clamp` › `hold` › `stop_cat2` › `stop_cat1` �
 IEC 60204-1 — because a kernel whose only response is a hard stop is a kernel operators disable.
 A humanoid that drops a crate whenever a velocity estimate blips is worse than no policy at all.
 
+**The column is what a guard demands when it trips, not everything it does.** `proximity` is the one
+row where the difference bites: inside the stop distance it demands `stop_cat1`, and *between* the
+two distances it scales the command and lets it through, which is a `clamp`. A verdict deriving its
+response from the row rather than from what the guard demanded that cycle reports a stop on a cycle
+the robot kept moving through, and a black box recording that is a black box recording something
+that did not happen. A cycle's response is therefore the strongest response actually demanded, and
+a `hold` or stronger means the command does not go out at all.
+
 ### 7.2 Guards that cannot run say so
 
 > **Extended in §45.5.** An *expired calibration* is a cause of unavailability alongside a missing
@@ -376,10 +384,17 @@ A humanoid that drops a crate whenever a velocity estimate blips is worse than n
 > guard, and it names the expired parameter set rather than assuming the numbers still hold.
 
 `resolveLimits()` partitions the guard set into `active_guards` and `unavailable_guards`, each
-with the specific input that is missing — no IMU, no collision model, no person-detecting sensor,
+with the specific input that is missing — no IMU, no collision geometry, no person-detecting sensor,
 no configured jerk ceiling. A guard whose inputs are absent is reported as **unavailable**, never
 as passing. And the `balance` guard on a wheeled base reports "not applicable to this body" rather
 than "missing an IMU", so nobody reads a shape difference as a defect.
+
+**The evidence is asked for, never the claim.** An earlier form of this asked the descriptor for a
+boolean — "does this body have a collision model?" — which a descriptor could answer `true` with no
+geometry in it, producing a guard reported as running that had nothing to evaluate. The pose guards
+ask the frame graph instead: `workspace` needs volumes *and* a tree that reaches every frame they
+name, `self_collision` needs two or more frames carrying a shape the kernel can place. Both are
+facts about the document rather than assertions in it, and both name the missing frame (§44.5).
 
 ### 7.3 Limits compose by minimum, always
 
@@ -389,6 +404,14 @@ precedence order. No source can raise what another lowered, including a mistaken
 operator profile, which is why the profile is folded in here rather than applied afterwards. An
 attempt to widen is recorded as a `profile_widened` notice and then discarded by the minimum:
 silently ignoring it would leave an operator believing a limit they set is in force.
+
+**A workspace volume is not a number, and the minimum rule does not apply to it.** Layers of allowed
+volumes (§38.2) compose by **conjunction**: a frame must lie inside at least one volume of *every*
+layer that names it. That is the same guarantee expressed as a predicate rather than as geometry —
+intersecting a box with a sphere is a shape that is neither, and a composition rule producing a
+third shape would be one no operator could check by reading their own configuration. A layer says
+nothing about frames it does not name, so a site rule about one arm does not silently confine the
+other.
 
 ### 7.4 What the certified tier is and is not
 
@@ -1345,9 +1368,22 @@ format. These stay single-source no matter how many editions exist:
 | MCAP channel schemas | A black box sealed by one edition must be readable by every other. |
 | The Hub wire protocol | One API, many clients. |
 | **The conformance corpus** | The thing all editions are measured against cannot itself be per-edition. |
+| The kernel's `sin`, `cos` and `sqrt` | §44.2's forward kinematics needs them and no platform library is required to round the way another one does. |
 
 Everything else is per-edition: the Safety Kernel, `skynetd`, the policy runtime, the contract
 implementations (transport, admission, certification), the CLI and the SDK.
+
+The last row is the newest and the least obvious, so the reasoning is worth stating. ECMAScript
+permits `Math.sin` an implementation-defined error, every C library rounds its own way, and a
+Cortex-M without double-precision hardware runs a third routine again — so two editions computing a
+pose through their own libraries diverge on the first revolute joint, and the divergence presents as
+a specification disagreement rather than as what it is. Worse, §7.4's certified tier mirrors this
+kernel onto a *separate processor with a different toolchain*, where a libm difference makes the
+redundant channel disagree with the primary about a clamp: the exact event the redundancy exists to
+detect, fired by correct behaviour, which is the fastest way to have redundancy switched off. So the
+specification defines the three functions as an explicit sequence of IEEE-754 binary64 operations —
+addition, subtraction, multiplication and division are correctly rounded everywhere, so the same
+sequence yields the same bits everywhere — and the corpus pins the poses, not only the verdicts.
 
 ### 31.3 The edition matrix
 
@@ -1995,6 +2031,10 @@ rule as §7.3 rather than by convention. A site cannot raise a fleet ceiling; a 
 a cell's. Attempted widenings are recorded and discarded, so an operator who believes they have
 raised a limit is told they have not.
 
+Workspace volumes (§7.1's fourth guard) layer the same way and by the rule §7.3 states for them: a
+frame must satisfy every layer that names it. The layers reach the kernel intact rather than being
+merged into one, because merging is what would require a geometry the operator did not draw.
+
 Session overrides are time-boxed and expire — a "maintenance mode, half speed" that outlives the
 maintenance is a hazard that looks like a setting.
 
@@ -2251,7 +2291,16 @@ there is therefore nothing to fail.
       "joint_type": "revolute" | "continuous" | "prismatic" | "ball" | "floating",
       "axis": [x, y, z],
       "mimics": "left_hand.finger.flex#0",
+      "mimic_multiplier": -1,
+      "mimic_offset": 0,
       "collision": true,
+      "collision_shape": {
+        "kind": "capsule",
+        "a": [0, 0, 0],
+        "b": [0, 0, -0.28],
+        "radius_m": 0.06
+      },
+      "collision_ignore": ["torso.link"],
       "mass_kg": 1.42
     }
   ]
@@ -2267,7 +2316,38 @@ there is therefore nothing to fail.
 | `source` | Which of the two sources above this transform came from. Absent on the root. |
 | `joint`, `joint_type`, `axis` | Present exactly when `kind` is `dynamic`. The axis is expressed in this frame, before the joint is applied. |
 | `mimics` | The joint this one follows, where it is a linkage rather than a degree of freedom. Optional. |
-| `collision`, `mass_kg` | What the geometry declares, for `self_collision` and for anyone estimating dynamics. `mass_kg` is nullable — a frame with no geometry has no mass. |
+| `mimic_multiplier`, `mimic_offset` | `value = multiplier × driver + offset`, URDF's semantics. Absent means 1 and 0. |
+| `collision` | Whether the frame carries collision geometry **at all**. |
+| `collision_shape` | That geometry as one sphere-swept segment, where it is one the kernel can evaluate. Nullable. |
+| `collision_ignore` | Frames this one is permitted to touch. Symmetric: written once, meant both ways. |
+| `mass_kg` | What the geometry declares, for anyone estimating dynamics. Nullable — a frame with no geometry has no mass. |
+
+**`mimics` carries a ratio, and the reason is a gripper.** The commonest linkage in robotics is a
+parallel gripper whose second finger runs at −1, and a field that could only record "follows" would
+place that finger on the wrong side of the object — inside the guard whose entire job is knowing
+where things are. URDF has carried the multiplier and the offset since the beginning; this now
+carries them too.
+
+**`collision` and `collision_shape` are two different facts and neither implies the other.** A
+vendor's model is usually meshes, and no honest reduction of a mesh to a primitive exists without
+reading the mesh. So a frame may say "there is collision geometry here" and offer no shape, and the
+`self_collision` guard then reports itself unavailable naming those frames — rather than testing a
+body with limbs quietly missing from it. A shape without `collision: true` is two statements that
+disagree and is refused.
+
+**The shape is one primitive: a sphere-swept segment.** It is a sphere when `a` equals `b`, it
+bounds a cylinder exactly and a link's real geometry conservatively, and the distance between two of
+them is a closed form with no branching beyond four clamps. Conservative is the only direction of
+error a collision bound may have — the shape contains what it stands for, so the guard trips early
+rather than late. A guard built on meshes would need a broadphase, a solver and an allocator, none
+of which belong inside a control cycle.
+
+**`collision_ignore` is not an optimisation.** Every real body has pairs that overlap by design — a
+humanoid's pelvis and torso — and URDF cannot say so, which is why SRDF's `disable_collisions`
+exists. Without the field the guard trips on the robot standing still, and a guard that does that is
+one an operator switches off: the failure §7.1 spends a paragraph avoiding. Adjacent frames, a
+parent and its child, are excluded without being declared, because they touch at the joint by
+construction.
 
 **A node carries at most one joint.** That is what keeps forward kinematics a walk rather than a
 solver, and it is also a real restriction: URDF cannot express anything else, MJCF can, and a body
@@ -2298,6 +2378,34 @@ exactly these.
 both gain an honest failure mode: a body whose descriptor declares no frame graph, or whose graph
 does not reach the end effector, reports those guards **unavailable** with the missing frame named
 — rather than evaluating them against a frame it guessed.
+
+"Does not reach" is a **static** property and is answered when the lease is granted, not once per
+cycle. A frame below a ball or floating joint can never be placed from one scalar per joint, so the
+guard reports it unavailable then and there. The alternative — an active guard that holds the robot
+on every cycle for the life of the lease — is the same outcome with the reason removed.
+
+Three limits, stated here rather than discovered:
+
+**A volume is in the robot's own root frame, and for a mobile base that is not the cell.** §44.2
+gives the kernel a frame set rooted at `base_link` and no world pose; localisation lives in the
+perception tree, which the kernel deliberately does not subscribe to. For a fixed-base arm the
+distinction is empty and an operator's "stay inside this region" means what they think it means. For
+a mobile base the volume travels with the robot. Fixing this needs a pose the kernel would have to
+trust from outside itself, which is the thing §44.2 exists to refuse; a cell boundary for a mobile
+base is a different mechanism and is not designed here.
+
+**The commanded configuration exists only on a position-commanded body.** §7.1 specifies both guards
+one step ahead, and on a body commanded in velocity or torque there is no next configuration to
+compute — so what runs is a check of where the robot is now. That is a real check and a weaker
+claim, and the verdict carries which of the two was performed rather than letting a log imply the
+stronger one.
+
+**The cost is quadratic and it is the first part of this kernel where that matters.** Forty collision
+bodies is 780 pairs and roughly fifty thousand floating-point operations per cycle: comfortable on
+an application processor, and not obviously comfortable on a safety MCU without double-precision
+hardware, where each of those is a software routine. The number is reported rather than assumed —
+`skynet frames` prints it — and §7.4's certified tier has to answer it before mirroring this guard
+onto a second processor.
 
 ---
 
@@ -2677,6 +2785,8 @@ schema change vendors must implement and the bench suite must measure:
 | Field | From | Measured by |
 |---|---|---|
 | `frames` — the frame graph (§44.3) | Part V | `embodiment.frames.complete` |
+| `frames[].collision_shape`, `collision_ignore` (§44.3) | Part V | `embodiment.frames.complete` |
+| `frames[].mimic_multiplier`, `mimic_offset` (§44.3) | Part V | `embodiment.frames.complete` |
 | `simulator` — the body is simulated (§35.3, §70) | Part IV | `embodiment.descriptor.valid` |
 | `on_command_loss` — hold / brake / fault / coast (§46.2) | Part V | `safety.command_loss.behaviour` |
 | `homing` — required, procedure token, restricted envelope (§48.3) | Part V | `safety.homing.envelope` |

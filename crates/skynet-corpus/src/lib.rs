@@ -38,7 +38,7 @@ use skynet_json::Json;
 mod blackbox;
 mod limits;
 
-pub use limits::{BorrowedChannels, CycleOwned, LimitsOwned};
+pub use limits::{BindingsOwned, BorrowedChannels, CycleOwned, LimitsOwned};
 
 /// One case that did not reproduce.
 #[derive(Debug, Clone)]
@@ -229,18 +229,29 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             let owned = LimitsOwned::from_json(input.get("limits").ok_or("no `limits`")?)?;
             let cycle_owned = CycleOwned::from_json(input.get("cycle").ok_or("no `cycle`")?)?;
             let last_sequence = input.get_present("last_sequence").and_then(Json::as_f64);
+            let bindings_owned = BindingsOwned::from_json(input.get_present("joints"));
 
             let per_channel = owned.per_channel_refs();
-            let params = owned.params(&per_channel);
-            let limits = skynet_kernel::resolve_limits(&params);
+            let frames = owned.frame_refs();
+            let volumes = owned.volume_refs();
+            let layers = owned.layer_refs(&volumes);
+            let params = owned.params(&per_channel, frames.as_deref(), &layers);
+            let grants = owned.grant_refs();
+            let limits = skynet_kernel::resolve_limits(&params).with_grants(&grants);
             let (desired, previous) = cycle_owned.refs();
             let cycle = cycle_owned.cycle(&desired, previous.as_deref());
             let envelope = owned.envelope();
-            let verdict = skynet_kernel::evaluate_cycle(
+            let bindings = bindings_owned.refs();
+            let mut scratch = skynet_kernel::kinematics::Kinematics::new();
+            let verdict = skynet_kernel::evaluate_cycle_with_body(
                 &cycle,
                 &limits,
                 envelope.as_ref(),
                 last_sequence.map(|n| n as u64),
+                Some(skynet_kernel::Body {
+                    joints: &bindings,
+                    scratch: &mut scratch,
+                }),
             );
             skynet_contracts::safety::verdict_to_json(&verdict)
         }
@@ -248,9 +259,40 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
         "limits" => {
             let owned = LimitsOwned::from_json(input)?;
             let per_channel = owned.per_channel_refs();
-            let params = owned.params(&per_channel);
+            let frames = owned.frame_refs();
+            let volumes = owned.volume_refs();
+            let layers = owned.layer_refs(&volumes);
+            let params = owned.params(&per_channel, frames.as_deref(), &layers);
             let limits = skynet_kernel::resolve_limits(&params);
             skynet_contracts::safety::limits_to_json(&limits, owned.profile_name())
+        }
+
+        // Forward kinematics on its own, with the poses themselves as the expected value.
+        //
+        // A separate corpus from `cycle` because it pins something `cycle` cannot: a trip is a
+        // boolean and two editions could agree on every one of them while disagreeing about every
+        // pose by a millimetre. Thirty digits of translation do not permit that — and they are what
+        // holds the two editions' sine, cosine and square root to each other (`skynet-kernel`'s
+        // `real` module, and `reference/typescript/kinematics.ts`).
+        "kinematics" => {
+            let graph = skynet_contracts::json::frames_from_json(input.get("frames"))
+                .ok_or("no `frames`")?;
+            let flat = skynet_contracts::kinematics::flatten(&graph)
+                .map_err(|fault| format!("{}: {}", fault.code, fault.detail))?;
+            let frames = flat.frames();
+            let set = skynet_kernel::kinematics::FrameSet::new(&frames)
+                .map_err(|fault| fault.as_str().to_string())?;
+            let bindings_owned = BindingsOwned::from_json(input.get_present("joints"));
+            let bindings = bindings_owned.refs();
+            let command = limits::channel_pairs(input.get_present("command"));
+            let mut solved = skynet_kernel::kinematics::Kinematics::new();
+            solved.solve(&set, &bindings, |name| {
+                command
+                    .iter()
+                    .find(|(channel, _)| channel == name)
+                    .map(|(_, value)| *value)
+            });
+            skynet_contracts::kinematics::solve_to_json(&set, &solved)
         }
 
         // The black box's four corpora. Dispatched on the file rather than only on the corpus

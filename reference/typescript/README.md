@@ -33,11 +33,16 @@ against the implementation, is worth more than a comment block — and it is wha
 | `digest.ts` | `versionDigest` — the identity a package is verified against at install |
 | `types.ts` | `SafetyEnvelope`, restated so the oracle is standalone |
 | `canonical.ts` | Canonical JSON — a deliberate reimplementation of `crates/skynet-json` |
+| `kinematics.ts` | Forward kinematics, the specified sine/cosine/square root, and the pose-guard geometry |
 | `shape.ts` | The wire shape of every output: which fields are nullable and which are optional |
 
-The first six, and `canonical.ts`, are the Hub's `lib/skynet/os/*.ts`, changed only in their import paths. That is
-deliberate: a vendored oracle that has been tidied is an oracle that no longer describes the thing
-it is the reference for. When the Hub's copy changes, this copy is updated and the corpus is
+The first six, and `canonical.ts`, are the Hub's `lib/skynet/os/*.ts`, changed only in their import
+paths. `blackbox.ts` and `kinematics.ts` are not: the Hub writes no black boxes and computes no
+forward kinematics, so those two are second implementations written here against the same
+specification the Rust is written against.
+
+Keeping the vendored six byte-for-byte is deliberate: an oracle that has been tidied is an oracle
+that no longer describes the thing it is the reference for. When the Hub's copy changes, this copy is updated and the corpus is
 regenerated, and the diff in `corpus/` is the review.
 
 ## Running it
@@ -57,7 +62,12 @@ Its tier ceiling is **off-robot** (§31.3). It is the Hub, the workstation CLI, 
 the contracts; it never runs on a robot, so the question of whether it could host an enforcing
 kernel does not arise.
 
-And its `CommandCycle` carries no capability token and no separation distance, so the mode gate and
-the proximity guard cannot be exercised from a corpus case. The Rust edition implements both and
-covers them in its own suite; until the reference grows the fields, a corpus case that set them
-would be comparing against an expectation nobody computed.
+And it never runs a control loop, so what `evaluateCycle` here proves is that the arithmetic agrees
+— not that it agrees inside a millisecond.
+
+Its `CommandCycle` used to carry no capability token and no separation distance, which meant the
+mode gate and the proximity guard could not be exercised from a corpus case at all. Both fields are
+now here, along with the two pose guards of §44 and the `kinematics.ts` that computes their input;
+all eight guards are implemented in both editions and six of the eight appear in the fuzz corpus.
+`balance` is the one guard neither edition implements — there is no centre-of-pressure input in
+either `CommandCycle` — and it reports itself unavailable rather than passing.

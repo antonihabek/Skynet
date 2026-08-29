@@ -547,7 +547,7 @@ fn record_pass(
                 outcome.as_str()
             ),
         };
-        let _ = recorder.event(mono_ns, code, &action.subject(), &detail);
+        let _ = recorder.event(mono_ns, code, action.subject(), &detail);
     }
 }
 

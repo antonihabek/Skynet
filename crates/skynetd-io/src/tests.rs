@@ -1588,9 +1588,22 @@ mod listeners {
 
     #[test]
     fn the_console_binds_loopback_and_the_private_ranges_a_robot_actually_lives_on() {
-        for address in ["127.0.0.1:0", "[::1]:0"] {
-            let parsed: std::net::SocketAddr = address.parse().unwrap();
-            assert!(crate::serve::Lan::bind(parsed).is_ok(), "{address}");
+        let parsed: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        assert!(crate::serve::Lan::bind(parsed).is_ok());
+
+        // IPv6 loopback, on a machine that has an IPv6 stack. Many containers do not, and a bind
+        // that fails for want of a stack is not the same fact as a bind this policy refused — so
+        // the two are told apart rather than the case being skipped. What is asserted either way is
+        // that `[::1]` is never refused *by us*: `InvalidInput` citing §34.2 is the refusal, and it
+        // must not appear here.
+        let parsed: std::net::SocketAddr = "[::1]:0".parse().unwrap();
+        match crate::serve::Lan::bind(parsed) {
+            Ok(_) => {}
+            Err(error) => assert_ne!(
+                error.kind(),
+                std::io::ErrorKind::InvalidInput,
+                "the IPv6 loopback was refused by policy rather than by the machine: {error}"
+            ),
         }
         for ip in ["169.254.1.2", "10.0.0.4", "192.168.1.9", "172.16.0.1"] {
             assert!(

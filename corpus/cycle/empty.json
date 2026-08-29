@@ -34,8 +34,6 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "collision_model": true,
-            "solvers": true,
             "legged": true
           }
         },
@@ -47,7 +45,7 @@
         },
         "last_sequence": null
       },
-      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"response\":null,\"tripped\":[]}"
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":null,\"tripped\":[]}"
     }
   ]
 }

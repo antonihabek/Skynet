@@ -28,9 +28,11 @@
 use std::ffi::{c_char, CStr};
 
 use skynet_contracts::certification::SCTS_TESTS;
-use skynet_contracts::embodiment::validate_frames;
+use skynet_contracts::embodiment::{validate_frames, FrameGraph};
 use skynet_contracts::json::descriptor_from_json;
+use skynet_contracts::kinematics::flatten;
 use skynet_contracts::parse_role;
+use skynet_contracts::safety::kinematics::FrameSet;
 use skynet_json::Json;
 use skynet_rhal::{flags, status, Command, Ctx, Frame, Mode, RawDriver, State};
 
@@ -522,6 +524,29 @@ fn descriptor_checks(
                     )),
                 },
             }
+            // "Valid" and "usable" are different claims, and the second is the one a driver author
+            // needs. A well-formed tree with one collision capsule has nothing for
+            // `self_collision` to test; a tree whose limbs hang off a ball joint has nothing for
+            // `workspace` to constrain. Both are §7.2's unavailability.
+            //
+            // Its own result rather than detail on the one above, because the report prints detail
+            // only for a result that is not a plain pass — and "the guard cannot run" is exactly
+            // the sentence that must not be swallowed.
+            if let Some(graph) = &descriptor.frames {
+                if let Some((usable, summary)) = pose_guard_summary(graph) {
+                    report.push(CheckResult::new(
+                        "embodiment.descriptor.valid",
+                        "what the pose guards can do with it",
+                        if usable {
+                            Outcome::Pass
+                        } else {
+                            Outcome::NotApplicable
+                        },
+                        summary,
+                    ));
+                }
+            }
+
             report.push(CheckResult::assert(
                 "embodiment.descriptor.valid",
                 "dof agrees with the joint list",
@@ -1113,4 +1138,44 @@ pub fn print(report: &Report) -> i32 {
     let _ = writeln!(out);
 
     i32::from(!report.green())
+}
+
+/// What the two pose guards will be able to do with this tree (§44.5).
+///
+/// `None` when the graph could not be flattened — the validation above has already reported that,
+/// and saying it twice puts one fault in two places for a reader to reconcile.
+///
+/// The boolean is "both guards could run on this body": every frame placeable, and two or more
+/// collision shapes to test against each other.
+fn pose_guard_summary(graph: &FrameGraph) -> Option<(bool, String)> {
+    let flat = flatten(graph).ok()?;
+    let frames = flat.frames();
+    let set = FrameSet::new(&frames).ok()?;
+
+    let placeable = (0..set.len())
+        .filter(|index| set.statically_resolvable(*index))
+        .count();
+    let bodies = set.collision_bodies();
+
+    let mut out = format!("{placeable} of {} frames can be placed", set.len());
+    if placeable < set.len() {
+        out.push_str(
+            "; the rest sit below a ball or floating joint, which one scalar cannot describe, so \
+             workspace cannot constrain them",
+        );
+    }
+    if bodies < 2 {
+        out.push_str(&format!(
+            ". {bodies} frames carry a collision shape this kernel can place, so self_collision \
+             has no pair to test and reports unavailable (§7.2). `collision: true` with no \
+             `collision_shape` is a mesh nobody has reduced to a primitive, which is a real body \
+             and not a defect in this driver."
+        ));
+    } else {
+        out.push_str(&format!(
+            ". {bodies} collision shapes, {} pairs per cycle",
+            set.collision_pairs()
+        ));
+    }
+    Some((placeable == set.len() && bodies >= 2, out))
 }

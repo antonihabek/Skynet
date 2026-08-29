@@ -459,6 +459,12 @@ fn build_frames(model: &UrdfModel) -> Json {
                         .set("axis", vector(&joint.axis));
                     if let Some(driver) = &joint.mimic {
                         node.set("mimics", Json::Str(driver.clone()));
+                        // Written only when the URDF said so. §44.3's defaults are 1 and 0, and
+                        // emitting them explicitly would make a file that declared nothing
+                        // indistinguishable from one that declared the defaults — the same
+                        // absent-versus-null distinction the whole descriptor turns on.
+                        node.set_opt("mimic_multiplier", joint.mimic_multiplier.map(Json::Num))
+                            .set_opt("mimic_offset", joint.mimic_offset.map(Json::Num));
                     }
                 }
                 node.set("translation", vector(&joint.origin_xyz))
@@ -471,6 +477,19 @@ fn build_frames(model: &UrdfModel) -> Json {
         }
 
         node.set("collision", Json::Bool(link.has_collision));
+        // Present only where the geometry reduced to a shape the kernel evaluates. A link with a
+        // mesh keeps `collision: true` and gets no shape, which is §44.3's third state and the one
+        // that makes the `self_collision` guard report unavailable rather than test a body with
+        // limbs missing from it.
+        if let Some(capsule) = link.collision {
+            let mut shape = Json::obj();
+            shape
+                .set("kind", Json::Str("capsule".to_string()))
+                .set("a", vector(&capsule.a))
+                .set("b", vector(&capsule.b))
+                .set("radius_m", Json::Num(capsule.radius_m));
+            node.set("collision_shape", shape);
+        }
         node.set_opt("mass_kg", link.mass_kg.map(Json::Num));
         nodes.push(node);
     }

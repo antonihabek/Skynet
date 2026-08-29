@@ -37,7 +37,26 @@ const args = process.argv.slice(2)
 const sync = args.includes('--sync')
 const given = args.find(arg => !arg.startsWith('--'))
 
-const hub = resolve(given ?? join(HERE, '..', 'BotMarket'))
+/**
+ * Where BotMarket is, when nobody said.
+ *
+ * Several spellings, because the repository is `botmarket` on GitHub, `BotMarket` in the
+ * specification's prose, and whatever `git clone` produced on disk. A case-sensitive filesystem
+ * makes those three different directories, and this script's whole failure mode is reporting "not
+ * found, nothing to compare" when the checkout is right there under a different capital — a check
+ * that cannot run is not a check, which is the sentence this file already says about CI.
+ */
+const CANDIDATES = ['BotMarket', 'botmarket', 'Botmarket', 'botMarket']
+
+function findHub() {
+  for (const name of CANDIDATES) {
+    const candidate = resolve(join(HERE, '..', name))
+    if (existsSync(candidate)) return candidate
+  }
+  return resolve(join(HERE, '..', 'BotMarket'))
+}
+
+const hub = given ? resolve(given) : findHub()
 
 if (!existsSync(hub)) {
   console.log(`BotMarket not found at ${hub} — nothing to compare.`)

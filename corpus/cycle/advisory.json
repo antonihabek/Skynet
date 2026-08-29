@@ -34,8 +34,6 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "collision_model": true,
-            "solvers": true,
             "legged": true
           }
         },
@@ -49,7 +47,7 @@
         },
         "last_sequence": null
       },
-      "expected": "{\"advisory\":true,\"clamped\":[{\"channel\":\"elbow\",\"from\":120,\"to\":80}],\"command\":{\"elbow\":120},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+      "expected": "{\"advisory\":true,\"clamped\":[{\"channel\":\"elbow\",\"from\":120,\"to\":80}],\"command\":{\"elbow\":120},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
     },
     {
       "id": "stop-still-forwards",
@@ -83,8 +81,6 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "collision_model": true,
-            "solvers": true,
             "legged": true
           }
         },
@@ -98,7 +94,7 @@
         },
         "last_sequence": null
       },
-      "expected": "{\"advisory\":true,\"clamped\":[],\"command\":{\"elbow\":10},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
+      "expected": "{\"advisory\":true,\"clamped\":[],\"command\":{\"elbow\":10},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"stop_cat2\",\"tripped\":[\"watchdog\"]}"
     },
     {
       "id": "certified-tier",
@@ -132,8 +128,6 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "collision_model": true,
-            "solvers": true,
             "legged": true
           }
         },
@@ -147,7 +141,7 @@
         },
         "last_sequence": null
       },
-      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":120,\"to\":80}],\"command\":{\"elbow\":80},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":120,\"to\":80}],\"command\":{\"elbow\":80},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
     }
   ]
 }
