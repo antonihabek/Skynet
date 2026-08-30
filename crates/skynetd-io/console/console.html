@@ -1,0 +1,138 @@
+<!doctype html>
+<!--
+  The on-robot console (§32.2).
+
+  Served by skynetd over the LAN, to a browser on a robot with no internet. That rules out every
+  fashionable way to build a page: no bundler, no framework, no CDN, no web font. Three files,
+  compiled into the daemon binary, and the only thing this page ever talks to is the daemon that
+  served it.
+
+  Two constraints from §32.2 are design decisions rather than details, and both are visible here:
+
+    * It must work with no network. Everything is local; `connect-src 'self'` is enforced by a
+      header and there is nothing to relax it for.
+    * It must never show a value it did not receive. Every panel carries the age of the answer it
+      is drawn from, a panel whose answer failed to arrive says so rather than keeping the last
+      one, and a field the daemon returned as null renders as the reason it is null — never as a
+      zero, a dash, or a hopeful green tick.
+
+  The stop control is in the header, above everything, on every scroll position, with no confirm
+  dialog — §32.2 is explicit and §39 explains why: an authentication prompt between a person and a
+  stop button is a hazard.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Skynet OS — robot console</title>
+  <link rel="stylesheet" href="/console.css">
+</head>
+<body>
+
+<!--
+  The stop bar. `position: sticky` at the top of the document, so it is reachable at any scroll
+  position without the page needing a scroll listener that could fail.
+-->
+<header class="stopbar">
+  <div class="stopbar-id">
+    <strong>Skynet OS</strong>
+    <span id="identity" class="dim">connecting…</span>
+  </div>
+  <button id="stop" class="stop" type="button">STOP</button>
+</header>
+
+<p id="stop-result" class="stop-result" hidden></p>
+
+<main>
+
+  <!-- ── Status ─────────────────────────────────────────────────────────── -->
+  <section class="panel" id="panel-status">
+    <h2>Status <span class="age" data-age="status"></span></h2>
+    <dl id="status-fields" class="fields"></dl>
+    <p id="status-note" class="note" hidden></p>
+  </section>
+
+  <!-- ── Body ───────────────────────────────────────────────────────────── -->
+  <!--
+    §5. What this robot believes it is. Three states rather than two: nobody has written a
+    descriptor, somebody has and it does not work, or here is the body — and the second is a
+    generator to fix rather than a provisioning step to run.
+  -->
+  <section class="panel" id="panel-embodiment">
+    <h2>Body <span class="age" data-age="embodiment"></span></h2>
+    <div id="embodiment-body"></div>
+  </section>
+
+  <!-- ── Guards ─────────────────────────────────────────────────────────── -->
+  <!--
+    §32.2 wants this live: which guards are active, which are unavailable with the exact input
+    missing, and trip counts this session. None of that exists on this robot, and the panel says
+    which absent thing is the reason rather than rendering eight green ticks.
+  -->
+  <section class="panel" id="panel-guards">
+    <h2>Guards</h2>
+    <div id="guards-body"></div>
+  </section>
+
+  <!-- ── Plan ───────────────────────────────────────────────────────────── -->
+  <!--
+    Two different plans share a word. §32.2's Plan panel is the resolved *transport* plan and its
+    clamps; `GET /plan` is the last *reconcile* pass. The reconcile pass is real and worth showing,
+    so it is shown under its own name, and the transport plan is reported absent with its reason.
+  -->
+  <section class="panel" id="panel-plan">
+    <h2>Reconcile pass <span class="age" data-age="plan"></span></h2>
+    <div id="plan-body"></div>
+    <div id="transport-body" class="subpanel"></div>
+  </section>
+
+  <!-- ── Packages ───────────────────────────────────────────────────────── -->
+  <section class="panel" id="panel-packages">
+    <h2>Packages <span class="age" data-age="packages"></span></h2>
+    <div id="packages-body"></div>
+  </section>
+
+  <!-- ── Health ─────────────────────────────────────────────────────────── -->
+  <section class="panel" id="panel-health">
+    <h2>Health <span class="age" data-age="health"></span></h2>
+    <div id="health-body"></div>
+  </section>
+
+  <!-- ── Black box ──────────────────────────────────────────────────────── -->
+  <section class="panel" id="panel-blackbox">
+    <h2>Black box <span class="age" data-age="blackbox"></span></h2>
+    <div id="blackbox-body"></div>
+  </section>
+
+  <!-- ── Access ─────────────────────────────────────────────────────────── -->
+  <!--
+    Last, because §39.1 puts stop and status above authentication and this panel is what the other
+    routes need. There is no default password (§39.2): on an unprovisioned robot every field here
+    is honest about offering nothing.
+  -->
+  <section class="panel" id="panel-access">
+    <h2>Access</h2>
+    <p class="note">
+      Stop and status need nothing. Everything else needs a token issued at pairing — there is no
+      default password, so an unprovisioned robot's console offers status and stop and nothing
+      else (§39.2). The token is held in this tab only and is never written to disk.
+    </p>
+    <div class="access-row">
+      <label for="token">Bearer token</label>
+      <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="paste the token issued at pairing">
+      <button id="token-apply" type="button">Use</button>
+      <button id="token-clear" type="button">Forget</button>
+    </div>
+    <p id="token-state" class="note"></p>
+  </section>
+
+</main>
+
+<footer>
+  <span id="poll-state" class="dim"></span>
+</footer>
+
+<script src="/console.js"></script>
+</body>
+</html>

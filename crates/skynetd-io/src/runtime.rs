@@ -273,6 +273,66 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         }
     }
 
+    /// §19's gate: a driver activates only if its signature verifies against a trusted key.
+    ///
+    /// Returns the refusal when there is one, and `None` when activation may proceed.
+    ///
+    /// **Why only drivers, and why here.** §19 is specific: *"a driver runs native and must
+    /// therefore be signed by a key the operator has trusted."* A driver is the one kind admission
+    /// lets out of the sandbox (§8.3), so it is the one kind where an unverified signature is a
+    /// stranger's code with the safety argument removed. Every other kind carries its findings and
+    /// installs, because nothing on a robot can *produce* a signature — the Hub signs releases —
+    /// and refusing them would refuse every local install and turn this gate into a flag.
+    ///
+    /// At activation rather than at stage, because a staged blob is inert (§37.1) and the symlink
+    /// swap is the consequential moment. And the trust store is read on the pass that needs it, so
+    /// a key an operator adds takes effect on the next reconcile rather than at the next restart.
+    ///
+    /// Refused, not deferred. [`Outcome::Failed`] is a decision that will not change on its own,
+    /// which is the truth here: the same bytes and the same trust store give the same answer every
+    /// pass, and reporting it as "waiting" would suggest otherwise.
+    pub(crate) fn driver_signature_refusal(&self, id: &str, digest: &str) -> Option<Outcome> {
+        let package = self.desired.package(id)?;
+        if package.kind != PackageKind::Driver {
+            return None;
+        }
+
+        let trust = crate::trust::TrustStore::load(self.store.layout());
+        let signed = package
+            .signature
+            .as_ref()
+            .and_then(|raw| crate::trust::SignedBy::from_hex(&raw.key, &raw.value).ok());
+        let verdict = trust.check(&crate::trust::package_message(digest), signed.as_ref());
+        if verdict.state == skynet_contracts::admission::SignatureState::Verified {
+            return None;
+        }
+
+        // The malformed case is worth its own sentence: a signature that arrived and could not be
+        // read is not the same fact as no signature, and reporting it as `absent` would send
+        // somebody to ask a publisher for what they already sent.
+        let malformed = package.signature.is_some() && signed.is_none();
+        let detail = if malformed {
+            "a signature accompanied it and could not be read — the key or the signature is not \
+             the hex it should be"
+                .to_string()
+        } else {
+            verdict.detail.clone()
+        };
+
+        Some(Outcome::Failed {
+            reason: format!(
+                "§19: {id} is a driver, so it runs native and must be signed by a key this robot \
+                 trusts. Its signature is `{}` — {detail}. The blob stays staged and inert; add \
+                 the signer to state/trust.json, or install a build somebody you trust has signed",
+                if malformed {
+                    "failed"
+                } else {
+                    verdict.state.as_str()
+                }
+            ),
+        })
+    }
+
     /// Re-read the operator's safe-state declaration (§33.4).
     ///
     /// **This is a stand-in, and it is important that it reads like one.** Whether the robot is at a
@@ -298,9 +358,42 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
 
     /// Re-read the desired state from disk, walking §33.8's ladder.
     pub fn reload(&mut self) {
-        let (desired, source) = load_desired(self.store.layout());
+        let (mut desired, source) = load_desired(self.store.layout());
+        self.verify_profile(&mut desired);
         self.desired = desired;
         self.desired_source = source;
+    }
+
+    /// §38.1's verification, done here because it is the only place that can do it.
+    ///
+    /// `DesiredState::from_json` sets `verified` to `false` whatever the document says, and this is
+    /// what may set it to `true`: the profile's signature, over `skynet.profile.v1` and the
+    /// profile's digest, checked against the trust store on this robot.
+    ///
+    /// It has to be here and not in the decoder for the reason [`skynetd`] is pure at all — the
+    /// trust store is a file — and it has to happen *at all* because the desired state lives on the
+    /// robot's disk, which is exactly where §38.1 says the interesting attacker is. A decoder that
+    /// believed the document's own `"verified": true` let anybody who could edit the limits also
+    /// edit the assertion that they had been checked.
+    ///
+    /// The unverified case emits no action at all (`reconcile.rs` step 4), so the profile is simply
+    /// not applied. §38.1 also wants an incident raised for a signature that *fails* rather than one
+    /// that is merely missing, and that is not written: there is no incident path yet (§34.4's
+    /// outbound queue). Recorded rather than silently skipped.
+    fn verify_profile(&self, desired: &mut DesiredState) {
+        let Some(profile) = desired.profile.as_mut() else {
+            return;
+        };
+        let trust = crate::trust::TrustStore::load(self.store.layout());
+        let signed = profile
+            .signature
+            .as_ref()
+            .and_then(|raw| crate::trust::SignedBy::from_hex(&raw.key, &raw.value).ok());
+        let verdict = trust.check(
+            &crate::trust::profile_message(&profile.digest),
+            signed.as_ref(),
+        );
+        profile.verified = verdict.state == skynet_contracts::admission::SignatureState::Verified;
     }
 
     /// Observe the machine.
@@ -429,6 +522,9 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
                 let Ok(parsed) = PackageId::parse(id) else {
                     return refuse_id(id);
                 };
+                if let Some(refusal) = self.driver_signature_refusal(id, digest) {
+                    return refusal;
+                }
                 match self.store.activate(&parsed, digest) {
                     Ok(()) => Outcome::Applied,
                     Err(error) => failed(error),

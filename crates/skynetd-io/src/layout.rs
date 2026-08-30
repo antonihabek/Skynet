@@ -286,6 +286,40 @@ impl Layout {
         self.state().join("credentials.json")
     }
 
+    /// The keys this robot trusts (§19, §37.1).
+    ///
+    /// Beside the credentials, and the parallel is exact: `credentials.json` answers *who may tell
+    /// this robot what to do*, and this answers *whose signatures it should believe*. Both are
+    /// written by an operator with physical possession of the machine (§39.2), and neither has a
+    /// default — a robot nobody has provisioned trusts nobody, which is the useless-rather-than-open
+    /// failure §39.2 chooses on purpose.
+    pub fn trust(&self) -> PathBuf {
+        self.state().join("trust.json")
+    }
+
+    /// The embodiment descriptor for this body (§5).
+    ///
+    /// Beside the profiles rather than under them, because it is not one. A profile is what an
+    /// operator may narrow (§38.2); the descriptor is what the vendor says the machine *is*, and
+    /// the layering rule has nothing to say about a joint count.
+    ///
+    /// One file and one body. A robot is one machine, and a directory here would invite a second
+    /// descriptor whose relationship to the first nothing defines — which of two bodies the kernel
+    /// is guarding is not a question this system should ever have to answer at run time.
+    pub fn embodiment(&self) -> PathBuf {
+        self.state().join("embodiment.json")
+    }
+
+    /// The vendor's detached signature over the descriptor's digest (§5).
+    ///
+    /// A **sibling file**, and it has to be. The digest is taken over the descriptor's canonical
+    /// form, so a signature written inside the document would change the digest it is a signature
+    /// of — and a scheme that excluded one member from the hash would mean two robots disagreeing
+    /// about which bytes were signed the first time somebody added a field beside it.
+    pub fn embodiment_signature(&self) -> PathBuf {
+        self.state().join("embodiment.sig.json")
+    }
+
     /// `/data/blackbox` (§28) — preallocated, so a full disk cannot silence it.
     pub fn blackbox(&self) -> PathBuf {
         self.data().join("blackbox")

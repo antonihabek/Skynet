@@ -309,7 +309,7 @@
           }
         ]
       },
-      "expected": "{\"awarded\":\"guest\",\"expires_in_days\":null,\"failures\":[],\"missing\":[\"rhal.state.rate\",\"rhal.command.latency\",\"embodiment.descriptor.signed\",\"embodiment.limits.sourced\",\"embodiment.roles.coverage\",\"safety.watchdog.fires\",\"safety.envelope.clamps\",\"safety.estop.latency\",\"safety.ratelimit.enforced\",\"package.budget.enforced\",\"ota.rollback.works\",\"ota.safe_state.respected\",\"ota.safety_gate\",\"telemetry.blackbox.complete\",\"telemetry.replay.deterministic\",\"offline.reconcile.resumes\",\"security.identity.attested\"],\"reasons\":[\"host: 0 failing, 17 unmeasured.\",\"Claimed certified; the evidence supports guest.\"]}"
+      "expected": "{\"awarded\":\"guest\",\"expires_in_days\":null,\"failures\":[],\"missing\":[\"rhal.state.rate\",\"rhal.command.latency\",\"rhal.sensor.latency\",\"embodiment.descriptor.signed\",\"embodiment.limits.sourced\",\"embodiment.roles.coverage\",\"embodiment.capabilities.declared\",\"embodiment.frames.complete\",\"safety.watchdog.fires\",\"safety.envelope.clamps\",\"safety.estop.latency\",\"safety.ratelimit.enforced\",\"safety.command_loss.behaviour\",\"safety.homing.envelope\",\"package.budget.enforced\",\"ota.rollback.works\",\"ota.safe_state.respected\",\"ota.safety_gate\",\"telemetry.blackbox.complete\",\"telemetry.replay.deterministic\",\"offline.reconcile.resumes\",\"security.identity.attested\",\"power.safe_state.reachable\"],\"reasons\":[\"host: 0 failing, 23 unmeasured.\",\"Claimed certified; the evidence supports guest.\"]}"
     },
     {
       "id": "field-suspends",
@@ -769,6 +769,11 @@
             "ran_at": "2026-08-29T00:00:00Z"
           },
           {
+            "test_id": "rhal.sensor.latency",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
             "test_id": "embodiment.descriptor.valid",
             "outcome": "pass",
             "ran_at": "2026-08-29T00:00:00Z"
@@ -785,6 +790,16 @@
           },
           {
             "test_id": "embodiment.roles.coverage",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.capabilities.declared",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.frames.complete",
             "outcome": "pass",
             "ran_at": "2026-08-29T00:00:00Z"
           },
@@ -810,6 +825,16 @@
           },
           {
             "test_id": "safety.ratelimit.enforced",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.command_loss.behaviour",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.homing.envelope",
             "outcome": "pass",
             "ran_at": "2026-08-29T00:00:00Z"
           },
@@ -875,6 +900,11 @@
           },
           {
             "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "power.safe_state.reachable",
             "outcome": "pass",
             "ran_at": "2026-08-29T00:00:00Z"
           }
@@ -914,6 +944,11 @@
             "ran_at": "2026-08-29T00:00:00Z"
           },
           {
+            "test_id": "rhal.sensor.latency",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
             "test_id": "embodiment.descriptor.valid",
             "outcome": "pass",
             "ran_at": "2026-08-29T00:00:00Z"
@@ -930,6 +965,16 @@
           },
           {
             "test_id": "embodiment.roles.coverage",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.capabilities.declared",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.frames.complete",
             "outcome": "pass",
             "ran_at": "2026-08-29T00:00:00Z"
           },
@@ -955,6 +1000,16 @@
           },
           {
             "test_id": "safety.ratelimit.enforced",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.command_loss.behaviour",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.homing.envelope",
             "outcome": "pass",
             "ran_at": "2026-08-29T00:00:00Z"
           },
@@ -1020,6 +1075,11 @@
           },
           {
             "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "power.safe_state.reachable",
             "outcome": "pass",
             "ran_at": "2026-08-29T00:00:00Z"
           }
@@ -1131,6 +1191,11 @@
             "ran_at": "2026-08-29T00:00:00Z"
           },
           {
+            "test_id": "rhal.sensor.latency",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
             "test_id": "embodiment.descriptor.valid",
             "outcome": "pass",
             "ran_at": "2026-08-29T00:00:00Z"
@@ -1147,6 +1212,16 @@
           },
           {
             "test_id": "embodiment.roles.coverage",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.capabilities.declared",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.frames.complete",
             "outcome": "pass",
             "ran_at": "2026-08-29T00:00:00Z"
           },
@@ -1172,6 +1247,16 @@
           },
           {
             "test_id": "safety.ratelimit.enforced",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.command_loss.behaviour",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.homing.envelope",
             "outcome": "pass",
             "ran_at": "2026-08-29T00:00:00Z"
           },
@@ -1237,6 +1322,11 @@
           },
           {
             "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "power.safe_state.reachable",
             "outcome": "pass",
             "ran_at": "2026-08-29T00:00:00Z"
           }

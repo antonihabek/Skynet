@@ -1,0 +1,679 @@
+{
+  "corpus": "frames",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "resolves",
+      "note": "Every dynamic frame names a joint the body declares.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "shoulder",
+              "parent": "base_link",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.shoulder.pitch",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ],
+              "mass_kg": 1.4
+            },
+            {
+              "name": "forearm",
+              "parent": "shoulder",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.elbow.flex",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ]
+            },
+            {
+              "name": "tool0",
+              "parent": "forearm",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true
+            }
+          ]
+        },
+        "joints": [
+          "right_arm.shoulder.pitch",
+          "right_arm.elbow.flex"
+        ]
+      },
+      "expected": "{\"fault\":null}"
+    },
+    {
+      "id": "no-dynamic-frames",
+      "note": "A fixed tree names no joints, so there is nothing to resolve.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "tool0",
+              "parent": "base_link",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true
+            }
+          ]
+        },
+        "joints": []
+      },
+      "expected": "{\"fault\":null}"
+    },
+    {
+      "id": "dangling-joint",
+      "note": "A frame moves with a joint the body does not declare, which binds to nothing and never moves.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "shoulder",
+              "parent": "base_link",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.shoulder.pitch",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ],
+              "mass_kg": 1.4
+            },
+            {
+              "name": "forearm",
+              "parent": "shoulder",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.elbow.flex",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ]
+            },
+            {
+              "name": "tool0",
+              "parent": "forearm",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true
+            }
+          ]
+        },
+        "joints": [
+          "right_arm.shoulder.pitch"
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"dangling_joint\",\"detail\":\"Frame forearm moves with right_arm.elbow.flex, which the body does not declare. Nothing binds it, so its pose never resolves and both pose guards trip on it every cycle.\",\"subjects\":[\"forearm\",\"right_arm.elbow.flex\"]}}"
+    },
+    {
+      "id": "dangling-joint-empty-body",
+      "note": "A graph full of joints against a body that declares none — the first frame is the one named.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "shoulder",
+              "parent": "base_link",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.shoulder.pitch",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ],
+              "mass_kg": 1.4
+            },
+            {
+              "name": "forearm",
+              "parent": "shoulder",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.elbow.flex",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ]
+            },
+            {
+              "name": "tool0",
+              "parent": "forearm",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true
+            }
+          ]
+        },
+        "joints": []
+      },
+      "expected": "{\"fault\":{\"code\":\"dangling_joint\",\"detail\":\"Frame shoulder moves with right_arm.shoulder.pitch, which the body does not declare. Nothing binds it, so its pose never resolves and both pose guards trip on it every cycle.\",\"subjects\":[\"shoulder\",\"right_arm.shoulder.pitch\"]}}"
+    },
+    {
+      "id": "mimic-resolves",
+      "note": "A linkage following a joint the body declares.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "drive",
+              "parent": "base_link",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "hand.finger.flex",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ]
+            },
+            {
+              "name": "follower",
+              "parent": "drive",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "hand.finger.distal",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ],
+              "mimics": "hand.finger.flex",
+              "mimic_multiplier": -1,
+              "mimic_offset": 0
+            }
+          ]
+        },
+        "joints": [
+          "hand.finger.flex",
+          "hand.finger.distal"
+        ]
+      },
+      "expected": "{\"fault\":null}"
+    },
+    {
+      "id": "mimic-missing",
+      "note": "A linkage whose driver does not exist never moves.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "follower",
+              "parent": "base_link",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "hand.finger.distal",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ],
+              "mimics": "hand.finger.flex"
+            }
+          ]
+        },
+        "joints": [
+          "hand.finger.distal"
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"mimic_missing\",\"detail\":\"Frame follower follows hand.finger.flex, which the body does not declare. A linkage read from a joint nobody drives never resolves, and takes every frame below it with it.\",\"subjects\":[\"follower\",\"hand.finger.flex\"]}}"
+    },
+    {
+      "id": "mimic-self",
+      "note": "`value = multiplier × driver + offset` over one value is a fixed point, not a linkage.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "follower",
+              "parent": "base_link",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "hand.finger.flex",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ],
+              "mimics": "hand.finger.flex",
+              "mimic_multiplier": 2
+            }
+          ]
+        },
+        "joints": [
+          "hand.finger.flex"
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"mimic_self\",\"detail\":\"Frame follower follows the joint it is driven by. `value = multiplier × driver + offset` over one value is a fixed point, not a linkage.\",\"subjects\":[\"follower\",\"hand.finger.flex\"]}}"
+    },
+    {
+      "id": "mimic-coefficient-without-a-mimic",
+      "note": "A coefficient with nothing to multiply describes a linkage that does not exist.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "link",
+              "parent": "base_link",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "hand.finger.flex",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ],
+              "mimic_multiplier": -1
+            }
+          ]
+        },
+        "joints": [
+          "hand.finger.flex"
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"mimic_coefficient\",\"detail\":\"Frame link declares a mimic multiplier or offset and no `mimics`. A coefficient with nothing to multiply describes a linkage that does not exist.\",\"subjects\":[\"link\"]}}"
+    },
+    {
+      "id": "mimic-offset-without-a-mimic",
+      "note": "The offset alone is the same statement about a linkage that does not exist.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "link",
+              "parent": "base_link",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "mimic_offset": 0.5
+            }
+          ]
+        },
+        "joints": []
+      },
+      "expected": "{\"fault\":{\"code\":\"mimic_coefficient\",\"detail\":\"Frame link declares a mimic multiplier or offset and no `mimics`. A coefficient with nothing to multiply describes a linkage that does not exist.\",\"subjects\":[\"link\"]}}"
+    },
+    {
+      "id": "a-joint-with-no-frame-is-not-a-fault",
+      "note": "A partial tree is legitimate — §44.5 has the guard report unavailable naming the frame it wanted — so “complete” means every name resolves, not that the graph covers the body.",
+      "input": {
+        "graph": {
+          "root": "base_link",
+          "convention": "rep103",
+          "generator": "urdf",
+          "nodes": [
+            {
+              "name": "base_link",
+              "parent": null,
+              "kind": "root",
+              "collision": true
+            },
+            {
+              "name": "shoulder",
+              "parent": "base_link",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.shoulder.pitch",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ],
+              "mass_kg": 1.4
+            },
+            {
+              "name": "forearm",
+              "parent": "shoulder",
+              "kind": "dynamic",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true,
+              "joint": "right_arm.elbow.flex",
+              "joint_type": "revolute",
+              "axis": [
+                0,
+                1,
+                0
+              ]
+            },
+            {
+              "name": "tool0",
+              "parent": "forearm",
+              "kind": "static",
+              "translation": [
+                0,
+                0,
+                0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "source": "descriptor",
+              "collision": true
+            }
+          ]
+        },
+        "joints": [
+          "right_arm.shoulder.pitch",
+          "right_arm.elbow.flex",
+          "hand.gripper.open"
+        ]
+      },
+      "expected": "{\"fault\":null}"
+    }
+  ]
+}

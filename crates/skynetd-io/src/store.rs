@@ -3,7 +3,7 @@
 //! ```text
 //! resolve   the desired state names id, version and digest — already resolved, §37.4
 //! fetch     by sha256, skipping any blob already present
-//! verify    digest, then the release signature
+//! verify    digest here; the release signature in `crate::trust`
 //! admit     admitPackage() — budget, capabilities, grants, dependencies, scan verdict
 //! transport resolveTransport() against this body; a `refused` verdict fails the install
 //! stage     unpack into /data/packages/<digest>/, still inert
@@ -26,18 +26,22 @@
 //! and a robot that lost power there would come back with a policy nobody removed and nothing to
 //! run.
 //!
-//! # What is verified, and what is not
+//! # What this verifies, and what it deliberately leaves to somebody else
 //!
-//! The **digest** is: [`Store::stage`] hashes every file it writes, computes the version digest the
+//! The **digest**: [`Store::stage`] hashes every file it writes, computes the version digest the
 //! Hub computes, and refuses if it differs from the one the desired state named. That is the check
-//! that makes a content address mean something.
+//! that makes a content address mean something, and it is entirely a property of the bytes.
 //!
-//! The **signature** is not. §37.1 puts an Ed25519 verification against an operator-trusted key
-//! immediately after the digest, and this edition has no Ed25519 — so [`StagedPackage::signature`]
-//! reports [`Signature::NotChecked`] and every caller has to decide what to do about that, which is
-//! the point. A `bool` defaulting to `false` would have been read as "unsigned"; a `bool` defaulting
-//! to `true` would be a lie with a robot on the end of it. There is no third value that means
-//! "verified" until something can produce one.
+//! The **signature** is not checked here, and the reason is not that it cannot be — [`crate::trust`]
+//! checks it, and has since Ed25519 landed. It is that the two questions have different inputs.
+//! A digest is answerable from the files alone; *"signed by a key the operator trusts"* needs the
+//! trust store, which is configuration, which can change between two installs of the same bytes.
+//! Folding it in here would make staging depend on policy and give a content-addressed blob a
+//! verdict that expires.
+//!
+//! So a staged package carries no signature verdict at all. The caller holds the digest this
+//! returns, asks [`crate::trust::TrustStore::check`] about it, and hands both to admission. There
+//! is nowhere for a stale "verified" to be recorded, which is the property that matters.
 //!
 //! # The on-disk shape of a package, which the specification does not pin
 //!
@@ -82,33 +86,6 @@ pub const ROLLBACK_DEPTH: usize = 2;
 /// The manifest file at the root of a staged package.
 pub const MANIFEST_FILE: &str = "manifest.json";
 
-/// What is known about a package's release signature.
-///
-/// Three states rather than a `bool`, because "nobody checked" is a distinct fact from "checked and
-/// it failed" and collapsing them is how an unverified package becomes an unsigned one in a report
-/// somebody trusts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Signature {
-    /// No verification was performed. This edition has no Ed25519 (§37.1), and says so rather than
-    /// reporting a verdict it did not reach.
-    NotChecked,
-    /// Verified against a key the operator trusts.
-    Verified,
-    /// Checked and refused.
-    Failed,
-}
-
-impl Signature {
-    /// Whether this may be passed to admission as a verified signature.
-    ///
-    /// Only [`Signature::Verified`] may. `NotChecked` is deliberately *not* treated as verified,
-    /// which means every package this edition stages carries admission's `unsigned` finding — and
-    /// that is the correct report for a robot that cannot check a signature yet.
-    pub fn is_verified(self) -> bool {
-        self == Self::Verified
-    }
-}
-
 /// A package as it sits in the store, staged and possibly activated.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StagedPackage {
@@ -118,8 +95,6 @@ pub struct StagedPackage {
     pub digest: String,
     /// The `.sky` manifest as read from the blob.
     pub manifest: Json,
-    /// What is known about its signature.
-    pub signature: Signature,
 }
 
 /// Why a store operation failed.
@@ -292,7 +267,6 @@ impl Store {
             id: id.clone(),
             digest: observed,
             manifest,
-            signature: Signature::NotChecked,
         })
     }
 

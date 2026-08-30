@@ -207,6 +207,29 @@ export interface EmbodimentDescriptor {
   /** IK solvers resident on this robot. Empty means task-space retargeting is not available. */
   solvers: string[]
   /**
+   * Capability tokens this body **and its adapter** provide (§8).
+   *
+   * The set `admitPackage` checks a package's `embodiment.capabilities` against. It lives here
+   * rather than anywhere else for two reasons: this descriptor is produced by the adapter, for the
+   * body, so “the robot plus its adapter” is precisely what it is in a position to answer — and
+   * §11's invariant is that no decision on a robot requires a round trip, which rules out asking
+   * the Hub at install time on a machine that has been offline for a week.
+   *
+   * **Empty is a claim, not an absence.** A body that declares no capabilities provides none, and a
+   * package needing one is refused — the direction that fails safe. Deliberately not nullable:
+   * “nobody said what this robot can do” would leave admission choosing between refusing
+   * everything and admitting everything, and both are worse than requiring a vendor to write the
+   * list down.
+   */
+  capabilities?: string[]
+  /**
+   * Vendor extension tokens, beyond the canonical vocabulary.
+   *
+   * Separate from `capabilities` for the reason §5.1 keeps roles extensible: a token nobody
+   * standardised must be expressible without being mistaken for one that was.
+   */
+  extensions?: string[]
+  /**
    * Whether this body is simulated (§35.3, §70).
    *
    * The one field on this descriptor whose absence means `false` rather than "nobody said". A real
@@ -340,6 +363,11 @@ export interface FrameFault {
     | 'unknown_shape'
     | 'collision_mismatch'
     | 'ignore_missing'
+    // Raised by `validateFrameBindings`, which needs the joint list `validateFrames` never sees.
+    | 'dangling_joint'
+    | 'mimic_missing'
+    | 'mimic_self'
+    | 'mimic_coefficient'
     // Raised by `flatten`, once indices exist, rather than by `validateFrames`.
     | 'too_large'
     | 'unreachable'
@@ -486,6 +514,110 @@ export function validateFrames(graph: FrameGraph): FrameFault | null {
           detail:
             `Frame ${node.name} is permitted to touch ${ignored}, which is not one of the frames. ` +
             `An exception naming nothing excludes nothing.`,
+        }
+      }
+    }
+  }
+
+  return null
+}
+
+/**
+ * Check a frame graph against the joint list of the body it describes.
+ *
+ * `validateFrames` is deliberately graph-only: it is given a tree and asked whether the tree is
+ * well formed, and it answers without ever seeing the descriptor the tree came out of. That leaves
+ * one whole class of defect uncaught, because the two most important names in a dynamic frame —
+ * `joint` and `mimics` — do not refer to anything in the graph. They refer to the joint list.
+ *
+ * A name that does not resolve there presents far from its cause. The kernel binds channels by
+ * joint name, finds nothing for that frame, and `solve` marks it unresolved — so both pose guards
+ * trip on it, on every cycle, for as long as the descriptor says what it says. That is the correct
+ * behaviour and it is also useless: the robot holds still and the reason is a spelling in a file
+ * nothing was checking.
+ *
+ * §44.5 asks for better than that. A guard which cannot run is supposed to report so **when the
+ * lease is granted**, naming the frame, and `staticallyResolvable` is that mechanism — but it reads
+ * the joint's *kind*, so it catches a limb hanging below a ball joint and cannot catch a joint name
+ * that binds to nothing, because the joint list is not in the graph. This is what closes that gap:
+ * it turns a permanent in-cycle trip into a refusal while somebody is still looking at the file.
+ *
+ * So this is the second half of §44.3, and it is what `embodiment.frames.complete` measures that
+ * `validateFrames` cannot. Returns null when every name in the graph resolves.
+ *
+ * It does **not** require that every declared joint have a frame. A partial tree is legitimate —
+ * a gripper whose fingers nobody modelled is a body with joints and no frames for them — and
+ * §44.5 already has the guard report unavailable naming the frame it wanted. "Complete" here means
+ * every name the graph uses resolves, not that the graph covers the body.
+ */
+export function validateFrameBindings(
+  graph: FrameGraph,
+  joints: readonly string[],
+): FrameFault | null {
+  const declared = new Set(joints)
+
+  for (const node of graph.nodes) {
+    if (node.kind === 'dynamic' && node.joint !== undefined && node.joint !== null) {
+      if (!declared.has(node.joint)) {
+        return {
+          code: 'dangling_joint',
+          subjects: [node.name, node.joint],
+          detail:
+            `Frame ${node.name} moves with ${node.joint}, which the body does not declare. ` +
+            'Nothing binds it, so its pose never resolves and both pose guards trip on it every ' +
+            'cycle.',
+        }
+      }
+    }
+
+    const mimics = node.mimics
+    const hasCoefficient = node.mimic_multiplier !== undefined || node.mimic_offset !== undefined
+
+    if (mimics === undefined || mimics === null) {
+      if (hasCoefficient) {
+        return {
+          code: 'mimic_coefficient',
+          subjects: [node.name],
+          detail:
+            `Frame ${node.name} declares a mimic multiplier or offset and no \`mimics\`. ` +
+            'A coefficient with nothing to multiply describes a linkage that does not exist.',
+        }
+      }
+      continue
+    }
+
+    if (!declared.has(mimics)) {
+      return {
+        code: 'mimic_missing',
+        subjects: [node.name, mimics],
+        detail:
+          `Frame ${node.name} follows ${mimics}, which the body does not declare. ` +
+          'A linkage read from a joint nobody drives never resolves, and takes every frame below ' +
+          'it with it.',
+      }
+    }
+
+    if (node.joint === mimics) {
+      return {
+        code: 'mimic_self',
+        subjects: [node.name, mimics],
+        detail:
+          `Frame ${node.name} follows the joint it is driven by. ` +
+          '`value = multiplier × driver + offset` over one value is a fixed point, not a linkage.',
+      }
+    }
+
+    for (const [label, value] of [
+      ['mimic_multiplier', node.mimic_multiplier],
+      ['mimic_offset', node.mimic_offset],
+    ] as const) {
+      if (value !== undefined && !Number.isFinite(value)) {
+        return {
+          code: 'mimic_coefficient',
+          subjects: [node.name],
+          detail:
+            `Frame ${node.name} declares ${label} as a value that is not a finite number. ` +
+            'A linkage computed from it produces a pose that is not one.',
         }
       }
     }

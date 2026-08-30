@@ -46,14 +46,14 @@
           ],
           "installed": []
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:pkg"
       },
       "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[]}"
     },
     {
-      "id": "unsigned",
-      "note": "Bytes may be intact and nobody has attested to who produced them.",
+      "id": "signature-absent",
+      "note": "Nobody signed it. The bytes may be intact and nobody has attested to who produced them.",
       "input": {
         "manifest": {
           "schema_version": 1,
@@ -95,10 +95,157 @@
           ],
           "installed": []
         },
-        "signature_verified": false,
+        "signature": "absent",
         "observed_digest": "sha256:pkg"
       },
-      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"unsigned\",\"message\":\"No verified publisher signature. The bytes may be intact and nobody has attested to who produced them.\",\"severity\":\"error\"}]}"
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"unsigned\",\"message\":\"No publisher signature accompanied this package. The bytes may be intact and nobody has attested to who produced them.\",\"severity\":\"error\"}]}"
+    },
+    {
+      "id": "signature-failed",
+      "note": "A signature was present and did not verify. The one state that says something went wrong rather than something is missing.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "failed",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"signature_failed\",\"message\":\"A release signature was present and did not verify. The bytes are not the ones the signer attested to — treat this as tampering until somebody proves otherwise.\",\"severity\":\"error\"}]}"
+    },
+    {
+      "id": "signature-untrusted",
+      "note": "It verified, against a key nobody here has trusted. Nothing is wrong with the bytes; what is missing is a decision.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "untrusted",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"signature_untrusted\",\"message\":\"A release signature verified, and the key that made it is not one this robot trusts. Nothing is wrong with the bytes; what is missing is the operator's decision that this signer may publish here.\",\"severity\":\"error\"}]}"
+    },
+    {
+      "id": "signature-unverifiable",
+      "note": "The platform cannot check. A gap in the operating system rather than in the package, and the remedy belongs on a different desk.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "unverifiable",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"signature_unverifiable\",\"message\":\"This platform cannot verify a release signature, so nothing has established who produced these bytes. That is a gap in the operating system rather than in the package.\",\"severity\":\"error\"}]}"
     },
     {
       "id": "digest-mismatch",
@@ -144,7 +291,7 @@
           ],
           "installed": []
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:other"
       },
       "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"digest_mismatch\",\"message\":\"The package contents do not hash to the digest in its manifest.\",\"severity\":\"error\",\"subjects\":[\"sha256:pkg\",\"sha256:other\"]}]}"
@@ -193,7 +340,7 @@
           ],
           "installed": []
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:pkg"
       },
       "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"isolation_violation\",\"message\":\"A policy package may not run unsandboxed. Only drivers touch hardware directly.\",\"severity\":\"error\"}]}"
@@ -242,7 +389,7 @@
           ],
           "installed": []
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:pkg"
       },
       "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[]}"
@@ -291,7 +438,7 @@
           ],
           "installed": []
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:pkg"
       },
       "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"budget_exceeded\",\"message\":\"This robot cannot supply the resources the package declares it needs.\",\"severity\":\"error\",\"subjects\":[\"RAM: needs 512 MB, has 256 MB\"]}]}"
@@ -340,7 +487,7 @@
           ],
           "installed": []
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:pkg"
       },
       "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"budget_exceeded\",\"message\":\"This robot cannot supply the resources the package declares it needs.\",\"severity\":\"error\",\"subjects\":[\"RAM: needs 512 MB, has 128 MB\",\"VRAM: needs 2048 MB, has 512 MB\",\"Disk: needs 4096 MB, has 100 MB\",\"CPU: needs 2 cores, has 1\"]}]}"
@@ -386,7 +533,7 @@
           ],
           "installed": []
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:pkg"
       },
       "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"budget_exceeded\",\"message\":\"This robot cannot supply the resources the package declares it needs.\",\"severity\":\"error\",\"subjects\":[\"VRAM: needs 2048 MB, has 0 MB\",\"Disk: needs 4096 MB, has 0 MB\",\"CPU: needs 2 cores, has 0\"]}]}"
@@ -436,7 +583,7 @@
           ],
           "installed": []
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:pkg"
       },
       "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"over_request\",\"message\":\"The package requests permissions it never declared a need for.\",\"severity\":\"error\",\"subjects\":[\"locomotion.walk\"]}]}"
@@ -488,7 +635,7 @@
             "manipulation.grasp"
           ]
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:pkg"
       },
       "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"capability_denied\",\"message\":\"The operator profile withholds capabilities this package requires.\",\"severity\":\"error\",\"subjects\":[\"manipulation.grasp\"]}]}"
@@ -536,7 +683,7 @@
           ],
           "installed": []
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:pkg"
       },
       "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"capability_ungranted\",\"message\":\"This robot does not provide capabilities the package requires.\",\"severity\":\"error\",\"subjects\":[\"manipulation.grasp\"]}]}"
@@ -583,7 +730,7 @@
           "granted": [],
           "installed": []
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:pkg"
       },
       "expected": "{\"admitted\":true,\"effective_grants\":[],\"findings\":[{\"code\":\"capability_ungranted\",\"message\":\"These capabilities are awaiting an operator grant. The package installs and cannot use them until it is given.\",\"severity\":\"warning\",\"subjects\":[\"manipulation.grasp\"]}]}"
@@ -638,7 +785,7 @@
           ],
           "installed": []
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:pkg"
       },
       "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"missing_dependency\",\"message\":\"Requires acme/vision ^2.0.0, which is not installed.\",\"severity\":\"error\",\"subjects\":[\"acme/vision\"]}]}"
@@ -698,7 +845,7 @@
             }
           ]
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:pkg"
       },
       "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[]}"
@@ -748,7 +895,7 @@
           ],
           "installed": []
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:pkg"
       },
       "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"os_too_old\",\"message\":\"Requires Skynet OS 2.0.0 or later; this robot runs 1.2.0.\",\"severity\":\"error\"}]}"
@@ -798,7 +945,7 @@
           ],
           "installed": []
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:pkg"
       },
       "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[]}"
@@ -847,7 +994,7 @@
           ],
           "installed": []
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:pkg",
         "transport_verdict": "refused"
       },
@@ -897,7 +1044,7 @@
           ],
           "installed": []
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:pkg",
         "transport_verdict": "degraded"
       },
@@ -947,7 +1094,7 @@
           ],
           "installed": []
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:pkg",
         "executes_on_load": true
       },
@@ -997,7 +1144,7 @@
           ],
           "installed": []
         },
-        "signature_verified": true,
+        "signature": "verified",
         "observed_digest": "sha256:pkg",
         "executes_on_load": true,
         "trust_remote_code": true
@@ -1049,10 +1196,10 @@
           ],
           "installed": []
         },
-        "signature_verified": false,
+        "signature": "failed",
         "observed_digest": "sha256:other"
       },
-      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"unsigned\",\"message\":\"No verified publisher signature. The bytes may be intact and nobody has attested to who produced them.\",\"severity\":\"error\"},{\"code\":\"digest_mismatch\",\"message\":\"The package contents do not hash to the digest in its manifest.\",\"severity\":\"error\",\"subjects\":[\"sha256:pkg\",\"sha256:other\"]},{\"code\":\"isolation_violation\",\"message\":\"A policy package may not run unsandboxed. Only drivers touch hardware directly.\",\"severity\":\"error\"},{\"code\":\"budget_exceeded\",\"message\":\"This robot cannot supply the resources the package declares it needs.\",\"severity\":\"error\",\"subjects\":[\"RAM: needs 512 MB, has 64 MB\"]},{\"code\":\"over_request\",\"message\":\"The package requests permissions it never declared a need for.\",\"severity\":\"error\",\"subjects\":[\"locomotion.walk\"]}]}"
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"signature_failed\",\"message\":\"A release signature was present and did not verify. The bytes are not the ones the signer attested to — treat this as tampering until somebody proves otherwise.\",\"severity\":\"error\"},{\"code\":\"digest_mismatch\",\"message\":\"The package contents do not hash to the digest in its manifest.\",\"severity\":\"error\",\"subjects\":[\"sha256:pkg\",\"sha256:other\"]},{\"code\":\"isolation_violation\",\"message\":\"A policy package may not run unsandboxed. Only drivers touch hardware directly.\",\"severity\":\"error\"},{\"code\":\"budget_exceeded\",\"message\":\"This robot cannot supply the resources the package declares it needs.\",\"severity\":\"error\",\"subjects\":[\"RAM: needs 512 MB, has 64 MB\"]},{\"code\":\"over_request\",\"message\":\"The package requests permissions it never declared a need for.\",\"severity\":\"error\",\"subjects\":[\"locomotion.walk\"]}]}"
     }
   ]
 }

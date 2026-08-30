@@ -35,7 +35,7 @@ import {
   type Meta as RingMeta, type Shape as RingShape,
 } from '../../reference/typescript/blackbox.ts'
 import {
-  parseRole, resolveTransport, roleKey, validateFrames,
+  parseRole, resolveTransport, roleKey, validateFrameBindings, validateFrames,
   type ActionChannel, type EmbodimentDescriptor, type FrameGraph, type FrameNode,
   type ResolveTransportOptions, type SourceEmbodiment,
 } from '../../reference/typescript/embodiment.ts'
@@ -866,7 +866,7 @@ function admissionCase(
   const params: AdmissionParams = {
     manifest: manifest(),
     capacity: capacity(),
-    signature_verified: true,
+    signature: 'verified',
     observed_digest: 'sha256:pkg',
     ...overrides,
   }
@@ -878,8 +878,22 @@ function admissionCase(
 }
 
 admissionCase('clean', 'Everything declared, provided and granted.')
-admissionCase('unsigned', 'Bytes may be intact and nobody has attested to who produced them.',
-  { signature_verified: false })
+// The four signature states that are findings, each its own case.
+//
+// They were one case and one boolean until the twelfth session, and the collapse mattered: an
+// operator reading `unsigned` could not tell whether to chase a publisher, upgrade the OS, or stop
+// and investigate. `untrusted` joined them the moment a verifier existed to discover it — a
+// signature can be entirely valid and made by a stranger, and the remedy for that is in the trust
+// store rather than anywhere near the package. Four cases because there are four different jobs at
+// the end of them.
+admissionCase('signature-absent', 'Nobody signed it. The bytes may be intact and nobody has attested to who produced them.',
+  { signature: 'absent' })
+admissionCase('signature-failed', 'A signature was present and did not verify. The one state that says something went wrong rather than something is missing.',
+  { signature: 'failed' })
+admissionCase('signature-untrusted', 'It verified, against a key nobody here has trusted. Nothing is wrong with the bytes; what is missing is a decision.',
+  { signature: 'untrusted' })
+admissionCase('signature-unverifiable', 'The platform cannot check. A gap in the operating system rather than in the package, and the remedy belongs on a different desk.',
+  { signature: 'unverifiable' })
 admissionCase('digest-mismatch', 'The contents do not hash to the manifest digest.',
   { observed_digest: 'sha256:other' })
 admissionCase('isolation-violation', 'Only drivers touch hardware directly.',
@@ -922,7 +936,7 @@ admissionCase('executes-on-load-trusted', 'The same package, once the operator h
 admissionCase('every-finding-at-once',
   'Four problems reported together, because fixing them one deployment at a time is how people end up granting everything.',
   {
-    signature_verified: false,
+    signature: 'failed',
     observed_digest: 'sha256:other',
     manifest: manifest({ isolation: 'native', requests: ['manipulation.grasp', 'locomotion.walk'] }),
     capacity: capacity({ ram_mb: 64 }),
@@ -1112,6 +1126,94 @@ framesCase('collision-ignore-missing', 'An exception naming nothing excludes not
     frameNode('base_link', null),
     frameNode('torso', 'base_link', { collision_shape: CAPSULE, collision_ignore: ['pelvis'] }),
   ]))
+
+// ── frames against the joint list, §44.3 ───────────────────────────────────────────
+//
+// The half `validateFrames` cannot see. `joint` and `mimics` are the two names in a dynamic frame
+// that do not refer to the graph — they refer to the descriptor's joint list — and a name that
+// does not resolve there leaves the frame unresolvable on every cycle. Both pose guards then trip
+// on it, correctly and forever, which is a robot holding still for a reason that is a spelling.
+//
+// This is what `embodiment.frames.complete` measures, so the vectors are here rather than in a
+// vendor's memory.
+
+function bindingsCase(id: string, note: string, input: FrameGraph, joints: string[]): void {
+  add('frames', 'bindings', {
+    id, note,
+    input: { graph: input, joints },
+    expected: canonical(shapeFrameFault(validateFrameBindings(input, joints))),
+  })
+}
+
+bindingsCase('resolves', 'Every dynamic frame names a joint the body declares.',
+  ARM_FRAMES, ['right_arm.shoulder.pitch', 'right_arm.elbow.flex'])
+bindingsCase('no-dynamic-frames', 'A fixed tree names no joints, so there is nothing to resolve.',
+  graph([frameNode('base_link', null), frameNode('tool0', 'base_link')]), [])
+bindingsCase('dangling-joint',
+  'A frame moves with a joint the body does not declare, which binds to nothing and never moves.',
+  ARM_FRAMES, ['right_arm.shoulder.pitch'])
+bindingsCase('dangling-joint-empty-body',
+  'A graph full of joints against a body that declares none — the first frame is the one named.',
+  ARM_FRAMES, [])
+bindingsCase('mimic-resolves', 'A linkage following a joint the body declares.',
+  graph([
+    frameNode('base_link', null),
+    frameNode('drive', 'base_link', {
+      kind: 'dynamic', joint: 'hand.finger.flex', joint_type: 'revolute', axis: [0, 1, 0],
+    }),
+    frameNode('follower', 'drive', {
+      kind: 'dynamic', joint: 'hand.finger.distal', joint_type: 'revolute', axis: [0, 1, 0],
+      mimics: 'hand.finger.flex', mimic_multiplier: -1, mimic_offset: 0,
+    }),
+  ]), ['hand.finger.flex', 'hand.finger.distal'])
+bindingsCase('mimic-missing', 'A linkage whose driver does not exist never moves.',
+  graph([
+    frameNode('base_link', null),
+    frameNode('follower', 'base_link', {
+      kind: 'dynamic', joint: 'hand.finger.distal', joint_type: 'revolute', axis: [0, 1, 0],
+      mimics: 'hand.finger.flex',
+    }),
+  ]), ['hand.finger.distal'])
+bindingsCase('mimic-self',
+  '`value = multiplier × driver + offset` over one value is a fixed point, not a linkage.',
+  graph([
+    frameNode('base_link', null),
+    frameNode('follower', 'base_link', {
+      kind: 'dynamic', joint: 'hand.finger.flex', joint_type: 'revolute', axis: [0, 1, 0],
+      mimics: 'hand.finger.flex', mimic_multiplier: 2,
+    }),
+  ]), ['hand.finger.flex'])
+bindingsCase('mimic-coefficient-without-a-mimic',
+  'A coefficient with nothing to multiply describes a linkage that does not exist.',
+  graph([
+    frameNode('base_link', null),
+    frameNode('link', 'base_link', {
+      kind: 'dynamic', joint: 'hand.finger.flex', joint_type: 'revolute', axis: [0, 1, 0],
+      mimic_multiplier: -1,
+    }),
+  ]), ['hand.finger.flex'])
+bindingsCase('mimic-offset-without-a-mimic',
+  'The offset alone is the same statement about a linkage that does not exist.',
+  graph([
+    frameNode('base_link', null),
+    frameNode('link', 'base_link', { mimic_offset: 0.5 }),
+  ]), [])
+// The non-finite coefficient rule has **no case here, and cannot have one.** This generator writes
+// every input through `JSON.stringify`, which renders infinity as `null`, so the frozen input would
+// be a *different* body from the one the expectation was computed from — worse than no case at
+// all, because it would fail an edition for reading the file correctly.
+//
+// The two editions also reach that branch differently, which is worth writing down. `1e999` is
+// valid JSON syntax. `crates/skynet-json` refuses it at parse — “a literal so large it overflows to
+// infinity is a corrupt corpus file, not a value” — so in the Rust edition the document is rejected
+// before `validate_frame_bindings` runs at all, and the branch is reachable only from a graph built
+// in memory. This oracle has no parser; whoever calls it reaches it through `JSON.parse`, which
+// answers `Infinity`, and this check is the only thing standing between that and an infinite pose.
+// So the rule belongs in both editions and is load-bearing in exactly one of them.
+bindingsCase('a-joint-with-no-frame-is-not-a-fault',
+  'A partial tree is legitimate — §44.5 has the guard report unavailable naming the frame it wanted — so “complete” means every name resolves, not that the graph covers the body.',
+  ARM_FRAMES,
+  ['right_arm.shoulder.pitch', 'right_arm.elbow.flex', 'hand.gripper.open'])
 
 // ── kinematics ───────────────────────────────────────────────────────────────
 //

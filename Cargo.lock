@@ -44,6 +44,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "skynet-ed25519"
+version = "0.1.0"
+dependencies = [
+ "skynet-ed25519",
+]
+
+[[package]]
 name = "skynet-json"
 version = "0.1.0"
 
@@ -81,6 +88,7 @@ version = "0.1.0"
 dependencies = [
  "skynet-blackbox",
  "skynet-contracts",
+ "skynet-ed25519",
  "skynet-json",
  "skynet-sha256",
  "skynetd",

@@ -37,7 +37,7 @@ export const SCTS_SUITES = ['sim', 'bench', 'field'] as const
 export type SctsSuite = (typeof SCTS_SUITES)[number]
 
 export const SCTS_AREAS = [
-  'rhal', 'embodiment', 'safety', 'package', 'ota', 'telemetry', 'offline', 'security',
+  'rhal', 'embodiment', 'safety', 'package', 'ota', 'telemetry', 'offline', 'security', 'power',
 ] as const
 export type SctsArea = (typeof SCTS_AREAS)[number]
 
@@ -78,6 +78,8 @@ export const SCTS_TESTS: SctsTest[] = [
     measures: 'Time from a command accepted at the RHAL boundary to measurable joint motion. The number the descriptor must declare.' },
   { id: 'rhal.command.rejection', suite: 'sim', area: 'rhal', required_from: 'guest',
     measures: 'The driver rejects a command naming a joint that does not exist, rather than ignoring it.' },
+  { id: 'rhal.sensor.latency', suite: 'bench', area: 'rhal', required_from: 'host', quantitative: true, unit: 'ms',
+    measures: 'Per sensor: time from the observed event to the timestamp the frame carries. A backend that stamps arrival rather than capture fails, because a queue delay folded into a timestamp is a number the policy treats as ground truth (§47.2).' },
 
   // ── Embodiment: the body as an interface ────────────────────────────────
   { id: 'embodiment.descriptor.valid', suite: 'sim', area: 'embodiment', required_from: 'guest',
@@ -90,6 +92,10 @@ export const SCTS_TESTS: SctsTest[] = [
     measures: 'Measured joint velocity and torque against the declared ratings under load. A body that cannot reach what it claims fails as surely as one that exceeds it.' },
   { id: 'embodiment.roles.coverage', suite: 'sim', area: 'embodiment', required_from: 'host', quantitative: true, unit: '%',
     measures: 'Share of actuated joints carrying a canonical role. Below full coverage, cross-body transport degrades to exact-name matching.' },
+  { id: 'embodiment.capabilities.declared', suite: 'sim', area: 'embodiment', required_from: 'host',
+    measures: 'Every capability token the descriptor declares is one the driver can actually service, and every token a resident package requires appears in the list. The set is what admission checks a package against (§8), so a body claiming a capability it does not have admits a package that will command hardware nobody fitted.' },
+  { id: 'embodiment.frames.complete', suite: 'sim', area: 'embodiment', required_from: 'host',
+    measures: 'The descriptor carries a §44.3 frame graph that is a single rooted tree, every dynamic node names a joint the descriptor declares, every mimic names a driver present in the tree, and every collision shape is one this edition can evaluate. Absent or null is not a failure of this test — it is the two pose guards reporting unavailable, which §44.5 permits — but a graph that is present and wrong is.' },
 
   // ── Safety: the claims that must not be wrong ───────────────────────────
   { id: 'safety.kernel.parity', suite: 'sim', area: 'safety', required_from: 'guest',
@@ -104,6 +110,10 @@ export const SCTS_TESTS: SctsTest[] = [
     measures: 'The application processor is halted mid-motion. The robot must still stop, proving the stop path does not run through it.' },
   { id: 'safety.ratelimit.enforced', suite: 'bench', area: 'safety', required_from: 'host',
     measures: 'A single-cycle step from zero to full scale produces a ramp at the configured jerk ceiling, not a step.' },
+  { id: 'safety.command_loss.behaviour', suite: 'bench', area: 'safety', required_from: 'host',
+    measures: 'Commands stop and the drives are observed at the joint. What they do must be what `on_command_loss` declares (§46.2). A body observed to coast may not claim host, because the watchdog chain’s own recovery path is, on that machine, a fall.' },
+  { id: 'safety.homing.envelope', suite: 'bench', area: 'safety', required_from: 'host',
+    measures: 'The driver-provided homing procedure is run and the joints are watched. No joint exceeds the restricted homing envelope the descriptor declares (§48.3). Homing is not an exemption from the kernel; it is a narrower envelope. A body that declares it needs no homing records not_applicable.' },
   { id: 'safety.policy.isolation', suite: 'sim', area: 'safety', required_from: 'guest',
     measures: 'A sandboxed package holding an actuator file descriptor is refused; the sandbox has no path to one.' },
 
@@ -142,6 +152,10 @@ export const SCTS_TESTS: SctsTest[] = [
     measures: 'The device key is held in a secure element or TPM and check-ins carry an attestation of the running image digest.' },
   { id: 'security.credential.scope', suite: 'sim', area: 'security', required_from: 'guest',
     measures: 'A device credential lifted from the robot cannot read repositories, claim jobs, or write to another namespace.' },
+
+  // ── Power: the energy the robot keeps back ──────────────────────────────
+  { id: 'power.safe_state.reachable', suite: 'bench', area: 'power', required_from: 'host', quantitative: true, unit: 's',
+    measures: 'From full rated load, the robot is taken to its nearest safe state and timed, against the `time_to_safe_state_s` it declares (§36.2). The reserve budget is computed from that figure, so a body that declares two seconds and takes six has a third of the reserve it needs.' },
 ]
 
 // ── Results and certification ────────────────────────────────────────────────

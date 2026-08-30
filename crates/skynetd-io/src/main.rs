@@ -44,12 +44,16 @@ skynetd — the Skynet OS supervisor
   skynetd [--root <dir>] [--lan <addr:port>] [--interval <ms>]
   skynetd once [--root <dir>]
   skynetd stage <dir> --id <ns/name> --kind <kind> --version <v> --digest <hex>
+              [--signed-by <64 hex key>] [--signature <128 hex>]
   skynetd credential add --label <name> --role observer|operator|admin
 
   --root       Where /data and /run live. Default `/`.
   --lan        Also serve the console on a link-local address. Refused if it is routable (§34.2).
   --interval   Reconcile period in milliseconds. Default 10000.
   --user       Use the calling user's systemd manager rather than the system one.
+  --signed-by  The public key that signed this version's digest, and
+  --signature  the signature it made. Both or neither; a signature with no key names nobody.
+               Checked against <root>/data/state/trust.json (§19, §37.1).
 
   The local socket is always served, at <root>/run/skynetd.sock.";
 
@@ -447,10 +451,82 @@ fn stage(argv: &[String]) -> i32 {
         }
     };
 
+    // §37.1's `verify` step is "digest, then Ed25519 signature against a key the operator trusts",
+    // and this is where the second half arrives. The two flags are read before staging so a
+    // half-given signature is a usage error rather than something discovered after the bytes are
+    // on disk — a signature with no key names nobody, and a key with no signature signs nothing.
+    let signed = match (flag(argv, "--signed-by"), flag(argv, "--signature")) {
+        (None, None) => None,
+        (Some(key), Some(value)) => {
+            let mut document = Json::obj();
+            document
+                .set("key", Json::from(key.as_str()))
+                .set("value", Json::from(value.as_str()));
+            match skynetd_io::trust::SignedBy::from_json(&document) {
+                Ok(signed) => Some(signed),
+                Err(error) => {
+                    eprintln!("skynetd: {}", error.reason());
+                    return 1;
+                }
+            }
+        }
+        (Some(_), None) => {
+            eprintln!(
+                "skynetd: --signed-by names a key and no --signature accompanies it. A key that \
+                 signed nothing attests to nothing"
+            );
+            return 1;
+        }
+        (None, Some(_)) => {
+            eprintln!(
+                "skynetd: --signature carries a signature and no --signed-by names the key that \
+                 made it. An Ed25519 signature does not say who produced it, so a robot given one \
+                 without a key cannot tell a stranger from a forgery"
+            );
+            return 1;
+        }
+    };
+
     match store.stage(&id, &kind, &version, &digest, &PathBuf::from(source)) {
         Ok(staged) => {
             println!("staged {} {}", staged.id, staged.digest);
-            println!("signature: not checked — this edition has no Ed25519 (§37.1)");
+
+            // The trust store is read here rather than held, because it is a file an operator edits
+            // and the next stage should see the key they just added.
+            let trust = skynetd_io::trust::TrustStore::load(store.layout());
+            for line in trust.notices() {
+                println!("{line}");
+            }
+            let verdict = trust.check(
+                &skynetd_io::trust::package_message(&staged.digest),
+                signed.as_ref(),
+            );
+
+            // §37.1 puts admission between `verify` and `stage`. It reports rather than gates here
+            // — the blob is inert until something activates it — and `skynetd_io::admit` carries
+            // the argument for where the gate does live.
+            let body = skynetd_io::embodiment::load(store.layout());
+            let capacity = skynetd_io::capacity::read(&store, &body, skynetd_io::api::VERSION);
+            let manifest = match skynet_contracts::json::manifest_from_json(&staged.manifest) {
+                Ok(manifest) => Some(manifest),
+                Err(error) => {
+                    // The store verified the digest over this manifest, so it is the manifest the
+                    // publisher signed — and it still may not decode into the shape admission
+                    // needs. Saying so beats an empty report.
+                    println!("admission: not run — the manifest does not decode: {error:?}");
+                    None
+                }
+            };
+            if let Some(manifest) = manifest {
+                for line in skynetd_io::admit::to_lines(&skynetd_io::admit::run(
+                    &manifest,
+                    &capacity,
+                    &staged.digest,
+                    verdict.into(),
+                )) {
+                    println!("{line}");
+                }
+            }
             0
         }
         Err(error) => {

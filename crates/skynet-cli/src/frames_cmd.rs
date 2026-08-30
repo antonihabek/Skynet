@@ -15,12 +15,17 @@
 //! * **What will the guards be able to do?** Which frames the `workspace` guard could constrain,
 //!   how many frames carry geometry the `self_collision` guard can evaluate, and how many pairs
 //!   that costs per cycle.
+//! * **Does every name in the tree resolve?** `joint` and `mimics` name entries in the joint list
+//!   rather than anything in the graph, so a typo in either is invisible to a validator given only
+//!   the tree. On the robot it is not silent — it is permanent: the frame never resolves and both
+//!   pose guards trip on it every cycle, correctly, for a reason no report traces back to a
+//!   spelling.
 //!
 //! The last one is the reason this is a command rather than a debugging print. §7.2's rule is that
 //! a guard which cannot run says so — and a vendor reading "1 collision body, 0 pairs" here has
 //! learned something they would otherwise learn from a guard silently doing nothing.
 
-use skynet_contracts::embodiment::FrameGraph;
+use skynet_contracts::embodiment::{validate_frame_bindings, FrameGraph};
 use skynet_contracts::json::frames_from_json;
 use skynet_contracts::kinematics::flatten;
 use skynet_json::Json;
@@ -96,6 +101,31 @@ pub fn run(rest: &[String]) -> i32 {
             )
         });
     };
+
+    // The joint list is the other half of §44.3, and the only place the two halves meet is here.
+    // A `joint` or `mimics` that names nothing is not a malformed tree — `flatten` accepts it
+    // happily — it is a frame whose pose never resolves, which both pose guards then trip on every
+    // cycle. So it is a refusal rather than a warning: the alternative is a robot that holds still
+    // and a report that does not say why.
+    //
+    // A descriptor with no `joints` array at all is a different statement and is left alone: this
+    // command is run on partial descriptors while one is being written, and refusing every frame
+    // in the tree because the joint list has not been filled in yet would make it unusable for
+    // the job it exists for.
+    if let Some(joints) = document.get_present("joints").and_then(Json::as_arr) {
+        let names: Vec<&str> = joints
+            .iter()
+            .filter_map(|joint| joint.get("name").and_then(Json::as_str))
+            .collect();
+        if let Some(fault) = validate_frame_bindings(&graph, &names) {
+            let subjects = if fault.subjects.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", fault.subjects.join(", "))
+            };
+            return term::fail(&format!("{}{subjects}: {}", fault.code, fault.detail));
+        }
+    }
 
     let flat = match flatten(&graph) {
         Ok(flat) => flat,

@@ -156,6 +156,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # §32.2. The console's script is `include_str!`'d, which means Rust sees a string: a missing
+      # brace compiles, ships, serves with a 200, and produces a blank page on a robot with every
+      # test in `console.rs` still green. This is the only check that can catch it, and a blank
+      # console is a robot whose stop button is gone.
+      - name: The console's script parses
+        run: node --check crates/skynetd-io/console/console.js
 
       # §7.4. The sentence the product is not allowed to shorten. It lives in the kernel as a
       # constant, and a surface that mentions the certified tier without it is a surface making a
@@ -208,7 +218,7 @@ jobs:
       # Every other crate can be, and stays that way.
       - name: Everything but the ABI and the loader forbids unsafe
         run: |
-          for crate in skynet-json skynet-sha256 skynet-kernel skynet-contracts skynet-urdf skynetd skynetd-io skynet-blackbox; do
+          for crate in skynet-json skynet-sha256 skynet-ed25519 skynet-kernel skynet-contracts skynet-urdf skynetd skynetd-io skynet-blackbox; do
             grep -q 'forbid(unsafe_code)' "crates/$crate/src/lib.rs" || {
               echo "::error::crates/$crate dropped forbid(unsafe_code)."
               exit 1
@@ -364,6 +374,71 @@ jobs:
               exit 1
             }
           done
+
+      # §38.1, and the hole Ed25519 closed. The desired state is a file on the robot's own disk —
+      # which is exactly where §38.1 puts the attacker, "somebody editing limits on a robot's disk"
+      # — so a document that could assert its own `"verified": true` let anybody who could raise the
+      # kernel's ceilings also raise the claim that somebody had checked them. The decoder must
+      # never read that key; only a signature verified on the robot may set it.
+      - name: A profile cannot assert its own verification
+        run: |
+          if grep -nE 'get\("verified"\)|string\(raw, "verified"\)' crates/skynetd/src/desired.rs; then
+            echo "::error::the desired-state decoder read a `verified` key from the document."
+            echo "§38.1: the interesting attacker is somebody editing limits on the robot's disk,"
+            echo "and the desired state is on the robot's disk. The verdict is skynetd-io's, from"
+            echo "the signature and the trust store, and never the document's own claim."
+            exit 1
+          fi
+          grep -q 'fn verify_profile' crates/skynetd-io/src/runtime.rs
+
+      # §19. "A driver runs native and must therefore be signed by a key the operator has trusted."
+      # The gate is at activation, because a staged blob is inert and the symlink swap is the
+      # consequential moment. Losing it would leave a report that says `signature_untrusted` next to
+      # a robot that loaded the code anyway.
+      - name: A driver does not activate without a trusted signature
+        run: |
+          grep -q 'fn driver_signature_refusal' crates/skynetd-io/src/runtime.rs
+          grep -q 'driver_signature_refusal' crates/skynetd-io/src/runtime.rs
+          # The refusal is reached from the activation arm, not merely defined.
+          grep -A4 'ActionKind::ActivatePackage' crates/skynetd-io/src/runtime.rs \
+            | grep -q 'driver_signature_refusal' || {
+              echo "::error::ActivatePackage no longer consults §19's driver signature gate."
+              exit 1
+            }
+
+      # §19. `skynet-ed25519` verifies; it signs only under `test-signing`, because signing
+      # multiplies a secret scalar and the implementation is not constant-time. A robot holds public
+      # keys and nothing else, so the signer must not be reachable from anything that ships — and
+      # "must not" is a build property or it is a comment.
+      #
+      # The check walks each manifest section by section: naming the feature under
+      # `[dev-dependencies]` is the supported arrangement, and naming it anywhere else puts a
+      # non-constant-time signer into a binary that runs on a machine that can move.
+      - name: The signer is not in anything that ships
+        run: |
+          fail=0
+          for manifest in Cargo.toml crates/*/Cargo.toml; do
+            offender=$(awk -v file="$manifest" '
+              /^\[/ { section = $0 }
+              /test-signing/ {
+                if (section !~ /dev-dependencies/ && section !~ /^\[features\]/) {
+                  print file ":" NR ": " $0
+                }
+              }
+            ' "$manifest")
+            if [ -n "$offender" ]; then
+              echo "::error::$offender"
+              fail=1
+            fi
+          done
+          if [ "$fail" = 1 ]; then
+            echo '§19: the robot verifies signatures and never produces one. `test-signing` may be'
+            echo 'named under [features] in skynet-ed25519 and under [dev-dependencies] anywhere;'
+            echo 'a normal dependency puts a non-constant-time signer into a shipped binary.'
+            exit 1
+          fi
+          # And the module itself stays behind the feature, from the other side.
+          grep -q '#\[cfg(feature = "test-signing")\]' crates/skynet-ed25519/src/lib.rs
 
       # The workspace has no third-party dependencies. A vendor building a driver in 2036 should be
       # able to build this with no network, and the kernel cannot reach most of the ecosystem

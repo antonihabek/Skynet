@@ -52,7 +52,8 @@ Four properties, each load-bearing:
 | `transport/` | Source embodiment + descriptor + options | The exact `TransportPlan` |
 | `cycle/` | Cycle vector + resolved limits + envelope + body | The exact `CycleVerdict` |
 | `limits/` | Tier, envelope, transport clamp, profile, availability, frames | The exact `ResolvedLimits` |
-| `frames/` | A §44.3 frame graph | The fault, or null when it is usable |
+| `frames/validate` | A §44.3 frame graph | The fault, or null when the tree is usable |
+| `frames/bindings` | A frame graph **and the joint list of the body it came from** | The fault, or null when every name resolves |
 | `kinematics/` | A frame graph + joint bindings + a command | Every frame's pose, to the last bit |
 | `blackbox/` | Ring records, headers, MCAP schemas, a whole sealed file | The exact bytes, by digest |
 | `admission/` | Package manifest + device capacity + flags | The exact finding list, in order |

@@ -220,9 +220,49 @@ suite runs at all), and — see §16 — LeRobot.
 
 The body, made explicit and typed: joints with vendor wire names, canonical roles, per-joint
 limits and accepted control modes; end effectors; sensors with modality and frame; control modes,
-rate bounds and **command latency**; the safety envelope; and the IK solvers actually resident on
-the robot. Digested with sha256 and signed by the vendor exactly as any other Skynet artifact, so
-`embodiment.descriptor.signed` in SCTS is a real check rather than a checkbox.
+rate bounds and **command latency**; the safety envelope; the IK solvers actually resident on the
+robot; and the **capability tokens this body and its adapter provide**. Digested with sha256 and
+signed by the vendor exactly as any other Skynet artifact, so `embodiment.descriptor.signed` in SCTS
+is a real check rather than a checkbox.
+
+The digest and the signature answer different questions, and the robot reports them separately: the
+digest identifies **which document this is**, and the signature identifies **who stands behind it**.
+A console that showed only the digest would let a number that is a fact about a file imply a
+provenance it does not carry. The signature is detached — `state/embodiment.sig.json` beside the
+descriptor (§28) — because the digest is taken over the descriptor's canonical form, so a signature
+written inside the document would change the digest it is a signature of.
+
+### 5.0 Why `capabilities` is here and not somewhere else
+
+§8 defines a package's side of the permission model completely — what it declares it needs, what it
+requests, what the operator grants — and left the robot's side assumed. `admitPackage()` takes a
+`capabilities` list described as "the tokens the robot plus its adapter actually provide", and until
+this section nothing said what determined it. The consequence was concrete: admission could not be
+wired onto the install path at all, because the only two ways to supply that set were to invent a
+mapping from body parts to tokens, or to leave it empty and refuse every package on a working robot.
+
+It belongs in the descriptor for two reasons.
+
+**The descriptor is produced by the adapter, for the body**, so "the robot plus its adapter" is
+exactly the question a driver's `describe()` is in a position to answer. Nothing else on the robot
+sees both halves.
+
+**§11's invariant is that no decision on a robot requires a round trip.** Fetching the set from the
+Hub at install time would make a package installable only while connected, on a machine the design
+expects to spend a week offline. The Hub keeps its own copy in the registry — that is what the
+compatibility engine answers "will this run?" from, before anybody downloads forty gigabytes — and
+the two are the same fact recorded in the two places that need it.
+
+**Empty is a claim, not an absence**, and this is the one place the descriptor's usual rule inverts.
+Everywhere else absent means "nobody declared it" and the consumer reports unavailability. Here a
+missing list would leave admission choosing between refusing every package and admitting every
+package, and there is no honest third option — so an absent list reads as *provides nothing*, and
+the vendor is required to write it down. The failure direction is refusal, which is visible, names
+the tokens, and is fixed by declaring them.
+
+The token vocabulary is §8's, and `extensions` carries the ones nobody standardised — the same
+extensibility rule §5.1 applies to roles, for the same reason: a vendor token must be expressible
+without being mistaken for a canonical one.
 
 ### 5.1 The canonical role vocabulary
 
@@ -663,10 +703,21 @@ measure different kinds of truth:
 The third is the one nobody else does, and it is where certification stops being a document and
 becomes a live property.
 
-29 tests across 8 areas, deliberately short. A suite that tests three hundred things is a suite
-nobody runs and every vendor games; one that tests the two dozen properties the rest of the system
+36 tests across 9 areas, deliberately short. A suite that tests three hundred things is a suite
+nobody runs and every vendor games; one that tests the three dozen properties the rest of the system
 actually depends on is one that can be *required*. Every test exists because some other part of
 Skynet OS would be unsound without it.
+
+The count grew because §52 collected the descriptor fields Parts IV and V added and named a test
+for each, and five of those tests did not exist. A schema obligation whose “measured by” column
+points at nothing is a field a vendor may fill in with anything, so the five were written:
+`embodiment.frames.complete`, `safety.command_loss.behaviour`, `safety.homing.envelope`,
+`rhal.sensor.latency`, and `power.safe_state.reachable` — which is the whole of the ninth area,
+because the energy a robot keeps back to stop with is not a property of any of the other eight.
+
+`embodiment.capabilities.declared` is the thirty-sixth, and it arrived *with* the field it measures
+(§5.0) rather than five sessions after it. That is the rule the expansion above was meant to
+establish: a descriptor field and its measure are one change.
 
 The measurements that matter most are the ones taken **at the joint rather than reported by the
 driver**: `safety.estop.latency`, `safety.envelope.clamps`, `embodiment.limits.honest`. A driver
@@ -794,6 +845,29 @@ requires:
   key the operator has trusted.
 * **A device credential is assumed lost.** It cannot read repositories, claim jobs, or write to
   another namespace, and `security.credential.scope` tests exactly that.
+* **"A key the operator has trusted" is a file, and it has no default.** The phrase appears in §37.1
+  and in the bullet above, and it needs a referent or it is decoration. That referent is
+  `/data/state/trust.json`: a list of Ed25519 public keys with the operator's own label for each.
+
+  Four rules, and each of them is the same rule §39.2 applies to credentials, applied to keys:
+
+  | | |
+  |---|---|
+  | No file | This robot trusts **nobody**. Every signature reports `untrusted`, which is true and names the file to write |
+  | A file that does not parse | Also nobody, and it says *that* rather than "no keys" — one is a robot nobody provisioned and the other is a file somebody broke |
+  | One malformed entry | Skipped and reported; the rest still work. A key that fails to parse can only ever *remove* trust, so skipping it is safe in the only direction that matters, while refusing the file would turn one typo into a robot that installs nothing |
+  | A small-order key | **Refused outright.** Those eight points verify signatures nobody produced, and an operator must not be able to trust one by pasting it in |
+
+  The **label** is why this is not a list of hex strings. A report that says *"signed by
+  `d75a980182b10ab7…`"* has told an operator nothing they can act on.
+
+  Keys are read on the pass that needs them rather than held at start-up, so a key an operator adds
+  takes effect on the next reconcile rather than at the next reboot.
+* **The verifier is strict, and the strictness is a compatibility property.** Non-canonical `y` in a
+  key or a commitment, a scalar at or above `L`, and a small-order key are all refused, and the
+  group equation is checked cofactorless. Every one of those is a case where two implementations
+  otherwise disagree about *the same bytes* — and a disagreement about whether a package is signed
+  is worse than either answer, because it means two robots in a fleet running different software.
 * **The blast radius of a compromised policy is bounded by the kernel**, not by the policy's good
   behaviour. This is the property that makes the whole marketplace model defensible.
 * **Every grant, stop, install, OTA and certification change is audit-logged** to the Hub's
@@ -1271,12 +1345,50 @@ resumes moving while somebody is standing next to it working out what happened.
 /data        persistent, survives updates
   /packages    content-addressed .sky blobs, shared by digest across policies
   /blackbox    ring buffer, preallocated at install so a full disk cannot silence it
-  /state       desired-state cache, grants, leases, operator profiles
+  /state       desired-state cache, grants, leases, operator profiles, the embodiment descriptor,
+               the credentials (§39.2) and the trusted keys (§19)
   /identity    device key (TPM/secure-element-backed where present)
 ```
 
+Three files in `/state` are pinned by name, for the reason §37.1 pins the package layout — two
+editions that disagree about where something is written are two editions where a robot provisioned
+by one looks unprovisioned to the other:
+
+| | |
+|---|---|
+| `state/embodiment.json` | the descriptor (§5) |
+| `state/embodiment.sig.json` | the vendor's detached signature over its digest. **Detached**, because the digest is over the descriptor's canonical form and a signature written inside it would change the digest it signs |
+| `state/trust.json` | the keys this robot trusts (§19) |
+
 `/blackbox` is preallocated on purpose: a black box that stops recording because a log filled the
 disk is a black box that fails exactly when something is going wrong.
+
+**The embodiment descriptor is `/data/state/embodiment.json`, and the path is pinned** for the
+reason §37.1 pins the package layout. Two editions that disagree about where the body is written are
+two editions where a robot provisioned by one is a robot the other believes has no body — and a
+robot with no body records a zero embodiment digest, cannot answer the capability half of an
+admission decision, and reports both pose guards unavailable. That is a large amount of wrong
+behaviour to inherit from a filename, and none of it announces itself.
+
+One file, not a directory. A robot is one machine, and a directory here would invite a second
+descriptor whose relationship to the first nothing defines — *which* of two bodies the kernel is
+guarding is not a question this system should ever have to answer at run time.
+
+It sits beside the profiles rather than under them because it is not one. A profile is what an
+operator may narrow (§38.2); the descriptor is what the vendor says the machine *is*, and the
+layering rule has nothing to say about a joint count.
+
+**It arrives as a file, and on the supervisor's side it has to.** §4 gives the driver a `describe()`
+returning exactly this document, and §33.1 forbids `skynetd` from loading a driver to call it —
+doing so would hand the supervisor a vtable of function pointers into vendor code, which is the
+whole of what that rule prevents. So the descriptor is written at provisioning (§50), by `skynet
+descriptor from-urdf`, or by vendor tooling, and the daemon reads it the way it reads everything
+else about the world.
+
+**Absent and malformed are different states**, and every consumer is required to keep them apart.
+"Nobody has told this robot what it is" is a provisioning step that did not run; "somebody did, and
+the answer does not parse" is a generator emitting something wrong. They imply different work, and a
+surface that renders both as an empty panel hides the only fact that decides which.
 
 Targets, not measurements — these are what the design is aimed at, and the bench suite is what will
 say whether they hold:
@@ -1535,6 +1647,29 @@ field reads as stale.
 4. `/skynet/os/transport` — once the transport endpoint exists.
 5. Devices, certification, and the on-robot console — these follow their tables and their first
    real device, and until then they would be showing invented state.
+
+**The console was built ahead of its place here, and the reason is worth recording** because it
+narrows what item 5 is actually about.
+
+Items 1 to 4 are Hub routes, and they are ordered by the tables they need. The console is not a Hub
+route — `skynetd` serves it from the machine it is describing, so it needs no table and no fleet,
+and the only thing it was waiting on was the risk in the last clause: *it would be showing invented
+state*.
+
+That risk is real and it is also the one thing §32.2 already forbids. "It must never show a value it
+did not receive" is not a quality bar to be met later; it is the property that decides whether the
+panel is worth having at all. A console built to that rule on a robot with no kernel does not invent
+a state machine position — it names §27 and says which unwritten thing would supply one. It does not
+draw eight green guards; it lists the eight and, for each, the input this robot does not have. The
+emptier the robot, the more the page is worth, because what it is reporting is exactly the gap.
+
+So the ordering constraint on the console was never the tables. It was whether the discipline would
+hold when there was nothing to show, and the honest answer is that a console which cannot be built
+without inventing state is a console that would have invented state on a full robot too.
+
+The other two in item 5 stay where they are: `/skynet/os/devices` and `/skynet/os/certification`
+are Hub routes over `skynet_device_state` and `skynet_certifications`, and those tables do not
+exist.
 
 ---
 ---
@@ -1912,11 +2047,88 @@ filesystem images, and they move far more often.
 resolve   the desired state names id, version and digest — already resolved, §37.4
 fetch     by sha256, skipping any blob already present (dedupe is free, §2 of Part I)
 verify    digest, then Ed25519 signature against a key the operator trusts
-admit     admitPackage() — budget, capabilities, grants, dependencies, scan verdict
+admit     admitPackage() — signature state, budget, capabilities, grants, dependencies, scan verdict
 transport resolveTransport() against this body; a `refused` verdict fails the install
 stage     unpack into /data/packages/<digest>/, still inert
 activate  atomic symlink swap, then register with the supervisor
 ```
+
+#### The signature has five outcomes, not two
+
+`verify` was written as though it answered yes or no, and `admitPackage()` took a boolean. Four
+different facts were collapsed into `false`, and they have different owners and different remedies:
+
+| State | What happened | Whose job |
+|---|---|---|
+| `verified` | Checked against a key the operator trusts | — |
+| `failed` | A signature was present and did not verify | **Stop.** The bytes are attested to somebody other than the manifest claims, which is what tampering looks like |
+| `untrusted` | It verified, against a key this robot has not been told to believe | The operator's. Add the key, or find out why a stranger signed this |
+| `absent` | Nobody signed it | The publisher's |
+| `unverifiable` | This platform cannot check a signature at all | The operating system's |
+
+`absent` and `unverifiable` are the pair the original collapse hurt most. An operator told `unsigned`
+by a robot whose OS has no Ed25519 will go and ask a publisher to sign a package the publisher
+already signed — and the finding was worded as a fact about the *bytes* ("nobody has attested to who
+produced them") when it was a fact about the *reader*. `signature_unverifiable` puts the remedy on
+the right desk.
+
+`failed` earns its own code for the opposite reason: it is the one state where something went wrong
+rather than something is missing, and it should not sit in the same bucket as a package nobody got
+round to signing.
+
+`untrusted` is the state a verifier discovers the moment there is a trust store to check against,
+and it did not exist while nothing could verify anything. A signature can be entirely valid and made
+by somebody this robot has never heard of — which is neither an attack nor a publisher's oversight,
+but a decision nobody has made. It is an **error** rather than a warning, because *somebody* attested
+to these bytes and it was nobody here.
+
+This is §7.2's rule — a check that could not run reports what was missing, rather than returning a
+verdict — applied to the one field where the missing thing might be an attack.
+
+#### A signature travels with the key that made it
+
+An Ed25519 signature does not name its signer. A verifier holding a set of trusted keys and a
+signature that verifies under none of them therefore cannot tell `failed` from `untrusted` — an
+attack from an administrative gap, which are the two states furthest apart in this table. So the
+signature arrives as a pair:
+
+```json
+"signature": { "key": "<64 hex public key>", "value": "<128 hex signature>" }
+```
+
+and the robot asks two questions in that order: does it verify under the key it names, and is that
+key one the operator trusts. Asking them the other way round collapses the distinction the pair
+exists to preserve.
+
+The **message signed is domain-separated**, because §38.1 signs operator profiles with the same
+machinery and §5 has the vendor sign the descriptor. Without a tag, a signature over one document's
+digest would verify over another's:
+
+| Signed thing | Message |
+|---|---|
+| a package version | `skynet.package.v1\n` + the version digest |
+| an operator profile | `skynet.profile.v1\n` + the profile digest |
+| an embodiment descriptor | `skynet.embodiment.v1\n` + the descriptor digest |
+
+#### What gating on the signature actually refuses
+
+§19 is specific: *a driver runs native and must therefore be signed by a key the operator has
+trusted.* So the gate is on **drivers**, at activation:
+
+* a driver whose signature is anything but `verified` does not activate. The blob stays staged and
+  inert, the refusal names the state and the remedy, and it is reported as a decision rather than as
+  a deferral, because the same bytes and the same trust store give the same answer every pass;
+* every other kind installs carrying its findings, and says `unsigned` in every report that mentions
+  it.
+
+That asymmetry is a real gap rather than a principle. Nothing on a robot can *produce* a signature —
+the Hub signs releases — so a developer staging a package they built five minutes ago has nothing to
+sign it with, and refusing those would refuse every local install and turn the gate into a flag
+somebody removes. Closing it needs a way for an operator to sign locally, which is a design question
+about developer keys rather than a missing primitive.
+
+At activation rather than at fetch, because a staged blob is inert and the symlink swap is the
+consequential moment.
 
 **Activation is a symlink swap**, so a crash at any point before it leaves the previous version
 running and a crash after it leaves the new one running. There is no window in which the robot has
@@ -2016,6 +2228,31 @@ Ed25519 machinery as releases**, versioned, and delivered through desired state.
 profile is not applied. A profile that fails signature verification is not applied *and* raises an
 incident, because the interesting case is not a corrupt file, it is somebody editing limits on a
 robot's disk.
+
+#### The robot checks; it does not take the document's word
+
+That last sentence names the attacker, and for a while the implementation handed them the door. The
+desired state carried a boolean — `"verified": true` — and the robot applied the limits when it saw
+one. But **the desired state is itself a file on the robot's disk**, so anybody who could edit the
+limits could edit the assertion that somebody had checked them, in the same pass, with the kernel's
+ceilings on the other side of it.
+
+So the document carries the *signature* and never the verdict:
+
+```json
+"profile": { "name": "site-a", "digest": "…",
+             "signature": { "key": "…", "value": "…" },
+             "limits": { … } }
+```
+
+and the decoder sets `verified` to false whatever the document says. The only thing that can make it
+true is a signature over `skynet.profile.v1` and the profile's digest, checked on this robot against
+`/data/state/trust.json` (§19). A document that could assert its own verification is not a document
+anybody has verified.
+
+The incident for a signature that *fails* — as against one that is merely missing — is not yet
+raised: there is no outbound incident path (§34.4). The profile is not applied either way, so the
+limits are safe; what is missing is the alarm.
 
 Non-safety configuration — log level, telemetry sampling, console theme — is unsigned and local.
 The line between the two is drawn by whether the value can reach the kernel.
@@ -2784,6 +3021,7 @@ schema change vendors must implement and the bench suite must measure:
 
 | Field | From | Measured by |
 |---|---|---|
+| `capabilities`, `extensions` — what this body provides (§5.0, §8) | Part I | `embodiment.capabilities.declared` |
 | `frames` — the frame graph (§44.3) | Part V | `embodiment.frames.complete` |
 | `frames[].collision_shape`, `collision_ignore` (§44.3) | Part V | `embodiment.frames.complete` |
 | `frames[].mimic_multiplier`, `mimic_offset` (§44.3) | Part V | `embodiment.frames.complete` |
@@ -2798,7 +3036,12 @@ Every one is nullable, and every one absent produces a named unavailability rath
 assumption — the rule from §7.2 applied consistently, which is what keeps the descriptor honest as
 it grows.
 
-`simulator` is the single exception, and deliberately so: absent means `false`. Made nullable it
+`capabilities` and `simulator` are the two exceptions, and each for its own reason.
+
+`capabilities` absent means **the empty set** — §5.0 explains why the usual rule cannot apply to a
+list admission has to compare against.
+
+`simulator` absent means `false`. Made nullable it
 would produce "nobody said whether this robot is real", which is a question about a physical machine
 that the machine's own existence answers. The obligation is asymmetric because the risk is —
 a simulator presented as a robot is the failure; a robot presented as a robot is not.
@@ -3721,7 +3964,7 @@ miniature, and currently trivial to fix.
 | LeRobot | §16, §67 | Designed |
 | Hub contract | §17, §57 | Designed — 9 new endpoints, no breaking change |
 | Developer experience, driver authoring, URDF import | §18, §63–65 | Designed |
-| Security, local access control | §19, §39 | Designed |
+| Security, local access control | §19, §39 | Designed; signature verification and the trust store implemented |
 | Distribution and business model | §20, §72 | Designed |
 | Languages, editions, levels | §23, §31, §42 | Designed |
 | IPC, observation assembly, arbitration | §25 | Designed |

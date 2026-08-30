@@ -228,8 +228,14 @@ fn staging_the_same_content_twice_is_the_same_blob() {
     );
 }
 
+/// The store reports the bytes and nothing about who vouched for them.
+///
+/// It used to carry a `signature: NotChecked`, which was honest while nothing could check one. Now
+/// that something can, the field is gone rather than filled in: a content-addressed blob is the
+/// same blob whoever signed it, and a verdict recorded beside it would be a verdict that outlives
+/// the trust store it came from. The answer lives in `crate::trust`, computed per install.
 #[test]
-fn a_staged_package_is_never_reported_as_signed() {
+fn a_staged_package_carries_no_verdict_about_its_signer() {
     let root = TempRoot::new("signature");
     let store = Store::new(root.layout());
     store.prepare().unwrap();
@@ -240,8 +246,16 @@ fn a_staged_package_is_never_reported_as_signed() {
     let staged = store
         .stage(&id, "policy", "1.0.0", &digest, &source)
         .unwrap();
-    assert_eq!(staged.signature, crate::store::Signature::NotChecked);
-    assert!(!staged.signature.is_verified());
+    assert_eq!(staged.digest, digest);
+
+    // And the trust store, asked about it with nothing to go on, says `absent` rather than
+    // anything that could be read as a pass.
+    let trust = crate::trust::TrustStore::load(&root.layout());
+    let verdict = trust.check(&crate::trust::package_message(&staged.digest), None);
+    assert_eq!(
+        verdict.state,
+        skynet_contracts::admission::SignatureState::Absent
+    );
 }
 
 #[cfg(unix)]
@@ -980,11 +994,393 @@ impl Fixture {
         let parsed = Json::parse(std::str::from_utf8(&response.body).unwrap()).unwrap();
         (response.status, parsed)
     }
+
+    /// The same path, without insisting the answer is JSON.
+    ///
+    /// The console's three files are not, and a helper that parses every response as JSON is a
+    /// helper that cannot test the routes a browser actually asks for first.
+    fn raw(&mut self, method: &str, target: &str, token: Option<&str>) -> crate::http::Response {
+        let mut head = format!("{method} {target} HTTP/1.1\r\nHost: robot\r\n");
+        if let Some(token) = token {
+            head.push_str(&format!("Authorization: Bearer {token}\r\n"));
+        }
+        head.push_str("\r\n");
+        let request = http::parse(&head, Vec::new()).unwrap();
+
+        let credentials = self.credentials.clone();
+        let mut context = Context {
+            daemon: &mut self.daemon,
+            credentials: &credentials,
+            now_ms: 1_000,
+            started_ms: 0,
+            blackbox: None,
+            mono_ns: 0,
+        };
+        api::handle(&mut context, &request)
+    }
 }
 
-// Read only by the `daemon` module below, which needs POSIX. Gated with it rather than
-// `#[allow(dead_code)]`, so that a constant which stops being used anywhere is still reported.
-#[cfg(unix)]
+// ── Rendering the console without a robot ────────────────────────────────────
+
+/// Write the console and one answer per route it fetches, so a browser can render it.
+///
+/// `cargo test -p skynetd-io -- --ignored console_fixture --nocapture`, then serve the directory it
+/// names — any static server will do, and §32.2's whole point is that the page needs nothing else.
+///
+/// **Why this exists.** The console has been written, served, routed and tested for several sessions
+/// and has never been *looked at*. Its script is syntax-checked in CI and every route it calls has a
+/// test, and neither of those catches a panel that renders as a blank box, a column that wraps, or a
+/// `null` printed where a sentence belongs — the failures a person sees in a second and no assertion
+/// is watching for.
+///
+/// The answers come from `api::handle` rather than from hand-written JSON, which is the property
+/// that makes this worth having: a fixture somebody typed would drift from the routes, and the page
+/// would be rendered against a robot that does not exist.
+///
+/// `#[ignore]` because it writes files and is a thing somebody *does*, not a thing CI checks.
+#[test]
+#[ignore]
+fn console_fixture() {
+    let mut fixture = Fixture::new("console-fixture");
+    fixture.provision();
+
+    // A robot with a body, a trusted vendor, a signed policy and an unsigned one — so every state
+    // the Signed by column can show is on the page at once.
+    write_embodiment(&fixture, BENCH_ARM);
+    let vendor = driver_key(31);
+    write_trust(&fixture, "bench-robotics", &public_hex(&vendor));
+
+    let layout = fixture.daemon.store.layout().clone();
+    let body = crate::embodiment::load(&layout);
+    let descriptor_digest = body.known().expect("a body").digest_hex.clone();
+    std::fs::write(
+        layout.embodiment_signature(),
+        format!(
+            "{{\"key\":\"{}\",\"value\":\"{}\"}}",
+            public_hex(&vendor),
+            hex_of(&vendor.sign(&crate::trust::embodiment_message(&descriptor_digest)))
+        ),
+    )
+    .unwrap();
+
+    let source = fixture.root.path().join("source");
+    let m = manifest("openrobot/grasp", "1.0.0", "policy");
+    let digest = write_package(&source, &m, &[("bin/run", "#!/bin/sh\nsleep 1\n")]);
+    let id = PackageId::parse("openrobot/grasp").unwrap();
+    fixture
+        .daemon
+        .store
+        .stage(&id, "policy", "1.0.0", &digest, &source)
+        .unwrap();
+
+    let signature = vendor.sign(&crate::trust::package_message(&digest));
+    fixture.write_desired(&format!(
+        r#"{{
+  "generation": 12,
+  "os": {{ "channel": "stable", "version": "" }},
+  "packages": [
+    {{ "id": "openrobot/grasp", "version": "1.0.0", "digest": "{digest}",
+      "kind": "policy", "state": "running", "grants": ["manipulation.grasp"],
+      "signature": {{ "key": "{key}", "value": "{value}" }} }}
+  ]
+}}"#,
+        digest = digest,
+        key = public_hex(&vendor),
+        value = hex_of(&signature),
+    ));
+    fixture.daemon.reload();
+    let _ = fixture.daemon.reconcile(1_000);
+
+    let out = std::env::var("SKYNET_CONSOLE_FIXTURE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir().join("skynet-console"));
+    std::fs::create_dir_all(&out).unwrap();
+
+    // The page itself, straight out of the binary, so what is served here is what a robot serves.
+    for (name, response) in [
+        ("index.html", fixture.raw("GET", "/", None)),
+        ("console.css", fixture.raw("GET", "/console.css", None)),
+        ("console.js", fixture.raw("GET", "/console.js", None)),
+    ] {
+        std::fs::write(out.join(name), &response.body).unwrap();
+    }
+
+    // One file per feed, named exactly as the page fetches it, **with its status code beside it**.
+    // A 503 replayed as a 200 is a different page: the console's job on a failed panel is to say
+    // what is missing, and serving the error body with a success status would render the error
+    // object as data and hide exactly the behaviour worth looking at.
+    for route in [
+        "status",
+        "embodiment",
+        "plan",
+        "packages",
+        "health",
+        "blackbox",
+        "capacity",
+        "grants",
+    ] {
+        let response = fixture.raw("GET", &format!("/{route}"), Some("observer-token"));
+        std::fs::write(out.join(route), &response.body).unwrap();
+        std::fs::write(
+            out.join(format!("{route}.status")),
+            response.status.to_string(),
+        )
+        .unwrap();
+    }
+
+    println!("console fixture written to {}", out.display());
+    println!("serve it and open index.html — every panel is a static file named after its route");
+}
+
+// ── §19's gate on a driver's signature ───────────────────────────────────────
+
+/// A desired state naming one driver, with `SIGNATURE` replaced by a `"signature"` member or by
+/// nothing at all.
+const DESIRED_ONE_DRIVER: &str = r#"{
+  "generation": 3,
+  "os": { "channel": "stable", "version": "" },
+  "packages": [
+    { "id": "acme/arm", "version": "1.0.0", "digest": "DIGEST",
+      "kind": "driver", "state": "running", "grants": []SIGNATURE }
+  ]
+}"#;
+
+/// Write a desired state naming `acme/arm` as a driver, optionally signed.
+fn desired_driver(fixture: &Fixture, digest: &str, signature: Option<(&str, &str)>) {
+    let signature = match signature {
+        None => String::new(),
+        Some((key, value)) => {
+            format!(", \"signature\": {{ \"key\": \"{key}\", \"value\": \"{value}\" }}")
+        }
+    };
+    fixture.write_desired(
+        &DESIRED_ONE_DRIVER
+            .replace("DIGEST", digest)
+            .replace("SIGNATURE", &signature),
+    );
+}
+
+fn write_trust(fixture: &Fixture, label: &str, key_hex: &str) {
+    let path = fixture.daemon.store.layout().trust();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        path,
+        format!("{{\"keys\":[{{\"label\":\"{label}\",\"key\":\"{key_hex}\"}}]}}"),
+    )
+    .unwrap();
+}
+
+fn driver_key(seed: u8) -> skynet_ed25519::signing::SigningKey {
+    skynet_ed25519::signing::SigningKey::from_seed(&[seed; 32])
+}
+
+fn public_hex(key: &skynet_ed25519::signing::SigningKey) -> String {
+    String::from_utf8(key.public_hex().to_vec()).expect("hex is ASCII")
+}
+
+fn hex_of(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// §19. A driver runs native, so an unsigned one does not activate.
+#[test]
+fn an_unsigned_driver_is_refused_at_activation() {
+    let mut fixture = Fixture::new("driver-unsigned");
+    let digest = format!("sha256:{}", "a".repeat(64));
+    desired_driver(&fixture, &digest, None);
+    fixture.daemon.reload();
+
+    let refusal = fixture
+        .daemon
+        .driver_signature_refusal("acme/arm", &digest)
+        .expect("an unsigned driver is refused");
+    let Outcome::Failed { reason } = refusal else {
+        panic!("a refusal, not {refusal:?}");
+    };
+    assert!(reason.contains("§19"), "{reason}");
+    assert!(reason.contains("absent"), "{reason}");
+    assert!(reason.contains("staged and inert"), "{reason}");
+}
+
+/// The case the fifth state exists for, at the place it matters most: native code, validly signed,
+/// by somebody this robot has never been told to believe.
+#[test]
+fn a_driver_signed_by_a_stranger_is_refused_at_activation() {
+    let mut fixture = Fixture::new("driver-stranger");
+    let digest = format!("sha256:{}", "b".repeat(64));
+
+    let trusted = driver_key(1);
+    let stranger = driver_key(2);
+    write_trust(&fixture, "acme-robotics", &public_hex(&trusted));
+
+    let signature = stranger.sign(&crate::trust::package_message(&digest));
+    desired_driver(
+        &fixture,
+        &digest,
+        Some((&public_hex(&stranger), &hex_of(&signature))),
+    );
+    fixture.daemon.reload();
+
+    let refusal = fixture
+        .daemon
+        .driver_signature_refusal("acme/arm", &digest)
+        .expect("a stranger's driver is refused");
+    let Outcome::Failed { reason } = refusal else {
+        panic!("a refusal, not {refusal:?}");
+    };
+    assert!(reason.contains("untrusted"), "{reason}");
+    assert!(reason.contains("state/trust.json"), "{reason}");
+}
+
+/// And the same driver, once the operator trusts the key that signed it.
+#[test]
+fn a_driver_signed_by_a_trusted_key_is_not_refused() {
+    let mut fixture = Fixture::new("driver-trusted");
+    let digest = format!("sha256:{}", "c".repeat(64));
+
+    let signer = driver_key(7);
+    let public = public_hex(&signer);
+    write_trust(&fixture, "acme-robotics", &public);
+
+    let signature = signer.sign(&crate::trust::package_message(&digest));
+    desired_driver(&fixture, &digest, Some((&public, &hex_of(&signature))));
+    fixture.daemon.reload();
+
+    assert!(fixture
+        .daemon
+        .driver_signature_refusal("acme/arm", &digest)
+        .is_none());
+}
+
+/// A signature that arrived and could not be read is not the same fact as no signature, and it must
+/// not be reported as one — that would send an operator to ask a publisher for what they sent.
+#[test]
+fn a_malformed_driver_signature_is_not_reported_as_absent() {
+    let mut fixture = Fixture::new("driver-malformed");
+    let digest = format!("sha256:{}", "d".repeat(64));
+    desired_driver(&fixture, &digest, Some(("not-hex", "also-not-hex")));
+    fixture.daemon.reload();
+
+    let refusal = fixture
+        .daemon
+        .driver_signature_refusal("acme/arm", &digest)
+        .expect("a driver with an unreadable signature is refused");
+    let Outcome::Failed { reason } = refusal else {
+        panic!("a refusal, not {refusal:?}");
+    };
+    assert!(reason.contains("could not be read"), "{reason}");
+    assert!(!reason.contains("absent"), "{reason}");
+}
+
+/// The gate is §19's, and §19 is about native code. A policy is sandboxed, and refusing it would
+/// refuse every local install — which is how a gate becomes a flag.
+#[test]
+fn a_policy_is_not_gated_on_its_signature() {
+    let mut fixture = Fixture::new("policy-ungated");
+    let digest = format!("sha256:{}", "e".repeat(64));
+    fixture.write_desired(&DESIRED_ONE_POLICY.replace("DIGEST", &digest));
+    fixture.daemon.reload();
+
+    assert!(fixture
+        .daemon
+        .driver_signature_refusal("openrobot/grasp", &digest)
+        .is_none());
+}
+
+// ── §38.1's profile signature ────────────────────────────────────────────────
+
+const PROFILE_DIGEST: &str =
+    "sha256:5555555555555555555555555555555555555555555555555555555555555555";
+
+/// A desired state with one profile, `SIGNATURE` replaced by a member or by nothing.
+const DESIRED_WITH_PROFILE: &str = r#"{
+  "generation": 9,
+  "os": { "channel": "stable", "version": "" },
+  "packages": [],
+  "profile": { "name": "site-a", "digest": "PROFILE_DIGEST", "verified": true SIGNATURE,
+               "limits": { "joint_velocity_max_rad_s": 1.5 } }
+}"#;
+
+fn desired_profile(fixture: &Fixture, signature: Option<(&str, &str)>) {
+    let signature = match signature {
+        None => String::new(),
+        Some((key, value)) => {
+            format!(", \"signature\": {{ \"key\": \"{key}\", \"value\": \"{value}\" }}")
+        }
+    };
+    fixture.write_desired(
+        &DESIRED_WITH_PROFILE
+            .replace("PROFILE_DIGEST", PROFILE_DIGEST)
+            .replace("SIGNATURE", &signature),
+    );
+}
+
+/// The hole this closes, stated as a test.
+///
+/// The document says `"verified": true`. The desired state is a file on the robot's own disk, which
+/// is precisely where §38.1 puts the attacker — *"somebody editing limits on a robot's disk"* — so
+/// anybody who could raise the ceilings could raise that boolean in the same pass. The robot now
+/// checks instead of believing.
+#[test]
+fn a_profile_claiming_to_be_verified_is_not_believed() {
+    let mut fixture = Fixture::new("profile-claimed");
+    desired_profile(&fixture, None);
+    fixture.daemon.reload();
+
+    let profile = fixture.daemon.desired.profile.as_ref().expect("a profile");
+    assert!(
+        !profile.verified,
+        "the document asserted its own verification"
+    );
+}
+
+#[test]
+fn a_profile_signed_by_a_trusted_key_is_verified() {
+    let mut fixture = Fixture::new("profile-signed");
+    let signer = driver_key(11);
+    write_trust(&fixture, "fleet-admin", &public_hex(&signer));
+
+    let signature = signer.sign(&crate::trust::profile_message(PROFILE_DIGEST));
+    desired_profile(&fixture, Some((&public_hex(&signer), &hex_of(&signature))));
+    fixture.daemon.reload();
+
+    assert!(fixture.daemon.desired.profile.as_ref().unwrap().verified);
+}
+
+/// A stranger's valid signature on the kernel's ceilings is the case §38.1 is about.
+#[test]
+fn a_profile_signed_by_a_stranger_is_not_verified() {
+    let mut fixture = Fixture::new("profile-stranger");
+    write_trust(&fixture, "fleet-admin", &public_hex(&driver_key(11)));
+
+    let stranger = driver_key(12);
+    let signature = stranger.sign(&crate::trust::profile_message(PROFILE_DIGEST));
+    desired_profile(
+        &fixture,
+        Some((&public_hex(&stranger), &hex_of(&signature))),
+    );
+    fixture.daemon.reload();
+
+    assert!(!fixture.daemon.desired.profile.as_ref().unwrap().verified);
+}
+
+/// A profile signature made over the package domain does not apply limits, and the reverse.
+#[test]
+fn a_package_signature_cannot_stand_in_for_a_profile_signature() {
+    let mut fixture = Fixture::new("profile-domain");
+    let signer = driver_key(13);
+    write_trust(&fixture, "fleet-admin", &public_hex(&signer));
+
+    let wrong_domain = signer.sign(&crate::trust::package_message(PROFILE_DIGEST));
+    desired_profile(
+        &fixture,
+        Some((&public_hex(&signer), &hex_of(&wrong_domain))),
+    );
+    fixture.daemon.reload();
+
+    assert!(!fixture.daemon.desired.profile.as_ref().unwrap().verified);
+}
+
 const DESIRED_ONE_POLICY: &str = r#"{
   "generation": 7,
   "os": { "channel": "stable", "version": "" },
@@ -1389,6 +1785,276 @@ fn status_says_the_safe_state_was_declared_rather_than_measured() {
         .contains("not measured"));
 }
 
+// ── The body (§5) ────────────────────────────────────────────────────────────
+
+/// A descriptor that would load, for the tests below.
+const BENCH_ARM: &str = r#"{
+  "robot_slug": "bench-arm",
+  "base": "fixed",
+  "dof": 1,
+  "joints": [{"name": "shoulder", "type": "revolute", "control_modes": ["position"]}]
+}"#;
+
+fn write_embodiment(fixture: &Fixture, document: &str) {
+    let path = fixture.daemon.store.layout().embodiment();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, document).unwrap();
+}
+
+/// The three states, over the wire, through the real router.
+///
+/// The distinction between the first two is the one worth an integration test: an operator seeing
+/// `absent` has a provisioning step to run and an operator seeing `malformed` has a generator to
+/// fix, and collapsing them into "no body" would send half of them to the wrong job.
+#[test]
+fn the_body_is_reported_as_absent_malformed_or_present() {
+    let mut fixture = Fixture::new("api-embodiment");
+    fixture.provision();
+
+    let (status, body) = fixture.request("GET", "/embodiment", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(body.get("state").and_then(Json::as_str), Some("absent"));
+    assert_eq!(body.get("digest"), Some(&Json::Null));
+
+    write_embodiment(&fixture, "{ not json");
+    let (status, body) = fixture.request("GET", "/embodiment", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(body.get("state").and_then(Json::as_str), Some("malformed"));
+    assert!(body
+        .get("detail")
+        .and_then(Json::as_str)
+        .is_some_and(|d| d.contains("not valid JSON")));
+
+    write_embodiment(&fixture, BENCH_ARM);
+    let (status, body) = fixture.request("GET", "/embodiment", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(body.get("state").and_then(Json::as_str), Some("present"));
+    assert_eq!(
+        body.get("robot_slug").and_then(Json::as_str),
+        Some("bench-arm")
+    );
+    assert_eq!(
+        body.get("digest").and_then(Json::as_str).map(str::len),
+        Some(64)
+    );
+    // §5 has the vendor sign the descriptor, and the check now runs. Nobody signed this one, so the
+    // answer is `absent` — a fact about the file rather than a verdict about its contents — and the
+    // digest is reported beside it without being allowed to imply a provenance it does not carry.
+    assert_eq!(body.get("signature").and_then(Json::as_str), Some("absent"));
+    assert_eq!(body.get("signer"), Some(&Json::Null));
+    assert!(body
+        .get("signature_note")
+        .and_then(Json::as_str)
+        .is_some_and(|note| note.contains("identifies the file")));
+}
+
+/// §5, end to end: a descriptor signed by a key this robot trusts reports its signer by name.
+#[test]
+fn a_signed_descriptor_names_its_vendor_on_the_wire() {
+    let mut fixture = Fixture::new("api-embodiment-signed");
+    fixture.provision();
+    write_embodiment(&fixture, BENCH_ARM);
+
+    // The digest is the daemon's own, so the signature is over what the robot computed rather than
+    // over what a test asserted it would compute.
+    let layout = fixture.daemon.store.layout().clone();
+    let body = crate::embodiment::load(&layout);
+    let digest = body.known().expect("a body").digest_hex.clone();
+
+    let vendor = driver_key(21);
+    write_trust(&fixture, "bench-robotics", &public_hex(&vendor));
+    let signature = vendor.sign(&crate::trust::embodiment_message(&digest));
+    std::fs::write(
+        layout.embodiment_signature(),
+        format!(
+            "{{\"key\":\"{}\",\"value\":\"{}\"}}",
+            public_hex(&vendor),
+            hex_of(&signature)
+        ),
+    )
+    .unwrap();
+
+    let (status, answer) = fixture.request("GET", "/embodiment", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(
+        answer.get("signature").and_then(Json::as_str),
+        Some("verified")
+    );
+    assert_eq!(
+        answer.get("signer").and_then(Json::as_str),
+        Some("bench-robotics")
+    );
+}
+
+/// It is a read, and §39.1 gives reads to the observer.
+#[test]
+fn the_body_needs_a_credential_and_a_wrong_method_is_not_a_404() {
+    let mut fixture = Fixture::new("api-embodiment-auth");
+    let (status, _) = fixture.request("GET", "/embodiment", None, "");
+    assert_eq!(status, 401, "an unprovisioned robot has no observer");
+
+    // §33.7 distinguishes "no such route" from "not that method here", and a path added without a
+    // `known_path` entry silently loses that distinction.
+    //
+    // With a credential, because the authorisation check runs *before* the route match: an
+    // unauthenticated caller gets 401 for every path, real or not. That is fail-closed rather than
+    // an oversight — route enumeration is not something to hand out for free — and it means this
+    // distinction is only observable by somebody the robot already trusts.
+    fixture.provision();
+    let (status, _) = fixture.request("POST", "/embodiment", Some("admin-token"), "");
+    assert_eq!(status, 405);
+    let (status, _) = fixture.request("GET", "/embodiment", Some("observer-token"), "");
+    assert_eq!(status, 200, "and the observer may read it");
+}
+
+/// What admission would be told about this robot, or why it cannot be told anything.
+///
+/// The answer is platform-dependent and both branches are asserted, because the interesting
+/// property is the same either way: **nothing is estimated**. On Linux the memory figure is read;
+/// everywhere else the capacity does not assemble and says so. What must never happen is a
+/// plausible default, because §8.1 makes the budget check the one place this format is stricter
+/// than an APK — a robot that runs out of memory mid-stride falls over.
+#[test]
+fn the_capacity_is_read_or_refused_and_never_estimated() {
+    let mut fixture = Fixture::new("api-capacity");
+    fixture.provision();
+
+    let (status, body) = fixture.request("GET", "/capacity", Some("observer-token"), "");
+    assert_eq!(status, 200);
+
+    match body.get("state").and_then(Json::as_str) {
+        Some("known") => {
+            let ram = body.get("ram_mb").and_then(Json::as_f64).expect("ram_mb");
+            assert!(
+                ram > 64.0,
+                "{ram} MB is not a machine that runs this daemon"
+            );
+            // Absent rather than zero. A console rendering `vram_mb: 0` reports a robot with no
+            // accelerator, which is a different claim from one nothing has measured.
+            assert_eq!(body.get("vram_mb"), Some(&Json::Null));
+            assert_eq!(body.get("disk_mb"), Some(&Json::Null));
+            assert!(body.get_present("unmeasured").is_some());
+            // §38.1: a withheld-capability list read from an unverified profile would be a
+            // safety-relevant value anybody on the robot could edit.
+            assert!(body.get_present("denied_note").is_some());
+        }
+        Some("unavailable") => {
+            assert!(body
+                .get("detail")
+                .and_then(Json::as_str)
+                .is_some_and(|d| d.contains("/proc/meminfo")));
+            // Not only the cause. An operator reading this needs to know what it stops.
+            assert!(body
+                .get("consequence")
+                .and_then(Json::as_str)
+                .is_some_and(|c| c.contains("Admission cannot run")));
+        }
+        other => panic!("unexpected capacity state: {other:?}"),
+    }
+}
+
+/// A body nobody can read is not a body to make an install decision about.
+///
+/// The malformed case is the one worth an integration test: an *absent* descriptor still assembles
+/// — the capability set is empty, which §5.0 makes a claim rather than an absence — but a
+/// descriptor that exists and does not parse leaves what this body provides genuinely unknown, and
+/// admission must not proceed on a guess.
+#[test]
+fn a_malformed_descriptor_stops_the_capacity_from_assembling() {
+    let mut fixture = Fixture::new("api-capacity-malformed");
+    fixture.provision();
+    write_embodiment(&fixture, "{ not json");
+
+    let (status, body) = fixture.request("GET", "/capacity", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(
+        body.get("state").and_then(Json::as_str),
+        Some("unavailable")
+    );
+    assert!(body
+        .get("detail")
+        .and_then(Json::as_str)
+        .is_some_and(|d| d.contains("descriptor")));
+}
+
+// ── The console (§32.2) ──────────────────────────────────────────────────────
+
+/// The property the whole console rests on, checked through the router.
+///
+/// `Fixture::new` builds an **unprovisioned** robot — no credentials at all — and this asks for the
+/// page with no token. §39.2: "an unprovisioned robot's console offers status and stop and nothing
+/// else", and a page that answered 401 would offer neither. The catch-all in `requirement` is
+/// `Role::Admin`, so this is one table entry away from being wrong at any time.
+#[test]
+fn the_console_loads_on_an_unprovisioned_robot_with_no_credential() {
+    let mut fixture = Fixture::new("console-anon");
+    assert!(!fixture.credentials.is_provisioned());
+
+    for (target, kind) in [
+        ("/", "text/html"),
+        ("/console.css", "text/css"),
+        ("/console.js", "text/javascript"),
+    ] {
+        let response = fixture.raw("GET", target, None);
+        assert_eq!(
+            response.status, 200,
+            "{target} did not load without a token"
+        );
+        assert!(
+            response.content_type.starts_with(kind),
+            "{target} came back as {}",
+            response.content_type
+        );
+        assert!(!response.body.is_empty(), "{target} is empty");
+    }
+}
+
+/// The console is served, and the API underneath it is not changed by that.
+///
+/// The asset arm runs before the authorisation check, so the risk it introduces is swallowing a
+/// route it should not. `/status` is anonymous and `/health` is not, and both must behave exactly
+/// as they did.
+#[test]
+fn routing_the_console_first_does_not_swallow_the_api() {
+    let mut fixture = Fixture::new("console-passthrough");
+
+    let (status, _) = fixture.request("GET", "/status", None, "");
+    assert_eq!(status, 200, "an anonymous API route still answers");
+
+    let (status, _) = fixture.request("GET", "/health", None, "");
+    assert_eq!(status, 401, "an authenticated one still refuses");
+
+    let (status, _) = fixture.request("GET", "/nothing-here", None, "");
+    assert_eq!(status, 401, "an unknown path still fails closed");
+
+    // Only GET. A console asset is not something to POST to, and the asset arm must not turn
+    // `POST /` into a 200 page.
+    let response = fixture.raw("POST", "/", None);
+    assert_ne!(response.status, 200, "POST / is not the console");
+}
+
+/// Every response carries the policy that makes the page unable to reach off the robot.
+#[test]
+fn the_console_is_served_under_a_policy_that_permits_no_other_origin() {
+    let mut fixture = Fixture::new("console-csp");
+    for target in ["/", "/console.css", "/console.js"] {
+        let response = fixture.raw("GET", target, None);
+        let policy = response
+            .extra
+            .iter()
+            .find(|(name, _)| name == "Content-Security-Policy")
+            .map(|(_, value)| value.clone())
+            .unwrap_or_else(|| panic!("{target} carries no Content-Security-Policy"));
+        assert!(policy.contains("default-src 'none'"), "{target}: {policy}");
+        assert!(!policy.contains("unsafe-inline"), "{target}: {policy}");
+
+        // The headers every response already carried, still there on the console's own.
+        let encoded = String::from_utf8(response.encode()).unwrap();
+        assert!(encoded.contains("X-Frame-Options: DENY"), "{target}");
+        assert!(encoded.contains("Cache-Control: no-store"), "{target}");
+    }
+}
+
 // ── The API ──────────────────────────────────────────────────────────────────
 
 #[test]
@@ -1549,13 +2215,51 @@ fn the_plan_route_reports_a_deferral_with_its_reason() {
 
     let (status, body) = fixture.request("GET", "/plan", Some("observer-token"), "");
     assert_eq!(status, 200);
-    assert_eq!(body.get("converged"), Some(&Json::Bool(false)));
-    let applied = body.get("applied").and_then(Json::as_arr).unwrap();
+    let pass = body.get("pass").expect("the pass is nested under `pass`");
+    assert_eq!(pass.get("converged"), Some(&Json::Bool(false)));
+    let applied = pass.get("applied").and_then(Json::as_arr).unwrap();
     assert_eq!(
         applied[0].get("outcome").and_then(Json::as_str),
         Some("unimplemented")
     );
     assert!(applied[0].get("reason").is_some());
+}
+
+/// One route, one shape — the assertion that was missing while the console could not render.
+///
+/// `GET /plan` answered `{"pass": null, "note": …}` before a pass had run and a **flat** object
+/// after one, so `value.pass` was `null` in the first case and `undefined` in the second. The
+/// console discriminated on `=== null`, took the second branch, and threw on `pass.converged` every
+/// two seconds from the moment a robot did anything. Nothing caught it: the CLI happened to read the
+/// flat shape, and no test looked at both branches of the same route.
+#[test]
+fn the_plan_route_answers_the_same_shape_before_and_after_a_pass() {
+    let mut fixture = Fixture::new("api-plan-shape");
+    fixture.provision();
+
+    // Before: `pass` is present and null, and something says why.
+    let (status, body) = fixture.request("GET", "/plan", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(body.get("pass"), Some(&Json::Null));
+    assert!(body.get("note").and_then(Json::as_str).is_some());
+
+    // After: `pass` is present and is the pass. A client that reads `pass` reads both.
+    fixture
+        .write_desired(r#"{"generation":1,"os":{"channel":"stable","version":""},"packages":[]}"#);
+    fixture.daemon.reload();
+    let _ = fixture.daemon.reconcile(500);
+
+    let (status, body) = fixture.request("GET", "/plan", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    let pass = body
+        .get_present("pass")
+        .expect("a pass has run, so `pass` is an object");
+    assert!(pass.get("converged").is_some());
+    assert!(pass.get("applied").is_some());
+    assert!(pass.get("at_ms").is_some());
+    // And nothing is left at the top level for a second parse to find.
+    assert!(body.get("converged").is_none(), "{body:?}");
+    assert!(body.get("applied").is_none(), "{body:?}");
 }
 
 // ── The listeners ────────────────────────────────────────────────────────────
@@ -1765,6 +2469,67 @@ mod recorder {
     fn open(root: &TempRoot, shape: Shape) -> Recorder {
         let layout = root.layout();
         Recorder::open(&layout, supervisor_meta(&layout), shape, BUDGET).expect("a recorder")
+    }
+
+    /// §56.4, end to end: the recording says which body it is of.
+    ///
+    /// Both directions matter. A robot nobody has told what it is records a **zero** embodiment
+    /// digest, and that is the honest answer — the ring has to open on an unprovisioned machine,
+    /// because §28 preallocates it precisely so that nothing can silence the recorder. A robot with
+    /// a descriptor records that descriptor's digest, and it is the digest of the *canonical* form,
+    /// so two robots handed the same body agree.
+    ///
+    /// A recording carrying an invented digest could be replayed against the wrong machine without
+    /// anybody noticing, which is why this was zero for two sessions rather than filled in.
+    #[test]
+    fn a_sealed_recording_names_the_body_it_was_taken_from() {
+        let root = TempRoot::new("bb-embodiment");
+        let layout = root.layout();
+
+        // Before: nobody has told this robot what it is.
+        assert_eq!(supervisor_meta(&layout).embodiment, [0u8; 32]);
+        assert!(!supervisor_meta(&layout).simulator);
+
+        std::fs::create_dir_all(layout.state()).unwrap();
+        std::fs::write(
+            layout.embodiment(),
+            r#"{"robot_slug":"bench-arm","base":"fixed","dof":1,
+                "simulator":true,
+                "joints":[{"name":"shoulder","type":"revolute","control_modes":["position"]}]}"#,
+        )
+        .unwrap();
+
+        let meta = supervisor_meta(&layout);
+        let expected = crate::embodiment::load(&layout)
+            .known()
+            .expect("the descriptor loads")
+            .digest;
+        assert_eq!(meta.embodiment, expected);
+        assert_ne!(meta.embodiment, [0u8; 32]);
+
+        // §56.2: a benchmark replayed from a simulated recording must never be mistaken for a field
+        // one, and the header is where that is settled rather than somebody's memory.
+        assert!(meta.simulator, "the body declares itself simulated");
+
+        // The OS image digest is still zero, and that is not the same kind of gap: §10's
+        // attestation is unwritten, so nothing has established which image is running.
+        assert_eq!(meta.os_image, [0u8; 32]);
+
+        // And it survives into a file somebody could replay.
+        let mut recorder =
+            Recorder::open(&layout, meta, events_only(), BUDGET).expect("a recorder");
+        recorder
+            .event(10, EventCode::RecordingStarted, "skynetd", "started")
+            .unwrap();
+        let (sealed, path) = recorder.seal(Reason::Operator, 20).expect("sealed");
+        let hex: String = expected.iter().map(|b| format!("{b:02x}")).collect();
+        assert!(
+            String::from_utf8_lossy(&sealed.bytes).contains(&hex),
+            "the sealed recording carries the embodiment digest"
+        );
+        // And the file on disk, not only the bytes in hand — the thing somebody would replay.
+        let written = std::fs::read(&path).expect("the sealed file");
+        assert!(String::from_utf8_lossy(&written).contains(&hex), "{path:?}");
     }
 
     #[test]

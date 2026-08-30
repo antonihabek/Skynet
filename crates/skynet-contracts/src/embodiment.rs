@@ -167,6 +167,25 @@ pub struct EmbodimentDescriptor {
     pub envelope: Option<SafetyEnvelope>,
     /// IK solvers resident on this robot. Empty means task-space retargeting is not available.
     pub solvers: Vec<String>,
+    /// Capability tokens this body **and its adapter** provide (§8).
+    ///
+    /// The set `admit_package` checks a package's `embodiment.capabilities` against. It lives here
+    /// rather than anywhere else for two reasons: this descriptor is produced by the adapter, for
+    /// the body, so "the robot plus its adapter" is precisely what it is in a position to answer —
+    /// and §11's invariant is that no decision on a robot requires a round trip, which rules out
+    /// asking the Hub at install time on a machine that has been offline for a week.
+    ///
+    /// **Empty is a claim, not an absence.** A body that declares no capabilities provides none, and
+    /// a package needing one is refused. That is the safe direction and it is deliberately not
+    /// nullable: `None` would mean "nobody said what this robot can do", and admission would then
+    /// have to choose between refusing everything and admitting everything. Both are worse than a
+    /// vendor being required to write the list down.
+    pub capabilities: Vec<String>,
+    /// Vendor extension tokens this body provides, beyond the canonical vocabulary.
+    ///
+    /// Separate from [`Self::capabilities`] for the reason §5.1 keeps roles extensible: a token
+    /// nobody standardised must be expressible without being mistaken for one that was.
+    pub extensions: Vec<String>,
     /// Whether this body is simulated (§35.3, §70).
     ///
     /// The one field on this descriptor whose absence means `false` rather than "nobody said". A
@@ -291,7 +310,8 @@ pub struct FrameGraph {
 pub struct FrameFault {
     /// One of `empty`, `root_missing`, `several_roots`, `duplicate_name`, `parent_missing`,
     /// `cycle`, `joint_mismatch`, `unknown_kind`, `unknown_shape`, `collision_mismatch`,
-    /// `ignore_missing`.
+    /// `ignore_missing` — or, from [`validate_frame_bindings`], `dangling_joint`,
+    /// `mimic_missing`, `mimic_self`, `mimic_coefficient`.
     pub code: String,
     /// The frames this is about, in the order they matter.
     pub subjects: Vec<String>,
@@ -485,6 +505,120 @@ pub fn validate_frames(graph: &FrameGraph) -> Option<FrameFault> {
     None
 }
 
+/// Check a frame graph against the joint list of the body it describes.
+///
+/// [`validate_frames`] is deliberately graph-only: it is given a tree and asked whether the tree is
+/// well formed, and it answers without ever seeing the descriptor the tree came out of. That leaves
+/// one whole class of defect uncaught, because the two most important names in a dynamic frame —
+/// `joint` and `mimics` — do not refer to anything in the graph. They refer to the joint list.
+///
+/// A name that does not resolve there presents far from its cause. The kernel binds channels by
+/// joint name, finds nothing for that frame, and [`crate::safety::kinematics::Kinematics::solve`]
+/// marks it unresolved — so both pose guards trip on it, on every cycle, for as long as the
+/// descriptor says what it says. That is the correct behaviour and it is also useless: the robot
+/// holds still and the reason is a spelling in a file nothing was checking.
+///
+/// §44.5 asks for better than that. A guard which cannot run is supposed to report so **when the
+/// lease is granted**, naming the frame, and `statically_resolvable` is that mechanism — but it
+/// reads the joint's *kind*, so it catches a limb hanging below a ball joint and cannot catch a
+/// joint name that binds to nothing, because the joint list is not in the graph. This is what
+/// closes that gap: it turns a permanent in-cycle trip into a refusal while somebody is still
+/// looking at the file.
+///
+/// So this is the second half of §44.3, and it is what `embodiment.frames.complete` measures that
+/// [`validate_frames`] cannot. Returns `None` when every name in the graph resolves.
+///
+/// It does **not** require that every declared joint have a frame. A partial tree is legitimate —
+/// a gripper whose fingers nobody modelled is a body with joints and no frames for them — and
+/// §44.5 already has the guard report unavailable naming the frame it wanted. "Complete" here means
+/// every name the graph uses resolves, not that the graph covers the body.
+pub fn validate_frame_bindings(graph: &FrameGraph, joints: &[&str]) -> Option<FrameFault> {
+    let declared = |name: &str| joints.contains(&name);
+
+    for node in &graph.nodes {
+        if node.kind == "dynamic" {
+            if let Some(joint) = &node.joint {
+                if !declared(joint) {
+                    return Some(fault(
+                        "dangling_joint",
+                        &[&node.name, joint],
+                        format!(
+                            "Frame {} moves with {}, which the body does not declare. Nothing \
+                             binds it, so its pose never resolves and both pose guards trip on it \
+                             every cycle.",
+                            node.name, joint
+                        ),
+                    ));
+                }
+            }
+        }
+
+        let has_coefficient = node.mimic_multiplier.is_some() || node.mimic_offset.is_some();
+
+        let Some(mimics) = &node.mimics else {
+            if has_coefficient {
+                return Some(fault(
+                    "mimic_coefficient",
+                    &[&node.name],
+                    format!(
+                        "Frame {} declares a mimic multiplier or offset and no `mimics`. A \
+                         coefficient with nothing to multiply describes a linkage that does not \
+                         exist.",
+                        node.name
+                    ),
+                ));
+            }
+            continue;
+        };
+
+        if !declared(mimics) {
+            return Some(fault(
+                "mimic_missing",
+                &[&node.name, mimics],
+                format!(
+                    "Frame {} follows {}, which the body does not declare. A linkage read \
+                     from a joint nobody drives never resolves, and takes every frame below it \
+                     with it.",
+                    node.name, mimics
+                ),
+            ));
+        }
+
+        if node.joint.as_deref() == Some(mimics.as_str()) {
+            return Some(fault(
+                "mimic_self",
+                &[&node.name, mimics],
+                format!(
+                    "Frame {} follows the joint it is driven by. `value = multiplier \u{d7} driver \
+                     + offset` over one value is a fixed point, not a linkage.",
+                    node.name
+                ),
+            ));
+        }
+
+        for (label, value) in [
+            ("mimic_multiplier", node.mimic_multiplier),
+            ("mimic_offset", node.mimic_offset),
+        ] {
+            if let Some(value) = value {
+                if !value.is_finite() {
+                    return Some(fault(
+                        "mimic_coefficient",
+                        &[&node.name],
+                        format!(
+                            "Frame {} declares {label} as a value that is not a finite number. A \
+                             linkage computed from it produces a pose that is not one.",
+                            node.name
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    None
+}
+
 // ── The source side: what the policy was trained on ──────────────────────────
 
 /// Kinds of channel a policy's action space may carry.
@@ -561,6 +695,8 @@ pub struct SourceEmbodiment {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::string::String;
+    use alloc::vec::Vec;
 
     #[test]
     fn an_absent_rating_is_not_an_unlimited_one() {
@@ -585,5 +721,92 @@ mod tests {
         assert_eq!(BASE_KINDS.len(), 6);
         assert_eq!(EMBODIMENT_MODALITIES.len(), 9);
         assert_eq!(ACTION_KINDS.len(), 7);
+    }
+
+    fn bare(name: &str, parent: Option<&str>, kind: &str) -> FrameNode {
+        FrameNode {
+            name: String::from(name),
+            parent: parent.map(String::from),
+            kind: String::from(kind),
+            translation: parent.map(|_| [0.0, 0.0, 0.1]),
+            rotation: parent.map(|_| [0.0, 0.0, 0.0, 1.0]),
+            source: parent.map(|_| String::from("descriptor")),
+            joint: None,
+            joint_type: None,
+            axis: None,
+            mimics: None,
+            mimic_multiplier: None,
+            mimic_offset: None,
+            collision: true,
+            collision_shape: None,
+            collision_ignore: Vec::new(),
+            mass_kg: None,
+        }
+    }
+
+    fn dynamic(name: &str, parent: &str, joint: &str) -> FrameNode {
+        FrameNode {
+            joint: Some(String::from(joint)),
+            joint_type: Some(String::from("revolute")),
+            axis: Some([0.0, 1.0, 0.0]),
+            ..bare(name, Some(parent), "dynamic")
+        }
+    }
+
+    fn rooted(nodes: &[FrameNode]) -> FrameGraph {
+        let mut all = Vec::new();
+        all.push(bare("base_link", None, "root"));
+        all.extend(nodes.iter().cloned());
+        FrameGraph {
+            root: String::from("base_link"),
+            convention: String::from("rep103"),
+            generator: Some(String::from("urdf")),
+            nodes: all,
+        }
+    }
+
+    /// The branch `corpus/frames/bindings.json` cannot hold.
+    ///
+    /// The generator writes every case input through `JSON.stringify`, which renders infinity as
+    /// `null`, so a frozen case would describe a different body from the one its expectation was
+    /// computed from. And `skynet-json` refuses `1e999` at parse — "a literal so large it overflows
+    /// to infinity is a corrupt corpus file, not a value" — so in this edition the document is
+    /// rejected before the check runs, and the only way to reach it is the way a driver would:
+    /// with a graph built in memory.
+    ///
+    /// It is kept because the TypeScript edition has no parser of its own. Whoever calls it arrives
+    /// through `JSON.parse`, which answers `Infinity` rather than refusing, and this rule is the
+    /// only thing between that and a pose computed from one.
+    #[test]
+    fn a_coefficient_that_is_not_a_number_is_refused_even_though_no_corpus_case_can_say_so() {
+        for value in [f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+            let graph = rooted(&[
+                dynamic("drive", "base_link", "hand.finger.flex"),
+                FrameNode {
+                    mimics: Some(String::from("hand.finger.flex")),
+                    mimic_multiplier: Some(value),
+                    ..dynamic("follower", "drive", "hand.finger.distal")
+                },
+            ]);
+            let fault =
+                validate_frame_bindings(&graph, &["hand.finger.flex", "hand.finger.distal"])
+                    .expect("a coefficient that is not a number is a fault");
+            assert_eq!(fault.code, "mimic_coefficient");
+            assert_eq!(fault.subjects.as_slice(), &[String::from("follower")]);
+        }
+    }
+
+    /// The same value, arriving the way a real descriptor would.
+    ///
+    /// Not a duplicate of the test above: it pins *which layer* refuses, and the answer is that the
+    /// parser gets there first. If `skynet-json` ever starts admitting non-finite literals, this
+    /// test fails and the one above becomes the load-bearing one — which is the order the two
+    /// should be read in.
+    #[test]
+    fn a_descriptor_carrying_1e999_is_refused_by_the_parser_before_any_of_this_runs() {
+        assert!(
+            skynet_json::Json::parse(r#"{"mimic_multiplier":1e999}"#).is_err(),
+            "a literal that overflows to infinity is a corrupt document, not a body"
+        );
     }
 }

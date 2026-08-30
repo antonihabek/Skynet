@@ -170,6 +170,7 @@ fn package(id: &str, digest: &str, kind: PackageKind, state: RunState) -> Desire
         kind,
         state,
         grants: Vec::new(),
+        signature: None,
     }
 }
 
@@ -520,6 +521,7 @@ fn narrowing_a_profile_is_immediate_and_widening_one_is_not() {
     want.profile = Some(DesiredProfile {
         name: "site-a".to_string(),
         digest: "sha256:new".to_string(),
+        signature: None,
         verified: true,
         limits: tight.clone(),
     });
@@ -545,6 +547,7 @@ fn an_unsigned_profile_produces_no_action_at_all() {
     want.profile = Some(DesiredProfile {
         name: "tampered".to_string(),
         digest: "sha256:new".to_string(),
+        signature: None,
         verified: false,
         limits: ProfileLimits::default(),
     });
@@ -782,8 +785,37 @@ fn a_desired_state_decodes() {
         ]
     );
     let profile = desired.profile.unwrap();
-    assert!(profile.verified);
+    // §38.1, and the hole this closes. The document above says `"verified": true`, and the decoder
+    // refuses to believe it: the desired state is a file on the robot's own disk, so anybody who
+    // could edit the limits could edit that boolean in the same pass, and the kernel's ceilings were
+    // on the other side of it. Only a signature checked on this robot may set it, and that happens
+    // in `skynetd-io` where the trust store is.
+    assert!(
+        !profile.verified,
+        "a document cannot assert its own verification"
+    );
     assert_eq!(profile.limits.joint_velocity_max_rad_s, Some(1.5));
+}
+
+#[test]
+fn a_profile_signature_is_decoded_but_never_believed() {
+    let json = Json::parse(
+        r#"{"generation":1,
+            "profile":{"name":"site-a","digest":"sha256:pr","verified":true,
+                       "signature":{"key":"aa","value":"bb"},
+                       "limits":{"joint_velocity_max_rad_s":1.5}}}"#,
+    )
+    .unwrap();
+    let profile = DesiredState::from_json(&json).unwrap().profile.unwrap();
+    // The signature travels; the verdict does not.
+    assert_eq!(
+        profile.signature,
+        Some(crate::desired::DesiredSignature {
+            key: "aa".to_string(),
+            value: "bb".to_string(),
+        })
+    );
+    assert!(!profile.verified);
 }
 
 #[test]

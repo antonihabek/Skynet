@@ -1,0 +1,205 @@
+/*
+ * The on-robot console's stylesheet (§32.2).
+ *
+ * No web font, because there is no internet. No preprocessor, because there is no build step. The
+ * whole file is here to make three distinctions visible at a glance, and each is a safety property
+ * rather than a decoration:
+ *
+ *   1. The stop control is unmistakably the stop control, and it is on screen at every scroll
+ *      position.
+ *   2. A value the robot measured looks different from a value nobody measured. `.absent` is the
+ *      class for the second, and it is deliberately not a dash — a dash reads as zero.
+ *   3. A stale panel looks stale. `.stale` dims the values and the age beside the heading says how
+ *      old they are, so a number that stopped updating cannot pass for one that is live.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --ink: #16181d;
+  --ink-dim: #5d6470;
+  --ground: #f4f5f7;
+  --card: #ffffff;
+  --rule: #d9dce2;
+  --accent: #1c4fd8;
+  --danger: #b3161d;
+  --danger-ink: #ffffff;
+  --warn: #8a5a00;
+  --ok: #1c6b3a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e7e9ee;
+    --ink-dim: #9aa1ad;
+    --ground: #14161a;
+    --card: #1c1f25;
+    --rule: #2d323a;
+    --accent: #7fa4ff;
+    --danger: #e0242c;
+    --danger-ink: #ffffff;
+    --warn: #e0a83c;
+    --ok: #5fca8b;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ── The stop bar ───────────────────────────────────────────────────────────
+ *
+ * Sticky rather than scroll-driven: §32.2 says never below the fold, and a scroll listener that
+ * fails leaves the stop button somewhere up the page. Sticky positioning cannot fail that way.
+ */
+.stopbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 16px;
+  background: var(--card);
+  border-bottom: 1px solid var(--rule);
+}
+
+.stopbar-id { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
+.stopbar-id strong { font-size: 14px; letter-spacing: 0.02em; }
+.stopbar-id span { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.stop {
+  flex: 0 0 auto;
+  min-width: 148px;
+  padding: 14px 28px;
+  font: 700 18px/1 inherit;
+  letter-spacing: 0.08em;
+  color: var(--danger-ink);
+  background: var(--danger);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.stop:hover { filter: brightness(1.08); }
+.stop:active { filter: brightness(0.92); }
+.stop:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+.stop-result {
+  margin: 0;
+  padding: 10px 16px;
+  background: var(--card);
+  border-bottom: 1px solid var(--rule);
+  font-size: 13px;
+}
+
+/* ── Panels ─────────────────────────────────────────────────────────────── */
+
+main {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 16px;
+  display: grid;
+  gap: 16px;
+}
+
+.panel {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.panel h2 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.age { font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: none; }
+
+/* A panel whose last answer is old. The values stay on screen — a blank panel loses the last
+ * thing the robot actually said — but they are dimmed and the age beside the heading says how
+ * old they are, so they cannot be read as live. */
+.panel.stale .fields, .panel.stale table, .panel.stale .subpanel { opacity: 0.45; }
+.panel.stale .age { color: var(--warn); font-weight: 700; }
+
+.fields { margin: 0; display: grid; grid-template-columns: minmax(160px, max-content) 1fr; gap: 4px 16px; }
+.fields dt { color: var(--ink-dim); font-size: 13px; }
+.fields dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+/* Not a dash, and not blank. A dash reads as zero and a blank reads as loading; §32.2's rule is
+ * that a value nobody received is reported as one. */
+.absent { color: var(--ink-dim); font-style: italic; }
+
+.note { margin: 8px 0 0; font-size: 12.5px; color: var(--ink-dim); }
+.dim { color: var(--ink-dim); }
+.subpanel { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--rule); }
+
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th, td { text-align: left; padding: 6px 8px 6px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { color: var(--ink-dim); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+tr:last-child td { border-bottom: none; }
+td.num { font-variant-numeric: tabular-nums; }
+
+.pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11.5px; font-weight: 600; border: 1px solid currentColor; }
+.pill.ok { color: var(--ok); }
+.pill.warn { color: var(--warn); }
+.pill.bad { color: var(--danger); }
+.pill.off { color: var(--ink-dim); }
+
+button.act {
+  font: 600 12px/1 inherit;
+  padding: 5px 10px;
+  margin-right: 6px;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  cursor: pointer;
+}
+button.act:hover { border-color: var(--accent); color: var(--accent); }
+button.act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.access-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.access-row label { font-size: 12px; color: var(--ink-dim); }
+.access-row input {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: 7px 9px;
+  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--ink);
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+}
+.access-row button {
+  font: 600 13px/1 inherit;
+  padding: 8px 14px;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+a { color: var(--accent); }
+
+footer { max-width: 900px; margin: 0 auto; padding: 0 16px 24px; font-size: 12px; }
+
+@media (max-width: 560px) {
+  .fields { grid-template-columns: 1fr; gap: 0 0; }
+  .fields dt { margin-top: 8px; }
+  .stop { min-width: 110px; padding: 14px 18px; }
+}

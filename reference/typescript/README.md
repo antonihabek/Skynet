@@ -36,14 +36,24 @@ against the implementation, is worth more than a comment block — and it is wha
 | `kinematics.ts` | Forward kinematics, the specified sine/cosine/square root, and the pose-guard geometry |
 | `shape.ts` | The wire shape of every output: which fields are nullable and which are optional |
 
-The first six, and `canonical.ts`, are the Hub's `lib/skynet/os/*.ts`, changed only in their import
-paths. `blackbox.ts` and `kinematics.ts` are not: the Hub writes no black boxes and computes no
-forward kinematics, so those two are second implementations written here against the same
-specification the Rust is written against.
+`conformance.ts`, `package.ts`, `readiness.ts`, `digest.ts` and `canonical.ts` are the Hub's
+`lib/skynet/os/*.ts`, changed only in their import paths. `blackbox.ts` and `kinematics.ts` never
+were: the Hub writes no black boxes and computes no forward kinematics, so those two are second
+implementations written here against the same specification the Rust is written against.
 
-Keeping the vendored six byte-for-byte is deliberate: an oracle that has been tidied is an oracle
-that no longer describes the thing it is the reference for. When the Hub's copy changes, this copy is updated and the corpus is
-regenerated, and the diff in `corpus/` is the review.
+**`embodiment.ts` and `safety.ts` are no longer byte-for-byte, and this file used to claim they
+were.** The frame graph of §44.3, the geometry it carries and the two pose guards of §44.5 were
+built in this repository, and the Hub has no consumer for it — it plans transports and awards
+tiers; it does not compute where an arm is, and it holds no `frames` to compute one from. So the two files are ahead here by that work and the
+divergence is deliberate. It is recorded rather than hidden because the sentence above it was
+false for two sessions, and a stale claim of identity is worse than an admitted difference: it is
+the reason nobody re-checks.
+
+Keeping the rest vendored byte-for-byte is deliberate: an oracle that has been tidied is an oracle
+that no longer describes the thing it is the reference for. When the Hub's copy changes, this copy
+is updated and the corpus is regenerated, and the diff in `corpus/` is the review. When a change
+starts here — as the SCTS expansion of §52 did — it is carried the other way by hand and recorded
+in `PROGRESS.md`, which is the same rule `docs/README.md` applies to the shared documents.
 
 ## Running it
 

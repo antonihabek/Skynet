@@ -130,8 +130,25 @@ pub struct PackageManifest {
 /// Why a package was refused, or warned about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PackageRejectionCode {
-    /// No verified publisher signature.
+    /// No publisher signature accompanied the package.
     Unsigned,
+    /// A signature was present and did not verify.
+    ///
+    /// The one signature state that says something *went wrong* rather than something is missing.
+    /// An operator who reads `unsigned` shrugs; one who reads this stops.
+    SignatureFailed,
+    /// A signature verified, and the key that made it is not one this robot trusts.
+    ///
+    /// Nothing is wrong with the bytes and nothing is wrong with the signature. What is missing is
+    /// a *decision*, and it is the operator's: this robot has not been told that this signer may
+    /// publish to it. Reporting it as `signature_failed` would send somebody hunting for tampering
+    /// that did not happen, and reporting it as `verified` would make the trust store decorative.
+    SignatureUntrusted,
+    /// This platform cannot verify a signature at all.
+    ///
+    /// A gap in the operating system rather than in the package, and it is named separately so the
+    /// remedy lands on the right desk.
+    SignatureUnverifiable,
     /// The bytes do not hash to the digest in the manifest.
     DigestMismatch,
     /// A non-driver asked to run unsandboxed.
@@ -159,6 +176,9 @@ impl PackageRejectionCode {
     pub fn as_str(self) -> &'static str {
         match self {
             PackageRejectionCode::Unsigned => "unsigned",
+            PackageRejectionCode::SignatureFailed => "signature_failed",
+            PackageRejectionCode::SignatureUntrusted => "signature_untrusted",
+            PackageRejectionCode::SignatureUnverifiable => "signature_unverifiable",
             PackageRejectionCode::DigestMismatch => "digest_mismatch",
             PackageRejectionCode::IsolationViolation => "isolation_violation",
             PackageRejectionCode::BudgetExceeded => "budget_exceeded",
@@ -239,6 +259,60 @@ pub struct DeviceCapacity {
     pub installed: Vec<InstalledPackage>,
 }
 
+/// What is known about a package's release signature.
+///
+/// Five states, because a boolean held two and the other three mattered. They have different owners
+/// and different remedies, and collapsing them left an operator unable to tell whether to chase a
+/// publisher, add a key, upgrade the OS, or stop and investigate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignatureState {
+    /// Checked against a key the operator trusts.
+    Verified,
+    /// Present, and it did not verify. The bytes are attested to somebody other than the manifest
+    /// claims, which is what tampering looks like.
+    Failed,
+    /// It verified, against a key this robot does not trust. The operator's job.
+    ///
+    /// The state a verifier discovers the moment there is a trust store to check against: a
+    /// signature can be perfectly good and made by a stranger. It is not `Failed` — nothing went
+    /// wrong — and it is not `Verified`, because §37.1 says *"against a key the operator trusts"*
+    /// and this one was not.
+    Untrusted,
+    /// No signature accompanied the package. The publisher's job.
+    Absent,
+    /// This edition cannot check a signature at all. The platform's job.
+    Unverifiable,
+}
+
+impl SignatureState {
+    /// The wire spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SignatureState::Verified => "verified",
+            SignatureState::Failed => "failed",
+            SignatureState::Untrusted => "untrusted",
+            SignatureState::Absent => "absent",
+            SignatureState::Unverifiable => "unverifiable",
+        }
+    }
+
+    /// Parse the wire spelling.
+    ///
+    /// No default. A document whose signature state does not parse is one nobody should guess
+    /// about, and the caller decides what to do with `None` — which is the whole reason this type
+    /// replaced a boolean that read a missing field as `false`.
+    pub fn parse(text: &str) -> Option<SignatureState> {
+        match text {
+            "verified" => Some(SignatureState::Verified),
+            "failed" => Some(SignatureState::Failed),
+            "untrusted" => Some(SignatureState::Untrusted),
+            "absent" => Some(SignatureState::Absent),
+            "unverifiable" => Some(SignatureState::Unverifiable),
+            _ => None,
+        }
+    }
+}
+
 /// Everything [`admit_package`] needs.
 #[derive(Debug, Clone)]
 pub struct AdmissionParams {
@@ -246,8 +320,8 @@ pub struct AdmissionParams {
     pub manifest: PackageManifest,
     /// The robot.
     pub capacity: DeviceCapacity,
-    /// Whether a release signature verified against a key registered to the publisher.
-    pub signature_verified: bool,
+    /// What is known about the release signature.
+    pub signature: SignatureState,
     /// The digest the bytes on disk actually hash to.
     pub observed_digest: String,
     /// Verdict from the transport plan for this body, when one was resolved.
@@ -279,13 +353,36 @@ pub fn admit_package(params: &AdmissionParams) -> AdmissionResult {
     let capacity = &params.capacity;
     let mut findings: Vec<PackageFinding> = Vec::new();
 
-    if !params.signature_verified {
-        findings.push(PackageFinding {
+    // Four of the five states are a finding, and they are four *different* findings, with four
+    // different people at the end of them. `failed` is the one that says something went wrong
+    // rather than something being missing; `untrusted` is the one where nothing is missing at all
+    // except a decision nobody has made.
+    match params.signature {
+        SignatureState::Verified => {}
+        SignatureState::Failed => findings.push(PackageFinding {
+            code: PackageRejectionCode::SignatureFailed,
+            severity: Severity::Error,
+            message: "A release signature was present and did not verify. The bytes are not the ones the signer attested to — treat this as tampering until somebody proves otherwise.".to_string(),
+            subjects: None,
+        }),
+        SignatureState::Untrusted => findings.push(PackageFinding {
+            code: PackageRejectionCode::SignatureUntrusted,
+            severity: Severity::Error,
+            message: "A release signature verified, and the key that made it is not one this robot trusts. Nothing is wrong with the bytes; what is missing is the operator's decision that this signer may publish here.".to_string(),
+            subjects: None,
+        }),
+        SignatureState::Absent => findings.push(PackageFinding {
             code: PackageRejectionCode::Unsigned,
             severity: Severity::Error,
-            message: "No verified publisher signature. The bytes may be intact and nobody has attested to who produced them.".to_string(),
+            message: "No publisher signature accompanied this package. The bytes may be intact and nobody has attested to who produced them.".to_string(),
             subjects: None,
-        });
+        }),
+        SignatureState::Unverifiable => findings.push(PackageFinding {
+            code: PackageRejectionCode::SignatureUnverifiable,
+            severity: Severity::Error,
+            message: "This platform cannot verify a release signature, so nothing has established who produced these bytes. That is a gap in the operating system rather than in the package.".to_string(),
+            subjects: None,
+        }),
     }
 
     if params.observed_digest != manifest.digest {

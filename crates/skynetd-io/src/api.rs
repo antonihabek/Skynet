@@ -8,8 +8,11 @@
 //!
 //! | Route | Role (§39.1) | |
 //! |---|---|---|
+//! | `GET /` | *(none)* | The on-robot console (§32.2). `/console.css` and `/console.js` with it |
 //! | `GET /status` | *(none)* | Tier, state, uptime, generation, and whether stop is reachable |
 //! | `POST /stop` | *(none)* | Stop every package. The software stop §32.2 puts on the console |
+//! | `GET /embodiment` | observer | What body this is (§5): slug, joints, frame graph, and the digest every recording carries |
+//! | `GET /capacity` | observer | What `admit_package` would be told about this robot (§8), or why it cannot be assembled |
 //! | `GET /health` | observer | Per-package liveness and readiness, every field with its age |
 //! | `GET /packages` | observer | Installed, active digest, wanted state, grants |
 //! | `GET /packages/{ns}:{name}` | observer | One package, with its rollback target |
@@ -76,6 +79,15 @@ pub fn handle<L: Launcher, S: Slots>(
     request: &Request,
 ) -> Response {
     let segments = request.segments();
+
+    // The console's own three files, answered before anything else looks at a credential. They
+    // carry no robot state — every number on the page arrives later, from a route that enforces
+    // its own role — and a console you must authenticate to *load* is a console whose stop button
+    // is behind a login form (§39).
+    if let Some(response) = crate::console::asset(&request.method, &segments) {
+        return response;
+    }
+
     let role = context
         .credentials
         .role_of_header(request.header("authorization"));
@@ -105,6 +117,20 @@ pub fn handle<L: Launcher, S: Slots>(
     match (request.method.as_str(), segments.as_slice()) {
         ("GET", ["status"]) => ok(status(context)),
         ("POST", ["stop"]) => ok(stop_all(context)),
+        ("GET", ["embodiment"]) => {
+            let layout = context.daemon.store.layout();
+            let body = crate::embodiment::load(layout);
+            let signature = crate::embodiment::signature_verdict(layout, &body);
+            ok(crate::embodiment::to_json(&body, &signature))
+        }
+        ("GET", ["capacity"]) => {
+            let body = crate::embodiment::load(context.daemon.store.layout());
+            ok(crate::capacity::to_json(&crate::capacity::read(
+                &context.daemon.store,
+                &body,
+                VERSION,
+            )))
+        }
         ("GET", ["health"]) => ok(health(context)),
         ("GET", ["packages"]) => ok(packages(context)),
         ("GET", ["packages", id]) => package(context, id),
@@ -135,6 +161,8 @@ fn known_path(segments: &[&str]) -> bool {
         segments,
         ["status"]
             | ["stop"]
+            | ["embodiment"]
+            | ["capacity"]
             | ["health"]
             | ["packages"]
             | ["packages", _]
@@ -370,13 +398,35 @@ fn health<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
 fn packages<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let actual = context.daemon.observe(context.now_ms);
     let grants = group(&actual.grants);
+    // Read once for the whole list rather than once per row. The store is a file, and a table of
+    // twenty packages is not a reason to open it twenty times.
+    let trust = crate::trust::TrustStore::load(context.daemon.store.layout());
 
     let mut list = Json::arr();
     for entry in &actual.installed {
+        let signed = context
+            .daemon
+            .desired
+            .package(&entry.id)
+            .and_then(|package| package.signature.as_ref())
+            .and_then(|raw| crate::trust::SignedBy::from_hex(&raw.key, &raw.value).ok());
+        let verdict = trust.check(
+            &crate::trust::package_message(&entry.digest),
+            signed.as_ref(),
+        );
+
         let mut item = Json::obj();
         item.set("id", Json::from(entry.id.as_str()))
             .set("digest", Json::from(entry.digest.as_str()))
             .set("activated", Json::Bool(entry.activated))
+            .set("signature", Json::from(verdict.state.as_str()))
+            .set(
+                "signer",
+                match &verdict.signer {
+                    Some(label) => Json::from(label.as_str()),
+                    None => Json::Null,
+                },
+            )
             .set(
                 "state",
                 Json::from(
@@ -423,6 +473,18 @@ fn package<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, raw: &str) ->
         return error(404, "no such package on this robot");
     };
 
+    // The signature the desired state carries for this package, checked here against the trust
+    // store. Both halves are read on the request rather than held, so a key an operator has just
+    // added is reflected by the next refresh of the console rather than by the next restart.
+    let signed = context
+        .daemon
+        .desired
+        .package(&id.as_str())
+        .and_then(|package| package.signature.as_ref())
+        .and_then(|raw| crate::trust::SignedBy::from_hex(&raw.key, &raw.value).ok());
+    let verdict = crate::trust::TrustStore::load(context.daemon.store.layout())
+        .check(&crate::trust::package_message(&digest), signed.as_ref());
+
     let mut body = Json::obj();
     body.set("id", Json::from(id.as_str().as_str()))
         .set("digest", Json::from(digest.as_str()))
@@ -442,10 +504,21 @@ fn package<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, raw: &str) ->
                 .manifest(&digest)
                 .unwrap_or_else(|_| Json::obj()),
         )
-        // §37.1 verifies the digest and then an Ed25519 signature. This edition has no Ed25519, and
-        // the field says "not checked" rather than false — an unverified package and an unsigned
-        // one are different facts and a console must not merge them.
-        .set("signature", Json::from("not_checked"));
+        // §37.1's second verification step, answered rather than deferred. The verdict is computed
+        // here rather than stored beside the blob: a content-addressed package is the same package
+        // whoever signed it, and a recorded "verified" would outlive the trust store it came from.
+        //
+        // `signer` is the trust store's label, because a report naming a key by its hex has told an
+        // operator nothing they can act on.
+        .set("signature", Json::from(verdict.state.as_str()))
+        .set(
+            "signer",
+            match &verdict.signer {
+                Some(label) => Json::from(label.as_str()),
+                None => Json::Null,
+            },
+        )
+        .set("signature_detail", Json::from(verdict.detail.as_str()));
     ok(body)
 }
 
@@ -484,8 +557,15 @@ fn plan<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
         deferred.push(item);
     }
 
-    let mut body = Json::obj();
-    body.set("at_ms", Json::Num(pass.at_ms as f64))
+    // Nested under `pass`, and it was not always. The route answered `{"pass": null, "note": …}`
+    // when no pass had run and a *flat* object when one had, so a client could not write one parse
+    // for both: the console read `value.pass.converged` and threw on every poll from the moment a
+    // robot did anything, and the CLI read the flat fields and never saw the bug. Two consumers,
+    // two shapes, one route — found by opening the page in a browser, which is the only thing that
+    // was ever going to find it.
+    let mut inner = Json::obj();
+    inner
+        .set("at_ms", Json::Num(pass.at_ms as f64))
         .set("applied", applied)
         .set("deferred", deferred)
         .set("converged", Json::Bool(pass.converged()))
@@ -497,6 +577,9 @@ fn plan<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
                 "no"
             }),
         );
+
+    let mut body = Json::obj();
+    body.set("pass", inner);
     body
 }
 
