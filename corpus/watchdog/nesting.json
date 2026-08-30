@@ -1,0 +1,98 @@
+{
+  "corpus": "watchdog",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "nested",
+      "note": "The order §46.3 requires, innermost first. Every layer above is reachable.",
+      "input": {
+        "on_command_loss": "hold",
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":null,\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":\"hold\"}"
+    },
+    {
+      "id": "wdt-pre-empts-kernel",
+      "note": "The processor resets before the kernel executes its controlled stop, so the harsher recovery pre-empts the gentler one and the robot's best available behaviour is the one it never performs.",
+      "input": {
+        "on_command_loss": "hold",
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 250,
+          "soc_wdt_ms": 100,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":null,\"nesting\":{\"complete\":false,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":250,\"window\":\"envelope_watchdog_ms\"},{\"ms\":100,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[{\"code\":\"wdt_pre_empts_kernel\",\"detail\":\"envelope_watchdog_ms is 250 ms and soc_wdt_ms is 100 ms, so the outer window is not outside the inner one. The processor resets before the kernel executes its controlled stop, so the harsher recovery pre-empts the gentler one and the robot never performs its best available behaviour (§46.3).\",\"inner\":\"envelope_watchdog_ms\",\"outer\":\"soc_wdt_ms\"}],\"missing\":[],\"ordered\":false},\"on_command_loss\":\"hold\"}"
+    },
+    {
+      "id": "drive-faults-first",
+      "note": "Layer 3 present, configured, and never reached: the drive faults on its own first.",
+      "input": {
+        "on_command_loss": "hold",
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 900,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":null,\"nesting\":{\"complete\":false,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":900,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[{\"code\":\"drive_faults_first\",\"detail\":\"soc_wdt_ms is 900 ms and drive_command_timeout_ms is 500 ms, so the outer window is not outside the inner one. The drive faults on its own before the hardware watchdog fires, so layer 3 is present, configured, and never reached (§46.3).\",\"inner\":\"soc_wdt_ms\",\"outer\":\"drive_command_timeout_ms\"}],\"missing\":[],\"ordered\":false},\"on_command_loss\":\"hold\"}"
+    },
+    {
+      "id": "cycle-exceeds-watchdog",
+      "note": "The kernel cannot finish a cycle inside its own command deadline, so the watchdog guard trips on a robot that is working correctly.",
+      "input": {
+        "on_command_loss": "hold",
+        "windows": {
+          "kernel_cycle_worst_case_ms": 120,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":null,\"nesting\":{\"complete\":false,\"declared\":[{\"ms\":120,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[{\"code\":\"cycle_exceeds_watchdog\",\"detail\":\"kernel_cycle_worst_case_ms is 120 ms and envelope_watchdog_ms is 100 ms, so the outer window is not outside the inner one. The kernel cannot complete a cycle inside its own command deadline, so the watchdog guard trips on a robot that is working correctly.\",\"inner\":\"kernel_cycle_worst_case_ms\",\"outer\":\"envelope_watchdog_ms\"}],\"missing\":[],\"ordered\":false},\"on_command_loss\":\"hold\"}"
+    },
+    {
+      "id": "equal-windows",
+      "note": "A race whose winner is interrupt latency. A chain whose order depends on which timer fires first is not a chain, so the comparison is strict.",
+      "input": {
+        "on_command_loss": "hold",
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 100,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":null,\"nesting\":{\"complete\":false,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":100,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[{\"code\":\"wdt_pre_empts_kernel\",\"detail\":\"envelope_watchdog_ms is 100 ms and soc_wdt_ms is 100 ms, so the outer window is not outside the inner one. The processor resets before the kernel executes its controlled stop, so the harsher recovery pre-empts the gentler one and the robot never performs its best available behaviour (§46.3).\",\"inner\":\"envelope_watchdog_ms\",\"outer\":\"soc_wdt_ms\"}],\"missing\":[],\"ordered\":false},\"on_command_loss\":\"hold\"}"
+    },
+    {
+      "id": "gap-in-the-middle",
+      "note": "An undeclared window is reported and skipped over rather than ending the walk: the pair either side of the gap still inverts, and that inversion is real whatever sits between them.",
+      "input": {
+        "on_command_loss": "hold",
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "soc_wdt_ms": 1,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":null,\"nesting\":{\"complete\":false,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":null,\"window\":\"envelope_watchdog_ms\"},{\"ms\":1,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[{\"code\":\"windows_not_nested\",\"detail\":\"kernel_cycle_worst_case_ms is 2 ms and soc_wdt_ms is 1 ms, so the outer window is not outside the inner one. The windows must nest innermost-first for every layer above to be reachable.\",\"inner\":\"kernel_cycle_worst_case_ms\",\"outer\":\"soc_wdt_ms\"}],\"missing\":[\"envelope_watchdog_ms\"],\"ordered\":false},\"on_command_loss\":\"hold\"}"
+    },
+    {
+      "id": "nothing-declared",
+      "note": "Ordered and not complete: nothing contradicts, and nothing was established. One boolean would have to lie about one of them.",
+      "input": {
+        "on_command_loss": "hold",
+        "windows": {}
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":null,\"nesting\":{\"complete\":false,\"declared\":[{\"ms\":null,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":null,\"window\":\"envelope_watchdog_ms\"},{\"ms\":null,\"window\":\"soc_wdt_ms\"},{\"ms\":null,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[\"kernel_cycle_worst_case_ms\",\"envelope_watchdog_ms\",\"soc_wdt_ms\",\"drive_command_timeout_ms\"],\"ordered\":true},\"on_command_loss\":\"hold\"}"
+    }
+  ]
+}

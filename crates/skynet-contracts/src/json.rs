@@ -26,6 +26,9 @@ use alloc::vec::Vec;
 use skynet_json::{format_number, Json};
 
 use crate::admission::*;
+use crate::calibration::{
+    self, CalibrationRecord, Conditions, GuardUnavailable, Validity, ValidityPolicy,
+};
 use crate::certification::*;
 use crate::embodiment::*;
 use crate::readiness::*;
@@ -482,6 +485,15 @@ pub fn descriptor_from_json(value: &Json) -> Result<EmbodimentDescriptor, Decode
         capabilities: value.str_arr("capabilities"),
         extensions: value.str_arr("extensions"),
         simulator: flag(value, "simulator"),
+        // §46.2. Read as declared, validated nowhere here: an unrecognised value is *not* silently
+        // dropped to `None`, because "this body says `freewheel` and nobody knows what that means"
+        // and "this body says nothing" are different facts with different remedies, and the
+        // readiness check names whichever it finds.
+        on_command_loss: opt_string(value, "on_command_loss"),
+        watchdog: value.get_present("watchdog").map(|block| DeclaredWindows {
+            soc_wdt_ms: opt_f64(block, "soc_wdt_ms"),
+            drive_command_timeout_ms: opt_f64(block, "drive_command_timeout_ms"),
+        }),
         frames: frames_from_json(value.get("frames")),
     })
 }
@@ -852,6 +864,175 @@ pub fn digest_files_from_json(value: Option<&Json>) -> Vec<crate::digest::Digest
                 .to_string(),
         })
         .collect()
+}
+
+// ── Calibration (§45) ────────────────────────────────────────────────────────
+
+/// Read the conditions a record was taken under, or the ones a robot is in now.
+pub fn conditions_from_json(value: Option<&Json>) -> Conditions {
+    let Some(value) = value else {
+        return Conditions::default();
+    };
+    Conditions {
+        at_s: opt_f64(value, "at_s"),
+        temperature_c: opt_f64(value, "temperature_c"),
+        joint_travel_rad: opt_f64(value, "joint_travel_rad"),
+        tool: opt_string(value, "tool"),
+        payload_kg: opt_f64(value, "payload_kg"),
+    }
+}
+
+/// Read a validity policy (§45.4).
+fn policy_from_json(value: Option<&Json>) -> ValidityPolicy {
+    let Some(value) = value else {
+        return ValidityPolicy::default();
+    };
+    ValidityPolicy {
+        max_age_s: opt_f64(value, "max_age_s"),
+        max_joint_travel_rad: opt_f64(value, "max_joint_travel_rad"),
+        max_temperature_delta_c: opt_f64(value, "max_temperature_delta_c"),
+        invalidating_events: value.str_arr("invalidating_events"),
+    }
+}
+
+/// Read one stored calibration (§45.3).
+///
+/// `set` is the one required field, because a record that does not say which parameter set it is
+/// cannot be filed, let alone judged. Everything else is optional *here* and mandatory in
+/// [`calibration::evaluate`] — the decoder's job is to report what the document says, and the
+/// verdict's job is to refuse it. Merging the two would make a record with no method a parse error,
+/// which is the wrong sentence: the file is fine and the calibration is a rumour.
+pub fn calibration_from_json(value: &Json) -> Result<CalibrationRecord, DecodeError> {
+    Ok(CalibrationRecord {
+        set: req_str(value, "set")?,
+        method: opt_string(value, "method"),
+        residual: opt_f64(value, "residual"),
+        residual_threshold: opt_f64(value, "residual_threshold"),
+        conditions: conditions_from_json(value.get_present("conditions")),
+        operator: opt_string(value, "operator"),
+        policy: policy_from_json(value.get_present("policy")),
+        events_since: value.str_arr("events_since"),
+    })
+}
+
+/// Serialise one record's verdict.
+pub fn validity_to_json(set: &str, validity: &Validity) -> Json {
+    let mut out = Json::obj();
+    out.set("set", Json::Str(set.to_string()));
+    out.set("state", Json::Str(validity.as_str().to_string()));
+    out.set("detail", Json::Str(validity.detail()));
+    out.set(
+        "reason",
+        match validity {
+            Validity::Expired { reason, .. } => Json::Str((*reason).to_string()),
+            _ => Json::Null,
+        },
+    );
+    out.set(
+        "checked",
+        match validity {
+            Validity::Valid { checked } => str_list(checked),
+            _ => Json::Arr(alloc::vec::Vec::new()),
+        },
+    );
+    out.set(
+        "guards",
+        str_list(
+            &calibration::guards_fed_by(set)
+                .iter()
+                .map(|g| g.to_string())
+                .collect::<alloc::vec::Vec<String>>(),
+        ),
+    );
+    out
+}
+
+/// Serialise one starved guard (§45.5).
+pub fn guard_unavailable_to_json(entry: &GuardUnavailable) -> Json {
+    let mut out = Json::obj();
+    out.set("guard", Json::Str(entry.guard.clone()));
+    out.set("set", Json::Str(entry.set.clone()));
+    out.set("state", Json::Str(entry.state.to_string()));
+    out.set("detail", Json::Str(entry.detail.clone()));
+    out
+}
+
+// ── The watchdog chain (§46) ─────────────────────────────────────────────────
+
+/// Serialise §46's whole answer for one body: the chain, the command-loss verdict, the nesting.
+///
+/// One document rather than three routes, because the three are one question — *is this robot's
+/// watchdog chain sound* — and a console that had to join them would be the fourth place the
+/// nesting rule was written down.
+pub fn watchdog_to_json(on_command_loss: Option<&str>, windows: &crate::watchdog::Windows) -> Json {
+    let mut layers = Json::arr();
+    for layer in crate::watchdog::CHAIN {
+        let mut row = Json::obj();
+        row.set("layer", Json::Num(layer.layer as f64));
+        row.set("name", Json::Str(layer.name.to_string()));
+        row.set("catches", Json::Str(layer.catches.to_string()));
+        row.set("response", Json::Str(layer.response.to_string()));
+        row.set("required_from", Json::Str(layer.required_from.to_string()));
+        row.set("petted_by", Json::Str(layer.petted_by.to_string()));
+        layers.push(row);
+    }
+
+    let report = crate::watchdog::check_nesting(windows);
+    let mut faults = Json::arr();
+    for fault in &report.faults {
+        let mut row = Json::obj();
+        row.set("code", Json::Str(fault.code.to_string()));
+        row.set("inner", Json::Str(fault.inner.to_string()));
+        row.set("outer", Json::Str(fault.outer.to_string()));
+        row.set("detail", Json::Str(fault.detail.clone()));
+        faults.push(row);
+    }
+
+    // An **array**, not an object, and the reason is the whole subject of this document: these four
+    // windows mean nothing except in order. A canonical JSON object sorts its keys, so the object
+    // form renders them alphabetically — `drive_command_timeout_ms` first and
+    // `kernel_cycle_worst_case_ms` third — and a panel about nesting that lists them out of nesting
+    // order is worse than one that lists nothing. Found by looking at the page.
+    let mut declared = Json::arr();
+    for (name, value) in windows.ordered() {
+        let mut row = Json::obj();
+        row.set("window", Json::Str(name.to_string()));
+        row.set("ms", nullable_num(value));
+        declared.push(row);
+    }
+
+    let mut nesting = Json::obj();
+    nesting.set("declared", declared);
+    nesting.set("faults", faults);
+    nesting.set(
+        "missing",
+        str_list(
+            &report
+                .missing
+                .iter()
+                .map(|name| name.to_string())
+                .collect::<Vec<String>>(),
+        ),
+    );
+    // Two booleans, because they are two different facts and a single one would have to lie about
+    // one of them: nothing contradicts, and nothing was established.
+    nesting.set("ordered", Json::Bool(report.ordered()));
+    nesting.set("complete", Json::Bool(report.complete()));
+
+    let mut out = Json::obj();
+    out.set("chain", layers);
+    out.set(
+        "on_command_loss",
+        nullable_str(&on_command_loss.map(ToString::to_string)),
+    );
+    out.set(
+        "host_blocked",
+        nullable_str(&crate::watchdog::host_blocked_by_command_loss(
+            on_command_loss,
+        )),
+    );
+    out.set("nesting", nesting);
+    out
 }
 
 #[cfg(test)]

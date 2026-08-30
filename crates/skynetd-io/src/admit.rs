@@ -177,6 +177,35 @@ pub fn run(
     Report::Ran { result, signature }
 }
 
+/// The verdict in one line, for a record rather than for a reader.
+///
+/// The black box takes this and the operator's terminal takes [`to_lines`], and the split is §41.1:
+/// the recording is not a log file, so what lands on the event channel is the **decision** — the
+/// signature state, and how many errors and warnings — while the findings themselves stay in the
+/// report somebody reads. A ring filled with prose would be a ring holding fewer control cycles.
+pub fn summary(report: &Report) -> String {
+    match report {
+        Report::NotRun { detail } => format!("admission not run: {detail}"),
+        Report::Ran { result, signature } => {
+            let errors = result
+                .findings
+                .iter()
+                .filter(|finding| finding.severity == Severity::Error)
+                .count();
+            let warnings = result.findings.len() - errors;
+            let signer = match (&signature.signer, signature.state) {
+                (Some(signer), SignatureState::Verified) => format!("signed by {signer}"),
+                _ => format!("signature {}", signature.state.as_str()),
+            };
+            if result.findings.is_empty() {
+                format!("admitted, nothing found, {signer}")
+            } else {
+                format!("{errors} error(s), {warnings} warning(s), {signer}")
+            }
+        }
+    }
+}
+
 /// The report, for a terminal.
 ///
 /// Every finding, not the first — §8.2's rule, because fixing four problems one deployment at a

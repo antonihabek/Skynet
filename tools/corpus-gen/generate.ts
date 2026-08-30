@@ -48,13 +48,18 @@ import {
   evaluateReadiness, summarizeReadiness, type ReadinessSubject,
 } from '../../reference/typescript/readiness.ts'
 import {
+  allSets, evaluate as evaluateCalibration, guardsUnavailable, setsFor,
+  type CalibrationRecord, type Conditions, type Validity,
+} from '../../reference/typescript/calibration.ts'
+import type { Windows as WatchdogWindows } from '../../reference/typescript/watchdog.ts'
+import {
   evaluateCycle, resolveLimits, withGrants,
   type CommandCycle, type ResolveLimitsParams,
 } from '../../reference/typescript/safety.ts'
 import type { SafetyEnvelope } from '../../reference/typescript/types.ts'
 import {
   shapeAdmission, shapeCertification, shapeFleet, shapeFrameFault, shapeLimits, shapePlan,
-  shapeDigest, shapeReadiness, shapeSolved, shapeVerdict,
+  shapeDigest, shapeReadiness, shapeSolved, shapeVerdict, shapeCalibration, shapeWatchdog,
 } from '../../reference/typescript/shape.ts'
 import {
   flatten, solve,
@@ -2106,6 +2111,232 @@ headerCase(
     },
     canonical({ size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), opcodes: opcodes(bytes) }))
 }
+
+// ── watchdog (§46) ───────────────────────────────────────────────────────────
+//
+// One corpus for the chain, the command-loss verdict and the nesting, for the reason §45.7's three
+// cases are one corpus: they are one question — is this robot's watchdog chain sound — and pinning
+// them separately would let an edition agree about an inversion and disagree about what it costs,
+// which is the half an operator reads.
+
+function watchdogCase(
+  file: string, id: string, note: string,
+  onCommandLoss: string | null, windows: WatchdogWindows,
+): void {
+  add('watchdog', file, {
+    id, note,
+    input: { on_command_loss: onCommandLoss, windows },
+    expected: canonical(shapeWatchdog(onCommandLoss, windows)),
+  })
+}
+
+const NESTED: WatchdogWindows = {
+  kernel_cycle_worst_case_ms: 2,
+  envelope_watchdog_ms: 100,
+  soc_wdt_ms: 250,
+  drive_command_timeout_ms: 500,
+}
+
+watchdogCase('nesting', 'nested', 'The order §46.3 requires, innermost first. Every layer above is '
+  + 'reachable.', 'hold', NESTED)
+watchdogCase('nesting', 'wdt-pre-empts-kernel',
+  'The processor resets before the kernel executes its controlled stop, so the harsher recovery '
+  + "pre-empts the gentler one and the robot's best available behaviour is the one it never "
+  + 'performs.',
+  'hold', { ...NESTED, envelope_watchdog_ms: 250, soc_wdt_ms: 100 })
+watchdogCase('nesting', 'drive-faults-first',
+  'Layer 3 present, configured, and never reached: the drive faults on its own first.',
+  'hold', { ...NESTED, soc_wdt_ms: 900 })
+watchdogCase('nesting', 'cycle-exceeds-watchdog',
+  'The kernel cannot finish a cycle inside its own command deadline, so the watchdog guard trips '
+  + 'on a robot that is working correctly.',
+  'hold', { ...NESTED, kernel_cycle_worst_case_ms: 120 })
+watchdogCase('nesting', 'equal-windows',
+  'A race whose winner is interrupt latency. A chain whose order depends on which timer fires '
+  + 'first is not a chain, so the comparison is strict.',
+  'hold', { ...NESTED, soc_wdt_ms: 100 })
+watchdogCase('nesting', 'gap-in-the-middle',
+  'An undeclared window is reported and skipped over rather than ending the walk: the pair either '
+  + 'side of the gap still inverts, and that inversion is real whatever sits between them.',
+  'hold', { kernel_cycle_worst_case_ms: 2, soc_wdt_ms: 1, drive_command_timeout_ms: 500 })
+watchdogCase('nesting', 'nothing-declared',
+  'Ordered and not complete: nothing contradicts, and nothing was established. One boolean would '
+  + 'have to lie about one of them.',
+  'hold', {})
+
+watchdogCase('command-loss', 'coast',
+  '§46.2, and the shape is the point: the middle rung is the unsafe one. Guest is fine, certified '
+  + 'is fine because layer 4 cuts drive enable independently, and only host — where layer 3 is the '
+  + 'last line — turns a reset into a fall.',
+  'coast', NESTED)
+watchdogCase('command-loss', 'hold', 'A body that holds takes the reset and stays where it is.',
+  'hold', NESTED)
+watchdogCase('command-loss', 'brake', 'Brakes engage; the recovery path is survivable.',
+  'brake', NESTED)
+watchdogCase('command-loss', 'fault', 'The drive faults and disables, which is a stop.',
+  'fault', NESTED)
+watchdogCase('command-loss', 'undeclared',
+  'Silence is not `hold`. Treating it as `hold` would be inventing the most convenient answer to '
+  + 'the only question layer 3 turns on.',
+  null, NESTED)
+watchdogCase('command-loss', 'unrecognised',
+  'A value outside the vocabulary gets its own sentence: "this body says `freewheel`" and "this '
+  + 'body says nothing" are different facts with different remedies.',
+  'freewheel', NESTED)
+
+// ── calibration (§45.7) ──────────────────────────────────────────────────────
+//
+// §45.7 asks for three conformance additions and they are one question asked of one input, so they
+// are one corpus: given these records and this moment, what is believed and which guards lose their
+// input. Splitting them would let an edition pass `expiry_enforced` while disagreeing about which
+// guard the expired set feeds — which is the half that matters to whoever is standing next to the
+// robot.
+
+const CALIBRATION_TAKEN: Conditions = {
+  at_s: 1_700_000_000,
+  temperature_c: 22,
+  joint_travel_rad: 1_000,
+  tool: 'gripper-2f85',
+  payload_kg: 0,
+}
+
+function calibrationRecord(
+  set: string, overrides: Partial<CalibrationRecord> = {},
+): CalibrationRecord {
+  return {
+    set,
+    method: 'charuco-12x9, 40 poses',
+    residual: 0.4,
+    residual_threshold: 1,
+    conditions: CALIBRATION_TAKEN,
+    operator: 'alice',
+    policy: {},
+    events_since: [],
+    ...overrides,
+  }
+}
+
+function calibrationCase(
+  file: string, id: string, note: string,
+  records: CalibrationRecord[], now: Conditions, applicable?: string[],
+): void {
+  const judged: Array<[string, Validity]> = records.map(
+    record => [record.set, evaluateCalibration(record, now)])
+  const sets = applicable ?? allSets()
+  add('calibration', file, {
+    id, note,
+    input: { now, records, ...(applicable ? { applicable } : {}) },
+    expected: canonical(shapeCalibration(judged, guardsUnavailable(judged, sets))),
+  })
+}
+
+const CALIBRATION_LATER: Conditions = {
+  at_s: 1_700_000_000 + 3_600,
+  temperature_c: 22,
+  joint_travel_rad: 1_000,
+}
+
+// `calibration.provenance` — every stored record carries a method and a residual, or it is refused.
+calibrationCase('provenance', 'complete',
+  'Method, residual and threshold all present: judged on its policy like any other record.',
+  [calibrationRecord('camera_extrinsics', { policy: { max_age_s: 86_400 } })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+calibrationCase('provenance', 'no-method',
+  'A measurement nobody can repeat. Unusable rather than believed, and its guards go with it.',
+  [calibrationRecord('camera_extrinsics', { method: null })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+calibrationCase('provenance', 'no-residual',
+  'A measurement nobody can grade — the other half of §45.3, and a different sentence.',
+  [calibrationRecord('camera_extrinsics', { residual: null })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+calibrationCase('provenance', 'residual-over-threshold',
+  'Twelve millimetres of reprojection error against a threshold of two: failed, not expired. It '
+  + 'was never a calibration, so no amount of freshness makes it one.',
+  [calibrationRecord('camera_extrinsics', { residual: 12, residual_threshold: 2 })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+calibrationCase('provenance', 'absent',
+  'Nobody ever measured this set. Absence is not validity, and the guards say so by name.',
+  [], CALIBRATION_LATER, ['imu_bias'])
+
+// `calibration.expiry_enforced` — a deliberately expired record disables its dependent guards, and
+// the guards report the parameter set by name.
+calibrationCase('expiry', 'within-age',
+  'One hour into a one-day validity. Valid, and the checked list says what was actually tested.',
+  [calibrationRecord('camera_extrinsics', { policy: { max_age_s: 86_400 } })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+calibrationCase('expiry', 'past-age',
+  'Past its elapsed-time backstop: proximity and workspace both lose their input, by name.',
+  [calibrationRecord('camera_extrinsics', { policy: { max_age_s: 600 } })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+calibrationCase('expiry', 'no-policy',
+  'A record that expires on nothing is valid and says nothing was checked — which is how a console '
+  + 'tells "still valid" from "nobody set a policy".',
+  [calibrationRecord('joint_zeros')], CALIBRATION_LATER, ['joint_zeros'])
+calibrationCase('expiry', 'joint-travel',
+  'Joint zeros drift with travel, not with the calendar (§45.2).',
+  [calibrationRecord('joint_zeros', { policy: { max_joint_travel_rad: 500 } })],
+  { ...CALIBRATION_LATER, joint_travel_rad: 2_000 }, ['joint_zeros'])
+calibrationCase('expiry', 'temperature-delta',
+  'F/T bias drifts with temperature continuously, so the delta is the rule and the direction does '
+  + 'not matter.',
+  [calibrationRecord('force_torque_bias', { policy: { max_temperature_delta_c: 5 } })],
+  { ...CALIBRATION_LATER, temperature_c: 40 }, ['force_torque_bias'])
+calibrationCase('expiry', 'temperature-unreadable',
+  'The rule that keeps an expiry policy from switching itself off: a robot whose temperature sensor '
+  + 'has failed is precisely the robot whose bias should not be trusted.',
+  [calibrationRecord('force_torque_bias', { policy: { max_temperature_delta_c: 5 } })],
+  { at_s: CALIBRATION_LATER.at_s }, ['force_torque_bias'])
+calibrationCase('expiry', 'two-sets-one-guard',
+  'Workspace starved by expired joint zeros and an expired tool offset is two measurements '
+  + 'somebody has to take, so it is two lines.',
+  [
+    calibrationRecord('joint_zeros', { policy: { max_age_s: 600 } }),
+    calibrationRecord('tool_offset', { policy: { max_age_s: 600 } }),
+  ],
+  CALIBRATION_LATER, ['joint_zeros', 'tool_offset'])
+
+// `calibration.event_invalidation` — a simulated collision invalidates the affected sets.
+calibrationCase('events', 'collision',
+  'Measured a minute ago and one impact old. §45.4: a robot that has just hit something has, by '
+  + 'definition, possibly moved its cameras.',
+  [calibrationRecord('camera_extrinsics', {
+    policy: { max_age_s: 86_400, invalidating_events: ['collision'] },
+    events_since: ['collision'],
+  })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+calibrationCase('events', 'unlisted-event',
+  'A tool change does not move a camera. Expiring everything on every event would train an '
+  + 'operator to recalibrate nothing.',
+  [calibrationRecord('camera_extrinsics', {
+    policy: { max_age_s: 86_400, invalidating_events: ['collision'] },
+    events_since: ['tool_change'],
+  })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+calibrationCase('events', 'tool-change-on-tool-offset',
+  'The same event against the set it does invalidate.',
+  [calibrationRecord('tool_offset', {
+    policy: { max_age_s: 86_400, invalidating_events: ['tool_change'] },
+    events_since: ['tool_change'],
+  })],
+  CALIBRATION_LATER, ['tool_offset'])
+calibrationCase('events', 'collision-beats-freshness',
+  'The event is checked before age, because it is a step rather than a slope: this record is sixty '
+  + 'seconds old and worthless.',
+  [calibrationRecord('camera_extrinsics', {
+    conditions: { ...CALIBRATION_TAKEN, at_s: CALIBRATION_LATER.at_s! - 60 },
+    policy: { max_age_s: 86_400, invalidating_events: ['collision', 'estop_under_load'] },
+    events_since: ['estop_under_load'],
+  })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+
+// The body decides which sets are applicable at all. A fixed-base arm reporting `balance`
+// unavailable for want of an IMU bias it can never hold is a page of guards nobody can restore.
+calibrationCase('events', 'arm-without-an-imu',
+  'A manipulator with a camera: seven sets exist, four apply, and `balance` is not among them.',
+  [], CALIBRATION_LATER, setsFor(['manipulation.grasp', 'sensing.rgb'], 'fixed'))
+calibrationCase('events', 'a-body-that-declares-nothing',
+  'Every set applies, because over-reporting what is missing is the conservative direction.',
+  [], CALIBRATION_LATER, setsFor([], null))
 
 // ── Write ────────────────────────────────────────────────────────────────────
 

@@ -410,7 +410,7 @@ fn event() -> Json {
                     "string",
                     "lease_granted, lease_released, lease_preempted, estop, estop_cleared, \
                      package_started, package_stopped, grant_changed, ota, clock_step, \
-                     recording_started, sealed, or gap.",
+                     recording_started, sealed, config_changed, admission, or gap.",
                 ),
             ),
             (
