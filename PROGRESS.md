@@ -1654,3 +1654,1266 @@ reports itself unavailable rather than passing.
 5. **Calibration (§45)**, which is what makes `source: "calibration"` in a frame node mean anything.
    Every extrinsic in every descriptor this repository can generate today says `descriptor`, and
    §44.3 is explicit that where both exist the measured one wins.
+
+---
+
+## 2026-08-30 (eighth) — the §52 expansion, and the half of §44.3 nothing was checking
+
+The Next list has opened with **the §52 SCTS expansion** for four sessions, and the last session
+made the case stronger by widening the gap it was about. This session closed it.
+
+§52 collects the descriptor fields Parts IV and V added and gives each a "Measured by" column
+naming the SCTS test that measures it. Nine rows, seven distinct tests — and **five of the seven
+did not exist**. Three rows pointed at `embodiment.frames.complete`, which no edition implemented.
+A vendor reading §52 as a list of obligations would have found no way to fail five of them, which
+makes those rows worse than absent: an obligation with no test is a field the vendor may fill in
+with anything and still be conformant.
+
+### The five, and where each number has to come from
+
+| Test | Suite | Tier | What it measures | From |
+|---|---|---|---|---|
+| `embodiment.frames.complete` | sim | host | The frame graph is a tree, every name in it resolves, every shape is one this edition can evaluate | §44.3 |
+| `safety.command_loss.behaviour` | bench | host | Commands stop; what the drives *do* is what `on_command_loss` declares | §46.2 |
+| `safety.homing.envelope` | bench | host | The homing sweep stays inside the restricted envelope, measured at the joint | §48.3 |
+| `rhal.sensor.latency` | bench | host | Per sensor, event to timestamp — a backend stamping arrival rather than capture fails | §47.2 |
+| `power.safe_state.reachable` | bench | host | From full rated load, timed to the nearest safe state, against `time_to_safe_state_s` | §36.2 |
+
+`power` is a ninth area, and it earns one: the energy a robot keeps back to stop with is not a
+property of the RHAL, the body, the kernel, packages, OTA, telemetry, offline operation or
+security. §36.2 computes the reserve budget from a declared figure, and a body that declares two
+seconds and takes six has a third of the reserve it needs — which is the kind of number that is
+otherwise discovered in an incident report.
+
+All five are `host` rather than `guest`. Guest is the portable core every integration passes, and
+four of these need a bench session and the fifth needs a frame graph most bodies do not have yet.
+Requiring them at guest would refuse bodies that are safe by the same argument the rest of the
+design is safe by.
+
+The suite is **35 tests across 9 areas**. §15's prose said 29 across 8 and the code said 30; the
+count now agrees in the prose, the oracle and the Rust, and §15 says why it grew.
+
+### The test that would have caught this three sessions ago
+
+`every_test_52_names_as_a_measure_exists` transcribes §52's third column and asserts each id is in
+the suite. The table is prose in a mirrored document and the suite is code, so nothing makes them
+agree by construction — what this does is make the second half of a §52 row impossible to forget.
+Add a row naming a new test, and the suite fails until the test exists.
+
+Cheap, and it is the mechanism whose absence let three rows point at nothing for three sessions.
+
+### `embodiment.frames.complete` had to measure something, and the obvious half was already done
+
+A test that exists and measures nothing is the defect this session was fixing, one level down. So
+the question was what "complete" means for a frame graph, and the answer split in two.
+
+The first half already existed: `validate_frames` checks the tree — a single root, no cycles, no
+duplicate names, no parent that resolves to nothing, shapes this edition can evaluate, ignore lists
+naming frames that exist. `skynet driver check` was already running it. It was filing the result
+under `embodiment.descriptor.valid`, so this session moved four results onto the id §52 names, which
+is also the more honest tier: a malformed graph is a real defect, but §44.5 already bounds its
+consequence to two guards going unavailable, and blocking guest on it was too strong.
+
+The second half did not exist in either edition, and it is the interesting one.
+
+### `joint` and `mimics` do not name anything in the graph
+
+They name entries in the **joint list**, and `validate_frames` is never given one. It is handed a
+tree and asked whether the tree is well formed, and it answers correctly without ever seeing the
+descriptor the tree came out of. So a `joint: "shoulder_pitch"` on a body whose joint list says
+`shoulder` is a graph that passes every check either edition had — and it is wrong in a way that
+reaches the robot.
+
+`validate_frame_bindings` is the missing half, in both editions, with four faults:
+
+* **`dangling_joint`** — a dynamic frame names a joint the body does not declare.
+* **`mimic_missing`** — a linkage follows a joint the body does not declare.
+* **`mimic_self`** — a frame follows the joint it is driven by. `value = multiplier × driver +
+  offset` over one value is a fixed point, not a linkage.
+* **`mimic_coefficient`** — a multiplier or offset with no `mimics` to apply it to, or one that is
+  not a finite number.
+
+It deliberately does **not** require that every declared joint have a frame. A gripper whose fingers
+nobody modelled is a legitimate partial tree and §44.5 already has the guard report unavailable
+naming the frame it wanted. "Complete" here means every name the graph uses resolves — not that the
+graph covers the body.
+
+### What a dangling joint actually does, which is not what I first wrote
+
+The first draft of this function said a dangling joint makes the frame hold its rest pose while the
+guards read that pose as the truth. That is wrong, and checking it rather than asserting it changed
+the argument for the check into a better one.
+
+`Kinematics::solve` marks a frame with no binding **unresolved**. `check_workspace` treats
+`(None, _)` as a trip rather than a pass — "the guard has not shown the command safe" — and
+`check_self_collision` does the same. So nothing is silently believed. What happens instead is that
+both pose guards trip on that frame **every cycle, forever**, which is correct and useless: the
+robot holds still and no report traces the cause back to a spelling in a file.
+
+§44.5 asks for better than that. A guard which cannot run is supposed to report so **when the lease
+is granted**, naming the frame, and `statically_resolvable` is that mechanism — but it reads the
+joint's *kind*, so it catches a limb hanging below a ball joint and cannot catch a joint name that
+binds to nothing, because the joint list is not in the graph. This check is what closes that gap: it
+turns a permanent in-cycle trip into a refusal while somebody is still looking at the file.
+
+The wrong sentence had reached six places including two user-facing fault messages. All six were
+corrected and the corpus regenerated.
+
+### Reachable from a workstation, not only from a driver
+
+`skynet frames` now runs the binding check, because the command a driver author actually has in
+front of them should be the one that finds this. It reads the descriptor's `joints` array and
+refuses on a fault.
+
+An **absent** `joints` array is left alone, and that is a decision rather than an oversight. This
+command is run on partial descriptors while one is being written, and refusing every frame in the
+tree because the joint list has not been filled in yet would make it useless for the job it exists
+for. An absent joint list and a joint list that omits the joint are two different statements.
+
+`skynet driver check` runs it too, filed under `embodiment.frames.complete`, which is where a driver
+gets caught — the graph and the joint list are commonly produced by two different code paths in one.
+
+### The corpus grew by ten, and one case could not be written
+
+`corpus/frames/bindings.json`, ten cases, and the joint list is what separates it from
+`frames/validate`: same trees, plus the body they came out of.
+
+The eleventh and twelfth cases were written, generated, and removed. The non-finite coefficient rule
+cannot be frozen in this corpus, because the generator writes every input through `JSON.stringify`,
+which renders infinity as `null` — so the frozen input would describe a *different* body from the
+one its expectation was computed from. That is worse than no case: it would fail an edition for
+reading the file correctly. It was caught by reading the generated file rather than by trusting the
+generator, and the reason is now a comment in `generate.ts` so the gap is a decision.
+
+The rule is held by unit tests in the Rust instead, and the two editions reach it differently in a
+way worth recording — see the findings below.
+
+### The corpus caught five bugs of mine in one run
+
+Every one of the five string literals in the new Rust function had its line continuations eaten on
+the way into the file, so each fault message carried twenty-odd spaces in the middle. The Rust
+compiled, the function was correct, and every test that did not compare exact bytes passed.
+`cargo test -p skynet-corpus` failed on the first run and named the byte offset of the first
+difference. That is the mechanism §31.4 exists for, working on its author.
+
+### Verification
+
+| | |
+|---|---|
+| `cargo test --workspace` | **24 test binaries, all ok**, 0 failed |
+| `cargo clippy --workspace --all-targets` | clean |
+| `cargo fmt --all --check` | clean |
+| `cargo test -p skynet-corpus` | this edition reproduces all **360** cases byte for byte |
+| `node tools/corpus-gen/generate.ts` | regenerates identically; the only diff is this session's |
+| `node tools/check-mirrors.mjs` | all three shared documents match |
+| Hub `npx vitest run lib/__tests__/skynet-os-packages.test.ts` | 28 passed |
+| `skynet frames` on a hand-broken descriptor | refuses with `dangling_joint`, naming the frame and the joint |
+
+`skynet-contracts` 90 → 93 tests, `skynet-cli`'s CLI suite 16 → 18, corpus 350 → 360 cases across
+29 → 30 files.
+
+### A failing test at HEAD, and why it failed on this machine and not in CI
+
+`cargo test --workspace` was red before any of this session's work.
+`a_descriptor_with_no_frame_block_says_which_of_the_two_absences_it_is` asserted a phrase against
+raw stderr, and `term::wrap` reflows a refusal to 92 columns with the file path in front of it. On
+a machine whose temp directory is long enough, the wrap point lands inside the phrase. CI's is not.
+
+`said()` — stderr with its whitespace collapsed — already existed in that file for exactly this, and
+most of the file already used it. Five assertions did not, of which two were failing and three were
+one longer path away from it. All five now use it.
+
+Worth stating plainly: a test that passes or fails on the length of a temp path is a test that
+reports on the machine rather than on the code, and it had been committed green.
+
+### What was changed in the Hub
+
+Two files, and the mirroring rule was applied to both.
+
+* `docs/skynet-os-architecture.md` — §15's count and the paragraph saying why it grew. Made here
+  first and carried across by hand; `node tools/check-mirrors.mjs` reports all three identical.
+* `lib/skynet/os/conformance.ts` — the five tests and the ninth area. This file is genuinely
+  byte-identical to `reference/typescript/conformance.ts` (it imports nothing outside itself), the
+  Hub consumes SCTS to award tiers, and the Hub's own suite passes unchanged at 28.
+
+No other Hub code was touched.
+
+### What is still zero lines
+
+The policy runtime, the SPSC ring and observation assembly, OTA (§12), the outbound queue (§34.4),
+the on-robot console's HTML (§32.2), calibration (§45), the watchdog chain (§46), POST and homing
+(§48), the safety MCU, Ed25519, and the drivers that talk to real hardware.
+
+Four of the five tests added this session are `bench` tests, and **nothing runs a bench suite**.
+They are specification and award arithmetic today: the award machinery will now correctly refuse a
+host claim whose command-loss behaviour was never measured, and there is no harness that could
+measure it. That is the honest state and it is the same state the other fifteen bench tests have
+been in since §15 was written — but five more of them is worth saying out loud rather than counting
+as progress.
+
+`balance` remains the only guard of the eight that neither edition implements.
+
+§59.5's several-engineer-years figure is unchanged.
+
+### Three findings recorded rather than fixed
+
+1. **The two editions disagree about a descriptor containing `1e999`, and no corpus case can catch
+   it.** `crates/skynet-json` refuses it at parse — "a literal so large it overflows to infinity is
+   a corrupt corpus file, not a value" — so the Rust edition rejects the whole document. The
+   TypeScript oracle has no parser of its own; whoever calls it arrives through `JSON.parse`, which
+   answers `Infinity`. So the same file is a parse error in one edition and an infinite coefficient
+   in the other, and §31.4's byte-identical requirement has nothing to say about it because the
+   corpus cannot express the input. The non-finite check exists in both editions and is load-bearing
+   in exactly one. The fix is a canonical *parser* in the oracle rather than `JSON.parse`, which is
+   a real piece of work and should not be folded into a feature.
+2. **`reference/typescript/embodiment.ts` and `safety.ts` have diverged from the Hub's copies, and
+   the README claimed for two sessions that they had not.** Ahead by 214 and 380 lines
+   respectively — the frame graph, its geometry and the two pose guards, all built here because the
+   Hub has no consumer for them. The divergence is defensible; the stale claim of identity was not, because a claim
+   nobody re-checks is how two copies get to differ by four hundred lines without anybody noticing.
+   The README now says which five files are byte-identical and which two are not. Whether the Hub
+   should carry the frames block at all is a Hub question this repository should not answer alone.
+3. **Self-collision still excludes only parent–child pairs and whatever the descriptor declares**,
+   carried from last session and untouched by this one. `validate_frame_bindings` checks that a
+   `collision_ignore` entry names a frame that exists; it says nothing about whether the list is
+   *populated*, and nothing generates one. A real humanoid needs a populated exception list before
+   the guard is usable.
+
+### Next
+
+1. **The on-robot console (§32.2)** — the API is complete enough to sit behind one; what is missing
+   is the small static page. It is now the oldest item on this list.
+2. **The embodiment descriptor on the robot**, which still unblocks three recorded findings at once:
+   admission on the install path, the black box's real shape, and its provenance digests.
+3. **The Hub side (§32.4)**: `/skynet/os` readiness over the live registry, the transport endpoint,
+   the embodiment tables, and the incident upload.
+4. **Calibration (§45)**, which is what makes `source: "calibration"` in a frame node mean anything.
+   Every extrinsic in every descriptor this repository can generate today says `descriptor`, and
+   §44.3 is explicit that where both exist the measured one wins.
+5. **A canonical JSON parser in the oracle**, from finding 1. It is the only way the `1e999`
+   divergence becomes something the corpus can hold.
+
+---
+
+## 2026-08-30 (ninth) — the on-robot console, and what it refuses to draw
+
+The console is §32.2, it was the oldest item on the Next list, and the API had been complete enough
+to sit behind one for three sessions. What was missing was the page.
+
+### Three files, and why not one
+
+`crates/skynetd-io/console/` — `console.html`, `console.css`, `console.js` — compiled into the
+binary with `include_str!` and served from `GET /`, `/console.css`, `/console.js`.
+
+Compiled in rather than read from disk, because the console is what somebody reaches for when
+something is wrong, and a page that could be missing because a partition failed to mount is a page
+that is missing exactly when it is needed. A binary that started has its console.
+
+Three files rather than one self-contained page, which is the less obvious choice. A single file
+needs inline `<script>` and inline `<style>`, and a `Content-Security-Policy` permitting those
+permits every injection the script's own escaping discipline exists to prevent. Split, the policy is
+
+```
+default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self';
+img-src 'none'; font-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'
+```
+
+with no `unsafe-inline` anywhere. It costs two extra requests on a link-local socket. It is still no
+build step: three files copied into a binary is not a toolchain.
+
+### The rule the page exists to obey
+
+> **It must never show a value it did not receive.**
+
+One sentence, three mechanisms, and they are the whole design:
+
+1. **`absent()`** — a field the daemon returned as null renders as *the reason it is null*. Never a
+   zero, never a dash, never a blank cell. §33.6 spends a paragraph establishing that zero guard
+   trips and no measurement of guard trips are opposite facts, and a console rendering them the same
+   way undoes that at the last possible moment. A dash is the specific trap: it reads as zero.
+2. **`Feed`** — every panel is drawn from a feed that remembers *when* its last answer arrived. The
+   age prints beside the heading, counting up twice a second, and past three poll periods the panel
+   goes `.stale`: values dimmed, age in warning colour. A failed poll does not clear the panel —
+   losing the last thing the robot said is worse — but it cannot leave it looking live either.
+3. **Panels with no source render what is missing and why.**
+
+### The guards panel is the one worth reading
+
+§32.2 asks for live guard state: which are active, which are unavailable with the exact input
+missing, trip counts this session. None of it exists. §33.1 keeps `skynetd` away from the body
+entirely — it supervises processes and never commands a joint — so the Safety Kernel is not
+evaluating cycles here and trip counts have nothing to count.
+
+So the panel lists the eight guards of §7.1 in evaluation order and, for each, names the input this
+robot does not have: `workspace` wants a frame graph and forward kinematics in cycle, `proximity`
+wants a separation distance from a sensor, `balance` wants a centre of pressure no edition
+implements, `watchdog` wants a command deadline from a running control loop. Eight rows, eight
+`unavailable`, eight specific absences.
+
+That is §7.2's rule — a guard that cannot run reports what it wanted — applied to a screen. An empty
+panel would have read as "nothing wrong", and eight green ticks would have been the one thing worse.
+
+The same discipline runs through the rest. The status panel reports `enforcement` and says in the
+same line that it is *enforced, not awarded* — §15 awards a tier from evidence and this robot has
+none, and "host tier" over a machine nobody measured is the precise failure the platform exists to
+avoid. §27's state machine position is named as unreported, with the two unwritten things that would
+supply it. The health panel's five measurements arrive as null and each renders as the daemon's own
+sentence about why. The black box carries its `cycles_unavailable` note verbatim.
+
+### Two plans share a word, and the panel says which one it is showing
+
+§32.2's Plan panel is the resolved **transport** plan with clamps and provenance. `GET /plan` is the
+last **reconcile** pass. They are different objects and it would have been easy to put one under the
+other's heading.
+
+The reconcile pass is real, so it is shown under its own name, with stage, action, subject, outcome
+and reason per row. The transport plan is reported absent, with what it would need — an embodiment
+descriptor on the robot and a policy to plan for — and where the same computation already runs
+today, which is `skynet transport` on a workstation.
+
+### The stop button
+
+In a `position: sticky` header, above everything, at every scroll position. No confirm dialog.
+
+Sticky rather than a scroll listener, because a scroll listener that fails leaves the stop control
+somewhere up the page and sticky positioning cannot fail that way. No dialog because §32.2 is
+explicit and §39 gives the reason: an authentication prompt — or any prompt — between a person and a
+stop button is a hazard.
+
+The one failure the script refuses to swallow is a stop that did not reach the daemon. It does not
+retry quietly and it does not print "stopped": it says the button did nothing and to use the
+physical estop.
+
+### Served before the credential check, deliberately
+
+The asset arm runs at the top of `api::handle`, before authorisation. All three files are
+`Role::Anonymous`.
+
+`Fixture::new` builds an unprovisioned robot, and `the_console_loads_on_an_unprovisioned_robot_with_no_credential`
+asks for all three with no token. §39.2 says that robot's console offers status and stop and nothing
+else — and a page that answered 401 would offer neither. The catch-all in `requirement` is
+`Role::Admin`, so this is permanently one table entry away from being wrong; `console::is_asset` is
+also wired into that table, unreachable today, so that any future caller asking it about the console
+is not told the page needs an administrator.
+
+### What the tests actually hold
+
+Six unit tests and three integration tests, and the ones worth naming are the ones that hold a
+design decision rather than a behaviour:
+
+* the stop button is inside the sticky header, the header is sticky, and the script never calls
+  `confirm()`;
+* no file contains `http://` or `https://` — the CSP forbids reaching off the robot, but a page that
+  needs the CSP to stop it is a page that fails differently on a browser ignoring the header;
+* the policy contains no `unsafe-inline`, no `unsafe-eval`, and no wildcard;
+* the script has an `absent()` and never assigns to `innerHTML`.
+
+That last one failed on its first run, correctly, and for the wrong reason: it searched for the bare
+word `innerHTML` and found it in the comment saying the script does not use it. Reading the property
+is harmless; assigning is the risk. It now matches `innerHTML =`, `innerHTML=`,
+`insertAdjacentHTML` and `document.write`, which is both stricter about what matters and immune to
+the file describing its own discipline.
+
+### One check Rust structurally cannot do
+
+`console.js` is `include_str!`'d, so Rust sees a string. A missing brace compiles, ships, serves with
+a 200, and produces a blank page on a robot with every test in `console.rs` still green — and a
+blank console is a robot whose stop button is gone.
+
+`node --check crates/skynetd-io/console/console.js` is the whole of the fix, and it is now a CI step
+in the `invariants` job.
+
+### §32.4 ordered this fifth, and it was built second
+
+Worth recording rather than quietly departing from. §32.4's items 1 to 4 are Hub routes ordered by
+the tables they need; item 5 groups devices, certification and the console, deferring all three
+because *"until then they would be showing invented state"*.
+
+The console is not a Hub route — `skynetd` serves it from the machine it describes, so it needs no
+table and no fleet. The only thing it was waiting on was that last clause, and that is the one thing
+§32.2 already forbids. A console built to the rule on a robot with no kernel does not invent a state
+machine position; it names §27 and says which unwritten thing would supply one. **The emptier the
+robot, the more the page is worth, because what it is reporting is exactly the gap.**
+
+§32.4 now says this, in both copies. The other two in item 5 stay where they are: they are Hub routes
+over tables that do not exist.
+
+### Verification
+
+| | |
+|---|---|
+| `cargo test --workspace` | **446 passed** across 24 binaries, 0 failed (437 before) |
+| `cargo clippy --workspace --all-targets` | clean |
+| `cargo fmt --all --check` | clean |
+| `node --check console.js` | parses |
+| HTML tag balance, by script | balances; 23 elements with ids |
+| Every `$('id')` the script reaches for | all 16 exist in the page |
+| `node tools/check-mirrors.mjs` | all three shared documents match |
+
+`skynetd-io` 83 → 92 tests. On this machine 68 of them run; the other 24 are `cfg(unix)`, which is
+why the count is asserted from the source rather than from a run.
+
+### What is honestly not verified
+
+**This console has never been rendered in a browser.** There is no Linux here, `serve` is
+`cfg(unix)`, and there is therefore no listener to point a browser at. What is verified is that the
+three files are served with the right content types and headers through the real router, that the
+script parses, that the HTML's tags balance, and that every element id the script reaches for
+exists. What is *not* verified is that it looks right, that the poll loop behaves against a live
+daemon, or that the object-URL download path works — that last one is the least certain, because a
+`default-src 'none'` policy and a blob-backed `<a download>` interact in ways that differ by
+browser.
+
+That is a real gap and it is the kind that a screenshot would close in a minute on the right
+machine. It is recorded rather than papered over.
+
+### What was changed in the Hub
+
+`docs/skynet-os-architecture.md` only — the §32.4 amendment, made here and carried across by hand;
+`node tools/check-mirrors.mjs` reports all three identical. No Hub code was touched.
+
+### What is still zero lines
+
+The policy runtime, the SPSC ring and observation assembly, OTA (§12), the outbound queue (§34.4),
+calibration (§45), the watchdog chain (§46), POST and homing (§48), the safety MCU, Ed25519, and the
+drivers that talk to real hardware.
+
+The on-robot console has moved off this list. Everything it reports as unavailable is still on it,
+which is the point of the panel.
+
+### Three findings recorded rather than fixed
+
+1. **The console is untranslated, and §32.3 requires otherwise.** "Every string translatable — a key
+   in `messages/en.json`, then `i18n-catalog.mjs sync`. Both interfaces, all 35 locales." Every
+   string in these three files is English in the source. The Hub has a catalogue and a sync tool;
+   `skynetd` has neither, and giving it one means either shipping 35 catalogues in the binary or
+   serving a locale the robot may not have. Neither is obviously right, both are more than a page
+   deserves before anybody has read it, and the constraint is real — an operator who cannot read the
+   stop button's panel is exactly who this page is for.
+2. **The console polls, and a robot in trouble is when polling is worst.** Five sequential requests
+   every two seconds, each on its own connection, against a single-threaded listener that handles one
+   request per connection (§33.7). That is fine on a healthy robot and it is the wrong shape when the
+   daemon is struggling — which is when somebody is looking at the page. An event stream would be the
+   answer and it is a change to the listener, not to the console.
+3. **`GET /plan` returns the reconcile pass, and §32.2's Plan panel wants the transport plan.** The
+   console now shows the first under its own name and reports the second absent. Both are correct and
+   the route name is the thing that is wrong: `/plan` will eventually have to become `/reconcile` or
+   acquire a sibling, and doing it before a client depends on it is cheaper than after.
+
+### Next
+
+1. **The embodiment descriptor on the robot.** It is now the item that unblocks the most: admission
+   on the install path, the black box's real shape, its provenance digests — and, after this session,
+   the console's transport panel and the pose-guard half of its guards panel.
+2. **The Hub side (§32.4)**: `/skynet/os` readiness over the live registry, the transport endpoint,
+   the embodiment tables, and the incident upload.
+3. **Calibration (§45)**, which is what makes `source: "calibration"` in a frame node mean anything.
+4. **A canonical JSON parser in the oracle**, from the eighth session's first finding. It is the only
+   way the `1e999` divergence becomes something the corpus can hold.
+5. **Render the console once on a Linux box** and fix what a browser says. It is a small job and it
+   is the only thing standing between "the tests pass" and "the page works".
+
+---
+
+## 2026-08-30 (tenth) — the robot learns what body it is
+
+This item has been on the Next list under one wording or another for four sessions, always with the
+same justification: it unblocks more than anything else on the list. It does, and this session found
+out that it unblocks slightly less than advertised — see the finding at the end.
+
+### The daemon had no idea what it was running on
+
+Not a gap in a feature. A gap that three separate things were waiting behind:
+
+* `admit_package` off the install path, because `DeviceCapacity` needs the body;
+* the black box's `embodiment` digest at zero, because a recording carrying an invented one could be
+  replayed against the wrong machine;
+* the console reporting the whole body absent where one field was actually missing.
+
+`crates/skynetd-io/src/embodiment.rs` reads `/data/state/embodiment.json` and closes the second and
+third of those.
+
+### It arrives as a file, and on this side it has to
+
+§4 gives the driver a `describe()` that returns exactly this document, and calling it here is
+impossible. §33.1 says `skynetd` never touches an actuator, the workspace denies it a dependency on
+`skynet-rhal`, and CI asserts the edge is absent. Loading a driver to ask what body this is would
+hand the supervisor a vtable of function pointers into vendor code, which is the whole of what that
+rule prevents.
+
+So the descriptor is written at provisioning (§50), by `skynet descriptor from-urdf`, or by vendor
+tooling, and the daemon reads it the way it reads everything else about the world.
+
+### Three states, not two
+
+`Body` is `Absent`, `Malformed { detail }`, or `Present`. That is §7.2's rule rather than
+fastidiousness, and it is the distinction the whole module is shaped around: **"nobody has told this
+robot what it is" is a provisioning step that did not run, and "somebody did, and the answer does not
+parse" is a generator emitting something wrong.** Different people, different jobs, and a surface
+rendering both as an empty panel hides the only fact that decides which.
+
+A malformed descriptor is never partially believed. No field-by-field salvage, because a body
+description half of which parsed is a body nobody has established the shape of.
+
+An **empty file is `Absent`**, not malformed — it is what a truncated write leaves behind, and
+"the descriptor does not parse" would send somebody hunting for a schema error in a file with
+nothing in it.
+
+### The eighth session's work, doing its job two sessions later
+
+Loading validates the frame graph in both halves: `validate_frames` for the tree, and
+`validate_frame_bindings` for the tree against the joint list. The second is what the §52 expansion
+added, and this is the first place it runs on a robot rather than on a workstation.
+
+A descriptor whose graph names a joint the body does not declare is refused at load, with the code
+and the joint named. On the robot that defect is a frame whose pose never resolves and two pose
+guards tripping on it every cycle — correct, permanent, and traceable to nothing. Refusing it here
+turns it into a provisioning error somebody can read.
+
+### The digest is over canonical JSON, and that is the point of it
+
+Two robots handed the same descriptor with different whitespace must agree about which body they
+are. Hashing the file would give them two answers, and a fleet where one robot's recording cannot be
+matched to another's is a fleet where §56.4's replay argument stops working.
+
+So: sha256 over `skynet-json`'s canonical form, under `skynet.embodiment.v1` — the same rule
+`version_digest` applies to a manifest, and domain-separated for the same reason. Three tests hold
+it: whitespace does not change the answer, a different body does, and the digest is not a bare hash
+of the canonical form.
+
+### What the recording now says
+
+`supervisor_meta` fills two fields it could not before.
+
+**`embodiment`** is the real digest when this robot has a descriptor and zero when it does not. Zero
+is readable as "no body was known", is not a value anybody could mistake for a digest, and is what
+lets the recorder open on an unprovisioned machine — §28 preallocates the ring precisely so nothing
+can silence it.
+
+**`simulator`** comes from the descriptor, for the reason §56.2 gives: a benchmark result replayed
+from a simulated recording must never be mistaken for a field one. It is now in the header rather
+than in somebody's memory of which machine they ran on. An unknown body is not a simulator, which is
+§52's one asymmetric field pointing the way it should.
+
+`os_image` is still zero and that is **not** the same kind of gap: §10's attestation is unwritten,
+so nothing has established which image is running. A digest of the running binary would be a
+different claim wearing this field's name.
+
+`a_sealed_recording_names_the_body_it_was_taken_from` asserts the whole path — descriptor on disk,
+meta, ring header, sealed MCAP, and the file on disk rather than only the bytes in hand.
+
+### `GET /embodiment`, and two console panels that got narrower
+
+An observer-role read returning the three states, the digest, the shape, and — named rather than
+implied — that **no signature was checked**. §5 has the vendor sign the descriptor and
+`embodiment.descriptor.signed` is an SCTS test; nothing here verifies one, so the answer says the
+digest identifies the file and not its provenance.
+
+The console gains a **Body** panel and its guards panel gets more precise. With no descriptor, the
+two pose guards are missing a frame graph. With one, the tree is *here*, and what is missing is a
+control loop to walk it in cycle — so the panel now says "3 of 4 frames move with a joint — what is
+missing is a control loop" rather than "a frame graph on this robot". Both are `unavailable` and
+they are different jobs; a panel naming the wrong one sends somebody to write a generator that
+already ran.
+
+The transport panel narrowed the same way: this robot now has a body, and what is missing is a
+policy declaring the embodiment it was trained on.
+
+### §28 pins the path
+
+`/data/state/embodiment.json`, written into the specification, for the reason §37.1 pins the package
+layout. Two editions that disagree about where the body is written are two editions where a robot
+provisioned by one is a robot the other believes has no body — and a robot with no body records a
+zero digest, cannot answer the capability half of an admission decision, and reports both pose
+guards unavailable. That is a lot of wrong behaviour to inherit from a filename, and none of it
+announces itself.
+
+One file rather than a directory: a robot is one machine, and *which* of two bodies the kernel is
+guarding is not a question this system should ever answer at run time.
+
+### Verification
+
+| | |
+|---|---|
+| `cargo test --workspace` | **458 passed** across 24 binaries, 0 failed (446 before) |
+| `cargo clippy --workspace --all-targets` | clean |
+| `cargo fmt --all --check` | clean |
+| `node --check console.js` | parses |
+| Every `$('id')` the script reaches for | exists in the page |
+| `node tools/check-mirrors.mjs` | all three shared documents match |
+
+`skynetd-io` 92 → 104 tests.
+
+### A test bug of mine, found the worst way
+
+Two of the new tests shared a scratch directory — the helper named it after a hash of the descriptor
+text, so two tests handed the same descriptor got the same path, and `remove_dir_all` on entry raced
+the read in the other. It passed until an unrelated change to `supervisor_meta` shifted the timing,
+and then failed *looking like it belonged to that change*.
+
+That is the expensive kind of test bug: not that it is wrong, but that it accuses the wrong code. The
+helper now takes a counter, nothing is removed, and no two calls can interfere however the harness
+schedules them. Run three times to confirm.
+
+### What was changed in the Hub
+
+`docs/skynet-os-architecture.md` only — §28's storage tree and the paragraphs pinning the descriptor
+path. Made here and carried across by hand; `node tools/check-mirrors.mjs` reports all three
+identical. No Hub code was touched.
+
+### What is still zero lines
+
+The policy runtime, the SPSC ring and observation assembly, OTA (§12), the outbound queue (§34.4),
+calibration (§45), the watchdog chain (§46), POST and homing (§48), the safety MCU, Ed25519, and the
+drivers that talk to real hardware.
+
+### The finding this session went looking for and found instead
+
+**`admit_package` still cannot be wired onto the install path, and the reason is no longer missing
+code.** It is that §8 never says what determines the set of capability tokens a *robot provides*.
+
+`DeviceCapacity.capabilities` is documented as "capability tokens the robot plus its adapter actually
+provide", and nothing decides that set. The descriptor does not carry it — there is no
+`capabilities` field on `EmbodimentDescriptor` — and §8 defines only the package's side: what it
+declares it needs, and what the operator grants. The robot's side is assumed to exist.
+
+Which leaves two ways to wire admission today and both are wrong:
+
+* **Derive the set from the body** — a gripper implies `manipulation.grasp`, an audio sensor implies
+  `sensing.audio` — which means a package is admitted or refused on the strength of a mapping table
+  nobody specified and I would have invented. That is exactly the "invent a plausible number"
+  failure the eighth session's finding warned about, one level up.
+* **Leave it empty** — and `admit_package` reports `capability_ungranted` as an *error* for every
+  capability any package needs, refusing every install on a robot that is fine.
+
+So the blocker was never the descriptor. Four sessions of Next lists said this item unblocked
+admission, and it does not: it unblocks the digest and the console, and admission needs a
+specification change first. Writing it down is worth more than a call site.
+
+The fix is probably a `capabilities` array on the descriptor, which is a §52-shaped change — a
+schema addition, a "measured by" row, and an SCTS test — and it touches the Hub's schema, the
+oracle and the corpus. It should be one reviewed change, not folded into a feature. It is now the
+head of the Next list.
+
+### Two more findings recorded rather than fixed
+
+1. **The descriptor's digest identifies the file, not its provenance.** §5 has the vendor sign it and
+   `embodiment.descriptor.signed` is an SCTS test at host tier; §19's Ed25519 is unwritten, so
+   nothing here verifies anything. `signature_checked: false` is reported on every answer and the
+   console prints the reason, which is the most that can be done — but an operator who edited
+   `embodiment.json` on a robot's disk would change the body the kernel guards and the recording
+   names, and nothing would notice. That is the same threat §38.1 spends a section on for profiles.
+2. **The route enumeration behaviour is fail-closed and undocumented.** `POST /embodiment` returns
+   401 rather than 405 to an unauthenticated caller, because authorisation runs before the route
+   match — so 404 and 405 are only distinguishable by somebody the robot already trusts. That is the
+   right behaviour and it surprised a test I wrote expecting the documented 405. The §33.7 table
+   should say so.
+
+### Next
+
+1. **`capabilities` on the descriptor**, from the finding above. It is what actually unblocks
+   admission on the install path, and it is a §52-shaped change: schema, a "measured by" row, an
+   SCTS test, the oracle and the corpus.
+2. **The Hub side (§32.4)**: `/skynet/os` readiness over the live registry, the transport endpoint,
+   the embodiment tables, and the incident upload.
+3. **Calibration (§45)**, which is what makes `source: "calibration"` in a frame node mean anything —
+   and which now has a descriptor on the robot to write into.
+4. **A canonical JSON parser in the oracle**, from the eighth session's first finding.
+5. **Render the console once on a Linux box** and fix what a browser says.
+
+---
+
+## 2026-08-30 (eleventh) — what a robot provides, and admission finally running
+
+The tenth session's finding was that `admit_package` could not be wired because §8 never said what
+determines the set of capability tokens a *robot provides*. This session answered that, and then ran
+admission — which turned up a second, sharper question that had been hiding behind the first.
+
+### The answer was already in the Hub
+
+`SkynetRobot.capabilities` and `SkynetRobotAdapter.capabilities` are registry columns, and the
+compatibility engine already answers "will this run?" from them before anybody downloads forty
+gigabytes. So the fact exists; what was missing was its copy on the robot.
+
+**§5.0** puts it in the embodiment descriptor, and the two reasons are worth keeping:
+
+* **The descriptor is produced by the adapter, for the body.** "The robot plus its adapter" is
+  precisely the question a driver's `describe()` is in a position to answer, and nothing else on the
+  robot sees both halves.
+* **§11's invariant is that no decision on a robot requires a round trip.** Fetching the set from
+  the Hub at install time would make a package installable only while connected, on a machine the
+  design expects to spend a week offline.
+
+`capabilities` and `extensions`, on `EmbodimentDescriptor`, in both editions.
+
+### The one place the descriptor's usual rule inverts
+
+Everywhere else on this descriptor, absent means *nobody declared it* and the consumer reports
+unavailability. That rule cannot apply here, and §5.0 says why: a missing list would leave admission
+choosing between refusing every package and admitting every package, and there is no honest third
+option.
+
+So **an absent list reads as the empty set** — this body provides nothing — and the vendor is
+required to write it down. The failure direction is refusal, which is visible, names the tokens, and
+is fixed by declaring them. It joins `simulator` as the second exception in §52's table, each with
+its own reason.
+
+### The measure arrived with the field
+
+`embodiment.capabilities.declared` — sim, host — added **in the same change** as the field it
+measures. That is the rule the eighth session's §52 expansion was meant to establish, applied for
+the first time to a new field rather than to a backlog of five. **36 tests across 9 areas**, and the
+transcribed §52 list in `every_test_52_names_as_a_measure_exists` grew with the table.
+
+The failure it guards against is silent and permissive: a body claiming `manipulation.grasp` it
+cannot perform admits a package that will command a gripper nobody fitted.
+
+### `crates/skynetd-io/src/capacity.rs` — nothing here is estimated
+
+`DeviceCapacity` wants memory, capability tokens, grants and what is installed. Every field is read
+from something, or the capacity does not assemble — which is why `read` returns a `Capacity` rather
+than a struct with plausible defaults in it.
+
+`ram_mb` comes from `/proc/meminfo`'s `MemTotal`, and two decisions inside that are load-bearing:
+
+* **`MemTotal`, not `MemAvailable`.** Available memory would make admission depend on what happened
+  to be running at install time, so the same package would install in the morning and be refused
+  after lunch.
+* **The unit is checked rather than assumed.** It has been `kB` forever; a unit misread by a factor
+  of 1024 is a memory budget misread by a factor of 1024, in the permissive direction. An unfamiliar
+  unit is refused with the reason.
+
+On a host that is not Linux the capacity does not assemble and says so. That is a real limitation on
+a laptop and it is correct on a robot: §23.5 says a robot runs Linux, and one whose memory cannot be
+read is one nobody should install a policy onto. A `ram_mb` of 8192 because that is a common figure
+would admit a package the robot cannot feed, and §8.1 is explicit about why that check exists — *a
+phone that runs out of memory kills an app; a robot that runs out of memory mid-stride falls over.*
+
+`vram_mb` and `disk_mb` stay `None`, which admission already reads as "not declared" rather than as
+zero, and the wire says which absences they are.
+
+**The body is read before the memory**, and the ordering is deliberate: a descriptor that does not
+parse is a file on *this robot* somebody can fix, and an unreadable `/proc/meminfo` is a property of
+the host the daemon was started on. Reporting the robot's own fault ahead of the environment's is
+what an operator needs — and it keeps the descriptor branch reachable on a machine that is not a
+robot, where the memory read would otherwise mask everything behind it.
+
+### The sharper question, stated rather than resolved quietly
+
+Admission runs. It also reports `unsigned` as an **error on every package**, because §37.1's verify
+step is "digest, then Ed25519 signature" and **this edition has no Ed25519**.
+
+Which forces a choice, and `crates/skynetd-io/src/admit.rs` opens by making it in the open.
+
+A gate that refuses everything is not a gate. Wiring this to block the install path today would
+refuse every package on every robot — including the ones the e2e run and the README's golden path
+depend on — and the only way to use the system would be to take the gate out again. That is how a
+safety check becomes a flag somebody turns off.
+
+So **it reports and does not block**, and the reporting is where the value is: a budget the robot
+cannot feed, a capability the body does not provide, a dependency that is not installed, an OS too
+old. Four real findings, none of which was being made at all before this session.
+
+**What it does not do is pretend the signature was checked.** Nothing rewrites the finding into a
+warning to make the output look clean, and the sentence saying the report does not gate is printed
+on *every* run including a clean one — because a reader who sees no findings must not come away
+believing the signature was verified. `every_report_says_the_signature_was_not_checked` asserts
+exactly that, on a clean report and a dirty one.
+
+The exception is one code, `UNAVOIDABLE_HERE`, and `the_exception_is_exactly_one_code` asserts the
+size. An exception list that grows by a line at a time is how a gate becomes decorative, and adding
+a second entry is a one-word edit somebody would make to get a build green.
+
+The gate belongs at **activation**, with a signature to check. A staged blob is inert (§37.1) and
+the consequential moment is the symlink swap.
+
+### `GET /capacity`
+
+An observer read: what admission would be told about this robot, or why it cannot be told anything.
+It is the panel that makes the gap concrete — an operator can see the capability set the body
+declares, the grants in force, and what is unmeasured, rather than reading a refusal and guessing.
+
+`denied` is empty and is the one field whose emptiness is **not** a claim: §38.1's operator profile
+is signed, this edition verifies no signature, and a withheld-capability list read from an unverified
+file would be a safety-relevant value anybody on the robot could edit. The wire carries the note.
+
+### The compiler caught a real bug
+
+`skynetd stage` passes an OS version to `capacity::read`, and the obvious local variable in that
+scope is `version` — the *package's*. Passing it would have made `min_os_version` compare a policy's
+version against itself, a check passing or failing for reasons unrelated to the robot. It did not
+compile, and the fix is `api::VERSION`.
+
+Worth recording because it would have type-checked in most languages, and the resulting check would
+have looked like it was working.
+
+### Verification
+
+| | |
+|---|---|
+| `cargo test --workspace` | **470 passed** across 24 binaries, 0 failed (458 before) |
+| `cargo clippy --workspace --all-targets` | clean |
+| `cargo fmt --all --check` | clean |
+| `cargo doc -p skynetd-io --lib` | no unresolved links |
+| `node tools/corpus-gen/generate.ts` | regenerates identically |
+| SCTS lists, TS against Rust | 36 each, identical order |
+| `node tools/check-mirrors.mjs` | all three shared documents match |
+
+`skynetd-io` 104 → 117 tests. The corpus is unchanged by the descriptor field, which is itself
+informative: nothing serializes a descriptor, so the addition is additive in the strict sense.
+
+### What was changed in the Hub
+
+`docs/skynet-os-architecture.md` only — §5.0, §52's new row and its amended exception paragraph, and
+§15's count. Made here and carried across by hand; the mirror check reports all three identical. No
+Hub code was touched: `lib/skynet/os/embodiment.ts` has already diverged from this repository's copy
+(recorded in the eighth session) and adding a field there is a Hub schema question rather than a
+mirroring obligation.
+
+### What is still zero lines
+
+The policy runtime, the SPSC ring and observation assembly, OTA (§12), the outbound queue (§34.4),
+calibration (§45), the watchdog chain (§46), POST and homing (§48), the safety MCU, **Ed25519**, and
+the drivers that talk to real hardware.
+
+Ed25519 has moved up that list from "one of ten" to the thing three separate mechanisms are now
+explicitly waiting on: the admission gate, the descriptor's provenance, and §38.1's profile.
+
+### Three findings recorded rather than fixed
+
+1. **`AdmissionParams.signature_verified` is a bool, and it conflates two facts.** "The signature
+   failed" and "this edition cannot check a signature" are §7.2's distinction exactly, and the
+   contract cannot express the second. The consequence is the whole of this session's awkwardness:
+   `unsigned` reads as a verdict when it is really an absence, and the daemon has to explain in prose
+   what a type could have carried. The fix is a tri-state in the contracts, which touches both
+   editions and the corpus, and it is worth doing before Ed25519 rather than after — because after,
+   nobody will notice the ambiguity again.
+2. **The store holds no version string, so a dependency range is checked by presence.**
+   `InstalledPackage.version` is filled with the digest, because §37.1's on-disk shape is
+   `blobs/<digest>` and the version lives in desired state. `MissingDependency` therefore fires only
+   when a package is absent entirely, and a package present at the wrong version passes. Filling the
+   field with the digest is visible in `GET /capacity`; inventing a version would not have been.
+3. **`denied` is empty and permissive.** See above — it needs §38.1's signature verification, which
+   is the same Ed25519 as everything else.
+
+### Next
+
+1. **Ed25519 (§19)**, which is now the head of three queues at once: the admission gate, the
+   descriptor's provenance, and the operator profile's. Nothing else on this list unblocks as much.
+2. **The tri-state signature in `AdmissionParams`**, from finding 1 — and it is cheaper before
+   Ed25519 than after.
+3. **The Hub side (§32.4)**: `/skynet/os` readiness over the live registry, the transport endpoint,
+   the embodiment tables, and the incident upload.
+4. **Calibration (§45)**, which now has a descriptor on the robot to write into.
+5. **Render the console once on a Linux box** and fix what a browser says.
+
+---
+
+## 2026-08-30 (twelfth) — a signature has four states, and a bool held two
+
+The eleventh session's first finding, taken while it was still cheap. It said this was worth doing
+**before** Ed25519 rather than after, because after, nobody would notice the ambiguity again — and
+that turned out to be right in a way that showed up in the first caller.
+
+### What was wrong
+
+`AdmissionParams.signature_verified: bool`. Three different facts collapsed into `false`:
+
+| State | What happened | Whose job |
+|---|---|---|
+| `verified` | Checked against a key the operator trusts | — |
+| `failed` | A signature was present and did not verify | **Stop.** The bytes are attested to somebody other than the manifest claims |
+| `absent` | Nobody signed it | The publisher's |
+| `unverifiable` | This platform cannot check at all | The operating system's |
+
+They have different owners and different remedies, and an operator reading `unsigned` could not tell
+whether to chase a publisher, upgrade the OS, or stop and investigate.
+
+This is §7.2's rule — a check that could not run reports *what was missing* rather than returning a
+verdict — applied to the one field where the missing thing might be an attack.
+
+### The finding was worded as a fact about the wrong thing
+
+The old message read *"No verified publisher signature. The bytes may be intact and nobody has
+attested to who produced them."*
+
+On this robot that sentence is false. Every package `skynetd` sees may be perfectly well signed;
+what is missing is an OS that can check. The finding described the *bytes* when it was describing
+the *reader*, and the remedy it implied — go and get this signed — is work somebody already did.
+
+`signature_unverifiable` says "this platform cannot verify a release signature… that is a gap in the
+operating system rather than in the package", and the daemon's exception constant moved with it:
+
+```rust
+pub const UNAVOIDABLE_HERE: PackageRejectionCode = PackageRejectionCode::SignatureUnverifiable;
+```
+
+An exception for *we cannot check* is defensible. One for *nobody signed it* would have been the
+gate quietly admitting unsigned packages, and yesterday's constant was spelled the second way while
+meaning the first. The test now asserts all three: it is `SignatureUnverifiable`, and it is neither
+`Unsigned` nor `SignatureFailed`.
+
+### `failed` earns its own code
+
+The state where something *went wrong* rather than something is missing. It should not share a
+bucket with a package nobody got round to signing, and the message says so: *"treat this as
+tampering until somebody proves otherwise."*
+
+Three findings for three states: `unsigned`, `signature_failed`, `signature_unverifiable`.
+
+### No default, anywhere
+
+`admission_params_from_json` used `flag(value, "signature_verified")`, which reads a missing key as
+`false` — which is exactly the conflation being removed, one layer down. A document that does not
+name a signature state is now refused with the four spellings listed, rather than silently becoming
+"unsigned".
+
+### The corpus
+
+One case and one boolean became three cases, one per state that is a finding, each with the job at
+the end of it in its note. `every-finding-at-once` now uses `failed`, so the case that exists to
+prove all findings are reported together includes the dangerous one.
+
+`admission/install` 21 → 23 cases, and both editions reproduce them byte for byte.
+
+### The rename found a dead assertion in the Hub
+
+`lib/__tests__/skynet-os-packages.test.ts` had a case passing `signature_verified: false` into a
+spread. After the rename that key does nothing — the default `signature: 'verified'` survived it —
+and the test asserting "every reason at once" dropped from three errors to two and failed.
+
+It failed loudly, which is the good outcome. Worth recording anyway: a spread over a renamed
+optional field is a silent no-op, and the only reason this one was caught is that the assertion
+counted. `grep signature_verified` over the Hub is now clean.
+
+### What was changed in the Hub
+
+* `lib/skynet/os/package.ts` — the four states, the two new codes, the switch. Byte-identical to
+  `reference/typescript/package.ts` apart from the import path, as it was before.
+* `lib/__tests__/skynet-os-packages.test.ts` — the fixture, and the unsigned test rewritten as
+  `tells the three signature failures apart`, which loops the three states against the three codes.
+* `docs/skynet-os-architecture.md` — §37.1 gains the four-outcome table and the paragraph on why the
+  collapse hurt. Carried across by hand; the mirror check reports all three identical.
+
+Hub suite: **28 passed**, unchanged in count.
+
+### Verification
+
+| | |
+|---|---|
+| `cargo test --workspace` | **470 passed** across 24 binaries, 0 failed |
+| `cargo clippy --workspace --all-targets` | clean |
+| `cargo fmt --all --check` | clean |
+| `cargo test -p skynet-corpus` | reproduces all 362 cases byte for byte |
+| Hub `npx vitest run lib/__tests__/skynet-os-packages.test.ts` | 28 passed |
+| `node tools/check-mirrors.mjs` | all three shared documents match |
+
+The test count did not move, which is correct: three cases replaced one in the corpus and one Hub
+test replaced another. The change was to make existing checks say something truer, not to add
+checks.
+
+### What is still zero lines
+
+Unchanged from the eleventh session, and **Ed25519 is now the head of four queues**: the admission
+gate, the descriptor's provenance, §38.1's operator profile, and — new this session — the ability to
+ever report `verified` or `failed` at all. Three of the four states this change introduced are
+currently unreachable in the daemon.
+
+That is worth saying plainly rather than counting the enum as progress: the type is now able to
+express the truth, and the truth it expresses today is still "this OS cannot check".
+
+### Two findings recorded rather than fixed
+
+1. **Three of the four signature states are unreachable on a robot.** `Verified`, `Failed` and
+   `Absent` are exercised only by the corpus and the unit tests; the daemon hard-codes
+   `Unverifiable`. That is honest and it is also a type whose value is deferred — the payoff arrives
+   with Ed25519, and until then the enum is mostly documentation with a compiler behind it.
+2. **`skynetd stage`'s admission report is not recorded in the black box.** It prints to a terminal
+   and vanishes. §13 records package events, and "this package was admitted with these four
+   findings" is exactly the kind of thing an incident review would want — particularly the
+   `signature_unverifiable` on every install, which is the sentence that explains why a robot was
+   running something nobody attested to. It should be an event, and the event schema already exists.
+
+### Next
+
+1. **Ed25519 (§19)**, now the head of four queues. Nothing else on this list unblocks as much, and
+   three states added this session cannot be reached without it.
+2. **The admission report as a black box event**, from finding 2 — small, and it is the difference
+   between a decision that was made and a decision anybody can review.
+3. **The Hub side (§32.4)**: `/skynet/os` readiness over the live registry, the transport endpoint,
+   the embodiment tables, and the incident upload.
+4. **Calibration (§45)**, which now has a descriptor on the robot to write into.
+5. **Render the console once on a Linux box** and fix what a browser says.
+
+---
+
+## 2026-08-30 (thirteenth) — Ed25519, and the four queues waiting on it
+
+The twelfth session ended with the same first item the eleventh did: *"Ed25519 (§19), now the head of
+four queues. Nothing else on this list unblocks as much, and three states added this session cannot
+be reached without it."* This session wrote it, and then went and emptied the four queues.
+
+### `crates/skynet-ed25519` — written, because the alternative was worse
+
+The workspace has no third-party dependencies, for the reasons its `Cargo.toml` gives. A signature
+verifier is the place where that policy costs the most, and it is also the place where abandoning it
+would cost more: the alternative is a supply chain reaching into the one component whose whole job is
+to decide what may run on a robot.
+
+So: SHA-512, GF(2^255 − 19), scalars modulo `L`, extended twisted Edwards points, and RFC 8032
+verification. `no_std`, `forbid(unsafe_code)`, no dependencies, about 1,100 lines with the
+explanations in.
+
+Three decisions worth recording rather than discovering later in a diff:
+
+* **The constants are checked against their definitions.** `d` is verified by `d · 121666 + 121665 ≡
+  0`, `sqrt(−1)` by squaring it, and the basepoint by `5y = 4`. A mistyped digit in any of the three
+  produces a coherent implementation of a curve nobody else is on — one that verifies its own
+  signatures and no published one — and that is exactly the failure a suite written against itself
+  cannot see. The basepoint is stored *compressed* and decompressed on use for the same reason: it
+  makes the routine that parses attacker-supplied keys run on the one input whose answer is published.
+* **The scalar reduction is schoolbook long division, one bit at a time.** ref10's `sc_reduce` is a
+  hundred lines of hand-derived shifts and it is fast and nearly unreviewable. 512 compare-and-
+  subtracts cost a few microseconds against a verification that already spends milliseconds in the
+  curve, and every line is the step as it is defined. Buying that time back with code nobody in this
+  project could check would be a bad trade twice over.
+* **Nothing is constant-time, and that is a decision.** Everything verification touches is public —
+  the key, the message and the signature, two of the three chosen by the attacker. There is no secret
+  to leak. The moment that stops being true is *signing*, which is why signing is behind a
+  `test-signing` feature that CI asserts appears in no manifest section that ships.
+
+The strictness is the part that matters for a fleet, and §19 now says so: non-canonical `y` in a key
+or commitment, a scalar at or above `L`, and small-order keys are all refused, and the group equation
+is checked cofactorless. Every one of those is a case where two implementations otherwise disagree
+about **the same bytes** — and a disagreement about whether a package is signed is worse than either
+answer, because it means two robots in a fleet running different software.
+
+`41 tests`: the FIPS 180-4 SHA-512 examples, RFC 8032 §7.1 in both directions (the vectors verify,
+*and* their seeds re-derive the published signatures byte for byte, which tests the whole computation
+rather than the final comparison), the eight small-order encodings, the nineteen long spellings of a
+field element, `S + L`, and a bit-flip sweep over a message and a signature.
+
+### The fifth signature state, which only exists once something can verify
+
+The twelfth session's four states — `verified`, `failed`, `absent`, `unverifiable` — turned out to be
+missing one, and it appeared in the first hour of having a verifier. **A signature can be entirely
+valid and made by a stranger.** That is not `failed`, because nothing went wrong; it is not
+`verified`, because §37.1 says *"against a key the operator trusts"* and this one was not; and
+reporting it as either sends an operator to the wrong place. `untrusted` is a fact about a decision
+nobody made, and the remedy is in the trust store rather than anywhere near the package.
+
+This is the same finding the eleventh and twelfth sessions made, one layer further in, and it is worth
+noticing that the shape repeats: **a check that gains a new capability gains a new outcome**, and the
+outcome is usually the one where nothing is wrong except that nobody has decided anything.
+
+`signature_untrusted` is an error rather than a warning. *Somebody* attested to these bytes and it
+was nobody here.
+
+### A signature travels with the key that made it
+
+An Ed25519 signature does not name its signer, which means a verifier holding a set of trusted keys
+and a signature that verifies under none of them **cannot tell `failed` from `untrusted`** — an
+attack from an administrative gap, which are the two states in that table furthest apart. So the wire
+shape is a pair, `{ "key": …, "value": … }`, and the robot asks two questions in order: does it verify
+under the key it names, and is that key one the operator trusts.
+
+Asking them the other way round collapses the distinction the pair exists to preserve. That ordering
+is three lines of code and it is the whole reason the fifth state can be reported at all.
+
+The message is **domain-separated** — `skynet.package.v1`, `skynet.profile.v1`,
+`skynet.embodiment.v1`, each followed by the digest — because §38.1 signs profiles with the same
+machinery and §5 has the vendor sign the descriptor. Without a tag, a signature over one document's
+digest verifies over another's, and a test asserts exactly that it no longer does.
+
+### `skynetd-io/src/trust.rs` — "a key the operator has trusted" acquires a referent
+
+The phrase is in §19 and in §37.1 and had none. It is now `/data/state/trust.json`: Ed25519 public
+keys with the operator's own label for each.
+
+The **label** is why this is not a list of hex strings. A report that says *"signed by
+`d75a980182b10ab7…`"* has told an operator nothing they can act on.
+
+Four rules, each of them §39.2's credential rule applied to keys:
+
+| | |
+|---|---|
+| No file | Trusts **nobody**. Every signature reports `untrusted`, which is true and names the file to write |
+| A file that does not parse | Also nobody, and it says *that* — one is a robot nobody provisioned, the other is a file somebody broke |
+| One malformed entry | Skipped and reported; the rest work. A key that fails to parse can only ever *remove* trust, so skipping is safe in the only direction that matters, while refusing the file turns one typo into a robot that installs nothing |
+| A small-order key | **Refused outright**, because those eight points verify signatures nobody produced |
+
+### The gate is real now, and it is §19's gate rather than a bigger one
+
+`admit.rs` has carried an argument since it was written: a gate that refuses everything is a gate
+somebody takes out, so the report reported and gated nothing. With a verifier there is **no longer an
+unavoidable rejection** — every error it reports is one somebody can act on — and `UNAVOIDABLE_HERE`
+and `only_unsigned` are both gone.
+
+Where the gate landed is §19's sentence, taken literally: *"a driver runs native and must therefore be
+signed by a key the operator has trusted."* A **driver** whose signature is anything but `verified`
+does not activate. Not `untrusted` either — a stranger's valid signature on native code is precisely
+the case the rule exists for, and it is the case nobody thinks of.
+
+At activation rather than at stage, because a staged blob is inert and the symlink swap is the
+consequential moment. Refused rather than deferred, because the same bytes and the same trust store
+give the same answer every pass and reporting it as "waiting" would suggest otherwise.
+
+**Every other kind still installs carrying its findings, and that asymmetry is a gap rather than a
+principle.** Nothing on a robot can *produce* a signature — the Hub signs releases — so a developer
+staging a package they built five minutes ago has nothing to sign it with, and refusing those would
+refuse every local install and the golden path in the README, and the fix would be a flag. Closing it
+needs a way to sign locally, which is a design question about developer keys rather than a missing
+primitive. It is recorded in §37.1 in those words.
+
+### §38.1 — the robot was believing a boolean it should have been checking
+
+The worst thing found this session, and it was found by going to wire up the profile signature.
+
+`DesiredProfile.verified` was decoded straight out of the desired state: `"verified": true` in the
+document meant the limits were applied. And §38.1 names the attacker in its own text — *"the
+interesting case is not a corrupt file, it is somebody editing limits on a robot's disk"* — while
+**the desired state is a file on the robot's disk**. Anybody who could edit the limits could edit the
+assertion that somebody had checked them, in the same pass, with the kernel's ceilings on the other
+side of it.
+
+The decoder now sets `verified` to `false` whatever the document says, the document carries the
+*signature* instead, and `skynetd-io` verifies it against the trust store on the pass that reads it.
+A document that could assert its own verification is not a document anybody has verified. CI greps
+that the decoder never reads that key again.
+
+The incident §38.1 wants for a signature that *fails* — as against one merely missing — is still not
+raised: there is no outbound incident path (§34.4). The profile is not applied either way, so the
+limits are safe; what is missing is the alarm, and that is recorded rather than quietly skipped.
+
+### §5 — the descriptor's provenance, separated from its digest
+
+`GET /embodiment` reported `signature_checked: false` and a paragraph saying why. It now reports the
+verdict, the signer's label, and a note that says which of the two questions the digest answers: the
+digest identifies **which document this is**, the signature identifies **who stands behind it**, and a
+console showing only the first lets a fact about a file imply a provenance it does not carry.
+
+The signature is **detached** — `state/embodiment.sig.json` beside the descriptor — because the digest
+is taken over the descriptor's canonical form, so a signature written inside the document would change
+the digest it is a signature of. A signature file that exists and cannot be read reports `failed`
+rather than `absent`: somebody put it there, and "the file you wrote is unusable" is a different job
+from "nobody signed this".
+
+### The console, and what happened when somebody finally looked at it
+
+`GET /packages` gained `signature` and `signer` per row, and the table gained a **Signed by** column
+that keeps the four outcomes apart — `verified` names the signer, `failed` is red, `untrusted` is
+amber and says *untrusted key*, `absent` says *nobody*. The body panel gained the same row.
+
+Then the thing that has been item 5 on every "Next" list since the console was written: **it was
+opened in a browser.** It had never been. Two bugs, in the first thirty seconds, and neither was
+findable by anything this repository was already doing.
+
+**`GET /plan` answered two different shapes, and the reconcile panel had never once rendered.** With
+no pass it returned `{"pass": null, "note": …}`; with a pass it returned a *flat* object and no
+`pass` key at all. The console discriminated on `value.pass === null`, fell through to the other
+branch, and threw `TypeError: Cannot read properties of undefined` on every poll from the moment a
+robot did anything. The CLI happened to read the flat shape and was fine. Two consumers, two shapes,
+one route — and a test for each consumer, neither of which looked at both branches.
+
+The route now nests under `pass` in both cases, the CLI reads it that way, and there is a test that
+asserts the *same shape before and after a pass* rather than one branch at a time. That test is the
+one that was missing, and its absence is more interesting than the bug: every individual assertion
+passed.
+
+**The health panel printed the same thirty-word sentence five times**, once per unmeasured field.
+§32.2's rule is that a null renders as the reason it is null, and this was that rule applied
+literally enough to bury the two fields that carry an answer. It is now a short marker beside each
+field and the reason once underneath — which is the shape the guards panel next to it already used.
+
+`cargo test -p skynetd-io -- --ignored console_fixture` is what made looking possible: it writes the
+page and one answer per route it fetches — **status codes included**, because a 503 replayed as a 200
+renders an error object as data and hides the behaviour worth looking at — from the real router, into
+a directory any static server can serve. The console needs nothing else, which is §32.2's whole
+design and now also its development loop.
+
+Confirmed by looking: the body panel's *Signed by · bench-robotics*, the packages table's new column,
+the black box panel correctly reporting a 503 as a missing recorder rather than as fields, and no
+horizontal overflow at a phone width.
+
+### Verification
+
+| | |
+|---|---|
+| `cargo test --workspace` | **542 passed** across 25 binaries, 0 failed (470 before) |
+| `cargo clippy --workspace --all-targets` | clean |
+| `cargo fmt --all --check` | clean |
+| `cargo test -p skynet-corpus` | reproduces all 363 cases byte for byte |
+| `node tools/corpus-gen/generate.ts` | regenerates identically |
+| `node --check crates/skynetd-io/console/console.js` | parses |
+| Hub `npx vitest run lib/__tests__/skynet-os-packages.test.ts` | **29 passed** (28 before) |
+| `node tools/check-mirrors.mjs` | all three shared documents match |
+
+`skynetd-io` 92 → 122, `skynetd` 37 → 38, `skynet-contracts` 84 → 93, and the new crate 41. One of
+`skynetd-io`'s is `#[ignore]`d — `console_fixture`, which writes files and is a thing somebody does
+rather than a thing CI checks.
+
+Three CI invariants added: the signer is in nothing that ships, a profile cannot assert its own
+verification, and a driver does not activate without a trusted signature — the last checked from the
+activation arm rather than by the function merely existing.
+
+### What was changed in the Hub
+
+* `lib/skynet/os/package.ts` — the fifth state, the new code, the switch arm. Byte-identical to
+  `reference/typescript/package.ts` apart from the import path, as before.
+* `lib/__tests__/skynet-os-packages.test.ts` — "the three signature failures" became four, plus a test
+  that a stranger's valid signature is reported as neither tampering nor an unsigned package.
+* `docs/skynet-os-architecture.md` — §5, §19, §28, §37.1 and §38.1. Carried across by hand; the mirror
+  check reports all three identical.
+
+### One thing lost, and how
+
+`crates/skynetd-io/src/admit.rs` was rewritten with a whole-file write, and its test module went with
+it — the file is new since the last commit, so there was nothing in git to recover from. The tests
+came back out of `target/doc/src/skynetd_io/admit.rs.html`, which is rustdoc's source view and holds
+the complete file. Worth writing down twice over: **rustdoc's source pages are a backup of last
+resort for an uncommitted file**, and a whole-file write over a file with tests at the bottom is a
+way to delete them without the compiler noticing.
+
+### What is still zero lines
+
+The policy runtime, the SPSC ring and observation assembly, OTA (§12), the outbound queue (§34.4),
+calibration (§45), the watchdog chain (§46), POST and homing (§48), the safety MCU, and the drivers
+that talk to real hardware.
+
+Ed25519 is off that list, and with it the four things that were waiting on it. What replaced it at the
+head of the queue is smaller and more specific: there is no way to **produce** a signature anywhere in
+this system except the Hub, and that is what keeps the driver gate from being the install gate.
+
+### Three findings recorded rather than fixed
+
+1. **A robot cannot sign anything, so the gate stops at drivers.** The full §37.1 gate — no package
+   activates unverified — is one design decision away, and the decision is what a developer does with
+   a package they built themselves. A local developer key in the CLI is the obvious answer and it puts
+   a non-constant-time signer into a shipped binary; an explicit recorded per-digest acceptance is the
+   other, and it is a mechanism the specification does not currently describe. Either is a session's
+   work; guessing between them is not.
+2. **`signature_unverifiable` is now unreachable in this edition, and stays in the contract.** It is
+   correct for an edition whose runtime has no Ed25519 (§31 permits those), and it is now documentation
+   with a compiler behind it here — the mirror image of the twelfth session's finding, which was that
+   three of four states were unreachable. Worth watching rather than removing.
+3. **The trust store has no `skynetd trust add`.** Keys are added by editing JSON, which is fine for a
+   file an operator writes once at provisioning and wrong for anything else: there is no place that
+   records *when* a key was trusted or *by whom*, and §38.3 asks for exactly that of profiles. The
+   store should be an audited surface before a fleet has one.
+
+### Next
+
+1. **The Hub side (§32.4), items 2 onwards.** Item 1 — `/skynet/os` readiness over the live registry
+   — **is built** (`app/[locale]/skynet/os/page.tsx`), and this list has been carrying it as
+   outstanding for several sessions, which is its own small lesson about writing a "Next" from
+   memory. What is genuinely absent is everything after it: `/skynet/os/editions`,
+   `/skynet/os/devices`, `/skynet/os/transport`, `/skynet/os/certification/[slug]`, the OS panel on
+   the robot page, and the incident upload — which is also §38.1's missing alarm.
+2. **`skynetd trust add`**, with the provenance §38.3 asks for, from finding 3.
+3. **Calibration (§45)**, which has had a descriptor on the robot to write into since the eleventh
+   session.
+4. **The admission report as a black box event** — still open from the twelfth session, and now more
+   worth having, because the report finally says something that varies.
+5. **Look at the console again after the next panel lands.** Two bugs in thirty seconds was not
+   bad luck; it is what four sessions of writing a page nobody opened produces, and the fixture makes
+   the next look cost a minute.

@@ -98,6 +98,41 @@ impl RunState {
     }
 }
 
+/// A detached signature as desired state carries it (§37.1).
+///
+/// The **key travels with the signature**, and that is not redundancy. An Ed25519 signature does
+/// not name the key that made it, so a robot holding a set of trusted keys and a signature that
+/// verifies under none of them cannot distinguish bytes that were tampered with from bytes signed
+/// correctly by a stranger — an attack and an administrative gap, with the same symptom. Naming the
+/// key lets the robot answer the two questions separately, and it answers them in that order.
+///
+/// Held as strings here, unparsed. This crate is the reconciler and it is pure (§33.3); deciding
+/// whether a signature verifies needs the trust store, which is a file, which is `skynetd-io`'s.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesiredSignature {
+    /// The signer's public key, 64 hex characters.
+    pub key: String,
+    /// The signature, 128 hex characters.
+    pub value: String,
+}
+
+impl DesiredSignature {
+    /// Read `{ "key": …, "value": … }`, or `None` when the field is absent or is not that shape.
+    ///
+    /// A malformed signature decodes to `None` — "nothing usable arrived" — rather than failing the
+    /// whole document. The distinction that matters is downstream: `None` here means the verifier
+    /// is told there is no signature, and §37.1's `absent` finding is what an operator sees, with
+    /// the shape of the field named in the same breath by the caller that read it.
+    pub fn from_json(value: &Json) -> Option<DesiredSignature> {
+        let key = value.get("key").and_then(Json::as_str)?;
+        let signature = value.get("value").and_then(Json::as_str)?;
+        Some(DesiredSignature {
+            key: key.to_string(),
+            value: signature.to_string(),
+        })
+    }
+}
+
 /// One package the Hub wants installed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DesiredPackage {
@@ -117,6 +152,12 @@ pub struct DesiredPackage {
     /// take an exclusive lease on the capability (§25.2), and two packages may hold the same grant
     /// while only one holds the lease.
     pub grants: Vec<String>,
+    /// The release signature over the version digest, when one arrived.
+    ///
+    /// `None` is §37.1's `absent`: nobody attested to these bytes. It is deliberately not a default
+    /// that reads as "fine" — a package with no signature reports as unsigned everywhere it is
+    /// mentioned, and a **driver** with no signature does not activate at all (§19).
+    pub signature: Option<DesiredSignature>,
 }
 
 /// The operator profile's ceilings (§38.1), which are the numbers the kernel enforces.
@@ -178,11 +219,20 @@ pub struct DesiredProfile {
     pub name: String,
     /// sha256 over the canonicalised profile.
     pub digest: String,
-    /// Whether the signature over `digest` verified against a key the operator trusts.
+    /// The signature over `digest`, as the document carries it.
+    pub signature: Option<DesiredSignature>,
+    /// Whether that signature verified against a key the operator trusts.
     ///
-    /// §38.1: an unsigned profile is not applied, and one that fails verification is not applied
-    /// *and* raises an incident — because the interesting case is not a corrupt file, it is
-    /// somebody editing limits on a robot's disk.
+    /// **Never read from the document, and this is the whole point.** It used to be, and that was a
+    /// hole with the kernel's ceilings on the other side of it: §38.1's threat model is *"somebody
+    /// editing limits on a robot's disk"*, and the desired state **is** a file on the robot's disk
+    /// (`state/desired.json`). Anybody who could edit the limits could edit `"verified": true` in
+    /// the same pass, and the robot applied them because the document said they had been checked.
+    ///
+    /// [`DesiredState::from_json`] therefore sets this to `false` unconditionally, whatever the
+    /// document says. `skynetd-io` verifies [`DesiredProfile::signature`] against the trust store
+    /// after decoding and sets it, so the only thing that can make it true is a signature that
+    /// verified on this robot. CI asserts the decoder never reads a `verified` key.
     pub verified: bool,
     /// The ceilings.
     pub limits: ProfileLimits,
@@ -285,6 +335,7 @@ impl DesiredState {
                 kind,
                 state: RunState::parse(&string(item, "state").unwrap_or_default()),
                 grants,
+                signature: item.get("signature").and_then(DesiredSignature::from_json),
             });
         }
 
@@ -309,7 +360,11 @@ impl DesiredState {
                 Some(DesiredProfile {
                     name: string(raw, "name").unwrap_or_default(),
                     digest: string(raw, "digest").unwrap_or_default(),
-                    verified: matches!(raw.get("verified"), Some(Json::Bool(true))),
+                    signature: raw.get("signature").and_then(DesiredSignature::from_json),
+                    // Not from the document. See `DesiredProfile::verified`: a document that could
+                    // assert its own verification is a document that can raise the kernel's
+                    // ceilings by editing one boolean on the robot's own disk.
+                    verified: false,
                     limits: ProfileLimits {
                         joint_velocity_max_rad_s: number(&limits, "joint_velocity_max_rad_s"),
                         joint_torque_max_nm: number(&limits, "joint_torque_max_nm"),

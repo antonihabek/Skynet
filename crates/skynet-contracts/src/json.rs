@@ -475,6 +475,12 @@ pub fn descriptor_from_json(value: &Json) -> Result<EmbodimentDescriptor, Decode
         },
         envelope: envelope_from_json(value, "envelope"),
         solvers: value.str_arr("solvers"),
+        // Absent reads as empty, and empty means "provides nothing" rather than "nobody said".
+        // A descriptor written before this field existed therefore provides no capabilities and
+        // admission refuses packages needing one — which is the direction that fails safe, and is
+        // visible rather than silent because the refusal names the tokens.
+        capabilities: value.str_arr("capabilities"),
+        extensions: value.str_arr("extensions"),
         simulator: flag(value, "simulator"),
         frames: frames_from_json(value.get("frames")),
     })
@@ -720,7 +726,17 @@ pub fn admission_params_from_json(value: &Json) -> Result<AdmissionParams, Decod
     Ok(AdmissionParams {
         manifest: manifest_from_json(require(value, "manifest")?)?,
         capacity: capacity_from_json(require(value, "capacity")?)?,
-        signature_verified: flag(value, "signature_verified"),
+        // No default. `flag` read a missing key as `false`, which is exactly the conflation this
+        // field was changed to remove — an absent state would have silently become "unsigned"
+        // rather than "nobody said". A document that does not name one is refused.
+        signature: {
+            let text = req_str(value, "signature")?;
+            SignatureState::parse(&text).ok_or_else(|| {
+                DecodeError(format!(
+                    "signature: `{text}` is not one of verified, failed, absent, unverifiable"
+                ))
+            })?
+        },
         observed_digest: req_str(value, "observed_digest")?,
         transport_verdict: opt_string(value, "transport_verdict"),
         executes_on_load: flag(value, "executes_on_load"),

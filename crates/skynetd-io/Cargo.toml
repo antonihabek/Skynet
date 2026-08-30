@@ -17,12 +17,19 @@ skynetd = { path = "../skynetd" }
 skynet-contracts = { path = "../skynet-contracts" }
 skynet-json = { path = "../skynet-json" }
 skynet-sha256 = { path = "../skynet-sha256" }
+skynet-ed25519 = { path = "../skynet-ed25519" }
 skynet-blackbox = { path = "../skynet-blackbox" }
 
 # Deliberately **not** `skynet-rhal`, for the same reason `skynetd` is not — and it matters more
 # here, because this is the half that can actually open things. §33.1's property is about the
 # daemon, not about one of its crates: "it never touches an actuator" stops being true the moment
 # either half can. CI asserts the edge is absent from both.
+
+[dev-dependencies]
+# The signer, for the tests that need a real signature over a digest they chose. See
+# `skynet-ed25519`'s crate documentation: a robot verifies and never signs, and CI asserts this
+# feature is named nowhere that ships.
+skynet-ed25519 = { path = "../skynet-ed25519", features = ["test-signing"] }
 
 [lints.rust]
 missing_docs = "warn"

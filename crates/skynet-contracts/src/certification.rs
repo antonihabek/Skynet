@@ -31,7 +31,7 @@ use alloc::vec::Vec;
 pub const SCTS_SUITES: [&str; 3] = ["sim", "bench", "field"];
 
 /// Areas the suite covers.
-pub const SCTS_AREAS: [&str; 8] = [
+pub const SCTS_AREAS: [&str; 9] = [
     "rhal",
     "embodiment",
     "safety",
@@ -40,6 +40,7 @@ pub const SCTS_AREAS: [&str; 8] = [
     "telemetry",
     "offline",
     "security",
+    "power",
 ];
 
 /// One test.
@@ -100,9 +101,14 @@ const fn quant(
 
 /// The suite.
 ///
-/// Thirty tests across eight areas. §15 of the specification says twenty-nine; the reference
-/// implementation has thirty, and the reference is the oracle the corpus is generated from, so the
-/// count here follows the code and the prose is what needs amending.
+/// Thirty-six tests across nine areas, and the count is the same in the prose, the oracle and here.
+///
+/// Five of them were added when §52 was reconciled: that table named a measure for every descriptor
+/// field Parts IV and V added, and five of those names referred to nothing. A table row pointing at
+/// a test that does not exist is a schema obligation with no way to fail.
+///
+/// `embodiment.capabilities.declared` was added with the field it measures rather than after it,
+/// which is the rule that expansion was meant to establish.
 ///
 /// Deliberately short and load-bearing. A conformance suite that tests three hundred things is a
 /// suite nobody runs and every vendor games; one that tests the two dozen properties the rest of
@@ -111,7 +117,7 @@ const fn quant(
 ///
 /// The measurements that matter most are the ones taken **at the joint rather than reported by the
 /// driver**. A driver returning success is not evidence.
-pub const SCTS_TESTS: [SctsTest; 30] = [
+pub const SCTS_TESTS: [SctsTest; 36] = [
     // ── RHAL: the vendor interface ──────────────────────────────────────────
     test("rhal.abi.version", "sim", "rhal", "guest",
         "The driver reports an RHAL ABI version the running OS supports, and refuses to load against one it does not."),
@@ -123,6 +129,8 @@ pub const SCTS_TESTS: [SctsTest; 30] = [
         "Time from a command accepted at the RHAL boundary to measurable joint motion. The number the descriptor must declare."),
     test("rhal.command.rejection", "sim", "rhal", "guest",
         "The driver rejects a command naming a joint that does not exist, rather than ignoring it."),
+    quant("rhal.sensor.latency", "bench", "rhal", "host", "ms",
+        "Per sensor: time from the observed event to the timestamp the frame carries. A backend that stamps arrival rather than capture fails, because a queue delay folded into a timestamp is a number the policy treats as ground truth (§47.2)."),
     // ── Embodiment: the body as an interface ────────────────────────────────
     test("embodiment.descriptor.valid", "sim", "embodiment", "guest",
         "The descriptor parses, its degrees of freedom match its joint list, and every declared role is well formed."),
@@ -134,6 +142,10 @@ pub const SCTS_TESTS: [SctsTest; 30] = [
         "Measured joint velocity and torque against the declared ratings under load. A body that cannot reach what it claims fails as surely as one that exceeds it."),
     quant("embodiment.roles.coverage", "sim", "embodiment", "host", "%",
         "Share of actuated joints carrying a canonical role. Below full coverage, cross-body transport degrades to exact-name matching."),
+    test("embodiment.capabilities.declared", "sim", "embodiment", "host",
+        "Every capability token the descriptor declares is one the driver can actually service, and every token a resident package requires appears in the list. The set is what admission checks a package against (§8), so a body claiming a capability it does not have admits a package that will command hardware nobody fitted."),
+    test("embodiment.frames.complete", "sim", "embodiment", "host",
+        "The descriptor carries a §44.3 frame graph that is a single rooted tree, every dynamic node names a joint the descriptor declares, every mimic names a driver present in the tree, and every collision shape is one this edition can evaluate. Absent or null is not a failure of this test — it is the two pose guards reporting unavailable, which §44.5 permits — but a graph that is present and wrong is."),
     // ── Safety: the claims that must not be wrong ───────────────────────────
     test("safety.kernel.parity", "sim", "safety", "guest",
         "The on-robot kernel and the reference implementation return identical verdicts across the full cycle-vector corpus."),
@@ -147,6 +159,10 @@ pub const SCTS_TESTS: [SctsTest; 30] = [
         "The application processor is halted mid-motion. The robot must still stop, proving the stop path does not run through it."),
     test("safety.ratelimit.enforced", "bench", "safety", "host",
         "A single-cycle step from zero to full scale produces a ramp at the configured jerk ceiling, not a step."),
+    test("safety.command_loss.behaviour", "bench", "safety", "host",
+        "Commands stop and the drives are observed at the joint. What they do must be what `on_command_loss` declares (§46.2). A body observed to coast may not claim host, because the watchdog chain’s own recovery path is, on that machine, a fall."),
+    test("safety.homing.envelope", "bench", "safety", "host",
+        "The driver-provided homing procedure is run and the joints are watched. No joint exceeds the restricted homing envelope the descriptor declares (§48.3). Homing is not an exemption from the kernel; it is a narrower envelope. A body that declares it needs no homing records not_applicable."),
     test("safety.policy.isolation", "sim", "safety", "guest",
         "A sandboxed package holding an actuator file descriptor is refused; the sandbox has no path to one."),
     // ── Packages ────────────────────────────────────────────────────────────
@@ -180,6 +196,9 @@ pub const SCTS_TESTS: [SctsTest; 30] = [
         "The device key is held in a secure element or TPM and check-ins carry an attestation of the running image digest."),
     test("security.credential.scope", "sim", "security", "guest",
         "A device credential lifted from the robot cannot read repositories, claim jobs, or write to another namespace."),
+    // ── Power: the energy the robot keeps back ─────────────────────────
+    quant("power.safe_state.reachable", "bench", "power", "host", "s",
+        "From full rated load, the robot is taken to its nearest safe state and timed, against the `time_to_safe_state_s` it declares (§36.2). The reserve budget is computed from that figure, so a body that declares two seconds and takes six has a third of the reserve it needs."),
 ];
 
 /// What a test run concluded.
@@ -457,11 +476,43 @@ mod tests {
 
     #[test]
     fn the_suite_is_the_size_the_specification_states() {
-        assert_eq!(SCTS_TESTS.len(), 30, "30 tests across 8 areas");
+        assert_eq!(SCTS_TESTS.len(), 36, "36 tests across 9 areas");
         for area in SCTS_AREAS {
             assert!(
                 SCTS_TESTS.iter().any(|t| t.area == area),
                 "no test covers {area}"
+            );
+        }
+    }
+
+    /// §52's "Measured by" column, held to the suite.
+    ///
+    /// §52 collects the descriptor fields Parts IV and V added and names, for each, the SCTS test
+    /// that measures it. For three sessions five of those names referred to nothing — the table
+    /// read as a complete set of obligations and three of its rows pointed at `frames.complete`,
+    /// which no edition implemented. A vendor reading it would have had no way to fail.
+    ///
+    /// The table is prose in a mirrored document and this is code, so nothing makes them agree
+    /// automatically. What this does is make the *second half* of a §52 row impossible to forget:
+    /// add a row naming a new test, and this fails until the test exists.
+    #[test]
+    fn every_test_52_names_as_a_measure_exists() {
+        // Transcribed from §52's third column, one entry per distinct test named there.
+        const NAMED_BY_52: [&str; 8] = [
+            "embodiment.capabilities.declared",
+            "embodiment.frames.complete",
+            "embodiment.descriptor.valid",
+            "safety.command_loss.behaviour",
+            "safety.homing.envelope",
+            "power.safe_state.reachable",
+            "rhal.sensor.latency",
+            "rhal.command.latency",
+        ];
+        for id in NAMED_BY_52 {
+            assert!(
+                SCTS_TESTS.iter().any(|test| test.id == id),
+                "§52 says {id} measures a descriptor field, and no such test exists. A schema \
+                 obligation with no way to fail is a field a vendor may fill in with anything."
             );
         }
     }

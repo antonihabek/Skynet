@@ -301,7 +301,15 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         ("POST", ["stop"]) => Role::Anonymous,
         ("GET", ["status"]) => Role::Anonymous,
 
+        // The console's own files (§32.2). Answered by the router before this table is consulted,
+        // so these arms are unreachable today — and they are here because the catch-all below is
+        // `Admin`, and a second caller that asks this table about the console should not be told
+        // the page needs an administrator.
+        (method, segments) if crate::console::is_asset(method, segments) => Role::Anonymous,
+
         ("GET", ["health"]) => Role::Observer,
+        ("GET", ["embodiment"]) => Role::Observer,
+        ("GET", ["capacity"]) => Role::Observer,
         ("GET", ["packages"]) => Role::Observer,
         ("GET", ["packages", _]) => Role::Observer,
         ("GET", ["plan"]) => Role::Observer,

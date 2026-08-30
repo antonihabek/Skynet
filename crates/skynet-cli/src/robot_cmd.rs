@@ -33,6 +33,7 @@
 
 use std::io::{Read, Write};
 
+use skynet_contracts::admission::SignatureState;
 use skynet_json::Json;
 
 use crate::term;
@@ -272,7 +273,10 @@ fn short(digest: &str) -> String {
 }
 
 fn print_plan(document: &Json) {
-    if document.get("pass") == Some(&Json::Null) {
+    // One shape for both cases: `pass` is the object, or it is null and `note` says why. The route
+    // used to answer a flat object when a pass existed and this printer read it that way, which
+    // worked here and broke the console — a route with two shapes has one consumer that is wrong.
+    let Some(pass) = document.get_present("pass") else {
         println!(
             "{}",
             term::dim(
@@ -283,7 +287,8 @@ fn print_plan(document: &Json) {
             )
         );
         return;
-    }
+    };
+    let document = pass;
 
     let applied = document.arr_or_empty("applied");
     let deferred = document.arr_or_empty("deferred");
@@ -533,8 +538,37 @@ fn install(argv: &[String]) -> i32 {
         flag(argv, "--digest"),
     ) else {
         return term::fail(
-            "skynet install <dir> --id <ns/name> --kind <kind> --version <v> --digest <hex>",
+            "skynet install <dir> --id <ns/name> --kind <kind> --version <v> --digest <hex> \
+             [--signed-by <64 hex>] [--signature <128 hex>]",
         );
+    };
+
+    // §37.1's second verification step. Both flags or neither: an Ed25519 signature does not say
+    // who made it, so a robot handed one without a key cannot tell a stranger's valid signature
+    // from a forgery — and a key that signed nothing attests to nothing.
+    let signed = match (flag(argv, "--signed-by"), flag(argv, "--signature")) {
+        (None, None) => None,
+        (Some(key), Some(value)) => {
+            let mut document = Json::obj();
+            document
+                .set("key", Json::from(key.as_str()))
+                .set("value", Json::from(value.as_str()));
+            match skynetd_io::trust::SignedBy::from_json(&document) {
+                Ok(signed) => Some(signed),
+                Err(error) => return term::fail(&error.reason()),
+            }
+        }
+        (Some(_), None) => {
+            return term::fail(
+                "--signed-by names a key and no --signature accompanies it: a key that signed \
+                 nothing attests to nothing",
+            )
+        }
+        (None, Some(_)) => {
+            return term::fail(
+                "--signature carries a signature and no --signed-by names the key that made it",
+            )
+        }
     };
 
     let layout = skynetd_io::Layout::new(flag(argv, "--root").unwrap_or_else(|| "/".to_string()));
@@ -556,13 +590,38 @@ fn install(argv: &[String]) -> i32 {
     ) {
         Ok(staged) => {
             println!("{} staged {} {}", term::ok("✓"), staged.id, staged.digest);
-            println!(
-                "  {}",
-                term::dim(
-                    "signature: not checked — this edition has no Ed25519, so §37.1's second \
-                     verification step did not run"
-                )
+
+            let trust = skynetd_io::trust::TrustStore::load(store.layout());
+            for line in trust.notices() {
+                println!("  {}", term::dim(&line));
+            }
+            let verdict = trust.check(
+                &skynetd_io::trust::package_message(&staged.digest),
+                signed.as_ref(),
             );
+            match (&verdict.signer, verdict.state) {
+                (Some(signer), SignatureState::Verified) => println!(
+                    "  {}",
+                    term::ok(&format!("signature: verified — signed by `{signer}`"))
+                ),
+                _ => println!(
+                    "  {}",
+                    term::warn(&format!(
+                        "signature: {} — {}",
+                        verdict.state.as_str(),
+                        verdict.detail
+                    ))
+                ),
+            }
+            if kind == "driver" && verdict.state != SignatureState::Verified {
+                println!(
+                    "  {}",
+                    term::warn(
+                        "§19: a driver runs native, so skynetd refuses to activate this one until \
+                         its signature verifies against a key this robot trusts",
+                    )
+                );
+            }
             println!(
                 "  {}",
                 term::dim("skynetd activates it on its next pass, once the desired state names it")

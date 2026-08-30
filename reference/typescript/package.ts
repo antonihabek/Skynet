@@ -110,6 +110,9 @@ export interface PackageManifest {
 
 export type PackageRejectionCode =
   | 'unsigned'
+  | 'signature_failed'
+  | 'signature_untrusted'
+  | 'signature_unverifiable'
   | 'digest_mismatch'
   | 'isolation_violation'
   | 'budget_exceeded'
@@ -145,11 +148,29 @@ export interface DeviceCapacity {
   installed: Array<{ id: string; version: string }>
 }
 
+/**
+ * What is known about a package's release signature.
+ *
+ * Deliberately not a boolean. See `AdmissionParams.signature`.
+ */
+export const SIGNATURE_STATES = ['verified', 'failed', 'untrusted', 'absent', 'unverifiable'] as const
+export type SignatureState = (typeof SIGNATURE_STATES)[number]
+
 export interface AdmissionParams {
   manifest: PackageManifest
   capacity: DeviceCapacity
-  /** Whether a release signature verified against a key registered to the publisher. */
-  signature_verified: boolean
+  /**
+   * What is known about the release signature.
+   *
+   * Five states, because a boolean held two and the other three mattered. `failed` is a signature
+   * that was present and did not verify — the bytes are attested to somebody other than the
+   * manifest claims, which is what tampering looks like; `untrusted` is a signature that verified
+   * against a key nobody here has trusted; `absent` is a publisher who did not sign;
+   * `unverifiable` is a platform that cannot check. They have different owners and different
+   * remedies, and collapsing them left an operator unable to tell whether to chase a publisher,
+   * add a key, upgrade the OS, or stop and investigate.
+   */
+  signature: SignatureState
   /** The digest the bytes on disk actually hash to. */
   observed_digest: string
   /** Verdict from the transport plan for this body. */
@@ -182,12 +203,41 @@ export function admitPackage(params: AdmissionParams): AdmissionResult {
   const { manifest, capacity } = params
   const findings: PackageFinding[] = []
 
-  if (!params.signature_verified) {
-    findings.push({
-      code: 'unsigned',
-      severity: 'error',
-      message: 'No verified publisher signature. The bytes may be intact and nobody has attested to who produced them.',
-    })
+  // Order matters here in one direction only: `failed` is reported as its own code because it is
+  // the one state that says something *went wrong* rather than something is missing. An operator
+  // who reads `unsigned` shrugs; one who reads `signature_failed` stops; and one who reads
+  // `signature_untrusted` goes and looks at the trust store, which is a third place entirely.
+  switch (params.signature) {
+    case 'verified':
+      break
+    case 'failed':
+      findings.push({
+        code: 'signature_failed',
+        severity: 'error',
+        message: 'A release signature was present and did not verify. The bytes are not the ones the signer attested to — treat this as tampering until somebody proves otherwise.',
+      })
+      break
+    case 'untrusted':
+      findings.push({
+        code: 'signature_untrusted',
+        severity: 'error',
+        message: "A release signature verified, and the key that made it is not one this robot trusts. Nothing is wrong with the bytes; what is missing is the operator's decision that this signer may publish here.",
+      })
+      break
+    case 'absent':
+      findings.push({
+        code: 'unsigned',
+        severity: 'error',
+        message: 'No publisher signature accompanied this package. The bytes may be intact and nobody has attested to who produced them.',
+      })
+      break
+    case 'unverifiable':
+      findings.push({
+        code: 'signature_unverifiable',
+        severity: 'error',
+        message: 'This platform cannot verify a release signature, so nothing has established who produced these bytes. That is a gap in the operating system rather than in the package.',
+      })
+      break
   }
 
   if (params.observed_digest !== manifest.digest) {

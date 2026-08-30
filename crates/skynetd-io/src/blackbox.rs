@@ -310,21 +310,32 @@ fn write_sealed(dir: &Path, sealed: &Sealed, mono_ns: u64) -> std::io::Result<Pa
 
 /// The metadata a supervisor can honestly fill in today.
 ///
-/// The embodiment and OS image digests are zero, and that is not a placeholder to tidy away: this
-/// daemon has no embodiment descriptor (the same absence that keeps `admit_package` off the install
-/// path) and no attested image digest. A recording that carried invented digests would be a
-/// recording that could be replayed against the wrong body without anybody noticing.
+/// **The embodiment digest is real when this robot has a descriptor**, and zero when it does not.
+/// Zero is readable as "no body was known" and is not a value anybody could mistake for a digest,
+/// which is what lets the recorder open on a robot nobody has provisioned — §28 preallocates the
+/// ring precisely so that nothing silences it.
+///
+/// `simulator` comes from the descriptor for the reason §56.2 gives: a benchmark result replayed
+/// from a simulated recording must never be mistaken for a field one. A body that declares itself a
+/// simulator says so in every recording it produces, in the header, rather than in somebody's
+/// memory of which machine they ran on. An unknown body is not a simulator (§52: absent means
+/// false, because the obligation is asymmetric).
+///
+/// **The OS image digest is still zero**, and that one is not a placeholder either: §10's
+/// attestation is unwritten, so there is nothing that has established which image is running. A
+/// digest of the running binary would be a different claim wearing this field's name.
 pub fn supervisor_meta(layout: &Layout) -> Meta {
     let robot_id = fs::read_to_string(layout.identity().join("robot-id"))
         .map(|text| text.trim().to_string())
         .unwrap_or_else(|_| "unprovisioned".to_string());
+    let body = crate::embodiment::load(layout);
     Meta {
         robot_id,
-        embodiment: [0u8; 32],
+        embodiment: body.digest_or_zero(),
         os_image: [0u8; 32],
         tier: 0,
         enforcement: 0,
-        simulator: false,
+        simulator: body.simulator(),
         wall_epoch_ns: 0,
         mono_ns: 0,
         channels: Vec::new(),

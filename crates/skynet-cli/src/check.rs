@@ -28,7 +28,7 @@
 use std::ffi::{c_char, CStr};
 
 use skynet_contracts::certification::SCTS_TESTS;
-use skynet_contracts::embodiment::{validate_frames, FrameGraph};
+use skynet_contracts::embodiment::{validate_frame_bindings, validate_frames, FrameGraph};
 use skynet_contracts::json::descriptor_from_json;
 use skynet_contracts::kinematics::flatten;
 use skynet_contracts::parse_role;
@@ -497,9 +497,16 @@ fn descriptor_checks(
             // against whichever generator wrote this file. Absent is not a failure — most bodies
             // have no graph yet, and §44.5 already says what that means: the pose guards report
             // unavailable with the frame they wanted named.
+            //
+            // Filed under `embodiment.frames.complete` rather than `embodiment.descriptor.valid`,
+            // which is what §52 names it and is also the more honest tier. A guest-tier body with
+            // no graph is ordinary; a *malformed* graph is a real defect, but one whose consequence
+            // §44.5 already bounds — the two pose guards go unavailable and the other six still
+            // run. Blocking guest on it would refuse a body that is safe by the same argument the
+            // rest of the design is safe by.
             match &descriptor.frames {
                 None => report.push(CheckResult::new(
-                    "embodiment.descriptor.valid",
+                    "embodiment.frames.complete",
                     "the frame graph, where there is one",
                     Outcome::NotApplicable,
                     "no frame graph is declared. The workspace and self-collision guards will \
@@ -507,7 +514,7 @@ fn descriptor_checks(
                 )),
                 Some(graph) => match validate_frames(graph) {
                     None => report.push(CheckResult::new(
-                        "embodiment.descriptor.valid",
+                        "embodiment.frames.complete",
                         "the frame graph, where there is one",
                         Outcome::Pass,
                         format!(
@@ -518,12 +525,46 @@ fn descriptor_checks(
                         ),
                     )),
                     Some(fault) => report.push(CheckResult::fail(
-                        "embodiment.descriptor.valid",
+                        "embodiment.frames.complete",
                         "the frame graph, where there is one",
                         format!("{} [{}]", fault.detail, fault.code),
                     )),
                 },
             }
+            // The half a graph-only validator cannot perform, and the reason this test needs
+            // the descriptor rather than the tree: `joint` and `mimics` name entries in the joint
+            // list, and a name that does not resolve there leaves the frame unresolvable on every
+            // cycle — which both pose guards correctly trip on, forever, for a reason that is a
+            // spelling in a file. §44.5 wants that reported when the lease is granted rather than
+            // in cycle, and this is the only place it can be.
+            //
+            // A driver is exactly where it goes wrong, because the graph and the joint list are
+            // commonly produced by two different code paths in it.
+            if let Some(graph) = &descriptor.frames {
+                let joints: Vec<&str> = descriptor.joints.iter().map(|j| j.name.as_str()).collect();
+                let driven = graph
+                    .nodes
+                    .iter()
+                    .filter(|node| node.joint.is_some())
+                    .count();
+                report.push(match validate_frame_bindings(graph, &joints) {
+                    None => CheckResult::new(
+                        "embodiment.frames.complete",
+                        "every joint the frame graph names is one the body declares",
+                        Outcome::Pass,
+                        format!(
+                            "{driven} of {} frames move with a declared joint.",
+                            graph.nodes.len()
+                        ),
+                    ),
+                    Some(fault) => CheckResult::fail(
+                        "embodiment.frames.complete",
+                        "every joint the frame graph names is one the body declares",
+                        format!("{} [{}]", fault.detail, fault.code),
+                    ),
+                });
+            }
+
             // "Valid" and "usable" are different claims, and the second is the one a driver author
             // needs. A well-formed tree with one collision capsule has nothing for
             // `self_collision` to test; a tree whose limbs hang off a ball joint has nothing for
@@ -535,7 +576,7 @@ fn descriptor_checks(
             if let Some(graph) = &descriptor.frames {
                 if let Some((usable, summary)) = pose_guard_summary(graph) {
                     report.push(CheckResult::new(
-                        "embodiment.descriptor.valid",
+                        "embodiment.frames.complete",
                         "what the pose guards can do with it",
                         if usable {
                             Outcome::Pass

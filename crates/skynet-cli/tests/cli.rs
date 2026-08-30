@@ -541,7 +541,7 @@ fn a_joint_with_no_value_is_unresolved_rather_than_assumed_to_be_at_zero() {
 
     let out = skynet(&["frames", descriptor.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
-    let report = stderr(&out);
+    let report = said(&out);
     assert!(report.contains("no value for shoulder"), "{report}");
     assert!(
         report.contains("upper above it has none"),
@@ -554,7 +554,7 @@ fn the_report_says_what_the_pose_guards_will_be_able_to_do() {
     let dir = scratch("frames-guards");
     let descriptor = descriptor_from(&dir, GEOMETRY_URDF);
     let out = skynet(&["frames", descriptor.to_str().unwrap()]);
-    let report = stderr(&out);
+    let report = said(&out);
     assert!(
         report.contains("3 of 3 frames can be constrained"),
         "{report}"
@@ -569,8 +569,65 @@ fn one_collision_body_is_reported_as_a_guard_that_cannot_run() {
     let dir = scratch("frames-one-body");
     let descriptor = descriptor_from(&dir, ARM_URDF);
     let out = skynet(&["frames", descriptor.to_str().unwrap()]);
-    let report = stderr(&out);
+    let report = said(&out);
     assert!(report.contains("the guard reports unavailable"), "{report}");
+}
+
+#[test]
+fn a_frame_naming_a_joint_the_body_does_not_declare_is_refused_by_name() {
+    // The defect this check exists for, and the reason it cannot live in `validate_frames`: the
+    // tree is *well formed*. Every parent resolves, there are no cycles, the root is the root.
+    // What is wrong is a name that points outside the graph, and the graph is all a tree validator
+    // is given.
+    //
+    // On the robot it is not silent — it is permanent. `solve` marks the frame unresolved, and
+    // both pose guards trip on an unresolvable frame every cycle, correctly, which is a robot that
+    // holds still and a report that never says the cause was a spelling.
+    let dir = scratch("frames-dangling");
+    let descriptor = descriptor_from(&dir, GEOMETRY_URDF);
+
+    let text = std::fs::read_to_string(&descriptor).expect("read descriptor");
+    let typo = text.replace("\"joint\":\"shoulder\"", "\"joint\":\"shoulder_pitch\"");
+    assert_ne!(
+        typo, text,
+        "the fixture should carry a dynamic frame to break"
+    );
+    let broken = dir.join("typo.json");
+    std::fs::write(&broken, &typo).expect("write");
+
+    let out = skynet(&["frames", broken.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let report = said(&out);
+    assert!(report.contains("dangling_joint"), "{report}");
+    assert!(
+        report.contains("shoulder_pitch") && report.contains("upper"),
+        "both the joint and the frame it belongs to are named: {report}"
+    );
+}
+
+#[test]
+fn a_partial_descriptor_is_still_usable_while_somebody_is_writing_one() {
+    // The check must not make this command useless for the job it exists for. A descriptor being
+    // written by hand has a frame graph before it has a joint list, and refusing every frame in it
+    // because `joints` is not there yet would be a check that costs more than it catches. An
+    // absent joint list is a different statement from a joint list that omits the joint.
+    let dir = scratch("frames-partial");
+    let descriptor = descriptor_from(&dir, GEOMETRY_URDF);
+
+    let text = std::fs::read_to_string(&descriptor).expect("read descriptor");
+    let document: String = text
+        .replace("\"joints\":", "\"joints_pending\":")
+        .to_string();
+    let partial = dir.join("partial.json");
+    std::fs::write(&partial, &document).expect("write");
+
+    let out = skynet(&["frames", partial.to_str().unwrap()]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "a descriptor with no joint list is incomplete, not wrong: {}",
+        stderr(&out)
+    );
 }
 
 #[test]
@@ -581,7 +638,7 @@ fn a_descriptor_with_no_frame_block_says_which_of_the_two_absences_it_is() {
     let out = skynet(&["frames", path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     assert!(
-        stderr(&out).contains("has no `frames` block"),
+        said(&out).contains("has no `frames` block"),
         "{}",
         stderr(&out)
     );
@@ -595,7 +652,7 @@ fn a_descriptor_with_no_frame_block_says_which_of_the_two_absences_it_is() {
     let out = skynet(&["frames", path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     assert!(
-        stderr(&out).contains("could not express this body's tree"),
+        said(&out).contains("could not express this body's tree"),
         "null is the generator saying so, which is a different fact: {}",
         stderr(&out)
     );

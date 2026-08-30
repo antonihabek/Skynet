@@ -330,6 +330,21 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             ))
         }
 
+        // The joint list is what separates the two frame corpora, and it is the whole of the
+        // difference: `validate_frames` is given a tree and asked whether the tree is well formed,
+        // and `validate_frame_bindings` is given the same tree and the body it came out of.
+        "frames" if label.contains("bindings") => {
+            let graph = json::frames_from_json(input.get("graph")).ok_or("no `graph`")?;
+            let joints: Vec<&str> = input
+                .arr_or_empty("joints")
+                .iter()
+                .filter_map(Json::as_str)
+                .collect();
+            json::frame_fault_to_json(&skynet_contracts::embodiment::validate_frame_bindings(
+                &graph, &joints,
+            ))
+        }
+
         "frames" => {
             // An absent or null graph is a body with no tree, which is a question for the guard
             // that wanted one rather than for the validator — so it is a broken case file here

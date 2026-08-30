@@ -89,6 +89,15 @@ fn body() -> EmbodimentDescriptor {
             source: Some("https://example.invalid/arm.pdf".to_string()),
         }),
         solvers: vec!["trac_ik".to_string()],
+        // An arm with a gripper and a camera, and the tokens a package would ask it for. Written
+        // out rather than derived from the effector and the sensor above, which is the whole point
+        // of the field: no rule anywhere turns "has a gripper" into `manipulation.grasp`, and
+        // inventing one would decide admissions on a mapping nobody specified.
+        capabilities: vec![
+            "manipulation.grasp".to_string(),
+            "sensing.camera.rgb".to_string(),
+        ],
+        extensions: Vec::new(),
         simulator: false,
         frames: None,
     }
@@ -651,7 +660,7 @@ fn a_refused_plan_refuses_the_install() {
             os_version: "1.0.0".to_string(),
             ..Default::default()
         },
-        signature_verified: true,
+        signature: SignatureState::Verified,
         observed_digest: "sha256:pkg".to_string(),
         transport_verdict: Some("refused".to_string()),
         executes_on_load: false,

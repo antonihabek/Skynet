@@ -12,6 +12,7 @@ resolver = "2"
 members = [
   "crates/skynet-json",
   "crates/skynet-sha256",
+  "crates/skynet-ed25519",
   "crates/skynet-rhal",
   "crates/skynet-kernel",
   "crates/skynet-contracts",

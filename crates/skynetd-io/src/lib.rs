@@ -46,15 +46,20 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod admit;
 pub mod api;
 pub mod auth;
 pub mod blackbox;
+pub mod capacity;
+pub mod console;
+pub mod embodiment;
 pub mod http;
 pub mod launch;
 pub mod layout;
 pub mod observe;
 pub mod runtime;
 pub mod store;
+pub mod trust;
 
 #[cfg(unix)]
 pub mod serve;

@@ -90,17 +90,18 @@ it, which says no when the answer is no.
 | `docs/` — the full specification, nine parts | Complete |
 | `bindings/c`, `bindings/cpp` — the RHAL ABI | Written, compiling, layout-checked from both sides |
 | `crates/skynet-kernel` — the Safety Kernel | `no_std`, no `alloc`, 8 guards, forward kinematics and its own arithmetic, 101 tests |
-| `crates/skynet-contracts` — transport, admission, certification, readiness | Ported from the reference, 84 tests |
+| `crates/skynet-contracts` — transport, admission, certification, readiness | Ported from the reference, 93 tests |
 | `crates/skynet-json` — canonical JSON | 16 tests |
 | `crates/skynet-rhal` — the Rust view of the ABI | 7 tests |
-| `crates/skynet-sha256` — SHA-256 | Held to the FIPS 180-4 vectors, 4 tests |
-| `crates/skynet-urdf` — URDF import (§63.4) | XML reader, model, role suggestion, descriptor, collision geometry, 44 tests |
-| `crates/skynet-cli` — the `skynet` command | descriptor, transport, frames, role, driver new/check, plus the robot commands over the local socket and `blackbox`; 42 tests |
-| `crates/skynetd` — the supervisor's brain (§33) | Reconciler, supervision, health, leases; pure, 37 tests, and CI asserts it stays pure |
-| `crates/skynetd-io` — the I/O half, and the `skynetd` binary | Package store, systemd launcher, observation, local API, the black box on disk, the loop; 83 tests plus an end-to-end run against real systemd |
+| `crates/skynet-sha256` — SHA-256 | Held to the FIPS 180-4 vectors, 5 tests |
+| `crates/skynet-ed25519` — Ed25519 verification (§19) | SHA-512, the field, the curve; held to RFC 8032's vectors and to the encodings that divide implementations. Verification only — signing is a test feature. 41 tests |
+| `crates/skynet-urdf` — URDF import (§63.4) | XML reader, model, role suggestion, descriptor, collision geometry, 45 tests |
+| `crates/skynet-cli` — the `skynet` command | descriptor, transport, frames, role, driver new/check, plus the robot commands over the local socket and `blackbox`; 44 tests |
+| `crates/skynetd` — the supervisor's brain (§33) | Reconciler, supervision, health, leases; pure, 38 tests, and CI asserts it stays pure |
+| `crates/skynetd-io` — the I/O half, and the `skynetd` binary | Package store, systemd launcher, observation, local API, the on-robot console (§32.2), the black box on disk, the trust store (§19), the loop; 121 tests plus an end-to-end run against real systemd |
 | `crates/skynet-blackbox` — the black box (§13, §26) | The preallocated ring, the MCAP writer, sealing, deterministic replay; `no_std`, 29 tests |
-| `corpus/` — the conformance corpus | 350 cases, 29 files |
-| `crates/skynet-corpus` — the corpus runner | Reproduces all 350 byte for byte |
+| `corpus/` — the conformance corpus | 363 cases, 30 files |
+| `crates/skynet-corpus` — the corpus runner | Reproduces all 363 byte for byte |
 | `reference/typescript/` — the oracle | Vendored from the Hub; generates the corpus |
 | `bindings/python` — the Python RHAL | Driver protocol plus a ctypes ABI view, offset-asserted |
 | `drivers/mock` — the mock robot | 24 sim-conformance checks, no hardware |
@@ -109,11 +110,16 @@ it, which says no when the answer is no.
 | `drivers/mujoco` — the MuJoCo simulator driver (§70) | 103 checks against real physics; Guest tier, twice over |
 
 **Not built, and the specification says so on its own behalf:** the policy runtime, the SPSC ring,
-OTA, the outbound queue, the on-robot console's page, Ed25519 (so a staged package reports its
-signature as *not checked* rather than as unsigned), the safety MCU, and every driver that talks to
-real hardware — `ros2_control`, EtherCAT, CANopen and the vendor SDKs. The realistic figure for a
-robot moving under this is several engineer-years. §59.5 states that plainly and this README does not
-improve on it.
+OTA, the outbound queue, calibration, the watchdog chain, the safety MCU, and every driver that
+talks to real hardware — `ros2_control`, EtherCAT, CANopen and the vendor SDKs. The realistic figure
+for a robot moving under this is several engineer-years. §59.5 states that plainly and this README
+does not improve on it.
+
+The on-robot console has now been opened in a browser, which found two things no test was watching
+for: `GET /plan` answered two different shapes and the reconcile panel had never once rendered, and
+the health panel repeated the same thirty-word sentence five times. Both are fixed.
+`cargo test -p skynetd-io -- --ignored console_fixture` writes the page and one file per route it
+fetches, from the real router, so anybody can serve the directory and look at it without a robot.
 
 The black box is a partial entry rather than either column. The ring, the format, the seal and the
 replay are written and held to the corpus; what a *supervisor* can put in one is §26's event channel
@@ -129,7 +135,8 @@ healthy-looking recording of a body that has never been commanded.
 `--root` puts `/data` and `/run` wherever you like.
 
 ```bash
-# Stage a package. The digest is verified against the content, not taken on trust.
+# Stage a package. The digest is verified against the content, not taken on trust; add
+# --signed-by and --signature and the release signature is checked too (§19, §37.1).
 skynet install ./my-policy --root /tmp/robot \
   --id openrobot/grasp --kind policy --version 1.0.0 --digest <hex>
 
@@ -151,6 +158,10 @@ Two things it will not do, and says so rather than pretending:
   report of the safe state says `declared` beside it.
 * **there is no default password.** An unprovisioned robot answers status and stop and nothing else
   (§39.2), and that is the specified behaviour rather than a state to be fixed by a fallback.
+* **and it trusts nobody until told to.** `/data/state/trust.json` holds the keys whose signatures
+  this robot believes, and there is no default there either — so a package reports `untrusted` until
+  somebody writes one, and a **driver** does not activate at all (§19). That is the same
+  useless-rather-than-open choice §39.2 makes for credentials.
 
 `sh crates/skynetd-io/e2e.sh` runs the whole chain — install, verify, activate, launch, socket,
 rollback — and reports the systemd launch step as not run where there is no systemd, rather than
