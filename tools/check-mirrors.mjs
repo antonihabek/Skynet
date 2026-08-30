@@ -33,6 +33,10 @@ const MIRRORS = [
   ['docs/skynet-build-plan.md', 'skynet-build-plan.md'],
 ]
 
+// The *code* the two repositories share is checked by `check-contract-mirrors.mjs` rather than
+// here, because those files legitimately differ in one way — their import specifiers — and a
+// byte comparison would report every one of them as diverged for ever. Run both.
+
 const args = process.argv.slice(2)
 const sync = args.includes('--sync')
 const given = args.find(arg => !arg.startsWith('--'))

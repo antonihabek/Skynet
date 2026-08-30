@@ -341,3 +341,134 @@ pub fn supervisor_meta(layout: &Layout) -> Meta {
         channels: Vec::new(),
     }
 }
+
+// ── §38.3's other half: the audit log, mirrored onto the event channel ───────
+
+/// How many audit entries one pass will copy into the ring.
+///
+/// A burst is possible — a provisioning script that trusts six keys and applies a profile writes
+/// seven entries between two reconciles — and a ring is a fixed number of records. Copying an
+/// unbounded number would let a configuration script *wrap the recording*, throwing away the
+/// control cycles an incident review is looking for in order to record that somebody typed a
+/// command. Sixteen a pass drains any realistic burst within a few seconds and cannot flood it.
+const MIRROR_MAX_PER_PASS: usize = 16;
+
+/// Read the cursor: the highest audit sequence already on the event channel.
+///
+/// `None` means there is no cursor file, which is not the same as zero — see [`mirror_audit`].
+fn read_cursor(layout: &Layout) -> Option<u64> {
+    fs::read_to_string(layout.audit_cursor())
+        .ok()
+        .and_then(|text| text.trim().parse().ok())
+}
+
+/// What a mirroring pass did, for a caller that wants to say so.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Mirrored {
+    /// Entries copied onto the event channel this pass.
+    pub recorded: usize,
+    /// Entries still waiting, because the per-pass cap was reached.
+    pub remaining: usize,
+    /// Whether this pass was the first — the one that skips history rather than replaying it.
+    pub baseline: bool,
+}
+
+/// Copy audit entries the daemon has not yet recorded onto §26's event channel (§38.3).
+///
+/// §38.3 wants every configuration change in two places, *"a black box event and an audit-log
+/// entry"*, and the two cannot be written by the same process. The ring has exactly one writer by
+/// construction — two writers to a preallocated file at computed offsets is corruption rather than
+/// a race that occasionally loses a record — and the changes are made by `skynetd trust add` and
+/// friends, which run while the daemon is up. So the change is written to the log by whoever makes
+/// it, and this copies it across on the next pass.
+///
+/// # The first pass skips the history, and that is the interesting decision
+///
+/// A robot provisioned a year ago has an audit log with hundreds of entries and a ring that holds a
+/// few minutes. Replaying that log into the ring on the first pass after this code ships would
+/// **wrap the recording** — the entire incident window replaced by a year of configuration history,
+/// most of it about keys that have since been removed.
+///
+/// The two files answer different questions and the ring's answer is the perishable one. So the
+/// first pass records a **baseline**: one event saying how many earlier changes exist and where to
+/// read them, and the cursor jumps to the end. Nothing is lost — the audit log is the record, and
+/// it is complete — and the ring keeps holding what only it can hold.
+///
+/// The absence of the cursor file is what distinguishes that pass, which is why [`read_cursor`]
+/// returns an `Option` rather than defaulting to zero: a cursor of zero means "mirrored nothing so
+/// far, start from the beginning", and a robot that legitimately reaches that state is one whose
+/// log is new too.
+///
+/// # Failure
+///
+/// A write that fails stops the pass and leaves the cursor at the last entry that succeeded, so the
+/// next pass retries from there. Advancing past a record that was not written would be the one
+/// outcome worth avoiding: a gap in the ring that nothing marks as a gap (§47.4).
+pub fn mirror_audit(layout: &Layout, recorder: &mut Recorder, mono_ns: u64) -> Mirrored {
+    let audit = crate::audit::Audit::of(layout);
+
+    let Some(cursor) = read_cursor(layout) else {
+        let log = audit.read();
+        let last = log.last_seq();
+        if last > 0 {
+            let _ = recorder.event(
+                mono_ns,
+                EventCode::ConfigChanged,
+                "audit",
+                &format!(
+                    "{last} earlier configuration change(s) are in state/audit.jsonl and are not \
+                     replayed here — this ring holds minutes and that file holds the life of the \
+                     machine (§38.3)",
+                ),
+            );
+        }
+        write_cursor(layout, last);
+        return Mirrored {
+            recorded: 0,
+            remaining: 0,
+            baseline: true,
+        };
+    };
+
+    let pending = audit.since(cursor);
+    let remaining = pending.len().saturating_sub(MIRROR_MAX_PER_PASS);
+    let mut recorded = 0;
+    let mut reached = cursor;
+
+    for entry in pending.into_iter().take(MIRROR_MAX_PER_PASS) {
+        // The action decides the channel's vocabulary. §41.1 keeps that vocabulary closed, so an
+        // unrecognised action is a configuration change rather than a new code invented on the fly.
+        let code = if entry.action.starts_with("package.admit") {
+            EventCode::Admission
+        } else {
+            EventCode::ConfigChanged
+        };
+        if recorder
+            .event(mono_ns, code, &entry.subject, &entry.summary())
+            .is_err()
+        {
+            break;
+        }
+        reached = entry.seq;
+        recorded += 1;
+    }
+
+    if reached != cursor {
+        write_cursor(layout, reached);
+    }
+    Mirrored {
+        recorded,
+        remaining,
+        baseline: false,
+    }
+}
+
+/// Advance the cursor, atomically.
+///
+/// A best-effort write: a cursor that could not be written means the next pass mirrors the same
+/// entries again, which duplicates records rather than losing them. Duplicated is the survivable
+/// direction — a reader sees the change twice and knows it happened — and the alternative is a
+/// change that is in the audit log and nowhere in the recording.
+fn write_cursor(layout: &Layout, seq: u64) {
+    let _ = crate::observe::write_atomic(&layout.audit_cursor(), seq.to_string().as_bytes());
+}

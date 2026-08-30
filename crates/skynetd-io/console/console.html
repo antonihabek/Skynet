@@ -105,6 +105,65 @@
     <div id="blackbox-body"></div>
   </section>
 
+  <!-- ── Self-test ──────────────────────────────────────────────────────── -->
+  <!--
+    High on the page, under Status, because §48.1 puts POST before HOLD: whether this robot may run
+    at all is answered here, and every panel below describes a robot that has not been cleared to.
+  -->
+  <section class="panel" id="panel-post">
+    <h2>Power-on self-test <span class="age" data-age="post"></span></h2>
+    <div id="post-body"></div>
+  </section>
+
+  <!-- ── Watchdogs ──────────────────────────────────────────────────────── -->
+  <!--
+    After Guards, because layer 1 *is* a guard and the other three are what catches the failures
+    that guard cannot see (§46.1).
+  -->
+  <section class="panel" id="panel-watchdog">
+    <h2>Watchdogs <span class="age" data-age="watchdog"></span></h2>
+    <div id="watchdog-body"></div>
+  </section>
+
+  <!-- ── Outbound ───────────────────────────────────────────────────────── -->
+  <!--
+    Beside the black box, because the two halves of "this robot has something to say" are the
+    recording and the queue it is waiting in (§34.4).
+  -->
+  <section class="panel" id="panel-outbound">
+    <h2>Outbound <span class="age" data-age="outbound"></span></h2>
+    <div id="outbound-body"></div>
+  </section>
+
+  <!-- ── Calibration ────────────────────────────────────────────────────── -->
+  <!--
+    Directly under Guards, because it is the other half of the same sentence: the guards panel says
+    which guards are unavailable, and this says which of them are unavailable because a measurement
+    expired rather than because a subsystem is unwritten (§45.5).
+  -->
+  <section class="panel" id="panel-calibration">
+    <h2>Calibration <span class="age" data-age="calibration"></span></h2>
+    <div id="calibration-body"></div>
+  </section>
+
+  <!-- ── Trust ──────────────────────────────────────────────────────────── -->
+  <!--
+    Beside the black box because the two answer the same question from opposite ends: what did this
+    robot do, and who was allowed to tell it to. A package reporting `untrusted` sends somebody
+    here, and the useful answer is "these are the four keys this robot holds, and here is who added
+    each one" (§19, §38.3).
+  -->
+  <section class="panel" id="panel-trust">
+    <h2>Trust <span class="age" data-age="trust"></span></h2>
+    <div id="trust-body"></div>
+  </section>
+
+  <!-- ── Configuration changes ──────────────────────────────────────────── -->
+  <section class="panel" id="panel-audit">
+    <h2>Configuration changes <span class="age" data-age="audit"></span></h2>
+    <div id="audit-body"></div>
+  </section>
+
   <!-- ── Access ─────────────────────────────────────────────────────────── -->
   <!--
     Last, because §39.1 puts stop and status above authentication and this panel is what the other

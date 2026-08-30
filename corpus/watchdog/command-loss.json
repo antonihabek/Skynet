@@ -1,0 +1,90 @@
+{
+  "corpus": "watchdog",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "coast",
+      "note": "§46.2, and the shape is the point: the middle rung is the unsafe one. Guest is fine, certified is fine because layer 4 cuts drive enable independently, and only host — where layer 3 is the last line — turns a reset into a fall.",
+      "input": {
+        "on_command_loss": "coast",
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":\"this body's drives coast when commands stop, and layer 3 of the watchdog chain recovers by resetting the processor — which on this machine is a fall. The sound configuration is the certified tier, where layer 4 cuts drive enable independently of the processor (§46.2)\",\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":\"coast\"}"
+    },
+    {
+      "id": "hold",
+      "note": "A body that holds takes the reset and stays where it is.",
+      "input": {
+        "on_command_loss": "hold",
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":null,\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":\"hold\"}"
+    },
+    {
+      "id": "brake",
+      "note": "Brakes engage; the recovery path is survivable.",
+      "input": {
+        "on_command_loss": "brake",
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":null,\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":\"brake\"}"
+    },
+    {
+      "id": "fault",
+      "note": "The drive faults and disables, which is a stop.",
+      "input": {
+        "on_command_loss": "fault",
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":null,\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":\"fault\"}"
+    },
+    {
+      "id": "undeclared",
+      "note": "Silence is not `hold`. Treating it as `hold` would be inventing the most convenient answer to the only question layer 3 turns on.",
+      "input": {
+        "on_command_loss": null,
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":\"this body does not declare what its drives do when commands stop, and layer 3 of the watchdog chain recovers by resetting the processor. Silence is not `hold`: it is a recovery path nobody has characterised (§46.2)\",\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":null}"
+    },
+    {
+      "id": "unrecognised",
+      "note": "A value outside the vocabulary gets its own sentence: \"this body says `freewheel`\" and \"this body says nothing\" are different facts with different remedies.",
+      "input": {
+        "on_command_loss": "freewheel",
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":\"this body declares `on_command_loss: freewheel`, which is not one of hold, brake, fault or coast — so what it does while its processor resets is not something anybody can read off the descriptor (§46.2)\",\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":\"freewheel\"}"
+    }
+  ]
+}

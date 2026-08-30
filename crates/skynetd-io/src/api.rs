@@ -132,6 +132,33 @@ pub fn handle<L: Launcher, S: Slots>(
             )))
         }
         ("GET", ["health"]) => ok(health(context)),
+        ("GET", ["trust"]) => {
+            ok(crate::trust::TrustStore::load(context.daemon.store.layout()).to_report())
+        }
+        ("GET", ["audit"]) => ok(audit(context)),
+        ("GET", ["watchdog"]) => ok(watchdog(context)),
+        ("GET", ["post"]) => {
+            // Wall time, because the calibration row is an age comparison (§45.4). Not a control
+            // decision, so §35.1 permits it.
+            let wall_s = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|elapsed| elapsed.as_secs() as f64);
+            ok(crate::post::run(context.daemon.store.layout(), wall_s).to_json())
+        }
+        ("GET", ["outbound"]) => {
+            ok(crate::outbound::Queue::of(context.daemon.store.layout()).to_json())
+        }
+        ("GET", ["calibration"]) => {
+            // Wall time, because §45.4's backstop is elapsed time and a calibration outlives every
+            // reboot between it and its expiry — a monotonic reading means nothing across one.
+            // §35.1 permits exactly this: it is not a control decision, it is a record's age.
+            let wall_s = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|elapsed| elapsed.as_secs() as f64);
+            ok(crate::calibration::status(context.daemon.store.layout(), wall_s).to_json())
+        }
         ("GET", ["packages"]) => ok(packages(context)),
         ("GET", ["packages", id]) => package(context, id),
         ("GET", ["plan"]) => ok(plan(context)),
@@ -164,6 +191,12 @@ fn known_path(segments: &[&str]) -> bool {
             | ["embodiment"]
             | ["capacity"]
             | ["health"]
+            | ["trust"]
+            | ["audit"]
+            | ["calibration"]
+            | ["outbound"]
+            | ["watchdog"]
+            | ["post"]
             | ["packages"]
             | ["packages", _]
             | ["packages", _, _]
@@ -341,6 +374,106 @@ fn stop_all<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
         ),
     );
     body
+}
+
+/// How many audit entries `GET /audit` answers with.
+///
+/// The file is the record; this route is a window onto it. A console that asked for eleven months
+/// of configuration history over a LAN would be asking a robot to serialise a file that only grows,
+/// and the panel showing it has room for a screen. Whoever needs the whole thing reads
+/// `state/audit.jsonl`, which is the point of a format one line long.
+const AUDIT_WINDOW: usize = 50;
+
+/// §46's chain, as this body declares it.
+///
+/// Three of the four nesting windows come from the descriptor and one does not: the kernel's
+/// worst-case cycle is the kernel's own measurement, and §27's kernel is unwritten, so it is `null`
+/// here and reported as missing rather than skipped. §46.3 wants the nesting *"reported at startup
+/// rather than discovered in the field"*, and a report that quietly ignored the window it could not
+/// get would be reporting on a chain it had not established.
+fn watchdog<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
+    let body = crate::embodiment::load(context.daemon.store.layout());
+    let known = body.known();
+    let declared = known.and_then(|known| known.descriptor.watchdog.as_ref());
+
+    let windows = skynet_contracts::watchdog::Windows {
+        // §27 is unwritten, so nothing on this robot has measured a cycle.
+        kernel_cycle_worst_case_ms: None,
+        envelope_watchdog_ms: known
+            .and_then(|known| known.descriptor.envelope.as_ref())
+            .and_then(|envelope| envelope.watchdog_ms),
+        soc_wdt_ms: declared.and_then(|w| w.soc_wdt_ms),
+        drive_command_timeout_ms: declared.and_then(|w| w.drive_command_timeout_ms),
+    };
+
+    let mut out = skynet_contracts::json::watchdog_to_json(
+        known.and_then(|known| known.descriptor.on_command_loss.as_deref()),
+        &windows,
+    );
+    // Which layers this robot actually has, as against which the chain describes. Layers 1 and 2
+    // are software this repository is meant to contain and one of them is written; 3 and 4 are
+    // hardware nothing here can see. Reporting the chain without this would let a page of four
+    // rows read as four running watchdogs.
+    let mut running = Json::arr();
+    for (name, state, detail) in [
+        (
+            "kernel_guard",
+            "unavailable",
+            "§27's kernel and the policy runtime are unwritten, so nothing evaluates a cycle and \
+             nothing pets this",
+        ),
+        (
+            "supervisor",
+            "armed",
+            "skynetd pings WatchdogSec from inside the reconcile loop, so a hung loop trips it \
+             rather than a hung process only",
+        ),
+        (
+            "soc_wdt",
+            "unobserved",
+            "a hardware window this daemon cannot read; it is declared on the descriptor and \
+             petted by the kernel, which is unwritten",
+        ),
+        (
+            "safety_mcu",
+            "unobserved",
+            "an independent timer on a safety MCU. Nothing in this edition talks to one",
+        ),
+    ] {
+        let mut row = Json::obj();
+        row.set("name", Json::Str(name.to_string()));
+        row.set("state", Json::Str(state.to_string()));
+        row.set("detail", Json::Str(detail.to_string()));
+        running.push(row);
+    }
+    out.set("here", running);
+    out
+}
+
+/// The recent configuration changes (§38.3), newest first.
+fn audit<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
+    let log = crate::audit::Audit::of(context.daemon.store.layout()).read();
+
+    let mut entries = Json::arr();
+    for entry in log.entries.iter().rev().take(AUDIT_WINDOW) {
+        entries.push(entry.to_json());
+    }
+    let mut broken = Json::arr();
+    for line in &log.broken {
+        let mut row = Json::obj();
+        row.set("line", Json::Num(line.line as f64));
+        row.set("detail", Json::Str(line.detail.clone()));
+        broken.push(row);
+    }
+
+    let mut document = Json::obj();
+    document.set("entries", entries);
+    // Reported rather than dropped: a log with invisible gaps is worse than none, because somebody
+    // is relying on it. The count is what tells a reader the window they are looking at is partial.
+    document.set("broken", broken);
+    document.set("total", Json::Num(log.entries.len() as f64));
+    document.set("window", Json::Num(AUDIT_WINDOW as f64));
+    document
 }
 
 fn health<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {

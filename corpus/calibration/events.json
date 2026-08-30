@@ -1,0 +1,209 @@
+{
+  "corpus": "calibration",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "collision",
+      "note": "Measured a minute ago and one impact old. §45.4: a robot that has just hit something has, by definition, possibly moved its cameras.",
+      "input": {
+        "now": {
+          "at_s": 1700003600,
+          "temperature_c": 22,
+          "joint_travel_rad": 1000
+        },
+        "records": [
+          {
+            "set": "camera_extrinsics",
+            "method": "charuco-12x9, 40 poses",
+            "residual": 0.4,
+            "residual_threshold": 1,
+            "conditions": {
+              "at_s": 1700000000,
+              "temperature_c": 22,
+              "joint_travel_rad": 1000,
+              "tool": "gripper-2f85",
+              "payload_kg": 0
+            },
+            "operator": "alice",
+            "policy": {
+              "max_age_s": 86400,
+              "invalidating_events": [
+                "collision"
+              ]
+            },
+            "events_since": [
+              "collision"
+            ]
+          }
+        ],
+        "applicable": [
+          "camera_extrinsics"
+        ]
+      },
+      "expected": "{\"records\":[{\"checked\":[],\"detail\":\"a `collision` was recorded against this set since it was measured, and §45.4 invalidates it outright: continuing to trust the previous values is exactly the wrong response to one\",\"guards\":[\"proximity\",\"workspace\"],\"reason\":\"event\",\"set\":\"camera_extrinsics\",\"state\":\"expired\"}],\"unavailable\":[{\"detail\":\"the `camera_extrinsics` calibration is expired — a `collision` was recorded against this set since it was measured, and §45.4 invalidates it outright: continuing to trust the previous values is exactly the wrong response to one\",\"guard\":\"proximity\",\"set\":\"camera_extrinsics\",\"state\":\"expired\"},{\"detail\":\"the `camera_extrinsics` calibration is expired — a `collision` was recorded against this set since it was measured, and §45.4 invalidates it outright: continuing to trust the previous values is exactly the wrong response to one\",\"guard\":\"workspace\",\"set\":\"camera_extrinsics\",\"state\":\"expired\"}]}"
+    },
+    {
+      "id": "unlisted-event",
+      "note": "A tool change does not move a camera. Expiring everything on every event would train an operator to recalibrate nothing.",
+      "input": {
+        "now": {
+          "at_s": 1700003600,
+          "temperature_c": 22,
+          "joint_travel_rad": 1000
+        },
+        "records": [
+          {
+            "set": "camera_extrinsics",
+            "method": "charuco-12x9, 40 poses",
+            "residual": 0.4,
+            "residual_threshold": 1,
+            "conditions": {
+              "at_s": 1700000000,
+              "temperature_c": 22,
+              "joint_travel_rad": 1000,
+              "tool": "gripper-2f85",
+              "payload_kg": 0
+            },
+            "operator": "alice",
+            "policy": {
+              "max_age_s": 86400,
+              "invalidating_events": [
+                "collision"
+              ]
+            },
+            "events_since": [
+              "tool_change"
+            ]
+          }
+        ],
+        "applicable": [
+          "camera_extrinsics"
+        ]
+      },
+      "expected": "{\"records\":[{\"checked\":[\"age 3600s of 86400s\"],\"detail\":\"\",\"guards\":[\"proximity\",\"workspace\"],\"reason\":null,\"set\":\"camera_extrinsics\",\"state\":\"valid\"}],\"unavailable\":[]}"
+    },
+    {
+      "id": "tool-change-on-tool-offset",
+      "note": "The same event against the set it does invalidate.",
+      "input": {
+        "now": {
+          "at_s": 1700003600,
+          "temperature_c": 22,
+          "joint_travel_rad": 1000
+        },
+        "records": [
+          {
+            "set": "tool_offset",
+            "method": "charuco-12x9, 40 poses",
+            "residual": 0.4,
+            "residual_threshold": 1,
+            "conditions": {
+              "at_s": 1700000000,
+              "temperature_c": 22,
+              "joint_travel_rad": 1000,
+              "tool": "gripper-2f85",
+              "payload_kg": 0
+            },
+            "operator": "alice",
+            "policy": {
+              "max_age_s": 86400,
+              "invalidating_events": [
+                "tool_change"
+              ]
+            },
+            "events_since": [
+              "tool_change"
+            ]
+          }
+        ],
+        "applicable": [
+          "tool_offset"
+        ]
+      },
+      "expected": "{\"records\":[{\"checked\":[],\"detail\":\"a `tool_change` was recorded against this set since it was measured, and §45.4 invalidates it outright: continuing to trust the previous values is exactly the wrong response to one\",\"guards\":[\"workspace\"],\"reason\":\"event\",\"set\":\"tool_offset\",\"state\":\"expired\"}],\"unavailable\":[{\"detail\":\"the `tool_offset` calibration is expired — a `tool_change` was recorded against this set since it was measured, and §45.4 invalidates it outright: continuing to trust the previous values is exactly the wrong response to one\",\"guard\":\"workspace\",\"set\":\"tool_offset\",\"state\":\"expired\"}]}"
+    },
+    {
+      "id": "collision-beats-freshness",
+      "note": "The event is checked before age, because it is a step rather than a slope: this record is sixty seconds old and worthless.",
+      "input": {
+        "now": {
+          "at_s": 1700003600,
+          "temperature_c": 22,
+          "joint_travel_rad": 1000
+        },
+        "records": [
+          {
+            "set": "camera_extrinsics",
+            "method": "charuco-12x9, 40 poses",
+            "residual": 0.4,
+            "residual_threshold": 1,
+            "conditions": {
+              "at_s": 1700003540,
+              "temperature_c": 22,
+              "joint_travel_rad": 1000,
+              "tool": "gripper-2f85",
+              "payload_kg": 0
+            },
+            "operator": "alice",
+            "policy": {
+              "max_age_s": 86400,
+              "invalidating_events": [
+                "collision",
+                "estop_under_load"
+              ]
+            },
+            "events_since": [
+              "estop_under_load"
+            ]
+          }
+        ],
+        "applicable": [
+          "camera_extrinsics"
+        ]
+      },
+      "expected": "{\"records\":[{\"checked\":[],\"detail\":\"a `estop_under_load` was recorded against this set since it was measured, and §45.4 invalidates it outright: continuing to trust the previous values is exactly the wrong response to one\",\"guards\":[\"proximity\",\"workspace\"],\"reason\":\"event\",\"set\":\"camera_extrinsics\",\"state\":\"expired\"}],\"unavailable\":[{\"detail\":\"the `camera_extrinsics` calibration is expired — a `estop_under_load` was recorded against this set since it was measured, and §45.4 invalidates it outright: continuing to trust the previous values is exactly the wrong response to one\",\"guard\":\"proximity\",\"set\":\"camera_extrinsics\",\"state\":\"expired\"},{\"detail\":\"the `camera_extrinsics` calibration is expired — a `estop_under_load` was recorded against this set since it was measured, and §45.4 invalidates it outright: continuing to trust the previous values is exactly the wrong response to one\",\"guard\":\"workspace\",\"set\":\"camera_extrinsics\",\"state\":\"expired\"}]}"
+    },
+    {
+      "id": "arm-without-an-imu",
+      "note": "A manipulator with a camera: seven sets exist, four apply, and `balance` is not among them.",
+      "input": {
+        "now": {
+          "at_s": 1700003600,
+          "temperature_c": 22,
+          "joint_travel_rad": 1000
+        },
+        "records": [],
+        "applicable": [
+          "joint_zeros",
+          "camera_intrinsics",
+          "camera_extrinsics",
+          "force_torque_bias",
+          "tool_offset"
+        ]
+      },
+      "expected": "{\"records\":[],\"unavailable\":[{\"detail\":\"the `joint_zeros` calibration is absent — nobody has ever measured it on this robot\",\"guard\":\"workspace\",\"set\":\"joint_zeros\",\"state\":\"absent\"},{\"detail\":\"the `joint_zeros` calibration is absent — nobody has ever measured it on this robot\",\"guard\":\"self_collision\",\"set\":\"joint_zeros\",\"state\":\"absent\"},{\"detail\":\"the `camera_intrinsics` calibration is absent — nobody has ever measured it on this robot\",\"guard\":\"proximity\",\"set\":\"camera_intrinsics\",\"state\":\"absent\"},{\"detail\":\"the `camera_extrinsics` calibration is absent — nobody has ever measured it on this robot\",\"guard\":\"proximity\",\"set\":\"camera_extrinsics\",\"state\":\"absent\"},{\"detail\":\"the `camera_extrinsics` calibration is absent — nobody has ever measured it on this robot\",\"guard\":\"workspace\",\"set\":\"camera_extrinsics\",\"state\":\"absent\"},{\"detail\":\"the `force_torque_bias` calibration is absent — nobody has ever measured it on this robot\",\"guard\":\"envelope\",\"set\":\"force_torque_bias\",\"state\":\"absent\"},{\"detail\":\"the `tool_offset` calibration is absent — nobody has ever measured it on this robot\",\"guard\":\"workspace\",\"set\":\"tool_offset\",\"state\":\"absent\"}]}"
+    },
+    {
+      "id": "a-body-that-declares-nothing",
+      "note": "Every set applies, because over-reporting what is missing is the conservative direction.",
+      "input": {
+        "now": {
+          "at_s": 1700003600,
+          "temperature_c": 22,
+          "joint_travel_rad": 1000
+        },
+        "records": [],
+        "applicable": [
+          "joint_zeros",
+          "camera_intrinsics",
+          "camera_extrinsics",
+          "force_torque_bias",
+          "tool_offset",
+          "imu_bias",
+          "gravity_vector"
+        ]
+      },
+      "expected": "{\"records\":[],\"unavailable\":[{\"detail\":\"the `joint_zeros` calibration is absent — nobody has ever measured it on this robot\",\"guard\":\"workspace\",\"set\":\"joint_zeros\",\"state\":\"absent\"},{\"detail\":\"the `joint_zeros` calibration is absent — nobody has ever measured it on this robot\",\"guard\":\"self_collision\",\"set\":\"joint_zeros\",\"state\":\"absent\"},{\"detail\":\"the `camera_intrinsics` calibration is absent — nobody has ever measured it on this robot\",\"guard\":\"proximity\",\"set\":\"camera_intrinsics\",\"state\":\"absent\"},{\"detail\":\"the `camera_extrinsics` calibration is absent — nobody has ever measured it on this robot\",\"guard\":\"proximity\",\"set\":\"camera_extrinsics\",\"state\":\"absent\"},{\"detail\":\"the `camera_extrinsics` calibration is absent — nobody has ever measured it on this robot\",\"guard\":\"workspace\",\"set\":\"camera_extrinsics\",\"state\":\"absent\"},{\"detail\":\"the `force_torque_bias` calibration is absent — nobody has ever measured it on this robot\",\"guard\":\"envelope\",\"set\":\"force_torque_bias\",\"state\":\"absent\"},{\"detail\":\"the `tool_offset` calibration is absent — nobody has ever measured it on this robot\",\"guard\":\"workspace\",\"set\":\"tool_offset\",\"state\":\"absent\"},{\"detail\":\"the `imu_bias` calibration is absent — nobody has ever measured it on this robot\",\"guard\":\"balance\",\"set\":\"imu_bias\",\"state\":\"absent\"},{\"detail\":\"the `gravity_vector` calibration is absent — nobody has ever measured it on this robot\",\"guard\":\"balance\",\"set\":\"gravity_vector\",\"state\":\"absent\"},{\"detail\":\"the `gravity_vector` calibration is absent — nobody has ever measured it on this robot\",\"guard\":\"envelope\",\"set\":\"gravity_vector\",\"state\":\"absent\"}]}"
+    }
+  ]
+}

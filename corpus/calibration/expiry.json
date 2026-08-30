@@ -1,0 +1,266 @@
+{
+  "corpus": "calibration",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "within-age",
+      "note": "One hour into a one-day validity. Valid, and the checked list says what was actually tested.",
+      "input": {
+        "now": {
+          "at_s": 1700003600,
+          "temperature_c": 22,
+          "joint_travel_rad": 1000
+        },
+        "records": [
+          {
+            "set": "camera_extrinsics",
+            "method": "charuco-12x9, 40 poses",
+            "residual": 0.4,
+            "residual_threshold": 1,
+            "conditions": {
+              "at_s": 1700000000,
+              "temperature_c": 22,
+              "joint_travel_rad": 1000,
+              "tool": "gripper-2f85",
+              "payload_kg": 0
+            },
+            "operator": "alice",
+            "policy": {
+              "max_age_s": 86400
+            },
+            "events_since": []
+          }
+        ],
+        "applicable": [
+          "camera_extrinsics"
+        ]
+      },
+      "expected": "{\"records\":[{\"checked\":[\"age 3600s of 86400s\"],\"detail\":\"\",\"guards\":[\"proximity\",\"workspace\"],\"reason\":null,\"set\":\"camera_extrinsics\",\"state\":\"valid\"}],\"unavailable\":[]}"
+    },
+    {
+      "id": "past-age",
+      "note": "Past its elapsed-time backstop: proximity and workspace both lose their input, by name.",
+      "input": {
+        "now": {
+          "at_s": 1700003600,
+          "temperature_c": 22,
+          "joint_travel_rad": 1000
+        },
+        "records": [
+          {
+            "set": "camera_extrinsics",
+            "method": "charuco-12x9, 40 poses",
+            "residual": 0.4,
+            "residual_threshold": 1,
+            "conditions": {
+              "at_s": 1700000000,
+              "temperature_c": 22,
+              "joint_travel_rad": 1000,
+              "tool": "gripper-2f85",
+              "payload_kg": 0
+            },
+            "operator": "alice",
+            "policy": {
+              "max_age_s": 600
+            },
+            "events_since": []
+          }
+        ],
+        "applicable": [
+          "camera_extrinsics"
+        ]
+      },
+      "expected": "{\"records\":[{\"checked\":[],\"detail\":\"measured 3600 s ago against a validity of 600 s\",\"guards\":[\"proximity\",\"workspace\"],\"reason\":\"age\",\"set\":\"camera_extrinsics\",\"state\":\"expired\"}],\"unavailable\":[{\"detail\":\"the `camera_extrinsics` calibration is expired — measured 3600 s ago against a validity of 600 s\",\"guard\":\"proximity\",\"set\":\"camera_extrinsics\",\"state\":\"expired\"},{\"detail\":\"the `camera_extrinsics` calibration is expired — measured 3600 s ago against a validity of 600 s\",\"guard\":\"workspace\",\"set\":\"camera_extrinsics\",\"state\":\"expired\"}]}"
+    },
+    {
+      "id": "no-policy",
+      "note": "A record that expires on nothing is valid and says nothing was checked — which is how a console tells \"still valid\" from \"nobody set a policy\".",
+      "input": {
+        "now": {
+          "at_s": 1700003600,
+          "temperature_c": 22,
+          "joint_travel_rad": 1000
+        },
+        "records": [
+          {
+            "set": "joint_zeros",
+            "method": "charuco-12x9, 40 poses",
+            "residual": 0.4,
+            "residual_threshold": 1,
+            "conditions": {
+              "at_s": 1700000000,
+              "temperature_c": 22,
+              "joint_travel_rad": 1000,
+              "tool": "gripper-2f85",
+              "payload_kg": 0
+            },
+            "operator": "alice",
+            "policy": {},
+            "events_since": []
+          }
+        ],
+        "applicable": [
+          "joint_zeros"
+        ]
+      },
+      "expected": "{\"records\":[{\"checked\":[],\"detail\":\"\",\"guards\":[\"workspace\",\"self_collision\"],\"reason\":null,\"set\":\"joint_zeros\",\"state\":\"valid\"}],\"unavailable\":[]}"
+    },
+    {
+      "id": "joint-travel",
+      "note": "Joint zeros drift with travel, not with the calendar (§45.2).",
+      "input": {
+        "now": {
+          "at_s": 1700003600,
+          "temperature_c": 22,
+          "joint_travel_rad": 2000
+        },
+        "records": [
+          {
+            "set": "joint_zeros",
+            "method": "charuco-12x9, 40 poses",
+            "residual": 0.4,
+            "residual_threshold": 1,
+            "conditions": {
+              "at_s": 1700000000,
+              "temperature_c": 22,
+              "joint_travel_rad": 1000,
+              "tool": "gripper-2f85",
+              "payload_kg": 0
+            },
+            "operator": "alice",
+            "policy": {
+              "max_joint_travel_rad": 500
+            },
+            "events_since": []
+          }
+        ],
+        "applicable": [
+          "joint_zeros"
+        ]
+      },
+      "expected": "{\"records\":[{\"checked\":[],\"detail\":\"1000.0 rad of joint travel since it was measured, against a validity of 500.0 rad\",\"guards\":[\"workspace\",\"self_collision\"],\"reason\":\"joint_travel\",\"set\":\"joint_zeros\",\"state\":\"expired\"}],\"unavailable\":[{\"detail\":\"the `joint_zeros` calibration is expired — 1000.0 rad of joint travel since it was measured, against a validity of 500.0 rad\",\"guard\":\"workspace\",\"set\":\"joint_zeros\",\"state\":\"expired\"},{\"detail\":\"the `joint_zeros` calibration is expired — 1000.0 rad of joint travel since it was measured, against a validity of 500.0 rad\",\"guard\":\"self_collision\",\"set\":\"joint_zeros\",\"state\":\"expired\"}]}"
+    },
+    {
+      "id": "temperature-delta",
+      "note": "F/T bias drifts with temperature continuously, so the delta is the rule and the direction does not matter.",
+      "input": {
+        "now": {
+          "at_s": 1700003600,
+          "temperature_c": 40,
+          "joint_travel_rad": 1000
+        },
+        "records": [
+          {
+            "set": "force_torque_bias",
+            "method": "charuco-12x9, 40 poses",
+            "residual": 0.4,
+            "residual_threshold": 1,
+            "conditions": {
+              "at_s": 1700000000,
+              "temperature_c": 22,
+              "joint_travel_rad": 1000,
+              "tool": "gripper-2f85",
+              "payload_kg": 0
+            },
+            "operator": "alice",
+            "policy": {
+              "max_temperature_delta_c": 5
+            },
+            "events_since": []
+          }
+        ],
+        "applicable": [
+          "force_torque_bias"
+        ]
+      },
+      "expected": "{\"records\":[{\"checked\":[],\"detail\":\"18.0 °C from the 22.0 °C it was measured at, against a validity of 5.0 °C\",\"guards\":[\"envelope\"],\"reason\":\"temperature\",\"set\":\"force_torque_bias\",\"state\":\"expired\"}],\"unavailable\":[{\"detail\":\"the `force_torque_bias` calibration is expired — 18.0 °C from the 22.0 °C it was measured at, against a validity of 5.0 °C\",\"guard\":\"envelope\",\"set\":\"force_torque_bias\",\"state\":\"expired\"}]}"
+    },
+    {
+      "id": "temperature-unreadable",
+      "note": "The rule that keeps an expiry policy from switching itself off: a robot whose temperature sensor has failed is precisely the robot whose bias should not be trusted.",
+      "input": {
+        "now": {
+          "at_s": 1700003600
+        },
+        "records": [
+          {
+            "set": "force_torque_bias",
+            "method": "charuco-12x9, 40 poses",
+            "residual": 0.4,
+            "residual_threshold": 1,
+            "conditions": {
+              "at_s": 1700000000,
+              "temperature_c": 22,
+              "joint_travel_rad": 1000,
+              "tool": "gripper-2f85",
+              "payload_kg": 0
+            },
+            "operator": "alice",
+            "policy": {
+              "max_temperature_delta_c": 5
+            },
+            "events_since": []
+          }
+        ],
+        "applicable": [
+          "force_torque_bias"
+        ]
+      },
+      "expected": "{\"records\":[{\"checked\":[],\"detail\":\"this record expires with temperature and no reading is available, so how far this robot has drifted from its calibration conditions cannot be established\",\"guards\":[\"envelope\"],\"reason\":\"temperature\",\"set\":\"force_torque_bias\",\"state\":\"expired\"}],\"unavailable\":[{\"detail\":\"the `force_torque_bias` calibration is expired — this record expires with temperature and no reading is available, so how far this robot has drifted from its calibration conditions cannot be established\",\"guard\":\"envelope\",\"set\":\"force_torque_bias\",\"state\":\"expired\"}]}"
+    },
+    {
+      "id": "two-sets-one-guard",
+      "note": "Workspace starved by expired joint zeros and an expired tool offset is two measurements somebody has to take, so it is two lines.",
+      "input": {
+        "now": {
+          "at_s": 1700003600,
+          "temperature_c": 22,
+          "joint_travel_rad": 1000
+        },
+        "records": [
+          {
+            "set": "joint_zeros",
+            "method": "charuco-12x9, 40 poses",
+            "residual": 0.4,
+            "residual_threshold": 1,
+            "conditions": {
+              "at_s": 1700000000,
+              "temperature_c": 22,
+              "joint_travel_rad": 1000,
+              "tool": "gripper-2f85",
+              "payload_kg": 0
+            },
+            "operator": "alice",
+            "policy": {
+              "max_age_s": 600
+            },
+            "events_since": []
+          },
+          {
+            "set": "tool_offset",
+            "method": "charuco-12x9, 40 poses",
+            "residual": 0.4,
+            "residual_threshold": 1,
+            "conditions": {
+              "at_s": 1700000000,
+              "temperature_c": 22,
+              "joint_travel_rad": 1000,
+              "tool": "gripper-2f85",
+              "payload_kg": 0
+            },
+            "operator": "alice",
+            "policy": {
+              "max_age_s": 600
+            },
+            "events_since": []
+          }
+        ],
+        "applicable": [
+          "joint_zeros",
+          "tool_offset"
+        ]
+      },
+      "expected": "{\"records\":[{\"checked\":[],\"detail\":\"measured 3600 s ago against a validity of 600 s\",\"guards\":[\"workspace\",\"self_collision\"],\"reason\":\"age\",\"set\":\"joint_zeros\",\"state\":\"expired\"},{\"checked\":[],\"detail\":\"measured 3600 s ago against a validity of 600 s\",\"guards\":[\"workspace\"],\"reason\":\"age\",\"set\":\"tool_offset\",\"state\":\"expired\"}],\"unavailable\":[{\"detail\":\"the `joint_zeros` calibration is expired — measured 3600 s ago against a validity of 600 s\",\"guard\":\"workspace\",\"set\":\"joint_zeros\",\"state\":\"expired\"},{\"detail\":\"the `joint_zeros` calibration is expired — measured 3600 s ago against a validity of 600 s\",\"guard\":\"self_collision\",\"set\":\"joint_zeros\",\"state\":\"expired\"},{\"detail\":\"the `tool_offset` calibration is expired — measured 3600 s ago against a validity of 600 s\",\"guard\":\"workspace\",\"set\":\"tool_offset\",\"state\":\"expired\"}]}"
+    }
+  ]
+}

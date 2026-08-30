@@ -99,6 +99,8 @@ fn body() -> EmbodimentDescriptor {
         ],
         extensions: Vec::new(),
         simulator: false,
+        on_command_loss: Some("hold".to_string()),
+        watchdog: None,
         frames: None,
     }
 }

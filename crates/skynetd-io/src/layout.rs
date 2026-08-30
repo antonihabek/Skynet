@@ -297,6 +297,42 @@ impl Layout {
         self.state().join("trust.json")
     }
 
+    /// The outbound queue (§34.4).
+    ///
+    /// Under `state/` rather than under `/var/spool` or beside the black box: it is state the robot
+    /// carries across a reboot, and §34.4's "survives reboot" is the whole point of it being a
+    /// directory rather than a channel.
+    pub fn outbound(&self) -> PathBuf {
+        self.state().join("outbound")
+    }
+
+    /// Where calibration records live (§45.3).
+    ///
+    /// A directory rather than one file, because each parameter set is measured by a different
+    /// procedure at a different time and expires under a different policy — one document would make
+    /// re-measuring the camera extrinsics a rewrite of the joint zeros, and a torn write during a
+    /// calibration would take every set with it.
+    pub fn calibration(&self) -> PathBuf {
+        self.state().join("calibration")
+    }
+
+    /// The append-only record of configuration changes (§38.3).
+    ///
+    /// Beside the things it is a record of, and not under `/data/blackbox`: the ring wraps and this
+    /// does not. A key trusted eleven months ago is out of the black box's window by a factor of a
+    /// hundred thousand and still in this file, which is the whole reason §38.3 asks for both.
+    pub fn audit(&self) -> PathBuf {
+        self.state().join("audit.jsonl")
+    }
+
+    /// How far the daemon has mirrored the audit log into the black box.
+    ///
+    /// Separate from the log because the log is written by whoever makes a change — often a CLI
+    /// process — and this is written only by `skynetd`. One file, one writer.
+    pub fn audit_cursor(&self) -> PathBuf {
+        self.state().join("audit.cursor")
+    }
+
     /// The embodiment descriptor for this body (§5).
     ///
     /// Beside the profiles rather than under them, because it is not one. A profile is what an

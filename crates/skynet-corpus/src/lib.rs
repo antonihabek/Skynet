@@ -359,6 +359,81 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             json::certification_to_json(&award_certification(&cert_input))
         }
 
+        // §45.7's three conformance additions, in one runner because they are one question asked
+        // of one input: given these records and this moment, what is believed and which guards
+        // lose their input. Splitting them would let an edition pass `expiry_enforced` while
+        // disagreeing about which guard the expired set feeds, which is the half that matters to
+        // whoever is standing next to the robot.
+        // §46. One runner for the whole chain, for the same reason §45.7's three cases are one
+        // corpus: the chain, the command-loss verdict and the nesting are one question — is this
+        // robot's watchdog chain sound — and pinning them separately would let an edition agree
+        // about the inversion and disagree about what it costs.
+        "watchdog" => {
+            let windows = skynet_contracts::watchdog::Windows {
+                kernel_cycle_worst_case_ms: input
+                    .get("windows")
+                    .and_then(|w| w.get("kernel_cycle_worst_case_ms"))
+                    .and_then(Json::as_f64),
+                envelope_watchdog_ms: input
+                    .get("windows")
+                    .and_then(|w| w.get("envelope_watchdog_ms"))
+                    .and_then(Json::as_f64),
+                soc_wdt_ms: input
+                    .get("windows")
+                    .and_then(|w| w.get("soc_wdt_ms"))
+                    .and_then(Json::as_f64),
+                drive_command_timeout_ms: input
+                    .get("windows")
+                    .and_then(|w| w.get("drive_command_timeout_ms"))
+                    .and_then(Json::as_f64),
+            };
+            json::watchdog_to_json(
+                input.get("on_command_loss").and_then(Json::as_str),
+                &windows,
+            )
+        }
+
+        "calibration" => {
+            let now = json::conditions_from_json(input.get_present("now"));
+            let mut records = Vec::new();
+            for raw in input.arr_or_empty("records") {
+                let record = json::calibration_from_json(raw).map_err(|e| e.to_string())?;
+                let validity = skynet_contracts::calibration::evaluate(&record, &now);
+                records.push((record.set.clone(), validity));
+            }
+
+            let applicable: Vec<String> = if input.get_present("applicable").is_some() {
+                input.str_arr("applicable")
+            } else {
+                skynet_contracts::calibration::all_sets()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            };
+            let applicable_refs: Vec<&str> = applicable.iter().map(String::as_str).collect();
+
+            let mut out = Json::obj();
+            out.set(
+                "records",
+                Json::Arr(
+                    records
+                        .iter()
+                        .map(|(set, validity)| json::validity_to_json(set, validity))
+                        .collect(),
+                ),
+            );
+            out.set(
+                "unavailable",
+                Json::Arr(
+                    skynet_contracts::calibration::guards_unavailable(&records, &applicable_refs)
+                        .iter()
+                        .map(json::guard_unavailable_to_json)
+                        .collect(),
+                ),
+            );
+            out
+        }
+
         "readiness" if input.get("subjects").is_some() => {
             let mut reports: Vec<ReadinessReport> = Vec::new();
             for subject in input.arr_or_empty("subjects") {

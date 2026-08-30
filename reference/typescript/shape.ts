@@ -24,6 +24,12 @@ import type { CheckResult, FleetReadiness, ReadinessReport } from './readiness.t
 import type { CycleVerdict, PoseOutcome, ResolvedLimits } from './safety.ts'
 import { collisionPairs, type Frame, type Solved } from './kinematics.ts'
 import type { DigestOutcome } from './digest.ts'
+import {
+  guardsFedBy, validityDetail, type GuardUnavailable, type Validity,
+} from './calibration.ts'
+import {
+  CHAIN, WINDOWS, checkNesting, hostBlockedByCommandLoss, type Windows,
+} from './watchdog.ts'
 
 /** Present-and-null, for a nullable field. */
 function nullable<T>(value: T | null | undefined): T | null {
@@ -250,4 +256,72 @@ export function shapeDigest(outcome: DigestOutcome): unknown {
   const detail = error.kind === 'path' ? error.detail : error.kind === 'manifest' ? error.detail : null
 
   return { digest: null, error: { kind: error.kind, subject, detail } }
+}
+
+/**
+ * Calibration (§45): one record's verdict, and the guards it starves.
+ *
+ * `reason` is nullable rather than optional — a record that is valid has *no* expiry reason, which
+ * is a fact worth stating rather than a field worth omitting — and `checked` is always an array,
+ * empty for a record whose policy checks nothing. That empty array is load-bearing: it is how a
+ * console tells "still valid" from "nothing was checked".
+ */
+export function shapeCalibration(
+  records: Array<[string, Validity]>,
+  unavailable: GuardUnavailable[],
+): unknown {
+  return {
+    records: records.map(([set, validity]) => ({
+      set,
+      state: validity.state,
+      detail: validityDetail(validity),
+      reason: validity.state === 'expired' ? validity.reason : null,
+      checked: validity.state === 'valid' ? validity.checked : [],
+      guards: [...guardsFedBy(set)],
+    })),
+    unavailable: unavailable.map(entry => ({
+      guard: entry.guard,
+      set: entry.set,
+      state: entry.state,
+      detail: entry.detail,
+    })),
+  }
+}
+
+/**
+ * The watchdog chain (§46): the chain, the command-loss verdict, and the nesting.
+ *
+ * One document rather than three, because the three are one question — *is this robot's watchdog
+ * chain sound* — and a console that had to join them would be the fourth place the nesting rule was
+ * written down.
+ *
+ * `ordered` and `complete` are both present, because they are two different facts and a single
+ * boolean would have to lie about one of them: nothing contradicts, and nothing was established.
+ */
+export function shapeWatchdog(onCommandLoss: string | null, windows: Windows): unknown {
+  const report = checkNesting(windows)
+  return {
+    chain: CHAIN.map(layer => ({
+      layer: layer.layer,
+      name: layer.name,
+      catches: layer.catches,
+      response: layer.response,
+      required_from: layer.required_from,
+      petted_by: layer.petted_by,
+    })),
+    on_command_loss: nullable(onCommandLoss),
+    host_blocked: nullable(hostBlockedByCommandLoss(onCommandLoss)),
+    nesting: {
+      // An array, not an object: canonical JSON sorts an object's keys, and these four windows
+      // mean nothing except in order. The object form renders them alphabetically, which on a
+      // panel about nesting is worse than rendering nothing.
+      declared: WINDOWS.map(name => ({ window: name, ms: nullable(windows[name]) })),
+      faults: report.faults.map(fault => ({
+        code: fault.code, inner: fault.inner, outer: fault.outer, detail: fault.detail,
+      })),
+      missing: [...report.missing],
+      ordered: report.ordered,
+      complete: report.complete,
+    },
+  }
 }

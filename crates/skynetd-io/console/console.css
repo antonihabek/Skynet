@@ -108,11 +108,28 @@ main {
   gap: 16px;
 }
 
+/*
+ * `min-width: 0`, and it is not cosmetic.
+ *
+ * A grid item's default `min-width` is `auto`, which means **it cannot be narrower than its own
+ * min-content**. One panel holding a table that will not shrink therefore sets the width of the
+ * single column, and every other panel is dragged out to match — so a robot's console read fine on
+ * a laptop and pushed 378 px off the right edge of a phone, with the *status* panel, which holds
+ * nothing wide at all, among the things hanging over the edge.
+ *
+ * That is the §32.2 constraint failing sideways: the console has to render on a phone somebody is
+ * holding next to a robot, and a page that scrolls horizontally puts the stop button's own row off
+ * screen. So the item may shrink, and anything that genuinely will not fit scrolls inside its own
+ * card instead of taking the page with it.
+ */
+main > * { min-width: 0; }
+
 .panel {
   background: var(--card);
   border: 1px solid var(--rule);
   border-radius: 8px;
   padding: 14px 16px;
+  overflow-x: auto;
 }
 
 .panel h2 {
@@ -142,6 +159,16 @@ main {
 /* Not a dash, and not blank. A dash reads as zero and a blank reads as loading; §32.2's rule is
  * that a value nobody received is reported as one. */
 .absent { color: var(--ink-dim); font-style: italic; }
+
+/*
+ * A key, a digest, a timestamp: things somebody compares character by character against a release
+ * page or a ticket. Proportional digits make that comparison harder than it needs to be.
+ */
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+
+/* A sentence about something wrong, as against `.pill.bad`, which is a label on a row. */
+.bad { margin: 8px 0 0; font-size: 12.5px; color: var(--danger); }
+td.bad { margin: 0; }
 
 .note { margin: 8px 0 0; font-size: 12.5px; color: var(--ink-dim); }
 .dim { color: var(--ink-dim); }
