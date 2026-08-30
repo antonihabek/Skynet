@@ -308,6 +308,27 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         (method, segments) if crate::console::is_asset(method, segments) => Role::Anonymous,
 
         ("GET", ["health"]) => Role::Observer,
+        // Reading the trust store is not changing it. Everything in it is a *public* key and a
+        // label the operator chose, so there is nothing to keep from a reader — and the person
+        // staring at a package that reports `untrusted` needs to see which keys the robot holds
+        // before they can say whether the remedy is a new key or a tampered package. Requiring an
+        // admin credential to answer that would send the one diagnosis this store exists to
+        // support through a role most people watching a robot do not have.
+        ("GET", ["trust"]) => Role::Observer,
+        ("GET", ["audit"]) => Role::Observer,
+        // §39.1 gives observer "read health, guards, plan". Which guards have lost their input is
+        // guard state, and it is the panel somebody reads when a robot is running with fewer of
+        // them than it should be.
+        ("GET", ["calibration"]) => Role::Observer,
+        // What a robot is waiting to say, and what it has thrown away for want of a link. Both are
+        // facts about this machine's health rather than about its contents — the bodies are not
+        // served here — so they belong with health and the plan.
+        ("GET", ["outbound"]) => Role::Observer,
+        ("GET", ["watchdog"]) => Role::Observer,
+        // §39.1 gives an unauthenticated caller "stop, and see status", and a self-test verdict is
+        // not status — it names which of a robot's safety proofs have and have not been made, which
+        // is the kind of thing an observer credential exists for.
+        ("GET", ["post"]) => Role::Observer,
         ("GET", ["embodiment"]) => Role::Observer,
         ("GET", ["capacity"]) => Role::Observer,
         ("GET", ["packages"]) => Role::Observer,

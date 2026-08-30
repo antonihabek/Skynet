@@ -48,8 +48,10 @@
 
 pub mod admit;
 pub mod api;
+pub mod audit;
 pub mod auth;
 pub mod blackbox;
+pub mod calibration;
 pub mod capacity;
 pub mod console;
 pub mod embodiment;
@@ -57,6 +59,8 @@ pub mod http;
 pub mod launch;
 pub mod layout;
 pub mod observe;
+pub mod outbound;
+pub mod post;
 pub mod runtime;
 pub mod store;
 pub mod trust;

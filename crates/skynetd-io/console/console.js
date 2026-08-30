@@ -774,6 +774,434 @@ async function downloadSealed(name) {
   URL.revokeObjectURL(url)
 }
 
+/**
+ * The power-on self-test (§48.2).
+ *
+ * Four outcomes rather than two, and the three that are not `pass` are the reason the panel is
+ * worth having. `fail` means something is wrong and §48.2 sends the robot to `SAFE`, which is
+ * sticky and needs a human. `unavailable` means the input does not exist — nothing is broken and
+ * nothing was proven. `elsewhere` means §33.1 forbids this daemon from running the check at all,
+ * which is a different sentence again: it is not that nobody ran it, it is that this process is not
+ * who would.
+ */
+function renderPost(feed) {
+  const body = clear($('post-body'))
+  if (!feed.value) {
+    body.appendChild(el('p', 'note', feed.detail || 'no answer yet'))
+    return
+  }
+  const p = feed.value
+
+  const verdict = el('dl', 'fields')
+  verdict.appendChild(el('dt', null, 'Verdict'))
+  const dd = el('dd')
+  dd.appendChild(pill(p.verdict, p.failed ? 'bad' : p.may_run ? 'ok' : 'warn'))
+  // The sentence a badge cannot carry: "incomplete" is not "nearly passed".
+  dd.appendChild(el('div', 'dim', p.failed
+    ? '§48.2 sends a failed self-test to SAFE, which is sticky and needs a human.'
+    : p.may_run
+      ? 'Every check passed, so this robot may leave POST.'
+      : 'Nothing is wrong and nothing is proven. A check that could not run is not a pass, so this '
+        + 'robot may not run a policy.'))
+  verdict.appendChild(dd)
+  body.appendChild(verdict)
+
+  const table = el('table', 'subpanel')
+  const head = el('tr')
+  for (const label of ['Check', 'Outcome', 'What it means']) head.appendChild(el('th', null, label))
+  table.appendChild(head)
+  for (const check of p.checks || []) {
+    const row = el('tr')
+    row.appendChild(el('td', 'mono', check.check))
+    const outcome = el('td')
+    outcome.appendChild(pill(check.outcome,
+      check.outcome === 'pass' ? 'ok' : check.outcome === 'fail' ? 'bad'
+        : check.outcome === 'unavailable' ? 'warn' : 'off'))
+    row.appendChild(outcome)
+    const what = el('td', 'dim')
+    what.appendChild(document.createTextNode(check.detail))
+    // What a failure would mean, kept on every row: it is what makes an `elsewhere` row worth
+    // showing rather than hiding.
+    what.appendChild(el('div', null, 'failure means: ' + check.failure_means))
+    row.appendChild(what)
+    table.appendChild(row)
+  }
+  body.appendChild(table)
+
+  if (p.partial) body.appendChild(el('p', 'note', p.partial))
+}
+
+/**
+ * The watchdog chain (§46), and whether this body's windows nest.
+ *
+ * Two things on one panel because they are one question. The chain says what catches what; the
+ * nesting says whether the layers above are reachable at all — a SoC watchdog shorter than the
+ * kernel's own window resets the processor before the kernel executes its controlled stop, and a
+ * page showing four healthy layers over that configuration would be the most misleading panel here.
+ */
+function renderWatchdog(feed) {
+  const body = clear($('watchdog-body'))
+  if (!feed.value) {
+    body.appendChild(el('p', 'note', feed.detail || 'no answer yet'))
+    return
+  }
+  const w = feed.value
+
+  // §46.2 first: it decides which tier this body may attempt, which outranks everything below.
+  const loss = el('dl', 'fields')
+  const addLoss = (label, value) => {
+    loss.appendChild(el('dt', null, label))
+    const dd = el('dd')
+    dd.appendChild(value instanceof Node ? value : document.createTextNode(String(value)))
+    loss.appendChild(dd)
+  }
+  addLoss('On command loss', w.on_command_loss
+    ? pill(w.on_command_loss, w.host_blocked ? 'warn' : 'ok')
+    : absent('not declared'))
+  body.appendChild(loss)
+  if (w.host_blocked) body.appendChild(el('p', 'bad', w.host_blocked))
+
+  // The nesting, and the declared numbers beside it so a reader can see the order themselves.
+  const nesting = w.nesting || {}
+  const table = el('table', 'subpanel')
+  const head = el('tr')
+  for (const label of ['Window', 'Declared']) head.appendChild(el('th', null, label))
+  table.appendChild(head)
+  // In nesting order, which is why the route sends an array: an object would arrive alphabetical,
+  // and a table about nesting that is not in nesting order teaches the reader the wrong nest.
+  for (const entry of nesting.declared || []) {
+    const row = el('tr')
+    row.appendChild(el('td', 'mono', entry.window))
+    const cell = el('td')
+    if (entry.ms === null || entry.ms === undefined) cell.appendChild(absent('not declared'))
+    else cell.appendChild(document.createTextNode(entry.ms + ' ms'))
+    row.appendChild(cell)
+    table.appendChild(row)
+  }
+  body.appendChild(table)
+
+  for (const fault of nesting.faults || []) body.appendChild(el('p', 'bad', fault.detail))
+  if ((nesting.faults || []).length === 0) {
+    // Ordered and complete are two facts, and a panel that showed one would be lying about the
+    // other: nothing contradicts, and nothing was established.
+    body.appendChild(el('p', 'note', nesting.complete
+      ? 'Every window is declared and they nest, so every layer above is reachable (§46.3).'
+      : 'Nothing contradicts, and nothing is established: '
+        + (nesting.missing || []).length + ' of 4 windows are undeclared.'))
+  }
+
+  // And which layers this robot actually has, as against which the chain describes — four rows of
+  // vocabulary over a machine with one of them running would read as four running watchdogs.
+  const here = el('table', 'subpanel')
+  const hhead = el('tr')
+  for (const label of ['Layer', 'Here', 'Catches']) hhead.appendChild(el('th', null, label))
+  here.appendChild(hhead)
+  const states = new Map((w.here || []).map(entry => [entry.name, entry]))
+  for (const layer of w.chain || []) {
+    const row = el('tr')
+    row.appendChild(el('td', 'mono', layer.layer + ' · ' + layer.name))
+    const state = states.get(layer.name)
+    const cell = el('td')
+    cell.appendChild(pill(state ? state.state : 'unknown', state && state.state === 'armed' ? 'ok' : 'off'))
+    if (state) cell.appendChild(el('div', 'dim', state.detail))
+    row.appendChild(cell)
+    const what = el('td', 'dim')
+    what.appendChild(document.createTextNode(layer.catches))
+    what.appendChild(el('div', null, '→ ' + layer.response + ' · petted by ' + layer.petted_by))
+    row.appendChild(what)
+    here.appendChild(row)
+  }
+  body.appendChild(here)
+}
+
+/**
+ * The outbound queue (§34.4): what this robot is waiting to say, and what it has thrown away.
+ *
+ * The dropped column is the point. §47.4's rule applied to a queue — a gap annotated as a gap is
+ * honest, a gap that looks like a quiet period is not — so a robot that has discarded forty
+ * thousand telemetry items says so, rather than presenting a suspiciously tidy series.
+ */
+function renderOutbound(feed) {
+  const body = clear($('outbound-body'))
+  if (!feed.value) {
+    body.appendChild(el('p', 'note', feed.detail || 'no answer yet'))
+    return
+  }
+  const q = feed.value
+
+  const table = el('table')
+  const head = el('tr')
+  for (const label of ['Class', 'Waiting', 'Size', 'Dropped']) head.appendChild(el('th', null, label))
+  table.appendChild(head)
+
+  for (const row of q.classes || []) {
+    const tr = el('tr')
+    const name = el('td')
+    name.appendChild(document.createTextNode(row.class))
+    // The one class that is never discarded, said on the row rather than in a footnote.
+    if (!row.droppable) name.appendChild(el('div', 'dim', 'never dropped'))
+    tr.appendChild(name)
+    tr.appendChild(el('td', 'num', String(row.held)))
+    tr.appendChild(el('td', 'num', bytes(row.bytes) || '0 B'))
+    const dropped = el('td', 'num')
+    if (row.dropped > 0) dropped.appendChild(pill(String(row.dropped), 'warn'))
+    else dropped.appendChild(document.createTextNode('0'))
+    tr.appendChild(dropped)
+    table.appendChild(tr)
+  }
+  body.appendChild(table)
+
+  const fields = el('dl', 'fields subpanel')
+  const add = (label, value) => {
+    fields.appendChild(el('dt', null, label))
+    const dd = el('dd')
+    dd.appendChild(value instanceof Node ? value : document.createTextNode(String(value)))
+    fields.appendChild(dd)
+  }
+  add('Budget', bytes(q.budget) + ' · ' + bytes(q.reserve) + ' reserved for incidents')
+  // Collapsed is not a loss and is counted apart from one: the newer check-in carries the same
+  // level-triggered state, which is the whole reason the older one can go.
+  add('Check-ins superseded', String(q.collapsed))
+  body.appendChild(fields)
+
+  if (q.delivery) body.appendChild(el('p', 'note', q.delivery))
+}
+
+/**
+ * Calibration (§45), and the guards it is starving.
+ *
+ * The panel leads with the guards rather than the records, because that is the question somebody
+ * standing next to a robot has: *what is this machine not checking right now, and why.* §45.5's
+ * whole requirement is that an expired parameter set be named — "proximity unavailable" sends
+ * nobody anywhere, and "proximity unavailable: the camera_extrinsics calibration expired 40 days
+ * ago" sends them to a target board.
+ */
+function renderCalibration(feed) {
+  const body = clear($('calibration-body'))
+  if (!feed.value) {
+    body.appendChild(el('p', 'note', feed.detail || 'no answer yet'))
+    return
+  }
+  const c = feed.value
+  const starved = c.unavailable || []
+
+  // Before the table, because it changes what the table means: none of these guards would run even
+  // with a fresh calibration, and a reader who takes this panel for a to-do list would go and
+  // re-measure a camera to no effect.
+  if (c.precedes) body.appendChild(el('p', 'note', c.precedes))
+
+  if (starved.length === 0) {
+    body.appendChild(el('p', 'note', 'No guard is short of a calibration.'))
+  } else {
+    const table = el('table')
+    const head = el('tr')
+    for (const label of ['Guard', 'Waiting on', 'Why']) head.appendChild(el('th', null, label))
+    table.appendChild(head)
+    for (const entry of starved) {
+      const row = el('tr')
+      row.appendChild(el('td', null, entry.guard))
+      const set = el('td')
+      set.appendChild(el('span', 'mono', entry.set))
+      set.appendChild(document.createTextNode(' '))
+      set.appendChild(pill(entry.state, entry.state === 'absent' ? 'off' : 'warn'))
+      row.appendChild(set)
+      row.appendChild(el('td', 'dim', entry.detail))
+      table.appendChild(row)
+    }
+    body.appendChild(table)
+  }
+
+  // Then the records themselves, so a set that *is* valid is visible rather than merely absent
+  // from the list above.
+  const sets = c.sets || []
+  if (sets.length > 0) {
+    const table = el('table', 'subpanel')
+    const head = el('tr')
+    for (const label of ['Parameter set', 'State', 'Method', 'Signed by']) {
+      head.appendChild(el('th', null, label))
+    }
+    table.appendChild(head)
+    for (const entry of sets) {
+      const row = el('tr')
+      row.appendChild(el('td', 'mono', entry.set))
+
+      const state = el('td')
+      state.appendChild(pill(entry.state, entry.state === 'valid' ? 'ok'
+        : entry.state === 'absent' ? 'off' : entry.state === 'failed' ? 'bad' : 'warn'))
+      // What was actually checked, which is how a reader tells "still valid" from "no policy".
+      if (entry.state === 'valid') {
+        state.appendChild(el('div', 'dim', (entry.checked || []).length > 0
+          ? entry.checked.join(' · ')
+          : 'no expiry policy — nothing was checked'))
+      } else if (entry.detail) {
+        state.appendChild(el('div', 'dim', entry.detail))
+      }
+      row.appendChild(state)
+
+      const method = el('td')
+      if (entry.method) {
+        method.appendChild(document.createTextNode(entry.method))
+        if (entry.residual !== null && entry.residual !== undefined) {
+          method.appendChild(el('div', 'dim', 'residual ' + entry.residual))
+        }
+      } else {
+        method.appendChild(absent('no record'))
+      }
+      row.appendChild(method)
+
+      const signed = el('td')
+      if (entry.signer) signed.appendChild(pill(entry.signer, 'ok'))
+      else if (entry.state === 'absent') signed.appendChild(absent('—'))
+      else signed.appendChild(pill(entry.signature, entry.signature === 'failed' ? 'bad' : 'warn'))
+      row.appendChild(signed)
+      table.appendChild(row)
+    }
+    body.appendChild(table)
+  }
+
+  // §32.2: never show a value it did not receive. Three of §45.4's four conditions have nothing
+  // producing them on this robot, and a panel of expired records with no explanation reads as a
+  // robot that has drifted rather than one that cannot measure.
+  for (const line of c.unmeasured || []) {
+    body.appendChild(el('p', 'note', 'not measured: ' + line))
+  }
+}
+
+/**
+ * The trust store (§19, §38.3) — which keys this robot believes, and who said so.
+ *
+ * Three states before any key is drawn, because they are three different machines and the
+ * remedies have nothing in common: no file at all is a robot nobody provisioned, a file that does
+ * not parse is one somebody broke, and a file naming no keys is one somebody emptied. All three
+ * make every signature report `untrusted`, which is why the packages panel sends people here.
+ */
+function renderTrust(feed) {
+  const body = clear($('trust-body'))
+  if (!feed.value) {
+    body.appendChild(el('p', 'note', feed.detail || 'no answer yet'))
+    return
+  }
+  const t = feed.value
+
+  if (t.source === 'missing') {
+    body.appendChild(el('p', 'note',
+      'No trust store. This robot trusts nobody, so every signature reports untrusted — which is ' +
+      'true, and is not the same as a package being wrong. Add a key with `skynetd trust add`.'))
+    return
+  }
+  if (t.source === 'unreadable') {
+    body.appendChild(el('p', 'bad', 'The trust store cannot be read: ' + (t.source_detail || '')))
+    body.appendChild(el('p', 'note',
+      'This robot trusts nobody until it is repaired. A file that broke on its own is worth a ' +
+      'second look.'))
+    return
+  }
+
+  const rows = t.keys || []
+  if (rows.length === 0) {
+    body.appendChild(el('p', 'note',
+      'The trust store is present and names no keys, so every signature reports untrusted.'))
+    return
+  }
+
+  const table = el('table')
+  const head = el('tr')
+  for (const label of ['Label', 'Key', 'Added']) head.appendChild(el('th', null, label))
+  table.appendChild(head)
+
+  for (const entry of rows) {
+    const row = el('tr')
+    if (!entry.usable) {
+      // An entry the robot could not read is not a key, and drawing it in the same shape as one
+      // would suggest this robot is trusting something it is not.
+      const cell = el('td', 'bad', entry.at + ' — unusable')
+      cell.colSpan = 3
+      cell.title = entry.detail || ''
+      row.appendChild(cell)
+      table.appendChild(row)
+      continue
+    }
+
+    row.appendChild(el('td', null, entry.label))
+
+    // Truncated, with the whole of it on hover and in the title: 64 hex characters in a table
+    // column on a phone is a horizontal scrollbar, and the first eight are what somebody compares
+    // against a release page.
+    const key = el('td', 'mono', (entry.key || '').slice(0, 16) + '…')
+    key.title = entry.key || ''
+    row.appendChild(key)
+
+    const when = el('td')
+    if (entry.provenance_recorded) {
+      when.appendChild(document.createTextNode(entry.provenance))
+    } else {
+      // §38.3's question with no answer. The key still verifies — this is a gap in the audit, not
+      // in the security — so it is drawn as an absence rather than as a fault.
+      when.appendChild(absent('unrecorded'))
+    }
+    if (entry.note) when.appendChild(el('div', 'dim', entry.note))
+    row.appendChild(when)
+    table.appendChild(row)
+  }
+  body.appendChild(table)
+
+  for (const notice of t.notices || []) body.appendChild(el('p', 'note', notice))
+}
+
+/**
+ * The audit log (§38.3), newest first.
+ *
+ * A separate panel from the black box on purpose: the ring holds the last few minutes and this
+ * holds the life of the machine, and the question "when did somebody trust that key" is nearly
+ * always older than the ring.
+ */
+function renderAudit(feed) {
+  const body = clear($('audit-body'))
+  if (!feed.value) {
+    body.appendChild(el('p', 'note', feed.detail || 'no answer yet'))
+    return
+  }
+  const a = feed.value
+  const entries = a.entries || []
+
+  if (entries.length === 0) {
+    body.appendChild(el('p', 'note',
+      'Nothing has been recorded. A robot provisioned by editing files directly has an empty ' +
+      'audit log and a full trust store — which is exactly the case the Trust panel marks ' +
+      'unrecorded.'))
+  } else {
+    const table = el('table')
+    const head = el('tr')
+    for (const label of ['When', 'Who', 'What']) head.appendChild(el('th', null, label))
+    table.appendChild(head)
+
+    for (const entry of entries) {
+      const row = el('tr')
+      row.appendChild(el('td', 'mono', entry.at))
+      row.appendChild(el('td', null, entry.actor))
+      const what = el('td')
+      what.appendChild(document.createTextNode(entry.action + ' ' + entry.subject))
+      if (entry.previous) what.appendChild(el('div', 'dim', 'was: ' + entry.previous))
+      row.appendChild(what)
+      table.appendChild(row)
+    }
+    body.appendChild(table)
+
+    if (a.total > entries.length) {
+      body.appendChild(el('p', 'note',
+        'Showing the most recent ' + entries.length + ' of ' + a.total +
+        '. The whole record is state/audit.jsonl on the robot.'))
+    }
+  }
+
+  // Never silent about a line that could not be read: a log with invisible gaps is worse than no
+  // log, because somebody is relying on it.
+  for (const line of a.broken || []) {
+    body.appendChild(el('p', 'bad',
+      'Line ' + line.line + ' of the audit log ' + line.detail))
+  }
+}
+
 // ── The poll loop ────────────────────────────────────────────────────────────
 
 const bodyFeed = new Feed('embodiment', '/embodiment', renderEmbodiment)
@@ -785,6 +1213,12 @@ const feeds = [
   new Feed('packages', '/packages', renderPackages),
   new Feed('health', '/health', renderHealth),
   new Feed('blackbox', '/blackbox', renderBlackbox),
+  new Feed('post', '/post', renderPost),
+  new Feed('watchdog', '/watchdog', renderWatchdog),
+  new Feed('outbound', '/outbound', renderOutbound),
+  new Feed('calibration', '/calibration', renderCalibration),
+  new Feed('trust', '/trust', renderTrust),
+  new Feed('audit', '/audit', renderAudit),
 ]
 
 function paintAges() {

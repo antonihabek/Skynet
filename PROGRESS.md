@@ -2917,3 +2917,618 @@ this system except the Hub, and that is what keeps the driver gate from being th
 5. **Look at the console again after the next panel lands.** Two bugs in thirty seconds was not
    bad luck; it is what four sessions of writing a page nobody opened produces, and the fixture makes
    the next look cost a minute.
+
+## 2026-08-30 (fourteenth) — the trust store becomes a surface somebody audits
+
+The thirteenth session's third finding: *"The trust store has no `skynetd trust add`. Keys are added
+by editing JSON, which is fine for a file an operator writes once at provisioning and wrong for
+anything else: there is no place that records **when** a key was trusted or **by whom**, and §38.3
+asks for exactly that of profiles."* This session wrote it, and looking at the result found two
+things nobody was checking.
+
+### Provenance is recorded, never inferred
+
+A trust entry gains `added_at`, `added_by` and `note`, and every one of them is optional — because a
+store written by hand before this existed has none, and the honest report of such an entry is
+**`unrecorded`** rather than a fabricated date.
+
+The same rule decides what `skynetd trust add` does without `--by`: it records **`unattributed`**,
+not `$USER`. An environment variable is not an identity, and a provenance nobody typed is exactly
+the confidently-wrong record the feature exists to remove. CI greps that nothing in `skynetd-io`
+reads a username out of the environment.
+
+`Provenance::describe()` produces the four sentences, one per corner of the two optional fields, and
+the fourth — *"provenance unrecorded — this key predates the audited store, or was added by editing
+the file"* — is the one that made a notice worth adding: a store where **1 of 2** keys record nobody
+is an entry somebody hand-edited, and **9 of 9** is a robot provisioned before any of this existed.
+Those are different machines. The notice names the count and the labels.
+
+It is a notice and not a refusal, and that distinction is the whole of it: a key nobody recorded
+still verifies. The gap is in the audit, not in the security.
+
+### The rewrite that would have deleted the bug report
+
+`trust add` writes the file back, and the first version of that would have dropped every line the
+parser could not use — which is to say **adding a key to a file with a typo in it would quietly take
+the typo away.** The typo is the bug report. It is the entry an operator came to this command to
+find.
+
+So the store holds `Vec<Entry>` in file order, where an entry is either a key or a skipped line
+*carrying its raw JSON*, and a rewrite re-emits the skipped ones verbatim, in place. Order is
+preserved rather than reconstructed, so a rewrite is a diff somebody recognises. A skipped line's
+position is the only handle it has, which is why `trust remove --at keys[1]` exists and why
+`trust list` prints that exact command under every unusable row.
+
+Three refusals, each naming the remedy rather than the rule:
+
+| | |
+|---|---|
+| The same key twice | Refused, naming the label already holding it. Silently relabelling would rewrite somebody else's decision, and the case it hides — one key under two names — is the case worth seeing |
+| The same label twice | Refused, naming the key. Two keys under one name make every report ambiguous about which one signed, which is the one thing a label exists to prevent |
+| A store that does not parse | **Nothing is added.** Writing over it would destroy the keys it still holds, and this robot cannot tell which those are. The remedy is a person |
+
+### `crates/skynetd-io/src/audit.rs` — the half of §38.3 the black box cannot be
+
+§38.3 asks for two records of every configuration change — *"a black box event and an audit-log
+entry"* — and they are not redundant. The black box is a fixed-size ring that **wraps**: it holds
+the last few minutes at full fidelity, which is what an incident needs and precisely the wrong shape
+for *"when did this robot start trusting that key"*, a question whose answer is eleven months old.
+
+`/data/state/audit.jsonl`, one canonical JSON object per line. JSON Lines rather than an array, and
+the reason is the design: **an append must not require rewriting the file.** An array has to be
+read, parsed, extended and written back on every entry, so every append is an opportunity to lose
+the history — and rewriting an audit log is the operation an audit log exists to make difficult. It
+degrades in the right direction too: a line truncated by a power cut costs that line, not the file.
+There is a test for exactly that, and one asserting a broken line is *reported* rather than skipped,
+because a log with invisible gaps is worse than no log — somebody is relying on it.
+
+Wall time, deliberately. §35.1 gives `CLOCK_REALTIME` three jobs — *"logging, scheduling,
+correlation with the Hub"* — and this is the first. Nothing here is read to make a decision, so a
+stepped clock spoils a record and cannot spoil a verdict; a monotonic reading would be wrong twice,
+meaning nothing after a reboot and comparable with nothing on an operator's calendar. `rfc3339()` is
+Hinnant's civil-from-days, checked against `date -u` on eight values including 1970, both sides of
+2000-02-29, and 2024-02-29 — vectors from outside this repository, because a calendar tested against
+its own arithmetic is the mistyped-constant failure the thirteenth session wrote about.
+
+**The sequence number, and why the black box half is not written here.** The ring has exactly one
+writer by construction, and `skynetd trust add` is a *different process* that may run while the
+daemon is up; two writers to a preallocated ring is corruption, not a race. So each entry carries a
+`seq`, the change is written to the log by whoever makes it, and the daemon mirrors anything past
+its cursor. The consequence, stated rather than discovered: a black box event for a configuration
+change is **delayed by up to one reconcile period**, and on a robot with no `skynetd` running it
+does not appear at all — while the audit entry always does. That is the correct direction for a
+record whose job is to survive.
+
+### Two bugs found by opening the page, again
+
+The thirteenth session's fifth item was *"look at the console again after the next panel lands"*.
+Two panels landed, the page was opened, and neither of the two things it found was findable by
+anything this repository runs.
+
+**The fixture was honest and the way it was being served was not.** `console_fixture` writes one
+file per route *and a `<route>.status` beside it*, with a comment explaining that a 503 replayed as
+a 200 renders an error object as data. Nothing reads those files: a plain static server answers 200
+with the error body, and the black box panel duly printed `null · undefined records of undefined B`
+for a robot that had said **service unavailable** — the exact §32.2 violation the console is built
+not to commit, arriving through the way it was being looked at. `console/fixture-serve.mjs` now
+ships with the fixture and replays each recorded status; CI parses it beside `console.js`. Served
+that way the same panel reads *"Service Unavailable — a daemon whose black box could not be opened
+still serves stop and status, which is why this panel can be the only one missing."*
+
+**The console pushed 378 px off the right edge of a phone, and had been doing it for six sessions.**
+`main` is a CSS grid, and a grid item's default `min-width: auto` means it cannot be narrower than
+its own min-content — so the packages panel, whose table of grants and buttons will not shrink below
+752 px, set the width of *every panel beside it*. The status panel, which holds nothing wide at all,
+hung 360 px over the edge. `main > * { min-width: 0 }` plus `overflow-x: auto` on the panel: a table
+that genuinely will not fit now scrolls inside its own card instead of taking the page with it.
+
+Worth recording that the thirteenth session reported checking this by eye and found nothing. The
+difference this time was measuring `scrollWidth - clientWidth` and then bisecting `min-content` per
+panel, which is the sort of thing a person does not see and a browser answers in a second.
+
+### The admission verdict, recorded at last — and the contradiction underneath it
+
+Open since the twelfth session: the verdict was printed to whoever ran `skynetd stage` and kept
+nowhere. It is a decision about whether code may run on this machine, which makes it precisely what
+an incident review asks about, and a terminal that has been closed answers nothing.
+
+It could not simply be written to the ring, for the reason the trust changes could not: `stage` is
+not the daemon. So it goes to the audit log and the daemon mirrors it, and the event vocabulary
+gains two closed codes — `config_changed` and `admission` — chosen by the audit entry's action.
+`admit::summary()` is deliberately one line: §41.1 keeps the black box out of the logging business,
+so the *decision* lands on the channel and the findings stay in the report a person reads.
+
+It is recorded on **every** path out of a successful stage, including the two where admission
+reached no verdict at all — which is how the next thing was found, because one of those paths turns
+out to be the only path.
+
+> **`manifest.digest` cannot be this package's own version digest, and two shared documents disagree
+> about whether it is.**
+
+`reference/typescript/package.ts` says of the field: *"Version digest from the Hub. The identity that
+matters."* §37.1's store layout says the version digest is *"computed by `versionDigest()` over the
+manifest as a value and the remaining files as a `(path, sha256)` list."* Those cannot both hold: the
+digest is a hash **of** the manifest, so writing it into the manifest changes it. Demonstrated rather
+than argued —
+
+```
+manifest with no digest field  → 08f85c6cfe2fa185e1f52bf8ce00844da033fccfd86dcf868e3c848c0fe07def
+the same manifest declaring that value → c40ef1ac0f5cd09b598648e6ab8023fbf25c74de007f2afc5ae11d612acfc0b2
+```
+
+— and the consequence is not cosmetic. On the robot's staging path, one of two things happens,
+always. Either the field is **absent**, the common case since nobody can compute a satisfying value,
+and `manifest_from_json` refuses, so **admission does not run at all**: §37.1's `verify → admit →
+stage` loses its middle step in silence, and everything the twelfth and thirteenth sessions built on
+that report never executes. Or the field is **present** with any value and `digest_mismatch` fires,
+on every package, for ever.
+
+Nothing caught it because `corpus/admission/*` uses `"sha256:pkg"` for both `manifest.digest` and
+`observed_digest` — a placeholder that makes them trivially equal, and one that also violates the
+same section's rule that a digest is *"64 lowercase hex characters and nothing else — no `sha256:`
+prefix"*. **A corpus case is only as sharp as the value it pins**, and this is the second time this
+project has found a check satisfied by the question rather than by the answer.
+
+Not fixed here, and the reason is that both fixes are contract decisions: exclude `digest` from the
+hashed manifest, or remove it from the manifest and let the identity travel in the desired state,
+where §33.4 already puts it. Either changes the identity of every package across three
+implementations and the corpus. It is recorded in §37.1 in those words and pinned by
+`a_manifest_cannot_carry_its_own_version_digest`, which asserts what happens **today** — so the next
+session cannot fail to see it, and the test says in its own comment that it should be deleted the day
+the field becomes satisfiable.
+
+### The first mirrored pass records a baseline, not the history
+
+The one decision in `mirror_audit` worth defending. A robot provisioned a year ago has hundreds of
+audit entries and a ring that holds minutes: replaying the log on the first pass after this ships
+would **wrap the recording**, discarding the incident window in order to record a year of
+configuration history, most of it about keys since removed. The two files answer different questions
+and the ring's answer is the perishable one.
+
+So the first pass writes one event — *"40 earlier configuration change(s) are in state/audit.jsonl
+and are not replayed here"* — and jumps the cursor to the end. The absence of the cursor *file* is
+what marks that pass, which is why reading it returns an `Option` rather than defaulting to zero: a
+cursor of zero means "start from the beginning", and a robot legitimately in that state has a new log
+too. A burst is capped at sixteen a pass for the same reason, so a provisioning script cannot wrap
+the ring either.
+
+### Calibration (§45) — the only safety state that drifts
+
+The descriptor is signed and static; profiles are signed and operator-set. Calibration is measured,
+it decays, and several guards are built on it, which makes it the one thing in this system that can
+be **wrong without anything being broken**. §45.1 states the failure and it is not a dramatic one:
+*"a camera extrinsic off by four centimetres means the `proximity` guard measures separation to the
+wrong place while reporting perfectly healthy."* Nothing trips. The number is simply about the world
+as it was last spring.
+
+`skynet-contracts::calibration` is pure, like the other four: the clock and the conditions are
+supplied, so the Hub can answer *"is this fleet's calibration current"* from a check-in and the robot
+can answer it offline, by the same function. §45.2's table — which parameter set feeds which guard —
+is **data rather than prose**, because that is what turns "we should calibrate the cameras sometime"
+into "an expired extrinsic disables the proximity guard", and a test holds every guard it names to
+the kernel's own vocabulary: a table naming `proximty` would disable nothing while reading as though
+it disabled something.
+
+**Five states, and the two absences that are not the same absence.**
+
+| | |
+|---|---|
+| `valid` | Believed — and it carries **what was actually checked**, which is empty for a record with no policy. A console must be able to tell *still valid* from *nothing was checked*, and a state alone cannot |
+| `failed` | The residual exceeds its own method's threshold. It was never a calibration, so it does not become one at any age and it does not *expire* |
+| `expired` | It was one, and §45.4 has caught up with it |
+| `absent` | Nobody ever measured this set here |
+| `unusable` | A record exists and cannot be judged: no method, no residual, or filed under one set and declaring another |
+
+`unusable` is `untrusted`'s cousin from §37.1 — nothing says the measurement is bad, and nothing says
+it is good either — and the misfiling case is the sharpest: whichever half is wrong, some set is
+being judged by another set's policy, and the guards that lose their input are the **wrong guards**.
+
+**A missing reading expires; it does not extend.** The tempting alternative — skip the condition you
+cannot evaluate — inverts the policy on exactly the robot it was written for: a machine whose thermal
+sensor has failed is precisely the machine whose force/torque bias should not be trusted. In this
+edition that is loud, because §47's sensor pipeline and the policy runtime are unwritten and nothing
+produces a temperature or a travel count, so every such record reports expired on day one naming the
+reading nothing supplies. Which is true.
+
+### The sentence that keeps a panel from being a lie
+
+The calibration panel was drawn, and then the page was opened, and the first thing visible was that
+it sat directly beneath a Guards panel reporting **the same guards unavailable for a different
+reason**. Both true. Together they invite exactly one wrong conclusion — that re-measuring the camera
+would restore `proximity`. It would not: §27's kernel is unwritten, so nothing evaluates a cycle at
+all.
+
+So every surface carries the precedence, from the daemon rather than from the page: *"every guard
+here is already unavailable for a prior reason … these are the calibrations that would still be
+missing once they do."* It is in `GET /calibration`, in the console panel above the table, and at the
+foot of `skynetd calibration`. A panel that is true line by line and misleading as a whole is the
+failure §32.2 is actually about.
+
+### The base kind decides, and looking at the fixture is what found it
+
+The first `sets_for` said: a body that declares no capabilities gets every parameter set, because
+over-reporting what is missing is the conservative direction. Rendered against the bench arm — which
+declares `"base": "fixed"` and no capabilities — that produced `balance unavailable: nobody has ever
+measured the IMU bias`, on a robot bolted to a table.
+
+That is a **permanent red mark nobody can ever clear**, which is how an operator learns to ignore a
+panel. The two absences are not the same absence: undeclared capabilities mean nobody said what this
+body senses, and a declared `fixed` base is a *positive statement that it cannot fall over*. §45.2
+says as much directly — the gravity vector drifts with base tilt, and a fixed base does not tilt. An
+unknown base is mobile, because that is the first kind of absence again going the other way, and a
+fixed body that does declare an IMU keeps both sets since it evidently has one.
+
+### The corpus, and why §45.7's three cases are one corpus
+
+18 cases across `calibration/provenance`, `calibration/expiry` and `calibration/events`, generated
+from `reference/typescript/calibration.ts` and reproduced byte for byte by the Rust edition —
+**381 cases across 33 files**, up from 363.
+
+§45.7 asks for three conformance additions and they are one question asked of one input: given these
+records and this moment, what is believed and which guards lose their input. Split, an edition could
+pass `expiry_enforced` while disagreeing about which guard the expired set feeds — and the guard is
+the half that matters to whoever is standing next to the robot.
+
+Every number inside a message goes through `json::number_text` and `json::fixed` rather than Rust's
+native float formatting, because §31.4 wants byte-identical output and `{}` on an `f64` and
+JavaScript's `${value}` disagree often enough that a residual would eventually differ by a digit in a
+sentence nobody reads until it is a support call.
+
+### The Hub: readiness where the vendor already is (§32.4 item 3)
+
+§32.4 orders the Hub surfaces by the tables they need and puts this third: *"small, and puts the
+answer where people already look."* `/skynet/os` answers *where is the ecosystem stuck*; a vendor
+looking at their own robot has a narrower question — **what do I publish next** — and the blockers
+were already the answer to it, sitting on a page their vendor does not visit.
+
+`components/skynet/OsReadinessPanel.tsx`, in the robot page's sidebar directly under the safety
+envelope, because the envelope is the single largest input to the verdict: a vendor who has just
+read *"no envelope declared"* finds the consequence in the next panel rather than on another page.
+The adapter count comes from the query the page already ran.
+
+Two decisions carried over from `/skynet/os` rather than re-argued:
+
+* **The whole check list, not three and a count.** A fleet row has one line; a panel has room, and
+  the passes are worth as much as the failures to the person publishing the next one — nine green
+  and two grey is the shape of the work.
+* **The vocabulary is not certification's, and the panel says so above the list rather than under
+  it.** A reader who takes *attainable* for *awarded* has already misread the panel by the time a
+  footnote reaches them.
+
+Six new keys, `i18n-catalog.mjs sync` run across all 35 locales. Worth recording that sync copies
+the **English text** into each catalog rather than leaving the value empty, and
+`translate-with-openai.mjs` picks up "still same as English" as one of its four reasons to
+translate — so the pipeline is consistent, and the keys are pending rather than done. The translate
+script needs `OPENAI_API_KEY` and was not run here.
+
+Rendered both states before believing it: a fully-declared body (certified attainable, 11 of 11) and
+a bare one (not yet, 4 of 11, *"Next to publish: Published adapter"*), with every translation key
+resolved against `en.json` rather than assumed. `npx tsc --noEmit` is clean; `npx eslint` cannot run
+in this repository at all — `typescript-eslint` refuses TypeScript 7.0 — which is pre-existing and
+unrelated to this change.
+
+### §32.4 item 4 is not waiting on an endpoint
+
+The thirteenth session's Next list treated `/skynet/os/transport` as waiting on "the transport
+endpoint". It is not. `resolveTransport()` is already in the Hub and tested; what it needs is a
+**source** — a policy's declared action channels, where the model manifest's `action_space` is an
+unshaped `object` — and a **target**, an `EmbodimentDescriptor` with per-joint names, roles and
+ratings. The registry carries `dof` and an actuator list *aggregated by type*, and no table holds a
+descriptor at all.
+
+So item 4 is blocked exactly the way items 2 and 5 are: on a table. Building it now would produce a
+page that answers "nothing can bind" for every robot in the registry, which is honest and useless.
+Recorded rather than built.
+
+### The outbound queue (§34.4) — and §38.1's alarm, raised at last
+
+Bounded, on disk, survives a reboot, four classes with four **different** policies. That the table
+is four policies rather than one policy with four thresholds is the whole of it: telemetry is a
+stream where the newest is worth most and any single item is worth nothing; a check-in is
+level-triggered state, so enqueueing one removes the last; an episode is data somebody collected and
+paid for; an incident is the entire reason the black box exists.
+
+Two rules fall out and both are held by CI:
+
+* **Nothing is evicted for something less important than itself.** Filling a disk with telemetry
+  must not take out an episode, so when everything left outranks the newcomer the enqueue is
+  *refused* rather than allowed to evict upwards.
+* **The reserve is a floor for incidents, not a ceiling for everybody else.** A queue packed to its
+  shared limit still takes an incident, and takes it *without discarding anything* — the reserve is
+  not made of other people's items. An incident that does not fit even there is an error naming a
+  **full disk**, never a licence to discard the previous incident.
+
+Every discard increments a counter that lives with the queue, which is §47.4's rule applied to a
+queue rather than to a ring: a robot that dropped forty thousand telemetry items says so instead of
+showing a suspiciously tidy series. Collapsing a check-in is counted *apart* from a drop, because
+nothing was lost.
+
+**Full jitter, not a perturbation.** `exponential ± 10%` leaves a hundred robots that lost the same
+access point retrying inside the same tenth of a window — the thundering herd smeared rather than
+broken up. Uniform over `[0, exponential]` is the form that decorrelates them, and the jitter is
+*supplied* rather than drawn, for §35.2's reason. Writing the test found the cap bites on the
+eleventh attempt rather than the twelfth, because doubling reaches 1,024,000 ms and fifteen minutes
+is 900,000 — a number worth having in a test rather than in somebody's head.
+
+**§38.1's alarm now has somewhere to go.** A profile signature that *fails* — as against absent, or
+from an untrusted key — is queued as an incident, because a signature verifying against nothing was
+made over other bytes, which is what "somebody editing limits on a robot's disk" leaves behind. The
+other two states raise nothing, for the reason §37.1 keeps them apart from `failed`: both are
+administrative gaps, both are already visible, and an incident for either trains an operator to
+close incidents without reading them. Queueing the alarm cannot fail silently either — the limits
+are refused either way, so a queue that could not take it leaves a robot *safe and quiet*, which is
+worse to be quiet about than the original event.
+
+### The budget belongs to the queue, and looking at the panel is what showed it
+
+The console panel reported a 64 MiB budget over a queue built with 4 KiB, because the route
+constructed its own `Queue` with the defaults while the fixture had constructed one with its own —
+two openers, two drop policies, one directory, and a console reporting a limit nothing was applying.
+
+§34.4 says disk is reserved for incidents *at install*, and that sentence taken literally is the
+fix: the budget and reserve are written into the queue's directory the first time it is opened and
+adopted by every later opener. Re-sizing an existing queue is deliberately **not** a side effect of
+opening it, because it changes retrospectively which items would have been dropped.
+
+### Verification
+
+| | |
+|---|---|
+| `cargo test --workspace` | **660 passed**, 0 failed (566 before) |
+| `cargo clippy --workspace --all-targets` | clean |
+| `cargo fmt --all --check` | clean |
+| `cargo test -p skynet-corpus` | 394 cases across 35 files, all reproduced byte for byte (363 before) |
+| `node tools/corpus-gen/generate.ts` | regenerates identically |
+| `node --check` on both console scripts | parses |
+| `node tools/check-mirrors.mjs` | all three shared documents match |
+| The console, rendered at 1100 px and 390 px | no page overflow at either; every new row drawn |
+| Hub `npx tsc --noEmit` | clean |
+| Hub `npx vitest run` | **1159 passed** across 43 files (1150 before, over drifted contracts) |
+| `node tools/check-contract-mirrors.mjs` | every contract the Hub mirrors matches the reference |
+| Hub `node scripts/i18n-catalog.mjs audit` | all 35 catalogs OK |
+
+`skynetd-io` gains 7 audit tests, 13 trust tests, 8 calibration tests, 16 outbound tests, 5 watchdog
+tests, 5 POST tests and 7 API tests; `skynet-contracts` gains 29. Eleven CI invariants: a trust rewrite preserves what it could
+not parse, provenance is never guessed from the environment, one panel cannot widen the console,
+every calibrated set names real guards, a missing reading expires a record rather than extending
+it, an incident is never dropped to make room, backoff jitter is full with the cap holding, a
+coasting body is refused host and nothing else, the watchdog windows nest strictly, a self-test that
+could not run is not one that passed, and the shared documents and contracts have not diverged.
+
+Spec amended in both repositories, carried across by hand and checked identical: §19 (the audited
+trust store), §26 (two event codes), §37.1 (the recorded verdict, and the digest contradiction),
+§38.3 (provenance, the audit log, the mirroring), §34.4 (the four policies, the reserve, the
+recorded drop, full jitter), §45 (§45.7–§45.10) and §46 (where the windows come from, the
+host-shaped refusal, what the chain reports about itself) and §48 (§48.4–§48.5).
+
+### The power-on self-test (§48.2), which is where the session's parts meet
+
+§48.1's reason is blunt: with incremental encoders — still common on arms — joint positions at
+power-on are unknown, forward kinematics is meaningless, every pose-dependent guard is unavailable,
+and the robot must not be permitted to run a policy. POST is what decides whether it may leave that
+state, and its table turned out to be a list of the things this session built: calibration expiry
+(§45), the black box and its reserve (§28, §34.4), and the watchdog nesting (§46.3).
+
+**Four outcomes, and two of them are not failures.** §48.2 gives a check two answers; it needs four.
+
+| | |
+|---|---|
+| `pass` | The check ran and this robot is good on this point |
+| `fail` | The check ran and it is not. §48.2's `SAFE`: sticky, needs a human |
+| `unavailable` | The input does not exist. Nothing is broken and nothing was established |
+| `elsewhere` | Not this daemon's check to run — see below |
+
+`may_run` is true only when **every** check passed, and the verdict for the rest is
+`post_incomplete` rather than `safe`, because a robot whose checks could not run does not need a
+human. It needs the rest of the operating system. Collapsing `fail` and `unavailable` would produce
+the two worst sentences available: *"self-test passed"* on a robot that tested almost nothing, or
+*"self-test failed"* on a robot with nothing wrong with it.
+
+Two rows are worth their argument. **An expired calibration does not fail POST** — §45.5 degrades
+rather than refuses, and a self-test that refused to boot on a stale camera extrinsic would be a
+robot nobody could get into a state where they could recalibrate it; what the row does is make the
+list of starved guards known at power-on rather than at the first command. **An unreachable watchdog
+layer does fail it**, because §46.3's inversions mean a layer cannot fire, and booting past that is
+exactly what "before anything moves" is for. An *undeclared* window does not: nothing contradicts,
+and a body nobody has measured is not a body that is wrong.
+
+#### Half of §48.2's table is not the supervisor's to answer, and that falls out of §33.1
+
+The structural finding. `skynetd` never touches an actuator — that single property licenses
+everything else about the daemon, and CI already asserts it cannot even take a dependency on the
+RHAL. Five of §48.2's eight checks need precisely what that denies: the RHAL ABI, `describe()`, the
+estop assert-and-observe, encoder sanity, and the kernel's corpus self-check.
+
+So they are reported as `elsewhere` — **not** as unavailable, which would be a different and wrong
+sentence. A POST that silently omitted them would be a supervisor claiming to have proved a stop
+path it is forbidden from touching; one that called them unavailable would suggest they might become
+available here. They will not. Every row still carries what a failure would *mean*, which is what
+makes an `elsewhere` row worth showing rather than hiding.
+
+The homing procedure itself (§48.3) is in the same position and is not built: it moves the robot,
+through the RHAL extension channel, which is the one thing this process may not do.
+
+### The watchdog chain (§46)
+
+Four layers, and the one that carries the argument is layer 3: the SoC hardware watchdog is petted
+by the **Safety Kernel**, not by `skynetd`. A watchdog petted by a supervisor tells you the
+supervisor is alive, which is not the question anybody is asking.
+
+**The refusal is host-shaped, and that is unusual.** §46.2 says a body whose drives *coast* on
+command loss cannot safely reach the host tier, because layer 3's own recovery — reset the processor
+— is on that machine a fall. Guest is fine: enforcement is advisory and nothing relies on a hardware
+watchdog. Certified is fine: layer 4 cuts drive enable independently of the reset. **Only the middle
+rung is unsafe**, which a tier ladder that caps downward cannot express, so it is a predicate rather
+than a ceiling — and CI asserts it stays one, because rewriting it as a cap would silently permit
+exactly the configuration it exists to refuse.
+
+**Silence is not `hold`.** A body that declares nothing is refused host for the same reason a
+coasting one is: the recovery path has not been characterised. Treating an absence as the most
+convenient value is inventing an answer to the only question layer 3 turns on. A value outside the
+vocabulary gets its own sentence, because *"this body says `freewheel`"* and *"this body says
+nothing"* are different facts with different remedies.
+
+The nesting (§46.3) is four windows and two of them are new descriptor fields, because a board's
+watchdog window and a drive's command timeout are the only two things in the nest that this
+operating system cannot read for itself. Three decisions in the check:
+
+* **An undeclared window is not a passing one** — reported as missing, and *stepped over* rather
+  than ending the walk, because the pair either side of a gap still inverts and that inversion is
+  real whatever sits between them.
+* **Two booleans, not one.** `ordered` means nothing contradicts; `complete` means every window is
+  declared as well. One boolean would have to lie about the other, and the lie it tells — "sound"
+  over a chain nobody has measured — is the one §46.3 exists to prevent.
+* **Strictly less than.** Equal windows are a race decided by interrupt latency, and a chain whose
+  order depends on which timer fires first is not a chain.
+
+Each inversion carries its own code *and its consequence*, because those are the half worth reading:
+"the processor resets before the kernel executes its controlled stop, so the robot never performs
+its best available behaviour" and "the drive faults first, so layer 3 is present, configured, and
+never reached" are different bugs.
+
+13 cases in `watchdog/nesting` and `watchdog/command-loss` — **394 across 35 files** — and the Rust
+and TypeScript editions agreed byte for byte on the first run.
+
+The certification half needed nothing: `safety.command_loss.behaviour` is already an SCTS test
+required at host, and §46.2 already says the field is *measured, not trusted*. What was missing was
+the declaration to measure against.
+
+#### Alphabetical order on a panel about order
+
+The watchdog panel rendered its four windows as `drive_command_timeout_ms`, `envelope_watchdog_ms`,
+`kernel_cycle_worst_case_ms`, `soc_wdt_ms` — alphabetically, on a panel whose entire subject is
+whether those windows *nest*. Canonical JSON sorts an object's keys, and `declared` was an object.
+
+A reader cannot see a nest that is not in nesting order, and a table that presents one order while
+discussing another teaches the wrong one. It is now an array, in all three implementations, and the
+inversion is visible as a break in the sequence: 100 ms, then 40 ms, then 500 ms. Found by looking
+at the page, which is now three sessions running.
+
+### The worst thing found this session: the Hub's contracts had drifted six sessions
+
+Found by going to add a field to the embodiment descriptor and diffing the three copies first.
+
+`lib/skynet/os/safety.ts` — the Hub's copy of the **Safety Kernel** — had no pose guards, no
+`PoseTrip`, no `PoseOutcome` and no `withGrants`. `embodiment.ts` had no collision shapes, no
+`validateFrameBindings` and no `capabilities` on the descriptor. `conformance.ts` was missing an
+SCTS test **required at host** (`embodiment.capabilities.declared`), which means
+`awardCertification()` on the Hub would award a host badge to a body the robot refuses.
+`kinematics.ts` did not exist there at all.
+
+Git says why, and it is not a mystery: `reference/typescript/safety.ts` was last written in the
+seventh session's *"the frame graph, consumed"*, and `lib/skynet/os/safety.ts` has been touched
+exactly once, by the commit that created it.
+
+**Nothing could see it.** §31.4's corpus holds the Rust edition and the TypeScript oracle to each
+other on every run, byte for byte, 381 cases — and the Hub's copies are outside it. The Hub's own
+suite passed the whole time, 1150 tests, because it was asserting the behaviour of the contracts
+that repository happened to hold. `check-mirrors.mjs` covers the three shared *documents* and has
+been run every session; there was no equivalent for the code, so the documents stayed identical
+while the implementations of them drifted apart.
+
+That is the failure §31 exists to prevent, arriving through the gap between two checks rather than
+through either of them.
+
+#### Repaired, and then made mechanical
+
+`tools/check-contract-mirrors.mjs` compares all eight modules, normalising the **one** legitimate
+difference — the import specifiers, since the reference is standalone with `.ts` extensions and its
+own `types.ts` while the Hub resolves through its bundler and takes `SafetyEnvelope` from its own
+object model. Normalising anything more would be a check that cannot see a divergence in the code.
+
+Its first version reported the two-line drift in `conformance.ts` as **247 lines**, because it
+compared line by line at the same index and every line after an insertion counts as changed. A
+number that wrong in that direction is a number somebody learns to ignore, so it counts a multiset
+difference instead and now agrees with `diff`.
+
+Two checks, because they catch different things and only both together close it:
+
+* **`check-contract-mirrors.mjs`** catches *the reference having moved ahead*, and can only run
+  where both repositories are checked out. Wired into CI beside the document check, where both are
+  no-ops when BotMarket is absent — which is the case in that workflow today and the reason they
+  cost nothing to have.
+* **`lib/__tests__/skynet-os-mirrors.test.ts`** catches *the Hub's copy being edited in place*,
+  which is what a well-meaning fix to a type error in a Next.js application looks like. It hashes
+  each file against a manifest the sync writes, runs in the suite that already runs, and was
+  confirmed to fail on a one-line edit and pass again when it was reverted — a check nobody has
+  seen fail is a check nobody has tested.
+
+#### Two things the sync then broke, both worth having broken
+
+**`kinematics.ts` needs BigInt literals** — its `sqrt` seeds Newton from the exponent field of an
+IEEE-754 double — and the Hub targeted ES2017. Bumped to ES2020. The alternative was forking the
+one file that must not fork away from the oracle every edition is measured against.
+
+**The Hub's safety test passed `solvers` and `collision_model`**, two flags §44's frame graph
+deliberately removed: both were claims about the body that nothing checked, and a descriptor
+asserting `collision_model: true` with no geometry produced a guard reported as running with
+nothing to evaluate. The test now supplies an actual frame tree with two collision bodies and a
+workspace volume — which is the work that was skipped six sessions ago when the file was not
+carried across, and precisely the work that would have caught the drift then.
+
+Hub: **1159 tests across 43 files**, `tsc --noEmit` clean. Rust: unchanged at 639.
+
+
+### What is still zero lines
+
+The policy runtime, the SPSC ring and observation assembly, OTA (§12), the safety MCU, and the
+drivers that talk to real hardware.
+
+§48's **homing** is on that list and belongs there rather than in a gap: it moves the robot through
+the RHAL extension channel, which is the one thing §33.1 forbids this process. §48's self-test is
+built, and reports five of its eight checks as somebody else's for the same reason.
+
+§46's chain is off the list as a *contract* — the layers, the nesting, the command-loss rule — and
+two of its four layers are still hardware nothing in this edition can see, which every surface now
+says rather than implies. The outbound *queue* is off; the outbound **path** is not — nothing sends from it, because
+§34.2's transport and §10's pairing are unwritten, and every surface that shows the queue says so
+rather than presenting a queue that only grows.
+
+### Findings recorded rather than fixed
+
+1. **`manifest.digest` cannot be this package's own version digest**, and two shared documents
+   disagree about whether it is. Demonstrated, pinned by a test that asserts today's behaviour, and
+   recorded in §37.1. The fix is a contract decision with two defensible answers, either of which
+   changes the identity of every package across three implementations and the corpus.
+2. **`skynetd once` records nothing.** The reconcile loop writes pass events and mirrors the audit
+   log; `once` does neither, so a robot operated entirely through `once` — which §33's own
+   documentation calls *"a legitimate way to operate a robot"* — has a black box holding only
+   `recording_started`. Whether a one-shot pass belongs in the incident record is a real question and
+   the current answer is an accident rather than an answer.
+3. **`/skynet/os/transport` is blocked on a descriptor store, not on an endpoint.** See above. The
+   same table unblocks §32.1's `/skynet/os/devices/[id]`, which wants "active and unavailable guards
+   with the missing input named" — which is now a thing the robot can actually answer, since
+   calibration produces exactly that list. It is also why `calibration.ts` and `watchdog.ts` are
+   deliberately **not** in the Hub's mirror list yet: two modules nothing imports, waiting on the
+   same table. The mirror tool says so in the list rather than leaving it to be rediscovered.
+4. **Nothing consumes the outbound queue.** Items accumulate under the drop policy for ever. That is
+   correct today and it means the drop counters are the only evidence the queue is working, which
+   makes them worth watching rather than worth trusting.
+5. **`npx eslint` cannot run in the Hub at all** — `typescript-eslint` refuses TypeScript 7.0. It is
+   pre-existing and unrelated to anything here, and it means `tsc --noEmit` and the vitest suite are
+   currently the only static checks that repository has.
+6. **The two mirror checks only meet where both repositories are checked out.** The CI job that runs
+   them has one, so both are no-ops there; the real coverage is a developer with both trees and the
+   Hub-side digest test. Closing that properly means a job that checks out both, which needs a token
+   this session cannot arrange.
+7. **`lib/skynet/os/mirror-digests.json` is written by a tool in the *other* repository.** That is
+   the right direction — the reference is the origin — and it means a Hub-only change to a contract
+   cannot be made honest without the OS repository present. Recorded because it is a workflow
+   constraint somebody will hit and mistake for a broken test.
+
+### Next
+
+1. **The descriptor store on the Hub** (`skynet_embodiments`, or a column on the robot). It is the
+   single largest unblock left on that side: §32.4 items 4 and 5 both wait on it, and the robot can
+   already produce and sign a descriptor (§5).
+2. **A sender for the queue**, even a stub one behind a flag, so the drop counters stop being the
+   only evidence. §34.3's bearer classes are the interesting half — bulk waits for an unmetered
+   link, and the wait is visible rather than silent.
+3. **The three POST checks the kernel owns**, which arrive with §27 rather than before it: the
+   RHAL ABI, `describe()`, the estop assert-and-observe, encoder sanity and the corpus self-check.
+   The report already has their rows and says who they belong to.
+4. **`skynetd once` and the record**, from finding 2.
+5. **Look at the console again after the next panel lands.** It has now found something on three
+   consecutive looks — a 503 rendered as data, 378 px of overflow, a budget nothing was applying,
+   and four windows in alphabetical order on a panel about their order — and the fixture plus
+   `fixture-serve.mjs` make the next look cost about a minute.

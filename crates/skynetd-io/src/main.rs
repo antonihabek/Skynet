@@ -46,6 +46,10 @@ skynetd — the Skynet OS supervisor
   skynetd stage <dir> --id <ns/name> --kind <kind> --version <v> --digest <hex>
               [--signed-by <64 hex key>] [--signature <128 hex>]
   skynetd credential add --label <name> --role observer|operator|admin
+  skynetd calibration
+  skynetd trust list
+  skynetd trust add --key <64 hex> --label <name> [--note <text>] [--by <who>]
+  skynetd trust remove (--label <name> | --key <64 hex> | --at keys[<n>]) [--by <who>]
 
   --root       Where /data and /run live. Default `/`.
   --lan        Also serve the console on a link-local address. Refused if it is routable (§34.2).
@@ -54,6 +58,9 @@ skynetd — the Skynet OS supervisor
   --signed-by  The public key that signed this version's digest, and
   --signature  the signature it made. Both or neither; a signature with no key names nobody.
                Checked against <root>/data/state/trust.json (§19, §37.1).
+  --by         Who is making this change, for the audit log (§38.3). Omitted is recorded as
+               unattributed rather than guessed from the environment — a name nobody typed is
+               a provenance nobody wrote.
 
   The local socket is always served, at <root>/run/skynetd.sock.";
 
@@ -70,6 +77,8 @@ fn run(argv: &[String]) -> i32 {
 
     match argv.first().map(String::as_str) {
         Some("credential") => credential(&argv[1..]),
+        Some("trust") => trust(&argv[1..]),
+        Some("calibration") => calibration(&argv[1..]),
         Some("stage") => stage(&argv[1..]),
         Some("once") => loop_or_once(&argv[1..], true),
         _ => loop_or_once(argv, false),
@@ -293,6 +302,23 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                     for pass in &passes {
                         record_pass(recorder, now.saturating_mul(1_000_000), pass);
                     }
+
+                    // §38.3's black box half, for changes made by a process that is not this one.
+                    // Here rather than beside the socket loop because it is bounded work that
+                    // belongs with the pass, and because a robot whose daemon is not reconciling
+                    // has bigger problems than a delayed configuration record.
+                    let mirrored = skynetd_io::blackbox::mirror_audit(
+                        &layout,
+                        recorder,
+                        now.saturating_mul(1_000_000),
+                    );
+                    if mirrored.remaining > 0 {
+                        eprintln!(
+                            "skynetd: {} configuration change(s) recorded, {} still to copy from \
+                             the audit log",
+                            mirrored.recorded, mirrored.remaining
+                        );
+                    }
                 }
                 for (action, reason) in passes
                     .last()
@@ -424,6 +450,294 @@ fn credential(argv: &[String]) -> i32 {
     0
 }
 
+/// `skynetd calibration` — what this robot has measured of itself, and what that costs it (§45).
+///
+/// Leads with the guards rather than the records, because that is the question somebody standing
+/// next to a robot has: *what is this machine not checking right now, and why*. §45.5's whole
+/// requirement is that an expired parameter set be named — "proximity unavailable" sends nobody
+/// anywhere, and "proximity unavailable: the camera_extrinsics calibration expired 40 days ago"
+/// sends them to a target board.
+fn calibration(argv: &[String]) -> i32 {
+    let layout = root_of(argv);
+    let wall_s = Some(wall_ms() as f64 / 1000.0);
+    let status = skynetd_io::calibration::status(&layout, wall_s);
+
+    let starved = status.unavailable();
+    if starved.is_empty() {
+        println!("no guard is short of a calibration.");
+    } else {
+        println!("guards without a calibration:");
+        for entry in &starved {
+            println!("  {:<16} {}", entry.guard, entry.detail);
+        }
+    }
+
+    println!();
+    for held in &status.held {
+        let validity = &held.validity;
+        println!("{:<20} {}", held.set, validity.as_str());
+        if let skynet_contracts::calibration::Validity::Valid { checked } = validity {
+            // What was actually checked, because "still valid" and "nothing was checked" are the
+            // same outcome and different facts.
+            println!(
+                "  {}",
+                if checked.is_empty() {
+                    "no expiry policy — nothing was checked".to_string()
+                } else {
+                    checked.join(" · ")
+                }
+            );
+        } else if !validity.detail().is_empty() {
+            println!("  {}", validity.detail());
+        }
+        if let Some(record) = &held.record {
+            if let Some(method) = &record.method {
+                println!("  method     {method}");
+            }
+            match &held.signature.signer {
+                Some(signer) => println!("  signed by  {signer}"),
+                None => println!("  signature  {}", held.signature.state.as_str()),
+            }
+        }
+    }
+
+    // §32.2's rule in a terminal: three of §45.4's four conditions have nothing producing them
+    // here, and a list of expired records with no explanation reads as a robot that has drifted
+    // rather than one that cannot measure.
+    println!();
+    println!(
+        "Every guard above is already unavailable for a prior reason: §27's kernel and the policy\n\
+         runtime are unwritten, so nothing on this robot evaluates a cycle. These are the\n\
+         calibrations that would still be missing once they do."
+    );
+    0
+}
+
+const TRUST_USAGE: &str = "\
+  skynetd trust list
+  skynetd trust add --key <64 hex> --label <name> [--note <text>] [--by <who>]
+  skynetd trust remove (--label <name> | --key <64 hex> | --at keys[<n>]) [--by <who>]";
+
+/// `skynetd trust` — the audited surface §38.3 asks for, applied to keys.
+///
+/// Before this, keys were added by editing JSON, which works and records nothing: a store written
+/// that way can say *which* signers a robot believes and never *who decided that, or when*. Those
+/// are the two questions asked after an incident, and a file cannot answer them retrospectively.
+///
+/// Three properties this has and hand-editing does not:
+///
+/// * **The change is dated and attributed** — into the entry, and into the audit log beside it.
+/// * **A malformed entry survives the rewrite.** The store round-trips what it cannot parse, so
+///   adding a key to a file with a typo in it does not quietly delete the typo (see
+///   [`skynetd_io::trust::SkippedKey`]).
+/// * **A duplicate is refused rather than merged**, naming the label already holding the key.
+///
+/// What it deliberately does not do is guess who is running it. `--by` omitted records
+/// `unattributed`, not `$USER`: an environment variable is not an identity, and a provenance
+/// nobody typed is exactly the confidently-wrong record this whole feature exists to remove.
+fn trust(argv: &[String]) -> i32 {
+    let layout = root_of(argv);
+    let audit = skynetd_io::audit::Audit::of(&layout);
+    let actor = flag(argv, "--by").unwrap_or_else(|| "unattributed".to_string());
+    let now = skynetd_io::audit::rfc3339(wall_ms());
+    let mut store = skynetd_io::trust::TrustStore::load(&layout);
+
+    match argv.first().map(String::as_str) {
+        Some("list") => {
+            trust_list(&store, &layout);
+            0
+        }
+        Some("add") => {
+            let (Some(hex), Some(label)) = (flag(argv, "--key"), flag(argv, "--label")) else {
+                eprintln!("skynetd trust add --key <64 hex> --label <name>");
+                return 1;
+            };
+            let key = match skynet_ed25519::VerifyingKey::from_hex(&hex) {
+                Ok(key) => key,
+                Err(error) => {
+                    eprintln!("skynetd: {}", error.reason());
+                    return 1;
+                }
+            };
+            let entry = skynetd_io::trust::TrustedKey {
+                label: label.clone(),
+                key,
+                provenance: skynetd_io::trust::Provenance {
+                    added_at: Some(now.clone()),
+                    added_by: flag(argv, "--by"),
+                    note: flag(argv, "--note"),
+                },
+            };
+            if let Err(error) = store.add(entry) {
+                eprintln!("skynetd: {}", error.reason());
+                return 1;
+            }
+            if !write_trust(&layout, &store) {
+                return 1;
+            }
+            record(&audit, &now, &actor, "trust.add", &label, &hex, None);
+            eprintln!(
+                "skynetd: this robot now trusts `{label}`. Signatures made by that key report \
+                 `verified` rather than `untrusted`."
+            );
+            0
+        }
+        Some("remove") => {
+            let selector = match (
+                flag(argv, "--label"),
+                flag(argv, "--key"),
+                flag(argv, "--at"),
+            ) {
+                (Some(label), _, _) => skynetd_io::trust::Selector::Label(label),
+                (_, Some(hex), _) => match skynet_ed25519::VerifyingKey::from_hex(&hex) {
+                    Ok(key) => skynetd_io::trust::Selector::Key(key),
+                    Err(error) => {
+                        eprintln!("skynetd: {}", error.reason());
+                        return 1;
+                    }
+                },
+                (_, _, Some(at)) => skynetd_io::trust::Selector::At(at),
+                _ => {
+                    eprintln!(
+                        "skynetd trust remove --label <name> | --key <64 hex> | --at keys[<n>]"
+                    );
+                    return 1;
+                }
+            };
+            let removed = match store.remove(&selector) {
+                Ok(removed) => removed,
+                Err(error) => {
+                    eprintln!("skynetd: {}", error.reason());
+                    return 1;
+                }
+            };
+            if !write_trust(&layout, &store) {
+                return 1;
+            }
+            match removed {
+                skynetd_io::trust::Removed::Trusted(key) => {
+                    record(
+                        &audit,
+                        &now,
+                        &actor,
+                        "trust.remove",
+                        &key.label,
+                        &key.key_hex(),
+                        Some(&key.provenance.describe()),
+                    );
+                    eprintln!(
+                        "skynetd: `{}` is no longer trusted. Anything it signed now reports \
+                         `untrusted`, including packages already installed.",
+                        key.label
+                    );
+                }
+                skynetd_io::trust::Removed::Skipped(skipped) => {
+                    record(
+                        &audit,
+                        &now,
+                        &actor,
+                        "trust.remove",
+                        &skipped.at,
+                        &skipped.detail,
+                        None,
+                    );
+                    eprintln!(
+                        "skynetd: removed {} — it was never usable: {}",
+                        skipped.at, skipped.detail
+                    );
+                }
+            }
+            0
+        }
+        _ => {
+            eprintln!("{TRUST_USAGE}");
+            1
+        }
+    }
+}
+
+/// Write the store back, atomically.
+fn write_trust(layout: &Layout, store: &skynetd_io::trust::TrustStore) -> bool {
+    let Ok(text) = store.to_json().to_canonical() else {
+        eprintln!("skynetd: the trust store could not be serialised");
+        return false;
+    };
+    if let Err(error) = skynetd_io::observe::write_atomic(&layout.trust(), text.as_bytes()) {
+        eprintln!("skynetd: could not write the trust store: {error}");
+        return false;
+    }
+    true
+}
+
+/// Append to the audit log, and say so if it could not be written.
+///
+/// A failed append does **not** roll the change back. The key is trusted either way — the file has
+/// already been written — and pretending otherwise by unwinding would leave the robot in whichever
+/// state the second write happened to reach. So it reports loudly instead: the change stands, and
+/// the record of it does not, which is a thing an operator must be told rather than a thing to
+/// paper over.
+fn record(
+    audit: &skynetd_io::audit::Audit,
+    at: &str,
+    actor: &str,
+    action: &str,
+    subject: &str,
+    detail: &str,
+    previous: Option<&str>,
+) {
+    if let Err(error) = audit.append(at, actor, action, subject, detail, previous) {
+        eprintln!(
+            "skynetd: the change was made and could NOT be written to the audit log ({}): \
+             {error}. §38.3 wants both; this robot now has one.",
+            audit.path().display()
+        );
+    }
+}
+
+fn trust_list(store: &skynetd_io::trust::TrustStore, layout: &Layout) {
+    use skynetd_io::trust::{Entry, Source};
+
+    match store.source() {
+        Source::Missing => {
+            println!("no trust store at {}", layout.trust().display());
+            println!("This robot trusts nobody, so every signature reports `untrusted` (§19).");
+            return;
+        }
+        Source::Unreadable { detail } => {
+            println!("the trust store at {} {detail}", layout.trust().display());
+            println!("This robot trusts nobody until it is repaired.");
+            return;
+        }
+        Source::Loaded => {}
+    }
+
+    if store.entries().is_empty() {
+        println!("the trust store is present and names no keys.");
+        return;
+    }
+
+    for entry in store.entries() {
+        match entry {
+            Entry::Trusted(key) => {
+                println!("{}", key.label);
+                println!("  key        {}", key.key_hex());
+                println!("  {}", key.provenance.describe());
+                if let Some(note) = &key.provenance.note {
+                    println!("  note       {note}");
+                }
+            }
+            Entry::Skipped(skipped) => {
+                println!("{} — UNUSABLE", skipped.at);
+                println!("  {}", skipped.detail);
+                println!(
+                    "  remove it with `skynetd trust remove --at {}`",
+                    skipped.at
+                );
+            }
+        }
+    }
+}
+
 fn stage(argv: &[String]) -> i32 {
     let layout = root_of(argv);
     let store = Store::new(layout);
@@ -507,26 +821,51 @@ fn stage(argv: &[String]) -> i32 {
             // the argument for where the gate does live.
             let body = skynetd_io::embodiment::load(store.layout());
             let capacity = skynetd_io::capacity::read(&store, &body, skynetd_io::api::VERSION);
-            let manifest = match skynet_contracts::json::manifest_from_json(&staged.manifest) {
-                Ok(manifest) => Some(manifest),
+            let outcome = match skynet_contracts::json::manifest_from_json(&staged.manifest) {
+                Ok(manifest) => {
+                    let report = skynetd_io::admit::run(
+                        &manifest,
+                        &capacity,
+                        &staged.digest,
+                        verdict.into(),
+                    );
+                    for line in skynetd_io::admit::to_lines(&report) {
+                        println!("{line}");
+                    }
+                    skynetd_io::admit::summary(&report)
+                }
                 Err(error) => {
                     // The store verified the digest over this manifest, so it is the manifest the
                     // publisher signed — and it still may not decode into the shape admission
                     // needs. Saying so beats an empty report.
-                    println!("admission: not run — the manifest does not decode: {error:?}");
-                    None
+                    let detail = format!("the manifest does not decode: {error:?}");
+                    println!("admission: not run — {detail}");
+                    format!("admission not run: {detail}")
                 }
             };
-            if let Some(manifest) = manifest {
-                for line in skynetd_io::admit::to_lines(&skynetd_io::admit::run(
-                    &manifest,
-                    &capacity,
-                    &staged.digest,
-                    verdict.into(),
-                )) {
-                    println!("{line}");
-                }
-            }
+
+            // Open since the twelfth session: the verdict was printed to whoever ran the command
+            // and recorded nowhere. It is a decision about whether code may run on this machine,
+            // which makes it exactly the thing an incident review asks about, and a terminal that
+            // has been closed answers nothing.
+            //
+            // Recorded on **every** path out of a successful stage, including the two where
+            // admission produced no verdict. "Nothing checked this package, and here is why" is a
+            // fact about what is now on the disk; leaving it out would make an unexamined blob
+            // indistinguishable from one nobody staged.
+            //
+            // Into the audit log rather than the ring, because `stage` is not the daemon and the
+            // ring has one writer (see `blackbox::mirror_audit`). `skynetd` copies it across on its
+            // next pass, which is where the delay this design accepts comes from.
+            record(
+                &skynetd_io::audit::Audit::of(store.layout()),
+                &skynetd_io::audit::rfc3339(wall_ms()),
+                &flag(argv, "--by").unwrap_or_else(|| "unattributed".to_string()),
+                "package.admit",
+                &format!("{} {version}", staged.id),
+                &outcome,
+                None,
+            );
             0
         }
         Err(error) => {
@@ -662,9 +1001,8 @@ fn notify_watchdog() {
 
 /// Wall time, for a log line and nothing else (§35.1).
 ///
-/// Never used for a deadline, a backoff or a watchdog. Present so a line in a journal can be
-/// correlated with the Hub, which is the one job §35.1 gives `CLOCK_REALTIME`.
-#[allow(dead_code)]
+/// Never used for a deadline, a backoff or a watchdog. Present so a line in a journal — and now an
+/// audit entry — can be correlated with the Hub, which is the one job §35.1 gives `CLOCK_REALTIME`.
 fn wall_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

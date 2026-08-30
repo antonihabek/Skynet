@@ -136,6 +136,20 @@ pub struct SafetyEnvelope {
     pub source: Option<String>,
 }
 
+/// The hardware windows a body declares for §46.3's nesting.
+///
+/// Both optional, and an absent one is **not a body without a watchdog** — it is a body nobody has
+/// measured one on. §46.3 wants the nesting *"reported at startup rather than discovered in the
+/// field"*, and a report that silently skipped an undeclared window would be reporting on a chain
+/// it had not established.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DeclaredWindows {
+    /// The SoC hardware watchdog's window, milliseconds. Layer 3 of §46.1.
+    pub soc_wdt_ms: Option<f64>,
+    /// The drive's own command timeout, past which it faults without being told.
+    pub drive_command_timeout_ms: Option<f64>,
+}
+
 /// The body.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EmbodimentDescriptor {
@@ -197,6 +211,28 @@ pub struct EmbodimentDescriptor {
     /// — and is read from here rather than from the driver's declared ceiling, because a simulator
     /// driver written in C++ has no language ceiling to fall back on.
     pub simulator: bool,
+    /// What the drives do when their command source stops (§46.2).
+    ///
+    /// One of [`COMMAND_LOSS_BEHAVIOURS`]. The reason it is on the descriptor at all is layer 3 of
+    /// §46.1's watchdog chain: a hardware watchdog's recovery is *resetting the application
+    /// processor*, and what a robot does while its processor is resetting is a property of the
+    /// **hardware**, not of anything this operating system does. Some hold. Some engage brakes.
+    /// Some fault and disable. **Some coast** — and on such a body the watchdog's own recovery path
+    /// is a fall.
+    ///
+    /// `None` means nobody declared it, which is not `hold` and is not safe to treat as `hold`. It
+    /// blocks the host tier for the same reason `coast` does: the recovery path has not been
+    /// characterised, so nobody can say what taking it costs. It is a declaration a vendor makes and
+    /// [`crate::certification`] measures — `safety.command_loss.behaviour` observes what the joint
+    /// actually does — because the declaration is a claim and this platform does not award tiers for
+    /// claims.
+    pub on_command_loss: Option<String>,
+    /// The two watchdog windows only the hardware knows (§46.3).
+    ///
+    /// The other two in the nest come from elsewhere: `envelope.watchdog_ms` is on this descriptor
+    /// already, and the kernel's worst-case cycle is the kernel's to measure. These two are facts
+    /// about the board and the drive, which makes the descriptor the only place they can come from.
+    pub watchdog: Option<DeclaredWindows>,
     /// The frame graph (§44.3), or `None` where the generator could not express this body's tree.
     ///
     /// Absent, null and empty are three different bodies. Absent and null both arrive here as
