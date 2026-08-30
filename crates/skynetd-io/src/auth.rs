@@ -275,7 +275,8 @@ pub fn random_hex(length: usize) -> std::io::Result<String> {
 pub fn random_hex(_length: usize) -> std::io::Result<String> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
-        "no /dev/urandom: §39.2 requires a credential to come from the system's entropy source,          and this platform is not the one a robot runs",
+        "no /dev/urandom: §39.2 requires a credential to come from the system's entropy source, \
+         and this platform is not the one a robot runs",
     ))
 }
 

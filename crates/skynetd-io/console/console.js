@@ -964,7 +964,67 @@ function renderOutbound(feed) {
   add('Check-ins superseded', String(q.collapsed))
   body.appendChild(fields)
 
-  if (q.delivery) body.appendChild(el('p', 'note', q.delivery))
+  // §34.3's bearers. The table is here rather than in its own panel because the only question it
+  // answers is about this queue: what will the link carry right now.
+  const link = q.link
+  if (link) {
+    if (!link.declared) {
+      body.appendChild(el('p', 'note', 'No bearer has been declared, so nothing can be sent. '
+        + 'Which interface is the modem is a fact about this machine that the OS cannot infer, so '
+        + 'it is read from state/bearers.json (§34.3).'))
+    } else if (!link.bearers.length) {
+      body.appendChild(el('p', 'note', 'state/bearers.json declares no bearers.'))
+    } else {
+      const links = el('table')
+      const lhead = el('tr')
+      for (const label of ['Bearer', 'Kind', 'State', 'Metered']) lhead.appendChild(el('th', null, label))
+      links.appendChild(lhead)
+      for (const bearer of link.bearers) {
+        const tr = el('tr', bearer.name === link.active ? 'active' : null)
+        const name = el('td')
+        name.appendChild(document.createTextNode(bearer.name))
+        if (bearer.name === link.active) name.appendChild(el('div', 'dim', 'in use'))
+        tr.appendChild(name)
+        tr.appendChild(el('td', null, bearer.kind))
+        const state = el('td')
+        state.appendChild(document.createTextNode(bearer.up ? 'up' : 'down'))
+        // Where that came from, on the row. "down" on a machine that has no /sys/class/net entry
+        // for the interface is not a measurement, and a panel that did not say so would be
+        // reporting one nobody took.
+        if (bearer.liveness !== 'observed') state.appendChild(el('div', 'dim', bearer.liveness))
+        tr.appendChild(state)
+        const metered = el('td')
+        metered.appendChild(document.createTextNode(bearer.metered ? 'yes' : 'no'))
+        // Declared or assumed, said on the row. A console that showed only "metered: yes" would
+        // present an assumption as a measurement, and the vendor who thinks their Wi-Fi is free
+        // needs to know the robot does not and that it is one line of configuration away.
+        metered.appendChild(el('div', 'dim', bearer.metering_declared ? 'declared' : 'assumed'))
+        tr.appendChild(metered)
+        links.appendChild(tr)
+      }
+      body.appendChild(links)
+    }
+  }
+
+  // Where items go, and what the head of the queue is waiting for.
+  //
+  // **Two sentences, never one.** The first version concatenated them, and on an unpaired robot it
+  // read `Sends to: none — this robot is not paired with a Hub (§10). the active bearer carries
+  // this class` — two true statements rendering as one claim that the queue was fine. §34.3's
+  // verdict is about the *link*; the obstacle is about whether there is anywhere to send at all,
+  // and a panel that cannot keep those apart will always be reassuring about the wrong one.
+  const delivery = q.delivery
+  if (delivery) {
+    const stuck = delivery.obstacle || delivery.verdict !== 'send'
+    const where = el('p', stuck ? 'note warn' : 'note')
+    where.appendChild(document.createTextNode('Sends to: ' + delivery.sink))
+    body.appendChild(where)
+    if (delivery.obstacle) body.appendChild(el('p', 'note warn', delivery.obstacle))
+    // §34.3: the wait is visible rather than silent, so the link gets its own sentence whatever it
+    // says — including when it says yes and nothing is listening.
+    body.appendChild(el('p', delivery.verdict === 'send' ? 'note' : 'note warn',
+      'Link: ' + delivery.detail))
+  }
 }
 
 /**

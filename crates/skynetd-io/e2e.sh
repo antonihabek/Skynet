@@ -92,7 +92,21 @@ DIGEST=$(sed -n 's/.*hashes to \([0-9a-f]\{64\}\).*/\1/p' "$ROOT/out")
 "$SKYNET" install "$ROOT/pkg" --root "$ROOT" --id openrobot/holder --kind policy \
   --version 1.0.0 --digest "$DIGEST" > "$ROOT/out" 2>&1
 want "staged" "staged openrobot/holder" "$ROOT/out"
-want "and the signature is reported as unchecked, not as signed" "not checked" "$ROOT/out"
+# Two assertions rather than one, because the sentence this replaces changed under it and nobody
+# noticed. §19's staging report used to say the signature was "not checked"; the trust store landed
+# and it now names the state the signature is actually in — `absent`, `untrusted`, `invalid` or
+# `verified` — and this line kept grepping for the old words. It has been failing since, which means
+# the end-to-end run has been red on a wording change while everything it exists to check was fine.
+#
+# So: assert the state that is true here, and assert separately that nothing claims verification.
+# The second half is the one that matters and it is the half a single grep for a phrase could lose
+# again the next time somebody improves the phrasing.
+want "the signature state is reported" "signature: absent" "$ROOT/out"
+if grep -q "signature: verified" "$ROOT/out"; then
+  fail "an unsigned package was reported as verified"
+else
+  pass "and nothing claims it was verified (§19)"
+fi
 
 say "3. Desired state, and one reconcile pass"
 cat > "$ROOT/data/state/desired.json" <<DESIRED
@@ -119,6 +133,17 @@ else
   want "the start fails, saying it could not reach systemd" "start_package openrobot/holder → failed" "$ROOT/out"
   pass "no systemd here, so the launch step is reported rather than skipped"
   STARTED=0
+fi
+
+# §33 calls `once` "a legitimate way to operate a robot", so its record has to be the same record.
+# Until this session it was not: the daemon loop recorded every pass and `once` recorded none, so a
+# robot driven entirely from a script had a black box holding `recording_started` and no evidence of
+# anything it had ever done. The daemon has not started yet at this point in the script, so anything
+# in the ring here was put there by `once` and by nothing else.
+if grep -aq grant_capability "$ROOT/data/blackbox/ring"; then
+  pass "\`once\` recorded its pass in the black box, with no daemon running (§13, §33)"
+else
+  fail "\`once\` reconciled and the black box holds nothing about it"
 fi
 
 say "4. The local socket, and the CLI over it (§33.7)"

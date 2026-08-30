@@ -234,8 +234,9 @@ fn the_four_kinds_fit_one_slot() {
         Entry::Frame(&FrameView {
             observation: [1; 32],
             target_ns: 42,
-            worst_skew_us: 8_000,
+            worst_skew_us: Some(8_000),
             streams_omitted: 0,
+            streams_absent: 0,
             streams: &[("wrist_cam", 31_000, false), ("joints", 900, false)],
         }),
     ] {
@@ -266,8 +267,9 @@ fn a_frame_with_too_many_streams_counts_what_it_dropped() {
         Entry::Frame(&FrameView {
             observation: [0; 32],
             target_ns: 0,
-            worst_skew_us: 0,
+            worst_skew_us: Some(0),
             streams_omitted: 0,
+            streams_absent: 0,
             streams: &streams,
         }),
     )
@@ -277,6 +279,93 @@ fn a_frame_with_too_many_streams_counts_what_it_dropped() {
     };
     assert_eq!(frame.streams.len(), 6);
     assert_eq!(frame.streams_omitted, 3);
+}
+
+#[test]
+fn a_frame_with_no_measurable_skew_round_trips_as_none_and_not_as_zero() {
+    // Format version 2's first reason. A frame with one contributing stream has no spread — the
+    // spread of one instant is undefined — and version 1 had to write a number. Zero is the number
+    // it would have written, and zero reads, months later, as a perfectly synchronised frame.
+    let shape = shape();
+    let mut slot = vec![0u8; shape.record_size()];
+    encode(
+        shape,
+        &mut slot,
+        1,
+        0,
+        Entry::Frame(&FrameView {
+            observation: [0; 32],
+            target_ns: 7,
+            worst_skew_us: None,
+            streams_omitted: 0,
+            streams_absent: 2,
+            streams: &[("joints", 900, false)],
+        }),
+    )
+    .unwrap();
+    let Body::Frame(frame) = decode(shape, &slot).unwrap().body else {
+        panic!("not a frame")
+    };
+    assert_eq!(frame.worst_skew_us, None);
+    // And a real zero is still a zero. The sentinel is at the top of the range precisely so that
+    // "no skew at all" and "no skew measurable" stay two different facts.
+    let mut other = vec![0u8; shape.record_size()];
+    encode(
+        shape,
+        &mut other,
+        2,
+        0,
+        Entry::Frame(&FrameView {
+            observation: [0; 32],
+            target_ns: 7,
+            worst_skew_us: Some(0),
+            streams_omitted: 0,
+            streams_absent: 0,
+            streams: &[("a", 1, false), ("b", 1, false)],
+        }),
+    )
+    .unwrap();
+    let Body::Frame(frame) = decode(shape, &other).unwrap().body else {
+        panic!("not a frame")
+    };
+    assert_eq!(frame.worst_skew_us, Some(0));
+}
+
+#[test]
+fn a_dead_capture_path_is_not_a_record_that_ran_out_of_room() {
+    // Format version 2's second reason, and the two counts must never be one. `streams_omitted` is
+    // a limit of the format — more streams than the record carries — and `streams_absent` is a
+    // limit of the robot. An investigation reading one as the other goes looking for a bigger
+    // record instead of a dead camera.
+    let shape = shape();
+    let mut slot = vec![0u8; shape.record_size()];
+    let streams: Vec<(&str, u32, bool)> = ["a", "b", "c", "d", "e", "f", "g"]
+        .iter()
+        .map(|name| (*name, 10, false))
+        .collect();
+    encode(
+        shape,
+        &mut slot,
+        1,
+        0,
+        Entry::Frame(&FrameView {
+            observation: [0; 32],
+            target_ns: 0,
+            worst_skew_us: Some(5),
+            streams_omitted: 0,
+            streams_absent: 3,
+            streams: &streams,
+        }),
+    )
+    .unwrap();
+    let Body::Frame(frame) = decode(shape, &slot).unwrap().body else {
+        panic!("not a frame")
+    };
+    assert_eq!(frame.streams.len(), 6);
+    // Seven offered, six written: one the record could not fit.
+    assert_eq!(frame.streams_omitted, 1);
+    // And three the robot never produced, which the record could have fitted perfectly well.
+    assert_eq!(frame.streams_absent, 3);
 }
 
 #[test]
@@ -293,8 +382,9 @@ fn a_long_name_is_truncated_on_a_character_boundary() {
         Entry::Frame(&FrameView {
             observation: [0; 32],
             target_ns: 0,
-            worst_skew_us: 0,
+            worst_skew_us: Some(0),
             streams_omitted: 0,
+            streams_absent: 0,
             streams: &[("ααααααααα", 1, false)],
         }),
     )
@@ -465,8 +555,9 @@ fn recorded_window() -> (Ring, Vec<u8>) {
         Entry::Frame(&FrameView {
             observation: [0xAB; 32],
             target_ns: 6_900,
-            worst_skew_us: 12_000,
+            worst_skew_us: Some(12_000),
             streams_omitted: 0,
+            streams_absent: 0,
             streams: &[("wrist_cam", 31_000, false), ("joints", 900, false)],
         }),
     )

@@ -1,0 +1,2097 @@
+{
+  "corpus": "fuzz",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "seeded-0",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "wrist_ft",
+            "modality": "force_torque",
+            "latency_ms": 3,
+            "budget_ms": 210,
+            "samples": [
+              {
+                "stamp_ns": 996000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1010000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "imu",
+            "modality": "imu",
+            "latency_ms": null,
+            "budget_ms": 170,
+            "samples": [
+              {
+                "stamp_ns": 976000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":7000,\"name\":\"wrist_ft\",\"stale\":false},{\"age_us\":24000,\"name\":\"imu\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":17000},\"skew_ms\":17,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":7,\"budget_ms\":210,\"considered\":2,\"latency_ms\":3,\"modality\":\"force_torque\",\"name\":\"wrist_ft\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":996000000,\"uncertainty_ms\":null},{\"age_ms\":24,\"budget_ms\":170,\"considered\":1,\"latency_ms\":null,\"modality\":\"imu\",\"name\":\"imu\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":976000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[\"imu\"],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-1",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "wrist_ft",
+            "modality": "force_torque",
+            "latency_ms": 3,
+            "budget_ms": 70,
+            "samples": [
+              {
+                "stamp_ns": 1002000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 979000000,
+                "seq": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":1000,\"name\":\"wrist_ft\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":1,\"budget_ms\":70,\"considered\":2,\"latency_ms\":3,\"modality\":\"force_torque\",\"name\":\"wrist_ft\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1002000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-2",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "imu",
+            "modality": "imu",
+            "latency_ms": 2,
+            "budget_ms": 70,
+            "samples": [
+              {
+                "stamp_ns": 988000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1016000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 60,
+            "samples": [
+              {
+                "stamp_ns": 1004000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":14000,\"name\":\"imu\",\"stale\":false},{\"age_us\":0,\"name\":\"joints\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":17000},\"skew_ms\":17,\"skew_upper_ms\":17,\"streams\":[{\"age_ms\":14,\"budget_ms\":70,\"considered\":2,\"latency_ms\":2,\"modality\":\"imu\",\"name\":\"imu\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":988000000,\"uncertainty_ms\":null},{\"age_ms\":-3,\"budget_ms\":60,\"considered\":1,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1004000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-3",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "wrist_cam",
+            "modality": "rgb",
+            "latency_ms": 22,
+            "budget_ms": 160,
+            "samples": [
+              {
+                "stamp_ns": 1017000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1016000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 1009000000,
+                "seq": 3
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":5000,\"name\":\"wrist_cam\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":5,\"budget_ms\":160,\"considered\":3,\"latency_ms\":22,\"modality\":\"rgb\",\"name\":\"wrist_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1017000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-4",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": 40,
+            "budget_ms": 150,
+            "samples": [
+              {
+                "stamp_ns": 884000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 734000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 848000000,
+                "seq": 3
+              }
+            ]
+          },
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 210,
+            "samples": [
+              {
+                "stamp_ns": 872000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "wrist_cam",
+            "modality": "rgb",
+            "latency_ms": 22,
+            "budget_ms": 60,
+            "samples": [
+              {
+                "stamp_ns": 987000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 994000000,
+                "seq": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"depth (depth) is 156 ms behind the frame's instant and the policy's budget for it is 150 ms. §25.1: exceeding it is a hold, not a silently older frame.\",\"reason\":\"stale\",\"stream\":\"depth\"}],\"record\":{\"streams\":[{\"age_us\":156000,\"name\":\"depth\",\"stale\":true},{\"age_us\":156000,\"name\":\"head_cam\",\"stale\":false},{\"age_us\":28000,\"name\":\"wrist_cam\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":128000},\"skew_ms\":128,\"skew_upper_ms\":128,\"streams\":[{\"age_ms\":156,\"budget_ms\":150,\"considered\":3,\"latency_ms\":40,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":true,\"seq\":1,\"stamp_ns\":884000000,\"uncertainty_ms\":null},{\"age_ms\":156,\"budget_ms\":210,\"considered\":1,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":872000000,\"uncertainty_ms\":null},{\"age_ms\":28,\"budget_ms\":60,\"considered\":2,\"latency_ms\":22,\"modality\":\"rgb\",\"name\":\"wrist_cam\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":994000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-5",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 140,
+            "samples": [
+              {
+                "stamp_ns": 998000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1024000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "wrist_cam",
+            "modality": "rgb",
+            "latency_ms": 22,
+            "budget_ms": 70,
+            "uncertainty_ms": 5.5,
+            "samples": [
+              {
+                "stamp_ns": 990000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "wrist_ft",
+            "modality": "force_torque",
+            "latency_ms": 3,
+            "budget_ms": 80,
+            "samples": [
+              {
+                "stamp_ns": 981000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":4000,\"name\":\"head_cam\",\"stale\":false},{\"age_us\":32000,\"name\":\"wrist_cam\",\"stale\":false},{\"age_us\":22000,\"name\":\"wrist_ft\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":28000},\"skew_ms\":28,\"skew_upper_ms\":33.5,\"streams\":[{\"age_ms\":4,\"budget_ms\":140,\"considered\":2,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":1024000000,\"uncertainty_ms\":null},{\"age_ms\":32,\"budget_ms\":70,\"considered\":1,\"latency_ms\":22,\"modality\":\"rgb\",\"name\":\"wrist_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":990000000,\"uncertainty_ms\":5.5},{\"age_ms\":22,\"budget_ms\":80,\"considered\":1,\"latency_ms\":3,\"modality\":\"force_torque\",\"name\":\"wrist_ft\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":981000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-6",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": null,
+            "samples": [
+              {
+                "stamp_ns": 876000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 882000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": 40,
+            "budget_ms": null,
+            "samples": [
+              {
+                "stamp_ns": 805000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": null,
+            "budget_ms": 120,
+            "samples": [
+              {
+                "stamp_ns": 731000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"joints (joint_state) is 269 ms behind the frame's instant and the policy's budget for it is 120 ms. §25.1: exceeding it is a hold, not a silently older frame.\",\"reason\":\"stale\",\"stream\":\"joints\"}],\"record\":{\"streams\":[{\"age_us\":146000,\"name\":\"head_cam\",\"stale\":false},{\"age_us\":235000,\"name\":\"depth\",\"stale\":false},{\"age_us\":269000,\"name\":\"joints\",\"stale\":true}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":123000},\"skew_ms\":123,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":146,\"budget_ms\":null,\"considered\":2,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":882000000,\"uncertainty_ms\":null},{\"age_ms\":235,\"budget_ms\":null,\"considered\":1,\"latency_ms\":40,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":805000000,\"uncertainty_ms\":null},{\"age_ms\":269,\"budget_ms\":120,\"considered\":1,\"latency_ms\":null,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":true,\"seq\":1,\"stamp_ns\":731000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[\"head_cam\",\"depth\"],\"undeclared_latency\":[\"joints\"],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-7",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": null,
+            "budget_ms": 180,
+            "samples": [
+              {
+                "stamp_ns": 999000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "wrist_cam",
+            "modality": "rgb",
+            "latency_ms": null,
+            "budget_ms": 30,
+            "samples": [
+              {
+                "stamp_ns": 1003000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 994000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 969000000,
+                "seq": 3
+              }
+            ]
+          },
+          {
+            "name": "imu",
+            "modality": "imu",
+            "latency_ms": 2,
+            "budget_ms": 110,
+            "samples": [
+              {
+                "stamp_ns": 997000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":1000,\"name\":\"head_cam\",\"stale\":false},{\"age_us\":0,\"name\":\"wrist_cam\",\"stale\":false},{\"age_us\":5000,\"name\":\"imu\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":8000},\"skew_ms\":8,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":1,\"budget_ms\":180,\"considered\":1,\"latency_ms\":null,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":999000000,\"uncertainty_ms\":null},{\"age_ms\":-3,\"budget_ms\":30,\"considered\":3,\"latency_ms\":null,\"modality\":\"rgb\",\"name\":\"wrist_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1003000000,\"uncertainty_ms\":null},{\"age_ms\":5,\"budget_ms\":110,\"considered\":1,\"latency_ms\":2,\"modality\":\"imu\",\"name\":\"imu\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":997000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[\"head_cam\",\"wrist_cam\"],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-8",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": 40,
+            "budget_ms": 190,
+            "samples": [
+              {
+                "stamp_ns": 1018000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1011000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "wrist_cam",
+            "modality": "rgb",
+            "latency_ms": 22,
+            "budget_ms": 80,
+            "samples": [
+              {
+                "stamp_ns": 777000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 713000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "imu",
+            "modality": "imu",
+            "latency_ms": 2,
+            "budget_ms": 150,
+            "samples": [
+              {
+                "stamp_ns": 982000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"wrist_cam (rgb) is 245 ms behind the frame's instant and the policy's budget for it is 80 ms. §25.1: exceeding it is a hold, not a silently older frame.\",\"reason\":\"stale\",\"stream\":\"wrist_cam\"}],\"record\":{\"streams\":[{\"age_us\":22000,\"name\":\"depth\",\"stale\":false},{\"age_us\":245000,\"name\":\"wrist_cam\",\"stale\":true},{\"age_us\":20000,\"name\":\"imu\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":225000},\"skew_ms\":225,\"skew_upper_ms\":225,\"streams\":[{\"age_ms\":22,\"budget_ms\":190,\"considered\":2,\"latency_ms\":40,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1018000000,\"uncertainty_ms\":null},{\"age_ms\":245,\"budget_ms\":80,\"considered\":2,\"latency_ms\":22,\"modality\":\"rgb\",\"name\":\"wrist_cam\",\"over_budget\":true,\"seq\":1,\"stamp_ns\":777000000,\"uncertainty_ms\":null},{\"age_ms\":20,\"budget_ms\":150,\"considered\":1,\"latency_ms\":2,\"modality\":\"imu\",\"name\":\"imu\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":982000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-9",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 130,
+            "samples": [
+              {
+                "stamp_ns": 968000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 985000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 986000000,
+                "seq": 3
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":15000,\"name\":\"joints\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":15,\"budget_ms\":130,\"considered\":3,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":3,\"stamp_ns\":986000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-10",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "wrist_ft",
+            "modality": "force_torque",
+            "latency_ms": 3,
+            "budget_ms": 130,
+            "samples": [
+              {
+                "stamp_ns": 973000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "wrist_cam",
+            "modality": "rgb",
+            "latency_ms": 22,
+            "budget_ms": 210,
+            "samples": [
+              {
+                "stamp_ns": 987000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":30000,\"name\":\"wrist_ft\",\"stale\":false},{\"age_us\":35000,\"name\":\"wrist_cam\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":5000},\"skew_ms\":5,\"skew_upper_ms\":5,\"streams\":[{\"age_ms\":30,\"budget_ms\":130,\"considered\":1,\"latency_ms\":3,\"modality\":\"force_torque\",\"name\":\"wrist_ft\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":973000000,\"uncertainty_ms\":null},{\"age_ms\":35,\"budget_ms\":210,\"considered\":1,\"latency_ms\":22,\"modality\":\"rgb\",\"name\":\"wrist_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":987000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-11",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": null,
+            "budget_ms": 60,
+            "samples": [
+              {
+                "stamp_ns": 970000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 100,
+            "samples": [
+              {
+                "stamp_ns": 728000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"joints (joint_state) is 273 ms behind the frame's instant and the policy's budget for it is 100 ms. §25.1: exceeding it is a hold, not a silently older frame.\",\"reason\":\"stale\",\"stream\":\"joints\"}],\"record\":{\"streams\":[{\"age_us\":30000,\"name\":\"depth\",\"stale\":false},{\"age_us\":273000,\"name\":\"joints\",\"stale\":true}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":243000},\"skew_ms\":243,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":30,\"budget_ms\":60,\"considered\":1,\"latency_ms\":null,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":970000000,\"uncertainty_ms\":null},{\"age_ms\":273,\"budget_ms\":100,\"considered\":1,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":true,\"seq\":1,\"stamp_ns\":728000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[\"depth\"],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-12",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": 40,
+            "budget_ms": 190,
+            "samples": [
+              {
+                "stamp_ns": 1035000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1045000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "wrist_ft",
+            "modality": "force_torque",
+            "latency_ms": null,
+            "budget_ms": null,
+            "samples": [
+              {
+                "stamp_ns": 983000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "wrist_cam",
+            "modality": "rgb",
+            "latency_ms": null,
+            "budget_ms": null,
+            "samples": [
+              {
+                "stamp_ns": 973000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 999000000,
+                "seq": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":5000,\"name\":\"depth\",\"stale\":false},{\"age_us\":17000,\"name\":\"wrist_ft\",\"stale\":false},{\"age_us\":1000,\"name\":\"wrist_cam\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":16000},\"skew_ms\":16,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":5,\"budget_ms\":190,\"considered\":2,\"latency_ms\":40,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1035000000,\"uncertainty_ms\":null},{\"age_ms\":17,\"budget_ms\":null,\"considered\":1,\"latency_ms\":null,\"modality\":\"force_torque\",\"name\":\"wrist_ft\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":983000000,\"uncertainty_ms\":null},{\"age_ms\":1,\"budget_ms\":null,\"considered\":2,\"latency_ms\":null,\"modality\":\"rgb\",\"name\":\"wrist_cam\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":999000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[\"wrist_ft\",\"wrist_cam\"],\"undeclared_latency\":[\"wrist_ft\",\"wrist_cam\"],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-13",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 180,
+            "samples": [
+              {
+                "stamp_ns": 1029000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "wrist_cam",
+            "modality": "rgb",
+            "latency_ms": null,
+            "budget_ms": 170,
+            "samples": [
+              {
+                "stamp_ns": 988000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1004000000,
+                "seq": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":0,\"name\":\"head_cam\",\"stale\":false},{\"age_us\":0,\"name\":\"wrist_cam\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":3000},\"skew_ms\":3,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":-1,\"budget_ms\":180,\"considered\":1,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1029000000,\"uncertainty_ms\":null},{\"age_ms\":-4,\"budget_ms\":170,\"considered\":2,\"latency_ms\":null,\"modality\":\"rgb\",\"name\":\"wrist_cam\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":1004000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[\"wrist_cam\"],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-14",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "wrist_cam",
+            "modality": "rgb",
+            "latency_ms": 22,
+            "budget_ms": 70,
+            "samples": [
+              {
+                "stamp_ns": 1006000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1021000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 989000000,
+                "seq": 3
+              }
+            ]
+          },
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 130,
+            "samples": [
+              {
+                "stamp_ns": 1010000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1026000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 1000000000,
+                "seq": 3
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":1000,\"name\":\"wrist_cam\",\"stale\":false},{\"age_us\":2000,\"name\":\"head_cam\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":1000},\"skew_ms\":1,\"skew_upper_ms\":1,\"streams\":[{\"age_ms\":1,\"budget_ms\":70,\"considered\":3,\"latency_ms\":22,\"modality\":\"rgb\",\"name\":\"wrist_cam\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":1021000000,\"uncertainty_ms\":null},{\"age_ms\":2,\"budget_ms\":130,\"considered\":3,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":1026000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-15",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": null,
+            "budget_ms": 150,
+            "samples": [
+              {
+                "stamp_ns": 993000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": 40,
+            "budget_ms": 40,
+            "samples": [
+              {
+                "stamp_ns": 931000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 937000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "wrist_ft",
+            "modality": "force_torque",
+            "latency_ms": null,
+            "budget_ms": 70,
+            "samples": [
+              {
+                "stamp_ns": 786000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 744000000,
+                "seq": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"depth (depth) is 103 ms behind the frame's instant and the policy's budget for it is 40 ms. §25.1: exceeding it is a hold, not a silently older frame.\",\"reason\":\"stale\",\"stream\":\"depth\"},{\"detail\":\"wrist_ft (force_torque) is 214 ms behind the frame's instant and the policy's budget for it is 70 ms. §25.1: exceeding it is a hold, not a silently older frame.\",\"reason\":\"stale\",\"stream\":\"wrist_ft\"}],\"record\":{\"streams\":[{\"age_us\":7000,\"name\":\"joints\",\"stale\":false},{\"age_us\":103000,\"name\":\"depth\",\"stale\":true},{\"age_us\":214000,\"name\":\"wrist_ft\",\"stale\":true}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":207000},\"skew_ms\":207,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":7,\"budget_ms\":150,\"considered\":1,\"latency_ms\":null,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":993000000,\"uncertainty_ms\":null},{\"age_ms\":103,\"budget_ms\":40,\"considered\":2,\"latency_ms\":40,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":true,\"seq\":2,\"stamp_ns\":937000000,\"uncertainty_ms\":null},{\"age_ms\":214,\"budget_ms\":70,\"considered\":2,\"latency_ms\":null,\"modality\":\"force_torque\",\"name\":\"wrist_ft\",\"over_budget\":true,\"seq\":1,\"stamp_ns\":786000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[\"joints\",\"wrist_ft\"],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-16",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 90,
+            "uncertainty_ms": 0.4,
+            "samples": []
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"joints (joint_state) offered no sample for this instant, so there is no frame to assemble. A stream the policy declared and the pipeline is not producing is a capture path that is not running.\",\"reason\":\"no_sample\",\"stream\":\"joints\"}],\"record\":{\"streams\":[],\"streams_absent\":1,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":null,\"budget_ms\":90,\"considered\":0,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":null,\"stamp_ns\":null,\"uncertainty_ms\":0.4}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-17",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": 40,
+            "budget_ms": 120,
+            "samples": [
+              {
+                "stamp_ns": 1020000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":20000,\"name\":\"depth\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":20,\"budget_ms\":120,\"considered\":1,\"latency_ms\":40,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1020000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-18",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": 40,
+            "budget_ms": 80,
+            "uncertainty_ms": 4.5,
+            "samples": [
+              {
+                "stamp_ns": 1042000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1040000000,
+                "seq": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":0,\"name\":\"depth\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":0,\"budget_ms\":80,\"considered\":2,\"latency_ms\":40,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":1040000000,\"uncertainty_ms\":4.5}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-19",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": 40,
+            "budget_ms": 200,
+            "samples": [
+              {
+                "stamp_ns": 752000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "wrist_ft",
+            "modality": "force_torque",
+            "latency_ms": 3,
+            "budget_ms": 130,
+            "samples": [
+              {
+                "stamp_ns": 990000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1016000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": null,
+            "samples": [
+              {
+                "stamp_ns": 808000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"depth (depth) is 288 ms behind the frame's instant and the policy's budget for it is 200 ms. §25.1: exceeding it is a hold, not a silently older frame.\",\"reason\":\"stale\",\"stream\":\"depth\"}],\"record\":{\"streams\":[{\"age_us\":288000,\"name\":\"depth\",\"stale\":true},{\"age_us\":13000,\"name\":\"wrist_ft\",\"stale\":false},{\"age_us\":193000,\"name\":\"joints\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":275000},\"skew_ms\":275,\"skew_upper_ms\":275,\"streams\":[{\"age_ms\":288,\"budget_ms\":200,\"considered\":1,\"latency_ms\":40,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":true,\"seq\":1,\"stamp_ns\":752000000,\"uncertainty_ms\":null},{\"age_ms\":13,\"budget_ms\":130,\"considered\":2,\"latency_ms\":3,\"modality\":\"force_torque\",\"name\":\"wrist_ft\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":990000000,\"uncertainty_ms\":null},{\"age_ms\":193,\"budget_ms\":null,\"considered\":1,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":808000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[\"joints\"],\"undeclared_latency\":[],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-20",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": null,
+            "budget_ms": 180,
+            "samples": [
+              {
+                "stamp_ns": 986000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 995000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 1003000000,
+                "seq": 3
+              }
+            ]
+          },
+          {
+            "name": "wrist_cam",
+            "modality": "rgb",
+            "latency_ms": 22,
+            "budget_ms": 70,
+            "samples": [
+              {
+                "stamp_ns": 1015000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 993000000,
+                "seq": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":0,\"name\":\"head_cam\",\"stale\":false},{\"age_us\":7000,\"name\":\"wrist_cam\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":10000},\"skew_ms\":10,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":-3,\"budget_ms\":180,\"considered\":3,\"latency_ms\":null,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":3,\"stamp_ns\":1003000000,\"uncertainty_ms\":null},{\"age_ms\":7,\"budget_ms\":70,\"considered\":2,\"latency_ms\":22,\"modality\":\"rgb\",\"name\":\"wrist_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1015000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[\"head_cam\"],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-21",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 160,
+            "samples": []
+          },
+          {
+            "name": "wrist_ft",
+            "modality": "force_torque",
+            "latency_ms": 3,
+            "budget_ms": 170,
+            "samples": [
+              {
+                "stamp_ns": 981000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"head_cam (rgb) offered no sample for this instant, so there is no frame to assemble. A stream the policy declared and the pipeline is not producing is a capture path that is not running.\",\"reason\":\"no_sample\",\"stream\":\"head_cam\"}],\"record\":{\"streams\":[{\"age_us\":22000,\"name\":\"wrist_ft\",\"stale\":false}],\"streams_absent\":1,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":null,\"budget_ms\":160,\"considered\":0,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":null,\"stamp_ns\":null,\"uncertainty_ms\":null},{\"age_ms\":22,\"budget_ms\":170,\"considered\":1,\"latency_ms\":3,\"modality\":\"force_torque\",\"name\":\"wrist_ft\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":981000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-22",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "imu",
+            "modality": "imu",
+            "latency_ms": null,
+            "budget_ms": 190,
+            "samples": [
+              {
+                "stamp_ns": 971000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1000000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 964000000,
+                "seq": 3
+              }
+            ]
+          },
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": 40,
+            "budget_ms": null,
+            "samples": [
+              {
+                "stamp_ns": 942000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 967000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": null,
+            "budget_ms": null,
+            "samples": [
+              {
+                "stamp_ns": 991000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 968000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 999000000,
+                "seq": 3
+              }
+            ]
+          },
+          {
+            "name": "wrist_ft",
+            "modality": "force_torque",
+            "latency_ms": 3,
+            "budget_ms": 30,
+            "samples": [
+              {
+                "stamp_ns": 985000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 980000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 979000000,
+                "seq": 3
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":0,\"name\":\"imu\",\"stale\":false},{\"age_us\":73000,\"name\":\"depth\",\"stale\":false},{\"age_us\":1000,\"name\":\"joints\",\"stale\":false},{\"age_us\":18000,\"name\":\"wrist_ft\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":73000},\"skew_ms\":73,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":0,\"budget_ms\":190,\"considered\":3,\"latency_ms\":null,\"modality\":\"imu\",\"name\":\"imu\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":1000000000,\"uncertainty_ms\":null},{\"age_ms\":73,\"budget_ms\":null,\"considered\":2,\"latency_ms\":40,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":967000000,\"uncertainty_ms\":null},{\"age_ms\":1,\"budget_ms\":null,\"considered\":3,\"latency_ms\":null,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":3,\"stamp_ns\":999000000,\"uncertainty_ms\":null},{\"age_ms\":18,\"budget_ms\":30,\"considered\":3,\"latency_ms\":3,\"modality\":\"force_torque\",\"name\":\"wrist_ft\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":985000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[\"depth\",\"joints\"],\"undeclared_latency\":[\"imu\",\"joints\"],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-23",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 190,
+            "samples": [
+              {
+                "stamp_ns": 881000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 931000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 875000000,
+                "seq": 3
+              }
+            ]
+          },
+          {
+            "name": "wrist_ft",
+            "modality": "force_torque",
+            "latency_ms": 3,
+            "budget_ms": 60,
+            "samples": [
+              {
+                "stamp_ns": 1001000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1005000000,
+                "seq": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":97000,\"name\":\"head_cam\",\"stale\":false},{\"age_us\":2000,\"name\":\"wrist_ft\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":95000},\"skew_ms\":95,\"skew_upper_ms\":95,\"streams\":[{\"age_ms\":97,\"budget_ms\":190,\"considered\":3,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":931000000,\"uncertainty_ms\":null},{\"age_ms\":2,\"budget_ms\":60,\"considered\":2,\"latency_ms\":3,\"modality\":\"force_torque\",\"name\":\"wrist_ft\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1001000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-24",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": null,
+            "budget_ms": 130,
+            "samples": [
+              {
+                "stamp_ns": 969000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":31000,\"name\":\"head_cam\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":31,\"budget_ms\":130,\"considered\":1,\"latency_ms\":null,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":969000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[\"head_cam\"],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-25",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 110,
+            "samples": [
+              {
+                "stamp_ns": 983000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 999000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "wrist_ft",
+            "modality": "force_torque",
+            "latency_ms": 3,
+            "budget_ms": 130,
+            "samples": [
+              {
+                "stamp_ns": 969000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 979000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 987000000,
+                "seq": 3
+              }
+            ]
+          },
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": 40,
+            "budget_ms": 110,
+            "samples": [
+              {
+                "stamp_ns": 1007000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1042000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 1023000000,
+                "seq": 3
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":2000,\"name\":\"joints\",\"stale\":false},{\"age_us\":16000,\"name\":\"wrist_ft\",\"stale\":false},{\"age_us\":0,\"name\":\"depth\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":18000},\"skew_ms\":18,\"skew_upper_ms\":18,\"streams\":[{\"age_ms\":2,\"budget_ms\":110,\"considered\":2,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":999000000,\"uncertainty_ms\":null},{\"age_ms\":16,\"budget_ms\":130,\"considered\":3,\"latency_ms\":3,\"modality\":\"force_torque\",\"name\":\"wrist_ft\",\"over_budget\":false,\"seq\":3,\"stamp_ns\":987000000,\"uncertainty_ms\":null},{\"age_ms\":-2,\"budget_ms\":110,\"considered\":3,\"latency_ms\":40,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":1042000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-26",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": 40,
+            "budget_ms": 180,
+            "samples": [
+              {
+                "stamp_ns": 1016000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1031000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 1013000000,
+                "seq": 3
+              }
+            ]
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 180,
+            "uncertainty_ms": 4.2,
+            "samples": [
+              {
+                "stamp_ns": 991000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 993000000,
+                "seq": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":9000,\"name\":\"depth\",\"stale\":false},{\"age_us\":8000,\"name\":\"joints\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":1000},\"skew_ms\":1,\"skew_upper_ms\":5.2,\"streams\":[{\"age_ms\":9,\"budget_ms\":180,\"considered\":3,\"latency_ms\":40,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":1031000000,\"uncertainty_ms\":null},{\"age_ms\":8,\"budget_ms\":180,\"considered\":2,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":993000000,\"uncertainty_ms\":4.2}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-27",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "wrist_cam",
+            "modality": "rgb",
+            "latency_ms": 22,
+            "budget_ms": null,
+            "samples": [
+              {
+                "stamp_ns": 1022000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1014000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 1011000000,
+                "seq": 3
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":0,\"name\":\"wrist_cam\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":0,\"budget_ms\":null,\"considered\":3,\"latency_ms\":22,\"modality\":\"rgb\",\"name\":\"wrist_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1022000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[\"wrist_cam\"],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-28",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 150,
+            "samples": [
+              {
+                "stamp_ns": 977000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "imu",
+            "modality": "imu",
+            "latency_ms": 2,
+            "budget_ms": 160,
+            "samples": [
+              {
+                "stamp_ns": 980000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 971000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "wrist_cam",
+            "modality": "rgb",
+            "latency_ms": 22,
+            "budget_ms": 200,
+            "samples": [
+              {
+                "stamp_ns": 940000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 945000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 727000000,
+                "seq": 3
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":24000,\"name\":\"joints\",\"stale\":false},{\"age_us\":22000,\"name\":\"imu\",\"stale\":false},{\"age_us\":77000,\"name\":\"wrist_cam\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":55000},\"skew_ms\":55,\"skew_upper_ms\":55,\"streams\":[{\"age_ms\":24,\"budget_ms\":150,\"considered\":1,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":977000000,\"uncertainty_ms\":null},{\"age_ms\":22,\"budget_ms\":160,\"considered\":2,\"latency_ms\":2,\"modality\":\"imu\",\"name\":\"imu\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":980000000,\"uncertainty_ms\":null},{\"age_ms\":77,\"budget_ms\":200,\"considered\":3,\"latency_ms\":22,\"modality\":\"rgb\",\"name\":\"wrist_cam\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":945000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-29",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": null,
+            "budget_ms": 10,
+            "samples": [
+              {
+                "stamp_ns": 986000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 967000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "wrist_ft",
+            "modality": "force_torque",
+            "latency_ms": null,
+            "budget_ms": 150,
+            "samples": [
+              {
+                "stamp_ns": 967000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"depth (depth) is 14 ms behind the frame's instant and the policy's budget for it is 10 ms. §25.1: exceeding it is a hold, not a silently older frame.\",\"reason\":\"stale\",\"stream\":\"depth\"}],\"record\":{\"streams\":[{\"age_us\":14000,\"name\":\"depth\",\"stale\":true},{\"age_us\":33000,\"name\":\"wrist_ft\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":19000},\"skew_ms\":19,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":14,\"budget_ms\":10,\"considered\":2,\"latency_ms\":null,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":true,\"seq\":1,\"stamp_ns\":986000000,\"uncertainty_ms\":null},{\"age_ms\":33,\"budget_ms\":150,\"considered\":1,\"latency_ms\":null,\"modality\":\"force_torque\",\"name\":\"wrist_ft\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":967000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[\"depth\",\"wrist_ft\"],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-30",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "wrist_ft",
+            "modality": "force_torque",
+            "latency_ms": null,
+            "budget_ms": 70,
+            "samples": [
+              {
+                "stamp_ns": 966000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 190,
+            "uncertainty_ms": 3.7,
+            "samples": [
+              {
+                "stamp_ns": 995000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "imu",
+            "modality": "imu",
+            "latency_ms": 2,
+            "budget_ms": 150,
+            "samples": [
+              {
+                "stamp_ns": 816000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"imu (imu) is 186 ms behind the frame's instant and the policy's budget for it is 150 ms. §25.1: exceeding it is a hold, not a silently older frame.\",\"reason\":\"stale\",\"stream\":\"imu\"}],\"record\":{\"streams\":[{\"age_us\":34000,\"name\":\"wrist_ft\",\"stale\":false},{\"age_us\":33000,\"name\":\"head_cam\",\"stale\":false},{\"age_us\":186000,\"name\":\"imu\",\"stale\":true}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":153000},\"skew_ms\":153,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":34,\"budget_ms\":70,\"considered\":1,\"latency_ms\":null,\"modality\":\"force_torque\",\"name\":\"wrist_ft\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":966000000,\"uncertainty_ms\":null},{\"age_ms\":33,\"budget_ms\":190,\"considered\":1,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":995000000,\"uncertainty_ms\":3.7},{\"age_ms\":186,\"budget_ms\":150,\"considered\":1,\"latency_ms\":2,\"modality\":\"imu\",\"name\":\"imu\",\"over_budget\":true,\"seq\":1,\"stamp_ns\":816000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[\"wrist_ft\"],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-31",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "imu",
+            "modality": "imu",
+            "latency_ms": 2,
+            "budget_ms": 200,
+            "uncertainty_ms": 3.2,
+            "samples": [
+              {
+                "stamp_ns": 980000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 120,
+            "samples": [
+              {
+                "stamp_ns": 990000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "wrist_ft",
+            "modality": "force_torque",
+            "latency_ms": 3,
+            "budget_ms": 10,
+            "samples": [
+              {
+                "stamp_ns": 795000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"wrist_ft (force_torque) is 208 ms behind the frame's instant and the policy's budget for it is 10 ms. §25.1: exceeding it is a hold, not a silently older frame.\",\"reason\":\"stale\",\"stream\":\"wrist_ft\"}],\"record\":{\"streams\":[{\"age_us\":22000,\"name\":\"imu\",\"stale\":false},{\"age_us\":11000,\"name\":\"joints\",\"stale\":false},{\"age_us\":208000,\"name\":\"wrist_ft\",\"stale\":true}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":197000},\"skew_ms\":197,\"skew_upper_ms\":197,\"streams\":[{\"age_ms\":22,\"budget_ms\":200,\"considered\":1,\"latency_ms\":2,\"modality\":\"imu\",\"name\":\"imu\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":980000000,\"uncertainty_ms\":3.2},{\"age_ms\":11,\"budget_ms\":120,\"considered\":1,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":990000000,\"uncertainty_ms\":null},{\"age_ms\":208,\"budget_ms\":10,\"considered\":1,\"latency_ms\":3,\"modality\":\"force_torque\",\"name\":\"wrist_ft\",\"over_budget\":true,\"seq\":1,\"stamp_ns\":795000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-32",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": null,
+            "budget_ms": 170,
+            "samples": [
+              {
+                "stamp_ns": 999000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 974000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 984000000,
+                "seq": 3
+              }
+            ]
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 210,
+            "uncertainty_ms": 0.7,
+            "samples": [
+              {
+                "stamp_ns": 912000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "imu",
+            "modality": "imu",
+            "latency_ms": 2,
+            "budget_ms": 90,
+            "samples": [
+              {
+                "stamp_ns": 966000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1038000000,
+                "seq": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":1000,\"name\":\"depth\",\"stale\":false},{\"age_us\":89000,\"name\":\"joints\",\"stale\":false},{\"age_us\":36000,\"name\":\"imu\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":88000},\"skew_ms\":88,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":1,\"budget_ms\":170,\"considered\":3,\"latency_ms\":null,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":999000000,\"uncertainty_ms\":null},{\"age_ms\":89,\"budget_ms\":210,\"considered\":1,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":912000000,\"uncertainty_ms\":0.7},{\"age_ms\":36,\"budget_ms\":90,\"considered\":2,\"latency_ms\":2,\"modality\":\"imu\",\"name\":\"imu\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":966000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[\"depth\"],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-33",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": null,
+            "samples": [
+              {
+                "stamp_ns": 1003000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":0,\"name\":\"joints\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":-2,\"budget_ms\":null,\"considered\":1,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1003000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[\"joints\"],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-34",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "wrist_cam",
+            "modality": "rgb",
+            "latency_ms": 22,
+            "budget_ms": 30,
+            "samples": []
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"wrist_cam (rgb) offered no sample for this instant, so there is no frame to assemble. A stream the policy declared and the pipeline is not producing is a capture path that is not running.\",\"reason\":\"no_sample\",\"stream\":\"wrist_cam\"}],\"record\":{\"streams\":[],\"streams_absent\":1,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":null,\"budget_ms\":30,\"considered\":0,\"latency_ms\":22,\"modality\":\"rgb\",\"name\":\"wrist_cam\",\"over_budget\":false,\"seq\":null,\"stamp_ns\":null,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-35",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "wrist_ft",
+            "modality": "force_torque",
+            "latency_ms": 3,
+            "budget_ms": 170,
+            "uncertainty_ms": 3.5,
+            "samples": [
+              {
+                "stamp_ns": 997000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 995000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": null,
+            "budget_ms": 30,
+            "samples": []
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"head_cam (rgb) offered no sample for this instant, so there is no frame to assemble. A stream the policy declared and the pipeline is not producing is a capture path that is not running.\",\"reason\":\"no_sample\",\"stream\":\"head_cam\"}],\"record\":{\"streams\":[{\"age_us\":6000,\"name\":\"wrist_ft\",\"stale\":false}],\"streams_absent\":1,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":6,\"budget_ms\":170,\"considered\":2,\"latency_ms\":3,\"modality\":\"force_torque\",\"name\":\"wrist_ft\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":997000000,\"uncertainty_ms\":3.5},{\"age_ms\":null,\"budget_ms\":30,\"considered\":0,\"latency_ms\":null,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":null,\"stamp_ns\":null,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[\"head_cam\"],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-36",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "wrist_cam",
+            "modality": "rgb",
+            "latency_ms": 22,
+            "budget_ms": 100,
+            "samples": [
+              {
+                "stamp_ns": 1017000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1009000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 1009000000,
+                "seq": 3
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":5000,\"name\":\"wrist_cam\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":5,\"budget_ms\":100,\"considered\":3,\"latency_ms\":22,\"modality\":\"rgb\",\"name\":\"wrist_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1017000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-37",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "wrist_cam",
+            "modality": "rgb",
+            "latency_ms": 22,
+            "budget_ms": 20,
+            "samples": [
+              {
+                "stamp_ns": 1015000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1029000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 90,
+            "samples": [
+              {
+                "stamp_ns": 1008000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1048000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": 40,
+            "budget_ms": null,
+            "samples": [
+              {
+                "stamp_ns": 1044000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1012000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 1026000000,
+                "seq": 3
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":7000,\"name\":\"wrist_cam\",\"stale\":false},{\"age_us\":20000,\"name\":\"head_cam\",\"stale\":false},{\"age_us\":0,\"name\":\"depth\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":24000},\"skew_ms\":24,\"skew_upper_ms\":24,\"streams\":[{\"age_ms\":7,\"budget_ms\":20,\"considered\":2,\"latency_ms\":22,\"modality\":\"rgb\",\"name\":\"wrist_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1015000000,\"uncertainty_ms\":null},{\"age_ms\":20,\"budget_ms\":90,\"considered\":2,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1008000000,\"uncertainty_ms\":null},{\"age_ms\":-4,\"budget_ms\":null,\"considered\":3,\"latency_ms\":40,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1044000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[\"depth\"],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-38",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": null,
+            "budget_ms": null,
+            "samples": [
+              {
+                "stamp_ns": 1002000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "imu",
+            "modality": "imu",
+            "latency_ms": null,
+            "budget_ms": 140,
+            "samples": []
+          },
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": null,
+            "budget_ms": 80,
+            "samples": [
+              {
+                "stamp_ns": 971000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 999000000,
+                "seq": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"imu (imu) offered no sample for this instant, so there is no frame to assemble. A stream the policy declared and the pipeline is not producing is a capture path that is not running.\",\"reason\":\"no_sample\",\"stream\":\"imu\"}],\"record\":{\"streams\":[{\"age_us\":0,\"name\":\"joints\",\"stale\":false},{\"age_us\":1000,\"name\":\"depth\",\"stale\":false}],\"streams_absent\":1,\"target_ns\":1000000000,\"worst_skew_us\":3000},\"skew_ms\":3,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":-2,\"budget_ms\":null,\"considered\":1,\"latency_ms\":null,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1002000000,\"uncertainty_ms\":null},{\"age_ms\":null,\"budget_ms\":140,\"considered\":0,\"latency_ms\":null,\"modality\":\"imu\",\"name\":\"imu\",\"over_budget\":false,\"seq\":null,\"stamp_ns\":null,\"uncertainty_ms\":null},{\"age_ms\":1,\"budget_ms\":80,\"considered\":2,\"latency_ms\":null,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":999000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[\"joints\"],\"undeclared_latency\":[\"joints\",\"imu\",\"depth\"],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-39",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "wrist_ft",
+            "modality": "force_torque",
+            "latency_ms": null,
+            "budget_ms": 90,
+            "samples": []
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": null,
+            "samples": [
+              {
+                "stamp_ns": 1004000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 978000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 1000000000,
+                "seq": 3
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"wrist_ft (force_torque) offered no sample for this instant, so there is no frame to assemble. A stream the policy declared and the pipeline is not producing is a capture path that is not running.\",\"reason\":\"no_sample\",\"stream\":\"wrist_ft\"}],\"record\":{\"streams\":[{\"age_us\":1000,\"name\":\"joints\",\"stale\":false}],\"streams_absent\":1,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":null,\"budget_ms\":90,\"considered\":0,\"latency_ms\":null,\"modality\":\"force_torque\",\"name\":\"wrist_ft\",\"over_budget\":false,\"seq\":null,\"stamp_ns\":null,\"uncertainty_ms\":null},{\"age_ms\":1,\"budget_ms\":null,\"considered\":3,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":3,\"stamp_ns\":1000000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[\"joints\"],\"undeclared_latency\":[\"wrist_ft\"],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-40",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 90,
+            "samples": [
+              {
+                "stamp_ns": 993000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1026000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": 40,
+            "budget_ms": 180,
+            "samples": [
+              {
+                "stamp_ns": 912000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 897000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 945000000,
+                "seq": 3
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":2000,\"name\":\"head_cam\",\"stale\":false},{\"age_us\":95000,\"name\":\"depth\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":93000},\"skew_ms\":93,\"skew_upper_ms\":93,\"streams\":[{\"age_ms\":2,\"budget_ms\":90,\"considered\":2,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":1026000000,\"uncertainty_ms\":null},{\"age_ms\":95,\"budget_ms\":180,\"considered\":3,\"latency_ms\":40,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":false,\"seq\":3,\"stamp_ns\":945000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-41",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 80,
+            "samples": [
+              {
+                "stamp_ns": 990000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":11000,\"name\":\"joints\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":11,\"budget_ms\":80,\"considered\":1,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":990000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-42",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "imu",
+            "modality": "imu",
+            "latency_ms": 2,
+            "budget_ms": null,
+            "uncertainty_ms": 1.4,
+            "samples": [
+              {
+                "stamp_ns": 981000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 998000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 1000000000,
+                "seq": 3
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":2000,\"name\":\"imu\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":2,\"budget_ms\":null,\"considered\":3,\"latency_ms\":2,\"modality\":\"imu\",\"name\":\"imu\",\"over_budget\":false,\"seq\":3,\"stamp_ns\":1000000000,\"uncertainty_ms\":1.4}],\"target_ns\":1000000000,\"undeclared_budget\":[\"imu\"],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "seeded-43",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": 40,
+            "budget_ms": 30,
+            "uncertainty_ms": 4.8,
+            "samples": [
+              {
+                "stamp_ns": 957000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 918000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "wrist_ft",
+            "modality": "force_torque",
+            "latency_ms": null,
+            "budget_ms": 190,
+            "samples": [
+              {
+                "stamp_ns": 997000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1003000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 130,
+            "samples": [
+              {
+                "stamp_ns": 1021000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1035000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "wrist_cam",
+            "modality": "rgb",
+            "latency_ms": 22,
+            "budget_ms": 20,
+            "samples": [
+              {
+                "stamp_ns": 1007000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1015000000,
+                "seq": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"depth (depth) is 83 ms behind the frame's instant and the policy's budget for it is 30 ms. §25.1: exceeding it is a hold, not a silently older frame.\",\"reason\":\"stale\",\"stream\":\"depth\"}],\"record\":{\"streams\":[{\"age_us\":83000,\"name\":\"depth\",\"stale\":true},{\"age_us\":3000,\"name\":\"wrist_ft\",\"stale\":false},{\"age_us\":7000,\"name\":\"head_cam\",\"stale\":false},{\"age_us\":7000,\"name\":\"wrist_cam\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":80000},\"skew_ms\":80,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":83,\"budget_ms\":30,\"considered\":2,\"latency_ms\":40,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":true,\"seq\":1,\"stamp_ns\":957000000,\"uncertainty_ms\":4.8},{\"age_ms\":3,\"budget_ms\":190,\"considered\":2,\"latency_ms\":null,\"modality\":\"force_torque\",\"name\":\"wrist_ft\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":997000000,\"uncertainty_ms\":null},{\"age_ms\":7,\"budget_ms\":130,\"considered\":2,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1021000000,\"uncertainty_ms\":null},{\"age_ms\":7,\"budget_ms\":20,\"considered\":2,\"latency_ms\":22,\"modality\":\"rgb\",\"name\":\"wrist_cam\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":1015000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[\"wrist_ft\"],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-44",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 120,
+            "uncertainty_ms": 0.1,
+            "samples": [
+              {
+                "stamp_ns": 992000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 977000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 999000000,
+                "seq": 3
+              }
+            ]
+          },
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 40,
+            "samples": []
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"head_cam (rgb) offered no sample for this instant, so there is no frame to assemble. A stream the policy declared and the pipeline is not producing is a capture path that is not running.\",\"reason\":\"no_sample\",\"stream\":\"head_cam\"}],\"record\":{\"streams\":[{\"age_us\":2000,\"name\":\"joints\",\"stale\":false}],\"streams_absent\":1,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":2,\"budget_ms\":120,\"considered\":3,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":3,\"stamp_ns\":999000000,\"uncertainty_ms\":0.1},{\"age_ms\":null,\"budget_ms\":40,\"considered\":0,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":null,\"stamp_ns\":null,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-45",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": null,
+            "budget_ms": 80,
+            "samples": [
+              {
+                "stamp_ns": 812000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 916000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 756000000,
+                "seq": 3
+              }
+            ]
+          },
+          {
+            "name": "imu",
+            "modality": "imu",
+            "latency_ms": null,
+            "budget_ms": 170,
+            "samples": [
+              {
+                "stamp_ns": 961000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1039000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": 40,
+            "budget_ms": null,
+            "uncertainty_ms": 5.6,
+            "samples": [
+              {
+                "stamp_ns": 1034000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1037000000,
+                "seq": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"joints (joint_state) is 84 ms behind the frame's instant and the policy's budget for it is 80 ms. §25.1: exceeding it is a hold, not a silently older frame.\",\"reason\":\"stale\",\"stream\":\"joints\"}],\"record\":{\"streams\":[{\"age_us\":84000,\"name\":\"joints\",\"stale\":true},{\"age_us\":39000,\"name\":\"imu\",\"stale\":false},{\"age_us\":3000,\"name\":\"depth\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":81000},\"skew_ms\":81,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":84,\"budget_ms\":80,\"considered\":3,\"latency_ms\":null,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":true,\"seq\":2,\"stamp_ns\":916000000,\"uncertainty_ms\":null},{\"age_ms\":39,\"budget_ms\":170,\"considered\":2,\"latency_ms\":null,\"modality\":\"imu\",\"name\":\"imu\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":961000000,\"uncertainty_ms\":null},{\"age_ms\":3,\"budget_ms\":null,\"considered\":2,\"latency_ms\":40,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":1037000000,\"uncertainty_ms\":5.6}],\"target_ns\":1000000000,\"undeclared_budget\":[\"depth\"],\"undeclared_latency\":[\"joints\",\"imu\"],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-46",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 60,
+            "samples": [
+              {
+                "stamp_ns": 918000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 733000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 904000000,
+                "seq": 3
+              }
+            ]
+          },
+          {
+            "name": "wrist_cam",
+            "modality": "rgb",
+            "latency_ms": 22,
+            "budget_ms": 170,
+            "samples": [
+              {
+                "stamp_ns": 1011000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1033000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 40,
+            "uncertainty_ms": 2.1,
+            "samples": [
+              {
+                "stamp_ns": 937000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 750000000,
+                "seq": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"head_cam (rgb) is 110 ms behind the frame's instant and the policy's budget for it is 60 ms. §25.1: exceeding it is a hold, not a silently older frame.\",\"reason\":\"stale\",\"stream\":\"head_cam\"},{\"detail\":\"joints (joint_state) is 64 ms behind the frame's instant and the policy's budget for it is 40 ms. §25.1: exceeding it is a hold, not a silently older frame.\",\"reason\":\"stale\",\"stream\":\"joints\"}],\"record\":{\"streams\":[{\"age_us\":110000,\"name\":\"head_cam\",\"stale\":true},{\"age_us\":11000,\"name\":\"wrist_cam\",\"stale\":false},{\"age_us\":64000,\"name\":\"joints\",\"stale\":true}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":99000},\"skew_ms\":99,\"skew_upper_ms\":99,\"streams\":[{\"age_ms\":110,\"budget_ms\":60,\"considered\":3,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":true,\"seq\":1,\"stamp_ns\":918000000,\"uncertainty_ms\":null},{\"age_ms\":11,\"budget_ms\":170,\"considered\":2,\"latency_ms\":22,\"modality\":\"rgb\",\"name\":\"wrist_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1011000000,\"uncertainty_ms\":null},{\"age_ms\":64,\"budget_ms\":40,\"considered\":2,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":true,\"seq\":1,\"stamp_ns\":937000000,\"uncertainty_ms\":2.1}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "seeded-47",
+      "note": "Generated from seed 0x0b5efeed.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 100,
+            "samples": []
+          },
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": 40,
+            "budget_ms": 90,
+            "uncertainty_ms": 4.1,
+            "samples": [
+              {
+                "stamp_ns": 1044000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1024000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 1006000000,
+                "seq": 3
+              }
+            ]
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 50,
+            "samples": [
+              {
+                "stamp_ns": 980000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 974000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "imu",
+            "modality": "imu",
+            "latency_ms": 2,
+            "budget_ms": 170,
+            "uncertainty_ms": 5.1,
+            "samples": [
+              {
+                "stamp_ns": 695000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 924000000,
+                "seq": 2
+              },
+              {
+                "stamp_ns": 758000000,
+                "seq": 3
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"head_cam (rgb) offered no sample for this instant, so there is no frame to assemble. A stream the policy declared and the pipeline is not producing is a capture path that is not running.\",\"reason\":\"no_sample\",\"stream\":\"head_cam\"}],\"record\":{\"streams\":[{\"age_us\":0,\"name\":\"depth\",\"stale\":false},{\"age_us\":21000,\"name\":\"joints\",\"stale\":false},{\"age_us\":78000,\"name\":\"imu\",\"stale\":false}],\"streams_absent\":1,\"target_ns\":1000000000,\"worst_skew_us\":82000},\"skew_ms\":82,\"skew_upper_ms\":91.19999999999999,\"streams\":[{\"age_ms\":null,\"budget_ms\":100,\"considered\":0,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":null,\"stamp_ns\":null,\"uncertainty_ms\":null},{\"age_ms\":-4,\"budget_ms\":90,\"considered\":3,\"latency_ms\":40,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1044000000,\"uncertainty_ms\":4.1},{\"age_ms\":21,\"budget_ms\":50,\"considered\":2,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":980000000,\"uncertainty_ms\":null},{\"age_ms\":78,\"budget_ms\":170,\"considered\":3,\"latency_ms\":2,\"modality\":\"imu\",\"name\":\"imu\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":924000000,\"uncertainty_ms\":5.1}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"hold\"}"
+    }
+  ]
+}

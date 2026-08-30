@@ -1,0 +1,389 @@
+{
+  "corpus": "observation",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "synchronised",
+      "note": "Three streams at three rates, and the correction inverts the order. By the stamps alone the camera looks the freshest thing in the frame — 15 ms ahead of the joint sample — and once each stream is moved back by its own declared latency the camera turns out to describe the earliest instant in it. That inversion is what §25.1 is for: taking the latest value from each stream would have built the frame around the stalest one while believing the opposite.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 80,
+            "samples": [
+              {
+                "stamp_ns": 982000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1015000000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 10,
+            "samples": [
+              {
+                "stamp_ns": 999500000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1000500000,
+                "seq": 2
+              }
+            ]
+          },
+          {
+            "name": "imu",
+            "modality": "imu",
+            "latency_ms": 2,
+            "budget_ms": 20,
+            "samples": [
+              {
+                "stamp_ns": 994000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 999000000,
+                "seq": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":13000,\"name\":\"head_cam\",\"stale\":false},{\"age_us\":500,\"name\":\"joints\",\"stale\":false},{\"age_us\":3000,\"name\":\"imu\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":12500},\"skew_ms\":12.5,\"skew_upper_ms\":12.5,\"streams\":[{\"age_ms\":13,\"budget_ms\":80,\"considered\":2,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":1015000000,\"uncertainty_ms\":null},{\"age_ms\":0.5,\"budget_ms\":10,\"considered\":2,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":1000500000,\"uncertainty_ms\":null},{\"age_ms\":3,\"budget_ms\":20,\"considered\":2,\"latency_ms\":2,\"modality\":\"imu\",\"name\":\"imu\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":999000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "the-frame-that-never-existed",
+      "note": "§25.1’s opening failure, measured: the camera’s freshest sample is two frames old and the joints are current, so the arm is where it is now and the image shows where it was. Nothing is broken, every budget holds, and the skew is the whole of what the assembler exists to say.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 120,
+            "samples": [
+              {
+                "stamp_ns": 962000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 10,
+            "samples": [
+              {
+                "stamp_ns": 1001000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":66000,\"name\":\"head_cam\",\"stale\":false},{\"age_us\":0,\"name\":\"joints\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":66000},\"skew_ms\":66,\"skew_upper_ms\":66,\"streams\":[{\"age_ms\":66,\"budget_ms\":120,\"considered\":1,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":962000000,\"uncertainty_ms\":null},{\"age_ms\":0,\"budget_ms\":10,\"considered\":1,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1001000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "stale-beyond-budget",
+      "note": "The camera is 138 ms behind the instant and the policy declared 80. §25.1: exceeding it is a hold, not a silently older frame.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 80,
+            "samples": [
+              {
+                "stamp_ns": 890000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 10,
+            "samples": [
+              {
+                "stamp_ns": 1001000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"head_cam (rgb) is 138 ms behind the frame's instant and the policy's budget for it is 80 ms. §25.1: exceeding it is a hold, not a silently older frame.\",\"reason\":\"stale\",\"stream\":\"head_cam\"}],\"record\":{\"streams\":[{\"age_us\":138000,\"name\":\"head_cam\",\"stale\":true},{\"age_us\":0,\"name\":\"joints\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":138000},\"skew_ms\":138,\"skew_upper_ms\":138,\"streams\":[{\"age_ms\":138,\"budget_ms\":80,\"considered\":1,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":true,\"seq\":1,\"stamp_ns\":890000000,\"uncertainty_ms\":null},{\"age_ms\":0,\"budget_ms\":10,\"considered\":1,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1001000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "no-sample",
+      "note": "A stream the policy declared and the pipeline is not producing. A hold with its own code, because an empty capture path and a slow one send a person to two different places.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 80,
+            "samples": []
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 10,
+            "samples": [
+              {
+                "stamp_ns": 1001000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"head_cam (rgb) offered no sample for this instant, so there is no frame to assemble. A stream the policy declared and the pipeline is not producing is a capture path that is not running.\",\"reason\":\"no_sample\",\"stream\":\"head_cam\"}],\"record\":{\"streams\":[{\"age_us\":0,\"name\":\"joints\",\"stale\":false}],\"streams_absent\":1,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":null,\"budget_ms\":80,\"considered\":0,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":null,\"stamp_ns\":null,\"uncertainty_ms\":null},{\"age_ms\":0,\"budget_ms\":10,\"considered\":1,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1001000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "undeclared-latency",
+      "note": "The camera declares no latency, so it is assembled at its raw stamp and named. The measured skew is still reported and the bound on it is null: the camera’s true instant could be anywhere, and a number claiming otherwise is worse than no number.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": null,
+            "budget_ms": 200,
+            "samples": [
+              {
+                "stamp_ns": 990000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 10,
+            "samples": [
+              {
+                "stamp_ns": 1001000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":10000,\"name\":\"head_cam\",\"stale\":false},{\"age_us\":0,\"name\":\"joints\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":10000},\"skew_ms\":10,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":10,\"budget_ms\":200,\"considered\":1,\"latency_ms\":null,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":990000000,\"uncertainty_ms\":null},{\"age_ms\":0,\"budget_ms\":10,\"considered\":1,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1001000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[\"head_cam\"],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "estimated-latency",
+      "note": "§47.2: a backend that cannot supply a capture timestamp records an estimate, and the frame carries a larger uncertainty which flows into the skew. The measurement does not move; the bound does.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 200,
+            "uncertainty_ms": 6,
+            "samples": [
+              {
+                "stamp_ns": 990000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 10,
+            "uncertainty_ms": 0.25,
+            "samples": [
+              {
+                "stamp_ns": 1001000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":38000,\"name\":\"head_cam\",\"stale\":false},{\"age_us\":0,\"name\":\"joints\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":38000},\"skew_ms\":38,\"skew_upper_ms\":44.25,\"streams\":[{\"age_ms\":38,\"budget_ms\":200,\"considered\":1,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":990000000,\"uncertainty_ms\":6},{\"age_ms\":0,\"budget_ms\":10,\"considered\":1,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1001000000,\"uncertainty_ms\":0.25}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "undeclared-budget",
+      "note": "A policy that declared no staleness requirement for a stream. Not a hold — nothing here can say whether the sample is good enough — and named separately from an undeclared latency, because the gap is in the package’s declaration rather than the body’s and the remedy is a different person.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": null,
+            "samples": [
+              {
+                "stamp_ns": 800000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 10,
+            "samples": [
+              {
+                "stamp_ns": 1001000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":228000,\"name\":\"head_cam\",\"stale\":false},{\"age_us\":0,\"name\":\"joints\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":228000},\"skew_ms\":228,\"skew_upper_ms\":228,\"streams\":[{\"age_ms\":228,\"budget_ms\":null,\"considered\":1,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":800000000,\"uncertainty_ms\":null},{\"age_ms\":0,\"budget_ms\":10,\"considered\":1,\"latency_ms\":1,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1001000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[\"head_cam\"],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "tie-takes-the-earlier",
+      "note": "Two samples 40 ms either side of the target are equally good by the distance rule and are not equally good in any other sense: the earlier one describes something that had already happened at the instant the frame claims to be.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 0,
+            "budget_ms": null,
+            "samples": [
+              {
+                "stamp_ns": 960000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1040000000,
+                "seq": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":40000,\"name\":\"joints\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":40,\"budget_ms\":null,\"considered\":2,\"latency_ms\":0,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":960000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[\"joints\"],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "a-sample-from-the-future",
+      "note": "Replay, or a clock that ran backwards. The nearer sample is ahead of the target, the age is negative, and it is deliberately not reported as staleness — the budget is one-sided, and calling this stale would send somebody to look at a capture pipeline that is working.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 0,
+            "budget_ms": 10,
+            "samples": [
+              {
+                "stamp_ns": 910000000,
+                "seq": 1
+              },
+              {
+                "stamp_ns": 1004000000,
+                "seq": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":0,\"name\":\"joints\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":-4,\"budget_ms\":10,\"considered\":2,\"latency_ms\":0,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":2,\"stamp_ns\":1004000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "one-contributing-stream",
+      "note": "The spread of a single instant is not zero, it is undefined. Zero would let a frame with one working stream look perfectly synchronised, which is the presentation §25.1 is written against.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 200,
+            "samples": [
+              {
+                "stamp_ns": 990000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": 40,
+            "budget_ms": 200,
+            "samples": []
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":false,\"holds\":[{\"detail\":\"depth (depth) offered no sample for this instant, so there is no frame to assemble. A stream the policy declared and the pipeline is not producing is a capture path that is not running.\",\"reason\":\"no_sample\",\"stream\":\"depth\"}],\"record\":{\"streams\":[{\"age_us\":38000,\"name\":\"head_cam\",\"stale\":false}],\"streams_absent\":1,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[{\"age_ms\":38,\"budget_ms\":200,\"considered\":1,\"latency_ms\":28,\"modality\":\"rgb\",\"name\":\"head_cam\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":990000000,\"uncertainty_ms\":null},{\"age_ms\":null,\"budget_ms\":200,\"considered\":0,\"latency_ms\":40,\"modality\":\"depth\",\"name\":\"depth\",\"over_budget\":false,\"seq\":null,\"stamp_ns\":null,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"hold\"}"
+    },
+    {
+      "id": "no-streams-at-all",
+      "note": "A policy that requires no observation. Deliverable, and every aggregate that would have to invent a value is null or empty rather than zero.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": []
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":null},\"skew_ms\":null,\"skew_upper_ms\":null,\"streams\":[],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "sub-millisecond-latency",
+      "note": "A 0.35 ms correction, to pin the nanosecond rounding: the conversion is one multiplication and a round-half-away-from-zero written out in both editions rather than taken from a platform library.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 0.35,
+            "budget_ms": 5,
+            "samples": [
+              {
+                "stamp_ns": 1000350000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "imu",
+            "modality": "imu",
+            "latency_ms": 0.15,
+            "budget_ms": 5,
+            "samples": [
+              {
+                "stamp_ns": 1000150000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":0,\"name\":\"joints\",\"stale\":false},{\"age_us\":0,\"name\":\"imu\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":0},\"skew_ms\":0,\"skew_upper_ms\":0,\"streams\":[{\"age_ms\":0,\"budget_ms\":5,\"considered\":1,\"latency_ms\":0.35,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1000350000,\"uncertainty_ms\":null},{\"age_ms\":0,\"budget_ms\":5,\"considered\":1,\"latency_ms\":0.15,\"modality\":\"imu\",\"name\":\"imu\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1000150000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    }
+  ]
+}

@@ -171,6 +171,9 @@ main > * { min-width: 0; }
 td.bad { margin: 0; }
 
 .note { margin: 8px 0 0; font-size: 12.5px; color: var(--ink-dim); }
+/* A note about something that is holding rather than running. §34.3 asks for the wait to be
+   visible; the same grey as every other note is how it becomes invisible. */
+.note.warn { color: var(--warn); }
 .dim { color: var(--ink-dim); }
 .subpanel { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--rule); }
 
@@ -178,6 +181,9 @@ table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 th, td { text-align: left; padding: 6px 8px 6px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
 th { color: var(--ink-dim); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
 tr:last-child td { border-bottom: none; }
+/* The bearer a send would actually go over. One row in a table of four is the whole answer to
+   "which link is this robot on", and bolding it is cheaper than a legend. */
+tr.active td { font-weight: 600; }
 td.num { font-variant-numeric: tabular-nums; }
 
 .pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11.5px; font-weight: 600; border: 1px solid currentColor; }

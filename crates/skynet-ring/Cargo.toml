@@ -1,0 +1,18 @@
+[package]
+name = "skynet-ring"
+description = "The SPSC command ring (§25): the only channel from a policy to the Safety Kernel."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+# No dependencies, and in particular not `skynet-kernel`. The kernel consumes what comes out of a
+# ring; it does not know a ring exists. §35.2 is the reason — "the kernel takes no clock at all",
+# and everything it operates on is supplied — and keeping the edge absent is what lets the same
+# kernel source run against a ring, against a replayed recording, and against a corpus vector with
+# no configuration anywhere.
+
+[lints.rust]
+missing_docs = "warn"

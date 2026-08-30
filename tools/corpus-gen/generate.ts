@@ -53,13 +53,17 @@ import {
 } from '../../reference/typescript/calibration.ts'
 import type { Windows as WatchdogWindows } from '../../reference/typescript/watchdog.ts'
 import {
+  assembleObservation, latestCommonInstant, type Stream as ObservationStream,
+} from '../../reference/typescript/observation.ts'
+import {
   evaluateCycle, resolveLimits, withGrants,
   type CommandCycle, type ResolveLimitsParams,
 } from '../../reference/typescript/safety.ts'
 import type { SafetyEnvelope } from '../../reference/typescript/types.ts'
 import {
   shapeAdmission, shapeCertification, shapeFleet, shapeFrameFault, shapeLimits, shapePlan,
-  shapeDigest, shapeReadiness, shapeSolved, shapeVerdict, shapeCalibration, shapeWatchdog,
+  shapeDigest, shapeObservation, shapeReadiness, shapeSolved, shapeVerdict, shapeCalibration,
+  shapeWatchdog,
 } from '../../reference/typescript/shape.ts'
 import {
   flatten, solve,
@@ -1938,6 +1942,7 @@ recordCase(
       targetNs: 4230n,
       worstSkewUs: 31000,
       streamsOmitted: 0,
+      streamsAbsent: 0,
       streams: [
         { name: 'wrist_cam', ageUs: 31000, stale: true },
         { name: 'joints', ageUs: 900, stale: false },
@@ -1950,6 +1955,7 @@ recordCase(
     target_ns: '4230',
     worst_skew_us: 31000,
     streams_omitted: 0,
+    streams_absent: 0,
     streams: [
       { name: 'wrist_cam', age_us: 31000, stale: true },
       { name: 'joints', age_us: 900, stale: false },
@@ -1968,6 +1974,7 @@ recordCase(
       targetNs: 5230n,
       worstSkewUs: 12,
       streamsOmitted: 0,
+      streamsAbsent: 0,
       streams: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map(name => ({ name, ageUs: 10, stale: false })),
     },
   },
@@ -1977,6 +1984,7 @@ recordCase(
     target_ns: '5230',
     worst_skew_us: 12,
     streams_omitted: 0,
+    streams_absent: 0,
     streams: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map(name => ({ name, age_us: 10, stale: false })),
   },
 )
@@ -1992,6 +2000,7 @@ recordCase(
       targetNs: 6230n,
       worstSkewUs: 0,
       streamsOmitted: 0,
+      streamsAbsent: 0,
       streams: [{ name: 'ααααααααα', ageUs: 1, stale: false }],
     },
   },
@@ -2001,7 +2010,37 @@ recordCase(
     target_ns: '6230',
     worst_skew_us: 0,
     streams_omitted: 0,
+    streams_absent: 0,
     streams: [{ name: 'ααααααααα', age_us: 1, stale: false }],
+  },
+)
+
+recordCase(
+  'frame-with-a-dead-capture-path',
+  'The record format version 1 could not write. Two of the three streams the policy declared produced '
+  + 'nothing, so there is one row — and a reader of the older record would have seen a robot with one '
+  + 'camera rather than a robot with two dead ones. One contributor also means there is no spread to '
+  + 'report, and `worst_skew_us` is null rather than the zero that would read as perfect synchronisation.',
+  BB_SHAPE, 12n, 6634n,
+  {
+    kind: 'frame',
+    frame: {
+      observation: BB_OBSERVATION,
+      targetNs: 6630n,
+      worstSkewUs: null,
+      streamsOmitted: 0,
+      streamsAbsent: 2,
+      streams: [{ name: 'joints', ageUs: 900, stale: false }],
+    },
+  },
+  {
+    kind: 'frame',
+    observation: hex(BB_OBSERVATION),
+    target_ns: '6630',
+    worst_skew_us: null,
+    streams_omitted: 0,
+    streams_absent: 2,
+    streams: [{ name: 'joints', age_us: 900, stale: false }],
   },
 )
 
@@ -2338,6 +2377,280 @@ calibrationCase('events', 'a-body-that-declares-nothing',
   'Every set applies, because over-reporting what is missing is the conservative direction.',
   [], CALIBRATION_LATER, setsFor([], null))
 
+// ── observation (§25.1) ────────────────────────────────────────────
+//
+// The corpus §25.1 has been owed since Part II. A skewed frame is the failure that does not
+// announce itself — it presents as a policy that grasps slightly late, and sends somebody to
+// retrain a model that was fine — so the numbers the assembler reports are the only evidence it
+// was ever wrong, and two editions disagreeing about them is two robots reporting two different
+// histories of the same incident.
+//
+// Two files, because there are two questions and the second is not a detail of the first: given a
+// target instant, what goes in the frame; and given a set of streams, which instant should a live
+// loop even aim at. An edition could agree about every assembled frame and pick a different target
+// every cycle, which would be a disagreement about every frame in the field and none in the corpus.
+
+const MS = 1_000_000
+/** One second in, so a latency correction can move a sample back without going negative. */
+const T = 1_000 * MS
+
+function stream(
+  name: string, modality: string, latency_ms: number | null,
+  budget_ms: number | null, stamps: number[], uncertainty_ms?: number,
+): ObservationStream {
+  return {
+    name,
+    modality,
+    latency_ms,
+    budget_ms,
+    ...(uncertainty_ms === undefined ? {} : { uncertainty_ms }),
+    // Sequence numbers ascend with the stamps, which is what a capture ring produces and what makes
+    // a chosen `seq` legible in the expected bytes.
+    samples: stamps.map((stamp, index) => ({ stamp_ns: stamp, seq: index + 1 })),
+  }
+}
+
+function observationCase(
+  file: string, id: string, note: string, targetNs: number, streams: ObservationStream[],
+): void {
+  add('observation', file, {
+    id, note,
+    input: { target_ns: targetNs, streams },
+    expected: canonical(shapeObservation(assembleObservation(targetNs, streams))),
+  })
+}
+
+function targetCase(
+  id: string, note: string, nowNs: number, streams: ObservationStream[],
+): void {
+  add('observation', 'target', {
+    id, note,
+    input: { now_ns: nowNs, streams },
+    expected: canonical({ target_ns: latestCommonInstant(nowNs, streams) }),
+  })
+}
+
+// The frame §25.1 describes, assembled correctly: a camera 28 ms behind the world, joint state at
+// 1 kHz 1 ms behind it, and an IMU. Every stream inside its budget.
+observationCase('frames', 'synchronised',
+  'Three streams at three rates, and the correction inverts the order. By the stamps alone the '
+  + 'camera looks the freshest thing in the frame — 15 ms ahead of the joint sample — and once each '
+  + 'stream is moved back by its own declared latency the camera turns out to describe the '
+  + 'earliest instant in it. That inversion is what §25.1 is for: taking the latest value from each '
+  + 'stream would have built the frame around the stalest one while believing the opposite.',
+  T, [
+    stream('head_cam', 'rgb', 28, 80, [T - 18 * MS, T + 15 * MS]),
+    stream('joints', 'joint_state', 1, 10, [T - 500_000, T + 500_000]),
+    stream('imu', 'imu', 2, 20, [T - 6 * MS, T - 1 * MS]),
+  ])
+
+observationCase('frames', 'the-frame-that-never-existed',
+  '§25.1’s opening failure, measured: the camera’s freshest sample is two frames old and the '
+  + 'joints are current, so the arm is where it is now and the image shows where it was. Nothing is '
+  + 'broken, every budget holds, and the skew is the whole of what the assembler exists to say.',
+  T, [
+    stream('head_cam', 'rgb', 28, 120, [T - 38 * MS]),
+    stream('joints', 'joint_state', 1, 10, [T + 1 * MS]),
+  ])
+
+observationCase('frames', 'stale-beyond-budget',
+  'The camera is 138 ms behind the instant and the policy declared 80. §25.1: exceeding it is a '
+  + 'hold, not a silently older frame.',
+  T, [
+    stream('head_cam', 'rgb', 28, 80, [T - 110 * MS]),
+    stream('joints', 'joint_state', 1, 10, [T + 1 * MS]),
+  ])
+
+observationCase('frames', 'no-sample',
+  'A stream the policy declared and the pipeline is not producing. A hold with its own code, '
+  + 'because an empty capture path and a slow one send a person to two different places.',
+  T, [
+    stream('head_cam', 'rgb', 28, 80, []),
+    stream('joints', 'joint_state', 1, 10, [T + 1 * MS]),
+  ])
+
+observationCase('frames', 'undeclared-latency',
+  'The camera declares no latency, so it is assembled at its raw stamp and named. The measured skew '
+  + 'is still reported and the bound on it is null: the camera’s true instant could be anywhere, '
+  + 'and a number claiming otherwise is worse than no number.',
+  T, [
+    stream('head_cam', 'rgb', null, 200, [T - 10 * MS]),
+    stream('joints', 'joint_state', 1, 10, [T + 1 * MS]),
+  ])
+
+observationCase('frames', 'estimated-latency',
+  '§47.2: a backend that cannot supply a capture timestamp records an estimate, and the frame '
+  + 'carries a larger uncertainty which flows into the skew. The measurement does not move; the '
+  + 'bound does.',
+  T, [
+    stream('head_cam', 'rgb', 28, 200, [T - 10 * MS], 6),
+    stream('joints', 'joint_state', 1, 10, [T + 1 * MS], 0.25),
+  ])
+
+observationCase('frames', 'undeclared-budget',
+  'A policy that declared no staleness requirement for a stream. Not a hold — nothing here can say '
+  + 'whether the sample is good enough — and named separately from an undeclared latency, because '
+  + 'the gap is in the package’s declaration rather than the body’s and the remedy is a different '
+  + 'person.',
+  T, [
+    stream('head_cam', 'rgb', 28, null, [T - 200 * MS]),
+    stream('joints', 'joint_state', 1, 10, [T + 1 * MS]),
+  ])
+
+observationCase('frames', 'tie-takes-the-earlier',
+  'Two samples 40 ms either side of the target are equally good by the distance rule and are not '
+  + 'equally good in any other sense: the earlier one describes something that had already happened '
+  + 'at the instant the frame claims to be.',
+  T, [stream('joints', 'joint_state', 0, null, [T - 40 * MS, T + 40 * MS])])
+
+observationCase('frames', 'a-sample-from-the-future',
+  'Replay, or a clock that ran backwards. The nearer sample is ahead of the target, the age is '
+  + 'negative, and it is deliberately not reported as staleness — the budget is one-sided, and '
+  + 'calling this stale would send somebody to look at a capture pipeline that is working.',
+  T, [stream('joints', 'joint_state', 0, 10, [T - 90 * MS, T + 4 * MS])])
+
+observationCase('frames', 'one-contributing-stream',
+  'The spread of a single instant is not zero, it is undefined. Zero would let a frame with one '
+  + 'working stream look perfectly synchronised, which is the presentation §25.1 is written '
+  + 'against.',
+  T, [
+    stream('head_cam', 'rgb', 28, 200, [T - 10 * MS]),
+    stream('depth', 'depth', 40, 200, []),
+  ])
+
+observationCase('frames', 'no-streams-at-all',
+  'A policy that requires no observation. Deliverable, and every aggregate that would have to '
+  + 'invent a value is null or empty rather than zero.',
+  T, [])
+
+observationCase('frames', 'sub-millisecond-latency',
+  'A 0.35 ms correction, to pin the nanosecond rounding: the conversion is one multiplication and a '
+  + 'round-half-away-from-zero written out in both editions rather than taken from a platform '
+  + 'library.',
+  T, [
+    stream('joints', 'joint_state', 0.35, 5, [T + 350_000]),
+    stream('imu', 'imu', 0.15, 5, [T + 150_000]),
+  ])
+
+targetCase('every-stream-can-answer',
+  'The slowest stream decides. The camera describes 0.972 s and the joints describe 1.019 s, so the '
+  + 'most recent frame everybody can answer for is at 0.972 s — and aiming at now instead would '
+  + 'make the camera the stalest stream in every frame for ever, a problem the loop created.',
+  T + 100 * MS, [
+    stream('head_cam', 'rgb', 28, 80, [T]),
+    stream('joints', 'joint_state', 1, 10, [T + 20 * MS]),
+  ])
+
+targetCase('a-stream-with-nothing-yet',
+  'Null rather than a later instant, and null rather than an instant that quietly drops the stream. '
+  + 'It is the same fact the assembler reports as a `no_sample` hold, and it is worth having before '
+  + 'building a frame nobody can use.',
+  T, [
+    stream('head_cam', 'rgb', 0, 80, [T - 10 * MS]),
+    stream('depth', 'depth', 0, 80, [T + 500 * MS]),
+  ])
+
+targetCase('no-streams',
+  'A policy requiring no observation: every instant is common to all of no streams, so the answer '
+  + 'is the one asked about.',
+  T, [])
+
+targetCase('latency-larger-than-the-clock',
+  'A declared latency past the start of the monotonic clock. The correction is still right and the '
+  + 'instant it names is one no `u64` can express, so the caller gets null rather than a wrapped '
+  + 'value.',
+  T, [stream('head_cam', 'rgb', 2_000, 80, [T])])
+
+// The fuzz half, generated here rather than beside the other two because it needs this section's
+// `stream` helper and its target instant, and a `const` cannot be read from further up the file.
+//
+// The distribution is drawn deliberately, for the reason the cycle fuzz gives: a uniform draw over
+// plausible-looking numbers produced a corpus in which almost every frame was deliverable, so the
+// two hold paths and the two unbounded ones were pinned by the curated cases and by nothing else.
+// The coverage is counted and printed at generation time, so a change that quietly flattens it is
+// visible when it happens rather than three sessions later.
+
+const obsRand = lcg(0x0b5efeed)
+const MODALITIES: Array<[string, string, number]> = [
+  // name, modality, a plausible declared latency in ms
+  ['head_cam', 'rgb', 28],
+  ['wrist_cam', 'rgb', 22],
+  ['depth', 'depth', 40],
+  ['joints', 'joint_state', 1],
+  ['imu', 'imu', 2],
+  ['wrist_ft', 'force_torque', 3],
+]
+
+const obsCoverage: Record<string, number> = {
+  ok: 0, hold: 0, stale: 0, no_sample: 0,
+  undeclared_latency: 0, undeclared_budget: 0, negative_age: 0, tie: 0,
+}
+
+for (let n = 0; n < 48; n += 1) {
+  const count = 1 + Math.floor(obsRand() * 4)
+  const streams: ObservationStream[] = []
+  const used = new Set<string>()
+  for (let i = 0; i < count; i += 1) {
+    const [name, modality, typical] = MODALITIES[Math.floor(obsRand() * MODALITIES.length)]
+    if (used.has(name)) continue
+    used.add(name)
+
+    // A fifth of streams declare no latency, and a fifth of the rest carry an uncertainty. Both are
+    // drawn often enough that the unbounded-skew path is reached by generated input rather than
+    // only by the case written to reach it.
+    const latency = obsRand() < 0.2 ? null : typical
+    const uncertainty = latency !== null && obsRand() < 0.25
+      ? Math.round(obsRand() * 60) / 10
+      : undefined
+    // A sixth declare no budget, and the rest draw one that a stale sample can plausibly exceed.
+    const budget = obsRand() < 0.17 ? null : 10 + Math.round(obsRand() * 20) * 10
+
+    const stamps: number[] = []
+    const roll = obsRand()
+    if (roll < 0.12) {
+      // An empty stream: the capture path is not running.
+    } else if (roll < 0.24) {
+      // A symmetric pair, so the tie-break is exercised by generated input. Without this the
+      // distance between two samples is almost never exactly equal and the rule is pinned by one
+      // curated case.
+      const offset = (1 + Math.floor(obsRand() * 40)) * MS
+      const centre = latency === null ? T : T + latency * MS
+      stamps.push(centre - offset, centre + offset)
+    } else {
+      // The band is drawn **per stream**, not per sample, and that is the whole of what makes
+      // staleness reachable. Drawn per sample, a stream with three samples almost always holds one
+      // fresh enough to be the nearest, so the first version of this generator produced three stale
+      // frames in forty-eight and reported coverage of a path it was barely touching.
+      const lagging = obsRand() < 0.3
+      const samples = 1 + Math.floor(obsRand() * 3)
+      for (let k = 0; k < samples; k += 1) {
+        const lagMs = lagging
+          ? 60 + Math.round(obsRand() * 260)
+          : Math.round(obsRand() * 40) - 4
+        stamps.push(T - Math.round(lagMs * MS) + (latency === null ? 0 : latency * MS))
+      }
+    }
+    streams.push(stream(name, modality, latency, budget, stamps, uncertainty))
+  }
+
+  const frame = assembleObservation(T, streams)
+  obsCoverage[frame.verdict] += 1
+  for (const hold of frame.holds) obsCoverage[hold.reason] += 1
+  if (frame.undeclared_latency.length > 0) obsCoverage.undeclared_latency += 1
+  if (frame.undeclared_budget.length > 0) obsCoverage.undeclared_budget += 1
+  if (frame.streams.some(one => one.chosen !== null && one.chosen.age_ms < 0)) {
+    obsCoverage.negative_age += 1
+  }
+  if (streams.some(one => one.samples.length === 2)) obsCoverage.tie += 1
+
+  add('fuzz', 'observation', {
+    id: `seeded-${n}`,
+    note: 'Generated from seed 0x0b5efeed.',
+    input: { target_ns: T, streams },
+    expected: canonical(shapeObservation(frame)),
+  })
+}
+
 // ── Write ────────────────────────────────────────────────────────────────────
 
 let cases = 0
@@ -2355,3 +2668,5 @@ for (const [key, list] of [...files.entries()].sort()) {
   console.log(`${key.padEnd(28)} ${String(list.length).padStart(4)} cases`)
 }
 console.log(`\n${files.size} files, ${cases} cases`)
+console.log(`fuzz/observation coverage: ${Object.entries(obsCoverage)
+  .map(([key, value]) => `${key} ${value}`).join(', ')}`)

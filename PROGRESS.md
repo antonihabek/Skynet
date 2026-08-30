@@ -3532,3 +3532,636 @@ rather than presenting a queue that only grows.
    consecutive looks — a 503 rendered as data, 378 px of overflow, a budget nothing was applying,
    and four windows in alphabetical order on a panel about their order — and the fixture plus
    `fixture-serve.mjs` make the next look cost about a minute.
+
+---
+
+## 2026-08-30 (fifteenth) — the command path: a frame that never existed, and the ring it crosses
+
+§25 is the one section of Part II that had no code at all. It is two things — an **observation
+assembler** on the way in and an **SPSC ring** on the way out — and they had been on the "still zero
+lines" list since the first session, which is a reasonable place for them to have been: they sit
+between a policy runtime and a kernel host, and neither of those exists yet.
+
+They came off it this session for a reason that has nothing to do with either of those programs.
+§25.1 describes a failure that **does not announce itself**, and a failure that does not announce
+itself is not made safer by waiting until there is something to run it against.
+
+> A policy is trained on synchronised frames: image and joint state as of one instant. A real robot
+> has three cameras at 30 Hz with 20–60 ms of pipeline latency, joint state at 1 kHz with 1 ms, and
+> an IMU at 200 Hz — none of them aligned, none of them stamped the same way. Feed a policy the most
+> recent value from each and it receives **a frame that never existed**, in which the arm is where it
+> is now and the image shows where it was two frames ago. **Policies degrade in ways that look like
+> bad training.**
+
+The last sentence is the expensive one. A skewed frame presents as a policy that grasps slightly
+late, or oscillates on contact, or works on the bench and not on the robot — and every one of those
+sends somebody to retrain a model that was fine.
+
+### The descriptor field §52 had been owed since Part V
+
+`sensors[].latency_ms` is in §52's table of descriptor additions, measured by `rhal.sensor.latency`,
+which was already an SCTS test with its own sentence about backends that stamp arrival rather than
+capture. The field itself did not exist in either edition. The assembler cannot be written without
+it — §25.1's whole mechanism is "declared per-sensor latency, so the assembler knows how far back a
+camera's *now* actually is" — so it went in first, nullable, in Rust and in the TypeScript reference,
+and out to the Hub through the mirror.
+
+Nullable, because §7.2's rule holds here and breaking it here would be invisible. **Zero is a claim
+no imaging pipeline can make**: it says a sample is available the instant the event happens. A stream
+that has not declared a latency is assembled at its raw stamp and *named in the frame*, and the
+frame's skew bound goes to null rather than pretending the omission cost nothing.
+
+### The assembler, and the four answers it has to keep apart
+
+`skynet_contracts::observation::assemble` and `assembleObservation` in the reference. For each stream
+it corrects every sample by the declared latency, picks the one nearest the target instant, and
+reports what accepting it cost; then it measures the spread across streams, which is the frame's own
+internal inconsistency and the number the whole section exists to produce.
+
+Four outcomes, and collapsing any pair of them would produce a sentence that sends somebody to the
+wrong place:
+
+* **stale** — over the policy's declared budget. §25.1: *"Exceeding it is a `hold`, not a silently
+  older frame."* A hold.
+* **no sample** — the stream produced nothing. Also a hold, and a different code, because an empty
+  capture path and a slow one are different repairs.
+* **undeclared latency** — the body never said. Not a hold; nothing is broken. The measured skew is
+  still reported and `skew_upper_ms` is null, because the true skew is larger by an unknown amount
+  and a bound that claimed otherwise is worse than no bound.
+* **undeclared budget** — the *package* never said. Also not a hold, and named separately from the
+  one above, because the gap is in a different declaration and the remedy is a different person.
+
+Three decisions in it are worth recording because each had a plausible alternative:
+
+**The budget is one-sided.** A chosen sample from *after* the target instant gives a negative age and
+is not reported as staleness. It cannot happen on a live robot and happens routinely in replay, and
+calling it stale would send somebody to look at a capture pipeline that is working. The age is
+signed so the evidence survives; clamping it at zero would erase the only trace of a clock that ran
+backwards.
+
+**A tie takes the earlier sample.** Two samples equidistant either side of the target are equally
+good by the distance rule and are not equally good in any other sense: the earlier describes
+something that had already happened at the instant the frame claims to be. The tie-break also has to
+exist for a duller reason — without it two editions iterating a capture ring in different orders pick
+different samples, and the corpus diverges on an input where nothing is wrong.
+
+**One contributing stream has no skew rather than zero skew.** The spread of a single instant is
+undefined, and zero would let a frame with one working stream and three empty ones look perfectly
+synchronised — which is the presentation §25.1 is written against.
+
+There is also `latest_common_instant`, which answers the question §25.1 raises and does not settle:
+*which* instant should a live loop target. Aim at *now* and the slowest camera is the stalest stream
+in every frame for ever — a problem the loop created and the assembler would faithfully report. It
+is offered rather than imposed, and it is in the corpus, because an edition could reproduce every
+assembled frame and still pick a different target every cycle: a disagreement about every frame in
+the field and none in the corpus.
+
+### The corpus: 458 cases across 38 files, and the fuzz that was not looking
+
+`observation/frames` (12 curated), `observation/target` (4) and `fuzz/observation` (48). The Rust
+edition and the TypeScript oracle agreed byte for byte on the first run.
+
+The curated case worth reading is `synchronised`, because it demonstrates the **inversion** rather
+than a difference in width. By the stamps alone the camera is the freshest thing in the frame, 15 ms
+ahead of the joint sample; once each stream is moved back by its own declared latency, the camera
+turns out to describe the earliest instant in it. Taking the latest value from each stream would have
+built the frame around the stalest one while believing the opposite, which is §25.1's failure stated
+as arithmetic instead of as prose.
+
+The fuzz generator's first version drew its staleness band **per sample**, so a stream with three
+samples nearly always held one fresh enough to be the nearest, and forty-eight generated frames
+produced three stale ones. That is the blind spot the corpus README already warns about, arriving in
+a new corpus on the day it was written. The band is now drawn per stream, and the generator prints
+its own coverage next to the file counts —
+
+```
+fuzz/observation coverage: ok 28, hold 20, stale 14, no_sample 8,
+  undeclared_latency 18, undeclared_budget 11, negative_age 9, tie 28
+```
+
+— so a change that flattens the distribution is visible when it is made rather than three sessions
+later.
+
+### A trap in the corpus runner, found by adding a corpus to it
+
+`fuzz` was dispatched as `"cycle" | "fuzz"` — a catch-all. So `fuzz/observation` did not arrive as an
+*unsupported corpus*, which is the one thing that runner reports loudly and refuses to skip; it
+arrived as forty-eight cycle vectors with no `limits`. The run still failed, so nothing shipped
+wrong. It named the wrong problem, which on a quieter day is how a whole corpus comes to be
+dispatched into an arm that was never written for it. Every arm now says which files it is for.
+
+### The ring, and the `unsafe` that did not happen
+
+`crates/skynet-ring`: 4 KiB slots, a per-slot seqlock, latest-wins, and no method that can block.
+
+Every crate in this workspace carries `#![forbid(unsafe_code)]` except the two that cannot — the ABI
+and the driver loader — and a lock-free structure shared between two processes is the obvious place
+for that streak to end. It does not end here. The shared region is modelled as **`&[AtomicU32]`**,
+which has interior mutability, so both ends read and write it concurrently with the memory model
+spelling out what each observes and with no `unsafe` anywhere. What genuinely needs it — turning an
+`mmap` of a `memfd` into that slice — is one call, and it belongs to the mapping layer rather than to
+the protocol. The protocol is the part where a mistake is a moving robot, and it is the part the
+compiler checks.
+
+It also makes the thing testable on any platform: the suite backs a ring with an ordinary array and
+is exercising the identical arithmetic a shared mapping would.
+
+**Latest wins, and it is not a queue.** §47.4 draws the distinction for sensor frames — *"a queue in
+front of a policy is latency wearing the costume of reliability"* — and it holds one step later for
+the commands a policy produces. A kernel draining a backlog would be executing a trajectory planned
+for a robot that has since moved. The several slots exist so a producer at full rate cannot overwrite
+the slot a consumer is mid-read of; they are not pending work.
+
+**Nothing blocks.** `read` returns `Stale` after four attempts and leaves the caller's buffer
+untouched, so the kernel runs its cycle on the command it already holds and §7.1's watchdog guard
+sees a sequence that has not advanced. Four is a statement rather than a knob: each attempt fails
+only if the producer published a whole command during the copy, and four consecutive failures is a
+misconfigured rate rather than a race worth waiting out.
+
+#### Two bugs the tests caught, both about zero
+
+**`published == 0` is not "nothing has been sent".** It is a wrapping `u32`, so it means that on the
+first cycle and *four billion commands* on a robot that has been up about seven weeks at a kilohertz.
+The first draft returned `Empty` on it. Emptiness is now asked of the **slot** — a seqlock of zero
+means nothing has ever been written there, which is true before the first publish and false ever
+after — and the producer steps its counter *over* zero rather than onto it so that stays an invariant
+rather than an approximation. Both are pinned by tests that drive the counters to the top of a `u32`
+by hand.
+
+**A shorter command must not inherit the previous one's tail.** The slot is reused, so publishing a
+2-channel command into a slot that held an 8-channel one leaves six values above it. Today's consumer
+never looks past `channels`, and "never looks" is a property of today's consumer while the bytes
+outlive it. The whole fixed array is written every publish.
+
+#### The test that was made to fail before it was trusted
+
+`a_reader_racing_a_writer_never_sees_a_torn_command` runs a producer and a consumer on two real
+threads over a **one-slot** ring, so the producer overwrites the only slot on every publish and the
+consumer races it on every read. The invariant is self-consistency, not delivery: missing a command is
+the design working, and every field of a command that *is* delivered is derived from its sequence
+number and checked against it.
+
+Every other assertion in that file stages a race by hand, which proves the arithmetic and proves
+nothing about the memory ordering — a single thread observes its own stores in program order whatever
+orderings are written. So the tear detection was deleted and the test run again; it failed, and was
+restored. A check nobody has seen fail is a check nobody has tested.
+
+And the slot fitting inside its page is now a `const` assertion rather than a runtime one. Three
+constants decide it, each plausible to change alone, and the failure of getting it wrong is a publish
+that writes into the head of the *next* slot — a torn command under a perfectly valid seqlock, which
+is the one corruption this format's reader cannot see.
+
+### The `memfd` under it, and the third crate allowed to use `unsafe`
+
+`crates/skynet-ring-shm`. §25 asks for "a `memfd`-backed mapping" and `skynet-ring` deliberately
+stops one step short of it; this is the step. Four `extern "C"` declarations, one `mmap`, one
+`slice::from_raw_parts`, and a `Drop` that unmaps and closes. That is the whole crate, and the size
+is the point: a reviewer asking whether the command path is memory-safe reads a short file, because
+everything that could move a robot wrongly is in the protocol next door where the compiler checks it.
+
+**Who creates it settles three things at once.** The runtime creates the ring and the sandboxed
+policy receives the descriptor — never the other way round — and each of the three properties that
+follows is a thing an untrusted policy would otherwise be able to do:
+
+* **The geometry is not the policy's to choose.** Written and validated before the fd is handed over,
+  and `Ring::open` caches the slot count at that moment, so a policy rewriting the header afterwards
+  moves nothing on the reading side.
+* **The file cannot be shrunk.** `F_SEAL_SHRINK` and `F_SEAL_GROW` are added before the fd leaves the
+  process, with `F_SEAL_SEAL` so the set cannot be reduced later — a seal that can be lifted is a
+  comment. Without it a policy inside the sandbox could `ftruncate` the mapping to zero and make
+  every subsequent read by the runtime a `SIGBUS`: **untrusted code killing the supervisor with one
+  syscall.**
+* **The runtime cannot write it.** Its mapping carries no `PROT_WRITE`, so "the policy is the only
+  writer" is enforced by the page tables rather than agreed between two programs, one of which is
+  hostile.
+
+What a hostile producer can still do is put nonsense in a slot — a wild `channels`, a stalled
+sequence, a seqlock that never goes even. None of it is memory-unsafe on the reading side, and all of
+it is *a command*, which is what §7's guards are for. This crate's only job is to make sure a bad
+command is the worst thing that can arrive.
+
+Two smaller decisions worth recording. `off_t` is declared 32-bit on a 32-bit target, because glibc
+compiles it as `long` unless `_FILE_OFFSET_BITS=64` is defined and 32-bit ARM is a live robot
+controller — an `i64` there sizes a file to something nobody asked for. And the four syscalls are
+declared rather than depended on: a bindings crate would be the first non-vendored dependency in a
+workspace whose absence of them is a property a vendor can check with `cargo build` and no network,
+and four declarations are visible in a diff in a way a transitive dependency is not.
+
+#### It is tested where it runs
+
+Windows cannot run any of it, so the crate returns `Unsupported` there rather than failing to
+compile, and the Linux path was exercised in a container — `rust:1-slim-bookworm` over the checkout.
+Nine tests, and the two that matter are the ones a single mapping cannot fake:
+
+* **`a_command_crosses_two_independent_mappings_of_one_file`** — two `mmap`s of one `memfd` are the
+  same memory, so a store through one is a load through the other.
+* **`a_command_crosses_two_processes`** — the same claim across a process boundary, which is the one
+  §25 actually makes: the policy is in a **sandbox**, and everything above proves only that a process
+  can talk to itself. The child is this test binary re-executed with the descriptor duplicated
+  without `FD_CLOEXEC`; the production flag stays, because a ring leaking into every child a runtime
+  spawns is exactly the accident `MFD_CLOEXEC` prevents. It was made to fail — the child's expected
+  sequence changed by one — and the parent reported `exit status: 101` before it was trusted.
+
+The seals are tested by trying to break them: `ftruncate` on the sealed fd returns `EPERM`, and so
+does a second `F_ADD_SEALS`.
+
+#### And the unsafe check now points the other way
+
+CI listed the crates that must carry `forbid(unsafe_code)`. That is the same check with its default
+inverted: a crate added to the workspace joins nobody's list and is watched by nothing. It now
+enumerates `crates/*` and requires the attribute of everything outside a three-name allow-list —
+`skynet-rhal`, `skynet-cli`, `skynet-ring-shm` — and requires each of those three to actually contain
+`unsafe`, so a crate that no longer needs to be on the list comes off it.
+
+### §25.1's last bullet, and the two things a record cannot say
+
+> The frame's skew and per-stream ages go into the black box, so "the policy behaved oddly" can be
+> checked against "the frame it was given was 80 ms skewed" months later.
+
+The record already existed — `/sk/frame`, channel 5, written in the sixth session with `target_ns`,
+`worst_skew_us` and a per-stream age. What did not exist was anything that could produce one. So the
+frame now projects onto it, in both editions, inside the frame's own corpus output rather than beside
+it: an edition could otherwise agree about every assembled frame and disagree about the only version
+of it that survives the day.
+
+Writing the projection is what surfaced the interesting part, which is that **the record could not
+say two things the assembler is careful to distinguish** — so the record format is now version 2.
+
+* **A stream that produced nothing had no row and no count.** The record carries a row per
+  *contributing* stream, so a frame with one working camera and two dead capture paths recorded one
+  stream and said nothing about the rest. Read months later, that is a robot with one camera. The new
+  `streams_absent` carries it, and it is deliberately **not** the existing `streams_omitted`, which
+  means "streams the record could not fit": one is a limit of the format and the other is a limit of
+  the robot, and an investigation reading one as the other goes looking for a bigger record instead
+  of a dead camera.
+* **`worst_skew_us` had no spelling for "not measurable".** The frame reports null when fewer than
+  two streams contributed, because the spread of one instant is undefined; an unsigned field has to
+  write something, and the something it wrote was zero — a frame with three dead capture paths
+  reading as a perfectly synchronised one, which is exactly the sentence §25.1 exists to prevent.
+  `SKEW_UNMEASURABLE` is `u32::MAX`, seventy-one minutes of skew, so nothing real collides with it,
+  and the two facts "no skew at all" and "no skew measurable" stay two facts. Both are asserted.
+
+That is a **format change to something §31.2 makes single-source**, so it was made as one: the
+record layout, both editions' encoders and decoders, the MCAP channel schema in both, the corpus, and
+`FORMAT_VERSION` from 1 to 2 — which exists for precisely this and had never been used. The stream
+table moves four bytes, and the version is what stops a version-2 daemon reading a version-1 ring as
+though the fields were where it expects them: an incident report that is confidently wrong is worse
+than no incident report. Nothing has shipped, so there are no version-1 rings; the bump is the
+mechanism working rather than a migration.
+
+The corpus grew a case for it — `blackbox/frame-with-a-dead-capture-path`, the record version 1 could
+not write — and the sealed-file digest changed with it, which is how the two editions were confirmed
+to agree about the new bytes rather than only about the new fields.
+
+**The third loss is real and stays**, and is asserted from both sides so that it remains a decision
+rather than an oversight: `age_us` is unsigned, so a sample from *after* the target saturates at
+zero. It cannot arise on a live robot — every target a runtime picks is at or before now, and
+`CLOCK_MONOTONIC_RAW` does not step — and the signed figure stays on the frame for everything that is
+not the recorder. The corpus shows both side by side, `"age_ms":-4` on the frame and `"age_us":0` in
+the record.
+
+One thing worth recording about *how* this went in: the first version of the schema strings reached
+the file with their Rust line-continuations eaten, so three descriptions carried twenty-space runs
+inside them. Nothing caught it except the corpus, which compared the Rust schema against the
+TypeScript one byte for byte and pointed at the offending column. A schema is a document somebody
+reads, and the corpus turns out to proof-read it.
+
+### `skynetd once` recorded nothing, which was two call sites rather than a decision
+
+Finding 2 from last session, closed. The reconcile loop recorded every pass and mirrored the audit
+log; `once` did neither, so a robot operated entirely through it — which §33's own documentation
+calls *"a legitimate way to operate a robot"* — had a black box holding `recording_started` and no
+evidence of one thing it had done afterwards.
+
+Last session recorded it as an open question about whether a one-shot pass belongs in the incident
+record. Looking at the code, it is not a question anybody answered: the two paths were two call
+sites, the loop grew a recorder, and the other one did not. Nothing chose.
+
+So they are now **one function**. `converge_and_record` reconciles, records each pass on §26's event
+channel and mirrors §38.3's audit log, and both entry points come through it — which is the fix for
+the drift as well as for the gap, because there is now one place either behaviour can change. It
+stopped being `#[cfg(unix)]` on the way, and the reason it had been is the reason it was missing:
+only the daemon loop called it, and the loop needs a Unix socket, while `once` is plan-and-apply over
+a directory and runs anywhere.
+
+`e2e.sh` asserts it at the point in the script where **the daemon has not started yet**, so anything
+in the ring there was put there by `once` and by nothing else. It was made to fail — the recorder
+replaced with `None` — before it was trusted.
+
+### And the end-to-end run had been red on a wording change
+
+Found by running `e2e.sh` in a container to check the line above. One assertion was failing, and it
+had nothing to do with this session:
+
+```
+✗ and the signature is reported as unchecked, not as signed - expected 'not checked' in:
+    signature: absent — nothing accompanied these bytes to say who produced them
+```
+
+§19's staging report *used* to say a signature was "not checked". The trust store landed two sessions
+ago and it now names the state the signature is actually in — `absent`, `untrusted`, `invalid` or
+`verified` — and `admit.rs` has a test whose documentation says so in as many words. The end-to-end
+script kept grepping for the old phrase, so it has been failing ever since, on a wording improvement,
+while everything it exists to check was fine.
+
+It is now two assertions instead of one, and the split is the point: the first names the state that
+is true here, and the second checks separately that **nothing claims the package was verified**. The
+second is the half that matters, and it is the half a grep for one phrase can lose again the next
+time somebody improves the phrasing.
+
+### A sender for the queue, and §34.3's bearers
+
+Next item 2 from last session, and the half it called interesting. §34.4's outbound queue has been
+complete for two sessions and nothing had ever taken an item out of it — so the drop counters were
+the only evidence it worked, and *"nothing sends from this queue yet"* was a sentence in the payload
+rather than a mechanism anybody could look at.
+
+`connectivity.rs` is the decision half. §34.3's table has three rows and **one rule**:
+
+> An unmetered bearer carries everything. A metered one carries incidents and check-ins.
+
+The rows differ only in what each kind *assumes* about metering when nobody has said — ethernet no,
+Wi-Fi no, cellular yes, anything unrecognised yes. Written as one rule rather than three, "Wi-Fi in a
+hotel, marked metered" behaves exactly like cellular, which is what §34.3's *"everything unless
+marked metered"* asks for and what a table read row by row would not give.
+
+The uncomfortable part is correct and is asserted as such: **an incident is on the list of things
+allowed over the most expensive link a robot has**, and it is the biggest payload in the queue. §34.4
+settles it — *"there is nothing in this queue worth less than an incident"* — and a fleet that
+discovers the recording of its worst day was waiting for Wi-Fi has saved a few pounds and lost the
+thing the black box exists for.
+
+**Declared, then observed**, the same shape as §33.4's safe state. Which interface is the modem is a
+fact about the machine that nothing can infer — `/sys/class/net` will not say whether `wwan0` is a
+modem or a dongle somebody left plugged in — so the bearers come from `state/bearers.json` and only
+their liveness is read from the kernel. A robot with no such file reports that it has no bearers
+rather than inventing one.
+
+**The sink is a trait with two implementations and neither is a transport.** §34.2's outbound path is
+HTTPS to an endpoint this robot was paired with in §10, and §10 is unwritten: no identity, no
+attestation, no endpoint, and no TLS stack in a workspace with no dependencies. `Unpaired` is the
+default and refuses everything with that sentence; `Directory`, behind `--outbox <dir>`, writes to
+this machine so the drain path — pick, decide, send, remove, back off — is exercised by something
+rather than by nothing. Both `skynetd` and `skynetd once` drain through it.
+
+Two decisions worth recording. The drain **stops at the first item §34.3 will not carry** rather than
+skipping past it to a lower-priority one it could: the queue is in priority order and routing around
+a wait would quietly invert §34.4's table. And the retry schedule lives **in memory** rather than on
+disk, because a backoff deadline is a monotonic instant (§35.1) and a monotonic instant survives a
+reboot as a meaningless number — so a restart makes every item eligible again, which is also the
+right behaviour, since a reboot is a change in the world. The attempt *count* does persist, so the
+backoff a restarted robot computes is the one its history earns.
+
+### Looking at the console found two things, which is now four sessions running
+
+The panel went on, and then the page was opened.
+
+**Every bearer reported as `down` on a machine that cannot measure one.** `observed_up` read
+`/sys/class/net/<if>/operstate` and returned `false` when the file was not there — so a developer's
+laptop, and a robot whose modem is managed outside `/sys`, reported a *measurement nobody took*. It
+is now `Option<bool>`: the kernel's answer where there is one, a declared `up` where there is not,
+and `false` only when neither exists. Every row says which of the three it is showing, and the
+"nothing is up" sentence no longer claims to be the machine's own answer when it is not.
+
+**The panel said the queue was fine on a robot that will never send anything.** §34.3's verdict —
+*"the active bearer carries this class"* — was concatenated with the sink description, and on an
+unpaired robot the result read:
+
+```
+Sends to: none — this robot is not paired with a Hub (§10). the active bearer carries this class
+```
+
+Two true statements rendering as one claim that nothing is wrong. They are two different questions —
+*will this link carry this class*, and *is there anywhere to send at all* — and a panel that cannot
+keep them apart will always be reassuring about the wrong one. `Sink::obstacle()` now answers the
+second, the payload carries both, and the console renders them as separate sentences with the
+obstacle in the warning colour.
+
+While there: a verdict that said only "yes" forced its caller to reconstruct the question, and the
+console reconstructed it badly — *"the active bearer carries this class"* is a sentence whose subject
+is not on the page. `Dispatch::Send` now carries the class and the bearer, and reads *"the next item
+is incident and `wlan0` carries it"*.
+
+### A string with a hole in it, three times
+
+Rust joins a literal across lines with a trailing backslash, which also eats the next line's
+indentation. Lose the backslash and the indentation stays inside the string: the compiler is happy,
+every test passes, and an operator reads
+
+```
+...has no Hub to send to.              §10's pairing and attestation are unwritten.
+```
+
+It happened twice this session — in an MCAP channel schema and in that console message — and a sweep
+then found a third that had been sitting in `skynetd-io/src/auth.rs` for four sessions, in the
+sentence a robot prints when it cannot issue a credential. The corpus caught one of them, because it
+compares two editions' schema bytes and pointed at the column. Looking at the page caught another.
+**Nothing was watching for the third**, and nothing would have.
+
+There is now a CI check: any string literal over eighty characters, excluding embedded JSON, with a
+run of ten or more spaces in it. Its first version matched the *source line's* indentation and fired
+on forty perfectly good sentences — a check in the shape somebody switches off — so it extracts the
+literal with `grep -o` first. It was made to fail and then to pass again before it was trusted.
+
+The cause is a tooling one and it is recorded outside this repository, because it will happen again
+in any file: this session's shell mangles backslashes inside heredocs, so patch scripts containing
+them have to be written to a file rather than piped.
+
+### The worst thing found this session: both mirror checks were failing on every Windows checkout
+
+Found by running `check-contract-mirrors.mjs` after a one-field change and being told **six contracts
+had diverged, 324 lines in a 162-line file**.
+
+Both repositories are cloned with `core.autocrlf=true`. The reference kept LF because its files were
+written by tools and never re-materialised; the Hub's copies came back as **CRLF** on the first
+`git checkout` after the previous session's merge. From that moment:
+
+* `tools/check-contract-mirrors.mjs` reported all six mirrored modules as diverged in every line, and
+* all eight assertions in `lib/__tests__/skynet-os-mirrors.test.ts` failed,
+
+on two trees that were character for character identical. Both checks were written *last* session,
+verified passing, and were broken by the merge that landed them.
+
+This is the failure `.gitattributes` in both repositories already describes — in a comment that says
+it "has already happened once, on the other side of the mirror" — pinned for the three shared
+**documents** and never extended to the eight shared **modules** when they arrived.
+
+The repair is three guards, because the first two can each be true while the third is not:
+
+1. **`.gitattributes` in both repositories** now pins `reference/typescript/*.ts`, `corpus/**/*.json`
+   and the Hub's `lib/skynet/os/*` to `eol=lf`.
+2. **The sync tool normalises** before comparing, before diff-counting and before hashing. A line
+   ending is never a semantic difference in TypeScript, and a comparison that treats one as a
+   contract divergence reports the wrong problem.
+3. **The Hub's digest test normalises** the same way, so it is checkout-independent on a machine that
+   has never heard of the OS repository.
+
+The diff count needed the same fix in a second place — the equality check was normalised and the
+count was not, so the tool went from "2691 lines differ" to "15 lines differ" only after both. Fifteen
+is the `latency_ms` block, which is the correct answer.
+
+**Why this one is the worst.** The drift it exists to catch is real and has happened: `safety.ts` on
+the Hub was six sessions behind the reference, awarding a host badge to a body the robot refuses. The
+check that found it was then broken by its own merge, in a way that fails *loudly and always* — and a
+check that always fails is a check somebody deletes. Nothing was wrong with the contracts for the
+whole of this window, which is exactly what makes it dangerous: the next real divergence would have
+arrived as line 7 of an alarm everybody had learned to skip.
+
+### Changed in the Hub
+
+Three files, and each is recorded here because the log has to be a complete account of what was done
+from this repository:
+
+* `lib/skynet/os/embodiment.ts` — `sensors[].latency_ms`, taken from the reference by `--sync`.
+* `lib/skynet/os/mirror-digests.json` — rewritten by the sync, as always.
+* `lib/__tests__/skynet-os-mirrors.test.ts` — normalises line endings before hashing.
+* `.gitattributes` — pins `lib/skynet/os/*` to LF.
+* `supabase/migrations/20260830120000_skynet_embodiments.sql`, and the migration **applied** to the
+  BotMarket project — see the descriptor-store section below.
+* `lib/skynet/robots/embodiment.ts`, `app/api/skynet/v1/robots/[slug]/embodiment/route.ts`,
+  `lib/skynet/db.ts`, `lib/skynet/activity.ts`, `messages/*.json`.
+
+The Hub's suite passes and `tsc --noEmit` is clean.
+
+### The descriptor store on the Hub, and where this session was stopped
+
+Next item 1 from last session, and the last unbuilt entry on §22's *"buildable now, no robot
+required"* list: *"the transport endpoint on the Hub, the embodiment tables, the descriptor publish
+path"*. Everything above it in that list has existed for sessions in two editions and is held to the
+corpus; what has never existed is anywhere on the Hub to **put a descriptor**, which is why §32.4's
+items 4 and 5 have both been recorded as waiting on "a table" rather than on an endpoint.
+
+**Applied to the BotMarket project**, with the owner's agreement, additively:
+
+* `supabase/migrations/20260830120000_skynet_embodiments.sql` — the table, its indexes and its RLS.
+  Append-only and content-addressed, because every transport plan pins a descriptor digest and a
+  descriptor edited in place would make an existing plan unreproducible while looking fine. A
+  partial unique index makes *"at most one current published descriptor per robot"* a property of
+  the database rather than of whichever code path last ran.
+* `lib/skynet/robots/embodiment.ts` — the digest, the signature check, and the store.
+* `app/api/skynet/v1/robots/[slug]/embodiment/route.ts` — `GET` (public, `?digest=` resolves a
+  superseded one) and `POST` (namespace-owned, `namespace.write`).
+* `lib/skynet/db.ts`, `lib/skynet/activity.ts` and `messages/en.json` — the table in the known set,
+  `embodiment.publish` in the audit vocabulary, and eleven translatable strings synced to all 35
+  locales.
+
+Three decisions worth recording.
+
+**The signature scheme had to be written again rather than reused, and that is the interesting
+part.** This repository already has `verifyDigestSignature` in `lib/skynet/signing.ts` — and it is
+base64 over SPKI DER, over the bare digest, with no domain tag, because it verifies *package
+releases*. The robot verifies a descriptor with raw hex keys and signatures, over
+`"skynet.embodiment.v1\n" + digest`. Reusing the first for the second would have produced a Hub that
+marks a descriptor `verified` and a robot that refuses the same bytes: the §31 failure one level up
+from the one the contract mirrors already guard against. The two encodings are the same key —
+Ed25519 SPKI DER is a fixed twelve-byte header plus the 32 raw bytes — so `rawKeyFromDer` re-encodes
+a registered key rather than asking a vendor to register two.
+
+**An unsigned or unverified descriptor is published, not refused.** §5 keeps four states apart, and
+only the last sets `verified`. Refusing the middle two would leave a vendor with no way to publish a
+body description at all, which pushes them back to the guesswork the descriptor exists to replace.
+What the platform will not do is *call* any of the first three verified.
+
+**The document is served exactly as it was published.** A descriptor carries `digest: null` and the
+digest is over the document including that null, so the Hub never fills the field in — a robot that
+downloaded a descriptor and recomputed its digest would otherwise get a different answer, and would
+be right to. The digest travels beside the document.
+
+#### Stopped mid-edit, and the tree is not clean
+
+The session was stopped while building the cross-edition **signature vector**: the thing that would
+prove the paragraph above rather than assert it. `crates/skynetd-io/src/embodiment_vector.rs` was
+written and registered in `lib.rs`, and it **does not compile**:
+
+* `use skynet_ed25519::SigningKey` should be `use skynet_ed25519::signing::SigningKey` — the signer
+  lives behind the `test-signing` feature, in its own module.
+* `sign()` returns `[u8; 64]` rather than a `Signature`, and `public_hex()` already returns hex, so
+  the two helpers around them are wrong.
+* **The frozen digest constant in it is a placeholder, not a computed value.** It was written to be
+  replaced by the output of the `#[ignore]`d generator, and that generator has never run.
+
+So `cargo build -p skynetd-io` succeeds and **`cargo test -p skynetd-io` does not compile**. Nothing
+else in the workspace is affected and nothing was committed. Finishing it is: fix the three lines,
+run `cargo test -p skynetd-io --lib -- --ignored embodiment_vector --nocapture`, paste the printed
+digest into the constant, and freeze the same four values in a Hub test that verifies the signature
+with Node's crypto. Backing it out instead is deleting the file and its `pub mod` line.
+
+The Hub side is unaffected by that: `npx tsc --noEmit` is clean and the audit-vocabulary test passes.
+
+#### Not done, and not started
+
+`GET /repos/{ns}/{name}/versions/{v}/transport` — §17's other new route, and the one §32.4 item 4
+actually waits on — is unwritten. It is now unblocked: the descriptor it needs has somewhere to live.
+
+The eleven new strings are in all 35 catalogues with their English text, which is this project's
+spelling of *pending*: `scripts/translate-with-openai.mjs` treats a value identical to English as
+untranslated. It has not been run.
+
+### Where the numbers stand
+
+`sh crates/skynetd-io/e2e.sh` passes end to end in a `rust:1-slim-bookworm` container, with the
+launch step reported as not run because there is no systemd in it.
+
+**One caveat on every number below: they were measured before the session was stopped mid-edit.**
+`crates/skynetd-io/src/embodiment_vector.rs` is half-written and `cargo test -p skynetd-io` does not
+currently compile because of it. The library builds, nothing else in the workspace is affected, and
+the descriptor-store section above says exactly what is wrong and how to finish or back it out.
+
+Rust: **690 tests** on Windows and **721** in a Linux container — the difference is `skynetd-io`'s
+systemd-adjacent suite and the whole of `skynet-ring-shm` — with `cargo fmt --check` clean and
+`cargo clippy --workspace --all-targets` clean under `-D warnings` on both. The kernel and the ring
+both still build for `thumbv7em-none-eabihf`. Corpus: **459 cases across 38 files**, reproduced byte
+for byte.
+
+### What is still zero lines
+
+The policy runtime, OTA (§12), the safety MCU, and the drivers that talk to real hardware.
+
+§25's command path has come off that list as a **mechanism** and is not off it as a **path**. The
+ring, the `memfd`, the seals, the two mappings and the frame's projection onto the black box record
+all exist and are exercised, including across two real processes. What does not exist is anything
+that would call them on a robot: no capture backend fills a stream (§47), no policy sandbox receives
+the descriptor (§8), and no loop turns a frame into an inference and a command. Every surface says so
+rather than implying otherwise.
+
+§34's outbound path is in the same half-state and for a related reason. The **decision** is built —
+which bearer, whether it carries this class, when to retry — and the **transport** is not: §34.2 is
+HTTPS to an endpoint §10's pairing would have established, and §10 is unwritten. So the sink a robot
+has is one that refuses everything and says why, and the one that actually moves bytes writes them
+into a directory on the same machine.
+
+§48's **homing** stays on the list and belongs there rather than in a gap: it moves the robot through
+the RHAL extension channel, which is the one thing §33.1 forbids `skynetd`.
+
+### Findings recorded rather than fixed
+
+1. **§52's table cites §25.2 for `sensors[].latency_ms`, and the mechanism is in §25.1.** §25.2 is
+   *"Two packages, one arm"* — capability leasing — and has nothing to say about sensor latency. It is
+   a cross-reference in a shared document, so it is recorded rather than corrected: amending the
+   specification is a decision, and this one is cosmetic enough that it should be made deliberately
+   rather than folded into a session that happened to notice it.
+2. **The ring's slot layout is a format, and §31.2's list does not name it.** Two processes read those
+   bytes, and on a robot running a Python policy runtime against a Rust kernel host they are two
+   *editions* — which is precisely the condition §31.2 says makes a thing single-source: *"a format
+   with two implementations of its own definition is not a format."* The layout is written out in full
+   in the crate documentation, so a second edition has something to implement rather than something to
+   reverse-engineer, but it is not in the corpus and it is not in §31.2's table. Adding it to either is
+   a specification decision.
+3. **Nothing consumes `Reading::Stale`.** The ring's consumer reports it and no caller exists to
+   count it. §25 makes the count the evidence that the producer is outrunning the reader, and
+   evidence nobody collects is a field in a struct. Unchanged by this session's sender, which drains
+   the *outbound* queue rather than the command ring. They are two different paths and only the
+   outbound one now has anything reading it.
+4. **The two mirror checks still only meet where both repositories are checked out**, unchanged from
+   last session and now with one more reason to care: this session's defect was found by a human
+   running the tool, and CI would not have caught it because the job that runs it has one repository.
+5. **`--outbox` is a sink that looks like a success.** A `Directory` send returns `Ok`, so the item
+   is removed from the queue and the counters record a delivery — which is true of the sink and
+   false of the robot. It is named as a development sink in its own documentation, in
+   `Sink::describe`, and on the console, and that is three places relying on a reader noticing. The
+   honest fix is for a non-transport sink to be visible in the *counters* as well, which means the
+   queue distinguishing "delivered" from "handed to something local", and that is a queue change
+   rather than a sink one.
+6. **`npx eslint` still cannot run in the Hub** — `typescript-eslint` refuses TypeScript 7.0.
+   Pre-existing, unrelated, and it means `tsc --noEmit` and vitest remain that repository's only
+   static checks.

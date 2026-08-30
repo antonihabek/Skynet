@@ -96,6 +96,17 @@ fn maybe_number(description: &str) -> Json {
     property
 }
 
+/// A field that is an integer or `null` — a quantity this frame could not measure.
+fn maybe_integer(description: &str) -> Json {
+    let mut property = Json::obj();
+    let mut kinds = Json::arr();
+    kinds.push(Json::Str("integer".into()));
+    kinds.push(Json::Str("null".into()));
+    property.set("type", kinds);
+    property.set("description", Json::Str(description.into()));
+    property
+}
+
 fn array_of(items: Json, description: &str) -> Json {
     let mut property = Json::obj();
     property.set("type", Json::Str("array".into()));
@@ -375,18 +386,35 @@ fn frame() -> Json {
             ),
             (
                 "worst_skew_us",
-                field(
-                    "integer",
+                maybe_integer(
                     "The worst skew between any stream and that instant. Recorded so that 'the \
                      policy behaved oddly' can be checked against 'the frame it was given was 80 ms \
-                     skewed' months later (§25.1).",
+                     skewed' months later (§25.1). Null when fewer than two streams contributed: \
+                     the spread of one instant is undefined rather than zero, and zero would make a \
+                     frame with three dead capture paths read as a perfectly synchronised one.",
                 ),
             ),
             (
                 "streams_omitted",
-                field("integer", "Streams the record could not carry, counted rather than dropped."),
+                field(
+                    "integer",
+                    "Streams the record could not carry, counted rather than dropped. A limit of \
+                     the format.",
+                ),
             ),
-            ("streams", array_of(stream, "Per-stream ages.")),
+            (
+                "streams_absent",
+                field(
+                    "integer",
+                    "Streams the policy declared that produced no sample at all. A limit of the \
+                     robot, and deliberately not the field above: an investigation reading one as \
+                     the other goes looking for a bigger record instead of a dead camera.",
+                ),
+            ),
+            (
+                "streams",
+                array_of(stream, "Per-stream ages, for the streams that had one."),
+            ),
         ],
         &[
             "mono_ns",
@@ -394,6 +422,7 @@ fn frame() -> Json {
             "target_ns",
             "worst_skew_us",
             "streams_omitted",
+            "streams_absent",
             "streams",
         ],
         "One assembled observation frame, and how well aligned it was.",

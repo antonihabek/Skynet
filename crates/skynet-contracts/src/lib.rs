@@ -47,6 +47,7 @@ pub mod digest;
 pub mod embodiment;
 pub mod json;
 pub mod kinematics;
+pub mod observation;
 pub mod readiness;
 pub mod roles;
 pub mod safety;

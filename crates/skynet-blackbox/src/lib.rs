@@ -101,7 +101,15 @@ pub use seal::{seal, Continuity, Hole, Reason, Sealed};
 /// the header and checked on open, because the failure it prevents — a new daemon reading an old
 /// ring as though the fields were where it expects them — produces an incident report that is
 /// confidently wrong, which is worse than no incident report.
-pub const FORMAT_VERSION: u16 = 1;
+///
+/// **2** adds `streams_absent` to the frame record and gives `worst_skew_us` a value meaning *not
+/// measurable* ([`record::SKEW_UNMEASURABLE`]), which moves the stream table four bytes. Both exist
+/// because the version-1 record could not distinguish a frame whose streams were all present from
+/// one whose capture paths had died — it recorded the survivors and said nothing about the rest, so
+/// a recording of a robot with two dead cameras read as a recording of a robot with one camera. A
+/// black box that cannot say what was missing is answering the wrong half of the question an
+/// incident asks.
+pub const FORMAT_VERSION: u16 = 2;
 
 /// The library string written into every sealed file's MCAP header.
 ///

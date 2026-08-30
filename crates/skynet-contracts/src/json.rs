@@ -454,6 +454,7 @@ pub fn descriptor_from_json(value: &Json) -> Result<EmbodimentDescriptor, Decode
             height: opt_f64(item, "height"),
             fps: opt_f64(item, "fps"),
             frame: opt_string(item, "frame"),
+            latency_ms: opt_f64(item, "latency_ms"),
         });
     }
 

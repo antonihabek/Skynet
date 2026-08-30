@@ -100,6 +100,20 @@ pub struct EmbodimentSensor {
     pub fps: Option<f64>,
     /// Frame the readings are expressed in, so extrinsics are resolvable (§44).
     pub frame: Option<String>,
+    /// How far behind the world this stream's timestamps are, in milliseconds (§25.1, §47.2).
+    ///
+    /// The observation assembler needs it to know "how far back a camera's *now* actually is": a
+    /// stream stamped at acquisition still describes an instant earlier than the stamp, because
+    /// exposure, readout and any in-pipeline processing all happened before the sample existed.
+    /// [`crate::observation::assemble`] subtracts it, and a stream that has not declared it is
+    /// assembled at its raw stamp with the omission **named in the frame** rather than assumed to
+    /// be zero.
+    ///
+    /// `None` is the §7.2 rule applied consistently: absent means nobody measured it, not that it
+    /// is zero. Zero is a claim — a sensor whose sample is available the instant the event happens
+    /// — and it is a claim no imaging pipeline can make. `rhal.sensor.latency` in the bench suite
+    /// is what turns the declaration into a measurement.
+    pub latency_ms: Option<f64>,
 }
 
 /// What the body will accept, and how fast.

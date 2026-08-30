@@ -540,16 +540,75 @@ impl Queue {
         out.set("collapsed", Json::Num(status.collapsed as f64));
         out.set("budget", Json::Num(status.budget as f64));
         out.set("reserve", Json::Num(status.reserve as f64));
-        // §34.2: nothing here has ever been sent, because there is no sender. Said in the payload
-        // rather than left to a reader to notice a queue that only grows.
-        out.set(
-            "delivery",
-            Json::Str(
-                "nothing sends from this queue yet — §34.2's outbound path and §10's pairing are \
-                 unwritten, so items accumulate under the drop policy and are delivered by nobody"
-                    .to_string(),
-            ),
+        out
+    }
+
+    /// The same, plus §34.3's bearers and what they will carry right now.
+    ///
+    /// Separate from [`Queue::to_json`] because a queue does not know about links: this crate's own
+    /// suite exercises the queue over a directory with no network anywhere near it, and a `to_json`
+    /// that reached for `/sys/class/net` would make that untrue.
+    ///
+    /// `sink` is the sentence describing where items would go, from
+    /// [`crate::connectivity::Sink::describe`]. It is a parameter and not a constant because the
+    /// honest answer is different on a paired robot, on an unpaired one, and on a developer's
+    /// machine with `--outbox`, and this payload has said the wrong one of those three before.
+    pub fn to_json_with(
+        &self,
+        bearers: &crate::connectivity::Table,
+        sink: &str,
+        sink_obstacle: Option<&str>,
+    ) -> Json {
+        let mut out = self.to_json();
+
+        let mut rows = Json::arr();
+        for bearer in &bearers.bearers {
+            rows.push(bearer.to_json());
+        }
+        let mut link = Json::obj();
+        link.set("declared", Json::Bool(bearers.declared));
+        link.set("bearers", rows);
+        link.set(
+            "active",
+            match bearers.active() {
+                Some(bearer) => Json::Str(bearer.name.clone()),
+                None => Json::Null,
+            },
         );
+        out.set("link", link);
+
+        // The verdict for the item at the **head** of the queue, which is the one a drain would
+        // reach first — not a verdict per class. §34.3's wait blocks the queue rather than filtering
+        // it, so "telemetry is waiting" while an episode in front of it is also waiting would be two
+        // true sentences describing one stall, and a console showing both invites somebody to fix
+        // the wrong one.
+        let mut delivery = Json::obj();
+        delivery.set("sink", Json::Str(sink.to_string()));
+        // Separate from the verdict below, and separate on purpose. §34.3's verdict answers "will
+        // this link carry this class"; this answers "is there anywhere to send at all". Both were
+        // once rendered as one sentence, which read as `the active bearer carries this class` on a
+        // robot that has never sent anything and never will until §10 exists.
+        delivery.set(
+            "obstacle",
+            match sink_obstacle {
+                Some(text) => Json::Str(text.to_string()),
+                None => Json::Null,
+            },
+        );
+        match self.next() {
+            None => {
+                delivery.set("head", Json::Null);
+                delivery.set("verdict", Json::Null);
+                delivery.set("detail", Json::Str("the queue is empty".to_string()));
+            }
+            Some(item) => {
+                let verdict = crate::connectivity::may_send(item.class, bearers);
+                delivery.set("head", Json::Str(item.class.as_str().to_string()));
+                delivery.set("verdict", Json::Str(verdict.as_str().to_string()));
+                delivery.set("detail", Json::Str(verdict.detail()));
+            }
+        }
+        out.set("delivery", delivery);
         out
     }
 }

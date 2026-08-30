@@ -34,10 +34,10 @@ use crate::store::Store;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-struct TempRoot(PathBuf);
+pub(crate) struct TempRoot(pub PathBuf);
 
 impl TempRoot {
-    fn new(label: &str) -> Self {
+    pub(crate) fn new(label: &str) -> Self {
         let n = COUNTER.fetch_add(1, Ordering::SeqCst);
         let path =
             std::env::temp_dir().join(format!("skynetd-io-{}-{}-{}", std::process::id(), label, n));
@@ -46,11 +46,11 @@ impl TempRoot {
         Self(path)
     }
 
-    fn layout(&self) -> Layout {
+    pub(crate) fn layout(&self) -> Layout {
         Layout::new(&self.0)
     }
 
-    fn path(&self) -> &std::path::Path {
+    pub(crate) fn path(&self) -> &std::path::Path {
         &self.0
     }
 }
@@ -980,6 +980,8 @@ impl Fixture {
         let request = http::parse(&head, body.as_bytes().to_vec()).unwrap();
 
         let credentials = self.credentials.clone();
+        let sink = crate::connectivity::Sink::describe(&crate::connectivity::Unpaired);
+        let obstacle = crate::connectivity::Sink::obstacle(&crate::connectivity::Unpaired);
         let mut context = Context {
             daemon: &mut self.daemon,
             credentials: &credentials,
@@ -989,6 +991,11 @@ impl Fixture {
             // answer 503, and the rest do not care.
             blackbox: None,
             mono_ns: 0,
+            // The sink a robot actually has today, and the reason it has nothing else. A fixture
+            // that said "a test" here would render the console panel in a state no robot is in,
+            // which is the failure the console fixture exists to catch rather than to commit.
+            outbound_sink: &sink,
+            outbound_obstacle: obstacle.as_deref(),
         };
         let response = api::handle(&mut context, &request);
         let parsed = Json::parse(std::str::from_utf8(&response.body).unwrap()).unwrap();
@@ -1008,6 +1015,8 @@ impl Fixture {
         let request = http::parse(&head, Vec::new()).unwrap();
 
         let credentials = self.credentials.clone();
+        let sink = crate::connectivity::Sink::describe(&crate::connectivity::Unpaired);
+        let obstacle = crate::connectivity::Sink::obstacle(&crate::connectivity::Unpaired);
         let mut context = Context {
             daemon: &mut self.daemon,
             credentials: &credentials,
@@ -1015,6 +1024,11 @@ impl Fixture {
             started_ms: 0,
             blackbox: None,
             mono_ns: 0,
+            // The sink a robot actually has today, and the reason it has nothing else. A fixture
+            // that said "a test" here would render the console panel in a state no robot is in,
+            // which is the failure the console fixture exists to catch rather than to commit.
+            outbound_sink: &sink,
+            outbound_obstacle: obstacle.as_deref(),
         };
         api::handle(&mut context, &request)
     }
@@ -1154,6 +1168,18 @@ fn console_fixture() {
             )
             .unwrap();
     }
+
+    // §34.3's bearers, in the state that makes the panel worth looking at: ethernet declared and
+    // down, Wi-Fi up and *marked* metered, cellular up and metered by assumption. So the active
+    // bearer is a metered one, the head of the queue is an incident — which §34.3 sends over
+    // anything — and the two figures behind it are waiting. A fixture with a docked robot on
+    // ethernet would show a panel in which every sentence is "yes".
+    std::fs::write(
+        layout.state().join("bearers.json"),
+        "{\"bearers\":[{\"name\":\"eth0\",\"kind\":\"ethernet\",\"up\":false},\
+           {\"name\":\"wlan0\",\"kind\":\"wifi\",\"metered\":true,\"up\":true},           {\"name\":\"wwan0\",\"kind\":\"cellular\",\"up\":true}]}",
+    )
+    .unwrap();
 
     let audit = crate::audit::Audit::of(&layout);
     for (at, actor, action, subject, previous) in [
@@ -3324,6 +3350,8 @@ mod listeners {
         });
 
         let credentials = fixture.credentials.clone();
+        let sink = crate::connectivity::Sink::describe(&crate::connectivity::Unpaired);
+        let obstacle = crate::connectivity::Sink::obstacle(&crate::connectivity::Unpaired);
         let mut context = Context {
             daemon: &mut fixture.daemon,
             credentials: &credentials,
@@ -3333,6 +3361,9 @@ mod listeners {
             // answer 503, and the rest do not care.
             blackbox: None,
             mono_ns: 0,
+            // The sink a robot actually has today, and the reason it has nothing else.
+            outbound_sink: &sink,
+            outbound_obstacle: obstacle.as_deref(),
         };
         let (stream, _) = local.listener().accept().unwrap();
         crate::serve::serve_one(stream, &mut context);

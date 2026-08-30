@@ -30,6 +30,9 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use skynet_json::Json;
+// Only the socket loop builds one now: `once` reconciles and records through
+// `converge_and_record`, which needs the daemon rather than a request context.
+#[cfg(unix)]
 use skynetd_io::api::Context;
 use skynetd_io::auth::Credentials;
 use skynetd_io::launch::SystemdLauncher;
@@ -199,23 +202,54 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         );
     }
 
+    // Where outbound items go (§34). `Unpaired` is the truth on a robot: §34.2's outbound path and
+    // §10's pairing are unwritten, so there is no endpoint and no identity to present at one, and
+    // this sink says exactly that on every surface rather than leaving a queue that only grows.
+    //
+    // `--outbox <dir>` swaps in a directory on this machine. It is not a transport and is never
+    // presented as one; it exists so the drain path is exercised by something, and so that somebody
+    // bringing a robot up can watch the queue actually empty.
+    let sink: Box<dyn skynetd_io::connectivity::Sink> = match flag(argv, "--outbox") {
+        Some(path) => Box::new(skynetd_io::connectivity::Directory {
+            path: PathBuf::from(path),
+        }),
+        None => Box::new(skynetd_io::connectivity::Unpaired),
+    };
+    let sink_description = sink.describe();
+    let sink_obstacle = sink.obstacle();
+    eprintln!("skynetd: outbound goes to {sink_description}");
+    if let Some(obstacle) = &sink_obstacle {
+        // Said at every start, beside the sink rather than after the first failed drain. A robot
+        // that will never send anything should say so before it has a queue to fail to send.
+        eprintln!("skynetd: {obstacle}");
+    }
+
     let origin = Instant::now();
+    // Only the daemon loop reports an uptime, and only on the platform that has one — `once`
+    // returns before it would mean anything.
+    #[cfg(unix)]
     let started_ms = monotonic(origin);
 
     if once {
-        let context = Context {
-            daemon: &mut daemon,
-            credentials: &credentials,
-            now_ms: monotonic(origin),
-            started_ms,
-            blackbox: recorder.as_mut(),
-            mono_ns: monotonic(origin).saturating_mul(1_000_000),
-        };
-        context.daemon.refresh_safe_state();
-        let passes = context.daemon.converge(context.now_ms);
+        let now = monotonic(origin);
+        daemon.refresh_safe_state();
+        // Through the same function the loop uses, and that is the whole of the fix. `once` used to
+        // converge directly and record nothing, so a robot operated entirely through it — which
+        // §33's own documentation calls "a legitimate way to operate a robot" — had a black box
+        // holding `recording_started` and not one thing that happened afterwards. It was not a
+        // decision; it was two call sites, one of which grew a recorder.
+        let passes = converge_and_record(&mut daemon, recorder.as_mut(), &layout, now);
         for pass in &passes {
             print_pass(pass);
         }
+        // One drain, for the same reason `once` records: §33 calls it a legitimate way to operate a
+        // robot, and a robot operated that way should not be one whose queue never moves. Jitter is
+        // at the top of the window because a one-shot pass has nobody to be decorrelated from — the
+        // thundering herd §34.4 guards against is a *fleet retrying in lockstep*, and a person
+        // running one command is not one.
+        let mut sender =
+            skynetd_io::connectivity::Sender::new(skynetd_io::outbound::Queue::of(&layout));
+        report_drain(&mut sender, &layout, sink.as_ref(), now, 1.0);
         return i32::from(!passes.last().is_some_and(|pass| pass.converged()));
     }
 
@@ -285,41 +319,13 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         }
 
         let mut next_reconcile = 0u64;
+        let mut sender =
+            skynetd_io::connectivity::Sender::new(skynetd_io::outbound::Queue::of(&layout));
         loop {
             let now = monotonic(origin);
             if now >= next_reconcile {
-                let context = Context {
-                    daemon: &mut daemon,
-                    credentials: &credentials,
-                    now_ms: now,
-                    started_ms,
-                    blackbox: None,
-                    mono_ns: now.saturating_mul(1_000_000),
-                };
-                context.daemon.refresh_safe_state();
-                let passes = context.daemon.converge(now);
-                if let Some(recorder) = recorder.as_mut() {
-                    for pass in &passes {
-                        record_pass(recorder, now.saturating_mul(1_000_000), pass);
-                    }
-
-                    // §38.3's black box half, for changes made by a process that is not this one.
-                    // Here rather than beside the socket loop because it is bounded work that
-                    // belongs with the pass, and because a robot whose daemon is not reconciling
-                    // has bigger problems than a delayed configuration record.
-                    let mirrored = skynetd_io::blackbox::mirror_audit(
-                        &layout,
-                        recorder,
-                        now.saturating_mul(1_000_000),
-                    );
-                    if mirrored.remaining > 0 {
-                        eprintln!(
-                            "skynetd: {} configuration change(s) recorded, {} still to copy from \
-                             the audit log",
-                            mirrored.recorded, mirrored.remaining
-                        );
-                    }
-                }
+                daemon.refresh_safe_state();
+                let passes = converge_and_record(&mut daemon, recorder.as_mut(), &layout, now);
                 for (action, reason) in passes
                     .last()
                     .map(|pass| pass.deferred.as_slice())
@@ -331,6 +337,12 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                         action.subject()
                     );
                 }
+                // §34.4's queue, drained. Bounded per pass rather than to exhaustion: a reconcile
+                // loop that spent ten minutes uploading episodes would be a supervisor that stopped
+                // supervising, and §33.2's watchdog would notice — correctly — that the loop had
+                // hung.
+                report_drain(&mut sender, &layout, sink.as_ref(), now, jitter_for(now));
+
                 next_reconcile = now.saturating_add(interval);
                 // Inside the loop body, on purpose. See the module documentation.
                 notify_watchdog();
@@ -348,6 +360,8 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                             started_ms,
                             blackbox: recorder.as_mut(),
                             mono_ns: now.saturating_mul(1_000_000),
+                            outbound_sink: &sink_description,
+                            outbound_obstacle: sink_obstacle.as_deref(),
                         };
                         let _ = stream.set_nonblocking(false);
                         skynetd_io::serve::serve_one(stream, &mut context);
@@ -368,6 +382,8 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                                 started_ms,
                                 blackbox: recorder.as_mut(),
                                 mono_ns: now.saturating_mul(1_000_000),
+                                outbound_sink: &sink_description,
+                                outbound_obstacle: sink_obstacle.as_deref(),
                             };
                             let _ = stream.set_nonblocking(false);
                             skynetd_io::serve::serve_one(stream, &mut context);
@@ -928,7 +944,94 @@ fn print_pass(pass: &skynetd_io::runtime::Pass) {
 /// A failed action is recorded too, with its reason. "The supervisor tried to start this and could
 /// not" is exactly the fact an incident review is looking for, and a recorder that kept only the
 /// successes would produce a file in which nothing ever went wrong.
+///
+/// No longer `#[cfg(unix)]`. It was, because only the daemon loop called it and the loop needs a
+/// Unix socket; `skynetd once` is `plan` and `apply` over a directory and runs anywhere, which is
+/// exactly why it was the path with no recording.
+/// Jitter for one backoff, drawn from the monotonic clock.
+///
+/// §34.4 wants the delay uniform over `[0, exponential]` and `backoff_ms` takes the fraction as an
+/// argument, for the reason §35.2 gives about clocks: a function that reaches for a random number
+/// cannot be tested. So the reaching happens here, at the edge, where the untestable part is one
+/// line long.
+///
+/// Only the daemon loop uses it — `once` passes the top of the window, because the thundering herd
+/// §34.4 guards against is a fleet retrying in lockstep and a person running one command is not one.
+///
+/// The low bits of a monotonic millisecond counter are not a random number and do not need to be.
+/// What §34.4 asks for is **decorrelation**: a hundred robots that lost the same access point must
+/// not retry in lockstep. Their uptimes differ by seconds at least, which is thousands of
+/// milliseconds, so the low bits differ — and that is the whole requirement. A cryptographic source
+/// here would be a dependency and a stronger claim than the problem needs.
 #[cfg(unix)]
+fn jitter_for(now_ms: u64) -> f64 {
+    (now_ms % 1_000) as f64 / 1_000.0
+}
+
+/// Drain the outbound queue once, and say what happened when it is worth saying.
+///
+/// Quiet when the queue is empty or everything simply went, because a supervisor that logged a line
+/// per idle pass is a supervisor whose log nobody reads. Loud about a **block**, because §34.3 is
+/// explicit that the wait is visible rather than silent, and about failures, because a queue that is
+/// filling while every send is refused is the shape of an outage.
+fn report_drain(
+    sender: &mut skynetd_io::connectivity::Sender,
+    layout: &Layout,
+    sink: &dyn skynetd_io::connectivity::Sink,
+    now_ms: u64,
+    jitter: f64,
+) {
+    let bearers = skynetd_io::connectivity::Table::of(layout);
+    // Sixteen per pass. Enough that a backlog clears over a few minutes of a ten-second loop, few
+    // enough that one pass cannot become a long upload.
+    let drained = sender.drain(&bearers, sink, now_ms, jitter, 16);
+    if drained.sent > 0 || drained.failed > 0 {
+        eprintln!(
+            "skynetd: outbound — {} sent, {} failed, {} backing off",
+            drained.sent, drained.failed, drained.backing_off
+        );
+    }
+    if let Some(blocked) = drained.blocked {
+        eprintln!("skynetd: outbound held — {}", blocked.detail());
+    }
+}
+
+/// One reconcile pass, and its record.
+///
+/// The two exist together or the recording is a lie by omission, so they are one function and there
+/// is one place either can be changed. `skynetd once` and `skynetd` (the loop) both come through
+/// here; before this they were two call sites, and the one that did not grow a recorder was the one
+/// §33 describes as a legitimate way to operate a robot.
+///
+/// The audit mirror (§38.3) runs here for the same reason it ran in the loop: it is bounded work
+/// that belongs with the pass, it covers configuration changed by a process that is not this one,
+/// and a robot whose daemon is not reconciling has bigger problems than a delayed record. A `once`
+/// pass now picks up whatever the audit log gained since the last one, which is the behaviour an
+/// operator running `once` from a script would assume they already had.
+fn converge_and_record<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>(
+    daemon: &mut Daemon<L, S>,
+    recorder: Option<&mut skynetd_io::blackbox::Recorder>,
+    layout: &Layout,
+    now_ms: u64,
+) -> Vec<skynetd_io::runtime::Pass> {
+    let passes = daemon.converge(now_ms);
+    let Some(recorder) = recorder else {
+        return passes;
+    };
+    let mono_ns = now_ms.saturating_mul(1_000_000);
+    for pass in &passes {
+        record_pass(recorder, mono_ns, pass);
+    }
+    let mirrored = skynetd_io::blackbox::mirror_audit(layout, recorder, mono_ns);
+    if mirrored.remaining > 0 {
+        eprintln!(
+            "skynetd: {} configuration change(s) recorded, {} still to copy from the audit log",
+            mirrored.recorded, mirrored.remaining
+        );
+    }
+    passes
+}
+
 fn record_pass(
     recorder: &mut skynetd_io::blackbox::Recorder,
     mono_ns: u64,

@@ -25,3 +25,20 @@
 *.a binary
 *.stl binary
 *.dae binary
+
+# The same failure, one directory over, and it has now happened for real.
+#
+# `reference/typescript/*.ts` is mirrored into BotMarket's `lib/skynet/os/` by
+# `tools/check-contract-mirrors.mjs`, and its digests are checked from the Hub's own suite. Both
+# sides were written on a working tree that happened to hold LF; the first `git checkout` after a
+# merge re-materialised the Hub's copies as CRLF, and from that moment the comparison reported all
+# six modules as diverged in every line and all eight digest assertions failed — a check that always
+# fails being a check somebody deletes.
+#
+# The tool no longer lets a line ending present as a contract divergence, and these four lines mean
+# it never has to: the files that are compared byte for byte across two repositories are stored the
+# same way in both.
+reference/typescript/*.ts eol=lf
+corpus/**/*.json          eol=lf
+tools/**/*.mjs            eol=lf
+tools/**/*.ts             eol=lf

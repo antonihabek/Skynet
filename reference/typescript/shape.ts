@@ -30,6 +30,7 @@ import {
 import {
   CHAIN, WINDOWS, checkNesting, hostBlockedByCommandLoss, type Windows,
 } from './watchdog.ts'
+import { toRecord, type Frame as ObservationFrame } from './observation.ts'
 
 /** Present-and-null, for a nullable field. */
 function nullable<T>(value: T | null | undefined): T | null {
@@ -323,5 +324,65 @@ export function shapeWatchdog(onCommandLoss: string | null, windows: Windows): u
       ordered: report.ordered,
       complete: report.complete,
     },
+  }
+}
+
+/**
+ * One assembled observation frame, as the black box records it (§25.1's last bullet).
+ *
+ * Payloads are absent by construction — this is the *index* of a frame, not the frame — which is
+ * what makes it affordable to record every cycle. An incident investigation months later reads this
+ * and can say which sample went in and how far apart they were, which is exactly what "the policy
+ * behaved oddly" turns into once somebody has to check it.
+ *
+ * The stream rows are an **array in the order the streams were given**, which is the descriptor's
+ * order. It is the only order in which two frames can be read row by row, and it is the same
+ * reasoning §46.3's window list is an array: canonical JSON sorts an object's keys, and a table
+ * whose rows reorder themselves between frames is a table nobody can diff.
+ *
+ * A stream with no sample gets five present-and-null columns rather than five absent keys, for the
+ * duller half of the same reason: a console lays these out in a table, and a row with no columns
+ * renders as blank rather than as "this stream had nothing".
+ */
+export function shapeObservation(frame: ObservationFrame): unknown {
+  return {
+    target_ns: frame.target_ns,
+    streams: frame.streams.map(stream => ({
+      name: stream.name,
+      modality: stream.modality,
+      latency_ms: nullable(stream.latency_ms),
+      uncertainty_ms: nullable(stream.uncertainty_ms),
+      budget_ms: nullable(stream.budget_ms),
+      age_ms: stream.chosen === null ? null : stream.chosen.age_ms,
+      considered: stream.chosen === null ? 0 : stream.chosen.considered,
+      over_budget: stream.chosen === null ? false : stream.chosen.over_budget,
+      seq: stream.chosen === null ? null : stream.chosen.seq,
+      stamp_ns: stream.chosen === null ? null : stream.chosen.stamp_ns,
+    })),
+    skew_ms: nullable(frame.skew_ms),
+    skew_upper_ms: nullable(frame.skew_upper_ms),
+    undeclared_latency: [...frame.undeclared_latency],
+    undeclared_budget: [...frame.undeclared_budget],
+    holds: frame.holds.map(hold => ({
+      stream: hold.stream, reason: hold.reason, detail: hold.detail,
+    })),
+    verdict: frame.verdict,
+    deliverable: frame.deliverable,
+    // The projection onto §26's record, inside the frame rather than beside it. It is derived from
+    // everything above, and pinning it in a second corpus would let an edition agree about a frame
+    // and disagree about the only version of it that survives the day.
+    record: shapeObservationRecord(frame),
+  }
+}
+
+function shapeObservationRecord(frame: ObservationFrame): unknown {
+  const record = toRecord(frame)
+  return {
+    target_ns: record.target_ns,
+    worst_skew_us: nullable(record.worst_skew_us),
+    streams_absent: record.streams_absent,
+    streams: record.streams.map(stream => ({
+      name: stream.name, age_us: stream.age_us, stale: stream.stale,
+    })),
   }
 }

@@ -59,7 +59,12 @@ jobs:
       - name: Kernel builds for a safety MCU
         run: |
           rustup target add thumbv7em-none-eabihf
-          cargo build -p skynet-kernel --target thumbv7em-none-eabihf
+          # The ring beside it. It does not run on the safety MCU — the command path is on the
+          # application processor — but it is `no_std` with no `alloc` for the same reason the kernel
+          # is, and this is the check that says so. A ring that quietly acquired a `Vec` would be an
+          # allocation on the one path §25 says never touches an allocator, and nothing else in the
+          # workspace would have noticed.
+          cargo build -p skynet-kernel -p skynet-ring --target thumbv7em-none-eabihf
 
   # The vendor-facing ABI. A driver author reads these headers before deciding whether the platform
   # is worth an afternoon, so they must compile cleanly from both C and C++.
@@ -233,14 +238,75 @@ jobs:
       # §23.1 again, from the other side. Two crates cannot be safe by construction: `skynet-rhal`
       # declares a C vtable of raw function pointers, and `skynet-cli` loads arbitrary native code.
       # Every other crate can be, and stays that way.
-      - name: Everything but the ABI and the loader forbids unsafe
+      #
+      # `skynet-ring` is the one worth pausing over, because a lock-free structure shared between two
+      # processes is the obvious place for that list to lose a member. It does not: the shared region
+      # is modelled as `&[AtomicU32]`, which has interior mutability, so both ends read and write it
+      # with the memory model spelling out what each observes and with no `unsafe` anywhere. What
+      # genuinely needs it — turning an `mmap` into that slice — is one call, and it belongs to the
+      # mapping layer rather than to the protocol. The protocol is the part where a mistake is a
+      # moving robot, and it is the part the compiler checks.
+      - name: Everything but the ABI, the loader and the mapping forbids unsafe
         run: |
-          for crate in skynet-json skynet-sha256 skynet-ed25519 skynet-kernel skynet-contracts skynet-urdf skynetd skynetd-io skynet-blackbox; do
-            grep -q 'forbid(unsafe_code)' "crates/$crate/src/lib.rs" || {
-              echo "::error::crates/$crate dropped forbid(unsafe_code)."
+          # An allow-list of the three, and every *other* crate in the workspace is required to
+          # forbid it — enumerated from the directory rather than from a list kept beside it, so the
+          # check covers the next crate somebody adds instead of the ones somebody remembered. The
+          # previous version listed the crates that must forbid it, which is the same check with the
+          # default pointing the wrong way: a new crate joined the workspace unwatched.
+          allowed="skynet-rhal skynet-cli skynet-ring-shm"
+          for path in crates/*/; do
+            crate=$(basename "$path")
+            case " $allowed " in *" $crate "*) continue ;; esac
+            grep -q 'forbid(unsafe_code)' "$path/src/lib.rs" || {
+              echo "::error::crates/$crate does not forbid(unsafe_code), and is not one of: $allowed"
+              echo "§23.1. If it genuinely cannot be safe, say so here and say why in its crate docs."
               exit 1
             }
           done
+
+          # And the three are each allowed for one stated reason, so the reason has to still be
+          # written down. `skynet-ring-shm` is the newest and the smallest: four `extern "C"`
+          # declarations, one mmap and one `from_raw_parts`, deliberately split from the protocol in
+          # `skynet-ring` so that a reviewer asking whether the command path is memory-safe reads a
+          # short file.
+          for crate in $allowed; do
+            grep -q 'unsafe' "crates/$crate/src/lib.rs" || {
+              echo "::error::crates/$crate is on the unsafe allow-list and contains no unsafe."
+              echo "Either it no longer needs to be there, or lib.rs no longer explains why it is."
+              exit 1
+            }
+          done
+
+      # A sentence with a hole in it.
+      #
+      # Rust joins a string across lines with a trailing backslash, which also eats the next line's
+      # indentation. Lose the backslash and the indentation stays: the compiler is happy, every test
+      # passes, and an operator reads `...has no Hub to send to.              §10's pairing...`.
+      #
+      # It has happened three times in this repository — twice in one session, in an MCAP channel
+      # schema and in a console message, and once before that in the sentence a robot prints when it
+      # cannot issue a credential, where it went unnoticed for four sessions. The corpus caught one
+      # because it compares two editions' schema bytes; the console caught another because somebody
+      # looked at the page. Nothing was watching for the third.
+      #
+      # Long literals only, and not the ones with embedded JSON: a short string may legitimately
+      # align a column of CLI output, and a test fixture may pretty-print an object.
+      - name: No string literal has a hole punched in it
+        run: |
+          # `-o`, so the space test is applied to the **literal** and not to the source line. The
+          # first version of this check matched a line's own indentation and fired on forty
+          # perfectly good sentences, which is the shape of check somebody switches off.
+          #
+          # `grep -o` still prints `path:line:` in front of each match, so a failure names where to
+          # look.
+          if grep -rnoE '"[^"]{80,}"' --include='*.rs' crates/ \
+             | grep -vF '\"' \
+             | grep -E '[^ ] {10,}[^ ]'; then
+            echo "::error::a string literal contains a run of spaces where a line continuation was."
+            echo "Rust's trailing backslash joins the lines *and* eats the next line's indentation."
+            echo "Without it the indentation ends up inside the sentence somebody reads."
+            exit 1
+          fi
 
       # §33.1. `skynetd` is not safety-critical and is built that way: it never touches an
       # actuator, and that single property is what licenses it to be a large, allocating,

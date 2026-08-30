@@ -63,6 +63,17 @@ name = "skynet-rhal"
 version = "0.1.0"
 
 [[package]]
+name = "skynet-ring"
+version = "0.1.0"
+
+[[package]]
+name = "skynet-ring-shm"
+version = "0.1.0"
+dependencies = [
+ "skynet-ring",
+]
+
+[[package]]
 name = "skynet-sha256"
 version = "0.1.0"
 

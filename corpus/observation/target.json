@@ -1,0 +1,105 @@
+{
+  "corpus": "observation",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "every-stream-can-answer",
+      "note": "The slowest stream decides. The camera describes 0.972 s and the joints describe 1.019 s, so the most recent frame everybody can answer for is at 0.972 s — and aiming at now instead would make the camera the stalest stream in every frame for ever, a problem the loop created.",
+      "input": {
+        "now_ns": 1100000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 28,
+            "budget_ms": 80,
+            "samples": [
+              {
+                "stamp_ns": 1000000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 1,
+            "budget_ms": 10,
+            "samples": [
+              {
+                "stamp_ns": 1020000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"target_ns\":972000000}"
+    },
+    {
+      "id": "a-stream-with-nothing-yet",
+      "note": "Null rather than a later instant, and null rather than an instant that quietly drops the stream. It is the same fact the assembler reports as a `no_sample` hold, and it is worth having before building a frame nobody can use.",
+      "input": {
+        "now_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 0,
+            "budget_ms": 80,
+            "samples": [
+              {
+                "stamp_ns": 990000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "depth",
+            "modality": "depth",
+            "latency_ms": 0,
+            "budget_ms": 80,
+            "samples": [
+              {
+                "stamp_ns": 1500000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"target_ns\":null}"
+    },
+    {
+      "id": "no-streams",
+      "note": "A policy requiring no observation: every instant is common to all of no streams, so the answer is the one asked about.",
+      "input": {
+        "now_ns": 1000000000,
+        "streams": []
+      },
+      "expected": "{\"target_ns\":1000000000}"
+    },
+    {
+      "id": "latency-larger-than-the-clock",
+      "note": "A declared latency past the start of the monotonic clock. The correction is still right and the instant it names is one no `u64` can express, so the caller gets null rather than a wrapped value.",
+      "input": {
+        "now_ns": 1000000000,
+        "streams": [
+          {
+            "name": "head_cam",
+            "modality": "rgb",
+            "latency_ms": 2000,
+            "budget_ms": 80,
+            "samples": [
+              {
+                "stamp_ns": 1000000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"target_ns\":null}"
+    }
+  ]
+}

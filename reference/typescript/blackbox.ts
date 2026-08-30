@@ -68,7 +68,7 @@ export const EVENT_SUBJECT = 64
 export const EVENT_DETAIL = 96
 export const NO_CAPABILITY = 0xffff
 
-const FRAME_BODY = 48 + MAX_STREAMS * (STREAM_NAME + 8)
+const FRAME_BODY = 52 + MAX_STREAMS * (STREAM_NAME + 8)
 const EVENT_BODY = 4 + EVENT_SUBJECT + EVENT_DETAIL
 const GAP_BODY = 24
 
@@ -190,8 +190,16 @@ export interface Cycle {
 export interface Frame {
   observation: Uint8Array
   targetNs: bigint
-  worstSkewUs: number
+  /** Null when fewer than two streams contributed; written as `SKEW_UNMEASURABLE`. */
+  worstSkewUs: number | null
+  /** Streams the record could not carry. A limit of the **format**. */
   streamsOmitted: number
+  /**
+   * Streams the policy declared that produced no sample at all. A limit of the **robot**, and
+   * deliberately not the field above: an investigation reading one as the other goes looking for a
+   * bigger record instead of a dead camera.
+   */
+  streamsAbsent: number
   streams: { name: string; ageUs: number; stale: boolean }[]
 }
 
@@ -287,12 +295,15 @@ function encodeCycle(shape: Shape, slot: Cursor, cycle: Cycle): void {
 function encodeFrame(slot: Cursor, frame: Frame): void {
   slot.raw(PREFIX, frame.observation)
   slot.u64(PREFIX + 32, frame.targetNs)
-  slot.u32(PREFIX + 40, frame.worstSkewUs)
+  slot.u32(PREFIX + 40, frame.worstSkewUs ?? SKEW_UNMEASURABLE)
   const written = Math.min(frame.streams.length, MAX_STREAMS)
   slot.u16(PREFIX + 44, written)
   slot.u16(PREFIX + 46, frame.streamsOmitted + Math.max(0, frame.streams.length - MAX_STREAMS))
+  slot.u16(PREFIX + 48, frame.streamsAbsent)
+  // PREFIX + 50 is reserved and left zero, so the stream table starts on a four-byte boundary and a
+  // hex dump of a damaged ring stays readable.
   frame.streams.slice(0, MAX_STREAMS).forEach((stream, index) => {
-    const at = PREFIX + 48 + index * (STREAM_NAME + 8)
+    const at = PREFIX + 52 + index * (STREAM_NAME + 8)
     slot.text(at, STREAM_NAME, stream.name)
     slot.u32(at + STREAM_NAME, stream.ageUs)
     slot.u8(at + STREAM_NAME + 4, stream.stale ? 1 : 0)
@@ -313,7 +324,25 @@ export const HEADER_ALIGN = 4096
 export const ROBOT_ID = 64
 export const TOKEN_NAME = 48
 export const CHANNEL_NAME = 48
-export const FORMAT_VERSION = 1
+/**
+ * The ring's on-disk format version.
+ *
+ * **2** adds `streams_absent` to the frame record and gives `worst_skew_us` a value meaning *not
+ * measurable* (`SKEW_UNMEASURABLE`), which moves the stream table four bytes. Both exist because the
+ * version-1 record could not distinguish a frame whose streams were all present from one whose
+ * capture paths had died: it recorded the survivors and said nothing about the rest, so a recording
+ * of a robot with two dead cameras read as a recording of a robot with one camera.
+ */
+export const FORMAT_VERSION = 2
+
+/**
+ * `worst_skew_us` when the skew is **not measurable**.
+ *
+ * A frame in which fewer than two streams contributed has no spread — the spread of one instant is
+ * undefined, not zero — and an unsigned field has to write something. `u32::MAX` is seventy-one
+ * minutes of skew, so nothing real can collide with it.
+ */
+export const SKEW_UNMEASURABLE = 4_294_967_295
 
 const AT = {
   MAGIC: 0, VERSION: 8, HEADER_LEN: 12, RECORD_SIZE: 16, CAPACITY: 20,
@@ -498,13 +527,24 @@ export function wire(): { id: number; topic: string; name: string; definition: s
       mono_ns: mono(),
       observation: field('string', 'Hex SHA-256 of the assembled frame.'),
       target_ns: field('integer', 'The instant the assembler targeted.'),
-      worst_skew_us: field(
+      worst_skew_us: maybe(
         'integer',
         "The worst skew between any stream and that instant. Recorded so that 'the policy behaved "
         + "oddly' can be checked against 'the frame it was given was 80 ms skewed' months later "
-        + '(§25.1).',
+        + '(§25.1). Null when fewer than two streams contributed: the spread of one instant is '
+        + 'undefined rather than zero, and zero would make a frame with three dead capture paths '
+        + 'read as a perfectly synchronised one.',
       ),
-      streams_omitted: field('integer', 'Streams the record could not carry, counted rather than dropped.'),
+      streams_omitted: field(
+        'integer',
+        'Streams the record could not carry, counted rather than dropped. A limit of the format.',
+      ),
+      streams_absent: field(
+        'integer',
+        'Streams the policy declared that produced no sample at all. A limit of the robot, and '
+        + 'deliberately not the field above: an investigation reading one as the other goes looking '
+        + 'for a bigger record instead of a dead camera.',
+      ),
       streams: arrayOf(object({
         name: field('string', "The stream's name."),
         age_us: field(
@@ -516,8 +556,12 @@ export function wire(): { id: number; topic: string; name: string; definition: s
           "Whether that exceeded the policy's declared staleness budget, which is a hold rather "
           + 'than a silently older frame (§25.1).',
         ),
-      }, ['name', 'age_us', 'stale'], "One stream's contribution to the frame."), 'Per-stream ages.'),
-    }, ['mono_ns', 'observation', 'target_ns', 'worst_skew_us', 'streams_omitted', 'streams'],
+      }, ['name', 'age_us', 'stale'], "One stream's contribution to the frame."),
+        'Per-stream ages, for the streams that had one.'),
+    }, [
+      'mono_ns', 'observation', 'target_ns', 'worst_skew_us', 'streams_omitted', 'streams_absent',
+      'streams',
+    ],
       'One assembled observation frame, and how well aligned it was.')],
 
     [6, '/sk/event', 'sk_event', object({
