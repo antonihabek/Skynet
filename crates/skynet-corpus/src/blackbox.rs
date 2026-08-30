@@ -274,8 +274,15 @@ pub fn records(input: &Json) -> Result<String, String> {
             let view = FrameView {
                 observation,
                 target_ns: u64_of(entry, "target_ns")?,
-                worst_skew_us: u32_of(entry, "worst_skew_us")?,
+                // Present-and-null in the case file means "not measurable", which is a value the
+                // record carries rather than a field it omits — so an absent key is still a broken
+                // case rather than a quiet `None`.
+                worst_skew_us: match entry.get("worst_skew_us") {
+                    Some(skynet_json::Json::Null) => None,
+                    _ => Some(u32_of(entry, "worst_skew_us")?),
+                },
                 streams_omitted: u32_of(entry, "streams_omitted")? as u16,
+                streams_absent: u32_of(entry, "streams_absent")? as u16,
                 streams: &borrowed,
             };
             encode(shape, &mut slot, sequence, mono_ns, Entry::Frame(&view))

@@ -225,7 +225,13 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             json::plan_to_json(&resolve_transport(&source, &target, options))
         }
 
-        "cycle" | "fuzz" => {
+        // Guarded on the label, and it was not always. `"cycle" | "fuzz"` sat here as a catch-all,
+        // which meant a *new* fuzz family did not arrive as an unsupported corpus — the thing this
+        // runner reports loudly and refuses to skip — but as forty-eight cycle vectors with no
+        // `limits`. The report was still a failure, so nothing shipped wrong; it named the wrong
+        // problem, which on a quieter day is how a whole corpus comes to be dispatched into an arm
+        // that was never written for it. Every arm now says which files it is for.
+        "cycle" | "fuzz" if label.contains("cycle") => {
             let owned = LimitsOwned::from_json(input.get("limits").ok_or("no `limits`")?)?;
             let cycle_owned = CycleOwned::from_json(input.get("cycle").ok_or("no `cycle`")?)?;
             let last_sequence = input.get_present("last_sequence").and_then(Json::as_f64);
@@ -393,6 +399,38 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             )
         }
 
+        // §25.1. Two files and one parser, because the two questions are asked of exactly the same
+        // input: given these streams, what goes in the frame, and which instant should a live loop
+        // aim at in the first place. An edition could agree about every assembled frame and still
+        // pick a different target every cycle, which is a disagreement about every frame in the
+        // field and none in the corpus — so the target is pinned beside the frames rather than
+        // trusted to follow from them.
+        "observation" if label.contains("target") => {
+            let streams = observation_streams(input)?;
+            let now = input
+                .get("now_ns")
+                .and_then(Json::as_f64)
+                .ok_or("no `now_ns`")? as u64;
+            let mut out = Json::obj();
+            out.set(
+                "target_ns",
+                match skynet_contracts::observation::latest_common_instant(now, &streams) {
+                    Some(instant) => Json::Num(instant as f64),
+                    None => Json::Null,
+                },
+            );
+            out
+        }
+
+        "observation" | "fuzz" if label.contains("observation") => {
+            let streams = observation_streams(input)?;
+            let target = input
+                .get("target_ns")
+                .and_then(Json::as_f64)
+                .ok_or("no `target_ns`")? as u64;
+            skynet_contracts::observation::assemble(target, &streams).to_json()
+        }
+
         "calibration" => {
             let now = json::conditions_from_json(input.get_present("now"));
             let mut records = Vec::new();
@@ -461,4 +499,44 @@ pub fn default_root() -> PathBuf {
         .join("..")
         .join("..")
         .join("corpus")
+}
+
+/// The stream list §25.1's two corpora share.
+///
+/// `latency_ms`, `uncertainty_ms` and `budget_ms` are read with [`Json::get`] rather than
+/// [`Json::get_present`], so an explicit `null` and an absent key arrive as the same `None`. That is
+/// the right collapse *here* and only here: on the wire the two are different facts, and the
+/// assembler's answer to both is identical — nobody declared it — which is exactly what the
+/// reference edition does with `?? null`.
+fn observation_streams(input: &Json) -> Result<Vec<skynet_contracts::observation::Stream>, String> {
+    let mut streams = Vec::new();
+    for raw in input.arr_or_empty("streams") {
+        let mut samples = Vec::new();
+        for sample in raw.arr_or_empty("samples") {
+            samples.push(skynet_contracts::observation::Sample {
+                stamp_ns: sample
+                    .get("stamp_ns")
+                    .and_then(Json::as_f64)
+                    .ok_or("a sample with no `stamp_ns`")? as u64,
+                seq: sample.get("seq").and_then(Json::as_f64).unwrap_or(0.0) as u64,
+            });
+        }
+        streams.push(skynet_contracts::observation::Stream {
+            name: raw
+                .get("name")
+                .and_then(Json::as_str)
+                .ok_or("a stream with no `name`")?
+                .to_string(),
+            modality: raw
+                .get("modality")
+                .and_then(Json::as_str)
+                .unwrap_or("")
+                .to_string(),
+            latency_ms: raw.get("latency_ms").and_then(Json::as_f64),
+            uncertainty_ms: raw.get("uncertainty_ms").and_then(Json::as_f64),
+            budget_ms: raw.get("budget_ms").and_then(Json::as_f64),
+            samples,
+        });
+    }
+    Ok(streams)
 }

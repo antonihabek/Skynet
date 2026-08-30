@@ -14,6 +14,8 @@ members = [
   "crates/skynet-sha256",
   "crates/skynet-ed25519",
   "crates/skynet-rhal",
+  "crates/skynet-ring",
+  "crates/skynet-ring-shm",
   "crates/skynet-kernel",
   "crates/skynet-contracts",
   "crates/skynet-urdf",

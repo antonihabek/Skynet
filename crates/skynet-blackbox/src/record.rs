@@ -143,13 +143,23 @@ pub const MAX_STREAMS: usize = 6;
 /// The fixed width of a stream name inside a [`Frame`] record.
 pub const STREAM_NAME: usize = 16;
 
+/// [`Frame::worst_skew_us`] when the skew is **not measurable**.
+///
+/// A frame in which fewer than two streams contributed a sample has no spread — the spread of one
+/// instant is undefined, not zero — and an unsigned field has to write something. Writing zero would
+/// make a recording of a robot with one working camera and three dead capture paths read, months
+/// later, as a perfectly synchronised frame, which is the exact sentence §25.1 exists to prevent.
+///
+/// `u32::MAX` is seventy-one minutes of skew, so nothing real can collide with it.
+pub const SKEW_UNMEASURABLE: u32 = u32::MAX;
+
 /// The fixed width of an [`Event`]'s subject — a package id, a capability token, a slot name.
 pub const EVENT_SUBJECT: usize = 64;
 
 /// The fixed width of an [`Event`]'s detail text.
 pub const EVENT_DETAIL: usize = 96;
 
-const FRAME_BODY: usize = 48 + MAX_STREAMS * (STREAM_NAME + 8);
+const FRAME_BODY: usize = 52 + MAX_STREAMS * (STREAM_NAME + 8);
 const EVENT_BODY: usize = 4 + EVENT_SUBJECT + EVENT_DETAIL;
 const GAP_BODY: usize = 24;
 
@@ -449,10 +459,23 @@ pub struct Frame {
     pub observation: [u8; 32],
     /// The instant the assembler targeted.
     pub target_ns: u64,
-    /// The worst skew between any stream in the frame and that instant.
-    pub worst_skew_us: u32,
+    /// The worst skew between any stream in the frame and that instant, or `None` when there were
+    /// fewer than two streams to measure between. See [`SKEW_UNMEASURABLE`].
+    pub worst_skew_us: Option<u32>,
     /// Streams the frame could not fit; reported so the record is not silently partial.
+    ///
+    /// A limit of the **format**: more streams than [`MAX_STREAMS`]. Not to be confused with
+    /// [`Self::streams_absent`], which is a limit of the robot.
     pub streams_omitted: u16,
+    /// Streams the policy declared that produced **no sample at all**.
+    ///
+    /// A limit of the **robot**: a capture path that is not running. It has no row below, because a
+    /// stream with no sample has no age — and without this count a frame with one working camera and
+    /// two dead ones records one stream and reads, months later, as a robot with one camera.
+    ///
+    /// Separate from [`Self::streams_omitted`] because an investigation reading one as the other
+    /// goes looking for a bigger record instead of a dead camera.
+    pub streams_absent: u16,
     /// Per stream: how far back its sample was, and whether that broke its budget.
     pub streams: Vec<Stream>,
 }
@@ -698,9 +721,11 @@ pub struct FrameView<'a> {
     /// See [`Frame::target_ns`].
     pub target_ns: u64,
     /// See [`Frame::worst_skew_us`].
-    pub worst_skew_us: u32,
+    pub worst_skew_us: Option<u32>,
     /// Streams beyond [`MAX_STREAMS`], counted rather than written.
     pub streams_omitted: u16,
+    /// See [`Frame::streams_absent`].
+    pub streams_absent: u16,
     /// Per stream: name, age, and whether the budget broke.
     pub streams: &'a [(&'a str, u32, bool)],
 }
@@ -873,7 +898,11 @@ fn encode_cycle(shape: Shape, slot: &mut [u8], cycle: &CycleView<'_>) -> Result<
 fn encode_frame(slot: &mut [u8], frame: &FrameView<'_>) {
     slot[PREFIX..PREFIX + 32].copy_from_slice(&frame.observation);
     put_u64(slot, PREFIX + 32, frame.target_ns);
-    put_u32(slot, PREFIX + 40, frame.worst_skew_us);
+    put_u32(
+        slot,
+        PREFIX + 40,
+        frame.worst_skew_us.unwrap_or(SKEW_UNMEASURABLE),
+    );
     let written = frame.streams.len().min(MAX_STREAMS);
     put_u16(slot, PREFIX + 44, written as u16);
     // Anything the caller could not fit, plus anything this record could not: a frame with eight
@@ -884,7 +913,10 @@ fn encode_frame(slot: &mut [u8], frame: &FrameView<'_>) {
         PREFIX + 46,
         frame.streams_omitted.saturating_add(overflow),
     );
-    let base = PREFIX + 48;
+    put_u16(slot, PREFIX + 48, frame.streams_absent);
+    // PREFIX + 50 is reserved and left zero, so the stream table starts on a four-byte boundary and
+    // a hex dump of a damaged ring stays readable.
+    let base = PREFIX + 52;
     for (index, (name, age_us, stale)) in frame.streams.iter().take(MAX_STREAMS).enumerate() {
         let at = base + index * (STREAM_NAME + 8);
         put_text(slot, at, STREAM_NAME, name);
@@ -1015,7 +1047,7 @@ fn decode_frame(slot: &[u8]) -> Frame {
     let mut observation = [0u8; 32];
     observation.copy_from_slice(&slot[PREFIX..PREFIX + 32]);
     let written = (get_u16(slot, PREFIX + 44) as usize).min(MAX_STREAMS);
-    let base = PREFIX + 48;
+    let base = PREFIX + 52;
     let mut streams = Vec::with_capacity(written);
     for index in 0..written {
         let at = base + index * (STREAM_NAME + 8);
@@ -1028,8 +1060,12 @@ fn decode_frame(slot: &[u8]) -> Frame {
     Frame {
         observation,
         target_ns: get_u64(slot, PREFIX + 32),
-        worst_skew_us: get_u32(slot, PREFIX + 40),
+        worst_skew_us: match get_u32(slot, PREFIX + 40) {
+            SKEW_UNMEASURABLE => None,
+            value => Some(value),
+        },
         streams_omitted: get_u16(slot, PREFIX + 46),
+        streams_absent: get_u16(slot, PREFIX + 48),
         streams,
     }
 }

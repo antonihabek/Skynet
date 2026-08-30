@@ -73,6 +73,7 @@ fn body() -> EmbodimentDescriptor {
             height: Some(480.0),
             fps: Some(30.0),
             frame: Some("right_arm.tool0".to_string()),
+            latency_ms: Some(28.0),
         }],
         control: ControlProfile {
             modes: vec!["position".to_string(), "torque".to_string()],

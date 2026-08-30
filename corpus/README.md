@@ -59,7 +59,9 @@ Four properties, each load-bearing:
 | `admission/` | Package manifest + device capacity + flags | The exact finding list, in order |
 | `certification/` | SCTS results + field conformance + bench age | The exact award |
 | `readiness/` | Registry subject | Attainable tier and blocker list |
-| `fuzz/` | Generated transport and cycle inputs | Their outputs |
+| `observation/frames` | A target instant + every stream's declared latency, budget and samples | The exact assembled frame: which sample per stream, its age, the skew |
+| `observation/target` | The same streams + the current instant | The instant a live loop should aim at, or null |
+| `fuzz/` | Generated transport, cycle and observation inputs | Their outputs |
 
 `kinematics/` is the newest, and it exists because `cycle/` cannot do its job. A guard trip is a
 boolean, and two editions could agree on every trip in the corpus while disagreeing about every pose
@@ -78,6 +80,26 @@ pinned by one edition's own suite and by nothing else — which is the arrangeme
 prevent. Both fields are now in the reference's cycle vector, in curated cases and in the fuzz
 generator, and six of the eight guards appear in `fuzz/cycle`'s verdicts. The lesson generalises: a
 corpus grows a blind spot wherever an *input* field is missing, not only where an implementation is.
+
+`observation/` is the corpus §25.1 has been owed since Part II, and it exists for the same reason
+`kinematics/` does: **the failure it describes does not announce itself.** A frame assembled from the
+latest value of each stream is a frame that never existed — the arm where it is now, the image where
+it was two frames ago — and §25.1 says plainly what that looks like from outside: *"policies degrade
+in ways that look like bad training."* The numbers the assembler reports are the only evidence the
+frame was ever wrong, so two editions disagreeing about them is two robots reporting two different
+histories of the same incident.
+
+It is two files because there are two questions and the second is not a detail of the first. Given a
+target instant, what goes in the frame; and given a set of streams, which instant should a live loop
+aim at at all. An edition could reproduce every assembled frame here and pick a different target
+every cycle, which would be a disagreement about every frame in the field and none in the corpus.
+
+`fuzz/observation` draws its distribution deliberately, and the first version of it is the reason
+that sentence is here: drawing the staleness band per *sample* rather than per *stream* meant almost
+every stream held one fresh sample, and forty-eight generated frames produced three stale ones. The
+generator now prints its own coverage — verdicts, both hold reasons, the unbounded paths, ties and
+negative ages — beside the file counts, so a change that flattens the distribution is visible when
+it is made rather than three sessions later.
 
 `limits/` is not one of the six §31.4 lists. Limit resolution is contract behaviour with a
 serialisable output and three composition rules — the minimum rule, the widening refusal, the guard

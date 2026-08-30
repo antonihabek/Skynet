@@ -79,9 +79,27 @@ if (!existsSync(hub)) {
 
 /** The reference's spelling of an import, rewritten to the Hub's. */
 function toHub(source) {
-  return source
+  return lf(source)
     .replace(/from '\.\/types\.ts'/g, "from '../types'")
     .replace(/from '\.\/([a-z-]+)\.ts'/g, "from './$1'")
+}
+
+/**
+ * One line ending, so a checkout convention cannot present as a contract divergence.
+ *
+ * This is not tidiness. Both repositories are cloned on Windows with `core.autocrlf=true`, and the
+ * first `git checkout` after a merge re-materialised the Hub's copies with CRLF while this
+ * repository's reference kept LF. From that moment the comparison below reported all six mirrored
+ * modules as diverged **in every line**, and the Hub's eight digest assertions all failed — on two
+ * trees that were character for character identical.
+ *
+ * A check that always fails is a check somebody deletes, which would have left the drift this tool
+ * exists to catch unwatched again. `.gitattributes` in both repositories now pins these files to
+ * LF so the situation does not recur; this normalisation is the belt to that pair of braces, and it
+ * costs nothing, because a line ending is never a semantic difference in TypeScript.
+ */
+function lf(source) {
+  return source.split('\r\n').join('\n')
 }
 
 let diverged = 0
@@ -110,7 +128,7 @@ for (const name of MIRRORS) {
     continue
   }
 
-  if (readFileSync(theirs, 'utf8') === expected) {
+  if (lf(readFileSync(theirs, 'utf8')) === expected) {
     console.log(`match    ${name}`)
     continue
   }
@@ -134,7 +152,7 @@ for (const name of MIRRORS) {
     for (const line of lines) seen.set(line, (seen.get(line) ?? 0) + 1)
     return seen
   }
-  const mine = count(readFileSync(theirs, 'utf8').split('\n'))
+  const mine = count(lf(readFileSync(theirs, 'utf8')).split('\n'))
   const yours = count(expected.split('\n'))
   let differing = 0
   for (const [line, n] of mine) differing += Math.max(0, n - (yours.get(line) ?? 0))

@@ -71,6 +71,16 @@ pub struct Context<'a, L: Launcher, S: Slots> {
     pub blackbox: Option<&'a mut crate::blackbox::Recorder>,
     /// Monotonic nanoseconds, for the records this request writes.
     pub mono_ns: u64,
+    /// Why sending cannot work at all, from `connectivity::Sink::obstacle`.
+    pub outbound_obstacle: Option<&'a str>,
+    /// Where outbound items would go, from `connectivity::Sink::describe`.
+    ///
+    /// A string rather than the sink itself, because this is the only thing an API answer needs
+    /// from it and passing the sink would give every request handler the ability to send. It is
+    /// supplied rather than constructed here for the reason `/outbound` needs it at all: the honest
+    /// answer differs between a paired robot, an unpaired one and a developer's machine running
+    /// `--outbox`, and only the process that chose the sink knows which of those this is.
+    pub outbound_sink: &'a str,
 }
 
 /// Answer one request.
@@ -147,7 +157,12 @@ pub fn handle<L: Launcher, S: Slots>(
             ok(crate::post::run(context.daemon.store.layout(), wall_s).to_json())
         }
         ("GET", ["outbound"]) => {
-            ok(crate::outbound::Queue::of(context.daemon.store.layout()).to_json())
+            let layout = context.daemon.store.layout();
+            ok(crate::outbound::Queue::of(layout).to_json_with(
+                &crate::connectivity::Table::of(layout),
+                context.outbound_sink,
+                context.outbound_obstacle,
+            ))
         }
         ("GET", ["calibration"]) => {
             // Wall time, because §45.4's backstop is elapsed time and a calibration outlives every

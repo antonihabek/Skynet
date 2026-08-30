@@ -513,8 +513,19 @@ fn frame_message(record: &Record, frame: &Frame) -> String {
     document.set("mono_ns", Json::Num(record.mono_ns as f64));
     document.set("observation", Json::Str(hex(&frame.observation)));
     document.set("target_ns", Json::Num(frame.target_ns as f64));
-    document.set("worst_skew_us", Json::Num(frame.worst_skew_us as f64));
+    // Present-and-null rather than absent or zero. A frame with fewer than two contributing streams
+    // has no spread to report, and that is a *fact* about the frame rather than a missing field —
+    // the same distinction §7.2 draws between "nobody declared an envelope" and "the envelope is
+    // null", arriving in a recording somebody will read months later.
+    document.set(
+        "worst_skew_us",
+        match frame.worst_skew_us {
+            Some(value) => Json::Num(value as f64),
+            None => Json::Null,
+        },
+    );
     document.set("streams_omitted", Json::Num(frame.streams_omitted as f64));
+    document.set("streams_absent", Json::Num(frame.streams_absent as f64));
     let mut streams = Json::arr();
     for stream in &frame.streams {
         let mut item = Json::obj();
