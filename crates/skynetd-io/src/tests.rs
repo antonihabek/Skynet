@@ -1045,12 +1045,144 @@ fn console_fixture() {
     fixture.provision();
 
     // A robot with a body, a trusted vendor, a signed policy and an unsigned one — so every state
-    // the Signed by column can show is on the page at once.
-    write_embodiment(&fixture, BENCH_ARM);
+    // the Signed by column can show is on the page at once. The body declares §46's windows and
+    // gets one of them wrong, so the watchdog panel has the case it exists for rather than an
+    // honest blank.
+    write_embodiment(&fixture, BENCH_ARM_WATCHDOG);
     let vendor = driver_key(31);
     write_trust(&fixture, "bench-robotics", &public_hex(&vendor));
 
     let layout = fixture.daemon.store.layout().clone();
+
+    // Every row the Trust panel can draw, on one page: a key with full provenance, one added by
+    // hand before anything recorded it, and a line the robot cannot read at all. The panel's job is
+    // to keep those three apart, and a fixture holding only the happy one would not show whether it
+    // does.
+    std::fs::write(
+        layout.trust(),
+        format!(
+            "{{\"keys\":[\
+               {{\"label\":\"bench-robotics\",\"key\":\"{vendor}\",\
+                 \"added_at\":\"2026-08-30T09:14:02Z\",\"added_by\":\"alice\",\
+                 \"note\":\"release signing, added at pairing\"}},\
+               {{\"label\":\"legacy-integrator\",\"key\":\"{other}\"}},\
+               {{\"label\":\"typo\",\"key\":\"not-a-key\"}}\
+             ]}}",
+            vendor = public_hex(&vendor),
+            other = public_hex(&driver_key(77)),
+        ),
+    )
+    .unwrap();
+
+    // Calibration in four states at once (§45): one valid and signed, one expired on age, one that
+    // fails its own residual, and one nobody has ever measured. A fixture holding only the healthy
+    // case would not show whether the panel keeps them apart.
+    let calibration = layout.calibration();
+    std::fs::create_dir_all(&calibration).unwrap();
+    let now_s = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs() as f64)
+        .unwrap_or(0.0);
+    for (set, extra, taken) in [
+        ("joint_zeros", "\"policy\":{}", now_s - 900.0),
+        (
+            "camera_extrinsics",
+            "\"policy\":{\"max_age_s\":600,\"invalidating_events\":[\"collision\"]}",
+            now_s - 3_600.0,
+        ),
+        (
+            "tool_offset",
+            "\"residual\":12,\"residual_threshold\":2,\"policy\":{}",
+            now_s - 60.0,
+        ),
+    ] {
+        std::fs::write(
+            calibration.join(format!("{set}.json")),
+            format!(
+                "{{\"set\":\"{set}\",\"method\":\"charuco-12x9, 40 poses\",\"residual\":0.4,\
+                  \"residual_threshold\":1,\"operator\":\"alice\",\
+                  \"conditions\":{{\"at_s\":{taken},\"temperature_c\":22}},{extra}}}"
+            ),
+        )
+        .unwrap();
+    }
+    // And one of them signed, so the Signed by column has something other than `absent` in it.
+    let zeros = std::fs::read_to_string(calibration.join("joint_zeros.json")).unwrap();
+    let zeros_digest = crate::embodiment::digest_of(&Json::parse(&zeros).unwrap()).unwrap();
+    let zeros_hex: String = zeros_digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    std::fs::write(
+        calibration.join("joint_zeros.sig.json"),
+        format!(
+            "{{\"key\":\"{}\",\"value\":\"{}\"}}",
+            public_hex(&vendor),
+            hex_of(&vendor.sign(&crate::calibration::calibration_message(&zeros_hex)))
+        ),
+    )
+    .unwrap();
+
+    // A queue with something in every class and a drop already counted, so the panel's whole
+    // vocabulary is on the page: an incident that is never discarded, a check-in that superseded
+    // four of its own, episodes, and telemetry that has been thrown away.
+    let queue = crate::outbound::Queue::at(layout.outbound(), 4_096, 1_024);
+    queue
+        .enqueue(
+            crate::outbound::Class::Incident,
+            "{\"kind\":\"estop\",\"detail\":\"the button on the chassis\"}",
+        )
+        .unwrap();
+    for generation in 0..5 {
+        queue
+            .enqueue(
+                crate::outbound::Class::CheckIn,
+                &format!("{{\"generation\":{generation}}}"),
+            )
+            .unwrap();
+    }
+    queue
+        .enqueue(crate::outbound::Class::Episode, &"e".repeat(600))
+        .unwrap();
+    // Past the shared pool on purpose, so the panel shows a non-zero Dropped column: a queue that
+    // has never thrown anything away does not demonstrate the one number worth looking at.
+    for index in 0..12 {
+        queue
+            .enqueue(
+                crate::outbound::Class::Telemetry,
+                &format!("{index:02}{}", "t".repeat(300)),
+            )
+            .unwrap();
+    }
+
+    let audit = crate::audit::Audit::of(&layout);
+    for (at, actor, action, subject, previous) in [
+        (
+            "2026-08-30T09:14:02Z",
+            "alice",
+            "trust.add",
+            "bench-robotics",
+            None,
+        ),
+        (
+            "2026-08-30T09:20:41Z",
+            "alice",
+            "trust.add",
+            "openrobot",
+            None,
+        ),
+        (
+            "2026-08-30T11:02:07Z",
+            "carol",
+            "trust.remove",
+            "openrobot",
+            Some("added 2026-08-30T09:20:41Z by alice"),
+        ),
+    ] {
+        audit
+            .append(at, actor, action, subject, "", previous)
+            .unwrap();
+    }
     let body = crate::embodiment::load(&layout);
     let descriptor_digest = body.known().expect("a body").digest_hex.clone();
     std::fs::write(
@@ -1118,6 +1250,12 @@ fn console_fixture() {
         "blackbox",
         "capacity",
         "grants",
+        "trust",
+        "audit",
+        "calibration",
+        "outbound",
+        "watchdog",
+        "post",
     ] {
         let response = fixture.raw("GET", &format!("/{route}"), Some("observer-token"));
         std::fs::write(out.join(route), &response.body).unwrap();
@@ -1128,8 +1266,765 @@ fn console_fixture() {
         .unwrap();
     }
 
+    // The server that replays those status codes. Shipped with the fixture rather than left to
+    // "any static server will do", because a static server does not know that the file beside
+    // `blackbox` is a status code — it answers 200 with the error body, and the console dutifully
+    // renders `undefined records of undefined B` for a robot that said *service unavailable*.
+    // That is the §32.2 violation this console exists not to commit, arriving through the way it
+    // was being looked at rather than through its own code, and it is what a static server drew the
+    // first time somebody actually opened the page.
+    std::fs::write(
+        out.join("fixture-serve.mjs"),
+        include_str!("../console/fixture-serve.mjs"),
+    )
+    .unwrap();
+
     println!("console fixture written to {}", out.display());
-    println!("serve it and open index.html — every panel is a static file named after its route");
+    println!(
+        "node {}/fixture-serve.mjs 8080   # then open http://127.0.0.1:8080/",
+        out.display()
+    );
+    println!("serve it with that, not a plain static server: it replays each route's status code");
+}
+
+// ── The power-on self-test (§48.2) ───────────────────────────────────────────
+
+fn post_check<'a>(body: &'a Json, name: &str) -> &'a Json {
+    body.arr_or_empty("checks")
+        .iter()
+        .find(|row| row.get("check").and_then(Json::as_str) == Some(name))
+        .expect("every §48.2 check is reported")
+}
+
+/// The structural fact §33.1 forces: four of §48.2's eight checks need the actuator path, and this
+/// daemon is forbidden from touching it. They are reported as somebody else's rather than as
+/// unavailable, because "nobody has run this" and "this is not mine to run" are different sentences.
+#[test]
+fn the_checks_skynetd_cannot_run_are_named_as_the_kernels() {
+    let mut fixture = Fixture::new("post-elsewhere");
+    fixture.provision();
+
+    let (status, body) = fixture.request("GET", "/post", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(
+        body.arr_or_empty("checks").len(),
+        8,
+        "§48.2's table is eight rows"
+    );
+
+    for name in [
+        "rhal_abi",
+        "describe_matches_descriptor",
+        "estop_asserted_and_observed",
+        "encoder_sanity",
+        "kernel_corpus_selfcheck",
+    ] {
+        let check = post_check(&body, name);
+        assert_eq!(
+            check.get("outcome").and_then(Json::as_str),
+            Some("elsewhere"),
+            "{name}"
+        );
+        // The row still carries what a failure would mean, which is what makes it worth showing.
+        assert!(!check
+            .get("failure_means")
+            .and_then(Json::as_str)
+            .unwrap_or("")
+            .is_empty());
+    }
+
+    // And nothing may run on the strength of a self-test that ran three of eight checks.
+    assert_eq!(body.get("may_run").and_then(Json::as_bool), Some(false));
+    assert_eq!(body.get("failed").and_then(Json::as_bool), Some(false));
+    assert_eq!(
+        body.get("verdict").and_then(Json::as_str),
+        Some("post_incomplete")
+    );
+}
+
+/// §48.2 sends a *failed* POST to `SAFE`, which is sticky and needs a human. A robot whose checks
+/// could not run does not need a human — it needs the rest of the operating system — so the two
+/// verdicts are separate.
+#[test]
+fn an_unreachable_watchdog_layer_fails_post_and_the_verdict_is_safe() {
+    let mut fixture = Fixture::new("post-inverted");
+    fixture.provision();
+    write_embodiment(
+        &fixture,
+        &NESTED_ARM.replace("\"soc_wdt_ms\": 250", "\"soc_wdt_ms\": 40"),
+    );
+
+    let (_, body) = fixture.request("GET", "/post", Some("observer-token"), "");
+    let nesting = post_check(&body, "watchdog_nesting");
+    assert_eq!(nesting.get("outcome").and_then(Json::as_str), Some("fail"));
+    assert_eq!(body.get("failed").and_then(Json::as_bool), Some(true));
+    assert_eq!(body.get("verdict").and_then(Json::as_str), Some("safe"));
+}
+
+/// An undeclared window is not a fault. Nothing contradicts, and a body nobody has measured is not
+/// a body that is wrong — so it is `unavailable`, and POST is incomplete rather than failed.
+#[test]
+fn an_undeclared_window_leaves_post_incomplete_rather_than_failed() {
+    let mut fixture = Fixture::new("post-undeclared");
+    fixture.provision();
+    write_embodiment(&fixture, BENCH_ARM);
+
+    let (_, body) = fixture.request("GET", "/post", Some("observer-token"), "");
+    let nesting = post_check(&body, "watchdog_nesting");
+    assert_eq!(
+        nesting.get("outcome").and_then(Json::as_str),
+        Some("unavailable")
+    );
+    assert_eq!(body.get("failed").and_then(Json::as_bool), Some(false));
+    assert_eq!(
+        body.get("verdict").and_then(Json::as_str),
+        Some("post_incomplete")
+    );
+}
+
+/// §45.5 degrades rather than refuses, so a stale calibration must not stop a robot booting — a
+/// self-test that refused would be a robot nobody could get into a state where they could
+/// recalibrate it. What POST does is make the list known at power-on.
+#[test]
+fn an_expired_calibration_is_listed_by_post_rather_than_failing_it() {
+    let mut fixture = Fixture::new("post-calibration");
+    fixture.provision();
+    write_embodiment(&fixture, BENCH_ARM);
+
+    let (_, body) = fixture.request("GET", "/post", Some("observer-token"), "");
+    let calibration = post_check(&body, "calibration_expiry");
+    assert_eq!(
+        calibration.get("outcome").and_then(Json::as_str),
+        Some("pass")
+    );
+    let detail = calibration
+        .get("detail")
+        .and_then(Json::as_str)
+        .unwrap_or("");
+    assert!(detail.contains("guard(s) will be unavailable"), "{detail}");
+    assert!(detail.contains("workspace"), "{detail}");
+    assert_eq!(body.get("failed").and_then(Json::as_bool), Some(false));
+}
+
+/// The recorder: a ring nobody has opened has established nothing, which is not the same as a ring
+/// that cannot be written.
+#[test]
+fn a_robot_with_no_ring_reports_the_recorder_unavailable_rather_than_broken() {
+    let mut fixture = Fixture::new("post-no-ring");
+    fixture.provision();
+
+    let (_, body) = fixture.request("GET", "/post", Some("observer-token"), "");
+    let recorder = post_check(&body, "blackbox_writable");
+    assert_eq!(
+        recorder.get("outcome").and_then(Json::as_str),
+        Some("unavailable")
+    );
+    assert_eq!(
+        recorder.get("failure_means").and_then(Json::as_str),
+        Some("the recorder cannot record")
+    );
+}
+
+// ── The watchdog chain (§46) ─────────────────────────────────────────────────
+
+/// A body whose declared windows nest, so the interesting cases are the ones that do not.
+const NESTED_ARM: &str = r#"{
+  "robot_slug": "bench-arm",
+  "base": "fixed",
+  "dof": 1,
+  "on_command_loss": "hold",
+  "envelope": { "watchdog_ms": 100 },
+  "watchdog": { "soc_wdt_ms": 250, "drive_command_timeout_ms": 500 },
+  "joints": [{"name": "shoulder", "type": "revolute", "control_modes": ["position"]}]
+}"#;
+
+#[test]
+fn the_watchdog_route_reports_the_chain_and_the_nesting() {
+    let mut fixture = Fixture::new("watchdog-nested");
+    fixture.provision();
+    write_embodiment(&fixture, NESTED_ARM);
+
+    let (status, body) = fixture.request("GET", "/watchdog", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(body.arr_or_empty("chain").len(), 4);
+    assert_eq!(
+        body.get("on_command_loss").and_then(Json::as_str),
+        Some("hold")
+    );
+    assert_eq!(body.get("host_blocked"), Some(&Json::Null));
+
+    let nesting = body.get("nesting").cloned().expect("a nesting report");
+    assert!(nesting.arr_or_empty("faults").is_empty());
+    // The kernel's own worst case is the kernel's to measure and §27 is unwritten, so it is
+    // reported missing rather than skipped: a report that ignored the window it could not get would
+    // be reporting on a chain it had not established.
+    assert_eq!(
+        nesting.str_arr("missing"),
+        vec!["kernel_cycle_worst_case_ms"]
+    );
+    assert_eq!(nesting.get("ordered").and_then(Json::as_bool), Some(true));
+    assert_eq!(nesting.get("complete").and_then(Json::as_bool), Some(false));
+}
+
+/// §46.3's inversion, over the wire: the harsher recovery pre-empts the gentler one.
+#[test]
+fn a_wdt_inside_the_kernel_window_is_reported_with_what_it_costs() {
+    let mut fixture = Fixture::new("watchdog-inverted");
+    fixture.provision();
+    write_embodiment(
+        &fixture,
+        &NESTED_ARM.replace("\"soc_wdt_ms\": 250", "\"soc_wdt_ms\": 40"),
+    );
+
+    let (_, body) = fixture.request("GET", "/watchdog", Some("observer-token"), "");
+    let faults = body
+        .get("nesting")
+        .map(|n| n.arr_or_empty("faults").to_vec())
+        .unwrap_or_default();
+    assert_eq!(faults.len(), 1, "{faults:?}");
+    assert_eq!(
+        faults[0].get("code").and_then(Json::as_str),
+        Some("wdt_pre_empts_kernel")
+    );
+    let detail = faults[0].get("detail").and_then(Json::as_str).unwrap_or("");
+    assert!(detail.contains("controlled stop"), "{detail}");
+}
+
+/// §46.2. The refusal is host-shaped: a coasting body may be guest and may be certified, and only
+/// the middle rung — where layer 3 is the last line — turns a reset into a fall.
+#[test]
+fn a_coasting_body_is_told_why_host_is_refused() {
+    let mut fixture = Fixture::new("watchdog-coast");
+    fixture.provision();
+    write_embodiment(
+        &fixture,
+        &NESTED_ARM.replace(
+            "\"on_command_loss\": \"hold\"",
+            "\"on_command_loss\": \"coast\"",
+        ),
+    );
+
+    let (_, body) = fixture.request("GET", "/watchdog", Some("observer-token"), "");
+    let blocked = body
+        .get("host_blocked")
+        .and_then(Json::as_str)
+        .unwrap_or("");
+    assert!(blocked.contains("is a fall"), "{blocked}");
+    assert!(blocked.contains("certified"), "{blocked}");
+}
+
+/// A body that declares nothing is not a body that holds.
+#[test]
+fn an_undeclared_command_loss_behaviour_blocks_host_too() {
+    let mut fixture = Fixture::new("watchdog-silent");
+    fixture.provision();
+    write_embodiment(&fixture, BENCH_ARM);
+
+    let (_, body) = fixture.request("GET", "/watchdog", Some("observer-token"), "");
+    assert_eq!(body.get("on_command_loss"), Some(&Json::Null));
+    let blocked = body
+        .get("host_blocked")
+        .and_then(Json::as_str)
+        .unwrap_or("");
+    assert!(blocked.contains("Silence is not"), "{blocked}");
+
+    // And with no descriptor windows at all, three of four are missing and nothing is established.
+    let nesting = body.get("nesting").cloned().expect("a nesting report");
+    assert_eq!(nesting.str_arr("missing").len(), 4);
+    assert_eq!(nesting.get("complete").and_then(Json::as_bool), Some(false));
+}
+
+/// Four rows of vocabulary over a machine with one of them running would read as four running
+/// watchdogs, so the report says which layers exist *here*.
+#[test]
+fn the_route_separates_the_chain_from_what_this_robot_has() {
+    let mut fixture = Fixture::new("watchdog-here");
+    fixture.provision();
+    write_embodiment(&fixture, NESTED_ARM);
+
+    let (_, body) = fixture.request("GET", "/watchdog", Some("observer-token"), "");
+    let here = body.arr_or_empty("here");
+    assert_eq!(here.len(), 4);
+    let armed: Vec<&str> = here
+        .iter()
+        .filter(|row| row.get("state").and_then(Json::as_str) == Some("armed"))
+        .filter_map(|row| row.get("name").and_then(Json::as_str))
+        .collect();
+    assert_eq!(
+        armed,
+        vec!["supervisor"],
+        "only the supervisor's watchdog is written"
+    );
+}
+
+// ── Calibration on the robot (§45) ───────────────────────────────────────────
+
+/// Write a record for `set`, with `body` merged over the usual fields.
+fn write_calibration(fixture: &Fixture, set: &str, body: &str) {
+    let directory = fixture.daemon.store.layout().calibration();
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join(format!("{set}.json")), body).unwrap();
+}
+
+const HOUR: f64 = 3_600.0;
+const TAKEN_AT: f64 = 1_700_000_000.0;
+
+fn record_json(set: &str, policy: &str) -> String {
+    format!(
+        "{{\"set\":\"{set}\",\"method\":\"charuco-12x9, 40 poses\",\"residual\":0.4,\
+          \"residual_threshold\":1,\"operator\":\"alice\",\
+          \"conditions\":{{\"at_s\":{TAKEN_AT},\"temperature_c\":22,\"joint_travel_rad\":1000}},\
+          \"policy\":{policy}}}"
+    )
+}
+
+/// A robot that has never been calibrated reports every applicable set absent, and every guard
+/// those sets feed as unavailable — because absence is not validity.
+#[test]
+fn a_robot_with_no_records_starves_the_guards_that_need_them() {
+    let mut fixture = Fixture::new("calib-none");
+    fixture.provision();
+    write_embodiment(&fixture, BENCH_ARM);
+
+    let (status, body) = fixture.request("GET", "/calibration", Some("observer-token"), "");
+    assert_eq!(status, 200);
+
+    for set in body.arr_or_empty("sets") {
+        assert_eq!(set.get("state").and_then(Json::as_str), Some("absent"));
+    }
+    let starved = body.arr_or_empty("unavailable");
+    assert!(!starved.is_empty());
+    for entry in starved {
+        assert_eq!(entry.get("state").and_then(Json::as_str), Some("absent"));
+        // §45.5's requirement: the guard names the parameter set it is waiting on.
+        let detail = entry.get("detail").and_then(Json::as_str).unwrap_or("");
+        let set = entry.get("set").and_then(Json::as_str).unwrap_or("");
+        assert!(detail.contains(set), "{detail}");
+    }
+}
+
+/// §45.5, end to end on a real file: an expired extrinsic disables `proximity` and `workspace`, by
+/// name, and the sentence carries both numbers.
+#[test]
+fn an_expired_record_disables_its_guards_and_names_the_set() {
+    let mut fixture = Fixture::new("calib-expired");
+    fixture.provision();
+    write_embodiment(&fixture, BENCH_ARM);
+    write_calibration(
+        &fixture,
+        "camera_extrinsics",
+        &record_json("camera_extrinsics", "{\"max_age_s\":600}"),
+    );
+
+    let (_, body) = fixture.request("GET", "/calibration", Some("observer-token"), "");
+    let extrinsics = body
+        .arr_or_empty("sets")
+        .iter()
+        .find(|row| row.get("set").and_then(Json::as_str) == Some("camera_extrinsics"))
+        .cloned()
+        .expect("the set is applicable on a body with a camera");
+    assert_eq!(
+        extrinsics.get("state").and_then(Json::as_str),
+        Some("expired")
+    );
+    assert_eq!(extrinsics.get("reason").and_then(Json::as_str), Some("age"));
+
+    let starved: Vec<String> = body
+        .arr_or_empty("unavailable")
+        .iter()
+        .filter(|row| row.get("set").and_then(Json::as_str) == Some("camera_extrinsics"))
+        .filter_map(|row| row.get("guard").and_then(Json::as_str).map(str::to_string))
+        .collect();
+    assert_eq!(starved, vec!["proximity", "workspace"]);
+}
+
+/// A record filed under one name that declares another is not a small inconsistency: whichever is
+/// wrong, some set is being judged by another set's policy and the wrong guards lose their input.
+#[test]
+fn a_record_filed_under_the_wrong_set_is_refused_rather_than_believed() {
+    let mut fixture = Fixture::new("calib-misfiled");
+    fixture.provision();
+    write_embodiment(&fixture, BENCH_ARM);
+    write_calibration(
+        &fixture,
+        "camera_extrinsics",
+        &record_json("joint_zeros", "{}"),
+    );
+
+    let (_, body) = fixture.request("GET", "/calibration", Some("observer-token"), "");
+    let row = body
+        .arr_or_empty("sets")
+        .iter()
+        .find(|row| row.get("set").and_then(Json::as_str) == Some("camera_extrinsics"))
+        .cloned()
+        .expect("the set is applicable");
+    assert_eq!(row.get("state").and_then(Json::as_str), Some("unusable"));
+    let detail = row.get("detail").and_then(Json::as_str).unwrap_or("");
+    assert!(detail.contains("joint_zeros"), "{detail}");
+}
+
+/// §45.3's provenance rule against a file: a record with no method is a rumour with six decimal
+/// places, and it does not keep a guard alive.
+#[test]
+fn a_record_with_no_method_does_not_keep_its_guards_running() {
+    let mut fixture = Fixture::new("calib-no-method");
+    fixture.provision();
+    write_embodiment(&fixture, BENCH_ARM);
+    write_calibration(
+        &fixture,
+        "joint_zeros",
+        "{\"set\":\"joint_zeros\",\"residual\":0.1,\"residual_threshold\":1}",
+    );
+
+    let (_, body) = fixture.request("GET", "/calibration", Some("observer-token"), "");
+    let row = body
+        .arr_or_empty("sets")
+        .iter()
+        .find(|row| row.get("set").and_then(Json::as_str) == Some("joint_zeros"))
+        .cloned()
+        .expect("joint_zeros is applicable on every body");
+    assert_eq!(row.get("state").and_then(Json::as_str), Some("unusable"));
+
+    let starved: Vec<String> = body
+        .arr_or_empty("unavailable")
+        .iter()
+        .filter(|row| row.get("set").and_then(Json::as_str) == Some("joint_zeros"))
+        .filter_map(|row| row.get("guard").and_then(Json::as_str).map(str::to_string))
+        .collect();
+    assert_eq!(starved, vec!["workspace", "self_collision"]);
+}
+
+/// A valid record's signature is checked against the trust store, and a valid one starves nothing.
+#[test]
+fn a_signed_record_names_its_signer_and_keeps_its_guards() {
+    let mut fixture = Fixture::new("calib-signed");
+    fixture.provision();
+    write_embodiment(&fixture, BENCH_ARM);
+    let vendor = driver_key(41);
+    write_trust(&fixture, "bench-robotics", &public_hex(&vendor));
+
+    let document = record_json("joint_zeros", "{}");
+    write_calibration(&fixture, "joint_zeros", &document);
+
+    let parsed = Json::parse(&document).unwrap();
+    let digest = crate::embodiment::digest_of(&parsed).unwrap();
+    let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    let signature = vendor.sign(&crate::calibration::calibration_message(&hex));
+    std::fs::write(
+        fixture
+            .daemon
+            .store
+            .layout()
+            .calibration()
+            .join("joint_zeros.sig.json"),
+        format!(
+            "{{\"key\":\"{}\",\"value\":\"{}\"}}",
+            public_hex(&vendor),
+            hex_of(&signature)
+        ),
+    )
+    .unwrap();
+
+    let (_, body) = fixture.request("GET", "/calibration", Some("observer-token"), "");
+    let row = body
+        .arr_or_empty("sets")
+        .iter()
+        .find(|row| row.get("set").and_then(Json::as_str) == Some("joint_zeros"))
+        .cloned()
+        .expect("joint_zeros is applicable");
+    assert_eq!(row.get("state").and_then(Json::as_str), Some("valid"));
+    assert_eq!(
+        row.get("signature").and_then(Json::as_str),
+        Some("verified")
+    );
+    assert_eq!(
+        row.get("signer").and_then(Json::as_str),
+        Some("bench-robotics")
+    );
+
+    assert!(body
+        .arr_or_empty("unavailable")
+        .iter()
+        .all(|entry| entry.get("set").and_then(Json::as_str) != Some("joint_zeros")));
+}
+
+/// §45.3 signs a *measurement* and §38.1 signs a *limit*. Without separate domain tags a signature
+/// over one document's digest verifies over the other's, and those are separate decisions by
+/// separate people.
+#[test]
+fn a_calibration_signature_does_not_verify_as_a_profile_signature() {
+    let signer = skynet_ed25519::signing::SigningKey::from_seed(&[9u8; 32]);
+    let digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let store = crate::trust::TrustStore::from_text(&format!(
+        "{{\"keys\":[{{\"label\":\"a\",\"key\":\"{}\",\"added_at\":\"2026-08-30T00:00:00Z\"}}]}}",
+        public_hex(&signer)
+    ));
+
+    let over_calibration = signer.sign(&crate::calibration::calibration_message(digest));
+    let signed = crate::trust::SignedBy {
+        key: signer.verifying_key(),
+        signature: skynet_ed25519::Signature::from_bytes(&over_calibration).unwrap(),
+    };
+
+    assert_eq!(
+        store
+            .check(
+                &crate::calibration::calibration_message(digest),
+                Some(&signed)
+            )
+            .state,
+        skynet_contracts::admission::SignatureState::Verified
+    );
+    assert_eq!(
+        store
+            .check(&crate::trust::profile_message(digest), Some(&signed))
+            .state,
+        skynet_contracts::admission::SignatureState::Failed
+    );
+}
+
+/// §32.2's rule, applied to a subsystem that does not exist yet: three of §45.4's four conditions
+/// have nothing producing them on this robot, and the report says so rather than letting a page of
+/// expired records read as a machine that has drifted.
+#[test]
+fn the_conditions_this_robot_cannot_measure_are_named() {
+    let mut fixture = Fixture::new("calib-unmeasured");
+    fixture.provision();
+
+    let (_, body) = fixture.request("GET", "/calibration", Some("observer-token"), "");
+    let unmeasured = body.str_arr("unmeasured").join(" ");
+    assert!(unmeasured.contains("temperature_c"), "{unmeasured}");
+    assert!(unmeasured.contains("joint_travel_rad"), "{unmeasured}");
+    assert!(unmeasured.contains("events"), "{unmeasured}");
+
+    let now = body.get("now").cloned().unwrap_or_else(Json::obj);
+    assert_eq!(now.get("temperature_c"), Some(&Json::Null));
+    assert_eq!(now.get("joint_travel_rad"), Some(&Json::Null));
+}
+
+/// The rule that keeps an expiry policy from switching itself off, on this robot specifically:
+/// nothing reads a temperature here, so a bias with a temperature policy expires rather than
+/// quietly staying valid for ever.
+#[test]
+fn a_temperature_policy_expires_on_a_robot_that_cannot_read_one() {
+    let mut fixture = Fixture::new("calib-no-thermal");
+    fixture.provision();
+    write_embodiment(&fixture, BENCH_ARM);
+    write_calibration(
+        &fixture,
+        "force_torque_bias",
+        &record_json("force_torque_bias", "{\"max_temperature_delta_c\":5}"),
+    );
+
+    let (_, body) = fixture.request("GET", "/calibration", Some("observer-token"), "");
+    let row = body
+        .arr_or_empty("sets")
+        .iter()
+        .find(|row| row.get("set").and_then(Json::as_str) == Some("force_torque_bias"))
+        .cloned()
+        .expect("a manipulator holds an F/T bias");
+    assert_eq!(row.get("state").and_then(Json::as_str), Some("expired"));
+    assert_eq!(
+        row.get("reason").and_then(Json::as_str),
+        Some("temperature")
+    );
+    let _ = HOUR;
+}
+
+// ── A contradiction between two shared documents, pinned ────────────────────
+
+/// **`manifest.digest` cannot be this package's own version digest, and two shared documents
+/// disagree about whether it is.**
+///
+/// `reference/typescript/package.ts` says of the field: *"Version digest from the Hub. The identity
+/// that matters."* §37.1's store layout says the version digest is *"computed by `versionDigest()`
+/// over the manifest as a value and the remaining files as a `(path, sha256)` list."*
+///
+/// Those cannot both hold. The digest is a hash **of** the manifest, so a manifest carrying it is a
+/// fixed point of SHA-256: writing the digest into the field changes the digest. This test does
+/// exactly that and shows the two values, which is the demonstration rather than the argument.
+///
+/// The consequence is not cosmetic. On the robot's own staging path, one of two things happens:
+///
+/// * the field is **absent** — the common case, since nobody can compute a satisfying value — and
+///   `manifest_from_json` refuses, so **admission does not run at all**. §37.1's `verify → admit →
+///   stage` loses its middle step silently, and everything the twelfth and thirteenth sessions
+///   built on top of the report never executes;
+/// * the field is **present** with any value, and `digest_mismatch` fires, on every package, for
+///   ever.
+///
+/// Nothing caught it because `corpus/admission/*` uses `"sha256:pkg"` for both `manifest.digest`
+/// and `observed_digest` — a placeholder that makes them trivially equal, and one that also
+/// violates the same section's rule that a digest is *"64 lowercase hex characters and nothing
+/// else — no `sha256:` prefix"*. A corpus case is only as sharp as the value it pins.
+///
+/// This test asserts **what happens today**, not what should. The fix is a contract decision with
+/// two defensible answers — exclude `digest` from the hashed manifest, or remove it from the
+/// manifest and let the desired state carry the identity, which is where §37.1 already puts it —
+/// and it changes the identity of every package in three implementations and the corpus. Recorded
+/// rather than guessed.
+#[test]
+fn a_manifest_cannot_carry_its_own_version_digest() {
+    let root = TempRoot::new("digest-fixed-point");
+    let store = Store::new(root.layout());
+    store.prepare().unwrap();
+    let source = root.path().join("source");
+
+    let files = [("bin/run", "#!/bin/sh\nsleep 1\n")];
+    let without = write_package(
+        &source,
+        &manifest("openrobot/grasp", "1.0.0", "policy"),
+        &files,
+    );
+
+    // Now write that answer into the manifest, which is what the field is documented to hold.
+    let mut claiming = manifest("openrobot/grasp", "1.0.0", "policy");
+    claiming.set("digest", Json::from(without.as_str()));
+    let with = write_package(&source, &claiming, &files);
+
+    assert_ne!(
+        without, with,
+        "if these were ever equal the field would be satisfiable and this test should be deleted"
+    );
+
+    // And the decode of a manifest without the field, which is the other horn.
+    let bare = manifest("openrobot/grasp", "1.0.0", "policy");
+    assert!(
+        skynet_contracts::json::manifest_from_json(&bare).is_err(),
+        "a manifest with no `digest` still decodes, so admission runs after all"
+    );
+}
+
+// ── §38.3's audited surface, over the API ────────────────────────────────────
+
+/// A robot nobody has provisioned answers the trust route rather than failing on it, and the
+/// answer names the file to write. A 404 here would send somebody looking for a bug in the daemon.
+#[test]
+fn the_trust_route_reports_a_robot_with_no_store() {
+    let mut fixture = Fixture::new("api-trust-missing");
+    fixture.provision();
+
+    let (status, body) = fixture.request("GET", "/trust", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(body.get("source").and_then(Json::as_str), Some("missing"));
+    assert!(body.arr_or_empty("keys").is_empty());
+    let notices = body.str_arr("notices").join(" ");
+    assert!(notices.contains("no trust store"), "{notices}");
+}
+
+/// The three rows the console has to keep apart, over the wire: a key with provenance, one
+/// without, and a line the robot could not read.
+#[test]
+fn the_trust_route_separates_recorded_unrecorded_and_unusable() {
+    let mut fixture = Fixture::new("api-trust-rows");
+    fixture.provision();
+
+    std::fs::write(
+        fixture.daemon.store.layout().trust(),
+        format!(
+            "{{\"keys\":[               {{\"label\":\"acme\",\"key\":\"{a}\",\"added_at\":\"2026-08-30T09:00:00Z\",                 \"added_by\":\"alice\"}},               {{\"label\":\"legacy\",\"key\":\"{b}\"}},               {{\"label\":\"typo\",\"key\":\"not-hex\"}}             ]}}",
+            a = public_hex(&driver_key(11)),
+            b = public_hex(&driver_key(12)),
+        ),
+    )
+    .unwrap();
+
+    let (status, body) = fixture.request("GET", "/trust", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    let keys = body.arr_or_empty("keys");
+    assert_eq!(keys.len(), 3);
+
+    assert_eq!(
+        keys[0].get("provenance_recorded").and_then(Json::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        keys[0].get("provenance").and_then(Json::as_str),
+        Some("added 2026-08-30T09:00:00Z by alice")
+    );
+    assert_eq!(
+        keys[1].get("provenance_recorded").and_then(Json::as_bool),
+        Some(false)
+    );
+    assert_eq!(keys[2].get("usable").and_then(Json::as_bool), Some(false));
+    assert_eq!(keys[2].get("at").and_then(Json::as_str), Some("keys[2]"));
+}
+
+/// §39.1 gives observer *"read health, guards, plan, packages, black box index"*. Reading which
+/// public keys a robot holds belongs in that register: the person staring at an `untrusted`
+/// package needs it, and requiring an admin credential would put the one diagnosis this store
+/// supports behind a role most people watching a robot do not have.
+#[test]
+fn trust_and_audit_are_readable_by_an_observer_and_not_by_nobody() {
+    let mut fixture = Fixture::new("api-trust-role");
+    fixture.provision();
+
+    for route in ["/trust", "/audit"] {
+        assert_eq!(fixture.request("GET", route, None, "").0, 401, "{route}");
+        assert_eq!(
+            fixture.request("GET", route, Some("observer-token"), "").0,
+            200,
+            "{route}"
+        );
+    }
+}
+
+#[test]
+fn the_audit_route_answers_newest_first_and_counts_what_it_did_not_send() {
+    let mut fixture = Fixture::new("api-audit");
+    fixture.provision();
+
+    let audit = crate::audit::Audit::of(fixture.daemon.store.layout());
+    for index in 0..3 {
+        audit
+            .append(
+                "2026-08-30T09:00:00Z",
+                "alice",
+                "trust.add",
+                &format!("key-{index}"),
+                "",
+                None,
+            )
+            .unwrap();
+    }
+
+    let (status, body) = fixture.request("GET", "/audit", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    let entries = body.arr_or_empty("entries");
+    assert_eq!(entries.len(), 3);
+    assert_eq!(
+        entries[0].get("subject").and_then(Json::as_str),
+        Some("key-2"),
+        "newest first"
+    );
+    assert_eq!(body.get("total").and_then(Json::as_usize), Some(3));
+}
+
+/// A log with invisible gaps is worse than none, because somebody is relying on it.
+#[test]
+fn a_broken_audit_line_is_reported_rather_than_dropped() {
+    let mut fixture = Fixture::new("api-audit-broken");
+    fixture.provision();
+
+    let audit = crate::audit::Audit::of(fixture.daemon.store.layout());
+    audit
+        .append(
+            "2026-08-30T09:00:00Z",
+            "alice",
+            "trust.add",
+            "acme",
+            "",
+            None,
+        )
+        .unwrap();
+    let mut text = std::fs::read_to_string(audit.path()).unwrap();
+    text.push_str("{ truncated\n");
+    std::fs::write(audit.path(), text).unwrap();
+
+    let (status, body) = fixture.request("GET", "/audit", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(body.arr_or_empty("entries").len(), 1);
+    assert_eq!(body.arr_or_empty("broken").len(), 1);
 }
 
 // ── §19's gate on a driver's signature ───────────────────────────────────────
@@ -1362,6 +2257,76 @@ fn a_profile_signed_by_a_stranger_is_not_verified() {
     fixture.daemon.reload();
 
     assert!(!fixture.daemon.desired.profile.as_ref().unwrap().verified);
+}
+
+/// §38.1's alarm, raised at last (§34.4).
+///
+/// Open since the thirteenth session for want of anywhere to put it. A signature that verifies
+/// against nothing was made over **other bytes**, which is what §38.1's attacker — "somebody
+/// editing limits on a robot's disk" — leaves behind. The limits are refused either way; what was
+/// missing was anybody being told.
+#[test]
+fn a_failed_profile_signature_raises_an_incident() {
+    let mut fixture = Fixture::new("profile-incident");
+    let signer = driver_key(14);
+    write_trust(&fixture, "fleet-admin", &public_hex(&signer));
+
+    // A well-formed signature over a different digest: it parses, it verifies against nothing.
+    let over_other_bytes = signer.sign(&crate::trust::profile_message(
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    ));
+    desired_profile(
+        &fixture,
+        Some((&public_hex(&signer), &hex_of(&over_other_bytes))),
+    );
+    fixture.daemon.reload();
+
+    assert!(!fixture.daemon.desired.profile.as_ref().unwrap().verified);
+
+    let queue = crate::outbound::Queue::of(fixture.daemon.store.layout());
+    let queued = queue.items();
+    assert_eq!(queued.len(), 1, "{queued:?}");
+    assert_eq!(queued[0].class, crate::outbound::Class::Incident);
+    assert!(
+        queued[0].body.contains("profile_signature_failed"),
+        "{:?}",
+        queued[0].body
+    );
+    // The incident says the limits were not applied, because an operator reading it needs to know
+    // whether the robot is currently running on ceilings somebody edited.
+    assert!(
+        queued[0].body.contains("NOT applied"),
+        "{:?}",
+        queued[0].body
+    );
+}
+
+/// The two states that are **not** incidents, and the reason is the same one §37.1 gives for
+/// keeping `untrusted` apart from `failed`: both are administrative gaps, both are already visible
+/// on every surface, and raising an incident for either trains an operator to close incidents
+/// without reading them.
+#[test]
+fn a_missing_or_untrusted_profile_signature_raises_nothing() {
+    for (label, trusted) in [
+        ("profile-incident-absent", true),
+        ("profile-incident-stranger", false),
+    ] {
+        let mut fixture = Fixture::new(label);
+        let signer = driver_key(15);
+        write_trust(&fixture, "fleet-admin", &public_hex(&driver_key(16)));
+
+        if trusted {
+            desired_profile(&fixture, None);
+        } else {
+            let signature = signer.sign(&crate::trust::profile_message(PROFILE_DIGEST));
+            desired_profile(&fixture, Some((&public_hex(&signer), &hex_of(&signature))));
+        }
+        fixture.daemon.reload();
+
+        assert!(!fixture.daemon.desired.profile.as_ref().unwrap().verified);
+        let queue = crate::outbound::Queue::of(fixture.daemon.store.layout());
+        assert!(queue.items().is_empty(), "{label}: {:?}", queue.items());
+    }
 }
 
 /// A profile signature made over the package domain does not apply limits, and the reverse.
@@ -1792,6 +2757,21 @@ const BENCH_ARM: &str = r#"{
   "robot_slug": "bench-arm",
   "base": "fixed",
   "dof": 1,
+  "joints": [{"name": "shoulder", "type": "revolute", "control_modes": ["position"]}]
+}"#;
+
+/// The same arm, declaring the two things §46 needs and one inversion to look at.
+///
+/// The console fixture uses this rather than [`BENCH_ARM`] so the watchdog panel has something to
+/// draw: a body that declares nothing produces a correct and completely empty panel, which shows
+/// that the panel handles absence and not that it handles the case it exists for.
+const BENCH_ARM_WATCHDOG: &str = r#"{
+  "robot_slug": "bench-arm",
+  "base": "fixed",
+  "dof": 1,
+  "on_command_loss": "coast",
+  "envelope": { "watchdog_ms": 100 },
+  "watchdog": { "soc_wdt_ms": 40, "drive_command_timeout_ms": 500 },
   "joints": [{"name": "shoulder", "type": "revolute", "control_modes": ["position"]}]
 }"#;
 
@@ -2653,6 +3633,131 @@ mod recorder {
             path.file_name().unwrap().to_string_lossy(),
             "00000000000000000042-estop.mcap"
         );
+    }
+
+    // ── §38.3, mirrored: the audit log onto the event channel ────────────────
+
+    fn audit_of(root: &TempRoot) -> crate::audit::Audit {
+        crate::audit::Audit::of(&root.layout())
+    }
+
+    fn append(root: &TempRoot, seq_label: &str, action: &str) {
+        audit_of(root)
+            .append("2026-08-30T09:00:00Z", "alice", action, seq_label, "", None)
+            .unwrap();
+    }
+
+    fn sealed_text(recorder: &Recorder) -> String {
+        let (sealed, _) = recorder.seal(Reason::Operator, 99).unwrap();
+        String::from_utf8_lossy(&sealed.bytes).into_owned()
+    }
+
+    /// The decision this design turns on. A robot provisioned a year ago has an audit log with
+    /// hundreds of entries and a ring that holds minutes; replaying the log would throw away the
+    /// incident window to record a year of configuration history. So the first pass records where
+    /// to read it and jumps the cursor to the end.
+    #[test]
+    fn the_first_pass_records_a_baseline_rather_than_replaying_history() {
+        let root = TempRoot::new("bb-mirror-baseline");
+        let mut recorder = open(&root, events_only());
+        for index in 0..40 {
+            append(&root, &format!("key-{index}"), "trust.add");
+        }
+
+        let mirrored = crate::blackbox::mirror_audit(&root.layout(), &mut recorder, 10);
+        assert!(mirrored.baseline);
+        assert_eq!(mirrored.recorded, 0);
+
+        let text = sealed_text(&recorder);
+        assert!(
+            text.contains("40 earlier configuration change(s)"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("key-7"),
+            "history was replayed into the ring"
+        );
+
+        // And the cursor is at the end, so nothing older ever arrives.
+        assert_eq!(
+            std::fs::read_to_string(root.layout().audit_cursor())
+                .unwrap()
+                .trim(),
+            "40"
+        );
+    }
+
+    /// A robot with no history at all writes no baseline event: there is nothing to point at, and
+    /// an event saying "0 earlier changes" is noise in a ring that holds minutes.
+    #[test]
+    fn an_empty_audit_log_produces_no_baseline_event() {
+        let root = TempRoot::new("bb-mirror-empty");
+        let mut recorder = open(&root, events_only());
+
+        let mirrored = crate::blackbox::mirror_audit(&root.layout(), &mut recorder, 10);
+        assert!(mirrored.baseline);
+        assert!(!sealed_text(&recorder).contains("earlier configuration change"));
+    }
+
+    #[test]
+    fn changes_after_the_baseline_reach_the_event_channel() {
+        let root = TempRoot::new("bb-mirror-after");
+        let mut recorder = open(&root, events_only());
+        crate::blackbox::mirror_audit(&root.layout(), &mut recorder, 10);
+
+        append(&root, "acme-robotics", "trust.add");
+        append(&root, "openrobot/grasp 1.0.0", "package.admit");
+
+        let mirrored = crate::blackbox::mirror_audit(&root.layout(), &mut recorder, 20);
+        assert_eq!(mirrored.recorded, 2);
+        assert_eq!(mirrored.remaining, 0);
+
+        let text = sealed_text(&recorder);
+        // The action decides the code: a configuration change and an admission verdict are
+        // different questions, and §41.1's vocabulary is closed so neither invents a third.
+        assert!(text.contains("\"event\":\"config_changed\""), "{text}");
+        assert!(text.contains("\"event\":\"admission\""), "{text}");
+        assert!(text.contains("acme-robotics"), "{text}");
+    }
+
+    /// Idempotent: the cursor means a second pass over the same log records nothing again. A ring
+    /// re-filled with the same three changes on every reconcile would hold ten seconds of history.
+    #[test]
+    fn a_second_pass_over_the_same_log_records_nothing() {
+        let root = TempRoot::new("bb-mirror-idempotent");
+        let mut recorder = open(&root, events_only());
+        crate::blackbox::mirror_audit(&root.layout(), &mut recorder, 10);
+        append(&root, "acme-robotics", "trust.add");
+
+        assert_eq!(
+            crate::blackbox::mirror_audit(&root.layout(), &mut recorder, 20).recorded,
+            1
+        );
+        assert_eq!(
+            crate::blackbox::mirror_audit(&root.layout(), &mut recorder, 30).recorded,
+            0
+        );
+    }
+
+    /// A provisioning script that trusts six keys between two reconciles must not be able to wrap
+    /// the recording. The cap drains over a few passes and says how many are still waiting.
+    #[test]
+    fn a_burst_is_capped_per_pass_and_the_rest_still_arrive() {
+        let root = TempRoot::new("bb-mirror-burst");
+        let mut recorder = open(&root, events_only());
+        crate::blackbox::mirror_audit(&root.layout(), &mut recorder, 10);
+
+        for index in 0..20 {
+            append(&root, &format!("key-{index}"), "trust.add");
+        }
+
+        let first = crate::blackbox::mirror_audit(&root.layout(), &mut recorder, 20);
+        assert_eq!(first.recorded, 16);
+        assert_eq!(first.remaining, 4);
+
+        let second = crate::blackbox::mirror_audit(&root.layout(), &mut recorder, 30);
+        assert_eq!(second.recorded, 4);
+        assert_eq!(second.remaining, 0);
     }
 
     #[test]

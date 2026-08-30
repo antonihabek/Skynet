@@ -863,6 +863,20 @@ requires:
 
   Keys are read on the pass that needs them rather than held at start-up, so a key an operator adds
   takes effect on the next reconcile rather than at the next reboot.
+
+  **The store is an audited surface, not a file people edit.** `skynetd trust list`, `add` and
+  `remove` are the way in, each change carries the provenance §38.3 asks for, and each is written to
+  the audit log beside the store. Editing the JSON by hand still works and still produces a robot
+  that trusts the key — the entry simply reports its provenance as `unrecorded`, which is true.
+
+  Two refusals belong to the command rather than to the file. **The same key twice** is refused
+  naming the label already holding it, because silently relabelling rewrites a decision somebody
+  else recorded and hides the case worth seeing — one key arriving under two names. **The same label
+  twice** is refused naming the key, because two keys under one name make every report ambiguous
+  about which one signed, which is the one thing a label exists to prevent.
+
+  And `add` refuses outright on a store that does not parse. Writing over it would destroy the keys
+  it still holds, and the robot cannot tell which those are; the remedy there is a person.
 * **The verifier is strict, and the strictness is a compatibility property.** Non-canonical `y` in a
   key or a commitment, a scalar at or above `L`, and a small-order key are all refused, and the
   group equation is checked cofactorless. Every one of those is a case where two implementations
@@ -1251,7 +1265,7 @@ Channels, each with an embedded schema so the file stays readable without the co
 | `/sk/verdict` | joint rate | guards tripped, clamps applied, response |
 | `/sk/command` | joint rate | what actually went to `write_command`, and its return |
 | `/sk/frame` | policy rate | observation hashes, per-stream ages, worst skew |
-| `/sk/event` | on change | lease grants, pre-emptions, estop, OTA, grant changes |
+| `/sk/event` | on change | lease grants, pre-emptions, estop, OTA, grant changes, configuration changes, admission verdicts |
 
 Observation *hashes* rather than observation bytes: an hour of three-camera video is hundreds of
 gigabytes and the robot has neither the disk nor the uplink. The hash proves which frame was seen;
@@ -1921,6 +1935,68 @@ Backoff on failure is exponential with jitter, capped at fifteen minutes. Jitter
 scale — a hundred robots that lost the same access point must not retry in lockstep and take down
 the endpoint the moment it returns.
 
+#### Four policies, not one policy with four thresholds
+
+That distinction is what makes the table worth having. Telemetry is a stream where the newest is
+worth most and any single item is worth nothing. A check-in is *level-triggered state*, so
+enqueueing one removes the last. An episode is data somebody collected and paid for, so it goes
+oldest-first and only above a quota. An incident is the entire reason the black box exists.
+
+Two rules fall out and both are load-bearing:
+
+* **Nothing is ever evicted for something less important than itself.** Filling a disk with
+  telemetry must not be able to take out an episode. When the only items left outrank the newcomer,
+  the enqueue is **refused** rather than allowed to evict upwards.
+* **The reserve is a floor for incidents, not a ceiling for everybody else.** Incidents draw on the
+  whole budget; every other class stops at the reserve line. So a queue packed to its shared limit
+  still takes an incident, and takes it *without discarding anything* — the reserve is not made of
+  other people's items.
+
+An incident that does not fit even in its reserve is an **error naming a full disk**, not a licence
+to discard the previous incident. There is nothing in this queue worth less than an incident.
+
+#### A drop is recorded, always
+
+§47.4's rule applied to a queue rather than to a ring: *a gap annotated as a gap is honest; a gap
+that looks like a quiet period is not.* Every discard increments a counter that lives with the queue
+and survives a reboot, so a fleet console can say "this robot dropped forty thousand telemetry items
+last month" instead of showing a suspiciously tidy series.
+
+Collapsing a check-in is **not** a drop and is counted apart from one. Nothing was lost: the newer
+item carries the same level-triggered state, which is the whole reason the older one can go.
+
+#### The budget lives with the queue
+
+*"Disk is reserved for them at install"*, taken literally: the budget and the reserve are written
+into the queue's own directory the first time it is opened, and every later opener adopts them. Two
+callers disagreeing about the budget would enforce two drop policies over one directory, and a
+console would report a limit nothing was applying. Re-sizing an existing queue is deliberately not a
+side effect of opening it — it changes retrospectively which items would have been dropped.
+
+#### Full jitter, not a perturbation
+
+The delay is uniform over `[0, exponential]` rather than `exponential ± 10%`. The narrow form leaves
+a hundred robots that lost the same access point retrying inside the same tenth of a window, which
+is the thundering herd this rule exists to prevent, smeared slightly rather than broken up. Its cost
+is that a robot occasionally retries sooner than the curve suggests, which is harmless. The jitter is
+**supplied** rather than drawn, for §35.2's reason: a function that reaches for a random number
+cannot be tested, and an untested backoff is how a fleet discovers the cap was off by a factor of
+sixty.
+
+#### What is queued today, and what sends it
+
+§38.1's alarm, which had been recorded as unraised for two sessions for want of anywhere to put it:
+a profile signature that **fails** — as against one merely absent or from an untrusted key — is an
+incident, because a signature that verifies against nothing was made over *other bytes*, which is
+what "somebody editing limits on a robot's disk" leaves behind. `absent` and `untrusted` raise
+nothing, for the same reason §37.1 keeps them apart from `failed`: both are administrative gaps,
+both are visible on every surface, and an incident for either trains an operator to close incidents
+without reading them.
+
+Nothing sends from the queue yet — §34.2's outbound path and §10's pairing are unwritten — so items
+accumulate under the drop policy and the surfaces say so rather than presenting a queue that only
+grows.
+
 ---
 
 ## 35. Time
@@ -2053,6 +2129,22 @@ stage     unpack into /data/packages/<digest>/, still inert
 activate  atomic symlink swap, then register with the supervisor
 ```
 
+#### The verdict is recorded, not only printed
+
+Admission decides whether code may run on this machine, which makes it exactly the thing an incident
+review asks about — and for several sessions it was printed to whoever ran the command and kept
+nowhere. Every stage now writes its verdict to the audit log (§38.3), from which `skynetd` mirrors it
+onto §26's event channel as an `admission` event.
+
+**On every path out of a successful stage**, including the two where admission reached no verdict at
+all: "nothing checked this package, and here is why" is a fact about what is now on the disk, and
+omitting it would make an unexamined blob indistinguishable from one nobody staged.
+
+What lands on the event channel is the *decision* — the signature state and the count of errors and
+warnings — rather than the findings, because §41.1 keeps the black box out of the logging business
+and a ring full of prose is a ring holding fewer control cycles. The findings stay in the report an
+operator reads.
+
 #### The signature has five outcomes, not two
 
 `verify` was written as though it answered yes or no, and `admitPackage()` took a boolean. Four
@@ -2159,6 +2251,26 @@ Four rules, each of which is a way two editions could otherwise disagree about t
 * **`<digest>` is the Hub's version digest**, bare lowercase hex, computed by `versionDigest()` over
   the manifest as a *value* and the remaining files as a `(path, sha256)` list. A manifest that also
   appeared in that list would be hashed twice and no version the Hub published would verify.
+
+  > **Open, and demonstrated rather than argued: `manifest.digest` cannot be this package's own
+  > version digest.** The shared package contract documents the field as *"the version digest from
+  > the Hub, the identity that matters"*, and the rule above hashes the manifest as a value — so the
+  > field is a fixed point of SHA-256, and writing the digest into it changes the digest.
+  >
+  > On the robot's staging path one of two things therefore happens, always. Either the field is
+  > absent — the common case, since no publisher can compute a satisfying value — and the manifest
+  > does not decode, so **admission does not run at all** and `verify → admit → stage` loses its
+  > middle step in silence; or the field is present with any value and `digest_mismatch` fires, on
+  > every package, for ever.
+  >
+  > Nothing caught it because the admission corpus uses `"sha256:pkg"` on both sides, a placeholder
+  > that makes them trivially equal and that also violates this section's own rule that a digest is
+  > 64 lowercase hex characters with no prefix. A corpus case is only as sharp as the value it pins.
+  >
+  > Two defensible fixes and the choice is a contract decision: exclude `digest` from the hashed
+  > manifest, or remove it from the manifest entirely and let the identity travel in the desired
+  > state, which is where §33.4 already puts it. Either changes the identity of every package across
+  > three implementations and the corpus, so it is recorded here rather than guessed.
 * **The links are the rollback set.** §37.3 says garbage collection never touches it, and the
   cheapest way to guarantee that is to have no second record of what "previous" means: `prev.N` are
   links like `current`, collection removes a blob nothing points at, and rollback reads `prev.1`. A
@@ -2279,6 +2391,63 @@ maintenance is a hazard that looks like a setting.
 
 `/data/state/profiles/`, each with its signature and its provenance. Every change is a black box
 event and an audit-log entry, carrying who, when, which layer, and the previous value.
+
+**The same rule applies to the trust store** (§19), and for the same reason: which keys a robot
+believes is a decision somebody made that changes what may run on the machine. Each entry carries
+`added_at`, `added_by` and a free `note`, all of them optional — a store written by hand before any
+of this existed has none, and the honest report of such an entry is **`unrecorded`** rather than a
+fabricated date. A key nobody recorded still verifies; the gap is in the audit and not in the
+security, so it is a notice and never a refusal.
+
+Provenance is *recorded*, never inferred. `skynetd trust add` without `--by` writes **unattributed**
+rather than the invoking user's name: an environment variable is not an identity, and a provenance
+nobody typed is exactly the confidently-wrong record this section exists to prevent.
+
+A change made through `skynetd trust` rewrites the store, which raises a hazard worth stating: an
+entry the parser could not read must survive the rewrite. It is kept verbatim, in place, because
+that entry is the thing an operator came to the command to find — a rewrite that dropped it would
+make adding a key a way to delete the bug report.
+
+#### The audit log, and why it is not the black box
+
+`/data/state/audit.jsonl`, one canonical JSON object per line, append-only.
+
+The two records this section asks for are not redundant. The black box is a fixed-size ring that
+**wraps**: it holds the last few minutes at full fidelity, which is what an incident needs and
+precisely the wrong shape for *"when did this robot start trusting that key"*, a question whose
+answer is eleven months old.
+
+JSON Lines rather than an array because **an append must not require rewriting the file**. An array
+has to be read, parsed, extended and written back for every entry, so every append is an opportunity
+to lose the history — and rewriting an audit log is the operation an audit log exists to make
+difficult. It degrades in the right direction too: a line truncated by a power cut costs that line,
+not the file. A line that cannot be read is *reported*, never skipped, because a log with invisible
+gaps is worse than no log — somebody is relying on it.
+
+Wall time, per §35.1's third job for `CLOCK_REALTIME`. Nothing here is read to make a decision, so a
+stepped clock spoils a record and cannot spoil a verdict; a monotonic reading would mean nothing
+after a reboot and could not be compared with the date on anybody's ticket.
+
+#### The black box half is mirrored, not written twice
+
+The ring has exactly one writer by construction, and configuration changes are made by *other
+processes* — `skynetd trust add` runs while the daemon is up. Two writers to a preallocated file at
+computed offsets is corruption rather than a race that occasionally loses a record. So each audit
+entry carries a sequence number, whoever makes the change writes the log, and `skynetd` copies
+anything past its cursor onto §26's event channel on its next reconcile pass.
+
+Three consequences, each stated rather than left to be discovered:
+
+* A black box event for a configuration change is **delayed by up to one reconcile period**, and on
+  a robot where `skynetd` is not running it does not arrive at all. The audit entry always does,
+  which is the right direction for the record whose job is to survive.
+* **The first pass records a baseline rather than the history.** A robot provisioned a year ago has
+  hundreds of audit entries and a ring that holds minutes; replaying the log would throw away the
+  incident window in order to record a year of configuration history, most of it about keys since
+  removed. So the first pass writes one event saying how many earlier changes exist and where to
+  read them, and the cursor jumps to the end.
+* **A burst is capped per pass**, so a provisioning script that trusts six keys between two
+  reconciles cannot wrap the recording either.
 
 ---
 
@@ -2734,6 +2903,70 @@ usually solved with a PDF and a spreadsheet.
   the guards report the parameter set by name.
 * `calibration.event_invalidation` — a simulated collision invalidates the affected sets.
 
+These are **one corpus**, not three, and the reason is worth writing down: they are one question
+asked of one input — *given these records and this moment, what is believed and which guards lose
+their input*. Split, an edition could pass `expiry_enforced` while disagreeing about which guard the
+expired set feeds, and the guard is the half that matters to whoever is standing next to the robot.
+
+### 45.8 Five states, and the two absences that are not the same absence
+
+A record is `valid`, `failed`, `expired`, `absent` or `unusable`, and the last two are the ones that
+took a session to separate.
+
+| State | Meaning | Whose job |
+|---|---|---|
+| `valid` | Believed, and the report says **what was actually checked** | — |
+| `failed` | The residual exceeds the method's own threshold (§45.3). It was never a calibration, so it does not become one at any age and does not "expire" | Whoever ran it |
+| `expired` | It was one, and §45.4 has since caught up with it | Schedule a re-measurement |
+| `absent` | Nobody ever measured this set on this robot | Schedule a first measurement |
+| `unusable` | A record exists and cannot be judged — no method, no residual, or filed under one set and declaring another | Somebody has to go and look |
+
+`valid` carries the list of conditions it was tested against, and that list is **empty for a record
+with no policy**. A console must be able to tell *still valid* from *nothing was checked*, and a
+state alone cannot: a record that expires on nothing is not evidence of anything.
+
+`unusable` is separate from `failed` for the reason `untrusted` is separate from `failed` in §37.1 —
+nothing says the measurement is bad, and nothing says it is good either. A record filed as
+`camera_extrinsics` that declares itself `joint_zeros` is the sharpest case: whichever half is wrong,
+some set is being judged by another set's policy, and the guards that lose their input are the wrong
+guards.
+
+### 45.9 A missing reading expires; it does not extend
+
+The rule that keeps an expiry policy from switching itself off. If a policy names a temperature delta
+and the robot cannot say what temperature it is, the record **expires**, with the reason naming the
+missing input.
+
+The tempting alternative — skip the condition you cannot evaluate — inverts the policy on exactly the
+robot it was written for: a machine whose thermal sensor has failed is precisely the machine whose
+force/torque bias should not be trusted.
+
+This has a loud consequence in this edition and it is the correct one. §47's sensor pipeline and the
+policy runtime are unwritten, so nothing on a robot produces a temperature or a cumulative travel
+count, and every record with one of those policies reports expired on day one, naming the reading
+nothing supplies. That is the honest state of the machine. Every surface that shows it also carries
+the sentence that keeps it from being read as a to-do list: **every guard here is already unavailable
+for a prior reason** — §27's kernel is unwritten, so nothing evaluates a cycle at all — and what
+calibration reports is what would *still* be missing once it is.
+
+### 45.10 Which sets apply, and the base kind that decides
+
+A robot is judged only on the parameter sets its own body can hold, derived from the capability
+tokens and the base kind the descriptor already carries rather than from a new field.
+
+Two absences, treated differently on purpose:
+
+* **Undeclared capabilities** mean nobody said what this body senses, so every sensing-derived set is
+  included. Over-reporting what is missing is the conservative direction.
+* **A declared `fixed` base is not an absence at all.** It is a positive statement that this body
+  cannot fall over, so the IMU bias and gravity vector are not measurements it is missing — they are
+  measurements it will never take. §45.2 says the gravity vector drifts with *base tilt*, and a fixed
+  base does not tilt. Listing `balance` unavailable on a bolted-down arm is a permanent red mark
+  nobody can ever clear, which is how an operator learns to ignore the panel.
+
+An *unknown* base is mobile, because that is the first kind of absence again, going the other way. A
+fixed body that does declare an IMU keeps both sets, since it evidently has one.
+
 ---
 
 ## 46. Watchdogs, all four of them
@@ -2792,6 +3025,57 @@ If it is longer than the drive's timeout, the drive faults first and the WDT nev
 
 The nesting is computed at boot from the descriptor and the resolved limits, and a body whose
 declared figures cannot be nested is reported at startup rather than discovered in the field.
+
+#### Where the four windows come from
+
+| Window | Declared by |
+|---|---|
+| `kernel_cycle_worst_case_ms` | The kernel, which measures its own worst case |
+| `envelope_watchdog_ms` | `envelope.watchdog_ms` on the descriptor |
+| `soc_wdt_ms` | `watchdog.soc_wdt_ms` on the descriptor — a fact about the board |
+| `drive_command_timeout_ms` | `watchdog.drive_command_timeout_ms` — a fact about the drive |
+
+The last two are on the descriptor because they are the only place they can come from: nothing in
+this operating system can read a hardware watchdog's window off a board.
+
+**An undeclared window is not a passing one.** It is reported as missing and the walk *steps over*
+it — the pair on either side of a gap still inverts, and that inversion is real whatever sits
+between them. So the report carries two booleans rather than one: `ordered` means nothing
+contradicts, `complete` means every window is declared as well. A single boolean would have to lie
+about one of them, and the lie it tells — "sound" over a chain nobody has measured — is the one this
+section exists to prevent.
+
+**The comparison is strict.** Two watchdogs with the same window is a race whose winner is decided
+by interrupt latency, and a chain whose order depends on which timer fires first is not a chain.
+
+**Adjacent pairs only.** Comparing every pair would report one inversion up to three times and bury
+the one an operator has to fix; the transitive consequences follow from the adjacent ones anyway.
+
+#### The refusal is host-shaped, and that is unusual
+
+§46.2 refuses **the host tier** for a coasting body, and the shape is worth stating because a tier
+ladder normally caps downward:
+
+* **Guest** is fine — enforcement is advisory and nothing relies on a hardware watchdog.
+* **Host** is the configuration where layer 3 is the last line and its recovery is resetting the
+  processor, which on a coasting body is a fall.
+* **Certified** is fine — layer 4 cuts drive enable independently of the processor being reset.
+
+The middle rung is the unsafe one. Rewriting that rule as a ceiling would silently permit exactly
+the configuration it exists to refuse.
+
+**Silence is not `hold`.** A body that has declared no `on_command_loss` is refused host for the
+same reason a coasting one is: the recovery path has not been characterised, and treating an
+absence as the most convenient value is inventing an answer to the only question layer 3 turns on.
+A value outside the vocabulary gets its own sentence — *"this body says `freewheel`"* and *"this
+body says nothing"* are different facts with different remedies.
+
+#### What the chain reports about *itself*
+
+A page listing four layers over a machine that has one of them reads as four running watchdogs. So
+every surface reports the chain **and** which layers exist here: layer 1 unavailable while §27's
+kernel is unwritten, layer 2 armed, layers 3 and 4 unobserved because nothing in this edition can
+see a hardware timer.
 
 ---
 
@@ -2905,6 +3189,62 @@ Homing **moves the robot**, and it is the only motion permitted before `RUNNING`
 
 A body that needs no homing declares so and the state is skipped. A body that needs it and cannot
 complete it stays `UNHOMED`, which is a reported state, not a hang.
+
+### 48.4 Four outcomes, because two of them are not failures
+
+§48.2 gives a check two answers. It needs four, and the three that are not `pass` send a person to
+three different places:
+
+| | |
+|---|---|
+| `pass` | The check ran and this robot is good on this point |
+| `fail` | The check ran and it is not. §48.2's `SAFE`: sticky, needs a human |
+| `unavailable` | The **input does not exist**. Nothing is broken and nothing was established |
+| `elsewhere` | This check is **not `skynetd`'s to run** — see below |
+
+`may_run` is true only when **every** check passed. An unavailable check has established nothing and
+a check nobody could run has not been run, so neither is a licence — and the verdict for that state
+is `post_incomplete` rather than `safe`, because a robot whose checks could not run does not need a
+human. It needs the rest of the operating system.
+
+Collapsing `fail` and `unavailable` would produce the two worst sentences available: *"self-test
+passed"* on a robot that tested almost nothing, or *"self-test failed"* on a robot with nothing
+wrong with it.
+
+**An expired calibration does not fail POST.** §45.5 degrades rather than refuses, and a self-test
+that refused to boot on a stale camera extrinsic would be a robot nobody could get into a state
+where they could recalibrate it. What the row does is make the list of guards that will start
+unavailable known *at power-on* rather than at the first command, which is what §48.2 asks of it.
+
+**An unreachable watchdog layer does fail it.** §46.3's inversions mean a layer of the chain cannot
+fire, and a robot booting past that is exactly what "before anything moves" is for. An *undeclared*
+window does not fail: nothing contradicts, and a body nobody has measured is not a body that is
+wrong.
+
+### 48.5 Half the table is not the supervisor's to answer
+
+This falls out of §33.1 and it is worth stating rather than discovering. `skynetd` never touches an
+actuator — that single property licenses everything else about the daemon, and CI asserts it cannot
+even take a dependency on the RHAL. Four of §48.2's eight checks need precisely what that denies:
+
+| Check | Owner |
+|---|---|
+| RHAL ABI version matches | The kernel, which loads the driver |
+| `describe()` parses; joint count matches | The kernel |
+| Estop asserted **and observed** | The kernel, through the RHAL |
+| Encoder sanity | The kernel, through the RHAL |
+| Kernel corpus self-check | The kernel |
+| Calibration expiry (§45) | **`skynetd`** |
+| Black box writable, reserve intact | **`skynetd`** |
+| Watchdog window nesting (§46.3) | **`skynetd`** |
+
+So the supervisor runs three and reports the other five as `elsewhere` — *not* as unavailable, which
+would be a different and wrong sentence. A POST that silently omitted them would be a supervisor
+claiming to have proved a stop path it is forbidden from touching, and one that called them
+unavailable would suggest they might become available here. They will not.
+
+The homing procedure itself (§48.3) is in the same position: it moves the robot, through the RHAL
+extension channel, which is the one thing this process may not do.
 
 ---
 

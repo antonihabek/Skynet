@@ -167,6 +167,23 @@ jobs:
       - name: The console's script parses
         run: node --check crates/skynetd-io/console/console.js
 
+      - name: The console fixture's server parses
+        run: node --check crates/skynetd-io/console/fixture-serve.mjs
+
+      # §72.1 splits the code and does not split the specification, and §31.4 makes the reference
+      # TypeScript the oracle every edition is measured against. Both checks are **no-ops when
+      # BotMarket is not checked out beside this one**, which is the case in this workflow today and
+      # the reason they are cheap to have: they become real for anybody working with both trees, and
+      # for a future job that checks out both.
+      #
+      # The contract check exists because the docs stayed in sync for thirteen sessions while
+      # `lib/skynet/os/safety.ts` fell six behind, and nothing could see it: the corpus holds the
+      # Rust edition and the reference to each other, and the Hub's copies are outside it.
+      - name: The shared documents and contracts have not diverged
+        run: |
+          node tools/check-mirrors.mjs
+          node tools/check-contract-mirrors.mjs
+
       # §7.4. The sentence the product is not allowed to shorten. It lives in the kernel as a
       # constant, and a surface that mentions the certified tier without it is a surface making a
       # claim nobody sanctioned.
@@ -405,6 +422,144 @@ jobs:
               echo "::error::ActivatePackage no longer consults §19's driver signature gate."
               exit 1
             }
+
+      # §38.3. The trust store is written back by `skynetd trust`, and a rewrite that dropped what
+      # it could not parse would make adding a key a way to delete the entry somebody is trying to
+      # find. The store therefore keeps every unusable line verbatim and re-emits it in place.
+      - name: A trust store rewrite preserves what it could not parse
+        run: |
+          grep -q 'raw: entry.clone()' crates/skynetd-io/src/trust.rs
+          grep -A6 'pub fn to_json' crates/skynetd-io/src/trust.rs \
+            | grep -q 'Entry::Skipped(skipped) => skipped.raw.clone()' || {
+              echo "::error::TrustStore::to_json no longer re-emits skipped entries."
+              echo "§38.3: an audited surface that silently drops a malformed key turns"
+              echo "\`skynetd trust add\` into a way to lose one."
+              exit 1
+            }
+
+      # §38.3, the other half: provenance is *recorded*, never inferred. A key added without
+      # `--by` records nobody rather than whatever `\$USER` happens to say, because an environment
+      # variable is not an identity and a confidently wrong provenance is worse than an absent one.
+      - name: Provenance is never guessed from the environment
+        run: |
+          if grep -rnE 'env::var\("(USER|SUDO_USER|LOGNAME|USERNAME)"\)' crates/skynetd-io/src/; then
+            echo "::error::something read a username out of the environment for an audit record."
+            echo "§38.3 wants who and when. A name nobody typed is a provenance nobody wrote."
+            exit 1
+          fi
+          grep -q '"unattributed"' crates/skynetd-io/src/main.rs
+
+      # §32.2. The console has to render on a phone held next to a robot, and `main` is a grid:
+      # a grid item's default `min-width: auto` means one wide table sets the width of every panel
+      # beside it, which is how a page that looked fine on a laptop pushed 378 px off the right
+      # edge of a phone — with the *status* panel among the things hanging over it. A page that
+      # scrolls sideways puts the stop button's own row off screen.
+      - name: The console cannot be widened by one panel
+        run: |
+          grep -q 'main > \* { min-width: 0; }' crates/skynetd-io/console/console.css
+          grep -q 'overflow-x: auto' crates/skynetd-io/console/console.css
+
+      # §48.2. A check that could not run has not passed. The self-test has four outcomes and only
+      # one of them is a licence: `may_run` is true when **every** check passed, and a refactor that
+      # counted `unavailable` or `elsewhere` as "not a failure, therefore fine" would produce a
+      # robot cleared to run a policy on the strength of three checks out of eight.
+      - name: A self-test that could not run is not a self-test that passed
+        run: |
+          grep -A4 'pub fn may_run' crates/skynetd-io/src/post.rs \
+            | grep -q 'check.outcome == Outcome::Pass' || {
+              echo "::error::POST's may_run no longer requires every check to have passed."
+              echo "§48.2: an unavailable check establishes nothing, and a check §33.1 forbids this"
+              echo "process from running has not been run by anybody it can ask."
+              exit 1
+            }
+          # And the two verdicts stay apart: SAFE is sticky and needs a human, incomplete does not.
+          grep -q '"post_incomplete"' crates/skynetd-io/src/post.rs
+          grep -q 'fn an_undeclared_window_leaves_post_incomplete_rather_than_failed' \
+            crates/skynetd-io/src/tests.rs
+
+      # §46.2, and the shape of the rule is what a refactor would flatten. A tier ladder normally
+      # caps downward; here the **middle rung is the unsafe one**. A body whose drives coast may be
+      # guest (enforcement is advisory) and may be certified (layer 4 cuts drive enable
+      # independently of the reset), and only host — where layer 3 is the last line and its recovery
+      # is resetting the processor — turns a watchdog reset into a fall. Rewriting this as a ceiling
+      # would silently permit exactly the configuration it exists to refuse.
+      - name: A coasting body is refused host and nothing else
+        run: |
+          grep -q 'fn host_blocked_by_command_loss' crates/skynet-contracts/src/watchdog.rs
+          grep -q 'Some("coast") => Some' crates/skynet-contracts/src/watchdog.rs
+          # Silence is not `hold`: an undeclared behaviour blocks host too.
+          grep -A3 'None => Some(' crates/skynet-contracts/src/watchdog.rs \
+            | grep -q 'does not declare what its drives do' || {
+              echo "::error::an undeclared on_command_loss no longer blocks the host tier."
+              echo "§46.2: silence is a recovery path nobody has characterised, not \`hold\`."
+              exit 1
+            }
+          grep -q 'fn a_coasting_body_is_refused_host_and_nothing_else' \
+            crates/skynet-contracts/src/watchdog.rs
+
+      # §46.3. Two watchdogs with the same window is a race decided by interrupt latency, and a
+      # chain whose order depends on which timer fires first is not a chain. The comparison is
+      # strict, and an undeclared window is reported rather than skipped — a nesting report that
+      # ignored the window it could not get would be reporting on a chain it had not established.
+      - name: The watchdog windows nest strictly
+        run: |
+          grep -q 'if inner < outer {' crates/skynet-contracts/src/watchdog.rs
+          grep -q 'fn equal_windows_do_not_nest' crates/skynet-contracts/src/watchdog.rs
+          grep -q 'fn a_gap_is_reported_and_skipped_over_rather_than_ending_the_check' \
+            crates/skynet-contracts/src/watchdog.rs
+
+      # §34.4. An incident is never dropped, which is only true if there is somewhere to put it —
+      # so the budget is split and the reserve is untouchable. The two ways this silently breaks
+      # are an incident drawing on the shared pool (it would then be evictable in practice) and
+      # `victim()` being allowed to evict upwards, which would let a flood of telemetry take out
+      # the incident it is supposed to make room beside.
+      - name: An incident is never dropped to make room
+        run: |
+          grep -q 'fn droppable' crates/skynetd-io/src/outbound.rs
+          grep -q 'self != Class::Incident' crates/skynetd-io/src/outbound.rs
+          # The eviction candidate must be at least as droppable as the item asking for room.
+          grep -q 'item.class.droppable() && item.class >= class' crates/skynetd-io/src/outbound.rs
+          grep -q 'fn an_incident_fits_into_a_queue_that_is_otherwise_full' \
+            crates/skynetd-io/src/outbound.rs
+          grep -q 'fn telemetry_never_evicts_an_episode' crates/skynetd-io/src/outbound.rs
+
+      # §34.4's jitter, which only does its job in the full form. `exponential ± 10%` leaves a
+      # hundred robots that lost the same access point retrying inside the same tenth of a window —
+      # the thundering herd smeared rather than broken up. The delay must be uniform over
+      # [0, exponential], and the cap must survive a jitter nobody clamped.
+      - name: Backoff jitter is full and the cap holds
+        run: |
+          grep -q 'jitter.clamp(0.0, 1.0)' crates/skynetd-io/src/outbound.rs
+          grep -q 'min(BACKOFF_CAP_MS)' crates/skynetd-io/src/outbound.rs
+          grep -q 'backoff_ms(12, 4.0), BACKOFF_CAP_MS' crates/skynetd-io/src/outbound.rs
+
+      # §45.5. An expired calibration disables its dependent guards **by name**. The naming is the
+      # whole requirement: "proximity unavailable" sends nobody anywhere, and "proximity
+      # unavailable: the camera_extrinsics calibration expired" sends them to a target board. The
+      # table that maps a parameter set to the guards it feeds is §45.2's deliverable, and a guard
+      # spelled wrongly in it disables nothing while reading as though it disabled something.
+      - name: Every calibrated parameter set names real guards
+        run: |
+          grep -q 'fn the_guard_table_names_only_guards_the_kernel_has' \
+            crates/skynet-contracts/src/calibration.rs
+          # Absence is not validity: a set nobody measured takes its guards with it.
+          grep -q 'None => Validity::Absent' crates/skynet-contracts/src/calibration.rs
+
+      # §45.3 and §45.4, the rule that keeps an expiry policy from switching itself off: a missing
+      # *current* reading expires the record rather than extending it. A robot whose temperature
+      # sensor has failed is precisely the robot whose F/T bias should not be trusted, and the
+      # tempting `if let Some(current)` that skips the check on a missing input is how that gets
+      # quietly inverted.
+      - name: A missing reading expires a calibration rather than extending it
+        run: |
+          for reason in age joint_travel temperature; do
+            grep -q "reason: \"$reason\"" crates/skynet-contracts/src/calibration.rs || {
+              echo "::error::§45.4's $reason expiry is gone."
+              exit 1
+            }
+          done
+          grep -q 'fn a_missing_current_reading_expires_rather_than_extends' \
+            crates/skynet-contracts/src/calibration.rs
 
       # §19. `skynet-ed25519` verifies; it signs only under `test-signing`, because signing
       # multiplies a secret scalar and the implementation is not constant-time. A robot holds public

@@ -41,6 +41,7 @@
 extern crate alloc;
 
 pub mod admission;
+pub mod calibration;
 pub mod certification;
 pub mod digest;
 pub mod embodiment;
@@ -50,6 +51,7 @@ pub mod readiness;
 pub mod roles;
 pub mod safety;
 pub mod transport;
+pub mod watchdog;
 
 /// The version of the contract surface this crate implements.
 ///

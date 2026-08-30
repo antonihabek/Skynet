@@ -394,6 +394,52 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             signed.as_ref(),
         );
         profile.verified = verdict.state == skynet_contracts::admission::SignatureState::Verified;
+
+        // §38.1 asks for an incident when a profile signature *fails*, as against one merely
+        // missing, and it has been recorded as unraised for two sessions for want of anywhere to
+        // put it. §34.4's queue is that place.
+        //
+        // `Failed` only, deliberately. `absent` is a robot nobody has signed a profile for and
+        // `untrusted` is a key nobody has added — both are administrative gaps, both are already
+        // visible, and raising an incident for either would train an operator to close incidents
+        // without reading them. `failed` is the one state where a signature was made over *other
+        // bytes*, which is what §38.1's attacker — "somebody editing limits on a robot's disk" —
+        // leaves behind.
+        if verdict.state == skynet_contracts::admission::SignatureState::Failed {
+            self.raise_profile_incident(&profile.digest, &verdict.detail);
+        }
+    }
+
+    /// Queue §38.1's alarm. Best effort, and loud when it fails.
+    ///
+    /// The limits are not applied either way — `verified` is false, so the ceilings stay where they
+    /// were — so a queue that could not take this is a robot that is *safe and silent*, which is a
+    /// worse thing to be quiet about than the original event. Hence the log line: the alarm not
+    /// being raised is itself the thing an operator needs to know.
+    fn raise_profile_incident(&self, digest: &str, detail: &str) {
+        let queue = crate::outbound::Queue::of(self.store.layout());
+        let mut incident = Json::obj();
+        incident.set("kind", Json::Str("profile_signature_failed".to_string()));
+        incident.set("digest", Json::Str(digest.to_string()));
+        incident.set("detail", Json::Str(detail.to_string()));
+        incident.set(
+            "note",
+            Json::Str(
+                "§38.1: the limits were NOT applied. A signature that verifies against nothing was \
+                 made over other bytes, which is what editing limits on a robot's disk leaves \
+                 behind"
+                    .to_string(),
+            ),
+        );
+        let Ok(text) = incident.to_canonical() else {
+            return;
+        };
+        if let Err(error) = queue.enqueue(crate::outbound::Class::Incident, &text) {
+            eprintln!(
+                "skynetd: a profile signature FAILED and the incident could not be queued: {}",
+                error.reason()
+            );
+        }
     }
 
     /// Observe the machine.

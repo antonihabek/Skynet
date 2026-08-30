@@ -513,6 +513,22 @@ pub enum EventCode {
     RecordingStarted = 11,
     /// The recording was sealed.
     Sealed = 12,
+    /// A configuration change (§38.3): a key trusted or untrusted, a profile applied.
+    ///
+    /// **Mirrored rather than written directly.** The change is usually made by a *different
+    /// process* — `skynetd trust add` runs while the daemon is up — and this ring has exactly one
+    /// writer by construction. So the change goes into the audit log, and the daemon copies
+    /// anything past its cursor onto this channel on its next pass. The consequence is a delay of
+    /// up to one reconcile period, and none at all on a robot where `skynetd` is not running; the
+    /// audit entry is the record that always exists, and this one is the one an incident replay
+    /// can see beside the cycles it was reading anyway.
+    ConfigChanged = 13,
+    /// A package was admitted, or was not (§8, §37.1).
+    ///
+    /// The verdict rather than the whole report: which package, which digest, and what admission
+    /// concluded. §41.1 keeps the black box out of the logging business, so the findings stay in
+    /// the report an operator reads and what lands here is the decision.
+    Admission = 14,
 }
 
 impl EventCode {
@@ -531,6 +547,8 @@ impl EventCode {
             10 => EventCode::ClockStep,
             11 => EventCode::RecordingStarted,
             12 => EventCode::Sealed,
+            13 => EventCode::ConfigChanged,
+            14 => EventCode::Admission,
             _ => return None,
         })
     }
@@ -550,6 +568,8 @@ impl EventCode {
             EventCode::ClockStep => "clock_step",
             EventCode::RecordingStarted => "recording_started",
             EventCode::Sealed => "sealed",
+            EventCode::ConfigChanged => "config_changed",
+            EventCode::Admission => "admission",
         }
     }
 }

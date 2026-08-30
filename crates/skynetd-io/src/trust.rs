@@ -197,22 +197,145 @@ impl SignedBy {
     }
 }
 
-/// A key this robot has been told to trust, and the operator's name for it.
+/// When a key was trusted, by whom, and why — or the recorded fact that nobody wrote it down.
+///
+/// §38.3 asks this of profiles: *"every change is a black box event and an audit-log entry,
+/// carrying who, when, which layer, and the previous value."* A trust store entry is the same class
+/// of thing — a decision somebody made that changes what may run on the machine — and until this
+/// existed the store recorded only the outcome.
+///
+/// # Every field is optional, and that is the point
+///
+/// A store written by hand before this existed has none of them, and the honest report of such an
+/// entry is **`unrecorded`** rather than a fabricated date. Defaulting `added_at` to the time the
+/// file was first read would produce a provenance that is confidently wrong, which is worse than
+/// one that is admittedly absent — the same rule §7.2 applies to a guard with no input.
+///
+/// [`Provenance::is_recorded`] is what a report asks, and [`skynetd trust list`] prints
+/// *"provenance unrecorded"* for the rest.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Provenance {
+    /// Wall time, RFC 3339, UTC, as written by whoever added the key.
+    ///
+    /// **Wall time and not monotonic**, which is not a slip: §35.1 gives `CLOCK_REALTIME` exactly
+    /// three jobs — *"logging, scheduling, correlation with the Hub"* — and an audit record is the
+    /// first of them. A monotonic reading here would be a number that means nothing once the
+    /// machine reboots, and this record has to be comparable against a person's calendar. Nothing
+    /// reads it to make a decision; a stepped clock spoils a record and cannot spoil a verdict.
+    pub added_at: Option<String>,
+    /// Who added it — a credential label, a person, a provisioning run.
+    pub added_by: Option<String>,
+    /// Why. The one field an operator writes for their successor rather than for themselves.
+    pub note: Option<String>,
+}
+
+impl Provenance {
+    /// Whether anybody wrote down anything about where this key came from.
+    pub fn is_recorded(&self) -> bool {
+        self.added_at.is_some() || self.added_by.is_some()
+    }
+
+    /// Read the three optional strings from an entry.
+    ///
+    /// An empty string is read as absence. A file that says `"added_by": ""` has not recorded an
+    /// actor, and treating the empty string as one would put a blank name in an audit report.
+    pub fn from_json(entry: &Json) -> Provenance {
+        let field = |name: &str| {
+            entry
+                .get(name)
+                .and_then(Json::as_str)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string)
+        };
+        Provenance {
+            added_at: field("added_at"),
+            added_by: field("added_by"),
+            note: field("note"),
+        }
+    }
+
+    /// A sentence for a report, or the fact that there is none.
+    pub fn describe(&self) -> String {
+        match (&self.added_at, &self.added_by) {
+            (Some(at), Some(by)) => format!("added {at} by {by}"),
+            (Some(at), None) => format!("added {at}, by nobody recorded"),
+            (None, Some(by)) => format!("added by {by}, at no recorded time"),
+            (None, None) => "provenance unrecorded — this key predates the audited store, or was \
+                             added by editing the file"
+                .to_string(),
+        }
+    }
+}
+
+/// A key this robot has been told to trust, the operator's name for it, and where it came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrustedKey {
     /// This robot's name for the signer. Local, and only ever used in reports.
     pub label: String,
     /// The key.
     pub key: VerifyingKey,
+    /// Who trusted it and when (§38.3), or the absence of that record.
+    pub provenance: Provenance,
+}
+
+impl TrustedKey {
+    /// The key as the file spells it.
+    pub fn key_hex(&self) -> String {
+        let rendered = self.key.to_hex();
+        core::str::from_utf8(&rendered)
+            .expect("hex is ASCII")
+            .to_string()
+    }
+
+    /// The entry as it is written back.
+    pub fn to_json(&self) -> Json {
+        let mut entry = Json::obj();
+        entry.set("label", Json::Str(self.label.clone()));
+        entry.set("key", Json::Str(self.key_hex()));
+        for (name, value) in [
+            ("note", &self.provenance.note),
+            ("added_at", &self.provenance.added_at),
+            ("added_by", &self.provenance.added_by),
+        ] {
+            if let Some(text) = value {
+                entry.set(name, Json::Str(text.clone()));
+            }
+        }
+        entry
+    }
 }
 
 /// An entry that could not be loaded, and why.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// The raw document is kept because this store gets **written back** (§38.3's audited surface), and
+/// a rewrite that dropped what it could not parse would delete the one entry an operator is trying
+/// to find. `skynetd trust add` on a file with a mistyped key must not quietly take the typo away:
+/// the typo is the bug report.
+#[derive(Debug, Clone, PartialEq)]
 pub struct SkippedKey {
     /// Where it was, so an operator can find it in the file.
     pub at: String,
     /// What is wrong.
     pub detail: String,
+    /// The entry exactly as it was read, so writing the file back preserves it.
+    pub raw: Json,
+}
+
+/// One line of the `keys` array, in the order the file gives it.
+///
+/// Order is preserved rather than reconstructed, so a rewrite is a diff an operator recognises.
+///
+/// Clippy is right that the variants differ in size: a [`TrustedKey`] carries a [`VerifyingKey`],
+/// which caches the *decompressed* curve point so that verifying does not re-decompress on every
+/// signature. Boxing it would put an allocation on the entry a robot actually uses, to save a few
+/// hundred bytes on a list that a provisioned robot holds three of.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum Entry {
+    /// A key this robot trusts.
+    Trusted(TrustedKey),
+    /// A line that could not be used, kept verbatim.
+    Skipped(SkippedKey),
 }
 
 /// Where the store's contents came from.
@@ -234,11 +357,105 @@ pub enum Source {
 }
 
 /// The keys this robot trusts.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TrustStore {
-    keys: Vec<TrustedKey>,
-    skipped: Vec<SkippedKey>,
+    entries: Vec<Entry>,
     source: Source,
+}
+
+/// How an operator names the entry they mean.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Selector {
+    /// This robot's name for a key.
+    Label(String),
+    /// The key itself, for a store holding two of the same label — or one whose labels are hex.
+    Key(VerifyingKey),
+    /// A skipped line's position, which is the only handle a malformed entry has.
+    At(String),
+}
+
+impl Selector {
+    /// How to say it back in an error.
+    pub fn describe(&self) -> String {
+        match self {
+            Selector::Label(label) => format!("a key labelled `{label}`"),
+            Selector::Key(key) => {
+                let rendered = key.to_hex();
+                format!(
+                    "the key `{}`",
+                    core::str::from_utf8(&rendered).expect("hex is ASCII")
+                )
+            }
+            Selector::At(at) => format!("an entry at `{at}`"),
+        }
+    }
+}
+
+/// What a removal took out.
+///
+/// Same size asymmetry as [`Entry`], for the same reason, and returned once per command.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum Removed {
+    /// A key this robot was trusting.
+    Trusted(TrustedKey),
+    /// A line it never could.
+    Skipped(SkippedKey),
+}
+
+/// Why a change to the store was refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChangeError {
+    /// The file is there and does not parse, so a rewrite would destroy it.
+    StoreUnreadable {
+        /// What is wrong with it.
+        detail: String,
+    },
+    /// A key with no label is a key no report can name.
+    LabelEmpty,
+    /// The key is already trusted, under this label.
+    KeyHeld {
+        /// The label it is held under.
+        label: String,
+    },
+    /// The label is taken, by this key.
+    LabelHeld {
+        /// The key holding it.
+        key: String,
+    },
+    /// Nothing in the store matches.
+    NotHeld {
+        /// What was asked for.
+        selector: String,
+    },
+}
+
+impl ChangeError {
+    /// A sentence for an operator, naming the remedy rather than the rule.
+    pub fn reason(&self) -> String {
+        match self {
+            ChangeError::StoreUnreadable { detail } => format!(
+                "the trust store {detail}, and writing over it would destroy the keys it still \
+                 holds. Repair the file first — `skynetd trust list` says what it can read"
+            ),
+            ChangeError::LabelEmpty => {
+                "a key needs a label: a report that names a signer by 64 hex characters has told \
+                 nobody anything"
+                    .to_string()
+            }
+            ChangeError::KeyHeld { label } => format!(
+                "this robot already trusts that key, as `{label}`. Remove it first if the label is \
+                 what needs to change"
+            ),
+            ChangeError::LabelHeld { key } => format!(
+                "`{key}` already holds that label. Two keys under one name make every report \
+                 ambiguous about which one signed"
+            ),
+            ChangeError::NotHeld { selector } => {
+                format!("this robot does not hold {selector}")
+            }
+        }
+    }
 }
 
 /// What checking a signature concluded.
@@ -256,9 +473,16 @@ impl TrustStore {
     /// A store holding nothing, because there is no file.
     pub fn missing() -> TrustStore {
         TrustStore {
-            keys: Vec::new(),
-            skipped: Vec::new(),
+            entries: Vec::new(),
             source: Source::Missing,
+        }
+    }
+
+    /// A store holding nothing, because the file is unusable.
+    fn broken(detail: String) -> TrustStore {
+        TrustStore {
+            entries: Vec::new(),
+            source: Source::Unreadable { detail },
         }
     }
 
@@ -270,15 +494,7 @@ impl TrustStore {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return TrustStore::missing()
             }
-            Err(error) => {
-                return TrustStore {
-                    keys: Vec::new(),
-                    skipped: Vec::new(),
-                    source: Source::Unreadable {
-                        detail: format!("could not be read: {error}"),
-                    },
-                }
-            }
+            Err(error) => return TrustStore::broken(format!("could not be read: {error}")),
         };
         TrustStore::from_text(&text)
     }
@@ -287,31 +503,26 @@ impl TrustStore {
     pub fn from_text(text: &str) -> TrustStore {
         let document = match Json::parse(text) {
             Ok(document) => document,
-            Err(error) => {
-                return TrustStore {
-                    keys: Vec::new(),
-                    skipped: Vec::new(),
-                    source: Source::Unreadable {
-                        detail: format!("does not parse: {error}"),
-                    },
-                }
-            }
+            Err(error) => return TrustStore::broken(format!("does not parse: {error}")),
         };
 
-        let mut keys = Vec::new();
-        let mut skipped = Vec::new();
+        let mut entries: Vec<Entry> = Vec::new();
         for (index, entry) in document.arr_or_empty("keys").iter().enumerate() {
             let at = format!("keys[{index}]");
+            let skip = |detail: &str| {
+                Entry::Skipped(SkippedKey {
+                    at: at.clone(),
+                    detail: detail.to_string(),
+                    raw: entry.clone(),
+                })
+            };
             let label = entry
                 .get("label")
                 .and_then(Json::as_str)
                 .unwrap_or("")
                 .to_string();
             let Some(hex) = entry.get("key").and_then(Json::as_str) else {
-                skipped.push(SkippedKey {
-                    at,
-                    detail: "has no `key` field".to_string(),
-                });
+                entries.push(skip("this entry names no `key`"));
                 continue;
             };
             match VerifyingKey::from_hex(hex) {
@@ -328,37 +539,54 @@ impl TrustStore {
                     } else {
                         label
                     };
-                    if keys.iter().any(|k: &TrustedKey| k.key == key) {
-                        skipped.push(SkippedKey {
-                            at,
-                            detail: "is a key that already appears earlier in the file".to_string(),
-                        });
+                    if entries.iter().any(|held| match held {
+                        Entry::Trusted(trusted) => trusted.key == key,
+                        Entry::Skipped(_) => false,
+                    }) {
+                        entries.push(skip("this key already appears earlier in the file"));
                         continue;
                     }
-                    keys.push(TrustedKey { label, key });
+                    entries.push(Entry::Trusted(TrustedKey {
+                        label,
+                        key,
+                        provenance: Provenance::from_json(entry),
+                    }));
                 }
-                Err(error) => skipped.push(SkippedKey {
-                    at,
-                    detail: error.reason().to_string(),
-                }),
+                Err(error) => entries.push(skip(error.reason())),
             }
         }
 
         TrustStore {
-            keys,
-            skipped,
+            entries,
             source: Source::Loaded,
         }
     }
 
+    /// Every line of the file, usable or not, in file order.
+    pub fn entries(&self) -> &[Entry] {
+        &self.entries
+    }
+
     /// The keys, in file order.
-    pub fn keys(&self) -> &[TrustedKey] {
-        &self.keys
+    pub fn keys(&self) -> Vec<&TrustedKey> {
+        self.entries
+            .iter()
+            .filter_map(|entry| match entry {
+                Entry::Trusted(key) => Some(key),
+                Entry::Skipped(_) => None,
+            })
+            .collect()
     }
 
     /// Entries that could not be loaded.
-    pub fn skipped(&self) -> &[SkippedKey] {
-        &self.skipped
+    pub fn skipped(&self) -> Vec<&SkippedKey> {
+        self.entries
+            .iter()
+            .filter_map(|entry| match entry {
+                Entry::Skipped(skipped) => Some(skipped),
+                Entry::Trusted(_) => None,
+            })
+            .collect()
     }
 
     /// Where the contents came from.
@@ -368,15 +596,95 @@ impl TrustStore {
 
     /// Whether this robot trusts anybody at all.
     pub fn is_empty(&self) -> bool {
-        self.keys.is_empty()
+        self.keys().is_empty()
     }
 
     /// The label this robot has for a key, if it trusts it.
     pub fn label_for(&self, key: &VerifyingKey) -> Option<&str> {
-        self.keys
-            .iter()
+        self.keys()
+            .into_iter()
             .find(|k| &k.key == key)
             .map(|k| k.label.as_str())
+    }
+
+    /// The entry this robot has for a key, if it trusts it.
+    pub fn entry_for(&self, key: &VerifyingKey) -> Option<&TrustedKey> {
+        self.keys().into_iter().find(|k| &k.key == key)
+    }
+
+    /// The document, ready to be written back.
+    ///
+    /// Round-trips: skipped lines are re-emitted exactly as they were read, in place, so a rewrite
+    /// changes the one entry it means to change and nothing else. A store that dropped what it
+    /// could not parse would make `trust add` a way to lose a key.
+    pub fn to_json(&self) -> Json {
+        let mut keys = Json::arr();
+        for entry in &self.entries {
+            keys.push(match entry {
+                Entry::Trusted(trusted) => trusted.to_json(),
+                Entry::Skipped(skipped) => skipped.raw.clone(),
+            });
+        }
+        let mut document = Json::obj();
+        document.set("keys", keys);
+        document
+    }
+
+    /// Trust a key (§38.3).
+    ///
+    /// Refused rather than merged when the key is already held, and the error names the label it is
+    /// held under. Silently relabelling would rewrite a decision somebody else recorded, and the
+    /// case it would hide — the same key arriving under two names — is the case worth seeing.
+    pub fn add(&mut self, key: TrustedKey) -> Result<(), ChangeError> {
+        if let Source::Unreadable { detail } = &self.source {
+            // Writing over a file that does not parse would destroy whatever is in it, including
+            // the keys this robot is currently trusting. The remedy is a person, not a rewrite.
+            return Err(ChangeError::StoreUnreadable {
+                detail: detail.clone(),
+            });
+        }
+        if key.label.trim().is_empty() {
+            return Err(ChangeError::LabelEmpty);
+        }
+        if let Some(existing) = self.entry_for(&key.key) {
+            return Err(ChangeError::KeyHeld {
+                label: existing.label.clone(),
+            });
+        }
+        if let Some(existing) = self.keys().into_iter().find(|held| held.label == key.label) {
+            return Err(ChangeError::LabelHeld {
+                key: existing.key_hex(),
+            });
+        }
+        self.entries.push(Entry::Trusted(key));
+        self.source = Source::Loaded;
+        Ok(())
+    }
+
+    /// Stop trusting whatever `selector` names, and return what was removed.
+    ///
+    /// Removal is permitted on an unreadable store's *skipped* lines and nothing else, because
+    /// removing trust is the safe direction and a broken entry is the thing somebody is here to
+    /// remove. Nothing else about a file that does not parse is knowable.
+    pub fn remove(&mut self, selector: &Selector) -> Result<Removed, ChangeError> {
+        let position = self
+            .entries
+            .iter()
+            .position(|entry| match (entry, selector) {
+                (Entry::Trusted(trusted), Selector::Label(label)) => &trusted.label == label,
+                (Entry::Trusted(trusted), Selector::Key(key)) => &trusted.key == key,
+                (Entry::Skipped(skipped), Selector::At(at)) => &skipped.at == at,
+                _ => false,
+            });
+        let Some(position) = position else {
+            return Err(ChangeError::NotHeld {
+                selector: selector.describe(),
+            });
+        };
+        Ok(match self.entries.remove(position) {
+            Entry::Trusted(trusted) => Removed::Trusted(trusted),
+            Entry::Skipped(skipped) => Removed::Skipped(skipped),
+        })
     }
 
     /// Decide what is known about a signature over `message`.
@@ -435,7 +743,7 @@ impl TrustStore {
                         ),
                         Source::Loaded => format!(
                             "signed by `{hex}`, which is not among the {} key(s) this robot trusts",
-                            self.keys.len()
+                            self.keys().len()
                         ),
                     },
                 }
@@ -462,7 +770,7 @@ impl TrustStore {
                  and a file that broke on its own is worth a second look"
             )),
             Source::Loaded => {
-                if self.keys.is_empty() {
+                if self.is_empty() {
                     lines.push(
                         "trust: the trust store is present and names no keys, so every signature \
                          will report `untrusted`"
@@ -471,13 +779,98 @@ impl TrustStore {
                 }
             }
         }
-        for skipped in &self.skipped {
+        for skipped in self.skipped() {
             lines.push(format!(
-                "trust: {} was skipped — it {}",
+                "trust: {} was skipped: {}",
                 skipped.at, skipped.detail
             ));
         }
+
+        // §38.3's question, asked of the store rather than of one entry: *who* decided this robot
+        // should believe these signers. A key with no provenance still verifies — it is a real
+        // decision somebody made — and the thing that is missing is the record of who made it,
+        // which is a gap in the audit rather than in the security. So this is a notice and not a
+        // refusal, and it names the count because "one of nine" and "nine of nine" are different
+        // machines: the first is an entry somebody hand-edited, the second a robot provisioned
+        // before anything recorded provenance at all.
+        let unrecorded: Vec<&str> = self
+            .keys()
+            .into_iter()
+            .filter(|key| !key.provenance.is_recorded())
+            .map(|key| key.label.as_str())
+            .collect();
+        if !unrecorded.is_empty() {
+            lines.push(format!(
+                "trust: {} of {} trusted key(s) record nobody who added them and no date — {}. \
+                 `skynetd trust list` shows the rest",
+                unrecorded.len(),
+                self.keys().len(),
+                unrecorded.join(", ")
+            ));
+        }
         lines
+    }
+
+    /// The store as a report: every line of the file, with provenance (§38.3).
+    ///
+    /// Separate from [`TrustStore::to_json`], which is the file. This is what a console and
+    /// `skynetd trust list` read, and it carries the two things the file does not spell out — the
+    /// source of the store, and whether each entry's provenance was ever written down.
+    pub fn to_report(&self) -> Json {
+        let mut keys = Json::arr();
+        for entry in &self.entries {
+            let mut row = Json::obj();
+            match entry {
+                Entry::Trusted(trusted) => {
+                    row.set("usable", Json::Bool(true));
+                    row.set("label", Json::Str(trusted.label.clone()));
+                    row.set("key", Json::Str(trusted.key_hex()));
+                    row.set(
+                        "provenance_recorded",
+                        Json::Bool(trusted.provenance.is_recorded()),
+                    );
+                    row.set("provenance", Json::Str(trusted.provenance.describe()));
+                    for (name, value) in [
+                        ("note", &trusted.provenance.note),
+                        ("added_at", &trusted.provenance.added_at),
+                        ("added_by", &trusted.provenance.added_by),
+                    ] {
+                        if let Some(text) = value {
+                            row.set(name, Json::Str(text.clone()));
+                        }
+                    }
+                }
+                Entry::Skipped(skipped) => {
+                    row.set("usable", Json::Bool(false));
+                    row.set("at", Json::Str(skipped.at.clone()));
+                    row.set("detail", Json::Str(skipped.detail.clone()));
+                }
+            }
+            keys.push(row);
+        }
+
+        let mut document = Json::obj();
+        document.set(
+            "source",
+            Json::Str(
+                match &self.source {
+                    Source::Missing => "missing",
+                    Source::Loaded => "loaded",
+                    Source::Unreadable { .. } => "unreadable",
+                }
+                .to_string(),
+            ),
+        );
+        if let Source::Unreadable { detail } = &self.source {
+            document.set("source_detail", Json::Str(detail.clone()));
+        }
+        document.set("keys", keys);
+        let mut notices = Json::arr();
+        for line in self.notices() {
+            notices.push(Json::Str(line));
+        }
+        document.set("notices", notices);
+        document
     }
 }
 
@@ -504,7 +897,29 @@ mod tests {
         }
     }
 
+    /// A store as `skynetd trust add` would have written it — provenance and all.
+    ///
+    /// The provenance is here rather than omitted because a store without it now raises a notice,
+    /// and a helper that produced one would make every test in this module assert against a robot
+    /// somebody hand-edited. That case has its own test.
     fn store_with(entries: &[(&str, &SigningKey)]) -> TrustStore {
+        let mut text = String::from("{\"keys\":[");
+        for (index, (label, key)) in entries.iter().enumerate() {
+            if index > 0 {
+                text.push(',');
+            }
+            text.push_str(&format!(
+                "{{\"label\":\"{label}\",\"key\":\"{}\",\"added_at\":\"2026-08-30T12:00:00Z\",\
+                 \"added_by\":\"alice\"}}",
+                public_hex(key)
+            ));
+        }
+        text.push_str("]}");
+        TrustStore::from_text(&text)
+    }
+
+    /// The same store as a hand-edited file: keys, and nothing about where they came from.
+    fn store_without_provenance(entries: &[(&str, &SigningKey)]) -> TrustStore {
         let mut text = String::from("{\"keys\":[");
         for (index, (label, key)) in entries.iter().enumerate() {
             if index > 0 {
@@ -726,5 +1141,217 @@ mod tests {
         ] {
             assert!(error.reason().len() > 20, "{error:?}");
         }
+    }
+
+    // ── The audited surface (§38.3) ────────────────────────────────────────
+
+    fn added(label: &str, key: &SigningKey, by: Option<&str>) -> TrustedKey {
+        TrustedKey {
+            label: label.to_string(),
+            key: key.verifying_key(),
+            provenance: Provenance {
+                added_at: Some("2026-08-30T12:00:00Z".to_string()),
+                added_by: by.map(str::to_string),
+                note: None,
+            },
+        }
+    }
+
+    #[test]
+    fn provenance_is_read_back_off_the_entry() {
+        let store = store_with(&[("acme-robotics", &key(1))]);
+        let held = store.keys();
+        let provenance = &held[0].provenance;
+
+        assert_eq!(provenance.added_at.as_deref(), Some("2026-08-30T12:00:00Z"));
+        assert_eq!(provenance.added_by.as_deref(), Some("alice"));
+        assert!(provenance.is_recorded());
+        assert_eq!(provenance.describe(), "added 2026-08-30T12:00:00Z by alice");
+    }
+
+    /// An empty string is not an actor. A file saying `"added_by": ""` has recorded nobody, and
+    /// carrying it through would put a blank name in an audit report.
+    #[test]
+    fn an_empty_provenance_field_reads_as_absence() {
+        let store = TrustStore::from_text(&format!(
+            "{{\"keys\":[{{\"label\":\"a\",\"key\":\"{}\",\"added_by\":\"\"}}]}}",
+            public_hex(&key(1))
+        ));
+        assert!(!store.keys()[0].provenance.is_recorded());
+    }
+
+    /// A key nobody recorded still verifies — the gap is in the audit, not in the security — so
+    /// this is a notice rather than a refusal, and it names which entries.
+    #[test]
+    fn a_store_nobody_recorded_says_so_without_refusing_anything() {
+        let signer = key(1);
+        let store = store_without_provenance(&[("acme-robotics", &signer)]);
+        let message = package_message(DIGEST);
+
+        assert_eq!(
+            store.check(&message, Some(&sign(&signer, &message))).state,
+            SignatureState::Verified,
+        );
+        let notices = store.notices().join("\n");
+        assert!(notices.contains("1 of 1 trusted key(s)"), "{notices}");
+        assert!(notices.contains("acme-robotics"), "{notices}");
+    }
+
+    /// The property that makes `trust add` safe to run on a file somebody broke: the broken line
+    /// comes back out exactly as it went in, in the position it was in.
+    #[test]
+    fn a_rewrite_preserves_an_entry_it_could_not_parse() {
+        let before = format!(
+            "{{\"keys\":[{{\"label\":\"good\",\"key\":\"{}\"}},             {{\"label\":\"typo\",\"key\":\"not-hex\",\"note\":\"keep me\"}}]}}",
+            public_hex(&key(1))
+        );
+        let mut store = TrustStore::from_text(&before);
+        assert_eq!(store.skipped().len(), 1);
+
+        store
+            .add(added("second", &key(2), Some("carol")))
+            .expect("add");
+        let written = store.to_json().to_canonical().expect("canonical");
+
+        assert!(written.contains("not-hex"), "{written}");
+        assert!(written.contains("keep me"), "{written}");
+
+        // And it is still in the middle: order is preserved, so a rewrite is a diff somebody reads.
+        let reread = TrustStore::from_text(&written);
+        assert!(
+            matches!(reread.entries()[1], Entry::Skipped(_)),
+            "{written}"
+        );
+        assert_eq!(reread.keys().len(), 2);
+        assert_eq!(reread.keys()[1].label, "second");
+    }
+
+    #[test]
+    fn a_store_written_back_reads_back_identically() {
+        let mut store = TrustStore::from_text("{\"keys\":[]}");
+        store
+            .add(added("acme-robotics", &key(1), Some("alice")))
+            .expect("add");
+        store.add(added("bench", &key(2), None)).expect("add");
+
+        let once = store.to_json().to_canonical().expect("canonical");
+        let twice = TrustStore::from_text(&once)
+            .to_json()
+            .to_canonical()
+            .expect("canonical");
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn the_same_key_twice_is_refused_and_names_the_label_holding_it() {
+        let mut store = TrustStore::from_text("{\"keys\":[]}");
+        store
+            .add(added("acme-robotics", &key(1), None))
+            .expect("add");
+
+        assert_eq!(
+            store.add(added("acme-again", &key(1), None)),
+            Err(ChangeError::KeyHeld {
+                label: "acme-robotics".to_string()
+            }),
+        );
+    }
+
+    /// Two keys under one name make every report ambiguous about which one signed, which is the
+    /// one thing a label exists to prevent.
+    #[test]
+    fn the_same_label_twice_is_refused() {
+        let mut store = TrustStore::from_text("{\"keys\":[]}");
+        store
+            .add(added("acme-robotics", &key(1), None))
+            .expect("add");
+
+        assert!(matches!(
+            store.add(added("acme-robotics", &key(2), None)),
+            Err(ChangeError::LabelHeld { .. })
+        ));
+    }
+
+    #[test]
+    fn a_key_with_no_label_is_refused() {
+        let mut store = TrustStore::from_text("{\"keys\":[]}");
+        assert_eq!(
+            store.add(added("   ", &key(1), None)),
+            Err(ChangeError::LabelEmpty)
+        );
+    }
+
+    /// Writing over a file that does not parse would destroy the keys it still holds, and this
+    /// robot cannot tell which those are. The remedy is a person.
+    #[test]
+    fn nothing_is_added_to_a_store_that_does_not_parse() {
+        let mut store = TrustStore::from_text("{ not json");
+        assert!(matches!(
+            store.add(added("acme", &key(1), None)),
+            Err(ChangeError::StoreUnreadable { .. })
+        ));
+    }
+
+    #[test]
+    fn removing_a_key_stops_it_verifying() {
+        let signer = key(1);
+        let mut store = store_with(&[("acme-robotics", &signer)]);
+        let message = package_message(DIGEST);
+        assert_eq!(
+            store.check(&message, Some(&sign(&signer, &message))).state,
+            SignatureState::Verified
+        );
+
+        let removed = store
+            .remove(&Selector::Label("acme-robotics".to_string()))
+            .expect("remove");
+        assert!(matches!(removed, Removed::Trusted(_)));
+        assert_eq!(
+            store.check(&message, Some(&sign(&signer, &message))).state,
+            SignatureState::Untrusted,
+        );
+    }
+
+    /// A malformed line has no label and no key, so its position is the only handle on it — and
+    /// removing it is the reason somebody came to this command.
+    #[test]
+    fn a_skipped_line_can_be_removed_by_position() {
+        let mut store =
+            TrustStore::from_text("{\"keys\":[{\"label\":\"typo\",\"key\":\"not-hex\"}]}");
+        assert_eq!(store.skipped().len(), 1);
+
+        let removed = store
+            .remove(&Selector::At("keys[0]".to_string()))
+            .expect("remove");
+        assert!(matches!(removed, Removed::Skipped(_)));
+        assert!(store.entries().is_empty());
+    }
+
+    #[test]
+    fn removing_something_absent_says_what_was_asked_for() {
+        let mut store = store_with(&[("acme-robotics", &key(1))]);
+        let error = store
+            .remove(&Selector::Label("nobody".to_string()))
+            .expect_err("absent");
+        assert!(error.reason().contains("`nobody`"), "{error:?}");
+    }
+
+    #[test]
+    fn the_report_carries_provenance_and_the_source() {
+        let store = store_with(&[("acme-robotics", &key(1))]);
+        let report = store.to_report().to_canonical().expect("canonical");
+
+        assert!(report.contains("\"source\":\"loaded\""), "{report}");
+        assert!(report.contains("\"provenance_recorded\":true"), "{report}");
+        assert!(
+            report.contains("added 2026-08-30T12:00:00Z by alice"),
+            "{report}"
+        );
+
+        let missing = TrustStore::missing()
+            .to_report()
+            .to_canonical()
+            .expect("canonical");
+        assert!(missing.contains("\"source\":\"missing\""), "{missing}");
     }
 }
