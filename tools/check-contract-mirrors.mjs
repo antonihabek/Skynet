@@ -26,8 +26,18 @@
  * model. So the comparison normalises exactly those two rewrites and nothing else — a check that
  * normalised more would be a check that could not see a divergence in the code.
  *
- * Exits **zero** when BotMarket is not present, for the same reason `check-mirrors.mjs` does: a
- * vendor who has cloned only this repository should never be told their tree is broken.
+ * # With one repository, which is what CI has
+ *
+ * The comparison above needs both trees, and for a long time this script's answer to having one was
+ * to print "BotMarket not found" and exit zero — so the CI job named after this check has never
+ * been able to fail, and the one divergence it has actually caught was caught by a human running it
+ * locally.
+ *
+ * So the digests are pinned in **both** repositories, written by the same `--sync`. With one
+ * checkout the script verifies the reference against its own pins, which catches the failure that
+ * matters most here: a mirrored contract edited without the Hub being resynced. A fresh clone
+ * matches its pins and passes, so a vendor who has cloned only this repository is still never told
+ * their tree is broken — the check fires when somebody edits a contract, and says what that costs.
  */
 
 import { createHash } from 'node:crypto'
@@ -40,11 +50,28 @@ const HERE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 /**
  * Modules the Hub keeps its own copy of.
  *
- * `calibration` (§45) and `watchdog` (§46) are deliberately **not** here yet. Both are contracts the
- * Hub will need for §32.1's `/skynet/os/devices/[id]` — "active and unavailable guards with the
- * missing input named" is precisely what calibration produces — and that page waits on a table that
- * does not exist. Mirroring them now would put two modules nothing imports into an application, and
- * the honest place to record that they are coming is here rather than in somebody's memory.
+ * `calibration` (§45), `watchdog` (§46), `entitlement` (§51), `birth` (§50) and `provenance` (§56)
+ * are deliberately **not** here yet.
+ * All three are contracts the Hub will need for §32.1's `/skynet/os/devices/[id]` — "active and
+ * unavailable guards with the missing input named" is precisely what calibration produces, and a
+ * fleet page that cannot say which robots are running on a lapsed entitlement is a fleet page
+ * missing the one commercial fact §51 defines — and that page waits on a table that does not exist.
+ * Mirroring them now would put five modules nothing imports into an application, and the honest
+ * place to record that they are coming is here rather than in somebody's memory. `birth` waits on
+ * §57's `POST /robots/{slug}/attestations`, which is unwritten.
+ *
+ * `provenance` is the one whose absence is least comfortable, because §56.2 says the **Hub**
+ * assigns the class — so unlike the others, the Hub is the consumer rather than a second opinion.
+ * What it waits on is a schema decision rather than an endpoint: `skynet_evaluations` already
+ * carries `verified: boolean` and `source: platform | self_reported | imported`, which is a
+ * different axis from §56.2's `field | simulated | unattested` — the first is about who submitted a
+ * result, the second about what it is evidence of. Reconciling them is a migration on a live
+ * project, and that is the owner's call rather than a tool's.
+ *
+ * `entitlement` has a second reason to wait, and it is the more interesting one. §57 makes the
+ * token *"a field in the desired-state document, not an endpoint"*, so the Hub's job is to **issue**
+ * tokens and the robot's is to decide about them. Those are not the same function, and mirroring
+ * the robot's decision into the Hub before anything issues one would put the wrong half there.
  *
  * Add a name to this list and run `--sync`; nothing else is needed.
  */
@@ -71,12 +98,6 @@ function findHub() {
 
 const hub = given ? resolve(given) : findHub()
 
-if (!existsSync(hub)) {
-  console.log(`BotMarket not found at ${hub} — nothing to compare.`)
-  console.log('This is not a failure: the OS repository stands on its own.')
-  process.exit(0)
-}
-
 /** The reference's spelling of an import, rewritten to the Hub's. */
 function toHub(source) {
   return lf(source)
@@ -100,6 +121,105 @@ function toHub(source) {
  */
 function lf(source) {
   return source.split('\r\n').join('\n')
+}
+
+/** The digest of one reference contract, as the Hub would hold it. */
+function digestOf(name) {
+  const path = join(HERE, REFERENCE, `${name}.ts`)
+  if (!existsSync(path)) return null
+  return createHash('sha256').update(toHub(readFileSync(path, 'utf8'))).digest('hex')
+}
+
+/**
+ * The pinned digests, kept in **both** repositories.
+ *
+ * The comparison further down only runs where both are checked out, and CI has one. So the job that
+ * exists to catch a divergence has never been able to: it printed "BotMarket not found" and exited
+ * zero, and the one defect this tool has actually caught was caught by a human running it locally.
+ *
+ * This file closes that. It holds the same digests as the Hub's copy and is written by the same
+ * `--sync`, so the two cannot drift from each other. What it buys is the property the Hub already
+ * had and this repository did not: **each side fails in its own suite, with one checkout.**
+ *
+ *   * The Hub's copy catches its own files being edited in place — which is what a well-meaning fix
+ *     to a type error in a Next.js application looks like.
+ *   * This copy catches a **reference contract changing without the Hub being resynced**, which is
+ *     the direction that matters more: the reference is the oracle the corpus holds the Rust
+ *     edition to, so a change here is a change every edition owes.
+ *
+ * It is not "your tree is broken" for somebody who cloned only this repository — a fresh checkout
+ * matches its own pins. It fires exactly when a mirrored contract has been edited, and says what
+ * that costs.
+ */
+const PINS = join(HERE, REFERENCE, 'mirror-digests.json')
+
+function checkPins() {
+  if (!existsSync(PINS)) {
+    console.error(`\n${REFERENCE}/mirror-digests.json is missing. Run with --sync to write it.`)
+    return 1
+  }
+  const pinned = JSON.parse(readFileSync(PINS, 'utf8')).digests ?? {}
+  let wrong = 0
+  for (const name of MIRRORS) {
+    const digest = digestOf(name)
+    if (digest === null) continue
+    if (pinned[name] === digest) continue
+    console.error(
+      pinned[name]
+        ? `CHANGED  ${name} — this contract no longer matches its pinned digest.`
+        : `UNPINNED ${name} — this contract has no pinned digest.`,
+    )
+    wrong += 1
+  }
+  if (wrong > 0) {
+    console.error(
+      `\n${wrong} mirrored contract(s) changed without the Hub being resynced.\n`
+        + 'The reference is the oracle the corpus holds the Rust edition to, and the Hub keeps its\n'
+        + 'own copy so a Next.js application can import it. A change here is a change the Hub owes,\n'
+        + 'and the two have to land together:\n\n'
+        + '    node tools/check-contract-mirrors.mjs --sync ../BotMarket\n\n'
+        + 'Editing the pins by hand switches this check off.',
+    )
+  }
+  return wrong
+}
+
+/** Write the pins into this repository, and into the Hub when it is there, from one computation. */
+function writePins(hubPath) {
+  const digests = {}
+  for (const name of MIRRORS) {
+    const digest = digestOf(name)
+    if (digest !== null) digests[name] = digest
+  }
+  const body = `${JSON.stringify({
+    note: 'sha256 of each reference contract, with its imports rewritten for the Hub. Written by '
+      + 'tools/check-contract-mirrors.mjs --sync in the Skynet OS repository; checked there against '
+      + 'reference/typescript/, and in BotMarket by lib/__tests__/skynet-os-mirrors.test.ts. Never '
+      + 'edit by hand — a digest somebody updated to match a local edit is a check that has been '
+      + 'switched off.',
+    digests,
+  }, null, 2)}\n`
+
+  writeFileSync(PINS, body, 'utf8')
+  console.log(`wrote    ${REFERENCE}/mirror-digests.json`)
+  if (hubPath) {
+    writeFileSync(join(hubPath, HUB, 'mirror-digests.json'), body, 'utf8')
+    console.log(`wrote    ${HUB}/mirror-digests.json`)
+  }
+}
+
+if (!existsSync(hub)) {
+  // The comparison needs both trees. The pins do not, and one repository is the case they were
+  // added for, because it is the case CI runs in.
+  console.log(`BotMarket not found at ${hub} — the Hub's copies cannot be compared.`)
+  if (sync) {
+    writePins(null)
+    process.exit(0)
+  }
+  const wrong = checkPins()
+  if (wrong > 0) process.exit(1)
+  console.log('Every mirrored contract matches its pinned digest.')
+  process.exit(0)
 }
 
 let diverged = 0
@@ -162,34 +282,22 @@ for (const name of MIRRORS) {
 }
 
 /**
- * The digests, written into the Hub beside the copies.
+ * The digests, written into both repositories.
  *
- * This half catches a different failure from the comparison above, and both are needed. Running
- * this script catches *the reference having moved ahead*, and it only runs where both repositories
- * are checked out. The digest file catches the Hub's copy being edited in place — which is what
- * a well-meaning fix to a type error in a Next.js application looks like — and it is checked by the
- * Hub's own suite, on a machine that has never heard of this repository.
+ * This half catches a different failure from the comparison above, and all three are needed.
+ * Running this script with both trees catches *the reference having moved ahead*. The Hub's copy of
+ * the pins catches the Hub's own files being edited in place, checked by its suite on a machine
+ * that has never heard of this repository. This repository's copy catches a reference contract
+ * changing without a resync, on a machine that has never heard of the Hub — which is the case CI
+ * actually runs in.
  */
 if (sync) {
-  const digests = {}
-  for (const name of MIRRORS) {
-    const ours = join(HERE, REFERENCE, `${name}.ts`)
-    if (!existsSync(ours)) continue
-    digests[name] = createHash('sha256').update(toHub(readFileSync(ours, 'utf8'))).digest('hex')
-  }
-  writeFileSync(
-    join(hub, HUB, 'mirror-digests.json'),
-    `${JSON.stringify({
-      note: 'sha256 of each reference contract, with its imports rewritten for this repository. '
-        + 'Written by tools/check-contract-mirrors.mjs --sync in the Skynet OS repository; '
-        + 'checked by lib/__tests__/skynet-os-mirrors.test.ts. Never edit by hand — a digest '
-        + 'somebody updated to match a local edit is a check that has been switched off.',
-      digests,
-    }, null, 2)}\n`,
-    'utf8',
-  )
-  console.log(`wrote    ${HUB}/mirror-digests.json`)
+  writePins(hub)
 }
+
+// Checked even when the Hub is present, so `--sync` is not the only thing that can write them and
+// a stale pin cannot survive a run that had both trees in front of it.
+if (!sync && checkPins() > 0) process.exit(1)
 
 if (synced > 0) console.log(`\n${synced} file(s) synced into BotMarket.`)
 

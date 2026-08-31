@@ -41,13 +41,16 @@
 extern crate alloc;
 
 pub mod admission;
+pub mod birth;
 pub mod calibration;
 pub mod certification;
 pub mod digest;
 pub mod embodiment;
+pub mod entitlement;
 pub mod json;
 pub mod kinematics;
 pub mod observation;
+pub mod provenance;
 pub mod readiness;
 pub mod roles;
 pub mod safety;

@@ -727,21 +727,30 @@ export interface ObservationBinding {
   reason: string
 }
 
-export type TransportWarningCode =
-  | 'no_source_embodiment'
-  | 'unverified_embodiment'
-  | 'no_target_envelope'
-  | 'dof_mismatch'
-  | 'control_mode_unsupported'
-  | 'rate_unsupported'
-  | 'rate_below_watchdog'
-  | 'scaled_down'
-  | 'unscalable_channel'
-  | 'retarget_without_solver'
-  | 'unmapped_roles'
-  | 'observation_missing'
-  | 'observation_degraded'
-  | 'latency_undeclared'
+/**
+ * Every transport warning code, as a value rather than only as a type.
+ *
+ * Same reason as `PACKAGE_REJECTION_CODES`: a union vanishes at compile time and cannot be compared
+ * against another edition's. See `corpus/vocabulary/closed-sets.json`.
+ */
+export const TRANSPORT_WARNING_CODES = [
+  'no_source_embodiment',
+  'unverified_embodiment',
+  'no_target_envelope',
+  'dof_mismatch',
+  'control_mode_unsupported',
+  'rate_unsupported',
+  'rate_below_watchdog',
+  'scaled_down',
+  'unscalable_channel',
+  'retarget_without_solver',
+  'unmapped_roles',
+  'observation_missing',
+  'observation_degraded',
+  'latency_undeclared',
+] as const
+
+export type TransportWarningCode = (typeof TRANSPORT_WARNING_CODES)[number]
 
 export interface TransportWarning {
   code: TransportWarningCode
@@ -755,7 +764,10 @@ export interface TransportWarning {
  * `refused` is a real refusal: the OS will not install the policy against this body. The other
  * three all run, and the difference between them is what the operator is told they are getting.
  */
-export type TransportVerdict = 'direct' | 'retargeted' | 'degraded' | 'refused'
+/** Every transport verdict, as a value. See `corpus/vocabulary/closed-sets.json`. */
+export const TRANSPORT_VERDICTS = ['direct', 'retargeted', 'degraded', 'refused'] as const
+
+export type TransportVerdict = (typeof TRANSPORT_VERDICTS)[number]
 
 export interface TransportPlan {
   verdict: TransportVerdict

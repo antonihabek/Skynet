@@ -962,6 +962,17 @@ function renderOutbound(feed) {
   // Collapsed is not a loss and is counted apart from one: the newer check-in carries the same
   // level-triggered state, which is the whole reason the older one can go.
   add('Check-ins superseded', String(q.collapsed))
+  add('Delivered', String(q.delivered || 0))
+  // Only when it has happened, and never as a synonym for the line above it. An item a local sink
+  // accepted left the queue and did not leave the machine, and a panel showing one "sent" total
+  // would report a working uplink on a robot running with --outbox.
+  if (q.handed_off > 0) {
+    const local = el('span')
+    local.appendChild(pill(String(q.handed_off), 'warn'))
+    local.appendChild(el('div', 'dim', 'accepted by a local sink and still on this machine — '
+      + 'nothing was sent'))
+    add('Handed off locally', local)
+  }
   body.appendChild(fields)
 
   // §34.3's bearers. The table is here rather than in its own panel because the only question it

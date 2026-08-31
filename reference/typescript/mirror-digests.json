@@ -1,0 +1,13 @@
+{
+  "note": "sha256 of each reference contract, with its imports rewritten for the Hub. Written by tools/check-contract-mirrors.mjs --sync in the Skynet OS repository; checked there against reference/typescript/, and in BotMarket by lib/__tests__/skynet-os-mirrors.test.ts. Never edit by hand — a digest somebody updated to match a local edit is a check that has been switched off.",
+  "digests": {
+    "canonical": "183dc0bcef009d147c1ae4c7512ed5ec4d38cd1bea75698b335b390c10b30900",
+    "conformance": "28f6a74110777751f3f785df89334286d8d1e32191f42811b72e0e04944af755",
+    "digest": "8093a18ffd5d4e80f0e7f057841c774d383428b9e14f9be85791c4afcef3ae8a",
+    "embodiment": "67dff4d447a3c3ef62dd730a62e653ed083d59293d9a1e59c6ade1337cd8549a",
+    "kinematics": "6cb0d550604b742c769d09a861334ae8dad69403a2cbf4025cab22c728dd52d3",
+    "package": "4547f141c1c01d3a9a02d0375ec4bd6fff29125305ec6dcedbaba8e8ed7acdb0",
+    "readiness": "cea3138b5217423505eb337ea4e8ed9685742bac59d80df9022ababc8b38a524",
+    "safety": "c3b5393b9b3eaba5e71108b2ed96e2f1ef6a1c35d975bf8654c9c67eb58d80f7"
+  }
+}

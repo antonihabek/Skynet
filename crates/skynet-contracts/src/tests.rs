@@ -862,3 +862,149 @@ fn a_vector_of_the_wrong_length_is_absent_rather_than_padded() {
     let graph = json::descriptor_from_json(&json).unwrap().frames.unwrap();
     assert_eq!(graph.nodes[1].rotation, None);
 }
+
+/// §49.1's warning channel, which is the safety-relevant reason §49 exists at all.
+///
+/// > `skynetd` owns it, it sounds on transition into `RUNNING` and on resumption after a stop, and
+/// > **a package cannot suppress it.** A policy that could silence its own warning would be a
+/// > policy that could remove a control the operator's risk assessment relied on.
+mod the_warning_channel {
+    use crate::admission::*;
+    use alloc::string::ToString;
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    /// A package that would otherwise be admitted, so a refusal below is about the token.
+    fn params(capabilities: Vec<&str>, requests: Vec<&str>) -> AdmissionParams {
+        AdmissionParams {
+            manifest: PackageManifest {
+                schema_version: 1,
+                id: "acme/chatty".to_string(),
+                version: "1.0.0".to_string(),
+                kind: "policy".to_string(),
+                digest: "sha256:pkg".to_string(),
+                isolation: "sandboxed".to_string(),
+                budget: ResourceBudget {
+                    ram_mb: 512.0,
+                    ..Default::default()
+                },
+                embodiment: EmbodimentRequirement {
+                    control_mode: "torque".to_string(),
+                    capabilities: capabilities.iter().map(|t| t.to_string()).collect(),
+                    ..Default::default()
+                },
+                requests: requests.iter().map(|t| t.to_string()).collect(),
+                runtime: None,
+                depends_on: Vec::new(),
+                min_os_version: None,
+            },
+            capacity: DeviceCapacity {
+                ram_mb: 8192.0,
+                os_version: "1.0.0".to_string(),
+                // The robot provides everything asked for, and the operator has granted it. The
+                // point of the tests below is that this is not enough.
+                capabilities: capabilities.iter().map(|t| t.to_string()).collect(),
+                granted: requests.iter().map(|t| t.to_string()).collect(),
+                ..Default::default()
+            },
+            signature: SignatureState::Verified,
+            observed_digest: "sha256:pkg".to_string(),
+            transport_verdict: None,
+            executes_on_load: false,
+            trust_remote_code: false,
+        }
+    }
+
+    fn codes(result: &AdmissionResult) -> Vec<PackageRejectionCode> {
+        result.findings.iter().map(|f| f.code).collect()
+    }
+
+    #[test]
+    fn a_package_granted_everything_it_asked_for_still_cannot_have_the_warning_channel() {
+        // The robot provides it and the operator granted it, and it is still refused — which is
+        // what "no grant confers it" has to mean if it means anything.
+        let result = admit_package(&params(vec![WARNING_CHANNEL], vec![WARNING_CHANNEL]));
+        assert!(!result.admitted);
+        assert!(codes(&result).contains(&PackageRejectionCode::CapabilityReserved));
+        assert!(
+            result.effective_grants.is_empty(),
+            "a refused install grants nothing, least of all this"
+        );
+    }
+
+    #[test]
+    fn declaring_a_need_for_it_is_refused_even_without_requesting_it() {
+        // Both halves, because a package that declared the capability and never requested the grant
+        // would otherwise install and be one manifest edit away from claiming the channel.
+        let result = admit_package(&params(vec![WARNING_CHANNEL], vec![]));
+        assert!(!result.admitted);
+        assert!(codes(&result).contains(&PackageRejectionCode::CapabilityReserved));
+    }
+
+    #[test]
+    fn hri_speech_is_ordinary_and_is_admitted() {
+        // §49.1 gives packages the speaker for everything else. A rule that refused audio outright
+        // would be a rule nobody could ship an HRI package under, and vendors would route around
+        // the whole capability system.
+        let result = admit_package(&params(vec!["hri.speech"], vec!["hri.speech"]));
+        assert!(result.admitted, "{:?}", result.findings);
+        assert!(result.effective_grants.contains(&"hri.speech".to_string()));
+    }
+
+    #[test]
+    fn a_reserved_token_is_not_reported_as_denied() {
+        // The distinction that decides where a person goes. "Denied" is an operator's decision and
+        // reversible; this is not grantable by anybody, and an operator told "denied" would go
+        // hunting for a setting that does not exist.
+        let result = admit_package(&params(vec![WARNING_CHANNEL], vec![WARNING_CHANNEL]));
+        assert!(!codes(&result).contains(&PackageRejectionCode::CapabilityDenied));
+        let finding = result
+            .findings
+            .iter()
+            .find(|f| f.code == PackageRejectionCode::CapabilityReserved)
+            .expect("the finding");
+        assert!(finding.message.contains("no grant confers it"));
+        assert!(finding.message.contains("silence its own warning"));
+        assert_eq!(
+            finding.subjects.as_ref().map(Vec::len),
+            Some(1),
+            "the finding names the token"
+        );
+    }
+
+    #[test]
+    fn the_reserved_list_is_the_single_place_the_rule_lives() {
+        assert!(is_reserved(WARNING_CHANNEL));
+        assert!(!is_reserved("hri.speech"));
+        assert!(!is_reserved("sensing.audio"));
+        assert!(RESERVED_CAPABILITIES.contains(&WARNING_CHANNEL));
+    }
+
+    #[test]
+    fn the_tone_sounds_entering_running_and_not_while_already_there() {
+        assert!(warning_required("hold", "running"));
+        assert!(warning_required("safe", "running"));
+        // "Resumption after a stop" is the same transition, which is why one rule covers both.
+        assert!(warning_required("stopping", "running"));
+        assert!(!warning_required("running", "running"));
+        assert!(!warning_required("running", "hold"));
+        assert!(!warning_required("hold", "degraded"));
+    }
+
+    #[test]
+    fn the_transition_check_is_case_insensitive_because_the_states_are_prose_today() {
+        // §27's state machine is not an enumeration in this codebase yet, so these arrive as
+        // whatever a caller spelled. When it becomes one this function is a two-line change and
+        // this test is the one that should be deleted.
+        assert!(warning_required("HOLD", "RUNNING"));
+        assert!(!warning_required("RUNNING", "running"));
+    }
+
+    #[test]
+    fn an_unknown_state_does_not_sound_the_tone_and_that_is_recorded_as_a_limit() {
+        // Under-sounding is the wrong direction for a safety control. It is acceptable only because
+        // this function answers a question about a transition it was handed; the enforcement point
+        // is `skynetd` owning the tone, which is not built.
+        assert!(!warning_required("hold", "nonsense"));
+    }
+}

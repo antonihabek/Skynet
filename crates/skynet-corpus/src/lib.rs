@@ -27,11 +27,15 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use skynet_contracts::admission::admit_package;
+use skynet_contracts::admission::{self, admit_package};
+use skynet_contracts::certification;
 use skynet_contracts::certification::award_certification;
+use skynet_contracts::embodiment as contracts_embodiment;
 use skynet_contracts::json;
 use skynet_contracts::readiness::{evaluate_readiness, summarize_readiness, ReadinessReport};
+use skynet_contracts::roles;
 use skynet_contracts::roles::parse_role;
+use skynet_contracts::transport;
 use skynet_contracts::transport::resolve_transport;
 use skynet_json::Json;
 
@@ -309,6 +313,77 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
         "blackbox" if label.contains("records") => return blackbox::records(input),
         "blackbox" if label.contains("header") => return blackbox::header(input),
         "blackbox" if label.contains("seal") => return blackbox::seal(input),
+
+        // The closed vocabularies, as data rather than as a computation.
+        //
+        // Every other arm holds this edition to an *answer*. This one holds it to a **word list**,
+        // and it is here because a divergence in one lived through a full green test run: a
+        // rejection code was added to the Rust and not to the reference, and nothing could see it.
+        // The mirror pins guard the reference's bytes; the corpus guards the cases it holds; and a
+        // vocabulary member nobody had written a case for was outside both.
+        //
+        // Emitted in declaration order rather than sorted, because order is part of the agreement
+        // for several of these — tiers and SCTS areas are ranked, and an edition that sorted them
+        // would be one whose "next tier up" arithmetic silently differed.
+        "vocabulary" => {
+            let set = input.get("set").and_then(Json::as_str).ok_or("no `set`")?;
+            let members: Vec<&str> = match set {
+                "package_rejection_codes" => admission::PACKAGE_REJECTION_CODES
+                    .iter()
+                    .map(|code| code.as_str())
+                    .collect(),
+                "signature_states" => admission::SIGNATURE_STATES
+                    .iter()
+                    .map(|state| state.as_str())
+                    .collect(),
+                "package_kinds" => admission::PACKAGE_KINDS.to_vec(),
+                "isolation_modes" => admission::ISOLATION_MODES.to_vec(),
+                "reserved_capabilities" => admission::RESERVED_CAPABILITIES.to_vec(),
+                "transport_verdicts" => transport::TRANSPORT_VERDICTS
+                    .iter()
+                    .map(|verdict| verdict.as_str())
+                    .collect(),
+                "transport_methods" => transport::TRANSPORT_METHODS.to_vec(),
+                "transport_warning_codes" => transport::TRANSPORT_WARNING_CODES
+                    .iter()
+                    .map(|code| code.as_str())
+                    .collect(),
+                "action_kinds" => contracts_embodiment::ACTION_KINDS.to_vec(),
+                "control_modes" => contracts_embodiment::CONTROL_MODES.to_vec(),
+                "joint_types" => contracts_embodiment::JOINT_TYPES.to_vec(),
+                "base_kinds" => contracts_embodiment::BASE_KINDS.to_vec(),
+                "embodiment_modalities" => contracts_embodiment::EMBODIMENT_MODALITIES.to_vec(),
+                "canonical_chains" => roles::CANONICAL_CHAINS.to_vec(),
+                "canonical_axes" => roles::CANONICAL_AXES.to_vec(),
+                "os_tiers" => skynet_kernel::OS_TIERS
+                    .iter()
+                    .map(|tier| tier.as_str())
+                    .collect(),
+                "enforcement_modes" => skynet_kernel::ENFORCEMENT_MODES
+                    .iter()
+                    .map(|mode| mode.as_str())
+                    .collect(),
+                "guards" => skynet_kernel::GUARDS
+                    .iter()
+                    .map(|guard| guard.as_str())
+                    .collect(),
+                "fault_responses" => skynet_kernel::FAULT_RESPONSES
+                    .iter()
+                    .map(|response| response.as_str())
+                    .collect(),
+                "scts_suites" => certification::SCTS_SUITES.to_vec(),
+                "scts_areas" => certification::SCTS_AREAS.to_vec(),
+                // Not a skip. A set the corpus names and this edition does not is exactly the
+                // divergence this file exists to catch, and answering "unsupported" is how it gets
+                // reported rather than passed over.
+                other => return Err(format!("no vocabulary named `{other}` in this edition")),
+            };
+            let mut out = Json::arr();
+            for member in members {
+                out.push(Json::Str(member.to_string()));
+            }
+            out
+        }
 
         "admission" => {
             let params = json::admission_params_from_json(input).map_err(|e| e.to_string())?;

@@ -35,14 +35,20 @@ import {
   type Meta as RingMeta, type Shape as RingShape,
 } from '../../reference/typescript/blackbox.ts'
 import {
-  parseRole, resolveTransport, roleKey, validateFrameBindings, validateFrames,
+  ACTION_KINDS, BASE_KINDS, CANONICAL_AXES, CANONICAL_CHAINS, CONTROL_MODES,
+  EMBODIMENT_MODALITIES, JOINT_TYPES, parseRole, resolveTransport, roleKey,
+  TRANSPORT_METHODS, TRANSPORT_VERDICTS, TRANSPORT_WARNING_CODES,
+  validateFrameBindings, validateFrames,
   type ActionChannel, type EmbodimentDescriptor, type FrameGraph, type FrameNode,
   type ResolveTransportOptions, type SourceEmbodiment,
 } from '../../reference/typescript/embodiment.ts'
-import { admitPackage, type AdmissionParams } from '../../reference/typescript/package.ts'
+import {
+  admitPackage, ISOLATION_MODES, PACKAGE_KINDS, PACKAGE_REJECTION_CODES,
+  RESERVED_CAPABILITIES, SIGNATURE_STATES, type AdmissionParams,
+} from '../../reference/typescript/package.ts'
 import { versionDigest, type DigestFile } from '../../reference/typescript/digest.ts'
 import {
-  awardCertification, testsRequiredFor, type CertificationInput,
+  awardCertification, SCTS_AREAS, SCTS_SUITES, testsRequiredFor, type CertificationInput,
 } from '../../reference/typescript/conformance.ts'
 import {
   evaluateReadiness, summarizeReadiness, type ReadinessSubject,
@@ -56,7 +62,7 @@ import {
   assembleObservation, latestCommonInstant, type Stream as ObservationStream,
 } from '../../reference/typescript/observation.ts'
 import {
-  evaluateCycle, resolveLimits, withGrants,
+  ENFORCEMENT_MODES, evaluateCycle, FAULT_RESPONSES, GUARDS, OS_TIERS, resolveLimits, withGrants,
   type CommandCycle, type ResolveLimitsParams,
 } from '../../reference/typescript/safety.ts'
 import type { SafetyEnvelope } from '../../reference/typescript/types.ts'
@@ -942,6 +948,42 @@ admissionCase('executes-on-load', 'Loading this package runs code the operator h
   { executes_on_load: true })
 admissionCase('executes-on-load-trusted', 'The same package, once the operator has decided.',
   { executes_on_load: true, trust_remote_code: true })
+// §49.1's reserved channel. Three cases because the rule has three edges and each is a different
+// mistake somebody could make in a second edition: refusing the token however it is asked for,
+// leaving the ordinary speaker grant alone, and reporting one problem rather than two when a
+// package both declares and requests it.
+admissionCase('reserved-warning-channel-requested',
+  'The audible warning before autonomous motion is a system function; no grant confers it, even one the operator made.',
+  {
+    manifest: manifest({
+      embodiment: { capabilities: ['manipulation.grasp', 'hri.warning'], control_mode: 'torque' },
+      requests: ['manipulation.grasp', 'hri.warning'],
+    }),
+    capacity: capacity({
+      capabilities: ['manipulation.grasp', 'sensing.rgb', 'hri.warning'],
+      granted: ['manipulation.grasp', 'hri.warning'],
+    }),
+  })
+admissionCase('reserved-warning-channel-declared-only',
+  'Declaring a need for it is refused too, or a package would install and be one manifest edit from claiming the channel.',
+  {
+    manifest: manifest({
+      embodiment: { capabilities: ['manipulation.grasp', 'hri.warning'], control_mode: 'torque' },
+    }),
+    capacity: capacity({ capabilities: ['manipulation.grasp', 'sensing.rgb', 'hri.warning'] }),
+  })
+admissionCase('speaker-is-ordinary',
+  'The rest of the speaker is an ordinary grant. A rule that refused audio outright is one nobody could ship an HRI package under.',
+  {
+    manifest: manifest({
+      embodiment: { capabilities: ['manipulation.grasp', 'hri.speech'], control_mode: 'torque' },
+      requests: ['manipulation.grasp', 'hri.speech'],
+    }),
+    capacity: capacity({
+      capabilities: ['manipulation.grasp', 'sensing.rgb', 'hri.speech'],
+      granted: ['manipulation.grasp', 'hri.speech'],
+    }),
+  })
 admissionCase('every-finding-at-once',
   'Four problems reported together, because fixing them one deployment at a time is how people end up granting everything.',
   {
@@ -950,6 +992,62 @@ admissionCase('every-finding-at-once',
     manifest: manifest({ isolation: 'native', requests: ['manipulation.grasp', 'locomotion.walk'] }),
     capacity: capacity({ ram_mb: 64 }),
   })
+
+// ── vocabulary ───────────────────────────────────────────────────────────────
+//
+// The closed string sets both editions must agree on, frozen as data.
+//
+// Every other corpus holds an edition to a *computation*: give it this input, emit these bytes. This
+// one holds it to a **vocabulary**, and it exists because of a divergence that lived through a full
+// green test run. `capability_reserved` was added to the Rust `PackageRejectionCode` and not to the
+// reference's, and nothing could see it: the mirror pins guard the reference, and the corpus covers
+// the cases it holds — none of which had ever mentioned a token invented ten minutes earlier.
+//
+// A missing member is now a corpus failure on the first run, with the set named. Which is the whole
+// argument for putting it here rather than in a lint: §31.4 already makes the corpus the thing an
+// edition must reproduce before it may carry the name, and a vocabulary is exactly the kind of
+// agreement it should be carrying.
+//
+// The sets are emitted **in declaration order, not sorted**. Order is part of the agreement for
+// several of these — `OS_TIERS` and `SCTS_AREAS` are ordered by rank, and an edition that sorted
+// them alphabetically would be one whose "next tier up" arithmetic silently differed.
+
+function vocabulary(name: string, note: string, members: readonly string[]): void {
+  add('vocabulary', 'closed-sets', {
+    id: name,
+    note,
+    input: { set: name },
+    expected: canonical(members),
+  })
+}
+
+vocabulary('package_rejection_codes',
+  'Why an install was refused. The set this corpus was added for.',
+  PACKAGE_REJECTION_CODES)
+vocabulary('signature_states', 'The four states a signature can be in, plus the platform gap.',
+  SIGNATURE_STATES)
+vocabulary('package_kinds', 'What a package can be.', PACKAGE_KINDS)
+vocabulary('isolation_modes', 'Sandboxed, or a driver.', ISOLATION_MODES)
+vocabulary('reserved_capabilities', 'Tokens no grant confers (§49.1).', RESERVED_CAPABILITIES)
+vocabulary('transport_verdicts', 'Ordered worst-last; the plan takes the worst binding in it.',
+  TRANSPORT_VERDICTS)
+vocabulary('transport_methods', 'Ordered by how much fidelity each costs.', TRANSPORT_METHODS)
+vocabulary('transport_warning_codes', 'Everything a plan can report about a fit it accepted.',
+  TRANSPORT_WARNING_CODES)
+vocabulary('action_kinds', 'What one channel of a policy output drives.', ACTION_KINDS)
+vocabulary('control_modes', 'How a joint is commanded.', CONTROL_MODES)
+vocabulary('joint_types', 'The kinds of joint a descriptor can declare.', JOINT_TYPES)
+vocabulary('base_kinds', 'What a body stands on.', BASE_KINDS)
+vocabulary('embodiment_modalities', 'What a sensor produces.', EMBODIMENT_MODALITIES)
+vocabulary('canonical_chains', 'The role vocabulary\'s chains (§5.1).', CANONICAL_CHAINS)
+vocabulary('canonical_axes', 'The role vocabulary\'s axes (§5.1).', CANONICAL_AXES)
+vocabulary('os_tiers', 'Ordered by rank. An edition that sorted these would differ on "next tier".',
+  OS_TIERS)
+vocabulary('enforcement_modes', 'Ordered by strength.', ENFORCEMENT_MODES)
+vocabulary('guards', 'Every guard the kernel can run.', GUARDS)
+vocabulary('fault_responses', 'What a tripped guard does.', FAULT_RESPONSES)
+vocabulary('scts_suites', 'Where a conformance test runs.', SCTS_SUITES)
+vocabulary('scts_areas', 'Ordered as the specification lists them.', SCTS_AREAS)
 
 // ── certification ────────────────────────────────────────────────────────────
 

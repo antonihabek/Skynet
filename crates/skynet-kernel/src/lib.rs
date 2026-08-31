@@ -196,6 +196,29 @@ pub enum Guard {
     ModeGate,
 }
 
+/// Every tier, in rank order. Not sorted: an edition that sorted these would differ about which
+/// tier is "next up".
+/// Reproduced into `corpus/vocabulary/closed-sets.json`, so an edition that gained a variant the
+/// reference does not have — or lost one it does — fails on the first run rather than on the first
+/// case somebody happens to write for it.
+pub const OS_TIERS: [Tier; 3] = [Tier::Guest, Tier::Host, Tier::Certified];
+
+/// Every enforcement mode, in order of strength.
+pub const ENFORCEMENT_MODES: [Enforcement; 3] = [
+    Enforcement::Advisory,
+    Enforcement::Enforcing,
+    Enforcement::EnforcingRedundant,
+];
+
+/// Every fault response, ordered from least to most severe.
+pub const FAULT_RESPONSES: [FaultResponse; 5] = [
+    FaultResponse::Clamp,
+    FaultResponse::Hold,
+    FaultResponse::StopCat2,
+    FaultResponse::StopCat1,
+    FaultResponse::StopCat0,
+];
+
 /// Every guard, in evaluation order. Iterating this is the only sanctioned order.
 pub const GUARDS: [Guard; 8] = [
     Guard::Watchdog,

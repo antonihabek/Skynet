@@ -1152,6 +1152,160 @@
       "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[]}"
     },
     {
+      "id": "reserved-warning-channel-requested",
+      "note": "The audible warning before autonomous motion is a system function; no grant confers it, even one the operator made.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "hri.warning"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp",
+            "hri.warning"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb",
+            "hri.warning"
+          ],
+          "granted": [
+            "manipulation.grasp",
+            "hri.warning"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"capability_reserved\",\"message\":\"The audible warning before autonomous motion is a system function and no grant confers it. A package that could claim this channel could silence its own warning, which removes a control the operator's risk assessment relied on (§49.1).\",\"severity\":\"error\",\"subjects\":[\"hri.warning\"]}]}"
+    },
+    {
+      "id": "reserved-warning-channel-declared-only",
+      "note": "Declaring a need for it is refused too, or a package would install and be one manifest edit from claiming the channel.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "hri.warning"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb",
+            "hri.warning"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"capability_reserved\",\"message\":\"The audible warning before autonomous motion is a system function and no grant confers it. A package that could claim this channel could silence its own warning, which removes a control the operator's risk assessment relied on (§49.1).\",\"severity\":\"error\",\"subjects\":[\"hri.warning\"]}]}"
+    },
+    {
+      "id": "speaker-is-ordinary",
+      "note": "The rest of the speaker is an ordinary grant. A rule that refused audio outright is one nobody could ship an HRI package under.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "hri.speech"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp",
+            "hri.speech"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb",
+            "hri.speech"
+          ],
+          "granted": [
+            "manipulation.grasp",
+            "hri.speech"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\",\"hri.speech\"],\"findings\":[]}"
+    },
+    {
       "id": "every-finding-at-once",
       "note": "Four problems reported together, because fixing them one deployment at a time is how people end up granting everything.",
       "input": {

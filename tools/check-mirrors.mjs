@@ -14,13 +14,24 @@
  *   node tools/check-mirrors.mjs --sync ../BotMarket   # copy BotMarket's copies over ours
  *
  * Exits non-zero on divergence, so it can be a pre-commit hook or a CI step in whichever repository
- * has both checked out. It exits **zero** when BotMarket is simply not present, because the OS
- * repository has to build for somebody who has only cloned this one — a vendor writing a driver
- * should never be told their tree is broken because a private repository is missing.
+ * has both checked out.
+ *
+ * # With one repository, which is what CI has
+ *
+ * The comparison needs both trees, and this script's answer to having one used to be to print
+ * "BotMarket not found" and exit zero — so the CI job named after this check could not fail, and
+ * a specification edited here and not there would ship.
+ *
+ * So each document's digest is pinned in `docs/mirror-digests.json`, written by `--sync` from the
+ * copies the two repositories agreed on. With one checkout the script verifies the documents
+ * against those pins, which catches exactly the thing the rule forbids: a shared document edited
+ * here without being edited there. A fresh clone matches its pins and passes, so a vendor who has
+ * only cloned this repository is still never told their tree is broken because a private one is
+ * missing.
  */
 
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, readFileSync } from 'node:fs'
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -62,13 +73,83 @@ function findHub() {
 
 const hub = given ? resolve(given) : findHub()
 
-if (!existsSync(hub)) {
-  console.log(`BotMarket not found at ${hub} — nothing to compare.`)
-  console.log('This is not a failure: the OS repository stands on its own.')
-  process.exit(0)
+const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex')
+
+/**
+ * The pinned digests of the shared documents.
+ *
+ * Written by `--sync`, from the copies the two repositories agreed on at that moment, and checked
+ * on every run — including the run with one checkout, which is the one CI performs.
+ *
+ * A pin is not a second source of truth. It records that these bytes were agreed, so that editing
+ * one copy afterwards is a visible act rather than a silent divergence discovered by whoever next
+ * has both trees in front of them.
+ */
+const PINS = join(HERE, 'docs/mirror-digests.json')
+
+function checkPins() {
+  if (!existsSync(PINS)) {
+    console.error('\ndocs/mirror-digests.json is missing. Run with --sync to write it.')
+    return 1
+  }
+  const pinned = JSON.parse(readFileSync(PINS, 'utf8')).digests ?? {}
+  let wrong = 0
+  for (const [ours] of MIRRORS) {
+    const path = join(HERE, ours)
+    if (!existsSync(path)) {
+      console.error(`MISSING  ${ours} here`)
+      wrong += 1
+      continue
+    }
+    const current = digest(path)
+    if (pinned[ours] === current) continue
+    console.error(
+      pinned[ours]
+        ? `CHANGED  ${ours} — this document no longer matches its pinned digest.`
+        : `UNPINNED ${ours} — this document has no pinned digest.`,
+    )
+    wrong += 1
+  }
+  if (wrong > 0) {
+    console.error(
+      `\n${wrong} shared document(s) changed here without the pin being updated.\n`
+        + 'A shared document is edited in both repositories or in neither. Make the same edit in\n'
+        + 'BotMarket, then re-pin from the two agreeing copies:\n\n'
+        + '    node tools/check-mirrors.mjs --sync ../BotMarket\n\n'
+        + 'Editing the pins by hand switches this check off.',
+    )
+  }
+  return wrong
 }
 
-const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex')
+/** Pin whatever the two repositories currently agree on. */
+function writePins() {
+  const digests = {}
+  for (const [ours] of MIRRORS) {
+    const path = join(HERE, ours)
+    if (existsSync(path)) digests[ours] = digest(path)
+  }
+  writeFileSync(
+    PINS,
+    `${JSON.stringify({
+      note: 'sha256 of each document shared with BotMarket, pinned so a divergence is caught with '
+        + 'one checkout — which is what CI has. Written by tools/check-mirrors.mjs --sync. Never '
+        + 'edit by hand: a digest somebody updated to match a local edit is a check that has been '
+        + 'switched off.',
+      digests,
+    }, null, 2)}\n`,
+    'utf8',
+  )
+  console.log('wrote    docs/mirror-digests.json')
+}
+
+if (!existsSync(hub)) {
+  console.log(`BotMarket not found at ${hub} — the two copies cannot be compared.`)
+  const wrong = checkPins()
+  if (wrong > 0) process.exit(1)
+  console.log('Every shared document matches its pinned digest.')
+  process.exit(0)
+}
 
 let diverged = 0
 let synced = 0
@@ -111,6 +192,14 @@ for (const [ours, theirs] of MIRRORS) {
 if (synced > 0) {
   console.log(`\n${synced} file(s) synced from BotMarket.`)
 }
+
+// Re-pinned only when the two copies agree, which after a sync they do. Pinning a divergence
+// would record a disagreement as the agreed state, which is the one thing a pin must never do.
+if (sync && diverged === 0) writePins()
+
+// Verified even with both trees present: a pin left stale by an edit made in both repositories
+// would otherwise survive until the next single-checkout run and fail in CI instead of here.
+if (!sync && diverged === 0 && checkPins() > 0) process.exit(1)
 
 if (diverged > 0) {
   console.error(

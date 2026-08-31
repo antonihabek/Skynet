@@ -221,6 +221,32 @@ pub enum TransportVerdict {
     Refused,
 }
 
+/// Every verdict, ordered best to worst. The plan takes the worst binding in it.
+pub const TRANSPORT_VERDICTS: [TransportVerdict; 4] = [
+    TransportVerdict::Direct,
+    TransportVerdict::Retargeted,
+    TransportVerdict::Degraded,
+    TransportVerdict::Refused,
+];
+
+/// Every warning a plan can carry.
+pub const TRANSPORT_WARNING_CODES: [TransportWarningCode; 14] = [
+    TransportWarningCode::NoSourceEmbodiment,
+    TransportWarningCode::UnverifiedEmbodiment,
+    TransportWarningCode::NoTargetEnvelope,
+    TransportWarningCode::DofMismatch,
+    TransportWarningCode::ControlModeUnsupported,
+    TransportWarningCode::RateUnsupported,
+    TransportWarningCode::RateBelowWatchdog,
+    TransportWarningCode::ScaledDown,
+    TransportWarningCode::UnscalableChannel,
+    TransportWarningCode::RetargetWithoutSolver,
+    TransportWarningCode::UnmappedRoles,
+    TransportWarningCode::ObservationMissing,
+    TransportWarningCode::ObservationDegraded,
+    TransportWarningCode::LatencyUndeclared,
+];
+
 impl TransportVerdict {
     /// The wire spelling.
     pub fn as_str(self) -> &'static str {

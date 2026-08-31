@@ -62,6 +62,7 @@ Four properties, each load-bearing:
 | `observation/frames` | A target instant + every stream's declared latency, budget and samples | The exact assembled frame: which sample per stream, its age, the skew |
 | `observation/target` | The same streams + the current instant | The instant a live loop should aim at, or null |
 | `fuzz/` | Generated transport, cycle and observation inputs | Their outputs |
+| `vocabulary/` | The name of a closed string set | Its members, in declaration order |
 
 `kinematics/` is the newest, and it exists because `cycle/` cannot do its job. A guard trip is a
 boolean, and two editions could agree on every trip in the corpus while disagreeing about every pose
@@ -100,6 +101,21 @@ every stream held one fresh sample, and forty-eight generated frames produced th
 generator now prints its own coverage — verdicts, both hold reasons, the unbounded paths, ties and
 negative ages — beside the file counts, so a change that flattens the distribution is visible when
 it is made rather than three sessions later.
+
+`vocabulary/` is the newest, and it is the only corpus that holds an edition to a **word list**
+rather than to an answer. It exists because of a divergence that survived a full green test run: a
+rejection code was added to the Rust edition and not to the reference, and nothing could see it. The
+mirror check guards the reference's *bytes*; every other corpus guards the *cases it holds*; and a
+vocabulary member nobody had yet written a case for was outside both. Twenty-one sets are now frozen
+— rejection codes, signature states, transport verdicts and warnings, guards, fault responses, tiers,
+enforcement modes, the role vocabulary, SCTS suites and areas — so a set that gained or lost a member
+in one edition fails on the first run, with both lists printed.
+
+The members are in **declaration order, not sorted**, and that is part of the agreement rather than
+an accident of generation: `os_tiers` and `scts_areas` are ranked, and an edition that sorted them
+would be one whose *"next tier up"* arithmetic silently differed while every set still contained the
+same members. And a set the corpus names that an edition does not have is reported as an error
+rather than skipped, because that is exactly the divergence being looked for.
 
 `limits/` is not one of the six §31.4 lists. Limit resolution is contract behaviour with a
 serialisable output and three composition rules — the minimum rule, the widening refusal, the guard

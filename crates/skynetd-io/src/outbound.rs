@@ -131,6 +131,19 @@ pub struct Status {
     pub dropped: Vec<(Class, u64)>,
     /// Check-ins superseded by a newer one. Not a drop: nothing was lost.
     pub collapsed: u64,
+    /// Items that **left this machine**, for the life of the queue.
+    ///
+    /// Separate from [`handed_off`](Status::handed_off) because the two are different facts about
+    /// a robot and the queue is the only place that can tell them apart: once an item is removed,
+    /// nothing downstream knows which of the two happened to it.
+    pub delivered: u64,
+    /// Items handed to a local sink, for the life of the queue.
+    ///
+    /// A development sink — `--outbox <dir>` — returns `Ok`, so the item is removed and the queue
+    /// is empty, and every one of those statements is true of the *queue* and false of the *robot*:
+    /// nothing was sent anywhere. Counted apart so an operator reading "the queue is empty" can
+    /// see which kind of empty it is.
+    pub handed_off: u64,
     /// The total byte budget.
     pub budget: usize,
     /// Of which this much is reserved for incidents and unavailable to anything else.
@@ -453,6 +466,26 @@ impl Queue {
         next
     }
 
+    /// Record that one item left the queue because a sink accepted it.
+    ///
+    /// `delivered` is the sink's own answer to [`Sink::delivers`](crate::connectivity::Sink::delivers)
+    /// — whether `Ok` meant the item left this machine. It is recorded **here**, in the queue,
+    /// rather than in the sender, for the reason the finding that prompted it gives: a sink that
+    /// only looks like a transport is invisible the moment the item is removed, and the counters
+    /// are the surface an operator actually reads. `Drained` reports one pass; this survives the
+    /// process.
+    ///
+    /// Silent about failure for the same reason `bump_counters` is: a robot that delivered an
+    /// incident and could not write a statistic has done the important half, and refusing the
+    /// delivery over the counter would be the wrong trade in the only direction that matters.
+    pub fn accepted(&self, delivered: bool) {
+        let key = if delivered { "delivered" } else { "handed_off" };
+        let mut counters = self.counters();
+        let was = counters.get(key).and_then(Json::as_usize).unwrap_or(0) as u64;
+        counters.set(key, Json::Num((was + 1) as f64));
+        self.write_counters(&counters);
+    }
+
     fn counters_path(&self) -> PathBuf {
         self.directory.join(".counters.json")
     }
@@ -503,6 +536,14 @@ impl Queue {
                 .get("collapsed")
                 .and_then(Json::as_usize)
                 .unwrap_or(0) as u64,
+            delivered: counters
+                .get("delivered")
+                .and_then(Json::as_usize)
+                .unwrap_or(0) as u64,
+            handed_off: counters
+                .get("handed_off")
+                .and_then(Json::as_usize)
+                .unwrap_or(0) as u64,
             ..Status::default()
         };
         for class in CLASSES {
@@ -538,6 +579,11 @@ impl Queue {
         let mut out = Json::obj();
         out.set("classes", classes);
         out.set("collapsed", Json::Num(status.collapsed as f64));
+        // Two keys rather than one `sent`, because a console with one number would render a
+        // development outbox and a Hub delivery identically — which is the defect this pair
+        // exists to make impossible rather than to warn about.
+        out.set("delivered", Json::Num(status.delivered as f64));
+        out.set("handed_off", Json::Num(status.handed_off as f64));
         out.set("budget", Json::Num(status.budget as f64));
         out.set("reserve", Json::Num(status.reserve as f64));
         out
