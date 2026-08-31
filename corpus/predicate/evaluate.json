@@ -1,0 +1,5859 @@
+{
+  "corpus": "predicate",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "exists-value",
+      "note": "A path with a value exists.",
+      "input": {
+        "predicate": {
+          "op": "exists",
+          "path": "robot.state.gripper"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "exists-zero",
+      "note": "Zero is a value. A robot at 0% has reported its battery.",
+      "input": {
+        "predicate": {
+          "op": "exists",
+          "path": "robot.state.zero"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "exists-null",
+      "note": "An explicit null does not exist — somebody looked and found nothing.",
+      "input": {
+        "predicate": {
+          "op": "exists",
+          "path": "robot.state.nothing"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "exists-empty-list",
+      "note": "An empty list does not exist. No guards active is not \"guards\".",
+      "input": {
+        "predicate": {
+          "op": "exists",
+          "path": "robot.state.empty"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "exists-blank-string",
+      "note": "A string of spaces does not exist.",
+      "input": {
+        "predicate": {
+          "op": "exists",
+          "path": "robot.state.blank"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "exists-missing",
+      "note": "The escape hatch: `exists` is the one operator an absent path does not refuse. It answers unsatisfied, so `not(exists(p))` still means what its author meant.",
+      "input": {
+        "predicate": {
+          "op": "exists",
+          "path": "robot.state.absent"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "eq-string",
+      "note": "The ordinary case.",
+      "input": {
+        "predicate": {
+          "op": "eq",
+          "path": "robot.state.mode",
+          "value": "idle"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "eq-mismatch",
+      "note": "A different value.",
+      "input": {
+        "predicate": {
+          "op": "eq",
+          "path": "robot.state.mode",
+          "value": "estop"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "eq-null-literal",
+      "note": "A literal null equals an explicit null: both are primitives.",
+      "input": {
+        "predicate": {
+          "op": "eq",
+          "path": "robot.state.nothing",
+          "value": null
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "eq-literal-array-never-matches",
+      "note": "A literal array in a rule is never equal to anything. `===` on two objects is reference equality, and a rule's literal was never the context's object. `includes` is the operator for this intent, and finding that out here is cheaper than finding it out in a cell.",
+      "input": {
+        "predicate": {
+          "op": "eq",
+          "path": "skill.needs",
+          "value": [
+            "manipulation.grasp"
+          ]
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "eq-same-path-reference",
+      "note": "Two operands read from the same path are one object, so they are equal even though neither is a primitive. This is the only way an object comparison can hold.",
+      "input": {
+        "predicate": {
+          "op": "eq",
+          "path": "skill.needs",
+          "value": {
+            "__ref": "skill.needs"
+          }
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "eq-structurally-equal-different-paths",
+      "note": "Two arrays with identical contents at different paths are not equal, because `===` is not a deep comparison. `skill.also` holds exactly what `skill.needs` holds.",
+      "input": {
+        "predicate": {
+          "op": "eq",
+          "path": "skill.needs",
+          "value": {
+            "__ref": "skill.also"
+          }
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "eq-element-of-a-collection",
+      "note": "A path may address an array member, and the member is the same object the collection holds.",
+      "input": {
+        "predicate": {
+          "op": "eq",
+          "path": "robot.guards.active.0",
+          "value": "workspace"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "neq-holds",
+      "note": "Not in estop.",
+      "input": {
+        "predicate": {
+          "op": "neq",
+          "path": "robot.state.mode",
+          "value": "estop"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "neq-does-not-hold",
+      "note": "It is idle, so it is not not-idle.",
+      "input": {
+        "predicate": {
+          "op": "neq",
+          "path": "robot.state.mode",
+          "value": "idle"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "neq-unresolved-refuses",
+      "note": "The headline change. `neq` against a path that names nothing used to answer **true** — `undefined !== \"estop\"` — so a rule reading \"the robot is not in estop\" passed on a robot that had never reported a mode. It now refuses and names the path.",
+      "input": {
+        "predicate": {
+          "op": "neq",
+          "path": "robot.state.absent",
+          "value": "estop"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"neq\",\"outcome\":\"unevaluable\",\"path\":\"robot.state.absent\",\"reason\":\"unresolved_path\",\"satisfied\":false}"
+    },
+    {
+      "id": "in-holds",
+      "note": "The value is one of the listed.",
+      "input": {
+        "predicate": {
+          "op": "in",
+          "path": "robot.state.gripper",
+          "value": [
+            "open",
+            "closed"
+          ]
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "in-does-not-hold",
+      "note": "The value is not.",
+      "input": {
+        "predicate": {
+          "op": "in",
+          "path": "robot.state.mode",
+          "value": [
+            "estop",
+            "fault"
+          ]
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "in-scalar-value-is-a-one-element-list",
+      "note": "A non-array right-hand side is wrapped.",
+      "input": {
+        "predicate": {
+          "op": "in",
+          "path": "robot.state.mode",
+          "value": "idle"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "includes-holds",
+      "note": "The collection contains the rule's value.",
+      "input": {
+        "predicate": {
+          "op": "includes",
+          "path": "robot.guards.active",
+          "value": "workspace"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "includes-does-not-hold",
+      "note": "It does not.",
+      "input": {
+        "predicate": {
+          "op": "includes",
+          "path": "robot.guards.active",
+          "value": "pose"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "includes-all-holds",
+      "note": "Every capability the skill needs is present.",
+      "input": {
+        "predicate": {
+          "op": "includes_all",
+          "path": "robot.capabilities",
+          "value": {
+            "__ref": "skill.needs"
+          }
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "includes-all-does-not-hold",
+      "note": "One is missing.",
+      "input": {
+        "predicate": {
+          "op": "includes_all",
+          "path": "robot.capabilities",
+          "value": [
+            "manipulation.grasp",
+            "locomotion.walk"
+          ]
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "includes-all-empty-requirement",
+      "note": "An empty requirement is vacuously satisfied: nothing was asked for. This is now reachable only from a requirement that *is* empty, never from one nobody could read.",
+      "input": {
+        "predicate": {
+          "op": "includes_all",
+          "path": "robot.capabilities",
+          "value": []
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "includes-all-unresolved-requirement-refuses",
+      "note": "The rule this module's own documentation uses as its example — \"robot capabilities must cover whatever this policy declares\" — used to **pass** when the policy declared nothing readable, because `every` over an empty list is true. It now refuses and names the reference.",
+      "input": {
+        "predicate": {
+          "op": "includes_all",
+          "path": "robot.capabilities",
+          "value": {
+            "__ref": "skill.absent_list"
+          }
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"includes_all\",\"outcome\":\"unevaluable\",\"path\":\"skill.absent_list\",\"reason\":\"unresolved_path\",\"satisfied\":false}"
+    },
+    {
+      "id": "includes-any-holds",
+      "note": "At least one.",
+      "input": {
+        "predicate": {
+          "op": "includes_any",
+          "path": "robot.guards.active",
+          "value": [
+            "pose",
+            "velocity"
+          ]
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "includes-any-does-not-hold",
+      "note": "None of them.",
+      "input": {
+        "predicate": {
+          "op": "includes_any",
+          "path": "robot.guards.active",
+          "value": [
+            "pose",
+            "payload"
+          ]
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "includes-any-empty-requirement",
+      "note": "Nothing was asked for.",
+      "input": {
+        "predicate": {
+          "op": "includes_any",
+          "path": "robot.guards.active",
+          "value": []
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "gte-number",
+      "note": "Battery above reserve.",
+      "input": {
+        "predicate": {
+          "op": "gte",
+          "path": "robot.state.battery_percent",
+          "value": 20
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "lt-number",
+      "note": "And the same fact from the other side.",
+      "input": {
+        "predicate": {
+          "op": "lt",
+          "path": "robot.state.battery_percent",
+          "value": 20
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "gt-boundary",
+      "note": "Strictly greater is not greater-or-equal.",
+      "input": {
+        "predicate": {
+          "op": "gt",
+          "path": "robot.state.battery_percent",
+          "value": 62
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "lte-boundary",
+      "note": "And the boundary itself.",
+      "input": {
+        "predicate": {
+          "op": "lte",
+          "path": "robot.state.battery_percent",
+          "value": 62
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "gte-numeric-string",
+      "note": "A percentage reported as a string still compares. Robots report numbers as strings, and an edition that refused this one and accepted the next would be a robot that stops for a quote.",
+      "input": {
+        "predicate": {
+          "op": "gte",
+          "path": "robot.state.reported_percent",
+          "value": 10
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "gte-decimal-string",
+      "note": "A decimal string.",
+      "input": {
+        "predicate": {
+          "op": "gte",
+          "path": "env.temperature_c",
+          "value": 21
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "gte-hex-string",
+      "note": "`Number(\"0x1f\")` is 31, and this is the reference being mirrored rather than a shape anybody should write.",
+      "input": {
+        "predicate": {
+          "op": "gte",
+          "path": "env.hex",
+          "value": 30
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "gte-exponent-string",
+      "note": "`Number(\"1e3\")` is 1000.",
+      "input": {
+        "predicate": {
+          "op": "gte",
+          "path": "env.exponent",
+          "value": 999
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "gte-infinity-string-refuses",
+      "note": "`Number(\"Infinity\")` is not finite, and a ceiling nothing can exceed is not a comparison.",
+      "input": {
+        "predicate": {
+          "op": "gte",
+          "path": "env.infinite",
+          "value": 5
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"gte\",\"outcome\":\"unevaluable\",\"path\":\"env.infinite\",\"reason\":\"not_a_number\",\"satisfied\":false}"
+    },
+    {
+      "id": "gte-non-numeric-string-refuses",
+      "note": "A fixture name is not a number.",
+      "input": {
+        "predicate": {
+          "op": "gte",
+          "path": "env.fixture",
+          "value": 1
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"gte\",\"outcome\":\"unevaluable\",\"path\":\"env.fixture\",\"reason\":\"not_a_number\",\"satisfied\":false}"
+    },
+    {
+      "id": "gte-blank-string-refuses",
+      "note": "A blank string is not zero here.",
+      "input": {
+        "predicate": {
+          "op": "gte",
+          "path": "robot.state.blank",
+          "value": 0
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"gte\",\"outcome\":\"unevaluable\",\"path\":\"robot.state.blank\",\"reason\":\"not_a_number\",\"satisfied\":false}"
+    },
+    {
+      "id": "gte-boolean-refuses",
+      "note": "A boolean is not coerced. `Number(true)` is 1 in JavaScript and the reference never reaches it: only numbers and strings are read.",
+      "input": {
+        "predicate": {
+          "op": "gte",
+          "path": "env.door_closed",
+          "value": 0
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"gte\",\"outcome\":\"unevaluable\",\"path\":\"env.door_closed\",\"reason\":\"not_a_number\",\"satisfied\":false}"
+    },
+    {
+      "id": "gte-null-refuses",
+      "note": "An explicit null is present and is not a number.",
+      "input": {
+        "predicate": {
+          "op": "gte",
+          "path": "robot.state.nothing",
+          "value": 0
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"gte\",\"outcome\":\"unevaluable\",\"path\":\"robot.state.nothing\",\"reason\":\"not_a_number\",\"satisfied\":false}"
+    },
+    {
+      "id": "gte-unresolved-right-refuses",
+      "note": "The reference names the side that failed, and here it is the rule's own reference rather than the robot's value.",
+      "input": {
+        "predicate": {
+          "op": "gte",
+          "path": "robot.state.battery_percent",
+          "value": {
+            "__ref": "skill.reserve_percent"
+          }
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"gte\",\"outcome\":\"unevaluable\",\"path\":\"skill.reserve_percent\",\"reason\":\"unresolved_path\",\"satisfied\":false}"
+    },
+    {
+      "id": "semver-holds",
+      "note": "The runtime is inside the skill's window.",
+      "input": {
+        "predicate": {
+          "op": "semver_satisfies",
+          "path": "robot.runtime",
+          "value": {
+            "__ref": "skill.range"
+          }
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "semver-does-not-hold",
+      "note": "And outside a different one.",
+      "input": {
+        "predicate": {
+          "op": "semver_satisfies",
+          "path": "robot.runtime",
+          "value": ">=2.0.0"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "semver-wildcard",
+      "note": "A wildcard constrains nothing and is a valid range.",
+      "input": {
+        "predicate": {
+          "op": "semver_satisfies",
+          "path": "robot.runtime",
+          "value": "*"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "semver-unreadable-version-refuses",
+      "note": "A version this edition cannot parse is a fact about the declaration, not a version that fell outside the window — so it is named rather than counted as a miss.",
+      "input": {
+        "predicate": {
+          "op": "semver_satisfies",
+          "path": "robot.state.mode",
+          "value": "^1.0.0"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"semver_satisfies\",\"outcome\":\"unevaluable\",\"path\":\"robot.state.mode\",\"reason\":\"not_a_version\",\"satisfied\":false}"
+    },
+    {
+      "id": "semver-unreadable-range-refuses",
+      "note": "And the same for the range.",
+      "input": {
+        "predicate": {
+          "op": "semver_satisfies",
+          "path": "robot.runtime",
+          "value": "garbage"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"semver_satisfies\",\"outcome\":\"unevaluable\",\"path\":null,\"reason\":\"not_a_version\",\"satisfied\":false}"
+    },
+    {
+      "id": "semver-range-with-one-unreadable-alternative-refuses",
+      "note": "Stricter than `satisfies`, deliberately: `>=1.0.0 || garbage` is satisfied by 1.4.2 and is still a range half of which nobody can read. A skill whose window is half unreadable is a skill whose publisher has to hear about it, so the operator refuses where the function would not.",
+      "input": {
+        "predicate": {
+          "op": "semver_satisfies",
+          "path": "robot.runtime",
+          "value": ">=1.0.0 || garbage"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"semver_satisfies\",\"outcome\":\"unevaluable\",\"path\":null,\"reason\":\"not_a_version\",\"satisfied\":false}"
+    },
+    {
+      "id": "and-all-hold",
+      "note": "The ordinary conjunction.",
+      "input": {
+        "predicate": {
+          "op": "and",
+          "predicates": [
+            {
+              "op": "eq",
+              "path": "robot.state.mode",
+              "value": "idle"
+            },
+            {
+              "op": "gte",
+              "path": "robot.state.battery_percent",
+              "value": 20
+            }
+          ]
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "and-short-circuits-on-unsatisfied",
+      "note": "A conjunction whose first child is false stops there, so the refusal names a predicate that was actually false rather than the unreadable one behind it.",
+      "input": {
+        "predicate": {
+          "op": "and",
+          "predicates": [
+            {
+              "op": "eq",
+              "path": "robot.state.mode",
+              "value": "estop"
+            },
+            {
+              "op": "gte",
+              "path": "robot.state.absent",
+              "value": 1
+            }
+          ]
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "and-names-the-first-unevaluable",
+      "note": "And when the unreadable one comes first, that is what is named. Which predicate a refusal names must not depend on how an edition iterates.",
+      "input": {
+        "predicate": {
+          "op": "and",
+          "predicates": [
+            {
+              "op": "gte",
+              "path": "robot.state.absent",
+              "value": 1
+            },
+            {
+              "op": "eq",
+              "path": "robot.state.mode",
+              "value": "estop"
+            }
+          ]
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"gte\",\"outcome\":\"unevaluable\",\"path\":\"robot.state.absent\",\"reason\":\"unresolved_path\",\"satisfied\":false}"
+    },
+    {
+      "id": "and-empty",
+      "note": "A skill declaring no preconditions is not a skill that fails them.",
+      "input": {
+        "predicate": {
+          "op": "and",
+          "predicates": []
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "or-holds-despite-an-unreadable-alternative",
+      "note": "An alternative that holds ends the question; the unreadable one beside it never mattered.",
+      "input": {
+        "predicate": {
+          "op": "or",
+          "predicates": [
+            {
+              "op": "gte",
+              "path": "robot.state.absent",
+              "value": 1
+            },
+            {
+              "op": "eq",
+              "path": "robot.state.mode",
+              "value": "idle"
+            }
+          ]
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "or-names-the-first-unevaluable",
+      "note": "With nothing holding, a disjunction containing something unreadable is not known to be false — only unread.",
+      "input": {
+        "predicate": {
+          "op": "or",
+          "predicates": [
+            {
+              "op": "eq",
+              "path": "robot.state.mode",
+              "value": "estop"
+            },
+            {
+              "op": "gte",
+              "path": "robot.state.absent",
+              "value": 1
+            }
+          ]
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"gte\",\"outcome\":\"unevaluable\",\"path\":\"robot.state.absent\",\"reason\":\"unresolved_path\",\"satisfied\":false}"
+    },
+    {
+      "id": "or-empty",
+      "note": "No alternatives, nothing holds.",
+      "input": {
+        "predicate": {
+          "op": "or",
+          "predicates": []
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "not-over-unsatisfied",
+      "note": "Negation of a decided answer is a decided answer.",
+      "input": {
+        "predicate": {
+          "op": "not",
+          "predicate": {
+            "op": "eq",
+            "path": "robot.state.mode",
+            "value": "estop"
+          }
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "not-over-unevaluable-refuses",
+      "note": "The change that matters most. `not(eq(robot.state.mode, \"estop\"))` over a robot that has never reported a mode used to be **true**, because `!false` is true and `undefined === \"estop\"` is false. Ignorance does not negate into knowledge.",
+      "input": {
+        "predicate": {
+          "op": "not",
+          "predicate": {
+            "op": "eq",
+            "path": "robot.state.absent",
+            "value": "estop"
+          }
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"eq\",\"outcome\":\"unevaluable\",\"path\":\"robot.state.absent\",\"reason\":\"unresolved_path\",\"satisfied\":false}"
+    },
+    {
+      "id": "not-over-exists-still-works",
+      "note": "And the idiom this must not break: `exists` answers about absence, so negating it is meaningful.",
+      "input": {
+        "predicate": {
+          "op": "not",
+          "predicate": {
+            "op": "exists",
+            "path": "robot.state.absent"
+          }
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "not-via-predicates-array",
+      "note": "The first child of `predicates` is accepted as the operand.",
+      "input": {
+        "predicate": {
+          "op": "not",
+          "predicates": [
+            {
+              "op": "eq",
+              "path": "robot.state.mode",
+              "value": "estop"
+            }
+          ]
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "not-with-no-operand-refuses",
+      "note": "A `not` with nothing to negate used to answer **true** — `!evaluate(undefined)` — which is a malformed rule passing.",
+      "input": {
+        "predicate": {
+          "op": "not"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"not\",\"outcome\":\"unevaluable\",\"path\":null,\"reason\":\"missing_operand\",\"satisfied\":false}"
+    },
+    {
+      "id": "path-array-index",
+      "note": "An array member is addressed by its index.",
+      "input": {
+        "predicate": {
+          "op": "eq",
+          "path": "robot.guards.active.1",
+          "value": "velocity"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "path-array-index-out-of-range",
+      "note": "Past the end is nothing.",
+      "input": {
+        "predicate": {
+          "op": "eq",
+          "path": "robot.guards.active.9",
+          "value": "velocity"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"eq\",\"outcome\":\"unevaluable\",\"path\":\"robot.guards.active.9\",\"reason\":\"unresolved_path\",\"satisfied\":false}"
+    },
+    {
+      "id": "path-array-index-leading-zero",
+      "note": "Not a canonical index, and therefore not a member. JavaScript agrees: `[\"a\"][\"01\"]` is undefined.",
+      "input": {
+        "predicate": {
+          "op": "exists",
+          "path": "robot.guards.active.01"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "path-array-length-is-not-a-member",
+      "note": "`length` is a property of a JavaScript array and not a member of the document, so it does not resolve. An edition without JavaScript arrays could not reproduce it, and a path vocabulary one edition can read is not a path vocabulary.",
+      "input": {
+        "predicate": {
+          "op": "exists",
+          "path": "robot.guards.active.length"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "path-prototype-is-not-a-member",
+      "note": "Nor is anything else off the prototype chain. Rules are operator-supplied rows, and a path they compose has no business reaching `constructor`.",
+      "input": {
+        "predicate": {
+          "op": "exists",
+          "path": "robot.constructor"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "path-through-a-scalar",
+      "note": "A path cannot continue through a string.",
+      "input": {
+        "predicate": {
+          "op": "exists",
+          "path": "robot.tier.length"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "path-through-null",
+      "note": "Nor through an explicit null.",
+      "input": {
+        "predicate": {
+          "op": "eq",
+          "path": "robot.state.nothing.deep",
+          "value": 1
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"eq\",\"outcome\":\"unevaluable\",\"path\":\"robot.state.nothing.deep\",\"reason\":\"unresolved_path\",\"satisfied\":false}"
+    },
+    {
+      "id": "path-empty-segment",
+      "note": "An empty segment names no member.",
+      "input": {
+        "predicate": {
+          "op": "exists",
+          "path": "robot..tier"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "path-missing-entirely",
+      "note": "A predicate with no path cannot read anything.",
+      "input": {
+        "predicate": {
+          "op": "eq",
+          "value": "idle"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"eq\",\"outcome\":\"unevaluable\",\"path\":null,\"reason\":\"missing_path\",\"satisfied\":false}"
+    },
+    {
+      "id": "path-not-a-string",
+      "note": "A `path` that is not a string used to reach `path.split` and **throw**, taking the whole compatibility check down with one bad rule row — in a module whose first paragraph says it is total. It is read defensively now.",
+      "input": {
+        "predicate": {
+          "op": "eq",
+          "path": 5,
+          "value": "idle"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"eq\",\"outcome\":\"unevaluable\",\"path\":null,\"reason\":\"missing_path\",\"satisfied\":false}"
+    },
+    {
+      "id": "path-empty-string",
+      "note": "An empty path is no path.",
+      "input": {
+        "predicate": {
+          "op": "exists",
+          "path": ""
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"exists\",\"outcome\":\"unevaluable\",\"path\":null,\"reason\":\"missing_path\",\"satisfied\":false}"
+    },
+    {
+      "id": "ref-alias-single-key",
+      "note": "`{ path: … }` is accepted as an alias for `__ref`.",
+      "input": {
+        "predicate": {
+          "op": "includes_all",
+          "path": "robot.capabilities",
+          "value": {
+            "path": "skill.needs"
+          }
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "ref-alias-needs-to-be-alone",
+      "note": "With a second key it is an object literal, not a reference — and an object literal is never equal to anything, so this asks whether the capability list contains an object.",
+      "input": {
+        "predicate": {
+          "op": "includes_all",
+          "path": "robot.capabilities",
+          "value": {
+            "path": "skill.needs",
+            "note": "x"
+          }
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "ref-to-a-missing-path-refuses",
+      "note": "A reference that names nothing refuses, and the refusal names the reference rather than the left-hand path.",
+      "input": {
+        "predicate": {
+          "op": "eq",
+          "path": "robot.state.mode",
+          "value": {
+            "__ref": "skill.expected_mode"
+          }
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"eq\",\"outcome\":\"unevaluable\",\"path\":\"skill.expected_mode\",\"reason\":\"unresolved_path\",\"satisfied\":false}"
+    },
+    {
+      "id": "malformed-null",
+      "note": "A null predicate is not a predicate.",
+      "input": {
+        "predicate": null,
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unevaluable\",\"path\":null,\"reason\":\"malformed\",\"satisfied\":false}"
+    },
+    {
+      "id": "malformed-scalar",
+      "note": "Nor is a number.",
+      "input": {
+        "predicate": 42,
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unevaluable\",\"path\":null,\"reason\":\"malformed\",\"satisfied\":false}"
+    },
+    {
+      "id": "malformed-no-op",
+      "note": "Nor is an object with no operator.",
+      "input": {
+        "predicate": {
+          "path": "robot.tier"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unevaluable\",\"path\":null,\"reason\":\"malformed\",\"satisfied\":false}"
+    },
+    {
+      "id": "malformed-op-not-a-string",
+      "note": "Nor one whose operator is not a string.",
+      "input": {
+        "predicate": {
+          "op": 5
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unevaluable\",\"path\":null,\"reason\":\"malformed\",\"satisfied\":false}"
+    },
+    {
+      "id": "unknown-op",
+      "note": "An operator this edition does not implement is named, not guessed at.",
+      "input": {
+        "predicate": {
+          "op": "approximately",
+          "path": "robot.state.battery_percent",
+          "value": 60
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"approximately\",\"outcome\":\"unevaluable\",\"path\":\"robot.state.battery_percent\",\"reason\":\"unknown_op\",\"satisfied\":false}"
+    },
+    {
+      "id": "malformed-predicates-not-an-array",
+      "note": "A `predicates` that is not an array used to reach `.every` and throw. It is malformed — deliberately not \"no children\", because a conjunction over no children is *satisfied*, and turning a broken rule into a pass is the failure this whole change is about.",
+      "input": {
+        "predicate": {
+          "op": "and",
+          "predicates": "nope"
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"and\",\"outcome\":\"unevaluable\",\"path\":null,\"reason\":\"malformed\",\"satisfied\":false}"
+    },
+    {
+      "id": "skill-preconditions-hold",
+      "note": "What a `SkillManifest` precondition becomes: the guards that must be running, the calibration that must be valid, the battery that must be above reserve, the cell that must be closed.",
+      "input": {
+        "predicate": {
+          "op": "and",
+          "predicates": [
+            {
+              "op": "includes_all",
+              "path": "robot.guards.active",
+              "value": [
+                "workspace",
+                "collision"
+              ]
+            },
+            {
+              "op": "eq",
+              "path": "robot.calibration.kinematic.valid",
+              "value": true
+            },
+            {
+              "op": "gte",
+              "path": "robot.state.battery_percent",
+              "value": 20
+            },
+            {
+              "op": "eq",
+              "path": "env.door_closed",
+              "value": true
+            },
+            {
+              "op": "includes_all",
+              "path": "robot.capabilities",
+              "value": {
+                "__ref": "skill.needs"
+              }
+            },
+            {
+              "op": "semver_satisfies",
+              "path": "robot.runtime",
+              "value": {
+                "__ref": "skill.range"
+              }
+            }
+          ]
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "skill-preconditions-refused-by-calibration",
+      "note": "The same tree against the set that expired. §45 makes a lapsed calibration a fact rather than a warning, and this is where that fact stops a skill.",
+      "input": {
+        "predicate": {
+          "op": "and",
+          "predicates": [
+            {
+              "op": "eq",
+              "path": "robot.calibration.torque.valid",
+              "value": true
+            },
+            {
+              "op": "gte",
+              "path": "robot.state.battery_percent",
+              "value": 20
+            }
+          ]
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "skill-preconditions-refused-by-an-undeclared-fact",
+      "note": "And the one §54.2 exists for: a precondition naming something this robot does not expose is refused with the path named, so the answer is \"nobody declared a payload\" rather than \"the payload is wrong\".",
+      "input": {
+        "predicate": {
+          "op": "and",
+          "predicates": [
+            {
+              "op": "gte",
+              "path": "robot.state.battery_percent",
+              "value": 20
+            },
+            {
+              "op": "lte",
+              "path": "robot.state.payload_kg",
+              "value": 5
+            }
+          ]
+        },
+        "context": {
+          "robot": {
+            "tier": "host",
+            "runtime": "1.4.2",
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.depth"
+            ],
+            "state": {
+              "mode": "idle",
+              "gripper": "open",
+              "battery_percent": 62,
+              "reported_percent": "17",
+              "empty": [],
+              "blank": "   ",
+              "zero": 0,
+              "nothing": null
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "velocity",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true,
+                "age_days": 12
+              },
+              "torque": {
+                "valid": false,
+                "age_days": 400
+              }
+            }
+          },
+          "skill": {
+            "grants": [
+              "actuation.arm"
+            ],
+            "needs": [
+              "manipulation.grasp"
+            ],
+            "also": [
+              "manipulation.grasp"
+            ],
+            "range": "^1.0.0"
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "temperature_c": "21.5",
+            "hex": "0x1f",
+            "exponent": "1e3",
+            "infinite": "Infinity"
+          }
+        }
+      },
+      "expected": "{\"op\":\"lte\",\"outcome\":\"unevaluable\",\"path\":\"robot.state.payload_kg\",\"reason\":\"unresolved_path\",\"satisfied\":false}"
+    }
+  ]
+}

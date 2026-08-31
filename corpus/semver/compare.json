@@ -1,0 +1,132 @@
+{
+  "corpus": "semver",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "equal",
+      "note": "Identical versions.",
+      "input": {
+        "a": "1.2.3",
+        "b": "1.2.3"
+      },
+      "expected": "{\"a\":{\"major\":1,\"minor\":2,\"patch\":3,\"prerelease\":null,\"raw\":\"1.2.3\"},\"b\":{\"major\":1,\"minor\":2,\"patch\":3,\"prerelease\":null,\"raw\":\"1.2.3\"},\"compare\":0}"
+    },
+    {
+      "id": "major",
+      "note": "Major dominates.",
+      "input": {
+        "a": "2.0.0",
+        "b": "1.9.9"
+      },
+      "expected": "{\"a\":{\"major\":2,\"minor\":0,\"patch\":0,\"prerelease\":null,\"raw\":\"2.0.0\"},\"b\":{\"major\":1,\"minor\":9,\"patch\":9,\"prerelease\":null,\"raw\":\"1.9.9\"},\"compare\":1}"
+    },
+    {
+      "id": "minor-numeric-not-lexical",
+      "note": "Ten is after two, which is the comparison a string sort gets wrong.",
+      "input": {
+        "a": "1.2.0",
+        "b": "1.10.0"
+      },
+      "expected": "{\"a\":{\"major\":1,\"minor\":2,\"patch\":0,\"prerelease\":null,\"raw\":\"1.2.0\"},\"b\":{\"major\":1,\"minor\":10,\"patch\":0,\"prerelease\":null,\"raw\":\"1.10.0\"},\"compare\":-1}"
+    },
+    {
+      "id": "patch",
+      "note": "And the patch.",
+      "input": {
+        "a": "1.2.3",
+        "b": "1.2.4"
+      },
+      "expected": "{\"a\":{\"major\":1,\"minor\":2,\"patch\":3,\"prerelease\":null,\"raw\":\"1.2.3\"},\"b\":{\"major\":1,\"minor\":2,\"patch\":4,\"prerelease\":null,\"raw\":\"1.2.4\"},\"compare\":-1}"
+    },
+    {
+      "id": "release-outranks-prerelease",
+      "note": "A release outranks its own prerelease.",
+      "input": {
+        "a": "1.0.0",
+        "b": "1.0.0-rc.1"
+      },
+      "expected": "{\"a\":{\"major\":1,\"minor\":0,\"patch\":0,\"prerelease\":null,\"raw\":\"1.0.0\"},\"b\":{\"major\":1,\"minor\":0,\"patch\":0,\"prerelease\":\"rc.1\",\"raw\":\"1.0.0-rc.1\"},\"compare\":1}"
+    },
+    {
+      "id": "prerelease-numeric",
+      "note": "Numeric identifiers compare as numbers.",
+      "input": {
+        "a": "1.0.0-2",
+        "b": "1.0.0-10"
+      },
+      "expected": "{\"a\":{\"major\":1,\"minor\":0,\"patch\":0,\"prerelease\":\"2\",\"raw\":\"1.0.0-2\"},\"b\":{\"major\":1,\"minor\":0,\"patch\":0,\"prerelease\":\"10\",\"raw\":\"1.0.0-10\"},\"compare\":-1}"
+    },
+    {
+      "id": "prerelease-alpha",
+      "note": "Alphanumeric identifiers compare as strings.",
+      "input": {
+        "a": "1.0.0-alpha",
+        "b": "1.0.0-beta"
+      },
+      "expected": "{\"a\":{\"major\":1,\"minor\":0,\"patch\":0,\"prerelease\":\"alpha\",\"raw\":\"1.0.0-alpha\"},\"b\":{\"major\":1,\"minor\":0,\"patch\":0,\"prerelease\":\"beta\",\"raw\":\"1.0.0-beta\"},\"compare\":-1}"
+    },
+    {
+      "id": "prerelease-numeric-before-alpha",
+      "note": "A numeric identifier is below an alphanumeric one.",
+      "input": {
+        "a": "1.0.0-1",
+        "b": "1.0.0-alpha"
+      },
+      "expected": "{\"a\":{\"major\":1,\"minor\":0,\"patch\":0,\"prerelease\":\"1\",\"raw\":\"1.0.0-1\"},\"b\":{\"major\":1,\"minor\":0,\"patch\":0,\"prerelease\":\"alpha\",\"raw\":\"1.0.0-alpha\"},\"compare\":-1}"
+    },
+    {
+      "id": "prerelease-length",
+      "note": "A longer identifier list wins a tie on the shared prefix.",
+      "input": {
+        "a": "1.0.0-alpha.1",
+        "b": "1.0.0-alpha"
+      },
+      "expected": "{\"a\":{\"major\":1,\"minor\":0,\"patch\":0,\"prerelease\":\"alpha.1\",\"raw\":\"1.0.0-alpha.1\"},\"b\":{\"major\":1,\"minor\":0,\"patch\":0,\"prerelease\":\"alpha\",\"raw\":\"1.0.0-alpha\"},\"compare\":1}"
+    },
+    {
+      "id": "unparseable-left",
+      "note": "Unparseable means **equal**, which is the reference and is not what this would be if it were being designed now. Reproduced because a sort that ordered a malformed list differently in two editions is worse than a comparator with a documented wart.",
+      "input": {
+        "a": "nonsense",
+        "b": "1.0.0"
+      },
+      "expected": "{\"a\":null,\"b\":{\"major\":1,\"minor\":0,\"patch\":0,\"prerelease\":null,\"raw\":\"1.0.0\"},\"compare\":0}"
+    },
+    {
+      "id": "unparseable-both",
+      "note": "And the same when neither side parses.",
+      "input": {
+        "a": "",
+        "b": "x"
+      },
+      "expected": "{\"a\":null,\"b\":null,\"compare\":0}"
+    },
+    {
+      "id": "trimmed",
+      "note": "Both sides are trimmed before parsing.",
+      "input": {
+        "a": "  1.2.3  ",
+        "b": "1.2.3"
+      },
+      "expected": "{\"a\":{\"major\":1,\"minor\":2,\"patch\":3,\"prerelease\":null,\"raw\":\"1.2.3\"},\"b\":{\"major\":1,\"minor\":2,\"patch\":3,\"prerelease\":null,\"raw\":\"1.2.3\"},\"compare\":0}"
+    },
+    {
+      "id": "leading-zeros",
+      "note": "Numeric components are numbers, so leading zeros do not change one.",
+      "input": {
+        "a": "1.02.3",
+        "b": "1.2.3"
+      },
+      "expected": "{\"a\":{\"major\":1,\"minor\":2,\"patch\":3,\"prerelease\":null,\"raw\":\"1.02.3\"},\"b\":{\"major\":1,\"minor\":2,\"patch\":3,\"prerelease\":null,\"raw\":\"1.2.3\"},\"compare\":0}"
+    },
+    {
+      "id": "large-major",
+      "note": "Components are read with `Number()`, so a value beyond an integer's exact range rounds rather than failing to parse. Both editions must round it the same way.",
+      "input": {
+        "a": "9007199254740993.0.0",
+        "b": "9007199254740992.0.0"
+      },
+      "expected": "{\"a\":{\"major\":9007199254740992,\"minor\":0,\"patch\":0,\"prerelease\":null,\"raw\":\"9007199254740993.0.0\"},\"b\":{\"major\":9007199254740992,\"minor\":0,\"patch\":0,\"prerelease\":null,\"raw\":\"9007199254740992.0.0\"},\"compare\":0}"
+    }
+  ]
+}

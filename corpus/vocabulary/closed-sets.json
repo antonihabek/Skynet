@@ -8,7 +8,7 @@
       "input": {
         "set": "package_rejection_codes"
       },
-      "expected": "[\"unsigned\",\"signature_failed\",\"signature_untrusted\",\"signature_unverifiable\",\"digest_mismatch\",\"isolation_violation\",\"budget_exceeded\",\"capability_ungranted\",\"capability_denied\",\"capability_reserved\",\"over_request\",\"missing_dependency\",\"os_too_old\",\"transport_refused\",\"executes_on_load_untrusted\"]"
+      "expected": "[\"unsigned\",\"signature_failed\",\"signature_untrusted\",\"signature_unverifiable\",\"digest_mismatch\",\"isolation_violation\",\"budget_exceeded\",\"capability_ungranted\",\"capability_denied\",\"capability_reserved\",\"over_request\",\"missing_dependency\",\"os_too_old\",\"transport_refused\",\"executes_on_load_untrusted\",\"environment_inert\"]"
     },
     {
       "id": "signature_states",
@@ -24,7 +24,7 @@
       "input": {
         "set": "package_kinds"
       },
-      "expected": "[\"policy\",\"skill\",\"driver\",\"service\",\"embodiment\"]"
+      "expected": "[\"policy\",\"skill\",\"driver\",\"service\",\"embodiment\",\"environment\"]"
     },
     {
       "id": "isolation_modes",
@@ -169,6 +169,78 @@
         "set": "scts_areas"
       },
       "expected": "[\"rhal\",\"embodiment\",\"safety\",\"package\",\"ota\",\"telemetry\",\"offline\",\"security\",\"power\"]"
+    },
+    {
+      "id": "predicate_ops",
+      "note": "The operators a §54.2 precondition is written in. One list, or a skill refuses on one robot and runs on another.",
+      "input": {
+        "set": "predicate_ops"
+      },
+      "expected": "[\"and\",\"or\",\"not\",\"eq\",\"neq\",\"in\",\"gte\",\"lte\",\"gt\",\"lt\",\"includes\",\"includes_all\",\"includes_any\",\"exists\",\"semver_satisfies\"]"
+    },
+    {
+      "id": "predicate_outcomes",
+      "note": "Satisfied, unsatisfied, and the third value §54.2 requires: a precondition nobody could evaluate is not a precondition that passed.",
+      "input": {
+        "set": "predicate_outcomes"
+      },
+      "expected": "[\"satisfied\",\"unsatisfied\",\"unevaluable\"]"
+    },
+    {
+      "id": "unevaluable_reasons",
+      "note": "Why a predicate could not be decided. §54.2 requires the refusal to name something, and a free-text reason is the same nothing as a free-text precondition.",
+      "input": {
+        "set": "unevaluable_reasons"
+      },
+      "expected": "[\"malformed\",\"unknown_op\",\"missing_path\",\"missing_operand\",\"unresolved_path\",\"not_a_number\",\"not_a_version\"]"
+    },
+    {
+      "id": "clause_outcomes",
+      "note": "What can happen to one precondition or success criterion. The fourth is the one the predicate engine does not have: there was no predicate to ask about.",
+      "input": {
+        "set": "clause_outcomes"
+      },
+      "expected": "[\"satisfied\",\"unsatisfied\",\"unevaluable\",\"unenforceable\"]"
+    },
+    {
+      "id": "clause_origins",
+      "note": "Publisher or site. §54.2: the operator may add preconditions; the skill may not remove them.",
+      "input": {
+        "set": "clause_origins"
+      },
+      "expected": "[\"skill\",\"operator\"]"
+    },
+    {
+      "id": "precondition_phases",
+      "note": "Before the skill starts, and every cycle while it runs.",
+      "input": {
+        "set": "precondition_phases"
+      },
+      "expected": "[\"entry\",\"hold\"]"
+    },
+    {
+      "id": "skill_outcomes",
+      "note": "How a skill invocation ends. The Hub's `EpisodeOutcome` and not a second vocabulary, so an aborted skill becomes a labelled training example rather than a gap.",
+      "input": {
+        "set": "skill_outcomes"
+      },
+      "expected": "[\"success\",\"failure\",\"aborted\",\"unlabeled\"]"
+    },
+    {
+      "id": "composition_faults",
+      "note": "Why a call graph is refused at install (§54.5).",
+      "input": {
+        "set": "composition_faults"
+      },
+      "expected": "[\"cycle\",\"too_deep\"]"
+    },
+    {
+      "id": "cell_faults",
+      "note": "What can be wrong with a cell descriptor (§55.2). Two of them — an unaddressable fact key and one that shadows a derived fact — could not have been named before §54.2 gave `env.*` a path vocabulary to be wrong in.",
+      "input": {
+        "set": "cell_faults"
+      },
+      "expected": "[\"unnamed\",\"fact_key_unusable\",\"fact_key_reserved\",\"volume_frame_missing\",\"volume_shape_invalid\",\"fixture_unnamed\",\"duplicate_fixture\",\"parking_channel_unnamed\",\"duplicate_parking_channel\"]"
     }
   ]
 }

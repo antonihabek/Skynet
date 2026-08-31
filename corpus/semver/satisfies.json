@@ -1,0 +1,429 @@
+{
+  "corpus": "semver",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "exact-match",
+      "note": "A bare version is an equality comparator.",
+      "input": {
+        "version": "1.2.3",
+        "range": "1.2.3"
+      },
+      "expected": "{\"range\":\"1.2.3\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.2.3\"}"
+    },
+    {
+      "id": "exact-mismatch",
+      "note": "And it is exact.",
+      "input": {
+        "version": "1.2.4",
+        "range": "1.2.3"
+      },
+      "expected": "{\"range\":\"1.2.3\",\"satisfies\":false,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.2.4\"}"
+    },
+    {
+      "id": "wildcard",
+      "note": "A wildcard constrains nothing.",
+      "input": {
+        "version": "9.9.9",
+        "range": "*"
+      },
+      "expected": "{\"range\":\"*\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"9.9.9\"}"
+    },
+    {
+      "id": "any-word",
+      "note": "`any` is spelled out as well, case-insensitively.",
+      "input": {
+        "version": "9.9.9",
+        "range": "ANY"
+      },
+      "expected": "{\"range\":\"ANY\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"9.9.9\"}"
+    },
+    {
+      "id": "empty-range",
+      "note": "An empty range constrains nothing either.",
+      "input": {
+        "version": "9.9.9",
+        "range": ""
+      },
+      "expected": "{\"range\":\"\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"9.9.9\"}"
+    },
+    {
+      "id": "caret-in-range",
+      "note": "Caret holds the major.",
+      "input": {
+        "version": "1.9.0",
+        "range": "^1.2.0"
+      },
+      "expected": "{\"range\":\"^1.2.0\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.9.0\"}"
+    },
+    {
+      "id": "caret-below",
+      "note": "Below the base is outside it.",
+      "input": {
+        "version": "1.1.0",
+        "range": "^1.2.0"
+      },
+      "expected": "{\"range\":\"^1.2.0\",\"satisfies\":false,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.1.0\"}"
+    },
+    {
+      "id": "caret-major-bump",
+      "note": "A major bump leaves it.",
+      "input": {
+        "version": "2.0.0",
+        "range": "^1.2.0"
+      },
+      "expected": "{\"range\":\"^1.2.0\",\"satisfies\":false,\"valid_range\":true,\"valid_version\":true,\"version\":\"2.0.0\"}"
+    },
+    {
+      "id": "caret-zero-major",
+      "note": "Under 1.0.0 the caret holds the minor instead.",
+      "input": {
+        "version": "0.2.9",
+        "range": "^0.2.0"
+      },
+      "expected": "{\"range\":\"^0.2.0\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"0.2.9\"}"
+    },
+    {
+      "id": "caret-zero-major-bump",
+      "note": "So a minor bump leaves it.",
+      "input": {
+        "version": "0.3.0",
+        "range": "^0.2.0"
+      },
+      "expected": "{\"range\":\"^0.2.0\",\"satisfies\":false,\"valid_range\":true,\"valid_version\":true,\"version\":\"0.3.0\"}"
+    },
+    {
+      "id": "caret-zero-minor",
+      "note": "And under 0.1.0 it holds the patch.",
+      "input": {
+        "version": "0.0.5",
+        "range": "^0.0.5"
+      },
+      "expected": "{\"range\":\"^0.0.5\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"0.0.5\"}"
+    },
+    {
+      "id": "caret-zero-minor-bump",
+      "note": "Which nothing else satisfies.",
+      "input": {
+        "version": "0.0.6",
+        "range": "^0.0.5"
+      },
+      "expected": "{\"range\":\"^0.0.5\",\"satisfies\":false,\"valid_range\":true,\"valid_version\":true,\"version\":\"0.0.6\"}"
+    },
+    {
+      "id": "tilde",
+      "note": "Tilde holds the minor.",
+      "input": {
+        "version": "1.2.9",
+        "range": "~1.2.0"
+      },
+      "expected": "{\"range\":\"~1.2.0\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.2.9\"}"
+    },
+    {
+      "id": "tilde-minor-bump",
+      "note": "A minor bump leaves it.",
+      "input": {
+        "version": "1.3.0",
+        "range": "~1.2.0"
+      },
+      "expected": "{\"range\":\"~1.2.0\",\"satisfies\":false,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.3.0\"}"
+    },
+    {
+      "id": "range-and",
+      "note": "Space-separated comparators are a conjunction.",
+      "input": {
+        "version": "1.5.0",
+        "range": ">=1.0.0 <2.0.0"
+      },
+      "expected": "{\"range\":\">=1.0.0 <2.0.0\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.5.0\"}"
+    },
+    {
+      "id": "range-and-outside",
+      "note": "Both must hold.",
+      "input": {
+        "version": "2.1.0",
+        "range": ">=1.0.0 <2.0.0"
+      },
+      "expected": "{\"range\":\">=1.0.0 <2.0.0\",\"satisfies\":false,\"valid_range\":true,\"valid_version\":true,\"version\":\"2.1.0\"}"
+    },
+    {
+      "id": "range-or",
+      "note": "`||` is a disjunction.",
+      "input": {
+        "version": "3.1.0",
+        "range": "<2.0.0 || >=3.0.0"
+      },
+      "expected": "{\"range\":\"<2.0.0 || >=3.0.0\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"3.1.0\"}"
+    },
+    {
+      "id": "range-or-gap",
+      "note": "And the gap between them is outside.",
+      "input": {
+        "version": "2.5.0",
+        "range": "<2.0.0 || >=3.0.0"
+      },
+      "expected": "{\"range\":\"<2.0.0 || >=3.0.0\",\"satisfies\":false,\"valid_range\":true,\"valid_version\":true,\"version\":\"2.5.0\"}"
+    },
+    {
+      "id": "spaced-operator",
+      "note": "The tokenizer splits on the operator, not on whitespace.",
+      "input": {
+        "version": "1.3.0",
+        "range": ">= 1.2.0"
+      },
+      "expected": "{\"range\":\">= 1.2.0\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.3.0\"}"
+    },
+    {
+      "id": "prerelease-below-release",
+      "note": "A prerelease is below its release, per semver §11.",
+      "input": {
+        "version": "2.0.0-rc.1",
+        "range": ">=2.0.0"
+      },
+      "expected": "{\"range\":\">=2.0.0\",\"satisfies\":false,\"valid_range\":true,\"valid_version\":true,\"version\":\"2.0.0-rc.1\"}"
+    },
+    {
+      "id": "prerelease-compared-to-prerelease",
+      "note": "And two prereleases order numerically where both identifiers are numbers.",
+      "input": {
+        "version": "2.0.0-rc.2",
+        "range": ">2.0.0-rc.1"
+      },
+      "expected": "{\"range\":\">2.0.0-rc.1\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"2.0.0-rc.2\"}"
+    },
+    {
+      "id": "unparseable-version",
+      "note": "A version that does not parse satisfies nothing.",
+      "input": {
+        "version": "nonsense",
+        "range": "*"
+      },
+      "expected": "{\"range\":\"*\",\"satisfies\":false,\"valid_range\":true,\"valid_version\":false,\"version\":\"nonsense\"}"
+    },
+    {
+      "id": "two-segment-version",
+      "note": "Two segments is not a version here.",
+      "input": {
+        "version": "1.2",
+        "range": ">=1.0.0"
+      },
+      "expected": "{\"range\":\">=1.0.0\",\"satisfies\":false,\"valid_range\":true,\"valid_version\":false,\"version\":\"1.2\"}"
+    },
+    {
+      "id": "unreadable-range",
+      "note": "A range with nothing in it satisfies nothing.",
+      "input": {
+        "version": "1.2.3",
+        "range": "garbage"
+      },
+      "expected": "{\"range\":\"garbage\",\"satisfies\":false,\"valid_range\":false,\"valid_version\":true,\"version\":\"1.2.3\"}"
+    },
+    {
+      "id": "range-with-one-unreadable-alternative",
+      "note": "One unreadable alternative does not invalidate the readable ones — `satisfies` is true — and the range is still not wholly readable, which is the second answer this corpus pins.",
+      "input": {
+        "version": "1.2.3",
+        "range": ">=1.0.0 || garbage"
+      },
+      "expected": "{\"range\":\">=1.0.0 || garbage\",\"satisfies\":true,\"valid_range\":false,\"valid_version\":true,\"version\":\"1.2.3\"}"
+    },
+    {
+      "id": "range-with-a-leading-v",
+      "note": "The tokenizer is a scan rather than an anchored parse, so a `v` prefix is skipped over and the version behind it is the token. That is what the reference regex does; an edition that rejected it would be a stricter and different implementation.",
+      "input": {
+        "version": "1.2.3",
+        "range": "v1.2.3"
+      },
+      "expected": "{\"range\":\"v1.2.3\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.2.3\"}"
+    },
+    {
+      "id": "range-with-four-segments",
+      "note": "And the same scan takes the first three segments of a four-segment number.",
+      "input": {
+        "version": "1.2.3",
+        "range": "1.2.3.4"
+      },
+      "expected": "{\"range\":\"1.2.3.4\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.2.3\"}"
+    },
+    {
+      "id": "bare-pipes",
+      "note": "Two empty alternatives read nothing.",
+      "input": {
+        "version": "1.2.3",
+        "range": "||"
+      },
+      "expected": "{\"range\":\"||\",\"satisfies\":false,\"valid_range\":false,\"valid_version\":true,\"version\":\"1.2.3\"}"
+    },
+    {
+      "id": "no-space-between-comparators",
+      "note": "The scan does not need whitespace to separate two comparators.",
+      "input": {
+        "version": "1.5.0",
+        "range": ">=1.0.0<2.0.0"
+      },
+      "expected": "{\"range\":\">=1.0.0<2.0.0\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.5.0\"}"
+    },
+    {
+      "id": "no-space-around-pipes",
+      "note": "Nor around the alternation.",
+      "input": {
+        "version": "2.1.0",
+        "range": "^1.2.0||^2.0.0"
+      },
+      "expected": "{\"range\":\"^1.2.0||^2.0.0\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"2.1.0\"}"
+    },
+    {
+      "id": "padded-range",
+      "note": "A range is trimmed before anything else.",
+      "input": {
+        "version": "1.5.0",
+        "range": "  ^1.2.0  "
+      },
+      "expected": "{\"range\":\"  ^1.2.0  \",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.5.0\"}"
+    },
+    {
+      "id": "explicit-equals",
+      "note": "An explicit `=` is the same as a bare version.",
+      "input": {
+        "version": "1.2.3",
+        "range": "=1.2.3"
+      },
+      "expected": "{\"range\":\"=1.2.3\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.2.3\"}"
+    },
+    {
+      "id": "spaced-equals",
+      "note": "With a space after it.",
+      "input": {
+        "version": "1.2.3",
+        "range": "= 1.2.3"
+      },
+      "expected": "{\"range\":\"= 1.2.3\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.2.3\"}"
+    },
+    {
+      "id": "reversed-arrow",
+      "note": "An operator that cannot start a match is retried as a shorter one and finally as none, which is what ordered alternation with backtracking does. `=>` is read as the `>` at its second character.",
+      "input": {
+        "version": "1.5.0",
+        "range": "=>1.0.0"
+      },
+      "expected": "{\"range\":\"=>1.0.0\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.5.0\"}"
+    },
+    {
+      "id": "less-than",
+      "note": "Strictly below.",
+      "input": {
+        "version": "1.2.2",
+        "range": "<1.2.3"
+      },
+      "expected": "{\"range\":\"<1.2.3\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.2.2\"}"
+    },
+    {
+      "id": "less-than-boundary",
+      "note": "And the boundary is not below.",
+      "input": {
+        "version": "1.2.3",
+        "range": "<1.2.3"
+      },
+      "expected": "{\"range\":\"<1.2.3\",\"satisfies\":false,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.2.3\"}"
+    },
+    {
+      "id": "greater-than-or-equal-prerelease",
+      "note": "A comparator may itself carry a prerelease.",
+      "input": {
+        "version": "1.2.3",
+        "range": ">=1.2.3-rc.1"
+      },
+      "expected": "{\"range\":\">=1.2.3-rc.1\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.2.3\"}"
+    },
+    {
+      "id": "caret-with-prerelease-base",
+      "note": "And so may a caret base.",
+      "input": {
+        "version": "1.2.3",
+        "range": "^1.2.3-rc.1"
+      },
+      "expected": "{\"range\":\"^1.2.3-rc.1\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.2.3\"}"
+    },
+    {
+      "id": "tilde-zero-zero",
+      "note": "Tilde on a 0.0.x base still holds the minor.",
+      "input": {
+        "version": "0.0.9",
+        "range": "~0.0.1"
+      },
+      "expected": "{\"range\":\"~0.0.1\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"0.0.9\"}"
+    },
+    {
+      "id": "contradictory-conjunction",
+      "note": "Two exact comparators in one alternative can never both hold. Nothing satisfies it, and it is still a readable range — which is the distinction this corpus exists to keep.",
+      "input": {
+        "version": "1.2.3",
+        "range": "1.2.3 1.2.4"
+      },
+      "expected": "{\"range\":\"1.2.3 1.2.4\",\"satisfies\":false,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.2.3\"}"
+    },
+    {
+      "id": "empty-first-alternative",
+      "note": "An empty alternative reads nothing, and the readable one beside it still decides.",
+      "input": {
+        "version": "1.2.3",
+        "range": "|| 1.2.3"
+      },
+      "expected": "{\"range\":\"|| 1.2.3\",\"satisfies\":true,\"valid_range\":false,\"valid_version\":true,\"version\":\"1.2.3\"}"
+    },
+    {
+      "id": "empty-last-alternative",
+      "note": "And the same at the other end.",
+      "input": {
+        "version": "1.2.3",
+        "range": "1.2.3 ||"
+      },
+      "expected": "{\"range\":\"1.2.3 ||\",\"satisfies\":true,\"valid_range\":false,\"valid_version\":true,\"version\":\"1.2.3\"}"
+    },
+    {
+      "id": "range-of-letters",
+      "note": "No token, no comparator.",
+      "input": {
+        "version": "1.2.3",
+        "range": "x.y.z"
+      },
+      "expected": "{\"range\":\"x.y.z\",\"satisfies\":false,\"valid_range\":false,\"valid_version\":true,\"version\":\"1.2.3\"}"
+    },
+    {
+      "id": "two-segment-range",
+      "note": "A two-segment number is not a version and yields no token.",
+      "input": {
+        "version": "1.2.3",
+        "range": ">=1.2"
+      },
+      "expected": "{\"range\":\">=1.2\",\"satisfies\":false,\"valid_range\":false,\"valid_version\":true,\"version\":\"1.2.3\"}"
+    },
+    {
+      "id": "nbsp-before-the-version",
+      "note": "A non-breaking space is whitespace to JavaScript, so the tokenizer steps over it. An edition that reached for the whitespace set of its own language would answer differently, once, in the field, to somebody who could not explain it.",
+      "input": {
+        "version": "1.2.3",
+        "range": ">= 1.2.3"
+      },
+      "expected": "{\"range\":\">= 1.2.3\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.2.3\"}"
+    },
+    {
+      "id": "bom-between-operator-and-version",
+      "note": "And so is a byte-order mark — the character where JavaScript and Rust disagree by default: trim() removes it and char::is_whitespace does not.",
+      "input": {
+        "version": "1.2.3",
+        "range": ">=﻿1.2.3"
+      },
+      "expected": "{\"range\":\">=﻿1.2.3\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.2.3\"}"
+    },
+    {
+      "id": "prerelease-does-not-satisfy-a-release-range",
+      "note": "The trap semver §11 exists for: 2.0.0-rc.1 is below 2.0.0, so a range asking for 2.x does not admit its own release candidate.",
+      "input": {
+        "version": "2.0.0-rc.1",
+        "range": "^2.0.0"
+      },
+      "expected": "{\"range\":\"^2.0.0\",\"satisfies\":false,\"valid_range\":true,\"valid_version\":true,\"version\":\"2.0.0-rc.1\"}"
+    }
+  ]
+}

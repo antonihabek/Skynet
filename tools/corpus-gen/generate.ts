@@ -69,8 +69,25 @@ import type { SafetyEnvelope } from '../../reference/typescript/types.ts'
 import {
   shapeAdmission, shapeCertification, shapeFleet, shapeFrameFault, shapeLimits, shapePlan,
   shapeDigest, shapeObservation, shapeReadiness, shapeSolved, shapeVerdict, shapeCalibration,
-  shapeWatchdog,
+  shapeWatchdog, shapePredicate, shapeSatisfies, shapeVersion,
+  shapeComposition, shapeDeadline, shapePreconditions, shapeSuccess,
+  shapeCellFaults, shapeCellLayer,
 } from '../../reference/typescript/shape.ts'
+import {
+  CELL_FAULTS, cellEnvironment, cellWorkspaceLayer, validateCell, type CellDescriptor,
+} from '../../reference/typescript/cell.ts'
+import type { Volume } from '../../reference/typescript/kinematics.ts'
+import {
+  CLAUSE_ORIGINS, CLAUSE_OUTCOMES, COMPOSITION_FAULTS, evaluatePreconditions, judgeSuccess,
+  PHASES, readCalls, readClauses, resolveClauses, skillDeadline, SKILL_OUTCOMES,
+  validateComposition, type Phase,
+} from '../../reference/typescript/skill.ts'
+import {
+  evaluatePredicate, evaluatePredicateOutcome, OUTCOMES, PREDICATE_OPS, UNEVALUABLE_REASONS,
+} from '../../reference/typescript/predicate.ts'
+import {
+  compareVersions, isValidRange, isValidVersion, parseVersion, satisfies,
+} from '../../reference/typescript/semver.ts'
 import {
   flatten, solve,
   type Frame, type JointBinding, type WorkspaceLayer,
@@ -100,9 +117,11 @@ function add(corpus: string, file: string, entry: Case): void {
 // One arm and one humanoid, reused across corpora so a reader comparing a transport case with an
 // admission case is looking at the same robot.
 
+type JointNode = EmbodimentDescriptor['joints'][number]
+
 function joint(
-  name: string, role: string | null, effort: number | null, modes: string[],
-): EmbodimentDescriptor['joints'][number] {
+  name: string, role: string | null, effort: number | null, modes: JointNode['control_modes'],
+): JointNode {
   return {
     name,
     role,
@@ -911,6 +930,38 @@ admissionCase('signature-unverifiable', 'The platform cannot check. A gap in the
   { signature: 'unverifiable' })
 admissionCase('digest-mismatch', 'The contents do not hash to the manifest digest.',
   { observed_digest: 'sha256:other' })
+
+// §55.1. An environment is a simulation artifact, and the OS says so rather than accepting one
+// silently onto a robot that can never load it.
+admissionCase('environment-on-a-physical-robot',
+  'An environment describes a simulated world — simulators, a scene, assets, physics and render '
+  + 'rates — and only a simulator RHAL driver can load one. A warning rather than an error: '
+  + 'installing it is not dangerous, and refusing it would stop an operator staging a package onto '
+  + 'a robot they are about to point at a simulator. What is not acceptable is silence.',
+  { manifest: manifest({ kind: 'environment' }) })
+
+admissionCase('environment-on-a-simulator',
+  'The same package where it belongs. The flag comes from the descriptor, where §35.3 puts the '
+  + 'obligation to declare.',
+  { manifest: manifest({ kind: 'environment' }), capacity: capacity({ simulator: true }) })
+
+admissionCase('environment-needing-a-capability-the-sim-does-not-have',
+  '§55.1: "its `required_capabilities` are still checked at admission, since an environment that '
+  + 'needs a gripper is not runnable by a robot without one in sim either". Two findings, and the '
+  + 'capability one is the error.',
+  {
+    manifest: manifest({
+      kind: 'environment',
+      embodiment: { capabilities: ['manipulation.grasp', 'locomotion.walk'], control_mode: 'torque' },
+    }),
+    capacity: capacity({ simulator: true }),
+  })
+
+admissionCase('a-policy-on-a-simulator-is-just-a-policy',
+  'The flag changes nothing for any other kind. A simulator is a robot as far as admission is '
+  + 'concerned, which is the whole point of §35.3 — the thing being tested has to be the thing '
+  + 'that ships.',
+  { capacity: capacity({ simulator: true }) })
 admissionCase('isolation-violation', 'Only drivers touch hardware directly.',
   { manifest: manifest({ isolation: 'native' }) })
 admissionCase('driver-may-be-native', 'A driver is the one kind that may.',
@@ -1048,6 +1099,33 @@ vocabulary('guards', 'Every guard the kernel can run.', GUARDS)
 vocabulary('fault_responses', 'What a tripped guard does.', FAULT_RESPONSES)
 vocabulary('scts_suites', 'Where a conformance test runs.', SCTS_SUITES)
 vocabulary('scts_areas', 'Ordered as the specification lists them.', SCTS_AREAS)
+
+vocabulary('predicate_ops',
+  'The operators a §54.2 precondition is written in. One list, or a skill refuses on one robot and '
+  + 'runs on another.', PREDICATE_OPS)
+vocabulary('predicate_outcomes',
+  'Satisfied, unsatisfied, and the third value §54.2 requires: a precondition nobody could evaluate '
+  + 'is not a precondition that passed.', OUTCOMES)
+vocabulary('unevaluable_reasons',
+  'Why a predicate could not be decided. §54.2 requires the refusal to name something, and a '
+  + 'free-text reason is the same nothing as a free-text precondition.', UNEVALUABLE_REASONS)
+vocabulary('clause_outcomes',
+  'What can happen to one precondition or success criterion. The fourth is the one the predicate '
+  + 'engine does not have: there was no predicate to ask about.', CLAUSE_OUTCOMES)
+vocabulary('clause_origins',
+  'Publisher or site. §54.2: the operator may add preconditions; the skill may not remove them.',
+  CLAUSE_ORIGINS)
+vocabulary('precondition_phases',
+  'Before the skill starts, and every cycle while it runs.', PHASES)
+vocabulary('skill_outcomes',
+  'How a skill invocation ends. The Hub\'s `EpisodeOutcome` and not a second vocabulary, so an '
+  + 'aborted skill becomes a labelled training example rather than a gap.', SKILL_OUTCOMES)
+vocabulary('composition_faults',
+  'Why a call graph is refused at install (§54.5).', COMPOSITION_FAULTS)
+vocabulary('cell_faults',
+  'What can be wrong with a cell descriptor (§55.2). Two of them — an unaddressable fact key and '
+  + 'one that shadows a derived fact — could not have been named before §54.2 gave `env.*` a path '
+  + 'vocabulary to be wrong in.', CELL_FAULTS)
 
 // ── certification ────────────────────────────────────────────────────────────
 
@@ -2748,6 +2826,1011 @@ for (let n = 0; n < 48; n += 1) {
     expected: canonical(shapeObservation(frame)),
   })
 }
+
+// ── predicate ────────────────────────────────────────────────────────────────
+//
+// §54.2's operator set, over a **live** context rather than a manifest one, because that is the
+// half the OS added: the Hub evaluates these against declared facts, and the skill runtime
+// evaluates the same shapes against a robot that is standing there.
+//
+// Every case pins the boolean **and** the three-valued outcome. `evaluatePredicate` is defined as
+// `satisfied(…)` of the outcome, so pinning them together is what makes "the refinement cannot
+// disagree with the boolean" a property an edition is held to rather than a claim in a comment.
+
+/**
+ * One cell, one robot, one skill — the context §54.2 describes.
+ *
+ * Deliberately full of the awkward values: a percentage reported as a string, a calibration set
+ * that has expired, an explicit `null`, an empty list, a blank string. Those are where two editions
+ * disagree, not on `battery_percent: 62`.
+ */
+const CONTEXT = {
+  robot: {
+    tier: 'host',
+    runtime: '1.4.2',
+    capabilities: ['manipulation.grasp', 'sensing.camera.depth'],
+    state: {
+      mode: 'idle',
+      gripper: 'open',
+      battery_percent: 62,
+      reported_percent: '17',
+      empty: [] as string[],
+      blank: '   ',
+      zero: 0,
+      nothing: null,
+    },
+    guards: { active: ['workspace', 'velocity', 'collision'] },
+    calibration: {
+      kinematic: { valid: true, age_days: 12 },
+      torque: { valid: false, age_days: 400 },
+    },
+  },
+  skill: {
+    grants: ['actuation.arm'],
+    needs: ['manipulation.grasp'],
+    also: ['manipulation.grasp'],
+    range: '^1.0.0',
+  },
+  env: {
+    door_closed: true,
+    fixture: 'jig-a',
+    temperature_c: '21.5',
+    hex: '0x1f',
+    exponent: '1e3',
+    infinite: 'Infinity',
+  },
+}
+
+function predicateCase(id: string, note: string, predicate: unknown, context: unknown = CONTEXT): void {
+  const outcome = evaluatePredicateOutcome(predicate as never, context)
+  add('predicate', 'evaluate', {
+    id,
+    note,
+    input: { predicate, context },
+    expected: canonical(shapePredicate(outcome, evaluatePredicate(predicate as never, context))),
+  })
+}
+
+// The operators, each holding and each not.
+
+predicateCase('exists-value', 'A path with a value exists.',
+  { op: 'exists', path: 'robot.state.gripper' })
+predicateCase('exists-zero', 'Zero is a value. A robot at 0% has reported its battery.',
+  { op: 'exists', path: 'robot.state.zero' })
+predicateCase('exists-null', 'An explicit null does not exist — somebody looked and found nothing.',
+  { op: 'exists', path: 'robot.state.nothing' })
+predicateCase('exists-empty-list', 'An empty list does not exist. No guards active is not "guards".',
+  { op: 'exists', path: 'robot.state.empty' })
+predicateCase('exists-blank-string', 'A string of spaces does not exist.',
+  { op: 'exists', path: 'robot.state.blank' })
+predicateCase('exists-missing', 'The escape hatch: `exists` is the one operator an absent path does '
+  + 'not refuse. It answers unsatisfied, so `not(exists(p))` still means what its author meant.',
+  { op: 'exists', path: 'robot.state.absent' })
+
+predicateCase('eq-string', 'The ordinary case.',
+  { op: 'eq', path: 'robot.state.mode', value: 'idle' })
+predicateCase('eq-mismatch', 'A different value.',
+  { op: 'eq', path: 'robot.state.mode', value: 'estop' })
+predicateCase('eq-null-literal', 'A literal null equals an explicit null: both are primitives.',
+  { op: 'eq', path: 'robot.state.nothing', value: null })
+predicateCase('eq-literal-array-never-matches',
+  'A literal array in a rule is never equal to anything. `===` on two objects is reference '
+  + 'equality, and a rule\'s literal was never the context\'s object. `includes` is the operator '
+  + 'for this intent, and finding that out here is cheaper than finding it out in a cell.',
+  { op: 'eq', path: 'skill.needs', value: ['manipulation.grasp'] })
+predicateCase('eq-same-path-reference',
+  'Two operands read from the same path are one object, so they are equal even though neither is a '
+  + 'primitive. This is the only way an object comparison can hold.',
+  { op: 'eq', path: 'skill.needs', value: { __ref: 'skill.needs' } })
+predicateCase('eq-structurally-equal-different-paths',
+  'Two arrays with identical contents at different paths are not equal, because `===` is not a '
+  + 'deep comparison. `skill.also` holds exactly what `skill.needs` holds.',
+  { op: 'eq', path: 'skill.needs', value: { __ref: 'skill.also' } })
+predicateCase('eq-element-of-a-collection',
+  'A path may address an array member, and the member is the same object the collection holds.',
+  { op: 'eq', path: 'robot.guards.active.0', value: 'workspace' })
+
+predicateCase('neq-holds', 'Not in estop.',
+  { op: 'neq', path: 'robot.state.mode', value: 'estop' })
+predicateCase('neq-does-not-hold', 'It is idle, so it is not not-idle.',
+  { op: 'neq', path: 'robot.state.mode', value: 'idle' })
+predicateCase('neq-unresolved-refuses',
+  'The headline change. `neq` against a path that names nothing used to answer **true** — '
+  + '`undefined !== "estop"` — so a rule reading "the robot is not in estop" passed on a robot that '
+  + 'had never reported a mode. It now refuses and names the path.',
+  { op: 'neq', path: 'robot.state.absent', value: 'estop' })
+
+predicateCase('in-holds', 'The value is one of the listed.',
+  { op: 'in', path: 'robot.state.gripper', value: ['open', 'closed'] })
+predicateCase('in-does-not-hold', 'The value is not.',
+  { op: 'in', path: 'robot.state.mode', value: ['estop', 'fault'] })
+predicateCase('in-scalar-value-is-a-one-element-list', 'A non-array right-hand side is wrapped.',
+  { op: 'in', path: 'robot.state.mode', value: 'idle' })
+
+predicateCase('includes-holds', 'The collection contains the rule\'s value.',
+  { op: 'includes', path: 'robot.guards.active', value: 'workspace' })
+predicateCase('includes-does-not-hold', 'It does not.',
+  { op: 'includes', path: 'robot.guards.active', value: 'pose' })
+predicateCase('includes-all-holds', 'Every capability the skill needs is present.',
+  { op: 'includes_all', path: 'robot.capabilities', value: { __ref: 'skill.needs' } })
+predicateCase('includes-all-does-not-hold', 'One is missing.',
+  { op: 'includes_all', path: 'robot.capabilities', value: ['manipulation.grasp', 'locomotion.walk'] })
+predicateCase('includes-all-empty-requirement',
+  'An empty requirement is vacuously satisfied: nothing was asked for. This is now reachable only '
+  + 'from a requirement that *is* empty, never from one nobody could read.',
+  { op: 'includes_all', path: 'robot.capabilities', value: [] })
+predicateCase('includes-all-unresolved-requirement-refuses',
+  'The rule this module\'s own documentation uses as its example — "robot capabilities must cover '
+  + 'whatever this policy declares" — used to **pass** when the policy declared nothing readable, '
+  + 'because `every` over an empty list is true. It now refuses and names the reference.',
+  { op: 'includes_all', path: 'robot.capabilities', value: { __ref: 'skill.absent_list' } })
+predicateCase('includes-any-holds', 'At least one.',
+  { op: 'includes_any', path: 'robot.guards.active', value: ['pose', 'velocity'] })
+predicateCase('includes-any-does-not-hold', 'None of them.',
+  { op: 'includes_any', path: 'robot.guards.active', value: ['pose', 'payload'] })
+predicateCase('includes-any-empty-requirement', 'Nothing was asked for.',
+  { op: 'includes_any', path: 'robot.guards.active', value: [] })
+
+predicateCase('gte-number', 'Battery above reserve.',
+  { op: 'gte', path: 'robot.state.battery_percent', value: 20 })
+predicateCase('lt-number', 'And the same fact from the other side.',
+  { op: 'lt', path: 'robot.state.battery_percent', value: 20 })
+predicateCase('gt-boundary', 'Strictly greater is not greater-or-equal.',
+  { op: 'gt', path: 'robot.state.battery_percent', value: 62 })
+predicateCase('lte-boundary', 'And the boundary itself.',
+  { op: 'lte', path: 'robot.state.battery_percent', value: 62 })
+predicateCase('gte-numeric-string',
+  'A percentage reported as a string still compares. Robots report numbers as strings, and an '
+  + 'edition that refused this one and accepted the next would be a robot that stops for a quote.',
+  { op: 'gte', path: 'robot.state.reported_percent', value: 10 })
+predicateCase('gte-decimal-string', 'A decimal string.',
+  { op: 'gte', path: 'env.temperature_c', value: 21 })
+predicateCase('gte-hex-string', '`Number("0x1f")` is 31, and this is the reference being mirrored '
+  + 'rather than a shape anybody should write.',
+  { op: 'gte', path: 'env.hex', value: 30 })
+predicateCase('gte-exponent-string', '`Number("1e3")` is 1000.',
+  { op: 'gte', path: 'env.exponent', value: 999 })
+predicateCase('gte-infinity-string-refuses',
+  '`Number("Infinity")` is not finite, and a ceiling nothing can exceed is not a comparison.',
+  { op: 'gte', path: 'env.infinite', value: 5 })
+predicateCase('gte-non-numeric-string-refuses', 'A fixture name is not a number.',
+  { op: 'gte', path: 'env.fixture', value: 1 })
+predicateCase('gte-blank-string-refuses', 'A blank string is not zero here.',
+  { op: 'gte', path: 'robot.state.blank', value: 0 })
+predicateCase('gte-boolean-refuses', 'A boolean is not coerced. `Number(true)` is 1 in JavaScript '
+  + 'and the reference never reaches it: only numbers and strings are read.',
+  { op: 'gte', path: 'env.door_closed', value: 0 })
+predicateCase('gte-null-refuses', 'An explicit null is present and is not a number.',
+  { op: 'gte', path: 'robot.state.nothing', value: 0 })
+predicateCase('gte-unresolved-right-refuses', 'The reference names the side that failed, and here '
+  + 'it is the rule\'s own reference rather than the robot\'s value.',
+  { op: 'gte', path: 'robot.state.battery_percent', value: { __ref: 'skill.reserve_percent' } })
+
+predicateCase('semver-holds', 'The runtime is inside the skill\'s window.',
+  { op: 'semver_satisfies', path: 'robot.runtime', value: { __ref: 'skill.range' } })
+predicateCase('semver-does-not-hold', 'And outside a different one.',
+  { op: 'semver_satisfies', path: 'robot.runtime', value: '>=2.0.0' })
+predicateCase('semver-wildcard', 'A wildcard constrains nothing and is a valid range.',
+  { op: 'semver_satisfies', path: 'robot.runtime', value: '*' })
+predicateCase('semver-unreadable-version-refuses',
+  'A version this edition cannot parse is a fact about the declaration, not a version that fell '
+  + 'outside the window — so it is named rather than counted as a miss.',
+  { op: 'semver_satisfies', path: 'robot.state.mode', value: '^1.0.0' })
+predicateCase('semver-unreadable-range-refuses', 'And the same for the range.',
+  { op: 'semver_satisfies', path: 'robot.runtime', value: 'garbage' })
+predicateCase('semver-range-with-one-unreadable-alternative-refuses',
+  'Stricter than `satisfies`, deliberately: `>=1.0.0 || garbage` is satisfied by 1.4.2 and is still '
+  + 'a range half of which nobody can read. A skill whose window is half unreadable is a skill '
+  + 'whose publisher has to hear about it, so the operator refuses where the function would not.',
+  { op: 'semver_satisfies', path: 'robot.runtime', value: '>=1.0.0 || garbage' })
+
+// Composition.
+
+predicateCase('and-all-hold', 'The ordinary conjunction.',
+  { op: 'and', predicates: [
+    { op: 'eq', path: 'robot.state.mode', value: 'idle' },
+    { op: 'gte', path: 'robot.state.battery_percent', value: 20 },
+  ] })
+predicateCase('and-short-circuits-on-unsatisfied',
+  'A conjunction whose first child is false stops there, so the refusal names a predicate that '
+  + 'was actually false rather than the unreadable one behind it.',
+  { op: 'and', predicates: [
+    { op: 'eq', path: 'robot.state.mode', value: 'estop' },
+    { op: 'gte', path: 'robot.state.absent', value: 1 },
+  ] })
+predicateCase('and-names-the-first-unevaluable',
+  'And when the unreadable one comes first, that is what is named. Which predicate a refusal names '
+  + 'must not depend on how an edition iterates.',
+  { op: 'and', predicates: [
+    { op: 'gte', path: 'robot.state.absent', value: 1 },
+    { op: 'eq', path: 'robot.state.mode', value: 'estop' },
+  ] })
+predicateCase('and-empty', 'A skill declaring no preconditions is not a skill that fails them.',
+  { op: 'and', predicates: [] })
+predicateCase('or-holds-despite-an-unreadable-alternative',
+  'An alternative that holds ends the question; the unreadable one beside it never mattered.',
+  { op: 'or', predicates: [
+    { op: 'gte', path: 'robot.state.absent', value: 1 },
+    { op: 'eq', path: 'robot.state.mode', value: 'idle' },
+  ] })
+predicateCase('or-names-the-first-unevaluable',
+  'With nothing holding, a disjunction containing something unreadable is not known to be false — '
+  + 'only unread.',
+  { op: 'or', predicates: [
+    { op: 'eq', path: 'robot.state.mode', value: 'estop' },
+    { op: 'gte', path: 'robot.state.absent', value: 1 },
+  ] })
+predicateCase('or-empty', 'No alternatives, nothing holds.',
+  { op: 'or', predicates: [] })
+predicateCase('not-over-unsatisfied', 'Negation of a decided answer is a decided answer.',
+  { op: 'not', predicate: { op: 'eq', path: 'robot.state.mode', value: 'estop' } })
+predicateCase('not-over-unevaluable-refuses',
+  'The change that matters most. `not(eq(robot.state.mode, "estop"))` over a robot that has never '
+  + 'reported a mode used to be **true**, because `!false` is true and `undefined === "estop"` is '
+  + 'false. Ignorance does not negate into knowledge.',
+  { op: 'not', predicate: { op: 'eq', path: 'robot.state.absent', value: 'estop' } })
+predicateCase('not-over-exists-still-works',
+  'And the idiom this must not break: `exists` answers about absence, so negating it is meaningful.',
+  { op: 'not', predicate: { op: 'exists', path: 'robot.state.absent' } })
+predicateCase('not-via-predicates-array', 'The first child of `predicates` is accepted as the operand.',
+  { op: 'not', predicates: [{ op: 'eq', path: 'robot.state.mode', value: 'estop' }] })
+predicateCase('not-with-no-operand-refuses',
+  'A `not` with nothing to negate used to answer **true** — `!evaluate(undefined)` — which is a '
+  + 'malformed rule passing.',
+  { op: 'not' })
+
+// Paths.
+
+predicateCase('path-array-index', 'An array member is addressed by its index.',
+  { op: 'eq', path: 'robot.guards.active.1', value: 'velocity' })
+predicateCase('path-array-index-out-of-range', 'Past the end is nothing.',
+  { op: 'eq', path: 'robot.guards.active.9', value: 'velocity' })
+predicateCase('path-array-index-leading-zero',
+  'Not a canonical index, and therefore not a member. JavaScript agrees: `["a"]["01"]` is undefined.',
+  { op: 'exists', path: 'robot.guards.active.01' })
+predicateCase('path-array-length-is-not-a-member',
+  '`length` is a property of a JavaScript array and not a member of the document, so it does not '
+  + 'resolve. An edition without JavaScript arrays could not reproduce it, and a path vocabulary '
+  + 'one edition can read is not a path vocabulary.',
+  { op: 'exists', path: 'robot.guards.active.length' })
+predicateCase('path-prototype-is-not-a-member',
+  'Nor is anything else off the prototype chain. Rules are operator-supplied rows, and a path they '
+  + 'compose has no business reaching `constructor`.',
+  { op: 'exists', path: 'robot.constructor' })
+predicateCase('path-through-a-scalar', 'A path cannot continue through a string.',
+  { op: 'exists', path: 'robot.tier.length' })
+predicateCase('path-through-null', 'Nor through an explicit null.',
+  { op: 'eq', path: 'robot.state.nothing.deep', value: 1 })
+predicateCase('path-empty-segment', 'An empty segment names no member.',
+  { op: 'exists', path: 'robot..tier' })
+predicateCase('path-missing-entirely', 'A predicate with no path cannot read anything.',
+  { op: 'eq', value: 'idle' })
+predicateCase('path-not-a-string',
+  'A `path` that is not a string used to reach `path.split` and **throw**, taking the whole '
+  + 'compatibility check down with one bad rule row — in a module whose first paragraph says it is '
+  + 'total. It is read defensively now.',
+  { op: 'eq', path: 5, value: 'idle' })
+predicateCase('path-empty-string', 'An empty path is no path.',
+  { op: 'exists', path: '' })
+
+// References.
+
+predicateCase('ref-alias-single-key', '`{ path: … }` is accepted as an alias for `__ref`.',
+  { op: 'includes_all', path: 'robot.capabilities', value: { path: 'skill.needs' } })
+predicateCase('ref-alias-needs-to-be-alone',
+  'With a second key it is an object literal, not a reference — and an object literal is never '
+  + 'equal to anything, so this asks whether the capability list contains an object.',
+  { op: 'includes_all', path: 'robot.capabilities', value: { path: 'skill.needs', note: 'x' } })
+predicateCase('ref-to-a-missing-path-refuses', 'A reference that names nothing refuses, and the '
+  + 'refusal names the reference rather than the left-hand path.',
+  { op: 'eq', path: 'robot.state.mode', value: { __ref: 'skill.expected_mode' } })
+
+// Malformed.
+
+predicateCase('malformed-null', 'A null predicate is not a predicate.', null)
+predicateCase('malformed-scalar', 'Nor is a number.', 42)
+predicateCase('malformed-no-op', 'Nor is an object with no operator.', { path: 'robot.tier' })
+predicateCase('malformed-op-not-a-string', 'Nor one whose operator is not a string.', { op: 5 })
+predicateCase('unknown-op', 'An operator this edition does not implement is named, not guessed at.',
+  { op: 'approximately', path: 'robot.state.battery_percent', value: 60 })
+predicateCase('malformed-predicates-not-an-array',
+  'A `predicates` that is not an array used to reach `.every` and throw. It is malformed — '
+  + 'deliberately not "no children", because a conjunction over no children is *satisfied*, and '
+  + 'turning a broken rule into a pass is the failure this whole change is about.',
+  { op: 'and', predicates: 'nope' })
+
+// A whole precondition, of the shape §54.2 describes.
+
+predicateCase('skill-preconditions-hold',
+  'What a `SkillManifest` precondition becomes: the guards that must be running, the calibration '
+  + 'that must be valid, the battery that must be above reserve, the cell that must be closed.',
+  { op: 'and', predicates: [
+    { op: 'includes_all', path: 'robot.guards.active', value: ['workspace', 'collision'] },
+    { op: 'eq', path: 'robot.calibration.kinematic.valid', value: true },
+    { op: 'gte', path: 'robot.state.battery_percent', value: 20 },
+    { op: 'eq', path: 'env.door_closed', value: true },
+    { op: 'includes_all', path: 'robot.capabilities', value: { __ref: 'skill.needs' } },
+    { op: 'semver_satisfies', path: 'robot.runtime', value: { __ref: 'skill.range' } },
+  ] })
+predicateCase('skill-preconditions-refused-by-calibration',
+  'The same tree against the set that expired. §45 makes a lapsed calibration a fact rather than a '
+  + 'warning, and this is where that fact stops a skill.',
+  { op: 'and', predicates: [
+    { op: 'eq', path: 'robot.calibration.torque.valid', value: true },
+    { op: 'gte', path: 'robot.state.battery_percent', value: 20 },
+  ] })
+predicateCase('skill-preconditions-refused-by-an-undeclared-fact',
+  'And the one §54.2 exists for: a precondition naming something this robot does not expose is '
+  + 'refused with the path named, so the answer is "nobody declared a payload" rather than '
+  + '"the payload is wrong".',
+  { op: 'and', predicates: [
+    { op: 'gte', path: 'robot.state.battery_percent', value: 20 },
+    { op: 'lte', path: 'robot.state.payload_kg', value: 5 },
+  ] })
+
+// ── semver ───────────────────────────────────────────────────────────────────
+//
+// Range satisfaction is a contract because §54.2 made `semver_satisfies` an operator the robot
+// evaluates. Validity is pinned beside satisfaction because the two answers are different facts:
+// "outside the window" and "that is not a window" have different remedies.
+
+function satisfiesCase(id: string, note: string, version: string, range: string): void {
+  add('semver', 'satisfies', {
+    id,
+    note,
+    input: { version, range },
+    expected: canonical(shapeSatisfies(version, range, {
+      satisfies: satisfies(version, range),
+      validVersion: isValidVersion(version),
+      validRange: isValidRange(range),
+    })),
+  })
+}
+
+satisfiesCase('exact-match', 'A bare version is an equality comparator.', '1.2.3', '1.2.3')
+satisfiesCase('exact-mismatch', 'And it is exact.', '1.2.4', '1.2.3')
+satisfiesCase('wildcard', 'A wildcard constrains nothing.', '9.9.9', '*')
+satisfiesCase('any-word', '`any` is spelled out as well, case-insensitively.', '9.9.9', 'ANY')
+satisfiesCase('empty-range', 'An empty range constrains nothing either.', '9.9.9', '')
+satisfiesCase('caret-in-range', 'Caret holds the major.', '1.9.0', '^1.2.0')
+satisfiesCase('caret-below', 'Below the base is outside it.', '1.1.0', '^1.2.0')
+satisfiesCase('caret-major-bump', 'A major bump leaves it.', '2.0.0', '^1.2.0')
+satisfiesCase('caret-zero-major', 'Under 1.0.0 the caret holds the minor instead.', '0.2.9', '^0.2.0')
+satisfiesCase('caret-zero-major-bump', 'So a minor bump leaves it.', '0.3.0', '^0.2.0')
+satisfiesCase('caret-zero-minor', 'And under 0.1.0 it holds the patch.', '0.0.5', '^0.0.5')
+satisfiesCase('caret-zero-minor-bump', 'Which nothing else satisfies.', '0.0.6', '^0.0.5')
+satisfiesCase('tilde', 'Tilde holds the minor.', '1.2.9', '~1.2.0')
+satisfiesCase('tilde-minor-bump', 'A minor bump leaves it.', '1.3.0', '~1.2.0')
+satisfiesCase('range-and', 'Space-separated comparators are a conjunction.', '1.5.0', '>=1.0.0 <2.0.0')
+satisfiesCase('range-and-outside', 'Both must hold.', '2.1.0', '>=1.0.0 <2.0.0')
+satisfiesCase('range-or', '`||` is a disjunction.', '3.1.0', '<2.0.0 || >=3.0.0')
+satisfiesCase('range-or-gap', 'And the gap between them is outside.', '2.5.0', '<2.0.0 || >=3.0.0')
+satisfiesCase('spaced-operator', 'The tokenizer splits on the operator, not on whitespace.', '1.3.0', '>= 1.2.0')
+satisfiesCase('prerelease-below-release',
+  'A prerelease is below its release, per semver §11.', '2.0.0-rc.1', '>=2.0.0')
+satisfiesCase('prerelease-compared-to-prerelease',
+  'And two prereleases order numerically where both identifiers are numbers.',
+  '2.0.0-rc.2', '>2.0.0-rc.1')
+satisfiesCase('unparseable-version', 'A version that does not parse satisfies nothing.', 'nonsense', '*')
+satisfiesCase('two-segment-version', 'Two segments is not a version here.', '1.2', '>=1.0.0')
+satisfiesCase('unreadable-range', 'A range with nothing in it satisfies nothing.', '1.2.3', 'garbage')
+satisfiesCase('range-with-one-unreadable-alternative',
+  'One unreadable alternative does not invalidate the readable ones — `satisfies` is true — and the '
+  + 'range is still not wholly readable, which is the second answer this corpus pins.',
+  '1.2.3', '>=1.0.0 || garbage')
+satisfiesCase('range-with-a-leading-v',
+  'The tokenizer is a scan rather than an anchored parse, so a `v` prefix is skipped over and the '
+  + 'version behind it is the token. That is what the reference regex does; an edition that '
+  + 'rejected it would be a stricter and different implementation.',
+  '1.2.3', 'v1.2.3')
+satisfiesCase('range-with-four-segments',
+  'And the same scan takes the first three segments of a four-segment number.', '1.2.3', '1.2.3.4')
+satisfiesCase('bare-pipes', 'Two empty alternatives read nothing.', '1.2.3', '||')
+
+// The tokenizer, which is where an edition drifts.
+//
+// `satisfies` is a scan over a regex rather than an anchored parse, and every case below is a shape
+// a hand-written parser gets subtly wrong in a different way. They are cheap and they are the ones
+// that would otherwise be found by a robot refusing a skill its Hub page said it could run.
+
+satisfiesCase('no-space-between-comparators',
+  'The scan does not need whitespace to separate two comparators.', '1.5.0', '>=1.0.0<2.0.0')
+satisfiesCase('no-space-around-pipes', 'Nor around the alternation.', '2.1.0', '^1.2.0||^2.0.0')
+satisfiesCase('padded-range', 'A range is trimmed before anything else.', '1.5.0', '  ^1.2.0  ')
+satisfiesCase('explicit-equals', 'An explicit `=` is the same as a bare version.', '1.2.3', '=1.2.3')
+satisfiesCase('spaced-equals', 'With a space after it.', '1.2.3', '= 1.2.3')
+satisfiesCase('reversed-arrow',
+  'An operator that cannot start a match is retried as a shorter one and finally as none, which is '
+  + 'what ordered alternation with backtracking does. `=>` is read as the `>` at its second '
+  + 'character.', '1.5.0', '=>1.0.0')
+satisfiesCase('less-than', 'Strictly below.', '1.2.2', '<1.2.3')
+satisfiesCase('less-than-boundary', 'And the boundary is not below.', '1.2.3', '<1.2.3')
+satisfiesCase('greater-than-or-equal-prerelease',
+  'A comparator may itself carry a prerelease.', '1.2.3', '>=1.2.3-rc.1')
+satisfiesCase('caret-with-prerelease-base',
+  'And so may a caret base.', '1.2.3', '^1.2.3-rc.1')
+satisfiesCase('tilde-zero-zero', 'Tilde on a 0.0.x base still holds the minor.', '0.0.9', '~0.0.1')
+satisfiesCase('contradictory-conjunction',
+  'Two exact comparators in one alternative can never both hold. Nothing satisfies it, and it is '
+  + 'still a readable range — which is the distinction this corpus exists to keep.',
+  '1.2.3', '1.2.3 1.2.4')
+satisfiesCase('empty-first-alternative',
+  'An empty alternative reads nothing, and the readable one beside it still decides.',
+  '1.2.3', '|| 1.2.3')
+satisfiesCase('empty-last-alternative', 'And the same at the other end.', '1.2.3', '1.2.3 ||')
+satisfiesCase('range-of-letters', 'No token, no comparator.', '1.2.3', 'x.y.z')
+satisfiesCase('two-segment-range', 'A two-segment number is not a version and yields no token.',
+  '1.2.3', '>=1.2')
+satisfiesCase('nbsp-before-the-version',
+  'A non-breaking space is whitespace to JavaScript, so the tokenizer steps over it. An edition '
+  + 'that reached for the whitespace set of its own language would answer differently, once, in '
+  + 'the field, to somebody who could not explain it.',
+  '1.2.3', '>=\u00A01.2.3')
+satisfiesCase('bom-between-operator-and-version',
+  'And so is a byte-order mark — the character where JavaScript and Rust disagree by default: '
+  + 'trim() removes it and char::is_whitespace does not.',
+  '1.2.3', '>=\uFEFF1.2.3')
+satisfiesCase('prerelease-does-not-satisfy-a-release-range',
+  'The trap semver §11 exists for: 2.0.0-rc.1 is below 2.0.0, so a range asking for 2.x does not '
+  + 'admit its own release candidate.', '2.0.0-rc.1', '^2.0.0')
+
+function compareCase(id: string, note: string, a: string, b: string): void {
+  add('semver', 'compare', {
+    id,
+    note,
+    input: { a, b },
+    expected: canonical({
+      compare: compareVersions(a, b),
+      a: shapeVersion(parseVersion(a)),
+      b: shapeVersion(parseVersion(b)),
+    }),
+  })
+}
+
+compareCase('equal', 'Identical versions.', '1.2.3', '1.2.3')
+compareCase('major', 'Major dominates.', '2.0.0', '1.9.9')
+compareCase('minor-numeric-not-lexical',
+  'Ten is after two, which is the comparison a string sort gets wrong.', '1.2.0', '1.10.0')
+compareCase('patch', 'And the patch.', '1.2.3', '1.2.4')
+compareCase('release-outranks-prerelease', 'A release outranks its own prerelease.', '1.0.0', '1.0.0-rc.1')
+compareCase('prerelease-numeric', 'Numeric identifiers compare as numbers.', '1.0.0-2', '1.0.0-10')
+compareCase('prerelease-alpha', 'Alphanumeric identifiers compare as strings.', '1.0.0-alpha', '1.0.0-beta')
+compareCase('prerelease-numeric-before-alpha',
+  'A numeric identifier is below an alphanumeric one.', '1.0.0-1', '1.0.0-alpha')
+compareCase('prerelease-length', 'A longer identifier list wins a tie on the shared prefix.',
+  '1.0.0-alpha.1', '1.0.0-alpha')
+compareCase('unparseable-left',
+  'Unparseable means **equal**, which is the reference and is not what this would be if it were '
+  + 'being designed now. Reproduced because a sort that ordered a malformed list differently in two '
+  + 'editions is worse than a comparator with a documented wart.',
+  'nonsense', '1.0.0')
+compareCase('unparseable-both', 'And the same when neither side parses.', '', 'x')
+compareCase('trimmed', 'Both sides are trimmed before parsing.', '  1.2.3  ', '1.2.3')
+compareCase('leading-zeros', 'Numeric components are numbers, so leading zeros do not change one.',
+  '1.02.3', '1.2.3')
+compareCase('large-major',
+  'Components are read with `Number()`, so a value beyond an integer\'s exact range rounds rather '
+  + 'than failing to parse. Both editions must round it the same way.',
+  '9007199254740993.0.0', '9007199254740992.0.0')
+
+// ── skill ────────────────────────────────────────────────────────────────────
+//
+// §54's four pure decisions: may this skill start, did it succeed, when is it stopped, and is its
+// call graph installable. The lifecycle that will ask them needs leases and §27's state machine and
+// does not exist, which is exactly why the answers are frozen now — so that when something does
+// loop, it is not also inventing the rules.
+
+/** The post-state and the live state are the same shape; §54.3 evaluates over the later one. */
+const CELL = {
+  robot: {
+    tier: 'host',
+    state: { battery_percent: 62, gripper: 'open', mode: 'idle' },
+    guards: { active: ['workspace', 'collision'] },
+    calibration: { kinematic: { valid: true }, torque: { valid: false } },
+  },
+  env: { door_closed: true, fixture: 'jig-a' },
+}
+
+const AFTER = {
+  robot: {
+    state: { battery_percent: 58, gripper: 'closed', mode: 'idle' },
+    grasp: { holding: true, slipped: false },
+  },
+}
+
+function preconditionCase(
+  id: string, note: string,
+  published: unknown, operator: unknown, context: unknown, phase: Phase = 'entry',
+): void {
+  const clauses = resolveClauses(readClauses(published), readClauses(operator))
+  add('skill', 'preconditions', {
+    id,
+    note,
+    input: { published, operator, context, phase },
+    expected: canonical(shapePreconditions(evaluatePreconditions(clauses, context, phase))),
+  })
+}
+
+preconditionCase('prose-refuses',
+  'What every skill published before §54.2 carries. Three sentences, no predicates, and prose does '
+  + 'not stop a robot — so all three are unenforceable and the skill is refused. The report is the '
+  + 'publisher’s to-do list rather than one verdict, which is the point of listing them.',
+  ['The gripper is empty', 'The cell door is closed', 'The workpiece is in the jig'], [], CELL)
+
+preconditionCase('predicates-hold',
+  'The same three preconditions, expressed as predicates. This is what §54.2 asks a publisher for.',
+  [
+    { statement: 'The gripper is empty', predicate: { op: 'eq', path: 'robot.state.gripper', value: 'open' } },
+    { statement: 'The cell door is closed', predicate: { op: 'eq', path: 'env.door_closed', value: true } },
+    { statement: 'Kinematic calibration is valid', predicate: { op: 'eq', path: 'robot.calibration.kinematic.valid', value: true } },
+  ], [], CELL)
+
+preconditionCase('a-precondition-that-is-false',
+  'The ordinary refusal: the world is not ready. The remedy is to change the world.',
+  [
+    { statement: 'Torque calibration is valid', predicate: { op: 'eq', path: 'robot.calibration.torque.valid', value: true } },
+  ], [], CELL)
+
+preconditionCase('a-precondition-that-cannot-be-evaluated',
+  'The refusal §54.2 exists for, and a different sentence with a different remedy: this manifest '
+  + 'names something this robot does not expose, so the path is named and the publisher is the one '
+  + 'who has to hear about it.',
+  [
+    { statement: 'Payload is under 5 kg', predicate: { op: 'lte', path: 'robot.state.payload_kg', value: 5 } },
+  ], [], CELL)
+
+preconditionCase('every-clause-is-reported-not-just-the-first',
+  'Four clauses, three of them wrong in three different ways. An operator fixing them one attempt '
+  + 'at a time is the failure `admitPackage` already refuses to cause, so all four are evaluated '
+  + 'and `refused` names the first.',
+  [
+    { statement: 'Battery above reserve', predicate: { op: 'gte', path: 'robot.state.battery_percent', value: 20 } },
+    { statement: 'Torque calibration is valid', predicate: { op: 'eq', path: 'robot.calibration.torque.valid', value: true } },
+    { statement: 'Payload is under 5 kg', predicate: { op: 'lte', path: 'robot.state.payload_kg', value: 5 } },
+    'The workpiece is in the jig',
+  ], [], CELL)
+
+preconditionCase('the-operator-adds-one',
+  '§54.2’s third rule: a site can require "door closed" on a skill whose publisher never '
+  + 'imagined that cell. The site’s clause is appended, carries `operator` as its origin, and '
+  + 'is evaluated exactly like the publisher’s.',
+  [{ statement: 'Gripper open', predicate: { op: 'eq', path: 'robot.state.gripper', value: 'open' } }],
+  [{ statement: 'Fixture B is loaded', predicate: { op: 'eq', path: 'env.fixture', value: 'jig-b' } }],
+  CELL)
+
+preconditionCase('the-skill-cannot-remove-one',
+  'The other half of the same rule, and the reason it needs no enforcement code: the operator’s '
+  + 'list is only ever appended, so the result is never shorter than the publisher’s. An empty '
+  + 'operator list changes nothing, and there is no spelling of one that could.',
+  [
+    { statement: 'Gripper open', predicate: { op: 'eq', path: 'robot.state.gripper', value: 'open' } },
+    { statement: 'Door closed', predicate: { op: 'eq', path: 'env.door_closed', value: true } },
+  ], [], CELL)
+
+preconditionCase('nothing-declared',
+  'A skill with no preconditions is not a skill that fails them.', [], [], CELL)
+
+const HOLDING = [
+  { statement: 'Gripper open', predicate: { op: 'eq', path: 'robot.state.gripper', value: 'open' } },
+  {
+    statement: 'Battery above reserve',
+    predicate: { op: 'gte', path: 'robot.state.battery_percent', value: 20 },
+    hold: true,
+  },
+]
+
+preconditionCase('hold-subset-at-entry',
+  '§54.2’s second rule, first half: at entry every clause is evaluated, marked or not.',
+  HOLDING, [], CELL, 'entry')
+
+preconditionCase('hold-subset-every-cycle',
+  'And the second half: the cycle re-check evaluates only the marked one. "Battery dropping below '
+  + 'reserve mid-skill should stop the skill, not be discovered at the end" — and the gripper, '
+  + 'which the skill itself closed on purpose, is not re-asked.',
+  HOLDING, [], CELL, 'hold')
+
+preconditionCase('hold-with-nothing-marked',
+  'A skill whose author marked nothing has nothing re-checked, and the cycle permits it. That is a '
+  + 'publisher’s decision rather than a gap: the entry check still ran.',
+  [{ statement: 'Gripper open', predicate: { op: 'eq', path: 'robot.state.gripper', value: 'open' } }],
+  [], CELL, 'hold')
+
+preconditionCase('hold-loses-the-battery',
+  'The scenario §54.2 describes, at the moment it matters: the same marked clause, one cycle after '
+  + 'the battery fell through reserve.',
+  HOLDING, [], {
+    ...CELL,
+    robot: { ...CELL.robot, state: { ...CELL.robot.state, battery_percent: 12 } },
+  }, 'hold')
+
+preconditionCase('a-predicate-that-is-a-number',
+  'Not a predicate. The reference reaches it through `value && typeof value === "object"`, so a '
+  + 'number there means the clause is unenforceable rather than malformed — the author wrote no '
+  + 'predicate, they did not write a broken one.',
+  [{ statement: 'Something', predicate: 5 }], [], CELL)
+
+preconditionCase('a-predicate-that-is-an-array',
+  'And the case on the other side of that line: an array *is* an object to JavaScript, so it '
+  + 'reaches the evaluator, which answers malformed. A broken predicate and an absent one are '
+  + 'different reports because they have different authors.',
+  [{ statement: 'Something', predicate: ['op'] }], [], CELL)
+
+preconditionCase('a-clause-with-no-statement',
+  'The sentence is what an operator reads, and a clause without one is still evaluated — reporting '
+  + 'nothing would hide a refusal.',
+  [{ predicate: { op: 'eq', path: 'robot.state.mode', value: 'estop' } }], [], CELL)
+
+preconditionCase('entries-that-are-not-clauses',
+  'A null and a number in the list are skipped rather than invented into empty clauses.',
+  [null, 42, 'Prose survives'], [], CELL)
+
+preconditionCase('preconditions-that-are-not-a-list',
+  'Neither is a string a list of clauses.', 'the door is closed', [], CELL)
+
+// ── §54.3 ────────────────────────────────────────────────────────────────────
+
+function successCase(id: string, note: string, criteria: unknown, postState: unknown): void {
+  const clauses = resolveClauses(readClauses(criteria))
+  add('skill', 'success', {
+    id,
+    note,
+    input: { criteria, post_state: postState },
+    expected: canonical(shapeSuccess(judgeSuccess(clauses, postState))),
+  })
+}
+
+successCase('every-criterion-held',
+  'Judged by the OS over post-state, not by the skill. A skill that judges its own success is a '
+  + 'skill that always succeeds.',
+  [
+    { statement: 'The gripper is closed', predicate: { op: 'eq', path: 'robot.state.gripper', value: 'closed' } },
+    { statement: 'The part did not slip', predicate: { op: 'eq', path: 'robot.grasp.slipped', value: false } },
+  ], AFTER)
+
+successCase('a-criterion-was-false',
+  'One criterion definitely false is a failure.',
+  [{ statement: 'The gripper is open', predicate: { op: 'eq', path: 'robot.state.gripper', value: 'open' } }],
+  AFTER)
+
+successCase('a-false-criterion-outranks-an-unreadable-one',
+  'The order the three answers are decided in, and the case that pins it: the unreadable criterion '
+  + 'comes **first** in the list and the answer is still `failure`. Evidence of failure beats '
+  + 'absence of evidence, and an edition that took the first non-satisfied clause would say '
+  + '`unlabeled` here.',
+  [
+    { statement: 'The cup is upright', predicate: { op: 'eq', path: 'robot.perception.cup_upright', value: true } },
+    { statement: 'The gripper is open', predicate: { op: 'eq', path: 'robot.state.gripper', value: 'open' } },
+  ], AFTER)
+
+successCase('an-unreadable-criterion-is-unlabeled',
+  'Not a failure. §54.3: "Honest ignorance beats an invented pass" — and calling an unmeasured run '
+  + 'a failure poisons a dataset exactly as thoroughly as calling it a success.',
+  [
+    { statement: 'The gripper is closed', predicate: { op: 'eq', path: 'robot.state.gripper', value: 'closed' } },
+    { statement: 'The cup is upright', predicate: { op: 'eq', path: 'robot.perception.cup_upright', value: true } },
+  ], AFTER)
+
+successCase('a-prose-criterion-is-unlabeled',
+  '§54.3’s own example. "The cup is upright" needs perception, is genuinely not '
+  + 'machine-evaluable, and is `unlabeled` rather than either verdict.',
+  [
+    { statement: 'The part did not slip', predicate: { op: 'eq', path: 'robot.grasp.slipped', value: false } },
+    'The cup is upright',
+  ], AFTER)
+
+successCase('no-criteria-is-unlabeled',
+  'Nothing was measured. A skill that scores itself by declaring nothing is the same gaming §54.3 '
+  + 'exists to stop, so the absence of criteria is not a pass.',
+  [], AFTER)
+
+// ── §54.4 ────────────────────────────────────────────────────────────────────
+
+function timeoutCase(
+  id: string, note: string, expected: number | null, factor?: unknown,
+): void {
+  add('skill', 'timeout', {
+    id,
+    note,
+    input: { expected_duration_seconds: expected, overrun_factor: factor ?? null },
+    expected: canonical(shapeDeadline(
+      factor === undefined ? skillDeadline(expected) : skillDeadline(expected, factor as number),
+    )),
+  })
+}
+
+timeoutCase('declared-duration', 'Thirty seconds at the default factor of two.', 30)
+timeoutCase('explicit-factor', 'A site that will tolerate half again as long.', 30, 1.5)
+timeoutCase('factor-below-one-is-refused',
+  'A factor under one would stop a skill before its own estimate, which is not an overrun factor. '
+  + 'The default is used rather than the number somebody typed.', 30, 0.5)
+timeoutCase('factor-that-is-not-a-number',
+  'A factor written as a string is not a factor. `NaN` and the infinities are refused the same way '
+  + 'and are not here, because JSON cannot hold one — they are in the unit suites of both editions '
+  + 'instead, which is where a value the corpus format cannot express has to be checked.',
+  30, '1.5')
+timeoutCase('no-declared-duration',
+  'The interesting one. §54.4 says the OS enforces a timeout and does not say what to do about a '
+  + 'skill that declares no duration, so this reports that it cannot be enforced rather than '
+  + 'inventing a ceiling. Refusing an unbounded skill and permitting one are both defensible, and '
+  + 'the decision belongs where policy is made.', null)
+timeoutCase('zero-duration', 'Zero is not a duration.', 0)
+timeoutCase('negative-duration', 'Nor is a negative one.', -5)
+timeoutCase('rounding',
+  'Milliseconds are integers. Half rounds up, which is JavaScript’s `Math.round` and is why '
+  + 'the sign of both operands is checked before the multiplication rather than after it.',
+  0.0025, 1)
+timeoutCase('long-skill', 'A twenty-minute skill, which is still bounded.', 1200)
+
+// ── §54.5 ────────────────────────────────────────────────────────────────────
+
+function compositionCase(
+  id: string, note: string, root: string, calls: unknown, maxDepth?: number,
+): void {
+  const parsed = readCalls(calls)
+  add('skill', 'composition', {
+    id,
+    note,
+    input: { root, calls, max_depth: maxDepth ?? null },
+    expected: canonical(shapeComposition(
+      maxDepth === undefined
+        ? validateComposition(root, parsed)
+        : validateComposition(root, parsed, maxDepth),
+    )),
+  })
+}
+
+compositionCase('within-the-limit',
+  'Four skills deep, which the default permits: the root counts as depth one.',
+  'pick', [
+    { from: 'pick', to: 'approach' },
+    { from: 'approach', to: 'align' },
+    { from: 'align', to: 'servo' },
+  ])
+
+compositionCase('one-too-deep',
+  'Five is not four, and the fault names the whole chain rather than the last link — an operator '
+  + 'needs to see which composition got out of hand.',
+  'pick', [
+    { from: 'pick', to: 'approach' },
+    { from: 'approach', to: 'align' },
+    { from: 'align', to: 'servo' },
+    { from: 'servo', to: 'nudge' },
+  ])
+
+compositionCase('a-skill-that-calls-itself',
+  'The simplest cycle, and it is refused at install rather than discovered by a robot that has '
+  + 'already taken a lease and started moving.',
+  'pick', [{ from: 'pick', to: 'pick' }])
+
+compositionCase('an-indirect-cycle',
+  'Three skills round a loop. The repeated element is the last entry of the path, so the chain '
+  + 'reads as the walk that found it.',
+  'pick', [
+    { from: 'pick', to: 'approach' },
+    { from: 'approach', to: 'retry' },
+    { from: 'retry', to: 'pick' },
+  ])
+
+compositionCase('a-diamond-is-not-a-cycle',
+  'Two paths reaching one skill is a shared child, not a loop. An edition that marked nodes '
+  + 'globally visited rather than tracking the current chain would refuse this, and it is legal.',
+  'pick', [
+    { from: 'pick', to: 'left' },
+    { from: 'pick', to: 'right' },
+    { from: 'left', to: 'grasp' },
+    { from: 'right', to: 'grasp' },
+  ])
+
+compositionCase('declaration-order-decides-which-fault',
+  'A graph with both faults in it. Depth-first in declaration order reaches the cycle first, and '
+  + 'pinning that is the point: an edition iterating its edges differently would refuse the same '
+  + 'graph and blame a different skill, which is the half an operator reads.',
+  'pick', [
+    { from: 'pick', to: 'loop' },
+    { from: 'pick', to: 'deep1' },
+    { from: 'loop', to: 'pick' },
+    { from: 'deep1', to: 'deep2' },
+    { from: 'deep2', to: 'deep3' },
+    { from: 'deep3', to: 'deep4' },
+  ])
+
+compositionCase('edges-that-do-not-start-at-the-root',
+  'A graph the root cannot reach is not this skill’s problem. Only what it can call is walked.',
+  'pick', [
+    { from: 'place', to: 'place' },
+    { from: 'pick', to: 'approach' },
+  ])
+
+compositionCase('no-calls-at-all', 'A skill that calls nothing composes trivially.', 'pick', [])
+
+compositionCase('a-depth-limit-of-one',
+  'The root and nothing else, which is a site that has switched composition off.',
+  'pick', [{ from: 'pick', to: 'approach' }], 1)
+
+compositionCase('a-depth-limit-of-zero-is-not-a-limit',
+  'Zero would refuse the root itself, which is not a composition rule. The default is used.',
+  'pick', [{ from: 'pick', to: 'approach' }], 0)
+
+compositionCase('malformed-edges-are-skipped',
+  'An edge whose ends are not names is not an edge. Both editions discard it in `readCalls`, at '
+  + 'the same boundary, so this case is testing one function rather than two.',
+  'pick', [
+    { from: 5, to: 'approach' },
+    { from: 'pick' },
+    null,
+    { from: 'pick', to: 'pick' },
+  ])
+
+// ── cell ─────────────────────────────────────────────────────────────────────
+//
+// §55.2's cell descriptor: the physical counterpart of an environment, living in the operator
+// profile rather than in the repository catalogue because a factory layout is not intellectual
+// property and safety-relevant volumes do not belong behind a fork-and-star workflow.
+//
+// It does two jobs, and both are pinned: it supplies `env.*` to §54.2's precondition context, and
+// it supplies allowed volumes to the workspace guard as one layer of §38.2's stack.
+
+const BENCH: Volume = {
+  frame: 'right_arm.tool0',
+  shape: { kind: 'box', min: [-0.6, -0.6, 0.0], max: [0.6, 0.6, 1.2] },
+}
+
+function cell(overrides: Partial<CellDescriptor> = {}): CellDescriptor {
+  return {
+    name: 'bay-3',
+    facts: { door_closed: true, fixture: 'jig-a', ambient_c: 21.5 },
+    allowed: [BENCH],
+    fixtures: [{ name: 'jig-a' }, { name: 'bin', volume: BENCH }],
+    parking_pose: [{ channel: 'J1', position: 0 }, { channel: 'J2', position: -1.2 }],
+    ...overrides,
+  }
+}
+
+function cellCase(id: string, note: string, subject: CellDescriptor): void {
+  add('cell', 'validate', {
+    id,
+    note,
+    input: { cell: subject },
+    expected: canonical(shapeCellFaults(validateCell(subject))),
+  })
+}
+
+cellCase('clean', 'A cell somebody measured: a name, three facts, a volume, two fixtures and a '
+  + 'parking pose.', cell())
+
+cellCase('unnamed', 'A cell has no identity but its name.', cell({ name: '' }))
+cellCase('name-of-spaces', 'And whitespace is not a name.', cell({ name: '   ' }))
+
+cellCase('a-fact-key-with-a-dot-in-it',
+  'The check that could not have existed before §54.2. A precondition addresses this as '
+  + '`env.door.closed`, which is the path to `closed` inside an object called `door` — so the fact '
+  + 'is unreachable, and it is the obvious way to write a hierarchical key for anybody who has not '
+  + 'read `readPath`.',
+  cell({ facts: { 'door.closed': true } }))
+
+cellCase('a-fact-key-with-surrounding-space',
+  'A path segment is the key exactly. Trimming it here would make the document and the path '
+  + 'disagree about what the fact is called.',
+  cell({ facts: { ' door_closed ': true } }))
+
+cellCase('an-empty-fact-key', 'A path cannot name nothing.', cell({ facts: { '': true } }))
+
+cellCase('a-fact-that-shadows-the-cell-name',
+  '`env.cell` is derived from the cell itself. A fact of that name would be read by nobody and '
+  + 'would make a precondition true for the wrong reason.',
+  cell({ facts: { cell: 'somewhere-else' } }))
+
+cellCase('a-fact-that-shadows-the-fixture-list',
+  'And the same for the other derived one.', cell({ facts: { fixtures: [] } }))
+
+cellCase('a-volume-with-no-frame',
+  'A volume constrains a frame, and the workspace guard would have nothing to check this against.',
+  cell({ allowed: [{ frame: '', shape: BENCH.shape }] }))
+
+cellCase('an-inverted-box',
+  'A box whose minimum exceeds its maximum on any axis is empty, and an empty *allowed* volume is '
+  + 'a cell the robot may never be in. That is a configuration mistake rather than a lock-out to '
+  + 'enforce silently.',
+  cell({ allowed: [{ frame: 'right_arm.tool0', shape: { kind: 'box', min: [1, 0, 0], max: [0, 1, 1] } }] }))
+
+cellCase('a-sphere-with-no-radius',
+  'Zero is not a radius. A sphere nothing can be inside forbids the frame it names.',
+  cell({ allowed: [{ frame: 'right_arm.tool0', shape: { kind: 'sphere', centre: [0, 0, 0], radius_m: 0 } }] }))
+
+cellCase('a-shape-this-edition-does-not-know',
+  'A cylinder is not in the vocabulary, and a volume nobody can evaluate is reported rather than '
+  + 'quietly dropped — a workspace layer silently missing the volume an operator drew is a robot '
+  + 'with more room than anybody agreed to.',
+  cell({ allowed: [{ frame: 'right_arm.tool0', shape: { kind: 'cylinder', radius_m: 1 } } as never] }))
+
+cellCase('an-unnamed-fixture',
+  'A fixture a precondition cannot name is a fixture the OS cannot check for.',
+  cell({ fixtures: [{ name: '' }] }))
+
+cellCase('two-fixtures-with-one-name',
+  'A precondition asking for it would be asking about whichever the reader happened to reach.',
+  cell({ fixtures: [{ name: 'jig-a' }, { name: 'jig-a' }] }))
+
+cellCase('a-fixture-measured-wrongly',
+  'A fixture may be named without being measured; it may not be measured wrongly.',
+  cell({ fixtures: [{ name: 'bin', volume: { frame: 'base', shape: { kind: 'sphere', centre: [0, 0, 0], radius_m: -1 } } }] }))
+
+cellCase('a-parking-entry-with-no-channel',
+  'A parking pose is a command, and a command names its channel.',
+  cell({ parking_pose: [{ channel: '', position: 0 }] }))
+
+cellCase('one-channel-parked-twice',
+  'Which position the robot drives to would depend on the order a reader happened to walk the list.',
+  cell({ parking_pose: [{ channel: 'J1', position: 0 }, { channel: 'J1', position: 1 }] }))
+
+cellCase('several-faults-at-once',
+  'Every fault, not the first. An operator is editing this by hand, and `admitPackage`’s reason '
+  + 'applies unchanged: fixing four problems one deployment at a time is how people end up giving '
+  + 'up. Fact keys are reported in sorted order, which is the only order a parsed object has in '
+  + 'every edition.',
+  {
+    name: '',
+    facts: { 'z.bad': 1, 'a.bad': 2, cell: 'x' },
+    allowed: [{ frame: '', shape: { kind: 'box', min: [1, 1, 1], max: [0, 0, 0] } }],
+    fixtures: [{ name: '' }],
+    parking_pose: [{ channel: 'J1', position: 0 }, { channel: 'J1', position: 2 }],
+  })
+
+cellCase('an-empty-cell',
+  'A cell with a name and nothing else is a cell nobody has measured yet, and that is not a fault.',
+  { name: 'bay-4' })
+
+function cellContextCase(id: string, note: string, subject: CellDescriptor): void {
+  add('cell', 'context', {
+    id,
+    note,
+    input: { cell: subject },
+    expected: canonical({
+      env: cellEnvironment(subject),
+      ...shapeCellLayer(cellWorkspaceLayer(subject)) as Record<string, unknown>,
+    }),
+  })
+}
+
+cellContextCase('facts-and-volumes',
+  'Both projections of one document: the facts a precondition reads as `env.*`, and the layer the '
+  + 'workspace guard reads. Pinned together because they are two views of one thing and an edition '
+  + 'that agreed about one could disagree about the other.',
+  cell())
+
+cellContextCase('derived-facts-are-always-there',
+  '`env.cell` and `env.fixtures` come from the cell rather than from its facts, so a precondition '
+  + 'can rely on them on a cell whose operator declared nothing.',
+  { name: 'bay-4', fixtures: [{ name: 'jig-a' }, { name: 'bin' }] })
+
+cellContextCase('an-unusable-key-does-not-reach-the-context',
+  'The fault is reported and the fact is dropped. Passing it through would put a key in the '
+  + 'context that no path can name, which is a fact that exists and cannot be read — worse than '
+  + 'one that is missing, because it looks present in the document.',
+  { name: 'bay-3', facts: { 'door.closed': true, door_open: false } })
+
+cellContextCase('a-shadowing-fact-does-not-win',
+  'The derived fact is the one a precondition gets.',
+  { name: 'bay-3', facts: { cell: 'somewhere-else' } })
+
+cellContextCase('a-cell-that-draws-nothing-adds-no-layer',
+  'Not the same as a cell that allows nothing. An empty layer would forbid every frame it named, '
+  + 'and a site that has not yet measured its cell would find the robot refusing to move with no '
+  + 'volume anywhere to explain why.',
+  { name: 'bay-4' })
+
+cellContextCase('an-unusable-volume-is-not-in-the-layer',
+  'It is reported by `validateCell` and it is not handed to the guard, because a shape the kernel '
+  + 'cannot evaluate is not a constraint. The usable one beside it still is.',
+  {
+    name: 'bay-3',
+    allowed: [BENCH, { frame: 'base', shape: { kind: 'sphere', centre: [0, 0, 0], radius_m: 0 } }],
+  })
+
+cellContextCase('every-volume-unusable-means-no-layer',
+  'And when nothing survives, there is no layer rather than an empty one — the same distinction '
+  + 'again, arrived at from the other direction.',
+  { name: 'bay-3', allowed: [{ frame: '', shape: BENCH.shape }] })
 
 // ── Write ────────────────────────────────────────────────────────────────────
 

@@ -32,7 +32,14 @@
 
 import type { ControlMode } from './embodiment.ts'
 
-export const PACKAGE_KINDS = ['policy', 'skill', 'driver', 'service', 'embodiment'] as const
+/**
+ * What a package can be.
+ *
+ * `environment` arrived with §55, which is written about a kind the vocabulary did not contain —
+ * "installed onto a robot whose driver is physical, an environment package is inert, and the OS
+ * says so rather than silently accepting it" needs the kind to exist before anything can say it.
+ */
+export const PACKAGE_KINDS = ['policy', 'skill', 'driver', 'service', 'embodiment', 'environment'] as const
 export type PackageKind = (typeof PACKAGE_KINDS)[number]
 
 /**
@@ -134,6 +141,7 @@ export const PACKAGE_REJECTION_CODES = [
   'os_too_old',
   'transport_refused',
   'executes_on_load_untrusted',
+  'environment_inert',
 ] as const
 
 export type PackageRejectionCode = (typeof PACKAGE_REJECTION_CODES)[number]
@@ -205,6 +213,15 @@ export interface DeviceCapacity {
   /** Tokens the operator profile withholds outright, whatever a package requests. */
   denied?: string[]
   installed: Array<{ id: string; version: string }>
+  /**
+   * Whether the loaded RHAL driver is a simulator (§35.3, §70).
+   *
+   * Absent means `false`, which is the same rule and the same reason as
+   * `EmbodimentDescriptor.simulator`: a real robot should not have to declare what it is not, and
+   * the obligation to declare sits on the simulator driver. The asymmetry is deliberate — a
+   * simulator presented as a robot is the failure; a robot presented as a robot is not.
+   */
+  simulator?: boolean
 }
 
 /**
@@ -313,6 +330,26 @@ export function admitPackage(params: AdmissionParams): AdmissionResult {
       code: 'isolation_violation',
       severity: 'error',
       message: `A ${manifest.kind} package may not run unsandboxed. Only drivers touch hardware directly.`,
+    })
+  }
+
+  // §55.1. An `EnvironmentManifest` carries simulators, a scene, assets, tasks, randomisation and
+  // physics and render rates: all of it describes a simulated world, and only a simulator RHAL
+  // driver can load one.
+  //
+  // A warning rather than an error, because installing it is not dangerous and refusing it would
+  // stop an operator staging a package onto a robot they are about to point at a simulator. What
+  // is not acceptable is silence — a package that will never do anything, sitting installed,
+  // looking exactly like one that works.
+  //
+  // Its `required_capabilities` are checked either way, below and without reference to the kind,
+  // "since an environment that needs a gripper is not runnable by a robot without one in sim
+  // either".
+  if (manifest.kind === 'environment' && capacity.simulator !== true) {
+    findings.push({
+      code: 'environment_inert',
+      severity: 'warning',
+      message: 'An environment describes a simulated world, and no simulator driver is loaded on this robot. It will install, and nothing will ever load it.',
     })
   }
 

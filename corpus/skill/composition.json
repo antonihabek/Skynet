@@ -1,0 +1,238 @@
+{
+  "corpus": "skill",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "within-the-limit",
+      "note": "Four skills deep, which the default permits: the root counts as depth one.",
+      "input": {
+        "root": "pick",
+        "calls": [
+          {
+            "from": "pick",
+            "to": "approach"
+          },
+          {
+            "from": "approach",
+            "to": "align"
+          },
+          {
+            "from": "align",
+            "to": "servo"
+          }
+        ],
+        "max_depth": null
+      },
+      "expected": "{\"fault\":null}"
+    },
+    {
+      "id": "one-too-deep",
+      "note": "Five is not four, and the fault names the whole chain rather than the last link — an operator needs to see which composition got out of hand.",
+      "input": {
+        "root": "pick",
+        "calls": [
+          {
+            "from": "pick",
+            "to": "approach"
+          },
+          {
+            "from": "approach",
+            "to": "align"
+          },
+          {
+            "from": "align",
+            "to": "servo"
+          },
+          {
+            "from": "servo",
+            "to": "nudge"
+          }
+        ],
+        "max_depth": null
+      },
+      "expected": "{\"fault\":{\"code\":\"too_deep\",\"detail\":\"This call chain is 5 skills deep; the limit is 4.\",\"path\":[\"pick\",\"approach\",\"align\",\"servo\",\"nudge\"]}}"
+    },
+    {
+      "id": "a-skill-that-calls-itself",
+      "note": "The simplest cycle, and it is refused at install rather than discovered by a robot that has already taken a lease and started moving.",
+      "input": {
+        "root": "pick",
+        "calls": [
+          {
+            "from": "pick",
+            "to": "pick"
+          }
+        ],
+        "max_depth": null
+      },
+      "expected": "{\"fault\":{\"code\":\"cycle\",\"detail\":\"pick is already in this call chain, so it would call itself.\",\"path\":[\"pick\",\"pick\"]}}"
+    },
+    {
+      "id": "an-indirect-cycle",
+      "note": "Three skills round a loop. The repeated element is the last entry of the path, so the chain reads as the walk that found it.",
+      "input": {
+        "root": "pick",
+        "calls": [
+          {
+            "from": "pick",
+            "to": "approach"
+          },
+          {
+            "from": "approach",
+            "to": "retry"
+          },
+          {
+            "from": "retry",
+            "to": "pick"
+          }
+        ],
+        "max_depth": null
+      },
+      "expected": "{\"fault\":{\"code\":\"cycle\",\"detail\":\"pick is already in this call chain, so it would call itself.\",\"path\":[\"pick\",\"approach\",\"retry\",\"pick\"]}}"
+    },
+    {
+      "id": "a-diamond-is-not-a-cycle",
+      "note": "Two paths reaching one skill is a shared child, not a loop. An edition that marked nodes globally visited rather than tracking the current chain would refuse this, and it is legal.",
+      "input": {
+        "root": "pick",
+        "calls": [
+          {
+            "from": "pick",
+            "to": "left"
+          },
+          {
+            "from": "pick",
+            "to": "right"
+          },
+          {
+            "from": "left",
+            "to": "grasp"
+          },
+          {
+            "from": "right",
+            "to": "grasp"
+          }
+        ],
+        "max_depth": null
+      },
+      "expected": "{\"fault\":null}"
+    },
+    {
+      "id": "declaration-order-decides-which-fault",
+      "note": "A graph with both faults in it. Depth-first in declaration order reaches the cycle first, and pinning that is the point: an edition iterating its edges differently would refuse the same graph and blame a different skill, which is the half an operator reads.",
+      "input": {
+        "root": "pick",
+        "calls": [
+          {
+            "from": "pick",
+            "to": "loop"
+          },
+          {
+            "from": "pick",
+            "to": "deep1"
+          },
+          {
+            "from": "loop",
+            "to": "pick"
+          },
+          {
+            "from": "deep1",
+            "to": "deep2"
+          },
+          {
+            "from": "deep2",
+            "to": "deep3"
+          },
+          {
+            "from": "deep3",
+            "to": "deep4"
+          }
+        ],
+        "max_depth": null
+      },
+      "expected": "{\"fault\":{\"code\":\"cycle\",\"detail\":\"pick is already in this call chain, so it would call itself.\",\"path\":[\"pick\",\"loop\",\"pick\"]}}"
+    },
+    {
+      "id": "edges-that-do-not-start-at-the-root",
+      "note": "A graph the root cannot reach is not this skill’s problem. Only what it can call is walked.",
+      "input": {
+        "root": "pick",
+        "calls": [
+          {
+            "from": "place",
+            "to": "place"
+          },
+          {
+            "from": "pick",
+            "to": "approach"
+          }
+        ],
+        "max_depth": null
+      },
+      "expected": "{\"fault\":null}"
+    },
+    {
+      "id": "no-calls-at-all",
+      "note": "A skill that calls nothing composes trivially.",
+      "input": {
+        "root": "pick",
+        "calls": [],
+        "max_depth": null
+      },
+      "expected": "{\"fault\":null}"
+    },
+    {
+      "id": "a-depth-limit-of-one",
+      "note": "The root and nothing else, which is a site that has switched composition off.",
+      "input": {
+        "root": "pick",
+        "calls": [
+          {
+            "from": "pick",
+            "to": "approach"
+          }
+        ],
+        "max_depth": 1
+      },
+      "expected": "{\"fault\":{\"code\":\"too_deep\",\"detail\":\"This call chain is 2 skills deep; the limit is 1.\",\"path\":[\"pick\",\"approach\"]}}"
+    },
+    {
+      "id": "a-depth-limit-of-zero-is-not-a-limit",
+      "note": "Zero would refuse the root itself, which is not a composition rule. The default is used.",
+      "input": {
+        "root": "pick",
+        "calls": [
+          {
+            "from": "pick",
+            "to": "approach"
+          }
+        ],
+        "max_depth": 0
+      },
+      "expected": "{\"fault\":null}"
+    },
+    {
+      "id": "malformed-edges-are-skipped",
+      "note": "An edge whose ends are not names is not an edge. Both editions discard it in `readCalls`, at the same boundary, so this case is testing one function rather than two.",
+      "input": {
+        "root": "pick",
+        "calls": [
+          {
+            "from": 5,
+            "to": "approach"
+          },
+          {
+            "from": "pick"
+          },
+          null,
+          {
+            "from": "pick",
+            "to": "pick"
+          }
+        ],
+        "max_depth": null
+      },
+      "expected": "{\"fault\":{\"code\":\"cycle\",\"detail\":\"pick is already in this call chain, so it would call itself.\",\"path\":[\"pick\",\"pick\"]}}"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  // The reference edition is the specification, and until this file existed nothing type-checked it.
+  //
+  // Node 23 and later strip types rather than checking them, so `node reference/typescript/*.ts`
+  // runs a file whose annotations are decoration: the corpus generator executed happily against an
+  // oracle importing a type its own `types.ts` did not export, and would have gone on doing so.
+  // The Hub type-checks its *copies* of the mirrored contracts, which covers ten of the modules
+  // here and none of the others — `kinematics.ts`, `blackbox.ts`, `shape.ts`, `skill.ts` and the
+  // generator itself were outside every check in either repository.
+  //
+  // This costs one CI step and no local ceremony: there is still no build, no `node_modules` in a
+  // checkout, and nothing to install before running the oracle. `npx tsc -p .` is a gate, not a
+  // toolchain.
+  "compilerOptions": {
+    "strict": true,
+    "target": "es2022",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    // The oracle imports with explicit `.ts` extensions, because that is what Node executes. The
+    // mirror tool rewrites them for the Hub, which resolves through a bundler instead.
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["reference/typescript/**/*.ts", "tools/**/*.ts"]
+}

@@ -69,6 +69,8 @@ use alloc::vec::Vec;
 use skynet_json::Json;
 
 use crate::json::number_text;
+// One rounding decision for the crate; see the note on the function.
+use crate::round_half_away;
 
 /// Nanoseconds in a millisecond. Stamps are `CLOCK_MONOTONIC_RAW` nanoseconds (§24, §35.1);
 /// everything a human reads is milliseconds.
@@ -432,27 +434,6 @@ fn effective_ns(stamp_ns: u64, latency_ms: Option<f64>) -> i128 {
         None => 0,
     };
     stamp_ns as i128 - latency_ns
-}
-
-/// Round half away from zero.
-///
-/// `f64::round` does this, but it is not available under `no_std` without `libm`, and §31.2's rule
-/// about platform maths libraries applies with full force to a rounding used in a latency
-/// correction: two editions rounding a half-nanosecond differently is a one-nanosecond disagreement
-/// today and a different chosen sample the day two candidates are equidistant.
-fn round_half_away(value: f64) -> f64 {
-    if !value.is_finite() {
-        return 0.0;
-    }
-    let truncated = value as i64 as f64;
-    let fraction = value - truncated;
-    if fraction >= 0.5 {
-        truncated + 1.0
-    } else if fraction <= -0.5 {
-        truncated - 1.0
-    } else {
-        truncated
-    }
 }
 
 /// Nanoseconds as milliseconds.

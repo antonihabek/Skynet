@@ -143,12 +143,18 @@ pub fn read(store: &Store, body: &Body, os_version: &str) -> Capacity {
     // package needing a capability rather than admitting it. A *malformed* descriptor is different
     // and stops the assembly, because a body nobody has established the shape of is not a body to
     // make an install decision about.
-    let (capabilities, extensions) = match body {
+    //
+    // §55.1's flag comes from the same place and by the same rule: the descriptor declares whether
+    // this body is simulated, absence means `false`, and a body that is absent entirely is not a
+    // simulator either — which is the conservative direction, since it is what makes an environment
+    // package report that nothing will load it rather than silently accepting one.
+    let (capabilities, extensions, simulator) = match body {
         Body::Present(known) => (
             known.descriptor.capabilities.clone(),
             known.descriptor.extensions.clone(),
+            known.descriptor.simulator,
         ),
-        Body::Absent => (Vec::new(), Vec::new()),
+        Body::Absent => (Vec::new(), Vec::new(), false),
         Body::Malformed { detail } => {
             return Capacity::Unavailable {
                 detail: format!(
@@ -196,6 +202,7 @@ pub fn read(store: &Store, body: &Body, os_version: &str) -> Capacity {
         // §38.1's profile is signed and nothing here verifies a signature. See the module docs.
         denied: Vec::new(),
         installed,
+        simulator,
     }))
 }
 

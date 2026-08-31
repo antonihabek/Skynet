@@ -50,8 +50,8 @@ const HERE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 /**
  * Modules the Hub keeps its own copy of.
  *
- * `calibration` (§45), `watchdog` (§46), `entitlement` (§51), `birth` (§50) and `provenance` (§56)
- * are deliberately **not** here yet.
+ * `calibration` (§45), `watchdog` (§46), `entitlement` (§51), `birth` (§50), `provenance` (§56) and
+ * `skill` (§54) are deliberately **not** here yet.
  * All three are contracts the Hub will need for §32.1's `/skynet/os/devices/[id]` — "active and
  * unavailable guards with the missing input named" is precisely what calibration produces, and a
  * fleet page that cannot say which robots are running on a lapsed entitlement is a fleet page
@@ -73,10 +73,38 @@ const HERE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
  * tokens and the robot's is to decide about them. Those are not the same function, and mirroring
  * the robot's decision into the Hub before anything issues one would put the wrong half there.
  *
+ * `cell` (§55.2) is different from every other name in this paragraph: it is not waiting, it is
+ * **never coming**. §55.2 refuses to make a cell a repo kind at all — *"making it a repo kind would
+ * invite people to publish their factory layout to a marketplace, and would put safety-relevant
+ * workspace volumes behind a fork-and-star workflow"* — so a module the Hub imported would be a
+ * module arguing the opposite of the section it implements. It stays in the reference because the
+ * robot has two editions of it and they have to agree; it stays out of the Hub because the Hub is
+ * the marketplace.
+ *
+ * `skill` is the one whose turn is closest, and it waits on a page rather than on a table. It
+ * answers questions a repository page will want — *which of this skill's preconditions can the OS
+ * actually enforce, and which are still sentences?* — and that page needs UI and thirty-five
+ * locale catalogues, which is a piece of work rather than a line in this list. Mirroring it before
+ * the page exists would put a module nothing imports into an application, which is the same
+ * mistake in the other direction.
+ *
+ * `predicate` and `semver` are the newest entries and the first that arrived from the **Hub**
+ * rather than from this repository. §54.2 turns a skill's `preconditions` from prose into
+ * predicates the robot evaluates before the skill may start, and `semver_satisfies` is one of the
+ * operators — so a robot deciding whether its runtime satisfies `^1.2.0` differently from the Hub
+ * that sold it the skill is §31.2's failure exactly: *a format with two implementations of its own
+ * definition is not a format.* The engine had lived at `lib/skynet/compatibility/predicate.ts`
+ * since long before Part VI was written; it is now the reference's, and the Hub's two old paths are
+ * re-exports of `lib/skynet/os/`.
+ *
+ * That move is the reason to be careful with `semver`: it is one of the most-imported modules in
+ * that repository, and a mirrored contract cannot be edited there in passing any more.
+ *
  * Add a name to this list and run `--sync`; nothing else is needed.
  */
 const MIRRORS = [
-  'canonical', 'conformance', 'digest', 'embodiment', 'kinematics', 'package', 'readiness', 'safety',
+  'canonical', 'conformance', 'digest', 'embodiment', 'kinematics', 'package', 'predicate',
+  'readiness', 'safety', 'semver',
 ]
 
 const REFERENCE = 'reference/typescript'

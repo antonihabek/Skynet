@@ -58,6 +58,10 @@ Four properties, each load-bearing:
 | `blackbox/` | Ring records, headers, MCAP schemas, a whole sealed file | The exact bytes, by digest |
 | `admission/` | Package manifest + device capacity + flags | The exact finding list, in order |
 | `certification/` | SCTS results + field conformance + bench age | The exact award |
+| `predicate/` | A predicate and a live context | The boolean **and** §54.2's three-valued outcome |
+| `semver/` | A version and a range, or two versions | What the range admits, and how the two order |
+| `skill/` | A skill's clauses and a live or post state | Whether it may start, whether it succeeded, when it is stopped, and whether its call graph installs |
+| `cell/` | An operator's cell descriptor | Every fault in it, and the two projections a robot reads out of it |
 | `readiness/` | Registry subject | Attainable tier and blocker list |
 | `observation/frames` | A target instant + every stream's declared latency, budget and samples | The exact assembled frame: which sample per stream, its age, the skew |
 | `observation/target` | The same streams + the current instant | The instant a live loop should aim at, or null |

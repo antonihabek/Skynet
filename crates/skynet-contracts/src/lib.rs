@@ -43,6 +43,7 @@ extern crate alloc;
 pub mod admission;
 pub mod birth;
 pub mod calibration;
+pub mod cell;
 pub mod certification;
 pub mod digest;
 pub mod embodiment;
@@ -50,10 +51,13 @@ pub mod entitlement;
 pub mod json;
 pub mod kinematics;
 pub mod observation;
+pub mod predicate;
 pub mod provenance;
 pub mod readiness;
 pub mod roles;
 pub mod safety;
+pub mod semver;
+pub mod skill;
 pub mod transport;
 pub mod watchdog;
 
@@ -68,9 +72,37 @@ pub use admission::{admit_package, AdmissionParams, AdmissionResult};
 pub use certification::{award_certification, field_conformance, CertificationInput};
 pub use digest::{version_digest, DigestError, DigestFile};
 pub use kinematics::{flatten, with_frame_set, FlatFrames};
+pub use predicate::{evaluate as evaluate_predicate, PredicateOutcome};
 pub use readiness::{evaluate_readiness, summarize_readiness, ReadinessSubject};
 pub use roles::{parse_role, ParsedRole};
 pub use transport::{resolve_transport, ResolveTransportOptions, TransportPlan};
+
+/// Round half away from zero.
+///
+/// `f64::round` does this, and it is not available under `no_std` without `libm` — and §31.2's rule
+/// about platform maths libraries applies with full force to a rounding used in a latency
+/// correction or a deadline: two editions rounding a half differently is a one-unit disagreement
+/// today and a different chosen sample the day two candidates are equidistant.
+///
+/// It lives here rather than in whichever module needed it first, because the second caller is how
+/// a private helper becomes two implementations of one decision.
+///
+/// **Not** JavaScript's `Math.round`, which is half toward positive infinity: the two differ on
+/// negative halves, and every caller here is required to have checked its sign first.
+pub(crate) fn round_half_away(value: f64) -> f64 {
+    if !value.is_finite() {
+        return 0.0;
+    }
+    let truncated = value as i64 as f64;
+    let fraction = value - truncated;
+    if fraction >= 0.5 {
+        truncated + 1.0
+    } else if fraction <= -0.5 {
+        truncated - 1.0
+    } else {
+        truncated
+    }
+}
 
 #[cfg(test)]
 mod tests;

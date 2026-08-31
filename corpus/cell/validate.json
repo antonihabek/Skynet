@@ -1,0 +1,1134 @@
+{
+  "corpus": "cell",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "clean",
+      "note": "A cell somebody measured: a name, three facts, a volume, two fixtures and a parking pose.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[]}"
+    },
+    {
+      "id": "unnamed",
+      "note": "A cell has no identity but its name.",
+      "input": {
+        "cell": {
+          "name": "",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"unnamed\",\"detail\":\"A cell has no identity but its name, and this one has none.\",\"subjects\":[]}]}"
+    },
+    {
+      "id": "name-of-spaces",
+      "note": "And whitespace is not a name.",
+      "input": {
+        "cell": {
+          "name": "   ",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"unnamed\",\"detail\":\"A cell has no identity but its name, and this one has none.\",\"subjects\":[]}]}"
+    },
+    {
+      "id": "a-fact-key-with-a-dot-in-it",
+      "note": "The check that could not have existed before §54.2. A precondition addresses this as `env.door.closed`, which is the path to `closed` inside an object called `door` — so the fact is unreachable, and it is the obvious way to write a hierarchical key for anybody who has not read `readPath`.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door.closed": true
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"fact_key_unusable\",\"detail\":\"A precondition addresses this as env.door.closed, and a dot path cannot name it. Nest the object instead of putting a dot in the key.\",\"subjects\":[\"door.closed\"]}]}"
+    },
+    {
+      "id": "a-fact-key-with-surrounding-space",
+      "note": "A path segment is the key exactly. Trimming it here would make the document and the path disagree about what the fact is called.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            " door_closed ": true
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"fact_key_unusable\",\"detail\":\"A precondition addresses this as env. door_closed , and a dot path cannot name it. Nest the object instead of putting a dot in the key.\",\"subjects\":[\" door_closed \"]}]}"
+    },
+    {
+      "id": "an-empty-fact-key",
+      "note": "A path cannot name nothing.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "": true
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"fact_key_unusable\",\"detail\":\"A precondition addresses this as env., and a dot path cannot name it. Nest the object instead of putting a dot in the key.\",\"subjects\":[\"\"]}]}"
+    },
+    {
+      "id": "a-fact-that-shadows-the-cell-name",
+      "note": "`env.cell` is derived from the cell itself. A fact of that name would be read by nobody and would make a precondition true for the wrong reason.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "cell": "somewhere-else"
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"fact_key_reserved\",\"detail\":\"env.cell is derived from the cell itself, so a fact of that name would be read by nobody and would make a precondition true for the wrong reason.\",\"subjects\":[\"cell\"]}]}"
+    },
+    {
+      "id": "a-fact-that-shadows-the-fixture-list",
+      "note": "And the same for the other derived one.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "fixtures": []
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"fact_key_reserved\",\"detail\":\"env.fixtures is derived from the cell itself, so a fact of that name would be read by nobody and would make a precondition true for the wrong reason.\",\"subjects\":[\"fixtures\"]}]}"
+    },
+    {
+      "id": "a-volume-with-no-frame",
+      "note": "A volume constrains a frame, and the workspace guard would have nothing to check this against.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"volume_frame_missing\",\"detail\":\"A volume constrains a frame, and this one names none. The workspace guard would have nothing to check it against.\",\"subjects\":[\"allowed[0]\"]}]}"
+    },
+    {
+      "id": "an-inverted-box",
+      "note": "A box whose minimum exceeds its maximum on any axis is empty, and an empty *allowed* volume is a cell the robot may never be in. That is a configuration mistake rather than a lock-out to enforce silently.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  1,
+                  0,
+                  0
+                ],
+                "max": [
+                  0,
+                  1,
+                  1
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"volume_shape_invalid\",\"detail\":\"This volume has no usable geometry — a box whose minimum exceeds its maximum, a sphere with no radius, or a shape this edition does not know.\",\"subjects\":[\"allowed[0]\"]}]}"
+    },
+    {
+      "id": "a-sphere-with-no-radius",
+      "note": "Zero is not a radius. A sphere nothing can be inside forbids the frame it names.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "sphere",
+                "centre": [
+                  0,
+                  0,
+                  0
+                ],
+                "radius_m": 0
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"volume_shape_invalid\",\"detail\":\"This volume has no usable geometry — a box whose minimum exceeds its maximum, a sphere with no radius, or a shape this edition does not know.\",\"subjects\":[\"allowed[0]\"]}]}"
+    },
+    {
+      "id": "a-shape-this-edition-does-not-know",
+      "note": "A cylinder is not in the vocabulary, and a volume nobody can evaluate is reported rather than quietly dropped — a workspace layer silently missing the volume an operator drew is a robot with more room than anybody agreed to.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "cylinder",
+                "radius_m": 1
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"volume_shape_invalid\",\"detail\":\"This volume has no usable geometry — a box whose minimum exceeds its maximum, a sphere with no radius, or a shape this edition does not know.\",\"subjects\":[\"allowed[0]\"]}]}"
+    },
+    {
+      "id": "an-unnamed-fixture",
+      "note": "A fixture a precondition cannot name is a fixture the OS cannot check for.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": ""
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"fixture_unnamed\",\"detail\":\"A fixture a precondition cannot name is a fixture the OS cannot check for.\",\"subjects\":[\"fixtures[0]\"]}]}"
+    },
+    {
+      "id": "two-fixtures-with-one-name",
+      "note": "A precondition asking for it would be asking about whichever the reader happened to reach.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "jig-a"
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"duplicate_fixture\",\"detail\":\"Two fixtures with one name: a precondition asking for it would be asking about whichever the reader happened to reach.\",\"subjects\":[\"jig-a\"]}]}"
+    },
+    {
+      "id": "a-fixture-measured-wrongly",
+      "note": "A fixture may be named without being measured; it may not be measured wrongly.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "base",
+                "shape": {
+                  "kind": "sphere",
+                  "centre": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "radius_m": -1
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"volume_shape_invalid\",\"detail\":\"This fixture has been given a volume with no usable geometry. A fixture may be named without being measured; it may not be measured wrongly.\",\"subjects\":[\"bin\"]}]}"
+    },
+    {
+      "id": "a-parking-entry-with-no-channel",
+      "note": "A parking pose is a command, and a command names its channel.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "",
+              "position": 0
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"parking_channel_unnamed\",\"detail\":\"A parking pose is a command, and a command names its channel.\",\"subjects\":[\"parking_pose[0]\"]}]}"
+    },
+    {
+      "id": "one-channel-parked-twice",
+      "note": "Which position the robot drives to would depend on the order a reader happened to walk the list.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J1",
+              "position": 1
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"duplicate_parking_channel\",\"detail\":\"One channel, two parking positions. Which one the robot drives to would depend on the order a reader happened to walk the list.\",\"subjects\":[\"J1\"]}]}"
+    },
+    {
+      "id": "several-faults-at-once",
+      "note": "Every fault, not the first. An operator is editing this by hand, and `admitPackage`’s reason applies unchanged: fixing four problems one deployment at a time is how people end up giving up. Fact keys are reported in sorted order, which is the only order a parsed object has in every edition.",
+      "input": {
+        "cell": {
+          "name": "",
+          "facts": {
+            "z.bad": 1,
+            "a.bad": 2,
+            "cell": "x"
+          },
+          "allowed": [
+            {
+              "frame": "",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  1,
+                  1,
+                  1
+                ],
+                "max": [
+                  0,
+                  0,
+                  0
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": ""
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J1",
+              "position": 2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"unnamed\",\"detail\":\"A cell has no identity but its name, and this one has none.\",\"subjects\":[]},{\"code\":\"fact_key_unusable\",\"detail\":\"A precondition addresses this as env.a.bad, and a dot path cannot name it. Nest the object instead of putting a dot in the key.\",\"subjects\":[\"a.bad\"]},{\"code\":\"fact_key_reserved\",\"detail\":\"env.cell is derived from the cell itself, so a fact of that name would be read by nobody and would make a precondition true for the wrong reason.\",\"subjects\":[\"cell\"]},{\"code\":\"fact_key_unusable\",\"detail\":\"A precondition addresses this as env.z.bad, and a dot path cannot name it. Nest the object instead of putting a dot in the key.\",\"subjects\":[\"z.bad\"]},{\"code\":\"volume_frame_missing\",\"detail\":\"A volume constrains a frame, and this one names none. The workspace guard would have nothing to check it against.\",\"subjects\":[\"allowed[0]\"]},{\"code\":\"volume_shape_invalid\",\"detail\":\"This volume has no usable geometry — a box whose minimum exceeds its maximum, a sphere with no radius, or a shape this edition does not know.\",\"subjects\":[\"allowed[0]\"]},{\"code\":\"fixture_unnamed\",\"detail\":\"A fixture a precondition cannot name is a fixture the OS cannot check for.\",\"subjects\":[\"fixtures[0]\"]},{\"code\":\"duplicate_parking_channel\",\"detail\":\"One channel, two parking positions. Which one the robot drives to would depend on the order a reader happened to walk the list.\",\"subjects\":[\"J1\"]}]}"
+    },
+    {
+      "id": "an-empty-cell",
+      "note": "A cell with a name and nothing else is a cell nobody has measured yet, and that is not a fault.",
+      "input": {
+        "cell": {
+          "name": "bay-4"
+        }
+      },
+      "expected": "{\"faults\":[]}"
+    }
+  ]
+}

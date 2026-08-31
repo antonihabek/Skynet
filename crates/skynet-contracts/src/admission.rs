@@ -24,7 +24,19 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 /// What a package is.
-pub const PACKAGE_KINDS: [&str; 5] = ["policy", "skill", "driver", "service", "embodiment"];
+/// What a package can be.
+///
+/// `environment` arrived with §55, which is written about a kind the vocabulary did not contain —
+/// "installed onto a robot whose driver is physical, an environment package is inert, and the OS
+/// says so rather than silently accepting it" needs the kind to exist before anything can say it.
+pub const PACKAGE_KINDS: [&str; 6] = [
+    "policy",
+    "skill",
+    "driver",
+    "service",
+    "embodiment",
+    "environment",
+];
 
 /// How a package is isolated.
 ///
@@ -169,6 +181,8 @@ pub enum PackageRejectionCode {
     TransportRefused,
     /// Files execute code when read, and the operator has not accepted that.
     ExecutesOnLoadUntrusted,
+    /// An environment package on a robot with no simulator driver, which will never load it (§55.1).
+    EnvironmentInert,
     /// The package asked for a capability no grant can ever confer (§49.1).
     ///
     /// Distinct from [`CapabilityDenied`](PackageRejectionCode::CapabilityDenied), and the
@@ -197,6 +211,7 @@ impl PackageRejectionCode {
             PackageRejectionCode::OsTooOld => "os_too_old",
             PackageRejectionCode::TransportRefused => "transport_refused",
             PackageRejectionCode::ExecutesOnLoadUntrusted => "executes_on_load_untrusted",
+            PackageRejectionCode::EnvironmentInert => "environment_inert",
             PackageRejectionCode::CapabilityReserved => "capability_reserved",
         }
     }
@@ -249,7 +264,7 @@ pub fn warning_required(from: &str, to: &str) -> bool {
 /// Reproduced into `corpus/vocabulary/closed-sets.json`, so an edition that gained a variant the
 /// reference does not have — or lost one it does — fails on the first run rather than on the first
 /// case somebody happens to write for it.
-pub const PACKAGE_REJECTION_CODES: [PackageRejectionCode; 15] = [
+pub const PACKAGE_REJECTION_CODES: [PackageRejectionCode; 16] = [
     PackageRejectionCode::Unsigned,
     PackageRejectionCode::SignatureFailed,
     PackageRejectionCode::SignatureUntrusted,
@@ -265,6 +280,7 @@ pub const PACKAGE_REJECTION_CODES: [PackageRejectionCode; 15] = [
     PackageRejectionCode::OsTooOld,
     PackageRejectionCode::TransportRefused,
     PackageRejectionCode::ExecutesOnLoadUntrusted,
+    PackageRejectionCode::EnvironmentInert,
 ];
 
 /// Every signature state.
@@ -340,6 +356,14 @@ pub struct DeviceCapacity {
     pub denied: Vec<String>,
     /// What is already installed.
     pub installed: Vec<InstalledPackage>,
+    /// Whether the loaded RHAL driver is a simulator (§35.3, §70).
+    ///
+    /// A `bool` rather than an `Option<bool>`, and that is the specification's decision rather than
+    /// a convenience: absent means `false`, because a real robot should not have to declare what it
+    /// is not and the obligation to declare sits on the simulator driver. The asymmetry is
+    /// deliberate — a simulator presented as a robot is the failure; a robot presented as a robot
+    /// is not.
+    pub simulator: bool,
 }
 
 /// What is known about a package's release signature.
@@ -488,6 +512,27 @@ pub fn admit_package(params: &AdmissionParams) -> AdmissionResult {
                 "A {} package may not run unsandboxed. Only drivers touch hardware directly.",
                 manifest.kind
             ),
+            subjects: None,
+        });
+    }
+
+    // §55.1. An environment manifest carries simulators, a scene, assets, tasks, randomisation and
+    // physics and render rates: all of it describes a simulated world, and only a simulator RHAL
+    // driver can load one.
+    //
+    // A warning rather than an error, because installing it is not dangerous and refusing it would
+    // stop an operator staging a package onto a robot they are about to point at a simulator. What
+    // is not acceptable is silence — a package that will never do anything, sitting installed,
+    // looking exactly like one that works.
+    //
+    // Its capability requirements are checked either way, below and without reference to the kind,
+    // "since an environment that needs a gripper is not runnable by a robot without one in sim
+    // either".
+    if manifest.kind == "environment" && !capacity.simulator {
+        findings.push(PackageFinding {
+            code: PackageRejectionCode::EnvironmentInert,
+            severity: Severity::Warning,
+            message: "An environment describes a simulated world, and no simulator driver is loaded on this robot. It will install, and nothing will ever load it.".to_string(),
             subjects: None,
         });
     }
@@ -736,6 +781,7 @@ fn compare_versions(a: &str, b: &str) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     #[test]
     fn versions_compare_by_numeric_segment() {
@@ -747,5 +793,97 @@ mod tests {
             0,
             "absent segments are zero"
         );
+    }
+
+    fn capacity(simulator: bool) -> DeviceCapacity {
+        DeviceCapacity {
+            ram_mb: 8192.0,
+            vram_mb: Some(8192.0),
+            cpu_cores: Some(6.0),
+            disk_mb: Some(65536.0),
+            os_version: "1.2.0".to_string(),
+            capabilities: vec!["manipulation.grasp".to_string()],
+            extensions: Vec::new(),
+            granted: vec!["manipulation.grasp".to_string()],
+            denied: Vec::new(),
+            installed: Vec::new(),
+            simulator,
+        }
+    }
+
+    fn manifest(kind: &str) -> PackageManifest {
+        PackageManifest {
+            schema_version: 1,
+            id: "acme/cell".to_string(),
+            version: "1.0.0".to_string(),
+            kind: kind.to_string(),
+            digest: "sha256:pkg".to_string(),
+            isolation: "sandboxed".to_string(),
+            budget: ResourceBudget {
+                ram_mb: 512.0,
+                ..ResourceBudget::default()
+            },
+            embodiment: EmbodimentRequirement {
+                capabilities: vec!["manipulation.grasp".to_string()],
+                extensions: Vec::new(),
+                control_mode: "torque".to_string(),
+                min_dof: None,
+                base_kinds: Vec::new(),
+                verified_on: Vec::new(),
+            },
+            requests: vec!["manipulation.grasp".to_string()],
+            runtime: None,
+            depends_on: Vec::new(),
+            min_os_version: None,
+        }
+    }
+
+    fn admit(kind: &str, simulator: bool) -> AdmissionResult {
+        admit_package(&AdmissionParams {
+            manifest: manifest(kind),
+            capacity: capacity(simulator),
+            signature: SignatureState::Verified,
+            observed_digest: "sha256:pkg".to_string(),
+            transport_verdict: None,
+            executes_on_load: false,
+            trust_remote_code: false,
+        })
+    }
+
+    /// §55.1. An environment is a simulation artifact, and a robot with no simulator driver will
+    /// never load one — so the OS says so rather than accepting it silently.
+    #[test]
+    fn an_environment_on_a_physical_robot_is_reported_inert() {
+        let result = admit("environment", false);
+        // A warning, not a refusal: installing it is not dangerous, and refusing would stop an
+        // operator staging a package onto a robot they are about to point at a simulator.
+        assert!(result.admitted);
+        assert_eq!(result.findings.len(), 1);
+        assert_eq!(
+            result.findings[0].code,
+            PackageRejectionCode::EnvironmentInert
+        );
+        assert_eq!(result.findings[0].severity, Severity::Warning);
+    }
+
+    #[test]
+    fn an_environment_on_a_simulator_is_ordinary() {
+        assert!(admit("environment", true).findings.is_empty());
+    }
+
+    /// The flag changes nothing for any other kind. A simulator is a robot as far as admission is
+    /// concerned, which is the point of §35.3: the thing being tested has to be the thing that
+    /// ships.
+    #[test]
+    fn the_simulator_flag_touches_no_other_kind() {
+        for kind in ["policy", "skill", "driver", "service", "embodiment"] {
+            // `driver` is the only kind permitted `native`, and this manifest is sandboxed, so
+            // every one of these is a clean install either way.
+            assert!(
+                admit(kind, true).findings.is_empty(),
+                "{kind} on a simulator"
+            );
+            assert!(admit(kind, false).findings.is_empty(), "{kind} on a robot");
+        }
     }
 }
