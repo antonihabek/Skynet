@@ -1,0 +1,196 @@
+{
+  "corpus": "cell",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "facts-and-volumes",
+      "note": "Both projections of one document: the facts a precondition reads as `env.*`, and the layer the workspace guard reads. Pinned together because they are two views of one thing and an edition that agreed about one could disagree about the other.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"]},\"layer\":{\"name\":\"cell:bay-3\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.6,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]}}"
+    },
+    {
+      "id": "derived-facts-are-always-there",
+      "note": "`env.cell` and `env.fixtures` come from the cell rather than from its facts, so a precondition can rely on them on a cell whose operator declared nothing.",
+      "input": {
+        "cell": {
+          "name": "bay-4",
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin"
+            }
+          ]
+        }
+      },
+      "expected": "{\"env\":{\"cell\":\"bay-4\",\"fixtures\":[\"jig-a\",\"bin\"]},\"layer\":null}"
+    },
+    {
+      "id": "an-unusable-key-does-not-reach-the-context",
+      "note": "The fault is reported and the fact is dropped. Passing it through would put a key in the context that no path can name, which is a fact that exists and cannot be read — worse than one that is missing, because it looks present in the document.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door.closed": true,
+            "door_open": false
+          }
+        }
+      },
+      "expected": "{\"env\":{\"cell\":\"bay-3\",\"door_open\":false,\"fixtures\":[]},\"layer\":null}"
+    },
+    {
+      "id": "a-shadowing-fact-does-not-win",
+      "note": "The derived fact is the one a precondition gets.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "cell": "somewhere-else"
+          }
+        }
+      },
+      "expected": "{\"env\":{\"cell\":\"bay-3\",\"fixtures\":[]},\"layer\":null}"
+    },
+    {
+      "id": "a-cell-that-draws-nothing-adds-no-layer",
+      "note": "Not the same as a cell that allows nothing. An empty layer would forbid every frame it named, and a site that has not yet measured its cell would find the robot refusing to move with no volume anywhere to explain why.",
+      "input": {
+        "cell": {
+          "name": "bay-4"
+        }
+      },
+      "expected": "{\"env\":{\"cell\":\"bay-4\",\"fixtures\":[]},\"layer\":null}"
+    },
+    {
+      "id": "an-unusable-volume-is-not-in-the-layer",
+      "note": "It is reported by `validateCell` and it is not handed to the guard, because a shape the kernel cannot evaluate is not a constraint. The usable one beside it still is.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            },
+            {
+              "frame": "base",
+              "shape": {
+                "kind": "sphere",
+                "centre": [
+                  0,
+                  0,
+                  0
+                ],
+                "radius_m": 0
+              }
+            }
+          ]
+        }
+      },
+      "expected": "{\"env\":{\"cell\":\"bay-3\",\"fixtures\":[]},\"layer\":{\"name\":\"cell:bay-3\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.6,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]}}"
+    },
+    {
+      "id": "every-volume-unusable-means-no-layer",
+      "note": "And when nothing survives, there is no layer rather than an empty one — the same distinction again, arrived at from the other direction.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "allowed": [
+            {
+              "frame": "",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "expected": "{\"env\":{\"cell\":\"bay-3\",\"fixtures\":[]},\"layer\":null}"
+    }
+  ]
+}

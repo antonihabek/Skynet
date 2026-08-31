@@ -1,0 +1,847 @@
+{
+  "corpus": "skill",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "prose-refuses",
+      "note": "What every skill published before §54.2 carries. Three sentences, no predicates, and prose does not stop a robot — so all three are unenforceable and the skill is refused. The report is the publisher’s to-do list rather than one verdict, which is the point of listing them.",
+      "input": {
+        "published": [
+          "The gripper is empty",
+          "The cell door is closed",
+          "The workpiece is in the jig"
+        ],
+        "operator": [],
+        "context": {
+          "robot": {
+            "tier": "host",
+            "state": {
+              "battery_percent": 62,
+              "gripper": "open",
+              "mode": "idle"
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true
+              },
+              "torque": {
+                "valid": false
+              }
+            }
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a"
+          }
+        },
+        "phase": "entry"
+      },
+      "expected": "{\"permitted\":false,\"phase\":\"entry\",\"refused\":{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unenforceable\",\"path\":null,\"reason\":null,\"statement\":\"The gripper is empty\"},\"results\":[{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unenforceable\",\"path\":null,\"reason\":null,\"statement\":\"The gripper is empty\"},{\"hold\":false,\"index\":1,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unenforceable\",\"path\":null,\"reason\":null,\"statement\":\"The cell door is closed\"},{\"hold\":false,\"index\":2,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unenforceable\",\"path\":null,\"reason\":null,\"statement\":\"The workpiece is in the jig\"}],\"unenforceable\":3}"
+    },
+    {
+      "id": "predicates-hold",
+      "note": "The same three preconditions, expressed as predicates. This is what §54.2 asks a publisher for.",
+      "input": {
+        "published": [
+          {
+            "statement": "The gripper is empty",
+            "predicate": {
+              "op": "eq",
+              "path": "robot.state.gripper",
+              "value": "open"
+            }
+          },
+          {
+            "statement": "The cell door is closed",
+            "predicate": {
+              "op": "eq",
+              "path": "env.door_closed",
+              "value": true
+            }
+          },
+          {
+            "statement": "Kinematic calibration is valid",
+            "predicate": {
+              "op": "eq",
+              "path": "robot.calibration.kinematic.valid",
+              "value": true
+            }
+          }
+        ],
+        "operator": [],
+        "context": {
+          "robot": {
+            "tier": "host",
+            "state": {
+              "battery_percent": 62,
+              "gripper": "open",
+              "mode": "idle"
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true
+              },
+              "torque": {
+                "valid": false
+              }
+            }
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a"
+          }
+        },
+        "phase": "entry"
+      },
+      "expected": "{\"permitted\":true,\"phase\":\"entry\",\"refused\":null,\"results\":[{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"statement\":\"The gripper is empty\"},{\"hold\":false,\"index\":1,\"op\":null,\"origin\":\"skill\",\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"statement\":\"The cell door is closed\"},{\"hold\":false,\"index\":2,\"op\":null,\"origin\":\"skill\",\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"statement\":\"Kinematic calibration is valid\"}],\"unenforceable\":0}"
+    },
+    {
+      "id": "a-precondition-that-is-false",
+      "note": "The ordinary refusal: the world is not ready. The remedy is to change the world.",
+      "input": {
+        "published": [
+          {
+            "statement": "Torque calibration is valid",
+            "predicate": {
+              "op": "eq",
+              "path": "robot.calibration.torque.valid",
+              "value": true
+            }
+          }
+        ],
+        "operator": [],
+        "context": {
+          "robot": {
+            "tier": "host",
+            "state": {
+              "battery_percent": 62,
+              "gripper": "open",
+              "mode": "idle"
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true
+              },
+              "torque": {
+                "valid": false
+              }
+            }
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a"
+          }
+        },
+        "phase": "entry"
+      },
+      "expected": "{\"permitted\":false,\"phase\":\"entry\",\"refused\":{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"statement\":\"Torque calibration is valid\"},\"results\":[{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"statement\":\"Torque calibration is valid\"}],\"unenforceable\":0}"
+    },
+    {
+      "id": "a-precondition-that-cannot-be-evaluated",
+      "note": "The refusal §54.2 exists for, and a different sentence with a different remedy: this manifest names something this robot does not expose, so the path is named and the publisher is the one who has to hear about it.",
+      "input": {
+        "published": [
+          {
+            "statement": "Payload is under 5 kg",
+            "predicate": {
+              "op": "lte",
+              "path": "robot.state.payload_kg",
+              "value": 5
+            }
+          }
+        ],
+        "operator": [],
+        "context": {
+          "robot": {
+            "tier": "host",
+            "state": {
+              "battery_percent": 62,
+              "gripper": "open",
+              "mode": "idle"
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true
+              },
+              "torque": {
+                "valid": false
+              }
+            }
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a"
+          }
+        },
+        "phase": "entry"
+      },
+      "expected": "{\"permitted\":false,\"phase\":\"entry\",\"refused\":{\"hold\":false,\"index\":0,\"op\":\"lte\",\"origin\":\"skill\",\"outcome\":\"unevaluable\",\"path\":\"robot.state.payload_kg\",\"reason\":\"unresolved_path\",\"statement\":\"Payload is under 5 kg\"},\"results\":[{\"hold\":false,\"index\":0,\"op\":\"lte\",\"origin\":\"skill\",\"outcome\":\"unevaluable\",\"path\":\"robot.state.payload_kg\",\"reason\":\"unresolved_path\",\"statement\":\"Payload is under 5 kg\"}],\"unenforceable\":0}"
+    },
+    {
+      "id": "every-clause-is-reported-not-just-the-first",
+      "note": "Four clauses, three of them wrong in three different ways. An operator fixing them one attempt at a time is the failure `admitPackage` already refuses to cause, so all four are evaluated and `refused` names the first.",
+      "input": {
+        "published": [
+          {
+            "statement": "Battery above reserve",
+            "predicate": {
+              "op": "gte",
+              "path": "robot.state.battery_percent",
+              "value": 20
+            }
+          },
+          {
+            "statement": "Torque calibration is valid",
+            "predicate": {
+              "op": "eq",
+              "path": "robot.calibration.torque.valid",
+              "value": true
+            }
+          },
+          {
+            "statement": "Payload is under 5 kg",
+            "predicate": {
+              "op": "lte",
+              "path": "robot.state.payload_kg",
+              "value": 5
+            }
+          },
+          "The workpiece is in the jig"
+        ],
+        "operator": [],
+        "context": {
+          "robot": {
+            "tier": "host",
+            "state": {
+              "battery_percent": 62,
+              "gripper": "open",
+              "mode": "idle"
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true
+              },
+              "torque": {
+                "valid": false
+              }
+            }
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a"
+          }
+        },
+        "phase": "entry"
+      },
+      "expected": "{\"permitted\":false,\"phase\":\"entry\",\"refused\":{\"hold\":false,\"index\":1,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"statement\":\"Torque calibration is valid\"},\"results\":[{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"statement\":\"Battery above reserve\"},{\"hold\":false,\"index\":1,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"statement\":\"Torque calibration is valid\"},{\"hold\":false,\"index\":2,\"op\":\"lte\",\"origin\":\"skill\",\"outcome\":\"unevaluable\",\"path\":\"robot.state.payload_kg\",\"reason\":\"unresolved_path\",\"statement\":\"Payload is under 5 kg\"},{\"hold\":false,\"index\":3,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unenforceable\",\"path\":null,\"reason\":null,\"statement\":\"The workpiece is in the jig\"}],\"unenforceable\":1}"
+    },
+    {
+      "id": "the-operator-adds-one",
+      "note": "§54.2’s third rule: a site can require \"door closed\" on a skill whose publisher never imagined that cell. The site’s clause is appended, carries `operator` as its origin, and is evaluated exactly like the publisher’s.",
+      "input": {
+        "published": [
+          {
+            "statement": "Gripper open",
+            "predicate": {
+              "op": "eq",
+              "path": "robot.state.gripper",
+              "value": "open"
+            }
+          }
+        ],
+        "operator": [
+          {
+            "statement": "Fixture B is loaded",
+            "predicate": {
+              "op": "eq",
+              "path": "env.fixture",
+              "value": "jig-b"
+            }
+          }
+        ],
+        "context": {
+          "robot": {
+            "tier": "host",
+            "state": {
+              "battery_percent": 62,
+              "gripper": "open",
+              "mode": "idle"
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true
+              },
+              "torque": {
+                "valid": false
+              }
+            }
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a"
+          }
+        },
+        "phase": "entry"
+      },
+      "expected": "{\"permitted\":false,\"phase\":\"entry\",\"refused\":{\"hold\":false,\"index\":1,\"op\":null,\"origin\":\"operator\",\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"statement\":\"Fixture B is loaded\"},\"results\":[{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"statement\":\"Gripper open\"},{\"hold\":false,\"index\":1,\"op\":null,\"origin\":\"operator\",\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"statement\":\"Fixture B is loaded\"}],\"unenforceable\":0}"
+    },
+    {
+      "id": "the-skill-cannot-remove-one",
+      "note": "The other half of the same rule, and the reason it needs no enforcement code: the operator’s list is only ever appended, so the result is never shorter than the publisher’s. An empty operator list changes nothing, and there is no spelling of one that could.",
+      "input": {
+        "published": [
+          {
+            "statement": "Gripper open",
+            "predicate": {
+              "op": "eq",
+              "path": "robot.state.gripper",
+              "value": "open"
+            }
+          },
+          {
+            "statement": "Door closed",
+            "predicate": {
+              "op": "eq",
+              "path": "env.door_closed",
+              "value": true
+            }
+          }
+        ],
+        "operator": [],
+        "context": {
+          "robot": {
+            "tier": "host",
+            "state": {
+              "battery_percent": 62,
+              "gripper": "open",
+              "mode": "idle"
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true
+              },
+              "torque": {
+                "valid": false
+              }
+            }
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a"
+          }
+        },
+        "phase": "entry"
+      },
+      "expected": "{\"permitted\":true,\"phase\":\"entry\",\"refused\":null,\"results\":[{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"statement\":\"Gripper open\"},{\"hold\":false,\"index\":1,\"op\":null,\"origin\":\"skill\",\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"statement\":\"Door closed\"}],\"unenforceable\":0}"
+    },
+    {
+      "id": "nothing-declared",
+      "note": "A skill with no preconditions is not a skill that fails them.",
+      "input": {
+        "published": [],
+        "operator": [],
+        "context": {
+          "robot": {
+            "tier": "host",
+            "state": {
+              "battery_percent": 62,
+              "gripper": "open",
+              "mode": "idle"
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true
+              },
+              "torque": {
+                "valid": false
+              }
+            }
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a"
+          }
+        },
+        "phase": "entry"
+      },
+      "expected": "{\"permitted\":true,\"phase\":\"entry\",\"refused\":null,\"results\":[],\"unenforceable\":0}"
+    },
+    {
+      "id": "hold-subset-at-entry",
+      "note": "§54.2’s second rule, first half: at entry every clause is evaluated, marked or not.",
+      "input": {
+        "published": [
+          {
+            "statement": "Gripper open",
+            "predicate": {
+              "op": "eq",
+              "path": "robot.state.gripper",
+              "value": "open"
+            }
+          },
+          {
+            "statement": "Battery above reserve",
+            "predicate": {
+              "op": "gte",
+              "path": "robot.state.battery_percent",
+              "value": 20
+            },
+            "hold": true
+          }
+        ],
+        "operator": [],
+        "context": {
+          "robot": {
+            "tier": "host",
+            "state": {
+              "battery_percent": 62,
+              "gripper": "open",
+              "mode": "idle"
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true
+              },
+              "torque": {
+                "valid": false
+              }
+            }
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a"
+          }
+        },
+        "phase": "entry"
+      },
+      "expected": "{\"permitted\":true,\"phase\":\"entry\",\"refused\":null,\"results\":[{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"statement\":\"Gripper open\"},{\"hold\":true,\"index\":1,\"op\":null,\"origin\":\"skill\",\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"statement\":\"Battery above reserve\"}],\"unenforceable\":0}"
+    },
+    {
+      "id": "hold-subset-every-cycle",
+      "note": "And the second half: the cycle re-check evaluates only the marked one. \"Battery dropping below reserve mid-skill should stop the skill, not be discovered at the end\" — and the gripper, which the skill itself closed on purpose, is not re-asked.",
+      "input": {
+        "published": [
+          {
+            "statement": "Gripper open",
+            "predicate": {
+              "op": "eq",
+              "path": "robot.state.gripper",
+              "value": "open"
+            }
+          },
+          {
+            "statement": "Battery above reserve",
+            "predicate": {
+              "op": "gte",
+              "path": "robot.state.battery_percent",
+              "value": 20
+            },
+            "hold": true
+          }
+        ],
+        "operator": [],
+        "context": {
+          "robot": {
+            "tier": "host",
+            "state": {
+              "battery_percent": 62,
+              "gripper": "open",
+              "mode": "idle"
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true
+              },
+              "torque": {
+                "valid": false
+              }
+            }
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a"
+          }
+        },
+        "phase": "hold"
+      },
+      "expected": "{\"permitted\":true,\"phase\":\"hold\",\"refused\":null,\"results\":[{\"hold\":true,\"index\":1,\"op\":null,\"origin\":\"skill\",\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"statement\":\"Battery above reserve\"}],\"unenforceable\":0}"
+    },
+    {
+      "id": "hold-with-nothing-marked",
+      "note": "A skill whose author marked nothing has nothing re-checked, and the cycle permits it. That is a publisher’s decision rather than a gap: the entry check still ran.",
+      "input": {
+        "published": [
+          {
+            "statement": "Gripper open",
+            "predicate": {
+              "op": "eq",
+              "path": "robot.state.gripper",
+              "value": "open"
+            }
+          }
+        ],
+        "operator": [],
+        "context": {
+          "robot": {
+            "tier": "host",
+            "state": {
+              "battery_percent": 62,
+              "gripper": "open",
+              "mode": "idle"
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true
+              },
+              "torque": {
+                "valid": false
+              }
+            }
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a"
+          }
+        },
+        "phase": "hold"
+      },
+      "expected": "{\"permitted\":true,\"phase\":\"hold\",\"refused\":null,\"results\":[],\"unenforceable\":0}"
+    },
+    {
+      "id": "hold-loses-the-battery",
+      "note": "The scenario §54.2 describes, at the moment it matters: the same marked clause, one cycle after the battery fell through reserve.",
+      "input": {
+        "published": [
+          {
+            "statement": "Gripper open",
+            "predicate": {
+              "op": "eq",
+              "path": "robot.state.gripper",
+              "value": "open"
+            }
+          },
+          {
+            "statement": "Battery above reserve",
+            "predicate": {
+              "op": "gte",
+              "path": "robot.state.battery_percent",
+              "value": 20
+            },
+            "hold": true
+          }
+        ],
+        "operator": [],
+        "context": {
+          "robot": {
+            "tier": "host",
+            "state": {
+              "battery_percent": 12,
+              "gripper": "open",
+              "mode": "idle"
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true
+              },
+              "torque": {
+                "valid": false
+              }
+            }
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a"
+          }
+        },
+        "phase": "hold"
+      },
+      "expected": "{\"permitted\":false,\"phase\":\"hold\",\"refused\":{\"hold\":true,\"index\":1,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"statement\":\"Battery above reserve\"},\"results\":[{\"hold\":true,\"index\":1,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"statement\":\"Battery above reserve\"}],\"unenforceable\":0}"
+    },
+    {
+      "id": "a-predicate-that-is-a-number",
+      "note": "Not a predicate. The reference reaches it through `value && typeof value === \"object\"`, so a number there means the clause is unenforceable rather than malformed — the author wrote no predicate, they did not write a broken one.",
+      "input": {
+        "published": [
+          {
+            "statement": "Something",
+            "predicate": 5
+          }
+        ],
+        "operator": [],
+        "context": {
+          "robot": {
+            "tier": "host",
+            "state": {
+              "battery_percent": 62,
+              "gripper": "open",
+              "mode": "idle"
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true
+              },
+              "torque": {
+                "valid": false
+              }
+            }
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a"
+          }
+        },
+        "phase": "entry"
+      },
+      "expected": "{\"permitted\":false,\"phase\":\"entry\",\"refused\":{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unenforceable\",\"path\":null,\"reason\":null,\"statement\":\"Something\"},\"results\":[{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unenforceable\",\"path\":null,\"reason\":null,\"statement\":\"Something\"}],\"unenforceable\":1}"
+    },
+    {
+      "id": "a-predicate-that-is-an-array",
+      "note": "And the case on the other side of that line: an array *is* an object to JavaScript, so it reaches the evaluator, which answers malformed. A broken predicate and an absent one are different reports because they have different authors.",
+      "input": {
+        "published": [
+          {
+            "statement": "Something",
+            "predicate": [
+              "op"
+            ]
+          }
+        ],
+        "operator": [],
+        "context": {
+          "robot": {
+            "tier": "host",
+            "state": {
+              "battery_percent": 62,
+              "gripper": "open",
+              "mode": "idle"
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true
+              },
+              "torque": {
+                "valid": false
+              }
+            }
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a"
+          }
+        },
+        "phase": "entry"
+      },
+      "expected": "{\"permitted\":false,\"phase\":\"entry\",\"refused\":{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unevaluable\",\"path\":null,\"reason\":\"malformed\",\"statement\":\"Something\"},\"results\":[{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unevaluable\",\"path\":null,\"reason\":\"malformed\",\"statement\":\"Something\"}],\"unenforceable\":0}"
+    },
+    {
+      "id": "a-clause-with-no-statement",
+      "note": "The sentence is what an operator reads, and a clause without one is still evaluated — reporting nothing would hide a refusal.",
+      "input": {
+        "published": [
+          {
+            "predicate": {
+              "op": "eq",
+              "path": "robot.state.mode",
+              "value": "estop"
+            }
+          }
+        ],
+        "operator": [],
+        "context": {
+          "robot": {
+            "tier": "host",
+            "state": {
+              "battery_percent": 62,
+              "gripper": "open",
+              "mode": "idle"
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true
+              },
+              "torque": {
+                "valid": false
+              }
+            }
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a"
+          }
+        },
+        "phase": "entry"
+      },
+      "expected": "{\"permitted\":false,\"phase\":\"entry\",\"refused\":{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"statement\":\"\"},\"results\":[{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"statement\":\"\"}],\"unenforceable\":0}"
+    },
+    {
+      "id": "entries-that-are-not-clauses",
+      "note": "A null and a number in the list are skipped rather than invented into empty clauses.",
+      "input": {
+        "published": [
+          null,
+          42,
+          "Prose survives"
+        ],
+        "operator": [],
+        "context": {
+          "robot": {
+            "tier": "host",
+            "state": {
+              "battery_percent": 62,
+              "gripper": "open",
+              "mode": "idle"
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true
+              },
+              "torque": {
+                "valid": false
+              }
+            }
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a"
+          }
+        },
+        "phase": "entry"
+      },
+      "expected": "{\"permitted\":false,\"phase\":\"entry\",\"refused\":{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unenforceable\",\"path\":null,\"reason\":null,\"statement\":\"Prose survives\"},\"results\":[{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unenforceable\",\"path\":null,\"reason\":null,\"statement\":\"Prose survives\"}],\"unenforceable\":1}"
+    },
+    {
+      "id": "preconditions-that-are-not-a-list",
+      "note": "Neither is a string a list of clauses.",
+      "input": {
+        "published": "the door is closed",
+        "operator": [],
+        "context": {
+          "robot": {
+            "tier": "host",
+            "state": {
+              "battery_percent": 62,
+              "gripper": "open",
+              "mode": "idle"
+            },
+            "guards": {
+              "active": [
+                "workspace",
+                "collision"
+              ]
+            },
+            "calibration": {
+              "kinematic": {
+                "valid": true
+              },
+              "torque": {
+                "valid": false
+              }
+            }
+          },
+          "env": {
+            "door_closed": true,
+            "fixture": "jig-a"
+          }
+        },
+        "phase": "entry"
+      },
+      "expected": "{\"permitted\":true,\"phase\":\"entry\",\"refused\":null,\"results\":[],\"unenforceable\":0}"
+    }
+  ]
+}

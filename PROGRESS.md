@@ -5160,3 +5160,529 @@ loader's territory, not a gap in POST.
 
 Neither repository has been committed or pushed. Both trees are clean of build artifacts and every
 check above was run against the working tree as it stands.
+
+---
+
+## 2026-08-31 (seventeenth) — §54, §55, §64 and §65: the Parts IV–VI pass finished, and the engine stops turning ignorance into a pass
+
+The last session examined §54 and deliberately did not start it, writing down the design decision so
+this one could begin from the decision rather than from the specification. That is what happened.
+The piece was scoped there as *"roughly seven hundred lines across two repositories, touching the
+Hub's most-imported module"*, and that estimate was close: about 1,900 lines with the corpus and the
+comments, across both.
+
+What the scoping note did not predict is the rest of this entry. **Moving one function from an
+application into a contract found four defects in it**, three of which had been shipping for
+months, and the fourth of which is a decision the specification had never been asked to make. None
+of them were found by looking for defects. They were found because a second edition has to
+reproduce the first exactly, and "exactly" is a question nobody asks a function until somebody has
+to write it twice.
+
+### What §54.2 asks for, and why it needed a session
+
+> `preconditions` in `SkillManifest` is a list of strings — human prose describing what must hold
+> before the skill is safe. Prose is documentation, and documentation does not stop a robot. So
+> preconditions become **predicates**, and they are evaluated by the OS before the skill is allowed
+> to start.
+
+§54.2 says this *"needs no new machinery"* because the Hub already has a pure predicate engine. That
+sentence is true of the Hub and false of the robot, which is §31.2's condition exactly: *a format
+with two implementations of its own definition is not a format.* So the engine moved.
+
+| | Before | After |
+|---|---|---|
+| Definition | `lib/skynet/compatibility/predicate.ts` | `reference/typescript/predicate.ts` |
+| Hub's copy | that file | `lib/skynet/os/predicate.ts`, mirrored, with the old path a re-export |
+| Rust | did not exist | `crates/skynet-contracts/src/predicate.rs` |
+| Held together by | nothing | `corpus/predicate/evaluate.json`, 83 cases |
+
+`semver.ts` came with it, for the same reason and with a sharper edge: `semver_satisfies` is one of
+the operators, the Rust workspace had **no range satisfaction at all** — `compare_versions` in
+`admission.rs` compares two versions and cannot read `^1.2.0` — and a robot deciding whether its
+runtime satisfies a skill's window differently from the Hub that sold it the skill is the failure
+in its most expensive form.
+
+The mirror set is now **ten** modules rather than eight, and `predicate` and `semver` are the first
+two that arrived *from* the Hub rather than from here.
+
+### The design decision: one evaluator, and the boolean is a view of it
+
+The last session recorded the shape and the constraint. The shape: the Hub's engine is total and
+boolean, which is right for a marketplace check and cannot express what §54.2 asks — *"a
+precondition that cannot be evaluated refuses the skill, naming the path that was unresolvable"*.
+`false` refuses, which is the right direction, but it collapses **"the world is not ready"** and
+**"this manifest names something this robot does not expose"** into one answer, and those have
+different remedies: charge the battery, or tell the publisher.
+
+The constraint was `satisfied(outcome)` having to equal the Hub's boolean for every corpus case. The
+implementation went one better than checking that: **there is one evaluator, and `evaluatePredicate`
+is `satisfied(…)` of it.** The refinement cannot become a second opinion because there is nothing
+for it to disagree with, and the corpus freezes *both* answers in every case so an edition that
+quietly reimplemented one of them is caught disagreeing with itself rather than with the corpus.
+
+Three values, and one closed vocabulary of seven reasons — `malformed`, `unknown_op`,
+`missing_path`, `missing_operand`, `unresolved_path`, `not_a_number`, `not_a_version` — because
+§54.2 requires a refusal to *name* something, and a free-text reason is the same nothing as a
+free-text precondition. All three sets are in `corpus/vocabulary/closed-sets.json`, which is what
+the last session added the vocabulary corpus for.
+
+### Finding: the engine was reporting ignorance as a pass, in five shapes
+
+Deriving the boolean changed answers, and the change was not incidental — it is the finding.
+
+| Input | Was | Is |
+|---|---|---|
+| `not` over a predicate whose path does not resolve | `true` | refused |
+| `not` with no operand at all | `true` | refused |
+| `neq` against a path that does not resolve | `true` | refused |
+| `eq` where neither side resolves — `undefined === undefined` | `true` | refused |
+| `includes_all` / `includes_any` whose `__ref` does not resolve | `true` | refused |
+
+Every one of these is JavaScript's `undefined` arriving somewhere that reads it as a fact: at `!`,
+at `!==`, and at `[].every(…)`, which is *true* over an empty list. The consequences are not
+theoretical:
+
+* `not(eq(robot.mode, "estop"))` — "the robot is not in emergency stop" — **passed on a robot that
+  had never reported a mode.**
+* `includes_all(robot.capabilities, {__ref: subject.required_capabilities})` — the example in the
+  module's own documentation, and the built-in rule the platform's compatibility answer rests on —
+  **passed when the policy's capability list was missing.**
+
+A rule that passes because a fact is absent is worse than one that fails, because nobody goes
+looking for it. The direction of every change is the same, and it was checked rather than asserted:
+a differential harness ran the old engine and the new one over **4,283 predicates × 7 contexts =
+29,981 evaluations**.
+
+```
+agreed:       23,378
+true → false:  6,567
+false → true:      36   — every one of them naming a JavaScript host property
+semver:  120 satisfaction pairs, 0 diverged
+```
+
+`exists` is the escape hatch and always was: it is the one operator whose job is to ask whether a
+path resolves, so it answers *unsatisfied* rather than *unevaluable*, `not(exists(p))` still means
+what its author meant, and an author who wants "absent counts as false" writes
+`and(exists(p), includes(p, x))` — which is what the built-in rules already do. Nearly all of them.
+
+### Finding: one built-in rule was resting on the vacuous truth
+
+`adapter-implements-required-capabilities` asks whether the adapter covers
+`subject.required_capabilities`, and guarded that with `exists(adapter.id)` — the adapter half, and
+not the subject half. Its sibling two entries above, `robot-capabilities-cover-policy`, guards the
+subject half. So with no subject in the context the reference resolved to nothing, `includes_all`
+was vacuously true, and the rule **passed rather than being skipped**: a check that had nothing to
+check reporting that it had checked. Under the new engine the same input would have become a false
+alarm instead, which is how it was found.
+
+The guard its sibling already carried is now on it too. And because "no rule depends on a vacuous
+truth" is the kind of property that stops being true the next time somebody adds a rule, it is now
+a test: every built-in rule is run against the sparsest context the application ever assembles, and
+any rule reaching a verdict it could not evaluate fails the suite.
+
+### Finding: "total" was not true, and one bad database row could take the platform's compatibility check down
+
+The module's first paragraph has said since it was written that it *"never throws on a malformed
+rule, it returns false, because one bad rule row must not take down the compatibility check for
+every user."* Four shapes threw:
+
+```
+{"op":"eq","path":5}                → path.split is not a function
+{"op":"exists","path":["a"]}        → path.split is not a function
+{"op":"and","predicates":"nope"}    → (predicate.predicates ?? []).every is not a function
+{"op":"or","predicates":{"a":1}}    → (predicate.predicates ?? []).some is not a function
+```
+
+Rules are operator-supplied rows in `skynet_compatibility_rules` and `evaluateCompatibility` has no
+`try`, so this is the exact failure totality was claimed to prevent, reachable from a row somebody
+could save today. Both shapes are read defensively now.
+
+The `predicates` half needed a decision rather than a guard. *Absent* and *not a list* had to become
+different answers: absent is **no children**, and a conjunction over no children is satisfied — a
+skill declaring no preconditions does not fail them — while a `predicates` that is a string is a
+**broken rule**, and answering "no children" there would have turned a broken rule into a pass,
+which is the failure the whole change is about.
+
+### Decision: a path addresses a member of the document, and nothing else
+
+This one is a specification decision rather than a defect, and it is the one that moved 36 answers
+the other way.
+
+`readPath` walked JavaScript property access, so `capabilities.length` resolved to a number and
+`robot.constructor` resolved to a function. Neither is a member of the document. An edition without
+JavaScript arrays cannot reproduce either, and *a path vocabulary one edition can read is not a path
+vocabulary* — so a path now addresses object members and canonical decimal array indices, and
+nothing else. `"01"` is not an index, which is JavaScript's own answer for arrays; the prototype
+chain is unreachable, which is the right answer for a path composed by somebody else.
+
+The cost is stated rather than buried: **36 evaluations moved from `false` to `true`**, all of them
+a negation over a host property — `not(exists(caps.length))` was false when the array was non-empty
+and is true now that the path resolves to nothing. No built-in rule uses such a path. A rule row
+somebody wrote by hand might, and would now behave differently; that is the price of the vocabulary
+being one vocabulary, and it is cheaper paid now than after a second edition shipped.
+
+If a rule ever needs a count, the answer is an operator or a context field, not a JavaScript
+property that happens to be reachable.
+
+### `===` on two objects, written down instead of borrowed
+
+The subtlest part of porting, and it would have been silent drift in any edition that skipped it.
+`evaluatePredicate` compares with `===`, which on two objects is **reference equality** — so a
+literal array in a rule is never equal to anything, and two structurally identical arrays at
+different context paths are not equal either, while the *same path read twice* is. An implementation
+holding a parsed document has no references to compare, so the rule is now stated in the reference
+and reproduced in the Rust:
+
+> Two operands are identical when both are primitives and equal, or when both were read from the
+> **same path of the same context** — which is the only way two non-primitive operands can be one
+> object. A context whose object graph aliases is outside the specified domain, because a context
+> that arrived as JSON cannot express one.
+
+That generalises to membership: an element of a collection carries the path `collection.index`, so a
+needle read from `robot.guards.active.1` is the same object as element 1 of `robot.guards.active`,
+and both editions agree that it is.
+
+### The Rust edition, and the four places JavaScript had to be reproduced rather than improved
+
+No regex in `no_std`, so the semver parser and the range tokenizer are hand-written against the
+reference's two regular expressions. Four behaviours are deliberately not what a Rust author would
+write, and each is marked where it happens:
+
+* **Numeric components are `f64`**, because the reference reads them with `Number()`. A version with
+  twenty digits of major must round the same way in both editions rather than parsing in one.
+* **`compare_versions` answers "equal" when either side does not parse**, because the reference
+  does. A comparator returning an error here would make two editions order a malformed list
+  differently.
+* **JavaScript's whitespace set**, not `char::is_whitespace`. They differ on `U+FEFF`, which
+  `trim()` removes and Rust does not — a divergence that would have been found once, in the field,
+  by somebody who could not explain it. There are corpus cases for a non-breaking space and a
+  byte-order mark inside a range.
+* **The range tokenizer is a scan, not an anchored parse**, with the operator as an *ordered*
+  alternation that backtracks. So `v1.2.3` yields the token `1.2.3`, `1.2.3.4` yields `1.2.3`, and
+  `=>1.0.0` is read as the `>` at its second character. All three are corpus cases, because all
+  three are what a hand-written parser gets subtly and differently wrong.
+
+`Number(string)` is its own function — hex, octal and binary prefixes, `Infinity` rejected as
+non-finite, and Rust's own `inf` / `infinity` / `NaN` spellings refused because JavaScript does not
+accept them. A battery reported as `"17"` has to compare the same way on both sides of the platform.
+
+One asymmetry is deliberate and recorded: `sortVersionsDesc` and `nextVersion` are the Hub's
+presentation helpers, nothing on a robot sorts versions or invents one, and porting them would have
+added two functions no edition-level consumer calls. And `package.ts` keeps its own numeric-segment
+comparator for `min_os_version`, because an image reports `2.0` as often as `2.0.0` and a strict
+parser in that position would silently admit a package onto an older OS. Two comparators with two
+jobs, and both now say so.
+
+### §54.3, §54.4 and §54.5, which the predicate work had made cheap
+
+With the evaluator in place the rest of §54's *pure* half was a session rather than a week, and it
+went in: `reference/typescript/skill.ts` and `crates/skynet-contracts/src/skill.rs`, held together
+by 43 corpus cases across four files.
+
+**The substantive decision in it is an asymmetry, and it is worth stating on its own.** A
+precondition and a success criterion are the same shape — a sentence and a predicate — and the OS
+treats *not knowing* about them in opposite directions:
+
+| | Ignorance means |
+|---|---|
+| A precondition nobody can evaluate | **refuse** (§54.2: "Not 'assume true'") |
+| A criterion nobody can evaluate | **`unlabeled`**, never `failure` (§54.3: "Honest ignorance beats an invented pass") |
+
+That is not an inconsistency. Before the skill runs, ignorance is a reason not to act. After it
+runs, ignorance is a reason not to *claim* — and calling an unmeasured run a failure poisons a
+dataset exactly as thoroughly as calling it a success. Both halves are one `judgeClause`, and the
+difference is entirely in how the results are folded.
+
+The other decisions, each with its corpus case:
+
+* **Prose refuses.** `SkillManifest.preconditions` is `string[]`, and a sentence has no predicate,
+  so under §54.2's rule **every skill published today refuses.** That is the point rather than a
+  regression: a skill whose safety preconditions are sentences has not been made safe, it has been
+  described. The report lists each unenforceable statement separately rather than returning one
+  verdict, so it is a publisher's to-do list in the same way `evaluateReadiness`'s blockers are a
+  vendor's. What a *guest*-tier robot should do about a prose skill is a tier policy this contract
+  deliberately does not decide.
+* **The `hold` subset is a phase, not a flag on the answer.** `entry` evaluates every clause;
+  `hold` evaluates only the marked ones, which is what runs every cycle. The corpus pins the pair
+  over one clause list, and the moment §54.2 describes — the battery falling through reserve
+  mid-skill — is a case.
+* **The operator may add and cannot remove**, and that needed no enforcement code: the site's
+  clauses are appended, a removal would need a mechanism, and not building one *is* the
+  enforcement. Publisher's clauses come first so a refusal names the skill's own requirement before
+  the site's, which is what tells an operator whether to call the publisher or walk to the cell.
+* **Evidence of failure beats absence of evidence.** A false criterion outranks an unreadable one
+  even when the unreadable one comes first in the list — there is a corpus case whose whole purpose
+  is that ordering, because an edition taking the first non-satisfied clause would answer
+  `unlabeled` where the answer is `failure`.
+* **A skill that declares no success criteria is `unlabeled`, not `success`.** Scoring yourself by
+  declaring nothing is the same gaming §54.3 exists to stop.
+* **A skill that declares no duration reports that its timeout cannot be enforced**, rather than
+  being given a guessed ceiling. §54.4 says the OS enforces a timeout and does not say what to do
+  about a skill with no estimate; refusing it and permitting it are both defensible, and inventing
+  the answer inside a pure function is how a policy nobody agreed to becomes load-bearing.
+* **A cycle is refused at install with the chain named.** Depth-first in declaration order, so the
+  chain a fault names is reproducible — an edition iterating its edges differently would refuse the
+  same graphs and blame different skills, which is the half an operator reads. A diamond is not a
+  cycle, and there is a case for it, because an edition marking nodes globally visited rather than
+  tracking the current chain would refuse a legal graph.
+
+Two details cost more thought than their size suggests. A `predicate` field holding a **number** is
+an *absent* predicate (`value && typeof value === 'object'` never reaches it) while one holding an
+**array** is a *broken* one that reaches the evaluator and answers `malformed` — different reports,
+because they have different authors, and both are corpus cases. And `readCalls` exists in both
+editions so that malformed edges are discarded at the same boundary: a typed `SkillCall` in Rust
+cannot hold `{ "from": 5 }`, so filtering inside `validateComposition` would have meant the corpus
+case for a malformed edge was testing two different functions.
+
+### §55.1, and the package kind the OS did not have
+
+Recorded as a finding an hour before it was fixed, which is the right order: §55.1 says
+
+> **environments are loaded only by a simulator RHAL driver.** Installed onto a robot whose driver
+> is physical, an environment package is inert, and the OS says so rather than silently accepting
+> it. Its `required_capabilities` are still checked at admission, since an environment that needs a
+> gripper is not runnable by a robot without one in sim either.
+
+— and `PACKAGE_KINDS` was `policy | skill | driver | service | embodiment`. Saying so needed the
+kind to exist first, which is a vocabulary change across three editions and the corpus rather than
+an `if`.
+
+All three landed: `environment` in the kind vocabulary, `simulator` on `DeviceCapacity`, and
+`environment_inert` in the finding codes. Three decisions worth their sentences:
+
+* **A warning, not an error.** Installing an environment on a physical robot is not dangerous, and
+  refusing it would stop an operator staging a package onto a robot they are about to point at a
+  simulator. What is not acceptable is *silence* — a package that will never do anything, sitting
+  installed, looking exactly like one that works.
+* **`simulator` is a `bool` and absence means false**, which is §52's rule for the same flag on the
+  descriptor rather than this reader being lenient: a real robot should not have to declare what it
+  is not, the obligation sits on the simulator driver, and the asymmetry is deliberate because a
+  simulator presented as a robot is the failure while a robot presented as a robot is not.
+* **The daemon reads it from the descriptor**, so `skynetd-io` needed one line and it is the line
+  that connects §35.3's declaration to §55.1's decision. A body that is absent entirely is not a
+  simulator either, which is the conservative direction.
+
+The vocabulary corpus did its job on the way through: the change broke two cases —
+`package_rejection_codes` and `package_kinds` — **before** anything was regenerated, which is
+exactly the drift the last session added it to catch, seen from the other side.
+
+### §55.2, the cell descriptor — and a check that could not have existed a day earlier
+
+§55.1's other half. An environment is a simulation artifact; its real-world analogue is the **cell**
+— where the fixtures are, which volumes are forbidden, where the safe parking pose is, what the
+operator has declared about the space — and §55.2 refuses to make it a repo kind:
+
+> An environment is published, versioned and shared; a cell is site-specific, changes when somebody
+> moves a table, and is nobody's intellectual property. Making it a repo kind would invite people to
+> publish their factory layout to a marketplace, and would put safety-relevant workspace volumes
+> behind a fork-and-star workflow.
+
+So `cell.ts` and `cell.rs` have no publishing, no version and no digest. A cell is a profile document
+(§38) that does two jobs, and both are now pinned by `corpus/cell/`: it supplies **`env.*`** to
+§54.2's precondition context, and it supplies **allowed volumes** to the `workspace` guard as one
+layer of §38.2's stack.
+
+**The interesting part is a fault nothing could have found yesterday.** `env.*` is addressed by a
+dot path, so a fact written `{"door.closed": true}` is a fact **no precondition can ever name** —
+`env.door.closed` is the path to `closed` inside an object called `door`, and the two are different
+documents. It is the obvious way to write a hierarchical key for anybody who has not read
+`readPath`, it would have failed silently for ever, and it was not a *defect* until this session
+gave `env.*` a path vocabulary to be wrong in. `validateCell` refuses it, and refuses a key that
+would shadow `env.cell` or `env.fixtures` — a cell whose facts overwrote its own name would answer a
+precondition truthfully about the wrong thing.
+
+Four more decisions, each with its case:
+
+* **A cell that draws no volumes adds no layer**, which is not the same as a cell that allows
+  nothing. An empty layer would forbid every frame it named, and a site that has not yet measured
+  its cell would find the robot refusing to move with no volume anywhere to explain why.
+* **An unreadable volume is reported and withheld from the guard.** A workspace layer silently
+  missing the volume an operator drew is a robot with more room than anybody agreed to; a shape the
+  kernel cannot evaluate is not a constraint, and both facts have to be true at once.
+* **Every fault, not the first** — unlike `validateFrames` next door, and the difference is about
+  who is reading. A frame graph that does not form a tree cannot be analysed further; a cell's
+  problems are independent and an operator is editing it by hand, so `admitPackage`'s reason applies
+  unchanged.
+* **A cell with faults still produces a context.** Refusing to would mean a typo in a fixture name
+  took away the battery check as well, and §54.2 already has an answer for a fact that cannot be
+  read: the precondition naming it is refused, individually, with the path named.
+
+One port decision worth recording because it is invisible from either side alone: **fact keys are
+reported in sorted order in both editions.** A `Json::Obj` is a `BTreeMap` and has no insertion
+order to offer, so the reference sorts to match rather than reporting in the order somebody typed.
+That is the honest answer as well as the compatible one — a canonical JSON document's key order *is*
+sorted by the time either edition sees it.
+
+### The oracle had never been type-checked, and that is now a CI job
+
+Found while porting, in the most embarrassing way available: `reference/typescript/predicate.ts`
+imported `Predicate` from its own `types.ts`, **which did not export it**, and everything ran
+perfectly. Node 23 and later *strip* types rather than checking them, so the generator executed an
+oracle whose annotations were decoration.
+
+The Hub type-checks its copies of the ten mirrored contracts. Nothing checked the rest —
+`kinematics.ts`, `blackbox.ts`, `shape.ts`, `skill.ts`, `types.ts` and the corpus generator were
+outside every check in either repository. A `tsconfig.json` and one CI step close it; the first run
+found the missing export and one genuine looseness in the generator (a `string[]` where a control
+mode union was wanted). There is still no build step, still nothing to install to run the oracle,
+and `npm install --no-save` in CI keeps a checkout free of `node_modules` — the claim in
+`reference/typescript/README.md` stays true.
+
+One small piece of housekeeping came with it: `round_half_away` existed privately in
+`observation.rs` and `skill.rs` needed it, because `f64::round` is not available under `no_std`
+without `libm`. It moved to the crate root rather than being copied, which is §31.2's rule applied
+to a five-line function — the second caller is how a private helper becomes two implementations of
+one decision.
+
+### §64 and §65 — two sections that describe the repository, and now two checks that say so
+
+The last two unvisited sections of the pass, and neither is a feature. Both are **claims about what
+already exists**, which makes them the two that can decay without anybody noticing.
+
+**§64: "every refusal in this system names the fix … a refusal that does not tell you what to change
+is a bug report the user has to write themselves."** That is true today and has no test, because it
+is not a thing anybody built — it is a property of thirty separate messages. So
+`crates/skynet-corpus/tests/refusals.rs` walks every JSON document in the corpus and applies §64's
+own table as nine rules: a finding's message must be a sentence and must not restate its code, a
+fault must carry a detail, an unevaluable outcome must name a reason, a transport binding must give
+a reason *even when it succeeded* ("why is this channel scaled to 0.44" is the same question as "why
+was it refused"), a failed conformance check must name what it measured, an unavailable guard must
+name its missing input, a refused award must name what is missing.
+
+The bar is deliberately "a sentence" rather than "not empty". The failure this guards against is not
+an empty string, which somebody would notice; it is `message: "refused"` — populated, passing every
+is-it-set check, telling the operator exactly what the code beside it already told them. All 709
+cases pass, and the check was proved able to fail by shortening one message to its own code, which
+produced two violations.
+
+**§65: "a vendor engineer should reach a moving robot without reading Parts II through VII, and if
+they cannot, the fault is in the golden path rather than in their patience."** The golden path
+itself already exists, in `README.md`, five steps long. What it did not have is anything stopping it
+from becoming wrong: a path moves, a `make` target is renamed, a CLI subcommand is folded into
+another, and the README keeps saying what it said — confidently, to somebody with no way to tell.
+Nothing in CI read a README.
+
+`tools/check-golden-path.mjs` reads the three kinds of instruction the developer-facing documents
+give and checks each against the repository: every relative link resolves, every `make` target
+exists in the Makefile of the directory it names, and every `skynet` command is one the CLI
+dispatches — read out of `main.rs`'s own match arms rather than from a second list that could drift
+from the first. Four documents, 29 commands, clean; and proved failable by moving a link, renaming a
+target and pluralising a command, which produced exactly those three findings.
+
+One false positive was worth fixing rather than suppressing: `cd my-arm && make` names a directory
+that does not exist, because the line above it is `skynet driver new my-arm`. Reporting that would
+have been reporting the golden path for working, so a directory an earlier line in the same block
+created is skipped.
+
+### Where the numbers stand
+
+Rust: **865** tests, up from 810 at the start of the session. `cargo fmt --all --check` clean,
+`cargo clippy --workspace --all-targets` clean under `-D warnings`, and `skynet-contracts` still
+builds for `thumbv7em-none-eabihf` — the predicate evaluator, the semver parser and the skill
+contract are all `no_std` with `alloc`.
+
+Hub: **1,229** tests across 45 files, up from 1,206. `tsc --noEmit` clean, `next build` clean. Both
+mirror checks pass, and the contract check failed correctly before the sync — `MISSING
+lib/skynet/os/predicate.ts`, `UNPINNED predicate` — which is the behaviour the last session built
+into it.
+
+The corpus is **709 cases across 48 files**, up from 483 across 39. Nine new files, and four
+cases added to `admission/install.json` for §55.1:
+
+| File | Cases | What it pins |
+|---|---|---|
+| `predicate/evaluate.json` | 83 | The boolean **and** the outcome, for every operator, every refusal reason, every path rule, and all five behaviour changes |
+| `semver/satisfies.json` | 47 | What a range admits, **and whether the range is readable at all** |
+| `semver/compare.json` | 14 | Ordering, prerelease precedence, and the parse result beside it |
+| `skill/preconditions.json` | 17 | Prose refusing, the `hold` subset, the operator's additions, and what counts as a predicate |
+| `skill/composition.json` | 11 | Cycles, depth, the diamond that is legal, and which fault a walk finds first |
+| `skill/timeout.json` | 9 | The deadline, the factor that is not a factor, and the skill with no estimate |
+| `skill/success.json` | 6 | §54.3's three answers and the order they are decided in |
+| `cell/validate.json` | 19 | Every fault a cell descriptor can have, including the two §54.2 made findable |
+| `cell/context.json` | 7 | The `env.*` a precondition reads and the workspace layer the guard reads, pinned together |
+
+Plus nine closed vocabularies, taking `vocabulary/closed-sets.json` from 21 sets to 30 — and two
+existing sets grew, which is what made the corpus fail before it was regenerated.
+
+The corpus was checked for the failure a corpus can have, which is passing because nothing ran: one
+character was changed in the Rust `eq` arm and **18 of 630 cases diverged**, then it was changed
+back. Regenerating is a byte-for-byte no-op, which is what the CI job asserts.
+
+### Not done, and what it waits on
+
+§54's pure half is complete. What is left of it is not pure, and the list is short and specific:
+
+* **The lifecycle itself** (§54.4's state machine). `idle → preconditions → acquiring → running →
+  verifying → terminal` needs capability **leases**, which do not exist, and §27's state machine,
+  which is referred to in prose and declared nowhere — recorded by the fifteenth session and still
+  true. Every decision that machine has to make is now frozen and testable; nothing loops.
+* **The `hold` re-check at cycle rate.** The evaluator is ready and there is a corpus case for the
+  moment it matters; what is missing is the loop, which is the same missing loop as above.
+* **§54.5's lease rule** — "leases are held by the root invocation, not re-acquired per call" — is
+  the one composition limit that is not a graph property, and it waits on leases.
+* **§54.6's four conformance tests.** All four assert runtime behaviour, and there is no runtime.
+  `skill.preconditions.enforced` and `skill.success.independent` are now one function call away
+  from being writable; they need something to call them.
+* **§54.2's `safety_notes` acknowledgement** — "displayed at grant time and acknowledged once per
+  skill per robot, recorded in the audit log" — is a Hub and console feature rather than a contract,
+  and it is untouched.
+
+§55 is done in both halves. What it leaves is one sentence and one integration:
+
+* **A cell descriptor is not yet loaded from anywhere.** §38.3 puts profiles in
+  `/data/state/profiles/` and §38.1 requires a signature, and `skynetd-io` reads neither for a cell.
+  The contract is ready and nothing calls it, which is the same shape as `skill.rs` and for the same
+  reason — both wait on the daemon rather than on a decision.
+* **§38.2's five-layer stack still resolves as one layer list.** `cellWorkspaceLayer` produces the
+  cell's, correctly named so an operator can tell which layer stopped the robot, and the vendor,
+  fleet, site and session layers around it are still whatever a caller assembles.
+
+**The pass through Parts IV–VI is finished.** §54, §55, §56 (last session), §64 and §65 have all
+been visited, and what each of them leaves is recorded above rather than left to be rediscovered.
+The next boundary is the one §32.4 named two sessions ago and is unchanged: items 2 and 5 wait on
+tables that do not exist — `skynet_os_editions`, `skynet_conformance_results`, `skynet_device_state`,
+`skynet_incidents` — and that is a schema decision on a live project rather than a coding one.
+
+The other direction is the runtime. Three contracts now exist with no caller: `skill.rs` waits on
+leases and §27's state machine, `cell.rs` waits on the daemon reading a signed profile out of
+`/data/state/profiles/`, and `entitlement.rs` has waited since §51. None of the three is blocked on
+a decision; all three are blocked on the same missing loop.
+
+### Findings, restated
+
+1. **§52's table cites §25.2 for `sensors[].latency_ms`, and the mechanism is in §25.1.** Unchanged.
+2. **The ring's slot layout is a format, and §31.2's list does not name it.** Unchanged.
+3. **Nothing consumes `Reading::Stale`.** Unchanged, and still waiting on the control loop rather
+   than on a counter.
+4. **`resolveTransport()` returns `verdict: "direct"` for a policy that declared no action space.**
+   Unchanged. Still the most interesting one, because all three editions agree and are wrong
+   together, and the corpus freezes the wrong answer.
+5. **§56.2's provenance class and the Hub's `EvaluationSource` are two axes, not two spellings of
+   one.** Unchanged; a schema decision on a live project.
+6. **`npx eslint` still cannot run in the Hub** — `typescript-eslint` refuses TypeScript 7.0.
+   Pre-existing and unrelated.
+7. **A compatibility finding whose rule could not be evaluated says the wrong thing.** New, and
+   created by this session's own change. `evaluateCompatibility` still calls the boolean, so a rule
+   refused for an unreadable path produces its ordinary failure message — "This robot does not have
+   every capability the policy requires" — when the truth is "nobody declared them". The engine now
+   has `evaluatePredicateOutcome` available and does not use it. Fixing it means a field on
+   `CompatibilityFinding`, a UI change and i18n keys, which is a deliberate second piece of work
+   rather than something to fold into a contract move.
+8. **§55.2 says "which volumes are forbidden" and the `workspace` guard admits only allow-lists.**
+   New. The guard's model is that a frame must be inside at least one volume of every layer that
+   names it, and layers compose by conjunction — which is what makes "each layer may only narrow"
+   true by construction. An *exclusion* volume cannot be expressed that way: the complement of a box
+   is not a box, and intersecting to produce one would be the third shape `WorkspaceLayer`'s own
+   documentation refuses to invent. §55.2's next sentence says the cell supplies "the allowed volumes
+   to the `workspace` guard", so the mechanism sentence and the descriptive one disagree, and the
+   contract implements the mechanism. Whether the kernel gains an exclusion is a safety-model
+   decision and belongs in a session that is making it deliberately.
+9. **§54.4's terminal states and the episode vocabulary are spelled differently.** New, and small:
+   the lifecycle diagram ends in `succeeded | failed | aborted`, and §54.4's own next paragraph says
+   the outcome matches the Hub's `EpisodeOutcome`, which is `success | failure | aborted |
+   unlabeled`. The contract uses the episode spelling, because that is the one that reaches a
+   dataset. The diagram is the thing to amend, and amending a shared document is a deliberate act
+   rather than a tidy-up.
+
+Neither repository has been committed or pushed. Both trees are clean of build artifacts, and every
+check above was run against the working tree as it stands.

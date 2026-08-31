@@ -1,0 +1,187 @@
+#!/usr/bin/env node
+/**
+ * §65's golden path, checked against the repository it describes.
+ *
+ * > What a developer reads, in order, and nothing else is required to get to a moving robot.
+ * >
+ * > A vendor engineer should reach a moving robot without reading Parts II through VII, and if they
+ * > cannot, **the fault is in the golden path rather than in their patience**.
+ *
+ * That last sentence is a promise about a document, and a document is the thing in this repository
+ * with no compiler behind it. A path moves, a `make` target is renamed, a CLI subcommand is folded
+ * into another — and the golden path keeps saying what it said, confidently, to somebody with no
+ * way to tell it is wrong. The Rust suite will not notice, the corpus will not notice, and the
+ * person who does notice is a vendor engineer forty minutes into an afternoon they will not get
+ * back.
+ *
+ * So the three kinds of instruction the README gives are checked mechanically:
+ *
+ *   1. **Every relative link resolves.** A README that links a file nobody moved is worth nothing;
+ *      one that links a file somebody moved is worse than nothing, because it is evidence the rest
+ *      of the document is maintained.
+ *   2. **Every `make` target it tells you to run exists**, in the Makefile of the directory it
+ *      tells you to run it in.
+ *   3. **Every `skynet` subcommand it shows is one the CLI dispatches.** The command table is a
+ *      `match` in `crates/skynet-cli/src/main.rs`; this reads the same strings out of it rather
+ *      than holding a second list that could drift from the first.
+ *
+ *     node tools/check-golden-path.mjs
+ *
+ * Exits non-zero on anything it cannot find, and prints what the document says beside what the
+ * repository has.
+ */
+
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const HERE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+
+/** The documents that make promises to a developer. Reference documents are not checked here. */
+const DOCUMENTS = ['README.md', 'docs/README.md', 'corpus/README.md', 'reference/typescript/README.md']
+
+const problems = []
+
+function report(document, what, detail) {
+  problems.push(`${document}: ${what}\n    ${detail}`)
+}
+
+// ── 1. Links ─────────────────────────────────────────────────────────────────
+
+/**
+ * Markdown links to things in this repository.
+ *
+ * Anchors and external URLs are skipped: an anchor is checked by the renderer and a URL is somebody
+ * else's uptime. A link with a `#fragment` is checked as far as its path.
+ */
+function checkLinks(document, source) {
+  const base = dirname(join(HERE, document))
+  for (const match of source.matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
+    const target = match[1]
+    if (/^(https?:|mailto:|#)/.test(target)) continue
+    const path = resolve(base, target.split('#')[0])
+    if (!existsSync(path)) {
+      report(document, 'a link points at nothing', `${target} → ${path.slice(HERE.length + 1)}`)
+    }
+  }
+}
+
+// ── 2. `make` targets ────────────────────────────────────────────────────────
+
+/**
+ * `cd <dir> && make <target>` — the shape the golden path uses to get somebody to a running mock.
+ *
+ * The target is looked up in that directory's Makefile as a rule head, which is what GNU make would
+ * do. A `make` with no target means the default rule, and a Makefile with any rule at all has one.
+ */
+function checkMakeTargets(document, source) {
+  for (const block of fenced(source)) {
+    const lines = block.split('\n')
+    lines.forEach((line, index) => {
+      const match = /^\s*cd\s+([^\s&]+)\s*&&\s*make\s*([A-Za-z0-9_.-]*)/.exec(line)
+      if (!match) return
+      const [, directory, target] = match
+      const makefile = join(HERE, directory, 'Makefile')
+      if (!existsSync(makefile)) {
+        // A directory an earlier line in the same block created. `skynet driver new my-arm` is
+        // followed by `cd my-arm && make`, and the whole point of §63.1 is that the directory does
+        // not exist until the developer runs the command above it. Reporting that would be
+        // reporting the golden path for working.
+        const generated = lines.slice(0, index).some(earlier => earlier.includes(directory))
+        if (!generated) {
+          report(document, 'a `make` instruction names a directory with no Makefile', line.trim())
+        }
+        return
+      }
+      if (!target) return
+      const rules = readFileSync(makefile, 'utf8')
+        .split('\n')
+        .filter(one => /^[A-Za-z0-9_.-]+\s*:/.test(one))
+        .map(one => one.split(':')[0].trim())
+      if (!rules.includes(target)) {
+        report(document, 'a `make` target does not exist', `${line.trim()} — ${makefile.slice(HERE.length + 1)} has ${rules.join(', ')}`)
+      }
+    })
+  }
+}
+
+// ── 3. `skynet` subcommands ──────────────────────────────────────────────────
+
+/**
+ * The command table, read out of the CLI rather than restated here.
+ *
+ * `main.rs` dispatches on a `match` over string literals, and the sub-dispatches do the same. The
+ * regex takes every quoted literal on a match arm's left-hand side across those files, which is
+ * broader than the true command set and deliberately so: a check that reported a false failure when
+ * somebody added a command would be a check somebody deleted.
+ */
+function commands() {
+  const directory = join(HERE, 'crates/skynet-cli/src')
+  const found = new Set()
+  for (const name of readdirSync(directory)) {
+    if (!name.endsWith('.rs')) continue
+    const source = readFileSync(join(directory, name), 'utf8')
+    for (const match of source.matchAll(/(?:Some\()?"([a-z][a-z0-9-]*)"\)?\s*(?:\||=>)/g)) {
+      found.add(match[1])
+    }
+  }
+  return found
+}
+
+function checkCommands(document, source, known) {
+  for (const block of fenced(source)) {
+    for (const line of block.split('\n')) {
+      const match = /^\s*(?:\$\s*)?skynet\s+([a-z][a-z0-9-]*)(?:\s+([a-z][a-z0-9-]*))?/.exec(line)
+      if (!match) continue
+      const [, command, sub] = match
+      if (!known.has(command)) {
+        report(document, 'a `skynet` command is not in the CLI', `${line.trim()} — no arm for \`${command}\``)
+        continue
+      }
+      // A second word is only a subcommand when it is not a flag or an argument, and the command
+      // table cannot tell those apart. Checking it against the same set is the conservative
+      // reading: a false name fails, and an argument that happens to match a command passes.
+      if (sub && !known.has(sub) && !sub.startsWith('-') && KNOWN_SUBCOMMANDED.has(command)) {
+        report(document, 'a `skynet` subcommand is not in the CLI', `${line.trim()} — no arm for \`${command} ${sub}\``)
+      }
+    }
+  }
+}
+
+/** Commands that dispatch a second word. Everything else takes arguments, not subcommands. */
+const KNOWN_SUBCOMMANDED = new Set(['driver', 'descriptor'])
+
+function fenced(source) {
+  return [...source.matchAll(/```(?:bash|sh|console)?\n([\s\S]*?)```/g)].map(match => match[1])
+}
+
+// ── Run ──────────────────────────────────────────────────────────────────────
+
+const known = commands()
+let checked = 0
+
+for (const document of DOCUMENTS) {
+  const path = join(HERE, document)
+  if (!existsSync(path) || !statSync(path).isFile()) {
+    problems.push(`${document}: this document does not exist`)
+    continue
+  }
+  const source = readFileSync(path, 'utf8')
+  checkLinks(document, source)
+  checkMakeTargets(document, source)
+  checkCommands(document, source, known)
+  checked += 1
+}
+
+if (problems.length > 0) {
+  console.error(`\n${problems.length} problem(s) in the golden path:\n`)
+  for (const problem of problems) console.error(`  ${problem}\n`)
+  console.error(
+    '§65: "a vendor engineer should reach a moving robot without reading Parts II through VII,\n'
+      + 'and if they cannot, the fault is in the golden path rather than in their patience."\n',
+  )
+  process.exit(1)
+}
+
+console.log(`${checked} document(s) checked: every link resolves, every make target exists, and`)
+console.log(`every skynet command is one of the ${known.size} the CLI dispatches.`)

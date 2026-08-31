@@ -31,6 +31,13 @@ import {
   CHAIN, WINDOWS, checkNesting, hostBlockedByCommandLoss, type Windows,
 } from './watchdog.ts'
 import { toRecord, type Frame as ObservationFrame } from './observation.ts'
+import type { PredicateOutcome } from './predicate.ts'
+import type { ParsedVersion } from './semver.ts'
+import type {
+  ClauseResult, CompositionFault, Deadline, PreconditionReport, SuccessJudgement,
+} from './skill.ts'
+import type { CellFault } from './cell.ts'
+import type { Shape as VolumeShape, WorkspaceLayer } from './kinematics.ts'
 
 /** Present-and-null, for a nullable field. */
 function nullable<T>(value: T | null | undefined): T | null {
@@ -384,5 +391,149 @@ function shapeObservationRecord(frame: ObservationFrame): unknown {
     streams: record.streams.map(stream => ({
       name: stream.name, age_us: stream.age_us, stale: stream.stale,
     })),
+  }
+}
+
+/**
+ * §54.2's predicate answer: the boolean **and** the outcome, in one value.
+ *
+ * Pinned together deliberately. `evaluatePredicate` is defined as `satisfied(…)` of the outcome, so
+ * an edition that computed the two separately would be free to disagree with itself — and the whole
+ * argument for adding the third value is that it is a refinement of the boolean rather than a
+ * second opinion. Freezing both in one case makes that checkable rather than asserted.
+ */
+export function shapePredicate(outcome: PredicateOutcome, boolean: boolean): unknown {
+  return {
+    satisfied: boolean,
+    outcome: outcome.outcome,
+    reason: nullable(outcome.reason),
+    path: nullable(outcome.path),
+    op: nullable(outcome.op),
+  }
+}
+
+/** A parsed version, or null. */
+export function shapeVersion(parsed: ParsedVersion | null): unknown {
+  return parsed === null ? null : {
+    major: parsed.major,
+    minor: parsed.minor,
+    patch: parsed.patch,
+    prerelease: nullable(parsed.prerelease),
+    raw: parsed.raw,
+  }
+}
+
+/**
+ * Range satisfaction, with **validity beside it**.
+ *
+ * `satisfies` answers false both for "outside the window" and for "that is not a window", and
+ * §54.2 needs those apart. Pinning only the boolean would let an edition agree about every
+ * satisfaction and disagree about which ranges it could read at all — which is the difference
+ * between refusing a skill and telling its publisher why.
+ */
+export function shapeSatisfies(
+  version: string, range: string,
+  outcome: { satisfies: boolean; validVersion: boolean; validRange: boolean },
+): unknown {
+  return {
+    version,
+    range,
+    satisfies: outcome.satisfies,
+    valid_version: outcome.validVersion,
+    valid_range: outcome.validRange,
+  }
+}
+
+function shapeClauseResult(result: ClauseResult): unknown {
+  return {
+    index: result.index,
+    statement: result.statement,
+    origin: result.origin,
+    hold: result.hold,
+    outcome: result.outcome,
+    reason: nullable(result.reason),
+    path: nullable(result.path),
+    op: nullable(result.op),
+  }
+}
+
+/**
+ * §54.2's report.
+ *
+ * `results` carries every clause even after one has refused, because an operator fixing four
+ * problems one attempt at a time is the failure `admitPackage` already refuses to cause. `refused`
+ * is the first, repeated rather than referenced by index, because it is what goes on a screen.
+ */
+export function shapePreconditions(report: PreconditionReport): unknown {
+  return {
+    phase: report.phase,
+    permitted: report.permitted,
+    refused: report.refused === null ? null : shapeClauseResult(report.refused),
+    results: report.results.map(shapeClauseResult),
+    unenforceable: report.unenforceable,
+  }
+}
+
+/** §54.3's judgement. */
+export function shapeSuccess(judgement: SuccessJudgement): unknown {
+  return {
+    outcome: judgement.outcome,
+    deciding: judgement.deciding === null ? null : shapeClauseResult(judgement.deciding),
+    results: judgement.results.map(shapeClauseResult),
+  }
+}
+
+/** §54.4's timeout. `deadline_ms` is nullable rather than absent: "no deadline" is a fact. */
+export function shapeDeadline(deadline: Deadline): unknown {
+  return {
+    deadline_ms: nullable(deadline.deadline_ms),
+    enforceable: deadline.enforceable,
+    factor: deadline.factor,
+  }
+}
+
+/** §54.5's verdict, `{ fault: null }` when the graph is usable — the same shape as a frame fault. */
+export function shapeComposition(fault: CompositionFault | null): unknown {
+  return {
+    fault: fault === null ? null : {
+      code: fault.code,
+      path: [...fault.path],
+      detail: fault.detail,
+    },
+  }
+}
+
+/** §55.2's faults, all of them, in the order `validateCell` found them. */
+export function shapeCellFaults(faults: CellFault[]): unknown {
+  return {
+    faults: faults.map(fault => ({
+      code: fault.code,
+      subjects: [...fault.subjects],
+      detail: fault.detail,
+    })),
+  }
+}
+
+function shapeVolumeShape(shape: VolumeShape): unknown {
+  return shape.kind === 'sphere'
+    ? { kind: 'sphere', centre: [...shape.centre], radius_m: shape.radius_m }
+    : { kind: 'box', min: [...shape.min], max: [...shape.max] }
+}
+
+/**
+ * A cell's contribution to the `workspace` guard, `{ layer: null }` when it draws nothing.
+ *
+ * Nullable rather than absent, and the distinction is §55.2's: a cell nobody has measured and a
+ * cell that permits nothing are different facts, and only one of them should stop a robot.
+ */
+export function shapeCellLayer(layer: WorkspaceLayer | null): unknown {
+  return {
+    layer: layer === null ? null : {
+      name: layer.name,
+      volumes: layer.volumes.map(volume => ({
+        frame: volume.frame,
+        shape: shapeVolumeShape(volume.shape),
+      })),
+    },
   }
 }

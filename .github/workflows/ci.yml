@@ -176,6 +176,20 @@ jobs:
       - name: The console fixture's server parses
         run: node --check crates/skynetd-io/console/fixture-serve.mjs
 
+      # §31.4 makes the reference TypeScript the oracle every edition is measured against, and
+      # until this step existed nothing checked its types. Node 23 and later *strip* types rather
+      # than checking them, so the generator ran happily against an oracle importing a type its own
+      # `types.ts` did not export. The Hub type-checks its copies of the ten mirrored contracts and
+      # nothing else, which left `kinematics.ts`, `blackbox.ts`, `shape.ts`, `skill.ts` and the
+      # generator outside every check in either repository.
+      #
+      # Installed rather than committed, so a checkout still has no `node_modules` and running the
+      # oracle still needs nothing. See `tsconfig.json`.
+      - name: The reference oracle type-checks
+        run: |
+          npm install --no-save --no-audit --no-fund typescript @types/node
+          npx tsc -p .
+
       # §72.1 splits the code and does not split the specification, and §31.4 makes the reference
       # TypeScript the oracle every edition is measured against.
       #
@@ -197,6 +211,15 @@ jobs:
         run: |
           node tools/check-mirrors.mjs
           node tools/check-contract-mirrors.mjs
+
+      # §65 promises that a vendor engineer reaches a moving robot without reading Parts II
+      # through VII, and that "if they cannot, the fault is in the golden path rather than in
+      # their patience." That is a promise about a document, and a document is the thing here with
+      # no compiler behind it: a path moves, a `make` target is renamed, a CLI subcommand is folded
+      # into another, and the README keeps saying what it said — confidently, to somebody with no
+      # way to tell it is wrong. Nothing else in this workflow reads a README.
+      - name: The golden path still describes this repository
+        run: node tools/check-golden-path.mjs
 
       # §7.4. The sentence the product is not allowed to shorten. It lives in the kernel as a
       # constant, and a surface that mentions the certified tier without it is a surface making a

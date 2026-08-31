@@ -28,13 +28,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use skynet_contracts::admission::{self, admit_package};
+use skynet_contracts::cell;
 use skynet_contracts::certification;
 use skynet_contracts::certification::award_certification;
 use skynet_contracts::embodiment as contracts_embodiment;
 use skynet_contracts::json;
+use skynet_contracts::predicate;
 use skynet_contracts::readiness::{evaluate_readiness, summarize_readiness, ReadinessReport};
 use skynet_contracts::roles;
 use skynet_contracts::roles::parse_role;
+use skynet_contracts::semver;
+use skynet_contracts::skill;
 use skynet_contracts::transport;
 use skynet_contracts::transport::resolve_transport;
 use skynet_json::Json;
@@ -314,6 +318,119 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
         "blackbox" if label.contains("header") => return blackbox::header(input),
         "blackbox" if label.contains("seal") => return blackbox::seal(input),
 
+        // §54.2's predicates, over a live context.
+        //
+        // The case pins the boolean **and** the three-valued outcome, and this arm calls the two
+        // entry points separately to produce them. `evaluate_bool` is defined as `satisfied(…)` of
+        // `evaluate`, so calling both is how an edition that had quietly reimplemented one of them
+        // gets caught disagreeing with itself rather than with the corpus.
+        "predicate" => {
+            let context = input.get("context").cloned().unwrap_or(Json::obj());
+            let outcome = predicate::evaluate(input.get("predicate"), &context);
+            let satisfied = predicate::evaluate_bool(input.get("predicate"), &context);
+            predicate::outcome_to_json(&outcome, satisfied)
+        }
+
+        // Range satisfaction, which became a contract when §54.2 made `semver_satisfies` an
+        // operator the robot evaluates. Two files: what a range admits, and how two versions order.
+        "semver" if label.contains("satisfies") => {
+            let version = input
+                .get("version")
+                .and_then(Json::as_str)
+                .ok_or("no `version`")?;
+            let range = input
+                .get("range")
+                .and_then(Json::as_str)
+                .ok_or("no `range`")?;
+            semver::satisfies_to_json(version, range)
+        }
+
+        "semver" if label.contains("compare") => {
+            let a = input.get("a").and_then(Json::as_str).ok_or("no `a`")?;
+            let b = input.get("b").and_then(Json::as_str).ok_or("no `b`")?;
+            let mut out = Json::obj();
+            out.set(
+                "compare",
+                Json::Num(f64::from(semver::compare_version_strings(a, b))),
+            )
+            .set("a", semver::version_to_json(&semver::parse_version(a)))
+            .set("b", semver::version_to_json(&semver::parse_version(b)));
+            out
+        }
+
+        // §54's four pure decisions. Four files rather than one runner, because they are four
+        // questions with four inputs — and one arm reaching for all of them would have to guess
+        // which from the shape of the case, which is how a whole corpus ends up dispatched into an
+        // arm nobody wrote for it.
+        "skill" if label.contains("preconditions") => {
+            let published =
+                skill::read_clauses(input.get_present("published"), skill::ClauseOrigin::Skill);
+            let operator =
+                skill::read_clauses(input.get_present("operator"), skill::ClauseOrigin::Operator);
+            let clauses = skill::resolve_clauses(published, operator);
+            let context = input.get("context").cloned().unwrap_or(Json::obj());
+            let phase = match input.get("phase").and_then(Json::as_str) {
+                Some("hold") => skill::Phase::Hold,
+                _ => skill::Phase::Entry,
+            };
+            skill::precondition_report_to_json(&skill::evaluate_preconditions(
+                &clauses, &context, phase,
+            ))
+        }
+
+        "skill" if label.contains("success") => {
+            let criteria =
+                skill::read_clauses(input.get_present("criteria"), skill::ClauseOrigin::Skill);
+            let post_state = input.get("post_state").cloned().unwrap_or(Json::obj());
+            skill::success_to_json(&skill::judge_success(&criteria, &post_state))
+        }
+
+        "skill" if label.contains("timeout") => {
+            let expected = input
+                .get_present("expected_duration_seconds")
+                .and_then(Json::as_f64);
+            // An absent factor is the default, which is what the reference's optional parameter
+            // means. A *present* one that is not a number is a caller who tried and failed, and
+            // both editions fall back rather than refusing.
+            let factor = input
+                .get_present("overrun_factor")
+                .and_then(Json::as_f64)
+                .unwrap_or(skill::DEFAULT_OVERRUN_FACTOR);
+            skill::deadline_to_json(&skill::skill_deadline(expected, factor))
+        }
+
+        "skill" if label.contains("composition") => {
+            let root = input
+                .get("root")
+                .and_then(Json::as_str)
+                .ok_or("no `root`")?;
+            let calls = skill::read_calls(input.get_present("calls"));
+            let max_depth = input
+                .get_present("max_depth")
+                .and_then(Json::as_f64)
+                .map(|depth| depth as usize)
+                .unwrap_or(skill::MAX_SKILL_DEPTH);
+            skill::composition_to_json(&skill::validate_composition(root, &calls, max_depth))
+        }
+
+        // §55.2's cell descriptor. Two files, because the document has two consumers and an
+        // edition could agree about one while disagreeing about the other: `validate` is what an
+        // operator sees when they save it, `context` is what a precondition and the workspace guard
+        // read out of it afterwards.
+        "cell" if label.contains("validate") => {
+            let subject = cell::cell_from_json(input.get("cell").ok_or("no `cell`")?);
+            cell::cell_faults_to_json(&cell::validate_cell(&subject))
+        }
+
+        "cell" if label.contains("context") => {
+            let subject = cell::cell_from_json(input.get("cell").ok_or("no `cell`")?);
+            let layer = cell::cell_layer_to_json(&cell::cell_workspace_layer(&subject));
+            let mut out = Json::obj();
+            out.set("env", cell::cell_environment(&subject));
+            out.set("layer", layer.get("layer").cloned().unwrap_or(Json::Null));
+            out
+        }
+
         // The closed vocabularies, as data rather than as a computation.
         //
         // Every other arm holds this edition to an *answer*. This one holds it to a **word list**,
@@ -370,6 +487,33 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
                 "fault_responses" => skynet_kernel::FAULT_RESPONSES
                     .iter()
                     .map(|response| response.as_str())
+                    .collect(),
+                "predicate_ops" => predicate::PREDICATE_OPS.to_vec(),
+                "clause_outcomes" => skill::CLAUSE_OUTCOMES
+                    .iter()
+                    .map(|outcome| outcome.as_str())
+                    .collect(),
+                "clause_origins" => skill::CLAUSE_ORIGINS
+                    .iter()
+                    .map(|origin| origin.as_str())
+                    .collect(),
+                "precondition_phases" => skill::PHASES.iter().map(|phase| phase.as_str()).collect(),
+                "skill_outcomes" => skill::SKILL_OUTCOMES
+                    .iter()
+                    .map(|outcome| outcome.as_str())
+                    .collect(),
+                "composition_faults" => skill::COMPOSITION_FAULTS
+                    .iter()
+                    .map(|code| code.as_str())
+                    .collect(),
+                "cell_faults" => cell::CELL_FAULTS.iter().map(|code| code.as_str()).collect(),
+                "predicate_outcomes" => predicate::OUTCOMES
+                    .iter()
+                    .map(|outcome| outcome.as_str())
+                    .collect(),
+                "unevaluable_reasons" => predicate::UNEVALUABLE_REASONS
+                    .iter()
+                    .map(|reason| reason.as_str())
                     .collect(),
                 "scts_suites" => certification::SCTS_SUITES.to_vec(),
                 "scts_areas" => certification::SCTS_AREAS.to_vec(),

@@ -1,0 +1,87 @@
+{
+  "corpus": "skill",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "declared-duration",
+      "note": "Thirty seconds at the default factor of two.",
+      "input": {
+        "expected_duration_seconds": 30,
+        "overrun_factor": null
+      },
+      "expected": "{\"deadline_ms\":60000,\"enforceable\":true,\"factor\":2}"
+    },
+    {
+      "id": "explicit-factor",
+      "note": "A site that will tolerate half again as long.",
+      "input": {
+        "expected_duration_seconds": 30,
+        "overrun_factor": 1.5
+      },
+      "expected": "{\"deadline_ms\":45000,\"enforceable\":true,\"factor\":1.5}"
+    },
+    {
+      "id": "factor-below-one-is-refused",
+      "note": "A factor under one would stop a skill before its own estimate, which is not an overrun factor. The default is used rather than the number somebody typed.",
+      "input": {
+        "expected_duration_seconds": 30,
+        "overrun_factor": 0.5
+      },
+      "expected": "{\"deadline_ms\":60000,\"enforceable\":true,\"factor\":2}"
+    },
+    {
+      "id": "factor-that-is-not-a-number",
+      "note": "A factor written as a string is not a factor. `NaN` and the infinities are refused the same way and are not here, because JSON cannot hold one — they are in the unit suites of both editions instead, which is where a value the corpus format cannot express has to be checked.",
+      "input": {
+        "expected_duration_seconds": 30,
+        "overrun_factor": "1.5"
+      },
+      "expected": "{\"deadline_ms\":60000,\"enforceable\":true,\"factor\":2}"
+    },
+    {
+      "id": "no-declared-duration",
+      "note": "The interesting one. §54.4 says the OS enforces a timeout and does not say what to do about a skill that declares no duration, so this reports that it cannot be enforced rather than inventing a ceiling. Refusing an unbounded skill and permitting one are both defensible, and the decision belongs where policy is made.",
+      "input": {
+        "expected_duration_seconds": null,
+        "overrun_factor": null
+      },
+      "expected": "{\"deadline_ms\":null,\"enforceable\":false,\"factor\":2}"
+    },
+    {
+      "id": "zero-duration",
+      "note": "Zero is not a duration.",
+      "input": {
+        "expected_duration_seconds": 0,
+        "overrun_factor": null
+      },
+      "expected": "{\"deadline_ms\":null,\"enforceable\":false,\"factor\":2}"
+    },
+    {
+      "id": "negative-duration",
+      "note": "Nor is a negative one.",
+      "input": {
+        "expected_duration_seconds": -5,
+        "overrun_factor": null
+      },
+      "expected": "{\"deadline_ms\":null,\"enforceable\":false,\"factor\":2}"
+    },
+    {
+      "id": "rounding",
+      "note": "Milliseconds are integers. Half rounds up, which is JavaScript’s `Math.round` and is why the sign of both operands is checked before the multiplication rather than after it.",
+      "input": {
+        "expected_duration_seconds": 0.0025,
+        "overrun_factor": 1
+      },
+      "expected": "{\"deadline_ms\":3,\"enforceable\":true,\"factor\":1}"
+    },
+    {
+      "id": "long-skill",
+      "note": "A twenty-minute skill, which is still bounded.",
+      "input": {
+        "expected_duration_seconds": 1200,
+        "overrun_factor": null
+      },
+      "expected": "{\"deadline_ms\":2400000,\"enforceable\":true,\"factor\":2}"
+    }
+  ]
+}

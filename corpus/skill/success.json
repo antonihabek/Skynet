@@ -1,0 +1,202 @@
+{
+  "corpus": "skill",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "every-criterion-held",
+      "note": "Judged by the OS over post-state, not by the skill. A skill that judges its own success is a skill that always succeeds.",
+      "input": {
+        "criteria": [
+          {
+            "statement": "The gripper is closed",
+            "predicate": {
+              "op": "eq",
+              "path": "robot.state.gripper",
+              "value": "closed"
+            }
+          },
+          {
+            "statement": "The part did not slip",
+            "predicate": {
+              "op": "eq",
+              "path": "robot.grasp.slipped",
+              "value": false
+            }
+          }
+        ],
+        "post_state": {
+          "robot": {
+            "state": {
+              "battery_percent": 58,
+              "gripper": "closed",
+              "mode": "idle"
+            },
+            "grasp": {
+              "holding": true,
+              "slipped": false
+            }
+          }
+        }
+      },
+      "expected": "{\"deciding\":null,\"outcome\":\"success\",\"results\":[{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"statement\":\"The gripper is closed\"},{\"hold\":false,\"index\":1,\"op\":null,\"origin\":\"skill\",\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"statement\":\"The part did not slip\"}]}"
+    },
+    {
+      "id": "a-criterion-was-false",
+      "note": "One criterion definitely false is a failure.",
+      "input": {
+        "criteria": [
+          {
+            "statement": "The gripper is open",
+            "predicate": {
+              "op": "eq",
+              "path": "robot.state.gripper",
+              "value": "open"
+            }
+          }
+        ],
+        "post_state": {
+          "robot": {
+            "state": {
+              "battery_percent": 58,
+              "gripper": "closed",
+              "mode": "idle"
+            },
+            "grasp": {
+              "holding": true,
+              "slipped": false
+            }
+          }
+        }
+      },
+      "expected": "{\"deciding\":{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"statement\":\"The gripper is open\"},\"outcome\":\"failure\",\"results\":[{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"statement\":\"The gripper is open\"}]}"
+    },
+    {
+      "id": "a-false-criterion-outranks-an-unreadable-one",
+      "note": "The order the three answers are decided in, and the case that pins it: the unreadable criterion comes **first** in the list and the answer is still `failure`. Evidence of failure beats absence of evidence, and an edition that took the first non-satisfied clause would say `unlabeled` here.",
+      "input": {
+        "criteria": [
+          {
+            "statement": "The cup is upright",
+            "predicate": {
+              "op": "eq",
+              "path": "robot.perception.cup_upright",
+              "value": true
+            }
+          },
+          {
+            "statement": "The gripper is open",
+            "predicate": {
+              "op": "eq",
+              "path": "robot.state.gripper",
+              "value": "open"
+            }
+          }
+        ],
+        "post_state": {
+          "robot": {
+            "state": {
+              "battery_percent": 58,
+              "gripper": "closed",
+              "mode": "idle"
+            },
+            "grasp": {
+              "holding": true,
+              "slipped": false
+            }
+          }
+        }
+      },
+      "expected": "{\"deciding\":{\"hold\":false,\"index\":1,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"statement\":\"The gripper is open\"},\"outcome\":\"failure\",\"results\":[{\"hold\":false,\"index\":0,\"op\":\"eq\",\"origin\":\"skill\",\"outcome\":\"unevaluable\",\"path\":\"robot.perception.cup_upright\",\"reason\":\"unresolved_path\",\"statement\":\"The cup is upright\"},{\"hold\":false,\"index\":1,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"statement\":\"The gripper is open\"}]}"
+    },
+    {
+      "id": "an-unreadable-criterion-is-unlabeled",
+      "note": "Not a failure. §54.3: \"Honest ignorance beats an invented pass\" — and calling an unmeasured run a failure poisons a dataset exactly as thoroughly as calling it a success.",
+      "input": {
+        "criteria": [
+          {
+            "statement": "The gripper is closed",
+            "predicate": {
+              "op": "eq",
+              "path": "robot.state.gripper",
+              "value": "closed"
+            }
+          },
+          {
+            "statement": "The cup is upright",
+            "predicate": {
+              "op": "eq",
+              "path": "robot.perception.cup_upright",
+              "value": true
+            }
+          }
+        ],
+        "post_state": {
+          "robot": {
+            "state": {
+              "battery_percent": 58,
+              "gripper": "closed",
+              "mode": "idle"
+            },
+            "grasp": {
+              "holding": true,
+              "slipped": false
+            }
+          }
+        }
+      },
+      "expected": "{\"deciding\":{\"hold\":false,\"index\":1,\"op\":\"eq\",\"origin\":\"skill\",\"outcome\":\"unevaluable\",\"path\":\"robot.perception.cup_upright\",\"reason\":\"unresolved_path\",\"statement\":\"The cup is upright\"},\"outcome\":\"unlabeled\",\"results\":[{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"statement\":\"The gripper is closed\"},{\"hold\":false,\"index\":1,\"op\":\"eq\",\"origin\":\"skill\",\"outcome\":\"unevaluable\",\"path\":\"robot.perception.cup_upright\",\"reason\":\"unresolved_path\",\"statement\":\"The cup is upright\"}]}"
+    },
+    {
+      "id": "a-prose-criterion-is-unlabeled",
+      "note": "§54.3’s own example. \"The cup is upright\" needs perception, is genuinely not machine-evaluable, and is `unlabeled` rather than either verdict.",
+      "input": {
+        "criteria": [
+          {
+            "statement": "The part did not slip",
+            "predicate": {
+              "op": "eq",
+              "path": "robot.grasp.slipped",
+              "value": false
+            }
+          },
+          "The cup is upright"
+        ],
+        "post_state": {
+          "robot": {
+            "state": {
+              "battery_percent": 58,
+              "gripper": "closed",
+              "mode": "idle"
+            },
+            "grasp": {
+              "holding": true,
+              "slipped": false
+            }
+          }
+        }
+      },
+      "expected": "{\"deciding\":{\"hold\":false,\"index\":1,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unenforceable\",\"path\":null,\"reason\":null,\"statement\":\"The cup is upright\"},\"outcome\":\"unlabeled\",\"results\":[{\"hold\":false,\"index\":0,\"op\":null,\"origin\":\"skill\",\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"statement\":\"The part did not slip\"},{\"hold\":false,\"index\":1,\"op\":null,\"origin\":\"skill\",\"outcome\":\"unenforceable\",\"path\":null,\"reason\":null,\"statement\":\"The cup is upright\"}]}"
+    },
+    {
+      "id": "no-criteria-is-unlabeled",
+      "note": "Nothing was measured. A skill that scores itself by declaring nothing is the same gaming §54.3 exists to stop, so the absence of criteria is not a pass.",
+      "input": {
+        "criteria": [],
+        "post_state": {
+          "robot": {
+            "state": {
+              "battery_percent": 58,
+              "gripper": "closed",
+              "mode": "idle"
+            },
+            "grasp": {
+              "holding": true,
+              "slipped": false
+            }
+          }
+        }
+      },
+      "expected": "{\"deciding\":null,\"outcome\":\"unlabeled\",\"results\":[]}"
+    }
+  ]
+}

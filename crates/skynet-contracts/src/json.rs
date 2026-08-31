@@ -731,6 +731,12 @@ pub fn capacity_from_json(value: &Json) -> Result<DeviceCapacity, DecodeError> {
         granted: value.str_arr("granted"),
         denied: value.str_arr("denied"),
         installed,
+        // Absent is `false`, which is §52's rule for this flag rather than this reader being
+        // lenient: a physical machine's existence answers the question.
+        simulator: value
+            .get("simulator")
+            .and_then(Json::as_bool)
+            .unwrap_or(false),
     })
 }
 

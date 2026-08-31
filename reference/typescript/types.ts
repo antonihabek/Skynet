@@ -21,3 +21,27 @@ export interface SafetyEnvelope {
   /** Where the figures came from — a datasheet URL. A limit with no provenance is a rumour. */
   source?: string
 }
+
+/**
+ * The predicate language (§54.2).
+ *
+ * Restated here for the same reason `SafetyEnvelope` is: on the Hub this lives in
+ * `lib/skynet/types.ts` beside the rest of the object model, and the oracle has to stand alone.
+ *
+ * The vocabulary is closed and `corpus/vocabulary/closed-sets.json` holds every edition to it —
+ * `predicate.ts` exports the same list as `PREDICATE_OPS`, and this type is the compiler's view of
+ * it rather than a second definition.
+ */
+export type PredicateOp =
+  | 'and' | 'or' | 'not'
+  | 'eq' | 'neq' | 'in' | 'gte' | 'lte' | 'gt' | 'lt'
+  | 'includes' | 'includes_all' | 'includes_any' | 'exists' | 'semver_satisfies'
+
+export interface Predicate {
+  op: PredicateOp
+  /** Dot path into the context, e.g. "robot.guards.active". */
+  path?: string
+  value?: unknown
+  predicates?: Predicate[]
+  predicate?: Predicate
+}

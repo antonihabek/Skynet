@@ -35,9 +35,13 @@ against the implementation, is worth more than a comment block — and it is wha
 | `canonical.ts` | Canonical JSON — a deliberate reimplementation of `crates/skynet-json` |
 | `kinematics.ts` | Forward kinematics, the specified sine/cosine/square root, and the pose-guard geometry |
 | `shape.ts` | The wire shape of every output: which fields are nullable and which are optional |
+| `predicate.ts` | The predicate language, and §54.2's three-valued precondition outcome |
+| `semver.ts` | Version parsing, ordering, and range satisfaction |
+| `skill.ts` | §54: preconditions, success judged by the OS, the timeout, and composition |
+| `cell.ts` | §55.2: the cell descriptor, its `env.*` facts and its workspace layer |
 
-`conformance.ts`, `package.ts`, `readiness.ts`, `digest.ts` and `canonical.ts` are the Hub's
-`lib/skynet/os/*.ts`, changed only in their import paths. `blackbox.ts` and `kinematics.ts` never
+`conformance.ts`, `package.ts`, `readiness.ts`, `digest.ts`, `canonical.ts`, `predicate.ts` and
+`semver.ts` are the Hub's `lib/skynet/os/*.ts`, changed only in their import paths. `blackbox.ts` and `kinematics.ts` never
 were: the Hub writes no black boxes and computes no forward kinematics, so those two are second
 implementations written here against the same specification the Rust is written against.
 
@@ -48,6 +52,16 @@ tiers; it does not compute where an arm is, and it holds no `frames` to compute 
 divergence is deliberate. It is recorded rather than hidden because the sentence above it was
 false for two sessions, and a stale claim of identity is worse than an admitted difference: it is
 the reason nobody re-checks.
+
+**`predicate.ts` and `semver.ts` came the other way**, and they are the first two that did. They
+were the Hub's — `lib/skynet/compatibility/predicate.ts` and `lib/skynet/semver.ts`, written for
+compatibility rules long before Part VI existed. §54.2 makes a skill's `preconditions` predicates
+the **robot** evaluates before the skill may start, and `semver_satisfies` is one of the operators,
+so both became contracts and moved here. The Hub's two old paths are now re-exports, and the
+modules themselves are mirrored like every other contract. Two things changed on the way, both
+described in `predicate.ts`'s own header: the boolean answer is now derived from a three-valued
+outcome, so a rule the engine cannot evaluate no longer *passes*; and the engine is total for real,
+where two malformed shapes used to throw.
 
 Keeping the rest vendored byte-for-byte is deliberate: an oracle that has been tidied is an oracle
 that no longer describes the thing it is the reference for. When the Hub's copy changes, this copy
