@@ -356,6 +356,37 @@ impl Layout {
         self.state().join("embodiment.sig.json")
     }
 
+    /// Cached entitlement tokens (§51.2).
+    ///
+    /// A directory, unlike the descriptor's single file, because §51.2 grants one token per package
+    /// and a robot runs several. One file per package, named by the package's own identifier with
+    /// its slash replaced, so an operator can see what the robot believes it is entitled to by
+    /// listing a directory.
+    ///
+    /// Under `state/` rather than beside the packages: §57 delivers these *"with the desired
+    /// state"*, they are refreshed on a check-in the packages are not, and a token whose package
+    /// has been removed is a fact worth keeping until it expires rather than deleting with the
+    /// package that prompted it.
+    pub fn entitlements(&self) -> PathBuf {
+        self.state().join("entitlements")
+    }
+
+    /// The cached token for one package, and its detached signature beside it.
+    ///
+    /// Sibling files, for exactly the reason [`embodiment_signature`](Layout::embodiment_signature)
+    /// gives: the digest is over the token's canonical form, so a signature written inside it would
+    /// change the digest it is a signature of.
+    pub fn entitlement(&self, package: &str) -> PathBuf {
+        self.entitlements()
+            .join(format!("{}.json", flatten(package)))
+    }
+
+    /// The issuer's detached signature over one token's digest (§51.2).
+    pub fn entitlement_signature(&self, package: &str) -> PathBuf {
+        self.entitlements()
+            .join(format!("{}.sig.json", flatten(package)))
+    }
+
     /// `/data/blackbox` (§28) — preallocated, so a full disk cannot silence it.
     pub fn blackbox(&self) -> PathBuf {
         self.data().join("blackbox")
@@ -366,8 +397,59 @@ impl Layout {
         self.data().join("identity")
     }
 
+    /// The vendor's birth certificate (§50.2).
+    ///
+    /// Under `identity/` rather than under `state/`, and the directory is the argument: everything
+    /// in `state/` is something the robot fetched, was granted or measured, and can be re-fetched.
+    /// A birth certificate is none of those. It was signed at manufacture, before the machine had an
+    /// owner, and a robot that lost it cannot obtain another without going back to the vendor.
+    pub fn birth_certificate(&self) -> PathBuf {
+        self.identity().join("birth.json")
+    }
+
+    /// The vendor's detached signature over the certificate's digest (§50.2).
+    ///
+    /// A sibling file, for the third time in this file and for the same reason each time: the digest
+    /// is over the document's canonical form, so a signature written inside it would change the
+    /// digest it is a signature of.
+    pub fn birth_signature(&self) -> PathBuf {
+        self.identity().join("birth.sig.json")
+    }
+
     /// `/run/skynetd.sock` (§33.7).
     pub fn socket(&self) -> PathBuf {
         self.root.join("run").join("skynetd.sock")
     }
+}
+
+/// A package identifier as one path component.
+///
+/// A package is `namespace/name`, and a slash in a file name is a directory somebody did not intend
+/// to create — or, from an untrusted desired-state document, a path traversal. Every character
+/// outside a small allowed set becomes `_`, which is deliberately **lossy**: two packages can
+/// flatten to one name, and that is a collision the caller sees as a token belonging to the wrong
+/// package rather than as a write outside `state/`.
+///
+/// Lossy is safe here only because the token names its own package and the reader checks it — see
+/// [`entitlement::read`](crate::entitlement::read), which refuses a token whose `package` field is
+/// not the one it was asked for. Without that check this function would be a vulnerability rather
+/// than a convenience.
+///
+/// **`.` is not in the allowed set**, and the reason is worth the line it costs. The first draft
+/// kept it, on the grounds that a dot is harmless in a file name — and a package named `..` then
+/// flattened to `..`, which is the parent directory. Nothing escaped, because both callers append
+/// `.json` or `.sig.json` and `"...json"` is an ordinary name. That is a safety property resting
+/// on a suffix, one refactor away from not being one, and a package identifier has no use for a
+/// dot anyway.
+fn flatten(package: &str) -> String {
+    package
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }

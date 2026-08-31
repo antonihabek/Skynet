@@ -108,21 +108,80 @@ export interface PackageManifest {
   min_os_version?: string
 }
 
-export type PackageRejectionCode =
-  | 'unsigned'
-  | 'signature_failed'
-  | 'signature_untrusted'
-  | 'signature_unverifiable'
-  | 'digest_mismatch'
-  | 'isolation_violation'
-  | 'budget_exceeded'
-  | 'capability_ungranted'
-  | 'capability_denied'
-  | 'over_request'
-  | 'missing_dependency'
-  | 'os_too_old'
-  | 'transport_refused'
-  | 'executes_on_load_untrusted'
+/**
+ * Every rejection code, as a value rather than only as a type.
+ *
+ * The union below is derived from this array rather than written beside it, so the two cannot
+ * disagree — and the array exists so the vocabulary can be **enumerated at run time** and written
+ * into the corpus. A type union vanishes at compile time, which is why a code that existed in one
+ * edition and not the other went unnoticed until somebody wrote a case that used it.
+ *
+ * See `corpus/vocabulary/closed-sets.json`.
+ */
+export const PACKAGE_REJECTION_CODES = [
+  'unsigned',
+  'signature_failed',
+  'signature_untrusted',
+  'signature_unverifiable',
+  'digest_mismatch',
+  'isolation_violation',
+  'budget_exceeded',
+  'capability_ungranted',
+  'capability_denied',
+  'capability_reserved',
+  'over_request',
+  'missing_dependency',
+  'os_too_old',
+  'transport_refused',
+  'executes_on_load_untrusted',
+] as const
+
+export type PackageRejectionCode = (typeof PACKAGE_REJECTION_CODES)[number]
+
+/**
+ * The audible warning channel (§49.1).
+ *
+ * > Standards for robots operating around people expect an audible indication before autonomous
+ * > motion. That makes the warning tone a **system function, not an application feature**:
+ * > `skynetd` owns it, it sounds on transition into `RUNNING` and on resumption after a stop, and
+ * > **a package cannot suppress it.** A policy that could silence its own warning would be a policy
+ * > that could remove a control the operator's risk assessment relied on.
+ *
+ * Named as a token so the rule is enforceable rather than aspirational. §49.1 gives packages
+ * `hri.speech` for everything else the speaker does, *"and that grant never includes the warning
+ * channel"* — so this token exists precisely to be refused.
+ */
+export const WARNING_CHANNEL = 'hri.warning'
+
+/**
+ * Capability tokens no grant can confer, whoever asks and whatever the operator profile says.
+ *
+ * One entry today. It is a list rather than a comparison because the next reserved token will be
+ * added by somebody who found this constant, not by somebody who found an `if` inside a function.
+ */
+export const RESERVED_CAPABILITIES: readonly string[] = [WARNING_CHANNEL]
+
+/** Whether a capability token is reserved to the OS (§49.1). */
+export function isReserved(token: string): boolean {
+  return RESERVED_CAPABILITIES.includes(token)
+}
+
+/**
+ * Whether a warning tone must sound on this transition (§49.1).
+ *
+ * > It sounds on transition into `RUNNING` and on resumption after a stop.
+ *
+ * The states are §27's, as strings rather than as a union, because **§27's state machine is not
+ * declared anywhere in this system yet**. A function here that invented the enumeration would put
+ * §27's design decision in §49's module, which is how a state machine ends up with two definitions.
+ *
+ * Unknown state names read as *not* a transition into RUNNING, which under-sounds rather than
+ * over-sounds — the wrong direction for a safety control, and acceptable only because this answers
+ * a question about a transition it was handed. The enforcement point is `skynetd` owning the tone.
+ */
+export function warningRequired(from: string, to: string): boolean {
+  return to.toLowerCase() === 'running' && from.toLowerCase() !== 'running'
+}
 
 export interface PackageFinding {
   code: PackageRejectionCode
@@ -267,6 +326,27 @@ export function admitPackage(params: AdmissionParams): AdmissionResult {
       severity: 'error',
       message: 'The package requests permissions it never declared a need for.',
       subjects: overRequested,
+    })
+  }
+
+  // §49.1, checked before the operator's denials on purpose: a reserved token is not something an
+  // operator declined, it is something nobody can grant, and a package that asked for both should
+  // be told the one it can never have.
+  const reserved: string[] = []
+  for (const token of [...manifest.requests, ...manifest.embodiment.capabilities]) {
+    // Deduplicated: a package that both declares and requests the channel has one problem, and a
+    // finding naming the same token twice reads as two.
+    if (isReserved(token) && !reserved.includes(token)) reserved.push(token)
+  }
+  if (reserved.length > 0) {
+    findings.push({
+      code: 'capability_reserved',
+      severity: 'error',
+      message:
+        'The audible warning before autonomous motion is a system function and no grant confers '
+        + "it. A package that could claim this channel could silence its own warning, which "
+        + "removes a control the operator's risk assessment relied on (§49.1).",
+      subjects: reserved,
     })
   }
 

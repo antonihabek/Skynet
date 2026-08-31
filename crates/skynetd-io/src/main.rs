@@ -991,6 +991,16 @@ fn report_drain(
             drained.sent, drained.failed, drained.backing_off
         );
     }
+    // Its own line, and it does not say "sent". A `--outbox` pass empties the queue and delivers
+    // nothing, and a log that spelled both the same way would read as a working uplink on a robot
+    // that has never had one.
+    if drained.handed_off > 0 {
+        eprintln!(
+            "skynetd: outbound — {} handed to a local sink, not sent: {}",
+            drained.handed_off,
+            sink.describe()
+        );
+    }
     if let Some(blocked) = drained.blocked {
         eprintln!("skynetd: outbound held — {}", blocked.detail());
     }

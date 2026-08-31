@@ -59,12 +59,13 @@ jobs:
       - name: Kernel builds for a safety MCU
         run: |
           rustup target add thumbv7em-none-eabihf
-          # The ring beside it. It does not run on the safety MCU — the command path is on the
-          # application processor — but it is `no_std` with no `alloc` for the same reason the kernel
-          # is, and this is the check that says so. A ring that quietly acquired a `Vec` would be an
-          # allocation on the one path §25 says never touches an allocator, and nothing else in the
-          # workspace would have noticed.
-          cargo build -p skynet-kernel -p skynet-ring --target thumbv7em-none-eabihf
+          # The ring and the capture split beside it. Neither runs on the safety MCU — the command
+          # path and the sensor pipeline are both on the application processor — but both are
+          # `no_std` with no `alloc` for the same reason the kernel is, and this is the check that
+          # says so. A ring that quietly acquired a `Vec` would be an allocation on the one path
+          # §25 says never touches an allocator, `skynet-capture` sits in the same cycle for §47.4's
+          # reasons, and nothing else in the workspace would have noticed either.
+          cargo build -p skynet-kernel -p skynet-ring -p skynet-capture --target thumbv7em-none-eabihf
 
   # The vendor-facing ABI. A driver author reads these headers before deciding whether the platform
   # is worth an afternoon, so they must compile cleanly from both C and C++.
@@ -176,10 +177,18 @@ jobs:
         run: node --check crates/skynetd-io/console/fixture-serve.mjs
 
       # §72.1 splits the code and does not split the specification, and §31.4 makes the reference
-      # TypeScript the oracle every edition is measured against. Both checks are **no-ops when
-      # BotMarket is not checked out beside this one**, which is the case in this workflow today and
-      # the reason they are cheap to have: they become real for anybody working with both trees, and
-      # for a future job that checks out both.
+      # TypeScript the oracle every edition is measured against.
+      #
+      # These two used to be no-ops here. BotMarket is not checked out beside this one, so both
+      # printed "not found" and exited zero — a job named after a check that could not fail, and the
+      # one divergence the contract tool has caught was caught by a human running it locally.
+      #
+      # They are real now with a single checkout. Each tool pins the digests of what it guards —
+      # `docs/mirror-digests.json` and `reference/typescript/mirror-digests.json`, both written by
+      # `--sync` from copies the two repositories agreed on — and verifies them when the Hub is
+      # absent. What that catches is the direction that matters: a shared document or a mirrored
+      # contract edited **here** without the other repository being brought along. The comparison
+      # itself still needs both trees and still runs for anybody who has them.
       #
       # The contract check exists because the docs stayed in sync for thirteen sessions while
       # `lib/skynet/os/safety.ts` fell six behind, and nothing could see it: the corpus holds the

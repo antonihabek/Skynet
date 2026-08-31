@@ -42,3 +42,13 @@ reference/typescript/*.ts eol=lf
 corpus/**/*.json          eol=lf
 tools/**/*.mjs            eol=lf
 tools/**/*.ts             eol=lf
+
+# And the shared specifications, for the same reason and now with the same teeth.
+#
+# `tools/check-mirrors.mjs` pins a sha256 of each of these into `docs/mirror-digests.json` so that a
+# document edited here and not in BotMarket fails with **one** checkout, which is what CI has. That
+# digest is over the file's bytes, so a checkout that rewrote the line endings would present as an
+# edit nobody made. The rule at the top of this file already covers them; they are named here
+# because their bytes now gate a check, and a reader looking for what must not be touched should
+# find them in the list rather than infer them from a wildcard.
+docs/*.md                 eol=lf

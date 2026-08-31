@@ -16,6 +16,7 @@ members = [
   "crates/skynet-rhal",
   "crates/skynet-ring",
   "crates/skynet-ring-shm",
+  "crates/skynet-capture",
   "crates/skynet-kernel",
   "crates/skynet-contracts",
   "crates/skynet-urdf",

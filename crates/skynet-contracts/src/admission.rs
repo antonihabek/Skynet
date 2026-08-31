@@ -169,6 +169,14 @@ pub enum PackageRejectionCode {
     TransportRefused,
     /// Files execute code when read, and the operator has not accepted that.
     ExecutesOnLoadUntrusted,
+    /// The package asked for a capability no grant can ever confer (§49.1).
+    ///
+    /// Distinct from [`CapabilityDenied`](PackageRejectionCode::CapabilityDenied), and the
+    /// distinction is the point. *Denied* is an operator's decision and an operator can reverse it;
+    /// this is a token that is **not grantable by anybody**, so an operator who read "denied" would
+    /// go looking for the setting that grants it and there is none. Reporting the two the same way
+    /// would send somebody hunting for a permission the system does not have.
+    CapabilityReserved,
 }
 
 impl PackageRejectionCode {
@@ -189,9 +197,84 @@ impl PackageRejectionCode {
             PackageRejectionCode::OsTooOld => "os_too_old",
             PackageRejectionCode::TransportRefused => "transport_refused",
             PackageRejectionCode::ExecutesOnLoadUntrusted => "executes_on_load_untrusted",
+            PackageRejectionCode::CapabilityReserved => "capability_reserved",
         }
     }
 }
+
+/// The audible warning channel (§49.1).
+///
+/// > Standards for robots operating around people expect an audible indication before autonomous
+/// > motion. That makes the warning tone a **system function, not an application feature**:
+/// > `skynetd` owns it, it sounds on transition into `RUNNING` and on resumption after a stop, and
+/// > **a package cannot suppress it.** A policy that could silence its own warning would be a
+/// > policy that could remove a control the operator's risk assessment relied on.
+///
+/// Named as a token so the rule is enforceable rather than aspirational. §49.1 gives packages
+/// `hri.speech` for everything else the speaker does, *"and that grant never includes the warning
+/// channel"* — so this token exists precisely to be refused, and the refusal is what makes the
+/// sentence true rather than a paragraph somebody has to remember.
+pub const WARNING_CHANNEL: &str = "hri.warning";
+
+/// Capability tokens no grant can confer, whoever asks and whatever the operator profile says.
+///
+/// One entry today. It is a list rather than a comparison because the next reserved token will be
+/// added by somebody who found this constant, not by somebody who found an `if` inside a function.
+pub const RESERVED_CAPABILITIES: [&str; 1] = [WARNING_CHANNEL];
+
+/// Whether a capability token is reserved to the OS (§49.1).
+pub fn is_reserved(token: &str) -> bool {
+    RESERVED_CAPABILITIES.contains(&token)
+}
+
+/// Whether a warning tone must sound on this transition (§49.1).
+///
+/// > It sounds on transition into `RUNNING` and on resumption after a stop.
+///
+/// The states are §27's, as strings rather than as an enumeration, because **§27's state machine
+/// does not exist in this codebase yet** — `post.rs` refers to it in prose and nothing declares it.
+/// A function here that invented the enumeration would be putting §27's design decision in §49's
+/// module, which is how a state machine ends up with two definitions. Strings until there is one,
+/// and then this becomes a two-line change.
+///
+/// Unknown state names read as **not a transition into RUNNING**, which is the direction that
+/// under-sounds rather than over-sounds — and that is the wrong direction for a safety control, so
+/// it is worth being explicit: this function is not the enforcement point. `skynetd` owning the
+/// tone is, and this answers a question about a transition it was given.
+pub fn warning_required(from: &str, to: &str) -> bool {
+    to.eq_ignore_ascii_case("running") && !from.eq_ignore_ascii_case("running")
+}
+
+/// Every rejection code.
+/// Reproduced into `corpus/vocabulary/closed-sets.json`, so an edition that gained a variant the
+/// reference does not have — or lost one it does — fails on the first run rather than on the first
+/// case somebody happens to write for it.
+pub const PACKAGE_REJECTION_CODES: [PackageRejectionCode; 15] = [
+    PackageRejectionCode::Unsigned,
+    PackageRejectionCode::SignatureFailed,
+    PackageRejectionCode::SignatureUntrusted,
+    PackageRejectionCode::SignatureUnverifiable,
+    PackageRejectionCode::DigestMismatch,
+    PackageRejectionCode::IsolationViolation,
+    PackageRejectionCode::BudgetExceeded,
+    PackageRejectionCode::CapabilityUngranted,
+    PackageRejectionCode::CapabilityDenied,
+    PackageRejectionCode::CapabilityReserved,
+    PackageRejectionCode::OverRequest,
+    PackageRejectionCode::MissingDependency,
+    PackageRejectionCode::OsTooOld,
+    PackageRejectionCode::TransportRefused,
+    PackageRejectionCode::ExecutesOnLoadUntrusted,
+];
+
+/// Every signature state.
+pub const SIGNATURE_STATES: [SignatureState; 5] = [
+    SignatureState::Verified,
+    SignatureState::Failed,
+    SignatureState::Untrusted,
+    SignatureState::Absent,
+    SignatureState::Unverifiable,
+];
 
 /// Whether a finding stops the install.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -424,6 +507,34 @@ pub fn admit_package(params: &AdmissionParams) -> AdmissionResult {
             severity: Severity::Error,
             message: "The package requests permissions it never declared a need for.".to_string(),
             subjects: Some(over_requested),
+        });
+    }
+
+    // §49.1, and it is checked before the operator's denials on purpose: a reserved token is not
+    // something an operator declined, it is something nobody can grant, and a package that asked
+    // for both should be told the one it can never have.
+    let mut reserved: Vec<String> = Vec::new();
+    for token in manifest
+        .requests
+        .iter()
+        .chain(manifest.embodiment.capabilities.iter())
+    {
+        // Deduplicated: a package that both declares and requests the channel has one problem, and
+        // a finding naming the same token twice reads as two.
+        if is_reserved(token) && !reserved.contains(token) {
+            reserved.push(token.clone());
+        }
+    }
+    if !reserved.is_empty() {
+        findings.push(PackageFinding {
+            code: PackageRejectionCode::CapabilityReserved,
+            severity: Severity::Error,
+            message: "The audible warning before autonomous motion is a system function and no \
+                      grant confers it. A package that could claim this channel could silence its \
+                      own warning, which removes a control the operator's risk assessment relied \
+                      on (§49.1)."
+                .to_string(),
+            subjects: Some(reserved),
         });
     }
 

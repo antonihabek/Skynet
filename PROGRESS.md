@@ -4165,3 +4165,998 @@ the RHAL extension channel, which is the one thing §33.1 forbids `skynetd`.
 6. **`npx eslint` still cannot run in the Hub** — `typescript-eslint` refuses TypeScript 7.0.
    Pre-existing, unrelated, and it means `tsc --noEmit` and vitest remain that repository's only
    static checks.
+
+## 2026-08-31 (sixteenth) — the vector closed, the transport path, and four sections nobody had noticed were buildable
+
+Last session was stopped mid-edit, and its own notes said so precisely: `embodiment_vector.rs` was
+written, registered in `lib.rs`, committed, and did not compile. This session opened by finishing
+that, and then took the item the descriptor store had unblocked.
+
+It then kept going, and the shape of what it found is worth stating at the top rather than leaving
+to be assembled from ten sections below.
+
+**§22's *"buildable now, no robot required"* list was completed and turned out not to be the list.**
+Its last entry — the transport endpoint, the embodiment tables, the descriptor publish path — went
+in, and with it §32.4's fourth page. That should have left only work that needs hardware. It did
+not: §22 was written against Part I, and Parts IV–VI added sections with exactly the same property.
+Three of them were built in the hours after that list was finished — §47.4's capture split, §51's
+offline entitlement, §50's birth certificate — and a fourth, §49.1's warning channel, followed. Each
+is pure, testable, and about a *discipline* rather than a device. The pass stops at §54, which is
+recorded rather than started.
+
+**Two divergence checks now exist that did not, and both caught something real the same day.** The
+mirror tools were made to fail with one checkout, which is the configuration CI runs in — and hours
+later that check caught a divergence *this session had just committed*, in the reference contract it
+had edited on one side only. The gap that let it happen — a vocabulary can drift where no corpus
+case has been written — was then closed too, with 21 closed string sets frozen as corpus cases.
+
+**Two recorded findings were fixed and one was created and closed.** The `--outbox` sink that
+reported deliveries it never made, the mirror checks that could not fail, and the vocabulary gap
+above.
+
+### The cross-edition signature vector, finished on both sides
+
+The three defects the last session recorded were the three that were there:
+
+* `use skynet_ed25519::SigningKey` → `use skynet_ed25519::signing::SigningKey`. The signer lives in
+  its own module behind the `test-signing` feature, which is the point of that feature: nothing
+  that ships may name it, and `cargo build -p skynetd-io` does not compile it.
+* `sign()` returns `[u8; 64]`, not a `Signature`, and `public_hex()` already returns hex. Both
+  helpers around them were written against an API this crate does not have.
+* The frozen digest was a placeholder — thirty-two bytes somebody typed — waiting for the
+  `#[ignore]`d generator that had never run.
+
+The generator ran. What it printed is now frozen in **four** constants rather than one, and that is
+the substantive change rather than a transcription:
+
+```
+digest      29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543
+public key  79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664
+signature   cde12b51…feeae708   (128 hex characters, over the domain-tagged digest)
+```
+
+**The signature is frozen, not re-derived.** The half-written test signed the vector and then
+verified what it had just signed, which passes for any self-consistent scheme including a wrong
+one: an edition that signed the bare digest would sign it and verify it and report success. Ed25519
+is deterministic — RFC 8032 §5.1.6 derives the nonce from the key and the message, so one key over
+one message has exactly one signature — so the signature can be *compared to a constant*, and that
+is what makes a vector a vector. `the_vector_signature_is_what_the_hub_holds` compares; the
+separate `the_frozen_signature_verifies_here` runs the **verifier** against bytes it did not
+produce, which is the side a robot actually runs. They fail separately on purpose.
+
+Three more assertions were added because each names a substitution a reader of the scheme would
+plausibly make: the seed still expands to the frozen key; the bare digest is *not* the signed
+message (asserted to fail, since a verifier accepting both would accept a signature made for any
+other document whose digest happened to be this hex); and filling the descriptor's own `digest`
+field in before hashing changes the digest, which is why the Hub serves a published document
+untouched.
+
+**The other half now exists.** The Rust module's doc comment has pointed at
+`lib/__tests__/skynet-embodiment.test.ts` since it was written, and that file did not exist — a
+cross-edition vector pinned in one edition is a constant. It exists now, in BotMarket: 17 tests
+that recompute the same four values with Node's `crypto` and the Hub's own canonicaliser. Both
+sides fail *in their own suite* without the other checkout present, which is the property finding
+№4 (the mirror checks only meet where both repositories are checked out) says the mirror tools do
+not have.
+
+The Hub half also covers what only the Hub can get wrong: `rawKeyFromDer` round-trips the vector's
+key through the base64 SPKI DER this repository has always stored signing keys as, proving that is
+a re-encoding rather than a derivation — one registered key, two spellings — and refuses both a
+non-Ed25519 header and a DER of the right shape and the wrong length. And upper-case hex is
+rejected, which is not pedantry: `publishEmbodiment` compares a signing key to the namespace's
+registered keys *as strings*, so a verifier lenient about case would verify a signature and then
+call the registered key that made it untrusted.
+
+Numbers after this item: Rust **697** tests on Windows (was 690), `cargo fmt --check` and
+`cargo clippy --workspace --all-targets -D warnings` both clean. Hub: **1176** tests across 44
+files, `tsc --noEmit` clean.
+
+### `GET /repos/{ns}/{name}/versions/{v}/transport` — §17's last unbuilt read route
+
+The route §32.4 item 4 waits on. §6.2's claim is that a repository page answers *"does this run on
+my G1, and how well?"* before anyone downloads forty gigabytes, and until now the Hub had the
+planner, the descriptor store, and no endpoint joining them.
+
+The planner itself needed nothing: `resolveTransport()` is pure and already held to the corpus by
+three editions. What this session had to build is the **impure edge** — turning a stored manifest
+and a stored descriptor row into the planner's two arguments — and every decision there turned out
+to be about *whose word counts*. It is `lib/skynet/robots/transport.ts` rather than code in the
+route for that reason: the same edge is what `/skynet/os/transport` and the device pages will need.
+
+Four decisions, in the order they matter.
+
+#### `verified` and `digest` come from the row, never from the vendor's document
+
+A descriptor is stored exactly as published — correct, and it means the document contains two
+fields the vendor *wrote* and the platform *decides*. A vendor who puts `"verified": true` in their
+own document has asserted something rather than established it, and handing that document to the
+planner unaltered suppresses `unverified_embodiment` on precisely the descriptors that most need
+it: the unsigned ones. `targetFromRow` overwrites both from the store's own columns, and a test
+asserts the consequence at the level a reader cares about — the warning still appears in the plan —
+rather than only at the field.
+
+The digest half is less alarming and equally necessary: a published document carries `digest: null`
+by construction, so a plan built from the document alone would have a null `target_digest` and
+nothing to pin.
+
+#### An undeclared action space is a refusal, not an empty plan
+
+`resolveTransport()` given zero action channels returns **`verdict: "direct"`** with a
+`no_source_embodiment` warning. It is the right answer to "did anything fail to bind" and it is
+read as "yes, this runs" by anyone looking at the verdict field, which is what a verdict field is
+for. See the findings below: all three editions agree and the corpus freezes it, so nothing
+differential can catch it.
+
+So the route refuses — 422, naming the manifest key and what to put in it — rather than serving a
+yes nobody checked. Changing the verdict vocabulary is a specification decision across three
+editions and the corpus; declining to publish a misleading one is not.
+
+The route's three no-plan answers are deliberately three rather than one, because they imply
+completely different work: **404 robot** (a typo), **404 descriptor** (the robot exists and its body
+has never been described — a vendor's work, and nothing about the policy matters), **422
+declaration** (the body is described and the policy does not say what it emits — the publisher's
+work).
+
+#### Nothing infers a channel from `action_space.dimensions`
+
+`ModelManifest.action_space` has said `{ type, dimensions, control_hz, limits }` since long before
+transport existed, and reading "12 joint_position dimensions" as twelve channels is one line of
+code. It is also wrong: a channel binds by canonical role or exact joint name, neither of which is
+in a dimension count, so twelve nameless channels produce twelve `blocked` bindings and a `refused`
+verdict — for a policy whose actual problem is that nobody wrote down what its outputs drive.
+Refusing a policy for under-declaring and refusing it for not fitting are different sentences, and
+this codebase does not conflate them anywhere else either.
+
+The per-channel declaration is a new manifest block, `source_embodiment`, which is the same key
+`skynet transport` already accepts around a policy file on disk.
+
+#### The reader had to be made to agree with the one on the robot, and the first draft did not
+
+This is the part worth recording, because the first version of `parseSourceEmbodiment` was written
+the way a careful TypeScript reader is normally written — validate against the union type, drop what
+does not match, collect issues — and that is a **divergence from `source_from_json`**, which reads
+the same declaration on the robot at install time. Two rules, and the draft had both backwards:
+
+* **A missing required field fails the whole declaration.** Rust propagates with `?`, so one channel
+  without an `index` makes the source undecodable — not that one channel absent. The friendlier
+  reader would hand the Hub a plan with N−1 bindings where the robot builds none at all, and *"the
+  plan you were shown had a channel missing from it"* is the exact failure a pre-download check
+  exists to prevent.
+* **An unrecognised value is carried, not dropped.** Rust types `kind`, `modality` and
+  `control_mode` as plain `String` and hands them to the planner. Dropping a channel whose `kind`
+  this edition does not recognise deletes it from the Hub's plan while the robot still binds it —
+  a divergence in the **fail-open** direction, because a channel absent from a plan raises no
+  warning at all while a channel bound raises whatever the planner raises.
+
+Neither the corpus nor any differential test covers the *readers*; both cover the planner they
+feed. So the parity is asserted directly, in `parity with the reader on the robot`, one test per
+rule with the reason in the test.
+
+What this edition adds on top is a second output rather than a different decode: it **names** every
+value it did not recognise, so a publisher whose channel says `joint_impedance` is told which
+channel and which word instead of finding a binding with no target in a plan. The route returns
+those as `declaration_issues`, separate from `plan.warnings` — the planner's warnings are about a
+declaration it could read, and a publisher reading only those would never learn that their channel
+is in the plan under a kind nothing understands.
+
+#### Also landed
+
+* `source_embodiment` added to `MODEL_SCHEMA` and to `ModelManifest`, typed `unknown` on purpose:
+  the shape is a format with a reader per edition (§31.2), and a structural type here would drift
+  from both readers while looking authoritative.
+* The docs page listed neither embodiment route — a gap from last session — so `GET`/`POST
+  /robots/{slug}/embodiment` and the new transport route were added to it, with three new strings
+  synced to all 35 locales (102 values added; `en.json` grew by exactly three lines).
+
+Numbers after this item: Hub **1204** tests across 45 files, `tsc --noEmit` clean, both mirror
+checks matching.
+
+### `/skynet/os/transport` — §32.4 item 4, built the moment its endpoint existed
+
+The interactive half: *"pick a policy version and a robot, get the per-channel plan before
+downloading anything."*
+
+**It is a `<form method="get">` and a server render, not a client that calls the API.** The
+endpoint computes a plan from `sourceForVersion`, `targetFromRow` and `resolveTransport`; so does
+this page, from the same three functions. Fetching the endpoint from a client component would put a
+second copy of the *shaping* — which field means what, which refusal reads how — behind a network
+hop, and §6.2's argument for the planner being pure is exactly that every caller computes rather
+than asks. The practical consequences are that the page works with JavaScript off, renders for a
+crawler, and cannot display a plan the endpoint would not have produced. The selection is in the
+URL, so a plan is a link somebody can send to the person who has to act on it.
+
+**Both selectors list only what can carry a plan.** Robots with a current published descriptor
+(`robotsWithEmbodiment`), and repositories with at least one published version declaring an action
+space (`listTransportableVersions`, newest first, so the option shows the newest release that
+actually declares one — which is not always the latest published). Offering anything else would be
+offering a button that always fails.
+
+**It never renders an example.** §32.3's rule has teeth here: a transport plan is precisely the kind
+of thing that looks instructive as a mock-up and is a fabricated statement about a physical machine.
+With no descriptors and no declarations the page says so — and says the two *separately*, because a
+missing descriptor is a vendor's work and a missing declaration is a publisher's, and telling
+somebody the wrong one wastes their day.
+
+Three smaller things the page holds to, each of which the codebase holds to elsewhere: a null
+control rate reads as *not declared* rather than as a number; a clamp with no `source` says a limit
+with no provenance is a rumour; and the declaration issues are a section of their own, apart from
+the planner's warnings, with a lede explaining that the distinction is the publisher's whole remedy.
+
+#### A defect found by writing the second page rather than by reading the first
+
+`/skynet/os` uses class names that are in no stylesheet: `skynet-h` (every other Skynet page uses
+`skynet-h1`/`skynet-h2`), `data-variant` on badges (the stylesheet keys badges off `data-tone`;
+`data-variant` belongs to the button), and a `muted` value that is not one of the four tones. So its
+headings have rendered unstyled and its badges untinted since the page was written, and nothing
+failed — a class name that matches no rule is not an error anywhere in the pipeline.
+
+Found because the new page was written by copying the old one's markup, which is how this class of
+defect propagates. Both are fixed; the "muted" cases now omit the attribute rather than passing a
+tone that does not exist, which is what "muted" meant.
+
+### The outbound sink that reported deliveries it never made — finding 5, fixed
+
+Recorded last session: *"`--outbox` is a sink that looks like a success. A `Directory` send returns
+`Ok`, so the item is removed from the queue and the counters record a delivery — which is true of
+the sink and false of the robot."* It was named in three places — the sink's documentation, its
+`describe`, and the console — and three places relying on a reader noticing is not a mechanism.
+
+The fix is the one the finding named: **the queue distinguishes "delivered" from "handed to
+something local"**, because the queue is the only thing that can. Once an item is removed nothing
+downstream can tell the two apart, and *"the queue is empty"* is true of both while meaning opposite
+things about the robot.
+
+* `Sink` gains `fn delivers(&self) -> bool` with **no default**. A default of `true` is the one that
+  lies — it is exactly what `--outbox` would have inherited — and `false` would make a real
+  transport under-report by omission. `Directory` answers false; `Unpaired` answers true and is
+  never asked, because it is the placeholder for §34.2's HTTPS transport and answering false would
+  describe a robot with nowhere to send as one handing items to something local.
+* `Queue::accepted(delivered)` records it at the one moment both facts are in hand — beside
+  `attempted`, which is its opposite number — into the same counters file that already holds
+  `dropped_*` and `collapsed`. So it survives the process, which `Drained` does not.
+* `Status`, `to_json`, `Drained`, the supervisor's log line and the console panel all carry the two
+  apart. The log line for a hand-off does not contain the word *sent*, and the console renders the
+  hand-off count as a warning pill saying the items are still on this machine.
+
+**The test suite had the bug written into it.** `the_drain_sends_over_an_unmetered_link_and_empties_the_queue`
+asserted `sent == 2` over a `Directory` — a sink writing to a directory on the same disk — and
+passed. It is now `the_drain_empties_the_queue_over_an_unmetered_link_and_calls_it_a_hand_off`, and
+the drain path is unchanged: only the word for what happened is right. Four tests around it,
+including one asserting a transport sink and a local one against each other in the same queue —
+a suite that only exercised the directory case would pass with `accepted` hard-coded to `false` —
+and one asserting both keys reach `to_json`, because the surface an operator reads showing a single
+number is what made the defect invisible.
+
+### The two mirror checks now fail with one checkout — finding 4, fixed
+
+Recorded for two sessions: *"The two mirror checks still only meet where both repositories are
+checked out, and CI would not have caught it because the job that runs it has one repository."*
+
+The CI job is called *"The shared documents and contracts have not diverged"* and it runs both
+tools. With one checkout each printed `BotMarket not found` and exited **zero**. So a job named
+after a check has never been able to fail, and the one divergence the contract tool has actually
+caught — `lib/skynet/os/safety.ts` six sessions behind, `conformance.ts` missing an SCTS test
+required at host — was caught by a human running it locally.
+
+The fix is the technique this session opened with, applied one level up. The embodiment vector works
+because **each side fails in its own suite, with one checkout**. The Hub already had that property
+for the contracts: `lib/skynet/os/mirror-digests.json` is checked by `skynet-os-mirrors.test.ts` on
+a machine that has never heard of this repository. This repository had nothing equivalent, in either
+direction.
+
+Both tools now pin what they guard, and both verify the pins when the Hub is absent:
+
+* `reference/typescript/mirror-digests.json` — the same digests as the Hub's copy, written by the
+  same `--sync`, so the two cannot drift from each other. It catches a **reference contract changed
+  without the Hub being resynced**, which is the direction that matters more: the reference is the
+  oracle the corpus holds the Rust edition to, so a change here is a change every edition owes.
+* `docs/mirror-digests.json` — the three shared specifications. It catches a document edited *here*
+  and not there, which is exactly what §72.1's rule forbids: a shared document is edited in both
+  repositories or in neither.
+
+Verified by breaking it on purpose in both directions: a line appended to `reference/typescript/safety.ts`
+fails with the Hub present *and* absent; a line appended to `docs/skynet-architecture.md` gives
+`CHANGED … no longer matches its pinned digest` with one tree and `DIVERGED` with two. Both restore
+clean.
+
+Three details that decide whether this is a check or a nuisance:
+
+* **A fresh clone passes.** The pins are of committed bytes, so somebody who has only cloned this
+  repository is still never told their tree is broken because a private one is missing — which is
+  the property the original exit-zero was protecting and the reason it was written that way.
+* **`--sync` re-pins only when the two copies agree.** Pinning a divergence would record a
+  disagreement as the agreed state, which is the one thing a pin must never do.
+* **The pins are verified with both trees present too**, so a pin left stale by an edit made
+  correctly in both repositories fails on the developer's machine rather than surviving to CI.
+
+`docs/*.md` is now named explicitly in `.gitattributes`. `* text=auto eol=lf` already covered it,
+but these digests are over file *bytes*, and this repository has already had a checkout convention
+present as a divergence once — six modules reported as differing in every line on two trees that
+were character for character identical. The list of things whose bytes are their meaning should be
+readable rather than inferred from a wildcard.
+
+The CI comment that said both checks were *"no-ops when BotMarket is not checked out beside this
+one … the reason they are cheap to have"* has been rewritten, because it is no longer true and a
+stale comment beside a check is how the next reader concludes the check is decorative.
+
+### §47.4's capture-side split — `skynet-capture`
+
+§47.4 is titled *"Two consumers, and they must not share a queue"* and calls itself **the design
+decision in this section**. It was unbuilt, and — unusually for what remains — it needs no hardware
+at all, because the decision is about *which frame each consumer sees and what happens when one
+falls behind*, and none of that involves a pixel.
+
+| Consumer | Wants | Gets |
+|---|---|---|
+| Policy | The freshest frame; an old frame is worthless | `LatestSlot` — new frames overwrite unconsumed ones |
+| Black box | Every frame; completeness is the guarantee | `RecordQueue<N>` — bounded, oldest-first, gaps annotated |
+
+The two disciplines are opposite on purpose: the slot **discards** to stay fresh, the queue
+**retains** to stay complete. Neither can stall capture, and that sentence is really about priority
+— §47.4: *"stalling capture starves the policy to protect the recording, which is precisely
+backwards."* `Distributor::deliver` therefore has **no error path at all**, and the absence is the
+invariant rather than an oversight.
+
+Four decisions worth recording.
+
+**It holds no pixels.** §47.3 passes capture buffers as `dmabuf` handles by reference, so what moves
+through here is a handle, a stream index, a sequence and an acquisition stamp. That is a performance
+decision in the specification and a *testability* decision here: sixty frames arriving during one
+long policy cycle is a loop over integers, and the assertion that the policy reads the sixtieth is
+the whole of §47.4's claim.
+
+**Every displaced or refused frame is handed back.** A zero-copy pipeline has one hard rule — a
+buffer handed onward is handed back, or the pool runs dry and capture stops for a reason that looks
+like a driver fault. So `publish` returns what it overwrote, `push` returns `Dropped(frame)` with
+the frame in it, and `deliver` returns a `Delivered` carrying both. An API that swallowed them would
+be one where the leak is invisible in the type system and obvious three hours in, which is §47.5's
+description of an unbounded capture pool.
+
+**A run of drops is one annotated gap, and `dropped` and `gaps` are separate counters.** §47.4: *"a
+gap in the black box that is annotated as a gap is honest; a gap that looks like a quiet period is
+not."* A hundred consecutive drops collapse into one `Gap` with first and last sequence and stamp —
+a hundred gaps of one frame each is the same information rendered unreadable. But the two counts are
+kept apart because two hundred frames lost in *one* gap is a stall and two hundred lost in *two
+hundred* gaps is a queue sized one frame too small, and those call for completely different work.
+There is a test that produces both shapes and asserts they are told apart.
+
+**`StampSource` has no `Arrival` variant.** §47.2 says estimating is acceptable and silently
+substituting arrival time is not, because it folds a variable queue delay into a number the policy
+treats as ground truth. So the type makes the dishonest option unspellable: `Captured::estimated`
+takes a `NonZeroU64` uncertainty, and there is no way to construct an estimate that claims to be
+exact. A backend with only an arrival time has to write a number down.
+
+`no_std`, no `alloc`, no `unsafe`, capacity as a const parameter — the per-stream declaration §47.5
+asks for, so the pool is bounded by construction rather than by a policy somebody enforces. It joins
+the kernel and the ring in CI's `thumbv7em-none-eabihf` build for the reason that step already
+gives: it sits in the cycle a control loop runs, and a crate that quietly acquired a `Vec` would be
+an allocation on a path that must not have one, and nothing else in the workspace would notice.
+
+**It is not wired to anything, and that is stated rather than implied.** No capture backend produces
+the handles it moves — V4L2 and GenICam are hardware — and no loop reads the slot. It lands the way
+`skynet-ring` landed: the mechanism, exercised, with the surfaces saying what does not exist.
+
+Seventeen tests. The one worth reading is `a_stalled_encoder_does_not_add_latency_to_the_policy`,
+which is §47.4's argument as an assertion: the encoder stops, sixty frames arrive, the policy reads
+the sixtieth, the recording is what lost, and all 115 displaced-or-refused handles come back.
+
+#### The README said the `memfd` was unbuilt, two rows below the crate that builds it
+
+Found while adding the crate to the table. `skynet-ring-shm` landed last session — sealed anonymous
+file, consumer mapping with no `PROT_WRITE`, a test that re-executes itself so a command crosses two
+real processes — and the paragraph below the table still read *"what is not built is the `memfd`
+that a real ring is mapped over … today the producer and the consumer are two threads in a test
+rather than two processes on a robot."*
+
+Both halves were wrong, and the second was wrong in the direction that matters least and embarrasses
+most: the README was understating what exists. Rewritten to split *built* from *not built* explicitly
+and to say what happened, because a README that describes what its author remembers rather than what
+is in the table above it will drift again.
+
+### §51's offline entitlement — the whole section, and it needed no hardware either
+
+The Parts IV–VI pass recommended a paragraph ago, done immediately. §51 was **zero lines**, it is
+entirely a decision over declared facts, and it had never appeared on §22's list because §22 was
+written against Part I.
+
+§51.1 states one principle and says the whole design follows from refusing its opposite:
+
+> **A licence check must never stop a running robot.** A billing system that can halt a humanoid
+> mid-task has invented a safety hazard to protect revenue.
+
+**The most important thing in `skynet_contracts::entitlement` is a type that does not exist.** There
+is no outcome meaning *stop*, *halt*, *suspend* or *deny at run*. `Verdict` answers one question —
+may this package be installed or upgraded — and the running robot is not a party to it. Adding a
+variant that stopped a robot would mean editing a file whose first paragraph says why not, and it
+would fail `no_verdict_stops_a_running_robot`, which iterates every variant rather than the ones the
+suite happens to construct: a new variant has to be added to that list, which is the moment somebody
+reads the sentence above it.
+
+There is also a `permits_running(Verdict) -> bool` that returns `true` unconditionally. It looks
+like nothing. It is §51.1 as something a reader can find, a test can assert, and a future change
+would have to edit on purpose rather than erode by addition.
+
+#### §51.2's four rows, and the one that looks like a bug
+
+| Situation | Behaviour |
+|---|---|
+| Valid | Install, upgrade and run |
+| Expired, inside grace | Runs. **Upgrades allowed.** Reported as lapsed. |
+| Expired, past grace | **Keeps running.** Installs and upgrades refused. |
+| Revoked | **Keeps running.** Reinstall refused, incident raised. |
+
+Two rows carry *keeps running* in bold in the specification itself, which is unusual enough to read
+as an instruction to whoever implemented it.
+
+The second row is the one somebody will eventually "fix". Expired-inside-grace still permits
+**upgrades**, which looks backwards until §51.2's reason for a ninety-day grace is read — *"the
+failure it guards against (a robot in a basement losing a feature because a token expired) is worse
+than the leakage it permits"* — and then it is obvious: a robot whose token lapsed three weeks ago
+and which needs a security fix should get the security fix. Its test says so in those words.
+
+Expiry deliberately does **not** raise an incident; only revocation does. A subscription ending on
+the day it was always going to end is the system working, and a fleet that raised an incident for it
+would teach its operators to ignore incidents.
+
+#### A fifth verdict the table does not have
+
+`Unattested`, for a token whose signature is absent, failed, untrusted or uncheckable. §51.2's table
+assumes a token; a token nobody can verify has told the robot nothing at all — neither a grant nor
+the absence of one — and installing on the strength of it would let anyone who can write a file into
+a cache directory grant themselves a licence.
+
+It **outranks revocation**, which is the ordering worth defending: an unverifiable token has not
+told the robot it was revoked either, so it must not be able to raise an incident against somebody
+any more than it can grant a licence. And revocation in turn outranks expiry, because a token
+revoked and since expired is a dispute rather than a renewal, and calling it expired would send
+somebody to a billing page instead of to whoever revoked it.
+
+Like the other four, it does not stop anything.
+
+#### The split, and the fourth domain tag
+
+`skynet-contracts` decides and takes no clock and no key — the instant is an argument, for §35.2's
+reason and §45's, so the Hub answering *"is this fleet lapsed"* from a check-in and the robot
+answering it offline are the same function over the same facts.
+
+`skynetd-io::entitlement` is the other half: reading the cached token, digesting its canonical form
+under `skynet.entitlement.v1`, and checking the issuer's detached signature against the trust store.
+That is a **fourth** domain tag beside package, profile and embodiment, and it is there for the
+reason the first one was: §51.2's token is signed over the same shape — a digest — as a release, and
+without its own tag a release signature would grant a licence to anything whose token digest
+happened to collide. A test asserts the two messages differ.
+
+Wall time, not monotonic, and that is a deliberate exception to §35.1: an entitlement is a fact about
+a calendar, somebody's subscription runs to a date, and a monotonic instant cannot express one.
+§35.1 forbids the wall clock for *control* decisions, and this is not one.
+
+#### A hole found by writing a test for something else
+
+`Layout::entitlement` flattens `namespace/name` into one path component, because a slash in a file
+name is a directory nobody intended — or, from a desired-state document, a traversal. The first
+draft's allowed set was alphanumerics, `-` and `.`, on the reasonable-sounding grounds that a dot is
+harmless in a file name.
+
+A package named exactly `..` then flattened to `..`, which is the parent directory. Nothing actually
+escaped, because both callers append `.json` or `.sig.json` and `"...json"` is an ordinary name —
+which is a safety property resting on a *suffix*, one refactor away from not being one. The dot is
+out of the allowed set, and the reasoning is in the function rather than in this log.
+
+The flattening stays lossy on purpose: `acme/grasp` and `acme_grasp` name one file. That is safe
+only because `read` refuses a token whose own `package` field is not the one it was asked for, and
+a test asserts the collision *and* the refusal together, so a future change that dropped the check
+fails with a test that says why.
+
+#### Where it is not
+
+Not mirrored to the Hub, and recorded in `check-contract-mirrors.mjs` beside `calibration` and
+`watchdog` — the same waiting room, for the same reason: `/skynet/os/devices/[id]` needs a table
+that does not exist. Entitlement has a second reason, and it is the more interesting one. §57 makes
+the token *"a field in the desired-state document, not an endpoint"*: the Hub's job is to **issue**
+tokens and the robot's is to decide about them, those are not the same function, and mirroring the
+robot's decision into the Hub before anything issues one would put the wrong half there.
+
+Nothing calls it yet either — §51.2 checks entitlement at install and upgrade, and `admit.rs` does
+not consult it. That is one line away and is deliberately not taken this session: whether a given
+package *requires* an entitlement is §39's question about the marketplace it came from, and wiring
+the check before that question is answered would refuse every open-source policy on a robot that has
+never bought anything. The module header says so, and so does the fact that a missing token reads
+`Ok(None)` rather than a refusal.
+
+**35 tests** — 18 on the decision table, 17 on the disk.
+
+### §50's birth certificate — third hardware-free section in one session
+
+§50.3 says what its absence costs, in a sentence this module exists to make false:
+
+> Without it, *"this is a Unitree G1 with these joint ratings"* is a claim the robot makes about
+> itself, and the entire safety envelope rests on believing it.
+
+Generating a birth certificate needs a secure element and a production line. **Checking one needs
+neither**, and checking one is the whole of its value on a robot that already exists — which is why
+§50 had been sitting behind §22's list along with §47.4 and §51.
+
+`skynet_contracts::birth` takes a certificate and an [`Observed`] — what the machine can see about
+itself right now — and returns findings.
+
+#### The distinction the section turns on, enforced
+
+§50.2: *"the birth certificate proves **what it is**; pairing (§10) binds it to **whose it is**. Two
+separate facts, established by two separate parties … the vendor is the only party who can attest
+to the first and has no business asserting the second."*
+
+So `claims_ownership` is a field on the certificate rather than something a decoder drops, and a
+vendor who filled it in gets `OwnershipAsserted` — a finding about the **document**, not about the
+robot, because the machine is fine and the paperwork overreached. Reported rather than silently
+ignored, because silently ignoring a field is how the next vendor comes to add it too. The forbidden
+names are written down once, in `OWNERSHIP_FIELDS`, so a decoder and whatever eventually issues a
+certificate cannot disagree about which they are.
+
+#### A board swap is expected behaviour, and the type says so
+
+§50.4: *"replacing a mainboard produces a robot whose birth certificate no longer matches its
+hardware. That is the correct behaviour and not a bug."*
+
+That sentence is why the result is a list of findings and not a boolean. `valid: false` would make a
+repaired robot look broken, and the remedies for *"the serial does not match"*, *"the descriptor
+digest does not match"* and *"the vendor's key is not one this robot trusts"* are three different
+phone calls. Each finding carries its own, and a test asserts all three sentences differ.
+
+The device-key sentence in particular says out loud that a board swap produces this, that it is
+expected, that the remedy is a vendor-signed re-issue, and that the re-issue also invalidates the
+calibrations a board swap could have disturbed (§45.4) — four things an operator staring at a red
+line at 2 a.m. should not have to reconstruct from the specification.
+
+#### The gap §5's `verified` flag cannot see
+
+`descriptor_digest` is the field that closes §50.3, and the reason it needs closing is subtle: a
+descriptor can be **perfectly well signed** and be for a different machine. §5's `verified` means
+*the vendor signed these bytes*; it has never meant *these bytes describe this body*. Only the birth
+certificate binds the two, and `DescriptorMismatch` is the only check anywhere that notices.
+
+Which is not necessarily tampering — a vendor publishing an updated descriptor and a robot fetching
+it produces exactly this — so the sentence says what it actually means: the joint ratings in force
+are ones nobody has signed *for this machine*.
+
+#### Two findings void a certificate; six narrow it
+
+`Unattested` and `DeviceKeyMismatch` remove what is attested — the first because comparing a machine
+to a document nobody signed is comparing it to a story it told itself, the second because every
+other field binds *to* that key, so a wrong key means the document is about another machine. The
+other six narrow it. `only_two_findings_void_a_certificate` asserts the split over every variant.
+
+And a test asserts what `attests()` is **not**: no sentence in this module says a robot must not run.
+§50 establishes identity and does not gate motion, and a robot with a void certificate is a robot
+with an unattested identity — which is exactly the state every robot was in before §50 existed.
+
+#### Two smaller things worth recording
+
+**An absent field is unchecked, never matched.** §7.2's rule, and the shape prevents the specific
+bug: an empty `serial` on the certificate compared against a machine reporting an empty serial would
+have "matched", so a certificate binding nothing would confirm everything. An empty field on the
+certificate is `Incomplete`; an absent observation is `Unobservable`; neither is a pass.
+
+**`BirthCertificate` has no `Default`, and the compiler is why.** `SignatureState` does not
+implement it, because there is no defensible default signature state — `Verified` would be a lie and
+`Absent` would be a document that looks constructed and attests nothing. Deriving `Default` here
+would have meant adding it there, to a type five other modules read. It has `unsigned(state)`
+instead: the one argument with no defensible default is the one the caller must supply.
+
+`manufactured` is a `String` and is never parsed. It is provenance, not a deadline, and a type that
+invited comparison to a clock would invite the certificate to expire — which §50 never says it does,
+and which would brick a robot in a basement for exactly the reason §51.1 rejects in the commercial
+case.
+
+Sixteen tests. Not mirrored to the Hub, recorded beside `calibration`, `watchdog` and `entitlement`
+in the mirror tool: `birth` waits on §57's `POST /robots/{slug}/attestations`, which is unwritten.
+
+#### The on-disk half, and the two fields of six a supervisor may read
+
+`skynetd-io::birth` completes it to the depth §51 reached: read the document the vendor shipped from
+`identity/birth.json`, digest its canonical form under `skynet.birth.v1`, check the detached
+signature against the trust store — a **fifth** domain tag, and it earns one for a sharper reason
+than the fourth. A birth certificate *binds a descriptor digest*, so a vendor signs a document
+containing a hex string that is also a descriptor digest, and without its own tag one signature could
+be presented as the other. A test asserts the three messages differ.
+
+The interesting part is what this process may check. §50.2 binds six things and **`skynetd` can
+compare one of them**:
+
+| Bound | Readable by this daemon |
+|---|---|
+| Device key | No — the private half never leaves the secure element, and §33.1 gives this process no path to one |
+| Serial | No — a DMI or vendor-bus read, which is the kernel's side of the RHAL |
+| Hardware revision | No — same |
+| **Descriptor digest** | **Yes** — the descriptor is a file this daemon already owns and digests |
+| Model | Bound, not comparable: there is nothing on a machine to compare a marketing name to |
+| Manufacture date | Provenance, compared to nothing |
+
+The one it can check is §50.3's field — the one that closes *"the entire safety envelope rests on
+believing it"* — and the other three come back as `Unobservable`, named, rather than being omitted.
+A version that dropped them would produce a report reading *"certificate verified"* on a robot that
+had compared a single field, which is the shape of answer this project refuses everywhere else. The
+payload therefore answers **two** questions rather than one: `attests` (is this document about this
+machine at all) and `fully_confirmed` (was every binding it makes checked and matched).
+
+One asymmetry worth recording, because it looks like an inconsistency and is not: `entitlement::from_json`
+**refuses** a token with no expiry, and `birth::from_json` **accepts** a certificate missing fields.
+An entitlement with no expiry fails to be the thing it claims — §51.2's token is signed *and*
+time-limited. A certificate missing a field is still a certificate; it binds less than §50.2 asks,
+each absence is reported as `Incomplete` with the field named, and refusing it outright would throw
+away the bindings it does make — one of which is the only one this daemon can check.
+
+Thirteen more tests, twenty-nine for §50 in total.
+
+### §49.1's warning channel, and the check built this session catching a real divergence
+
+§49 opens by saying it is *"lower priority than everything above it, and included because one part
+of it is safety-relevant."* That part:
+
+> Standards for robots operating around people expect an audible indication before autonomous
+> motion. That makes the warning tone a **system function, not an application feature**: `skynetd`
+> owns it, it sounds on transition into `RUNNING` and on resumption after a stop, and **a package
+> cannot suppress it.** … Packages may use the speaker for anything else only with an explicit
+> `hri.speech` grant, and that grant never includes the warning channel.
+
+*"That grant never includes the warning channel"* was a sentence in a document. It is now a token —
+`hri.warning` — that admission refuses however it is asked for, which is what makes the sentence
+true rather than a paragraph somebody has to remember.
+
+**`capability_reserved` is a new rejection code rather than a reuse of `capability_denied`**, and the
+distinction decides where a person goes. *Denied* is an operator's decision and an operator can
+reverse it; reserved is not grantable by anybody, so an operator told "denied" would go hunting for
+a setting that does not exist. The check runs before the denial check for the same reason: a package
+that asked for both should be told the one it can never have.
+
+The rule covers `requests` **and** `embodiment.capabilities`. A package that declared the capability
+and never requested the grant would otherwise install and sit one manifest edit away from claiming
+the channel.
+
+`warningRequired(from, to)` is there too, and it takes **strings rather than an enumeration** — with
+a comment saying why, because it looks like laziness and is not: §27's `HOLD`/`RUNNING`/`DEGRADED`/
+`STOPPING`/`SAFE` machine is referred to in prose by `post.rs` and is declared nowhere. Inventing the
+enumeration inside §49's module is how a state machine ends up with two definitions. It also records
+that an unknown state name under-sounds rather than over-sounds, which is the wrong direction for a
+safety control and is acceptable only because this function answers a question about a transition it
+was handed — the enforcement point is `skynetd` owning the tone, and that is not built.
+
+#### The mistake, and the check that caught it
+
+The rule went into `crates/skynet-contracts/src/admission.rs` first, with tests, and everything
+passed: 176 contract tests green, clippy clean, the corpus reproducing byte for byte.
+
+**And the two editions had just diverged.** `admission.rs` is the Rust half of the mirrored
+`reference/typescript/package.ts` — the oracle §31.4 measures every edition against — and the
+reference had not moved. The corpus could not see it, for the exact reason a corpus never can: it
+covers the cases that exist, and no case had ever mentioned a token invented ten minutes earlier.
+This is the §31.2 failure this repository is arranged around, committed by the session that had
+spent the afternoon building a check for it.
+
+The check found it immediately. `node tools/check-contract-mirrors.mjs` — with **one** checkout, the
+configuration that until this morning printed *"BotMarket not found"* and exited zero — answered:
+
+```
+CHANGED  package — this contract no longer matches its pinned digest.
+```
+
+That is the pinned-digest work from earlier in this session doing precisely what it was built for,
+on a real divergence rather than a synthetic one, within an hour of existing. It is also a reminder
+that the check catches the *reference* moving and cannot catch the *Rust* moving — the corpus is
+what covers that direction, and only for cases it holds.
+
+#### Landed properly
+
+* The same rule in `reference/typescript/package.ts`: the code, the constants, `isReserved`,
+  `warningRequired`, and the same deduplicating loop.
+* **Three corpus cases**, because the rule has three edges and each is a different mistake a second
+  edition could make: refusing the token however it is asked for, refusing it when only *declared*,
+  and leaving `hri.speech` alone — *"a rule that refused audio outright is one nobody could ship an
+  HRI package under"*, and vendors would route around the capability system entirely.
+* Corpus regenerated: **462 cases across 38 files**, up from 459, all reproduced byte for byte by
+  the Rust edition — which is the actual proof that the two now agree rather than the assertion that
+  they should.
+* The Hub's `lib/skynet/os/package.ts` resynced, both pin files rewritten, and BotMarket's own suite
+  re-run: 1206 tests, `tsc --noEmit` clean.
+
+One small defect found by a test on the way: the finding listed the same token twice when a package
+both declared and requested it. Deduplicated in both editions — a finding naming one token twice
+reads as two problems.
+
+§49.2 — microphones as a privacy surface, `sensing.audio` denied by default and audit-logged — is
+untouched. It is an operator-profile default rather than a mechanism, and this repository has no
+shipped default profile to put it in.
+
+### The vocabulary corpus — the gap that let the last divergence through, closed
+
+The §49.1 divergence above was recorded as a finding with a note that *"a check that the Rust and
+the reference export the same set of rejection codes would have caught this one in seconds, and is
+a morning's work."* Written, then read back, then done — a finding whose fix is understood and
+cheap is a finding that should not survive the session that wrote it.
+
+**`corpus/vocabulary/closed-sets.json`, 21 sets.** Every other corpus holds an edition to a
+*computation* — give it this input, emit these bytes. This one holds it to a **word list**, and the
+reason it belongs in the corpus rather than in a lint is that §31.4 already makes the corpus the
+thing an edition must reproduce before it may carry the name. A vocabulary is exactly the kind of
+agreement it should have been carrying.
+
+The sets: rejection codes, signature states, package kinds, isolation modes, reserved capabilities,
+transport verdicts, methods and warning codes, action kinds, control modes, joint types, base kinds,
+modalities, canonical chains and axes, OS tiers, enforcement modes, guards, fault responses, SCTS
+suites and areas.
+
+**They are emitted in declaration order, not sorted**, and that is a decision rather than laziness.
+Order is part of the agreement for several of them — `OS_TIERS` and `SCTS_AREAS` are ranked, and an
+edition that sorted them alphabetically would be one whose *"next tier up"* arithmetic silently
+differed while every set still contained the same members.
+
+**A vocabulary the corpus names and an edition does not is an error, not a skip.** The runner
+returns *"no vocabulary named `x` in this edition"* rather than passing over it, because a set that
+exists on one side and not the other is precisely the divergence this file was added to catch.
+
+#### What had to change to make it possible
+
+A TypeScript string union **vanishes at compile time**, which is why the reference's rejection codes
+could not be compared against anything. `PackageRejectionCode`, `TransportWarningCode` and
+`TransportVerdict` are now `as const` arrays with the union *derived from them* — so the value and
+the type cannot disagree, and the value can be written into a file. On the Rust side, six enums
+gained an `ALL`-style constant beside them: `OS_TIERS`, `ENFORCEMENT_MODES`, `FAULT_RESPONSES`,
+`PACKAGE_REJECTION_CODES`, `SIGNATURE_STATES`, `TRANSPORT_VERDICTS`, `TRANSPORT_WARNING_CODES`.
+
+#### Proved by breaking it
+
+`capability_reserved` was removed from the Rust array — reproducing this morning's divergence
+exactly — and the corpus failed on the first run:
+
+```
+vocabulary/closed-sets.json :: package_rejection_codes
+  first difference at byte 180
+```
+
+with both lists printed in full. Restored, green: **483 cases across 39 files**, all reproduced byte
+for byte.
+
+So the two checks now cover the two directions. The pinned digests catch the **reference** moving
+without the Hub; the vocabulary corpus catches an **edition** moving without the reference, for
+every closed set rather than only for the cases somebody thought to write. Neither existed twelve
+hours ago, and between them they would have caught both of this session's divergences — the one it
+found in last session's work, and the one it committed itself.
+
+### §56's provenance classes — the last item of this session
+
+The Parts IV–VI pass reached §56, which opens with the sentence its whole design follows from:
+
+> **A leaderboard fed by self-reported on-robot numbers is trivially gameable** — a publisher
+> evaluating their own policy on their own robot, choosing their own seeds, and reporting their own
+> score is not producing evidence. So an on-robot evaluation result is only worth as much as its
+> attestation.
+
+`skynet_contracts::provenance` is that made mechanical, and it is the first thing this session built
+that **consumes** something else this session built: `birth_attested` is
+`skynet_contracts::birth::Attested::attests`, supplied rather than recomputed, because duplicating
+that decision would give the platform two answers to one question.
+
+#### The order of the checks is the whole anti-gaming argument
+
+Only one of the three classes is worth lying to obtain, so the order is load-bearing and is the one
+thing in the file marked as not to be rearranged for tidiness:
+
+1. **An untrustworthy device signature is `unattested` before anything else is looked at.** A bundle
+   nobody can attribute makes claims about its own simulator flag, its own seeds and its own birth
+   certificate, and none of those is evidence either.
+2. **A declared simulator is `simulated` and can never be `field`** — asserted against an otherwise
+   flawless bundle, because that is the version somebody would ship. §35.3 puts the obligation to
+   declare on the driver, and this is where that obligation pays.
+3. **`field` needs all four of its conditions.** Three of them is `unattested`, not a fourth class:
+   a fourth class would be a way of saying *"nearly evidence"*.
+
+`unattested` is **accepted and never ranked**, which is §56.2's own phrasing and the same posture
+§51 takes about a lapsed entitlement and §5 takes about an unsigned descriptor: the platform stores
+what it was given and refuses to *call* it something it has not established.
+
+Two smaller decisions with tests behind them. A **simulator is not asked about its birth
+certificate** — a simulated body has no mainboard and no secure element, and a finding with no
+remedy teaches people to ignore findings. And **§56.4's replayability never changes the class**: a
+result can be perfectly attested and unreplayable, and conflating the two would let a missing
+recording quietly demote a genuine number.
+
+§56.3's seeds — *"supplied to the robot, never generated by it"* — is a sentence about a protocol,
+and its mechanical form is that the bundle's seeds must be the benchmark's **in the benchmark's
+order**. A benchmark that fixes its seeds is fixing the sequence, not the set, so the same seeds
+shuffled are a different run.
+
+§56.5's two roll-ups are a `scores_agree` with a `1e-9` tolerance that exists for the floating-point
+representation and not for the arithmetic — *"a caller tempted to widen it is a caller papering over
+the divergence §31.4 exists to catch"* — and a non-finite score never agrees with anything, itself
+included, because `NaN == NaN` reporting agreement would say a robot and a Hub that both failed to
+compute anything were in perfect accord.
+
+Twenty-two tests.
+
+#### Why it is not on the Hub, and the finding underneath that
+
+This is the first of the three new contracts where the Hub is the **consumer** rather than a second
+opinion: §56.2 says the Hub verifies the signature and assigns the class. So its absence there is
+less comfortable than `entitlement`'s or `birth`'s, and the reason is worth recording as a finding
+rather than as a to-do.
+
+`skynet_evaluations` already carries `verified: boolean` and
+`source: platform | self_reported | imported`. **That is a different axis from §56.2's, not an older
+spelling of it.** `source` is about *who submitted a result*; `field | simulated | unattested` is
+about *what the result is evidence of*. A leaderboard filtering on the first would happily rank a
+self-reported simulator run as a platform result, which is precisely §56.1's failure.
+
+Reconciling them is a schema decision and a migration on a live project, and that is the owner's
+call rather than something to fold into a session that happened to reach §56. Recorded in
+`tools/check-contract-mirrors.mjs` beside the other deferrals, with the reason.
+
+### §54 examined and deliberately not started, with the design work recorded
+
+The Parts IV–VI pass reached §54 (skills), and it stops here on purpose. What follows is what the
+examination found, written down so the next session does not re-derive it.
+
+**§54.2 is the piece, and it calls itself that**: *"the decision that matters most in this part."*
+`preconditions` in `SkillManifest` is a list of prose strings, and *"prose is documentation, and
+documentation does not stop a robot"*, so preconditions become predicates the OS evaluates before a
+skill may start.
+
+§54.2 says this *"needs no new machinery"* because the Hub already has a pure predicate engine at
+`lib/skynet/compatibility/predicate.ts` — 148 lines, `and / or / not / eq / neq / in / exists /
+includes / includes_all / includes_any / gte / lte / gt / lt / semver_satisfies`, plus `__ref` values
+that read from the context instead of holding a literal.
+
+**That sentence is true of the Hub and not of the robot.** The engine exists in one edition, is not
+in `reference/typescript/`, is not in the mirror set, and has no Rust counterpart — so "the skill
+runtime evaluates the same predicate shape" currently means "a second implementation somebody will
+write", which is the §31.2 condition: *a format with two implementations of its own definition is
+not a format.*
+
+#### The design decision, worked out and not yet built
+
+The Hub's engine is **total and boolean**: it never throws and returns `false` for anything
+malformed, unresolvable or unknown, because *"one bad rule row must not take down the compatibility
+check for every user."* Correct for its job.
+
+It is **not** correct for §54.2's, which asks for something the boolean cannot express:
+
+> A precondition that cannot be evaluated refuses the skill, **naming the path that was
+> unresolvable**. Not "assume true", which is what free-text preconditions do by construction.
+
+`false` refuses, which is the right direction — but it collapses *"the world is not ready"* and
+*"this manifest names something this robot does not expose"* into one answer, and those are
+different facts with different remedies. The first is a battery that needs charging; the second is a
+skill that will never run here and whose publisher needs telling.
+
+So the robot's edition should return three values — satisfied, unsatisfied, unevaluable(path) — and
+the way to add that **without** diverging is the useful part:
+
+> `satisfied(outcome)` must equal the Hub's boolean for every corpus case.
+
+The richer answer is then a refinement rather than a second opinion, and the corpus can hold the two
+editions to it directly: freeze the boolean, and freeze the three-valued outcome beside it.
+
+#### Why it is a session and not an afternoon
+
+Doing it under §31.2 means the engine moves into `reference/typescript/`, joins the mirror set, and
+the Hub's copy becomes a re-export — one implementation, three checkouts. The obstacle is
+`semver_satisfies`: it calls `lib/skynet/semver.ts`, the reference has no semver module, and **the
+Rust workspace has no range satisfaction at all** — `compare_versions` in `admission.rs` compares two
+versions and does not parse `^1.2.0`. So the real shape is:
+
+* `reference/typescript/semver.ts` and `predicate.ts`, both added to `MIRRORS`;
+* `lib/skynet/semver.ts` and `lib/skynet/compatibility/predicate.ts` reduced to re-exports — and
+  `semver.ts` is one of the most-imported modules in that repository, so that is the step to be
+  careful with;
+* range satisfaction in Rust, which does not exist;
+* the predicate evaluator in Rust, with the three-valued outcome;
+* corpus cases for both, including the malformed and unresolvable inputs that are the whole reason
+  the Hub's engine is total.
+
+Roughly seven hundred lines across two repositories, touching the Hub's most-imported module. That
+is a coherent piece of work and a bad thing to leave half-done — which this session knows, because
+it opened by finishing a file the last one was stopped in the middle of.
+
+**The rest of §54 waits on it** rather than being separately available: §54.3's success criteria are
+the same predicates over post-state, §54.4's lifecycle re-checks the `hold` subset every cycle, and
+§54.6's four conformance tests all assert predicate behaviour. The lifecycle also wants §27's state
+machine, which as §49.1's note above records, is referred to in prose and declared nowhere.
+
+### Where the numbers stand
+
+Rust: **810** tests on Windows, up from 690 at the start of the session. `cargo fmt --all --check`
+clean; `cargo clippy --workspace --all-targets` clean under `-D warnings`; and the kernel, the ring
+and now the capture split all build for `thumbv7em-none-eabihf`.
+
+The corpus is **483 cases across 39 files**, up from 459. Twenty-one of the twenty-four new cases
+are a new *kind*: the closed vocabularies, which hold an edition to a word list rather than to an
+answer. The other three are §49.1's reserved-channel cases, and they are the only change to the
+reference implementation's *behaviour* this session made. §51's entitlement and §50's birth
+certificate are new contracts rather than changed ones, and neither is in the corpus or the mirror
+set, for the reasons the mirror tool now records.
+
+Hub: **1206** tests across 45 files, `tsc --noEmit` clean, `next build` clean with both new routes
+registered (`/[locale]/skynet/os/transport` and
+`/api/skynet/v1/repos/[handle]/[name]/versions/[version]/transport`), and all 35 locale catalogues
+carrying 5258 source keys.
+
+Both mirror checks pass, and — for the first time — would have failed if they should have.
+
+### Findings, restated after this session
+
+Three are now fixed and are recorded above rather than here: **№4**, the mirror checks that could
+not fail; **№5**, the `--outbox` sink that reported deliveries; and one this session both created
+and closed — the gap that let an edition's vocabulary drift from the reference, which is now the
+vocabulary corpus. The rest stand, with two additions, both found by building on top of the contracts rather than by
+looking for them.
+
+1. **§52's table cites §25.2 for `sensors[].latency_ms`, and the mechanism is in §25.1.** Unchanged.
+   A cross-reference in a shared document, and amending the specification is a decision that should
+   be made deliberately rather than folded into a session that happened to notice it. It is now
+   slightly more expensive to fix than it was — the shared documents are pinned, so the amendment
+   lands in three files — which is the correct price for the check being real.
+2. **The ring's slot layout is a format, and §31.2's list does not name it.** Unchanged.
+3. **Nothing consumes `Reading::Stale`.** Unchanged, and deliberately not "fixed" this session. The
+   obvious move is to add a counter to the consumer, and a counter nobody reads is the same shape of
+   nothing as a variant nobody counts. What the finding actually waits on is the control loop — no
+   capture backend fills a stream, no policy sandbox receives a descriptor, and nothing turns a frame
+   into a command — and the honest place to collect this evidence is in the loop that would be
+   outrun.
+4. **`resolveTransport()` returns `verdict: "direct"` for a policy that declared no action space.**
+   New, and the most interesting one, because it is a defect *nothing in this system could have
+   caught*. All three editions compute it identically — the Rust `derive_verdict`, the TypeScript
+   reference, the Hub's mirror — and `corpus/transport/declaration.json`'s `empty-action-space` case
+   freezes `"verdict":"direct"` as the expected answer. The corpus note beside it reads *"Nothing
+   about the fit can be checked, and the plan says so"*, which is true of the `no_source_embodiment`
+   warning and false of the verdict field sitting next to it. `isInstallable()` returns true.
+   §6.2 argues that three implementations of one pure function cannot disagree, and that is exactly
+   right and exactly why differential testing is blind here: they agree, and they are all wrong
+   together. Working around it at the Hub's edge — a refusal rather than a `direct` verdict nobody
+   backs — is what this session did, and it is a workaround. The fix is a specification decision:
+   either an `unknown` verdict, or a rule that zero channels refuses. Both change three editions and
+   the corpus, which is why it is recorded here rather than taken.
+5. **§56.2's provenance class and the Hub's `EvaluationSource` are two axes, not two spellings of
+   one.** New. `skynet_evaluations` carries `verified: boolean` and
+   `source: platform | self_reported | imported`, which answers *who submitted this result*. §56.2's
+   `field | simulated | unattested` answers *what this result is evidence of*. They overlap enough
+   to be mistaken for each other and a leaderboard filtering on the first would rank a self-reported
+   simulator run as a platform result — which is exactly §56.1's failure, arrived at by using the
+   wrong existing field rather than by missing one. Reconciling them is a schema decision and a
+   migration on a live project, so it is recorded rather than taken.
+6. **`npx eslint` still cannot run in the Hub** — `typescript-eslint` refuses TypeScript 7.0.
+   Pre-existing, unrelated, and it means `tsc --noEmit` and vitest remain that repository's only
+   static checks.
+
+### Not done, and not started
+
+The policy runtime, OTA (§12), the safety MCU, and the drivers that talk to real hardware remain at
+zero lines. §22's *"buildable now, no robot required"* list is, with this session, **complete**: the
+transport endpoint, the embodiment tables and the descriptor publish path were its last entry, and
+the two simulator/LeRobot drivers above it have existed for several sessions.
+
+§32.4's remaining items are 2 (`/skynet/os/editions`) and 5 (devices, certification), and both wait
+on tables that do not exist — `skynet_os_editions`, `skynet_conformance_results`,
+`skynet_device_state`, `skynet_incidents`. That is the next boundary, and it is a schema decision
+rather than a coding one. §32.4 gates item 2 on there being more than one edition, and there is one.
+
+**What §22's list does not cover is where the remaining hardware-free work is**, and this session
+ended by taking one piece of it: §47.4's capture-side split. §22 was written against Part I, and
+Parts IV–VI added sections with the same property — a decision that is pure, testable, and about
+*discipline* rather than about a device. The pass through Parts IV–VI then produced §51 and §50 in
+succession — three such sections in one session, from a list that was supposed to be exhausted —
+which is strong evidence that *"what is left needs hardware"* was the wrong conclusion to have been
+drifting toward, and that the right next move is to finish that pass rather than to assume it is
+done. §49 was then examined and produced its safety-relevant half, and §56 produced its provenance
+classes. §54 was examined and deliberately not started, with its design decision recorded above so
+the next session begins from it rather than from the specification. §55 (environments), §64 (errors
+as a design surface) and §65 (the golden path) were not reached — the pass is not finished, and on
+this session's evidence it should be.
+
+§48.2's power-on self-test is **not** one of them, and checking rather than assuming is the reason
+this paragraph is shorter than it started. `crates/skynetd-io/src/post.rs` already runs the three
+checks §33.1 permits a supervisor that may not touch an actuator — calibration expiry, black box
+writable with its reserve intact, watchdog window nesting — and reports the other five as the
+kernel's rather than as unavailable, which is a different and correct sentence. What is missing
+there is the kernel-side half, and it needs a loaded RHAL driver: that is the `skynet-cli` driver
+loader's territory, not a gap in POST.
+
+Neither repository has been committed or pushed. Both trees are clean of build artifacts and every
+check above was run against the working tree as it stands.

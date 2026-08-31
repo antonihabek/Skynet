@@ -1,0 +1,174 @@
+{
+  "corpus": "vocabulary",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "package_rejection_codes",
+      "note": "Why an install was refused. The set this corpus was added for.",
+      "input": {
+        "set": "package_rejection_codes"
+      },
+      "expected": "[\"unsigned\",\"signature_failed\",\"signature_untrusted\",\"signature_unverifiable\",\"digest_mismatch\",\"isolation_violation\",\"budget_exceeded\",\"capability_ungranted\",\"capability_denied\",\"capability_reserved\",\"over_request\",\"missing_dependency\",\"os_too_old\",\"transport_refused\",\"executes_on_load_untrusted\"]"
+    },
+    {
+      "id": "signature_states",
+      "note": "The four states a signature can be in, plus the platform gap.",
+      "input": {
+        "set": "signature_states"
+      },
+      "expected": "[\"verified\",\"failed\",\"untrusted\",\"absent\",\"unverifiable\"]"
+    },
+    {
+      "id": "package_kinds",
+      "note": "What a package can be.",
+      "input": {
+        "set": "package_kinds"
+      },
+      "expected": "[\"policy\",\"skill\",\"driver\",\"service\",\"embodiment\"]"
+    },
+    {
+      "id": "isolation_modes",
+      "note": "Sandboxed, or a driver.",
+      "input": {
+        "set": "isolation_modes"
+      },
+      "expected": "[\"sandboxed\",\"native\"]"
+    },
+    {
+      "id": "reserved_capabilities",
+      "note": "Tokens no grant confers (§49.1).",
+      "input": {
+        "set": "reserved_capabilities"
+      },
+      "expected": "[\"hri.warning\"]"
+    },
+    {
+      "id": "transport_verdicts",
+      "note": "Ordered worst-last; the plan takes the worst binding in it.",
+      "input": {
+        "set": "transport_verdicts"
+      },
+      "expected": "[\"direct\",\"retargeted\",\"degraded\",\"refused\"]"
+    },
+    {
+      "id": "transport_methods",
+      "note": "Ordered by how much fidelity each costs.",
+      "input": {
+        "set": "transport_methods"
+      },
+      "expected": "[\"direct\",\"remap\",\"retarget\",\"synthesize\",\"drop\",\"blocked\"]"
+    },
+    {
+      "id": "transport_warning_codes",
+      "note": "Everything a plan can report about a fit it accepted.",
+      "input": {
+        "set": "transport_warning_codes"
+      },
+      "expected": "[\"no_source_embodiment\",\"unverified_embodiment\",\"no_target_envelope\",\"dof_mismatch\",\"control_mode_unsupported\",\"rate_unsupported\",\"rate_below_watchdog\",\"scaled_down\",\"unscalable_channel\",\"retarget_without_solver\",\"unmapped_roles\",\"observation_missing\",\"observation_degraded\",\"latency_undeclared\"]"
+    },
+    {
+      "id": "action_kinds",
+      "note": "What one channel of a policy output drives.",
+      "input": {
+        "set": "action_kinds"
+      },
+      "expected": "[\"joint_position\",\"joint_velocity\",\"joint_torque\",\"cartesian\",\"base_velocity\",\"gripper\",\"discrete\"]"
+    },
+    {
+      "id": "control_modes",
+      "note": "How a joint is commanded.",
+      "input": {
+        "set": "control_modes"
+      },
+      "expected": "[\"position\",\"velocity\",\"torque\",\"trajectory\",\"cartesian\"]"
+    },
+    {
+      "id": "joint_types",
+      "note": "The kinds of joint a descriptor can declare.",
+      "input": {
+        "set": "joint_types"
+      },
+      "expected": "[\"revolute\",\"prismatic\",\"continuous\",\"fixed\"]"
+    },
+    {
+      "id": "base_kinds",
+      "note": "What a body stands on.",
+      "input": {
+        "set": "base_kinds"
+      },
+      "expected": "[\"fixed\",\"wheeled\",\"tracked\",\"legged\",\"aerial\",\"rail\"]"
+    },
+    {
+      "id": "embodiment_modalities",
+      "note": "What a sensor produces.",
+      "input": {
+        "set": "embodiment_modalities"
+      },
+      "expected": "[\"rgb\",\"depth\",\"stereo\",\"point_cloud\",\"imu\",\"force_torque\",\"tactile\",\"audio\",\"joint_state\"]"
+    },
+    {
+      "id": "canonical_chains",
+      "note": "The role vocabulary's chains (§5.1).",
+      "input": {
+        "set": "canonical_chains"
+      },
+      "expected": "[\"left_arm\",\"right_arm\",\"left_leg\",\"right_leg\",\"left_hand\",\"right_hand\",\"torso\",\"neck\",\"head\",\"base\",\"tail\",\"aux\"]"
+    },
+    {
+      "id": "canonical_axes",
+      "note": "The role vocabulary's axes (§5.1).",
+      "input": {
+        "set": "canonical_axes"
+      },
+      "expected": "[\"pitch\",\"yaw\",\"roll\",\"slide\",\"flex\",\"abduct\",\"rotate\",\"grip\"]"
+    },
+    {
+      "id": "os_tiers",
+      "note": "Ordered by rank. An edition that sorted these would differ on \"next tier\".",
+      "input": {
+        "set": "os_tiers"
+      },
+      "expected": "[\"guest\",\"host\",\"certified\"]"
+    },
+    {
+      "id": "enforcement_modes",
+      "note": "Ordered by strength.",
+      "input": {
+        "set": "enforcement_modes"
+      },
+      "expected": "[\"advisory\",\"enforcing\",\"enforcing_redundant\"]"
+    },
+    {
+      "id": "guards",
+      "note": "Every guard the kernel can run.",
+      "input": {
+        "set": "guards"
+      },
+      "expected": "[\"watchdog\",\"envelope\",\"rate_limit\",\"workspace\",\"self_collision\",\"balance\",\"proximity\",\"mode_gate\"]"
+    },
+    {
+      "id": "fault_responses",
+      "note": "What a tripped guard does.",
+      "input": {
+        "set": "fault_responses"
+      },
+      "expected": "[\"clamp\",\"hold\",\"stop_cat2\",\"stop_cat1\",\"stop_cat0\"]"
+    },
+    {
+      "id": "scts_suites",
+      "note": "Where a conformance test runs.",
+      "input": {
+        "set": "scts_suites"
+      },
+      "expected": "[\"sim\",\"bench\",\"field\"]"
+    },
+    {
+      "id": "scts_areas",
+      "note": "Ordered as the specification lists them.",
+      "input": {
+        "set": "scts_areas"
+      },
+      "expected": "[\"rhal\",\"embodiment\",\"safety\",\"package\",\"ota\",\"telemetry\",\"offline\",\"security\",\"power\"]"
+    }
+  ]
+}

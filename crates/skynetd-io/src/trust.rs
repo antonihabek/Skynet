@@ -85,6 +85,25 @@ pub const PROFILE_DOMAIN: &str = "skynet.profile.v1\n";
 /// The domain tag for an embodiment descriptor's signature (§5).
 pub const EMBODIMENT_DOMAIN: &str = "skynet.embodiment.v1\n";
 
+/// The domain tag for an offline entitlement token (§51.2).
+///
+/// The fourth tag, and the reason for a fourth is the reason there was a first: §51.2's token is
+/// *"signed and time-limited"*, and it is signed over the same shape — a digest — as a release, a
+/// profile and a descriptor. Without its own tag, a signature made over an entitlement's digest
+/// would verify over a *package* whose digest happened to match, and the difference between those
+/// two is the difference between "you may install this" and "these are the bytes".
+pub const ENTITLEMENT_DOMAIN: &str = "skynet.entitlement.v1
+";
+
+/// The domain tag for a vendor's birth certificate (§50.2).
+///
+/// The fifth, and the reason is the reason there was a first. A birth certificate binds the
+/// **embodiment descriptor digest**, so a vendor signs a document containing a hex string that is
+/// also a descriptor digest — and without its own tag a signature over one could be presented as a
+/// signature over the other. The tag makes a signature say what it is a signature *of*.
+pub const BIRTH_DOMAIN: &str = "skynet.birth.v1
+";
+
 /// The message a package signature is made over: the domain tag, then the version digest.
 pub fn package_message(digest: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(PACKAGE_DOMAIN.len() + digest.len());
@@ -108,6 +127,25 @@ pub fn profile_message(digest: &str) -> Vec<u8> {
 pub fn embodiment_message(digest: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(EMBODIMENT_DOMAIN.len() + digest.len());
     out.extend_from_slice(EMBODIMENT_DOMAIN.as_bytes());
+    out.extend_from_slice(digest.as_bytes());
+    out
+}
+
+/// The message an issuer's signature over an entitlement token is made over (§51.2).
+///
+/// The digest is over the token's canonical form, computed the way every other digest in this
+/// system is, so an issuer and a robot that disagree about whitespace still agree about the grant.
+pub fn entitlement_message(digest: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(ENTITLEMENT_DOMAIN.len() + digest.len());
+    out.extend_from_slice(ENTITLEMENT_DOMAIN.as_bytes());
+    out.extend_from_slice(digest.as_bytes());
+    out
+}
+
+/// The message a vendor's signature over a birth certificate is made over (§50.2).
+pub fn birth_message(digest: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(BIRTH_DOMAIN.len() + digest.len());
+    out.extend_from_slice(BIRTH_DOMAIN.as_bytes());
     out.extend_from_slice(digest.as_bytes());
     out
 }

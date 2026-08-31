@@ -1,0 +1,16 @@
+[package]
+name = "skynet-capture"
+description = "The capture-side split (§47.4): a latest-wins slot for the policy and a bounded queue for the black box, which must never be one queue."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+# No dependencies, and in particular not a capture backend. This crate moves buffer *handles* and
+# timestamps; the bytes never enter it (§47.3). That is what lets the decision §47.4 actually makes
+# — two consumers, two disciplines, one capture — be exercised with no camera, no V4L2 and no GPU.
+
+[lints.rust]
+missing_docs = "warn"

@@ -90,7 +90,7 @@ it, which says no when the answer is no.
 | `docs/` — the full specification, nine parts | Complete |
 | `bindings/c`, `bindings/cpp` — the RHAL ABI | Written, compiling, layout-checked from both sides |
 | `crates/skynet-kernel` — the Safety Kernel | `no_std`, no `alloc`, 8 guards, forward kinematics and its own arithmetic, 101 tests |
-| `crates/skynet-contracts` — transport, admission, certification, readiness, observation | Ported from the reference; §25.1's observation assembler; 131 tests |
+| `crates/skynet-contracts` — transport, admission, certification, readiness, observation, entitlement, birth, provenance | Ported from the reference; §25.1's observation assembler; §51's offline entitlement, whose enumeration has no variant meaning *stop*; §50's birth certificate, where a board swap is an expected finding with a remedy rather than a failure; §56's provenance classes, where a declared simulator can never reach the field leaderboard; 197 tests |
 | `crates/skynet-json` — canonical JSON | 16 tests |
 | `crates/skynet-rhal` — the Rust view of the ABI | 7 tests |
 | `crates/skynet-sha256` — SHA-256 | Held to the FIPS 180-4 vectors, 5 tests |
@@ -98,12 +98,13 @@ it, which says no when the answer is no.
 | `crates/skynet-urdf` — URDF import (§63.4) | XML reader, model, role suggestion, descriptor, collision geometry, 45 tests |
 | `crates/skynet-cli` — the `skynet` command | descriptor, transport, frames, role, driver new/check, plus the robot commands over the local socket and `blackbox`; 44 tests |
 | `crates/skynetd` — the supervisor's brain (§33) | Reconciler, supervision, health, leases; pure, 38 tests, and CI asserts it stays pure |
-| `crates/skynetd-io` — the I/O half, and the `skynetd` binary | Package store, systemd launcher, observation, local API, the on-robot console (§32.2), the black box on disk, the trust store (§19), §34.3's bearers and the outbound sender, the loop; 206 tests plus an end-to-end run against real systemd |
+| `crates/skynetd-io` — the I/O half, and the `skynetd` binary | Package store, systemd launcher, observation, local API, the on-robot console (§32.2), the black box on disk, the trust store (§19), §34.3's bearers and the outbound sender, §51's cached entitlement tokens, §50's birth certificate, the loop; 246 tests plus an end-to-end run against real systemd |
 | `crates/skynet-blackbox` — the black box (§13, §26) | The preallocated ring, the MCAP writer, sealing, deterministic replay; `no_std`, 31 tests. Record format **2**: a frame now records the capture paths that produced nothing, and an unmeasurable skew rather than a zero one |
 | `crates/skynet-ring` — the SPSC command ring (§25) | The only channel from a policy to the kernel: 4 KiB slots, a seqlock, latest-wins, never blocks. `no_std`, no `alloc`, no `unsafe`; 18 tests including a two-thread torture run |
 | `crates/skynet-ring-shm` — the `memfd` under it | Creates, seals and maps the anonymous file; the consumer's mapping carries no `PROT_WRITE`. 9 tests, one of which re-executes itself so a command crosses two real processes |
-| `corpus/` — the conformance corpus | 459 cases, 38 files |
-| `crates/skynet-corpus` — the corpus runner | Reproduces all 459 byte for byte |
+| `crates/skynet-capture` — the capture-side split (§47.4) | A latest-wins slot for the policy and a bounded queue for the black box, which must never be one queue. Moves buffer handles, never pixels; every displaced or refused frame is handed back, and a run of drops is one annotated gap. `no_std`, no `alloc`, no `unsafe`; 17 tests |
+| `corpus/` — the conformance corpus | 483 cases, 39 files, of which 21 are the closed vocabularies both editions must spell identically |
+| `crates/skynet-corpus` — the corpus runner | Reproduces all 483 byte for byte |
 | `reference/typescript/` — the oracle | Vendored from the Hub; generates the corpus |
 | `bindings/python` — the Python RHAL | Driver protocol plus a ctypes ABI view, offset-asserted |
 | `drivers/mock` — the mock robot | 24 sim-conformance checks, no hardware |
@@ -117,11 +118,21 @@ vendor SDKs. The realistic figure for a robot moving under this is several engin
 states that plainly and this README does not improve on it.
 
 §25's command path is a **half** entry rather than either column, and the halves are worth naming
-separately. The protocol is built and exercised — the ring's slots, its seqlock, its wrap and its
-refusal to block, and §25.1's observation assembler with the corpus pinning both editions to the
-same frame. What is not built is the `memfd` that a real ring is mapped over, and the runtime that
-would sit either side of it: today the producer and the consumer are two threads in a test rather
-than two processes on a robot, and the frames the assembler builds are ones the corpus handed it.
+separately — this paragraph said the `memfd` was unbuilt for a session after `skynet-ring-shm`
+built it, which is the kind of drift a README acquires by describing what it remembers rather than
+what is in the table above it.
+
+Built and exercised: the ring's slots, its seqlock, its wrap and its refusal to block; the `memfd`
+under it, sealed, with the consumer's mapping carrying no `PROT_WRITE`, and a test that re-executes
+itself so a command crosses two real processes; §25.1's observation assembler, with the corpus
+pinning both editions to the same frame; and §47.4's capture-side split, where the policy's
+latest-wins slot and the black box's bounded queue are separate structures because a single queue in
+front of a policy is latency wearing the costume of reliability.
+
+Not built: the runtime that would sit either side of any of it. No capture backend fills a stream —
+`skynet-capture` moves handles a V4L2 or GenICam backend would produce, and neither exists — no
+policy sandbox receives a descriptor, and nothing turns a frame into an inference and a command. The
+frames the assembler builds are ones the corpus handed it.
 
 The on-robot console has now been opened in a browser, which found two things no test was watching
 for: `GET /plan` answered two different shapes and the reconcile panel had never once rendered, and
@@ -365,7 +376,8 @@ crates/          The Rust reference edition.
   skynet-sha256      SHA-256, for the digests the specification already names.
   skynet-rhal        The Rust view of the ABI. Layout-asserted against the header.
   skynet-kernel      The Safety Kernel. no_std, no alloc, no clock, its own sin/cos/sqrt.
-  skynet-contracts   L2: transport, admission, certification, readiness.
+  skynet-contracts   L2: transport, admission, certification, readiness, entitlement,
+                     birth, provenance.
   skynet-urdf        URDF import. The only crate that links std, because it is a tool.
   skynet-cli         The `skynet` command, and the driver loader that needs unsafe.
   skynetd            The supervisor's brain: reconcile, supervise, health, leases. Pure.
@@ -373,6 +385,7 @@ crates/          The Rust reference edition.
   skynet-blackbox    The black box: the ring, MCAP, sealing, replay. no_std, no I/O.
   skynet-ring        The SPSC command ring (§25). A protocol, no I/O, and no unsafe.
   skynet-ring-shm    The memfd under it. Four syscalls, and the third crate that may use unsafe.
+  skynet-capture     The capture-side split (§47.4): a latest-wins slot and a bounded queue.
   skynet-corpus      Holds this edition to the corpus.
 corpus/          The conformance corpus. Plain data, no code.
 reference/       The TypeScript oracle the corpus is generated from.

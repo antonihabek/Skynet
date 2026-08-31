@@ -428,6 +428,18 @@ pub trait Sink {
     /// Deliver one item. `Ok(())` means it is gone and the queue may forget it.
     fn send(&self, item: &Item) -> Result<(), SendError>;
 
+    /// Whether `Ok` from [`send`](Sink::send) means the item **left this machine**.
+    ///
+    /// No default, deliberately. A default of `true` is the one that lies — it is exactly what the
+    /// `--outbox` sink would have inherited — and a default of `false` would make a real transport
+    /// under-report by omission. So every sink answers, and the answer is one word in a file whose
+    /// author is holding the question in mind.
+    ///
+    /// The queue records it per accepted item ([`Queue::accepted`](crate::outbound::Queue::accepted)),
+    /// because once an item is removed nothing downstream can tell the two apart, and "the queue is
+    /// empty" is true of both while meaning opposite things about the robot.
+    fn delivers(&self) -> bool;
+
     /// What this sink is, for `/outbound` and the console. Shown to an operator, so it says what is
     /// actually happening rather than naming a type.
     fn describe(&self) -> String;
@@ -464,6 +476,16 @@ impl Sink for Unpaired {
                      §34.4's drop policy applies to it."
                 .to_string(),
         })
+    }
+
+    /// True, and never reached.
+    ///
+    /// This sink stands in for §34.2's HTTPS transport, so the honest answer is the transport's.
+    /// It cannot be observed — `send` returns `Err` unconditionally, so the queue never asks — and
+    /// answering `false` would say that a robot with nowhere to send is a robot handing items to
+    /// something local, which is a different and wrong description of the same nothing.
+    fn delivers(&self) -> bool {
+        true
     }
 
     fn describe(&self) -> String {
@@ -505,6 +527,14 @@ impl Sink for Directory {
         )
     }
 
+    /// False. The item is on the same disk it started on.
+    ///
+    /// The whole point of the pair: a `Directory` send returns `Ok`, the item is removed and the
+    /// counters used to record a delivery — which was true of the queue and false of the robot.
+    fn delivers(&self) -> bool {
+        false
+    }
+
     fn describe(&self) -> String {
         format!(
             "a directory on this machine, {} — a development sink, not the Hub",
@@ -516,8 +546,13 @@ impl Sink for Directory {
 /// What one drain did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Drained {
-    /// Items delivered and removed.
+    /// Items that left this machine and were removed.
     pub sent: usize,
+    /// Items a **non-transport** sink accepted, and which are therefore still on this machine.
+    ///
+    /// Removed from the queue like a delivery, because they are gone from it, and counted apart
+    /// because nothing was sent. A `--outbox` pass reports every item here and none in `sent`.
+    pub handed_off: usize,
     /// Items attempted and refused, now in backoff.
     pub failed: usize,
     /// Items skipped because they are still in backoff.
@@ -595,7 +630,16 @@ impl Sender {
                 Ok(()) => {
                     if self.queue.remove(&item.id).is_ok() {
                         self.schedule.remove(&item.id);
-                        drained.sent += 1;
+                        // Counted before it is forgotten. After `remove` nothing can tell a
+                        // delivery from a local hand-off, so the distinction has to be recorded at
+                        // the one moment both facts are in hand.
+                        let delivered = sink.delivers();
+                        self.queue.accepted(delivered);
+                        if delivered {
+                            drained.sent += 1;
+                        } else {
+                            drained.handed_off += 1;
+                        }
                     }
                 }
                 Err(_) => {
@@ -819,7 +863,11 @@ mod tests {
     }
 
     #[test]
-    fn the_drain_sends_over_an_unmetered_link_and_empties_the_queue() {
+    fn the_drain_empties_the_queue_over_an_unmetered_link_and_calls_it_a_hand_off() {
+        // This test used to assert `sent == 2` over a `Directory`, and that assertion was the
+        // defect written down: the sink is a directory on the same disk, nothing was sent, and the
+        // suite agreed with the counters that something had been. The drain path is unchanged —
+        // pick, decide, accept, remove — and only the word for what happened is now right.
         let root = TempRoot::new("drain-sends");
         let dir = root.path();
         let queue = Queue::at(dir.join("q"), 1024 * 1024, 256 * 1024);
@@ -837,10 +885,134 @@ mod tests {
             0.0,
             16,
         );
-        assert_eq!(drained.sent, 2);
+        assert_eq!(drained.handed_off, 2);
+        assert_eq!(
+            drained.sent, 0,
+            "a directory on this machine is not a delivery"
+        );
         assert_eq!(drained.failed, 0);
         assert!(sender.queue().items().is_empty());
         assert_eq!(std::fs::read_dir(dir.join("out")).unwrap().count(), 2);
+
+        // And it survives the pass, in the counters an operator reads rather than only in the
+        // return value of one drain.
+        let status = sender.queue().status();
+        assert_eq!(status.handed_off, 2);
+        assert_eq!(status.delivered, 0);
+    }
+
+    /// A sink that is a transport, for the half of the pair `Directory` cannot exercise.
+    #[derive(Debug, Clone, Copy)]
+    struct Delivers;
+
+    impl Sink for Delivers {
+        fn send(&self, _item: &Item) -> Result<(), SendError> {
+            Ok(())
+        }
+
+        fn delivers(&self) -> bool {
+            true
+        }
+
+        fn describe(&self) -> String {
+            "a sink that claims to be a transport".to_string()
+        }
+    }
+
+    #[test]
+    fn a_transport_sink_counts_as_delivered_and_a_local_one_never_does() {
+        // The two counters are one distinction, so they are asserted against each other: a suite
+        // that only checked the directory case would pass with `accepted` hard-coded to `false`.
+        let root = TempRoot::new("drain-delivered");
+        let dir = root.path();
+        let queue = Queue::at(dir.join("q"), 1024 * 1024, 256 * 1024);
+        queue.enqueue(Class::Telemetry, "one").unwrap();
+
+        let bearers = table(&[("eth0", Kind::Ethernet, None, true)]);
+        let mut sender = Sender::new(queue);
+        let drained = sender.drain(&bearers, &Delivers, 0, 0.0, 16);
+        assert_eq!(drained.sent, 1);
+        assert_eq!(drained.handed_off, 0);
+
+        let status = sender.queue().status();
+        assert_eq!(status.delivered, 1);
+        assert_eq!(status.handed_off, 0);
+
+        // The same queue, the other kind of sink. Both totals stand, because they are two facts
+        // about one robot's history and neither replaces the other.
+        sender.queue().enqueue(Class::Telemetry, "two").unwrap();
+        sender.drain(
+            &bearers,
+            &Directory {
+                path: dir.join("out"),
+            },
+            0,
+            0.0,
+            16,
+        );
+        let status = sender.queue().status();
+        assert_eq!(status.delivered, 1);
+        assert_eq!(status.handed_off, 1);
+    }
+
+    #[test]
+    fn the_counters_reach_the_payload_the_console_reads() {
+        // The defect was invisible because the surface an operator reads showed one number. Both
+        // keys are asserted present rather than only the struct fields, because a `to_json` that
+        // dropped one would leave the console rendering a `--outbox` robot as a delivering one.
+        let root = TempRoot::new("drain-payload");
+        let dir = root.path();
+        let queue = Queue::at(dir.join("q"), 1024 * 1024, 256 * 1024);
+        queue.enqueue(Class::Telemetry, "one").unwrap();
+
+        let mut sender = Sender::new(queue);
+        sender.drain(
+            &table(&[("eth0", Kind::Ethernet, None, true)]),
+            &Directory {
+                path: dir.join("out"),
+            },
+            0,
+            0.0,
+            16,
+        );
+        let payload = sender.queue().to_json();
+        assert_eq!(
+            payload
+                .get("handed_off")
+                .and_then(skynet_json::Json::as_usize),
+            Some(1)
+        );
+        assert_eq!(
+            payload
+                .get("delivered")
+                .and_then(skynet_json::Json::as_usize),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn a_failed_send_counts_as_neither() {
+        // Backoff already covers the failure; what this pins is that a refusal does not quietly
+        // land in `handed_off` and make an outage look like a development sink.
+        let root = TempRoot::new("drain-neither");
+        let dir = root.path();
+        let queue = Queue::at(dir.join("q"), 1024 * 1024, 256 * 1024);
+        queue.enqueue(Class::CheckIn, "hello").unwrap();
+
+        let mut sender = Sender::new(queue);
+        let drained = sender.drain(
+            &table(&[("eth0", Kind::Ethernet, None, true)]),
+            &Unpaired,
+            0,
+            1.0,
+            16,
+        );
+        assert_eq!(drained.failed, 1);
+        assert_eq!(drained.sent, 0);
+        assert_eq!(drained.handed_off, 0);
+        let status = sender.queue().status();
+        assert_eq!(status.delivered, 0);
+        assert_eq!(status.handed_off, 0);
     }
 
     #[test]
@@ -881,7 +1053,10 @@ mod tests {
             0.0,
             16,
         );
-        assert_eq!(drained.sent, 1);
+        // `handed_off` and not `sent`: the sink here is a directory too. What this test is about
+        // is that the incident got past the wait, and that is the count that moved.
+        assert_eq!(drained.handed_off, 1);
+        assert_eq!(drained.sent, 0);
         assert_eq!(sender.queue().items().len(), 2);
     }
 
