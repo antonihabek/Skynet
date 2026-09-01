@@ -632,6 +632,35 @@ function abortReason(progress: Progress): { reason: LifecycleReason, detail: str
  * Pure, clockless and total: `elapsed_ms` is supplied for the same reason the kernel takes `now_ms`
  * as a parameter (§35.2), which is what lets a timeout be tested without waiting for one.
  */
+/**
+ * What a denied acquisition tells the operator, which is two different errands.
+ *
+ * §25.2 keeps a *grant* and a *lease* apart: holding a grant makes a package eligible to take an
+ * exclusive lease, and two packages may hold the same grant while only one holds the lease. So a
+ * refusal has two shapes and they send an operator to opposite places —
+ *
+ * * **a holder is named:** somebody else is using it. Stop that package, or wait.
+ * * **no holder:** nobody has it, and this package was never granted it. Grant it, or take it out
+ *   of `required_capabilities`.
+ *
+ * The projection from §25.2's own outcome has always reported the second as `holder: null`, and
+ * this function is where that survives into the sentence. The version it replaced said "is held by
+ * another package" for both, which is a refusal that sends an operator hunting for a package that
+ * does not exist — §64's failure exactly, and one no corpus case had caught because a case written
+ * from the document imagines the contended arm rather than the unconfigured one.
+ */
+function leaseDeniedDetail(progress: Progress): string {
+  if (!progress.lease_token) {
+    return 'a required capability could not be leased, and nothing named which'
+  }
+  if (!progress.lease_holder) {
+    return `\`${progress.lease_token}\` was never granted to this package, so §25.2 will not let `
+      + 'it take the lease — nobody is holding it. Grant it, or take it out of '
+      + '`required_capabilities`.'
+  }
+  return `\`${progress.lease_token}\` is held by ${progress.lease_holder}`
+}
+
 export function advance(phase: SkillPhase, progress: Progress = {}): SkillTransition {
   const done = (
     to: SkillPhase,
@@ -680,10 +709,7 @@ export function advance(phase: SkillPhase, progress: Progress = {}): SkillTransi
     case 'acquiring': {
       const leases = progress.leases ?? 'pending'
       if (leases === 'denied') {
-        return done('terminal', 'lease_denied', 'aborted',
-          progress.lease_token
-            ? `\`${progress.lease_token}\` is held by ${progress.lease_holder || 'another package'}`
-            : 'a required capability is held by another package')
+        return done('terminal', 'lease_denied', 'aborted', leaseDeniedDetail(progress))
       }
       if (leases !== 'held') {
         return done('acquiring', 'lease_pending', null,

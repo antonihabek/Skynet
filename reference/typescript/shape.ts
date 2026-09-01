@@ -31,6 +31,8 @@ import {
   commandsAutonomously, isSafeState, isSticky, OPERATING_STATES, warningRequired,
   type Transition,
 } from './opstate.ts'
+import type { LiveContext } from './live.ts'
+import type { BootVerdict, BundleVerdict } from './ota.ts'
 import type { SkillTransition } from './skill.ts'
 import {
   CHAIN, WINDOWS, checkNesting, hostBlockedByCommandLoss, type Windows,
@@ -540,6 +542,51 @@ export function shapeCellLayer(layer: WorkspaceLayer | null): unknown {
         shape: shapeVolumeShape(volume.shape),
       })),
     },
+  }
+}
+
+/**
+ * §54.2's live context, with the two omission lists beside it rather than inside it.
+ *
+ * Beside, because a path under `robot.` describing the context itself would be a path a
+ * precondition could read — and a skill whose precondition asserts something about the completeness
+ * of its own evaluation context is a skill asserting something about the OS rather than about the
+ * robot.
+ */
+export function shapeLiveContext(built: LiveContext): unknown {
+  return {
+    context: built.context,
+    unaddressable: [...built.unaddressable],
+    unreadable: [...built.unreadable],
+  }
+}
+
+/**
+ * §12's verdict on one OS bundle.
+ *
+ * `subjects` is always present and may be empty, which is the opposite of the rule most findings in
+ * this file follow — and the reason is that a *reader* of this list groups by subject. A finding
+ * whose subject key came and went would make that grouping a special case per code.
+ */
+export function shapeBundleVerdict(verdict: BundleVerdict): unknown {
+  return {
+    admitted: verdict.admitted,
+    faults: verdict.faults.map(fault => ({
+      code: fault.code,
+      severity: fault.severity,
+      message: fault.message,
+      subjects: [...fault.subjects],
+    })),
+    gated_components: [...verdict.gated_components],
+  }
+}
+
+/** §12's decision about a slot the robot has just booted into. */
+export function shapeBootVerdict(verdict: BootVerdict): unknown {
+  return {
+    decision: verdict.decision,
+    detail: verdict.detail,
+    missing: [...verdict.missing],
   }
 }
 

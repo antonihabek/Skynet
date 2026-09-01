@@ -11,6 +11,10 @@
 //! skynet estop                       stop every package, now
 //! skynet install <dir> --id … --kind … --version … --digest …
 //! skynet rollback <ns/name>          the previous version, in milliseconds
+//! skynet skills                      every invocation, and where §54.4 says it is
+//! skynet skill run <ns/name>         invoke one (§54.1)
+//! skynet skill stop <inv-id>         make a running one return
+//! skynet ota                         the slots, and whether the next image may be applied
 //! ```
 //!
 //! These were absent until `skynetd` existed, and the reason they were absent rather than stubbed is
@@ -55,6 +59,11 @@ skynet — talking to a running robot (§33.7)
   blackbox                    The recording's window, and what is missing from it
   blackbox seal               Seal the window now (§13); needs operator
   blackbox get <name>         Download one sealed recording, as MCAP
+  skills                      Every invocation, and where §54.4 says it is
+  skill run <ns/name> [--args <json>] [--parent <inv-id>] [--overrun <factor>]
+                              Invoke a skill; needs operator
+  skill stop <inv-id>         Make a running skill return; needs operator
+  ota                         A/B slots, and §12's verdict on the wanted image
 
   --socket <path>   Default /run/skynetd.sock
   --host <addr:port>  The LAN console instead of the socket
@@ -131,8 +140,224 @@ pub fn run(command: &str, argv: &[String]) -> i32 {
         "rollback" => rollback(argv),
         "install" => install(argv),
         "blackbox" => blackbox(argv),
+        "ota" => show(argv, "GET", "/ota", None, print_ota),
+        "skills" => show(argv, "GET", "/skills", None, print_skills),
+        "skill" => skill(argv),
         other => term::fail(&format!("`{other}` is not a robot command.\n\n{USAGE}")),
     }
+}
+
+/// `skynet skill run|stop` (§54.1).
+///
+/// Two subcommands rather than one because they are two different acts on two different nouns:
+/// `run` names a *package*, `stop` names an *invocation*. Collapsing them would mean guessing which
+/// from the shape of the argument, and a robot is the wrong place to guess.
+fn skill(argv: &[String]) -> i32 {
+    match argv.first().map(String::as_str) {
+        Some("run") => skill_run(&argv[1..]),
+        Some("stop") => match argv.get(1) {
+            Some(id) if !id.starts_with('-') => show(
+                &argv[2..],
+                "POST",
+                &format!("/skills/{id}/stop"),
+                Some(String::new()),
+                print_note,
+            ),
+            _ => term::fail("skynet skill stop <inv-id> — name the invocation, not the package"),
+        },
+        _ => term::fail(&format!(
+            "skynet skill run <ns/name>, or skynet skill stop <inv-id>.\n\n{USAGE}"
+        )),
+    }
+}
+
+fn skill_run(argv: &[String]) -> i32 {
+    let Some(package) = argv.first().filter(|arg| !arg.starts_with('-')) else {
+        return term::fail("skynet skill run <ns/name> — name the skill package to invoke");
+    };
+
+    let mut body = Json::obj();
+    body.set("skill", Json::from(package.as_str()));
+
+    // `--args` is JSON on the command line, and a malformed one is refused here rather than sent.
+    // The robot would refuse it too, but a parse error from a local argument is a parse error the
+    // person typing it can fix, and sending it first would make the robot answer for the typo.
+    if let Some(text) = flag(argv, "--args") {
+        match Json::parse(&text) {
+            Ok(parsed) => {
+                body.set("arguments", parsed);
+            }
+            Err(error) => {
+                return term::fail(&format!("--args is not JSON: {error:?}"));
+            }
+        }
+    }
+    if let Some(parent) = flag(argv, "--parent") {
+        body.set("parent", Json::from(parent.as_str()));
+    }
+    if let Some(text) = flag(argv, "--overrun") {
+        match text.parse::<f64>() {
+            Ok(factor) => {
+                body.set("overrun_factor", Json::Num(factor));
+            }
+            Err(_) => return term::fail("--overrun takes a number, e.g. --overrun 3"),
+        }
+    }
+
+    let Ok(text) = body.to_canonical() else {
+        return term::fail("the invocation could not be serialised");
+    };
+    show(argv, "POST", "/skills", Some(text), print_note)
+}
+
+/// The `note` a robot sent back with an acceptance, or the whole document when there is none.
+fn print_note(document: &Json) {
+    if let Some(invocation) = document.get_present("invocation").and_then(Json::as_str) {
+        println!("{invocation}");
+    }
+    if let Some(note) = document.get_present("note").and_then(Json::as_str) {
+        println!("{}", term::dim(note));
+    }
+}
+
+/// §12's state: where the robot is, and whether it may move.
+///
+/// The verdict is printed with **every** error finding rather than the first, because an OS update
+/// is the case where each attempt round the loop costs a reboot. A gated component is called out
+/// separately from the refusal that names it: "this update touches the safety kernel" is what an
+/// operator needs before they go and book bench time, and it is true whether or not they hold a
+/// pass today.
+fn print_ota(document: &Json) {
+    let text = |key: &str| {
+        document
+            .get_present(key)
+            .and_then(Json::as_str)
+            .unwrap_or("—")
+            .to_string()
+    };
+    println!(
+        "active {}   staged {}   channel {}",
+        text("active"),
+        text("staged"),
+        text("channel"),
+    );
+
+    if let Some(pending) = document
+        .get_present("pending")
+        .filter(|p| **p != Json::Null)
+    {
+        println!(
+            "pending {} — this boot has to prove itself within {} ms or the bootloader returns",
+            pending
+                .get("version")
+                .and_then(Json::as_str)
+                .unwrap_or("(unknown)"),
+            pending
+                .get("budget_ms")
+                .and_then(Json::as_f64)
+                .unwrap_or(0.0),
+        );
+    }
+
+    let Some(assessment) = document
+        .get_present("assessment")
+        .filter(|a| **a != Json::Null)
+    else {
+        println!(
+            "{}",
+            term::dim("The desired state names no OS version, so there is nothing to assess.")
+        );
+        return;
+    };
+
+    let admitted = assessment.get("admitted") == Some(&Json::Bool(true));
+    println!(
+        "wanted {}   {}",
+        text("wanted"),
+        if admitted { "admitted" } else { "REFUSED" }
+    );
+    if let Some(reason) = assessment.get_present("because").and_then(Json::as_str) {
+        println!("  {}", term::dim(reason));
+    }
+    let Some(verdict) = assessment.get_present("verdict") else {
+        return;
+    };
+    let gated = verdict.arr_or_empty("gated_components");
+    if !gated.is_empty() {
+        let names: Vec<&str> = gated.iter().filter_map(Json::as_str).collect();
+        println!(
+            "  {}",
+            term::dim(&format!(
+                "changes {} — §12 requires a bench pass for these exact bytes",
+                names.join(", ")
+            ))
+        );
+    }
+    for fault in verdict.arr_or_empty("faults") {
+        let severity = fault
+            .get("severity")
+            .and_then(Json::as_str)
+            .unwrap_or("error");
+        println!(
+            "  {} {}",
+            fault.get("code").and_then(Json::as_str).unwrap_or("?"),
+            term::dim(fault.get("message").and_then(Json::as_str).unwrap_or("")),
+        );
+        let _ = severity;
+    }
+    if let Some(note) = assessment.get_present("bench_note").and_then(Json::as_str) {
+        println!("  {}", term::dim(&format!("bench pass: {note}")));
+    }
+}
+
+/// §54.4's ladder, one line per invocation.
+///
+/// The phase and the reason on the same line, because neither is enough alone: `terminal` says it
+/// is over and `lease_denied` says whether to grant a token, stop a package, or call the publisher.
+fn print_skills(document: &Json) {
+    let rows = document.arr_or_empty("invocations");
+    if rows.is_empty() {
+        println!("Nothing has been invoked.");
+        println!(
+            "{}",
+            term::dim(
+                "A skill is installed like any other package and run on demand (§54.1): skynet \
+                 skill run <ns/name>."
+            )
+        );
+        return;
+    }
+    for row in rows {
+        let text = |key: &str| {
+            row.get_present(key)
+                .and_then(Json::as_str)
+                .unwrap_or("—")
+                .to_string()
+        };
+        println!(
+            "{}  {}  {}  {}",
+            text("id"),
+            text("package"),
+            text("phase"),
+            term::dim(&text("reason")),
+        );
+        let outcome = row.get_present("outcome").and_then(Json::as_str);
+        if let Some(outcome) = outcome {
+            println!("    outcome {outcome}");
+        }
+        let detail = text("detail");
+        if detail != "—" && !detail.is_empty() {
+            println!("    {}", term::dim(&detail));
+        }
+    }
+    // The one thing a reader would otherwise get wrong, printed once rather than per row.
+    println!(
+        "{}",
+        term::dim(
+            "The outcome is the OS's, not the skill's (§54.3). A criterion nothing on this robot \
+             can evaluate is `unlabeled` rather than a pass."
+        )
+    );
 }
 
 fn show(argv: &[String], method: &str, path: &str, body: Option<String>, print: fn(&Json)) -> i32 {

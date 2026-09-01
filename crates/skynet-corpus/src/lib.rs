@@ -33,7 +33,9 @@ use skynet_contracts::certification;
 use skynet_contracts::certification::award_certification;
 use skynet_contracts::embodiment as contracts_embodiment;
 use skynet_contracts::json;
+use skynet_contracts::live;
 use skynet_contracts::opstate;
+use skynet_contracts::ota;
 use skynet_contracts::predicate;
 use skynet_contracts::readiness::{evaluate_readiness, summarize_readiness, ReadinessReport};
 use skynet_contracts::roles;
@@ -443,6 +445,31 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             skill::deadline_to_json(&skill::bounded_deadline(&child, remaining))
         }
 
+        // §12's two decisions. Two files, because they are two questions with two inputs and
+        // nothing in common but a section number: one is about a bundle nobody has installed yet,
+        // the other about a slot the robot is already running.
+        "ota" if label.contains("bundle") => {
+            let bundle = json::bundle_from_json(input.get("bundle").ok_or("no `bundle`")?);
+            let subject =
+                json::update_subject_from_json(input.get("subject").ok_or("no `subject`")?);
+            ota::bundle_verdict_to_json(&ota::admit_bundle(&bundle, &subject))
+        }
+
+        "ota" if label.contains("boot") => {
+            let evidence = json::boot_evidence_from_json(input);
+            ota::boot_verdict_to_json(&ota::confirm_boot(&evidence))
+        }
+
+        // §54.2's live context. The half of the precondition machinery that had no builder until
+        // the runtime needed one: `evaluate_preconditions` has always taken a context, and nothing
+        // said what a robot puts in it. One file, because there is one function — and every case
+        // in it is really a case about a single rule, that a fact the robot does not know is
+        // *absent* rather than defaulted.
+        "live" if label.contains("context") => {
+            let inputs = json::live_inputs_from_json(input);
+            live::live_context_to_json(&live::live_context(&inputs))
+        }
+
         // §55.2's cell descriptor. Two files, because the document has two consumers and an
         // edition could agree about one while disagreeing about the other: `validate` is what an
         // operator sees when they save it, `context` is what a precondition and the workspace guard
@@ -556,6 +583,16 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
                     .map(|code| code.as_str())
                     .collect(),
                 "cell_faults" => cell::CELL_FAULTS.iter().map(|code| code.as_str()).collect(),
+                "os_components" => ota::OS_COMPONENTS.to_vec(),
+                "certification_gated" => ota::CERTIFICATION_GATED.to_vec(),
+                "bundle_faults" => ota::BUNDLE_FAULTS
+                    .iter()
+                    .map(|code| code.as_str())
+                    .collect(),
+                "boot_decisions" => ota::BOOT_DECISIONS
+                    .iter()
+                    .map(|decision| decision.as_str())
+                    .collect(),
                 "operating_states" => opstate::state_names(),
                 "state_reasons" => opstate::STATE_REASONS
                     .iter()

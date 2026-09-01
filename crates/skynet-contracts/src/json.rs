@@ -31,6 +31,9 @@ use crate::calibration::{
 };
 use crate::certification::*;
 use crate::embodiment::*;
+use crate::live::{BasePose, CalibrationFact, JointReading, LiveInputs};
+use crate::opstate::OperatingState;
+use crate::ota::{BenchPass, BootEvidence, BundleManifest, UpdateSubject, DEFAULT_BOOT_BUDGET_MS};
 use crate::readiness::*;
 use crate::roles::ParsedRole;
 use crate::transport::*;
@@ -962,6 +965,214 @@ pub fn guard_unavailable_to_json(entry: &GuardUnavailable) -> Json {
     out.set("state", Json::Str(entry.state.to_string()));
     out.set("detail", Json::Str(entry.detail.clone()));
     out
+}
+
+// ── OTA (§12) ────────────────────────────────────────────────────────────────
+
+/// Read a bundle manifest from a corpus case or a cached release document.
+pub fn bundle_from_json(value: &Json) -> BundleManifest {
+    BundleManifest {
+        version: opt_string(value, "version").unwrap_or_default(),
+        channel: opt_string(value, "channel").unwrap_or_default(),
+        digest: opt_string(value, "digest").unwrap_or_default(),
+        compatible: value.str_arr("compatible"),
+        changes: value.str_arr("changes"),
+    }
+}
+
+/// Read the robot an update would be applied to.
+///
+/// The signature defaults to `unverifiable`, which is the one of §37.1's five states that is *about
+/// the reader* rather than about the bundle — a case that did not say has not established anything,
+/// and saying so is more honest than `absent`, which would be a claim that nobody signed the image.
+pub fn update_subject_from_json(value: &Json) -> UpdateSubject {
+    UpdateSubject {
+        running_version: opt_string(value, "running_version").unwrap_or_default(),
+        board: opt_string(value, "board"),
+        channel: opt_string(value, "channel").unwrap_or_default(),
+        signature: value
+            .get("signature")
+            .and_then(Json::as_str)
+            .and_then(signature_state_from_str)
+            .unwrap_or(SignatureState::Unverifiable),
+        bench: value.get_present("bench").map(|bench| BenchPass {
+            image_digest: opt_string(bench, "image_digest").unwrap_or_default(),
+            tier: opt_string(bench, "tier").unwrap_or_default(),
+            passed: flag(bench, "passed"),
+        }),
+    }
+}
+
+fn signature_state_from_str(text: &str) -> Option<SignatureState> {
+    Some(match text {
+        "verified" => SignatureState::Verified,
+        "failed" => SignatureState::Failed,
+        "untrusted" => SignatureState::Untrusted,
+        "absent" => SignatureState::Absent,
+        "unverifiable" => SignatureState::Unverifiable,
+        _ => return None,
+    })
+}
+
+/// Read §12's boot evidence.
+///
+/// Every health field decodes through [`Json::get_present`], so a case that omits one and a case
+/// that writes `null` both arrive as "nobody has said" — which is the state `confirm_boot` is built
+/// around and the one a `false` would silently replace with a failure.
+pub fn boot_evidence_from_json(value: &Json) -> BootEvidence {
+    let tristate = |key: &str| value.get_present(key).and_then(Json::as_bool);
+    BootEvidence {
+        pending: flag(value, "pending"),
+        elapsed_ms: opt_f64(value, "elapsed_ms").unwrap_or(0.0),
+        budget_ms: opt_f64(value, "budget_ms").unwrap_or(DEFAULT_BOOT_BUDGET_MS),
+        post_passed: tristate("post_passed"),
+        packages_healthy: tristate("packages_healthy"),
+        converged: tristate("converged"),
+    }
+}
+
+// ── The live precondition context (§54.2) ────────────────────────────────────
+
+/// Read a calibration verdict back from a corpus case.
+///
+/// Only the **state** survives the round trip, and that is deliberate rather than lazy:
+/// [`live::live_context`](crate::live::live_context) reads exactly two things from a [`Validity`] —
+/// whether it is `Valid` and what it is called — and a decoder that reconstructed the sentence
+/// would be inventing text nobody wrote. The one field that is not free-form, `Expired::reason`, is
+/// looked up in [`EXPIRY_REASONS`](crate::calibration::EXPIRY_REASONS) so a case cannot introduce a
+/// reason the vocabulary does not have.
+fn validity_from_json(value: Option<&Json>) -> Validity {
+    let state = value
+        .and_then(|v| v.get("state"))
+        .and_then(Json::as_str)
+        .unwrap_or("absent");
+    let detail = value
+        .and_then(|v| v.get("detail"))
+        .and_then(Json::as_str)
+        .unwrap_or("")
+        .to_string();
+    match state {
+        "valid" => Validity::Valid {
+            checked: value.map(|v| v.str_arr("checked")).unwrap_or_default(),
+        },
+        "failed" => Validity::Failed { detail },
+        "expired" => Validity::Expired {
+            reason: value
+                .and_then(|v| v.get("reason"))
+                .and_then(Json::as_str)
+                .and_then(|reason| {
+                    calibration::EXPIRY_REASONS
+                        .iter()
+                        .copied()
+                        .find(|known| *known == reason)
+                })
+                .unwrap_or("age"),
+            detail,
+        },
+        "unusable" => Validity::Unusable { detail },
+        _ => Validity::Absent,
+    }
+}
+
+/// Read a base pose, component by component.
+///
+/// Deliberately **not** [`vec3`] and [`vec4`], and the difference is the whole reason this decoder
+/// exists. Those two refuse the whole vector when one component is not a number, which would turn a
+/// pose with one bad reading into a pose that was never reported — and those are exactly the two
+/// facts [`live::live_context`](crate::live::live_context) has to tell apart: a robot with no base
+/// pose omits the path silently, and a robot whose base pose has a NaN in it names `base_pose` in
+/// [`LiveContext::unreadable`](crate::live::LiveContext::unreadable).
+///
+/// `null` decodes to `NaN` for the same reason it does for a joint: canonical JSON cannot carry a
+/// non-finite number, so `null` is how a corpus case spells one, and both editions have to read it
+/// as *"this component is not a reading"* rather than as *"this component is absent"*.
+fn base_pose_from_json(pose: &Json) -> Option<BasePose> {
+    fn component(items: &[Json], index: usize) -> f64 {
+        items.get(index).and_then(Json::as_f64).unwrap_or(f64::NAN)
+    }
+    let xyz = pose.get("xyz")?.as_arr()?;
+    let quaternion = pose.get("quaternion")?.as_arr()?;
+    Some(BasePose {
+        xyz: [component(xyz, 0), component(xyz, 1), component(xyz, 2)],
+        quaternion: [
+            component(quaternion, 0),
+            component(quaternion, 1),
+            component(quaternion, 2),
+            component(quaternion, 3),
+        ],
+    })
+}
+
+fn joints_from_json(value: Option<&Json>) -> Vec<JointReading> {
+    let mut readings = Vec::new();
+    for entry in value.and_then(Json::as_arr).unwrap_or(&[]) {
+        let Some(name) = entry.get("name").and_then(Json::as_str) else {
+            continue;
+        };
+        readings.push(JointReading {
+            name: name.to_string(),
+            // A joint whose position is not a number at all is read as one that is not finite, and
+            // the two reach §54.2 as the same fact: there is no reading. `NaN` is the value the
+            // canonical form cannot carry, so a corpus case spells it `null` or omits it, and both
+            // must land in [`LiveContext::unreadable`] rather than in the context.
+            position: entry
+                .get("position")
+                .and_then(Json::as_f64)
+                .unwrap_or(f64::NAN),
+        });
+    }
+    readings
+}
+
+fn calibration_facts_from_json(value: Option<&Json>) -> Vec<CalibrationFact> {
+    let mut facts = Vec::new();
+    for entry in value.and_then(Json::as_arr).unwrap_or(&[]) {
+        let Some(set) = entry.get("set").and_then(Json::as_str) else {
+            continue;
+        };
+        facts.push(CalibrationFact {
+            set: set.to_string(),
+            validity: validity_from_json(entry.get_present("validity")),
+            age_s: opt_f64(entry, "age_s"),
+        });
+    }
+    facts
+}
+
+/// Read §54.2's inputs from a corpus case.
+pub fn live_inputs_from_json(value: &Json) -> LiveInputs {
+    LiveInputs {
+        joints: joints_from_json(value.get_present("joints")),
+        gripper: opt_f64(value, "gripper"),
+        battery_percent: opt_f64(value, "battery_percent"),
+        base_pose: value.get_present("base_pose").and_then(base_pose_from_json),
+        operating_state: value
+            .get("operating_state")
+            .and_then(Json::as_str)
+            .and_then(OperatingState::parse),
+        guards_active: value
+            .get_present("guards_active")
+            .map(|_| value.str_arr("guards_active")),
+        guards_unavailable: value.str_arr("guards_unavailable"),
+        calibration: calibration_facts_from_json(value.get_present("calibration")),
+        frames_resolved: value.str_arr("frames_resolved"),
+        frames_fault: value.get_present("frames_fault").map(|fault| FrameFault {
+            code: fault
+                .get("code")
+                .and_then(Json::as_str)
+                .unwrap_or("")
+                .to_string(),
+            subjects: fault.str_arr("subjects"),
+            detail: fault
+                .get("detail")
+                .and_then(Json::as_str)
+                .unwrap_or("")
+                .to_string(),
+        }),
+        tier: opt_string(value, "tier"),
+        grants: value.str_arr("grants"),
+        env: value.get_present("env").cloned(),
+    }
 }
 
 // ── The watchdog chain (§46) ─────────────────────────────────────────────────

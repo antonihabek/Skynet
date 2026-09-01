@@ -40,6 +40,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
+use skynet_contracts::cell::{cell_environment, cell_from_json};
+use skynet_contracts::live::{CalibrationFact, LiveInputs};
 use skynet_contracts::opstate::{
     evaluate as evaluate_state, Conditions, OperatingState, StateReason, Transition,
 };
@@ -262,6 +264,16 @@ pub struct Daemon<L: Launcher, S: Slots> {
     pub desired_source: DesiredSource,
     /// The desired state in force.
     pub desired: DesiredState,
+    /// §54.4's invocations, and the loop that advances them.
+    pub skills: crate::skill::Runtime,
+    /// What installs an image and tells the bootloader what it thinks of a slot (§12).
+    ///
+    /// Boxed rather than a third type parameter, and the reason is proportion: `Launcher` and
+    /// `Slots` are read on every pass by code that is generic over them anyway, and an updater is
+    /// touched twice in the life of an image. Threading a parameter through every `Daemon<L, S>` in
+    /// the API, the suite and the binary to describe two calls would be a lot of signature for very
+    /// little, and §33.1 already licenses this half to allocate.
+    pub updater: Box<dyn crate::ota::Updater>,
 }
 
 impl<L: Launcher, S: Slots> Daemon<L, S> {
@@ -289,6 +301,8 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             last_pass: None,
             desired_source,
             desired: nothing(),
+            skills: crate::skill::Runtime::new(),
+            updater: Box::new(crate::ota::RaucUpdater),
         }
     }
 
@@ -596,6 +610,9 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     /// Apply one action.
     fn apply(&mut self, action: &Action, now_ms: u64) -> Outcome {
         match &action.kind {
+            ActionKind::StageOsImage { version } => self.stage_image(version),
+            ActionKind::ApplyOsImage { version } => self.apply_image(version),
+            #[allow(unreachable_patterns)]
             ActionKind::StageOsImage { .. } | ActionKind::ApplyOsImage { .. } => {
                 Outcome::Unimplemented {
                     reason:
@@ -658,7 +675,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
                             .to_string(),
                     };
                 };
-                match write_profile(self.store.layout(), name, digest, &profile.limits) {
+                match write_profile(self.store.layout(), name, digest, &profile) {
                     Ok(()) => Outcome::Applied,
                     Err(error) => Outcome::Failed {
                         reason: error.to_string(),
@@ -738,7 +755,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     }
 
     /// Build the unit for a package and start it.
-    fn start(&mut self, id: &str, now_ms: u64) -> Outcome {
+    pub(crate) fn start(&mut self, id: &str, now_ms: u64) -> Outcome {
         let Ok(parsed) = PackageId::parse(id) else {
             return refuse_id(id);
         };
@@ -841,6 +858,357 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         }
     }
 
+    /// The board this machine is, for §12's compatibility check.
+    ///
+    /// The embodiment descriptor's `robot_slug`, because that is the identifier a vendor already
+    /// puts on a body and §12 does not introduce a second one. `None` on a robot that has not been
+    /// told what it is — which `admit_bundle` treats as *"no mismatch established"* rather than as
+    /// a refusal, so an unknown machine stays updatable.
+    pub fn board(&self) -> Option<String> {
+        crate::embodiment::load(self.store.layout())
+            .known()
+            .map(|known| known.descriptor.robot_slug.clone())
+    }
+
+    /// §12's third rule, run against the documents this robot holds.
+    pub fn assess_image(&self, version: &str) -> crate::ota::Assessment {
+        let layout = self.store.layout();
+        crate::ota::assess(
+            layout,
+            &crate::trust::TrustStore::load(layout),
+            version,
+            &self.slots.read().active,
+            self.board(),
+            &self.desired.os_channel,
+        )
+    }
+
+    /// Stage an image: assess it, then install it into the inactive slot.
+    ///
+    /// **Assessed before it is fetched, not after.** §12's third rule refuses an update that
+    /// changes the Safety Kernel without a bench pass, and refusing it *after* the bytes are in the
+    /// other slot would leave a robot one `mark-good` away from running something nobody certified.
+    /// Staging is also where the refusal is cheapest: nothing has rebooted, and the operator reads
+    /// one report rather than discovering it at the safe-state barrier.
+    fn stage_image(&mut self, version: &str) -> Outcome {
+        let assessment = self.assess_image(version);
+        if !assessment.admitted() {
+            return Outcome::Failed {
+                reason: refusal_text(&assessment),
+            };
+        }
+        let Some(bundle) = assessment.bundle_path.clone() else {
+            return Outcome::Unimplemented {
+                reason: format!(
+                    "release `{version}` is admitted and this robot has no bundle to install. \
+                     §34's inbound fetcher is not written, so an image has to be put at {} by \
+                     hand",
+                    self.store.layout().os().join("bundles").display()
+                ),
+            };
+        };
+        if !bundle.exists() {
+            return Outcome::Unimplemented {
+                reason: format!(
+                    "release `{version}` names {} and no such file is on this robot. §34's \
+                     inbound fetcher is not written; nothing here can go and get it",
+                    bundle.display()
+                ),
+            };
+        }
+        match self.updater.install(&bundle) {
+            Ok(()) => Outcome::Applied,
+            Err(error) => Outcome::Failed {
+                reason: error.to_string(),
+            },
+        }
+    }
+
+    /// Apply a staged image: assess it again, mark the next boot as the one that must prove itself,
+    /// and reboot.
+    ///
+    /// **Assessed again**, and not because anything is expected to have changed. A stage and an
+    /// apply are separated by a safe-state barrier that can be hours wide (§33.4), and in that gap
+    /// an operator can revoke a key, a bench pass can be replaced, or a desired state can move the
+    /// robot to another channel. Re-running the gate costs nothing and is the difference between a
+    /// rule that holds and one that held when the bytes arrived.
+    ///
+    /// **The reboot is not here.** `skynetd` marks the slot pending and returns; what reboots is
+    /// the operator or the unit's own restart policy. A supervisor that rebooted a robot from
+    /// inside a reconcile pass would be a supervisor whose most destructive action has no
+    /// confirmation and no audit entry of its own.
+    fn apply_image(&mut self, version: &str) -> Outcome {
+        let assessment = self.assess_image(version);
+        if !assessment.admitted() {
+            return Outcome::Failed {
+                reason: refusal_text(&assessment),
+            };
+        }
+        let budget = crate::ota::read_pending(self.store.layout())
+            .map(|pending| pending.budget_ms)
+            .unwrap_or(skynet_contracts::ota::DEFAULT_BOOT_BUDGET_MS);
+        match crate::ota::mark_pending(self.store.layout(), version, budget) {
+            Ok(()) => Outcome::Applied,
+            Err(error) => Outcome::Failed {
+                reason: format!(
+                    "release `{version}` is admitted and the pending-boot marker could not be \
+                     written: {error}. §12's health gate is what makes the rollback unattended, \
+                     and applying an image with no marker would be applying it with no gate"
+                ),
+            },
+        }
+    }
+
+    /// §12's second rule, once a pass.
+    ///
+    /// Called after the reconcile, because two of the three health inputs — whether the wanted
+    /// packages are running and whether the plan converged — are what the pass just established.
+    pub fn confirm_boot(
+        &mut self,
+        started_ms: u64,
+        now_ms: u64,
+        wall_s: Option<f64>,
+        actual: &Actual,
+        converged: bool,
+    ) -> crate::ota::Confirmation {
+        let layout = self.store.layout().clone();
+
+        // §12's budget is a *boot* budget. A daemon that restarted twice while a driver
+        // crash-looped would otherwise reset the clock on a rollback meant to be unattended, so the
+        // machine's uptime is preferred and the fallback says which was used.
+        let (elapsed_ms, clock) = match crate::ota::boot_elapsed_ms(layout.root()) {
+            Some(elapsed) => (elapsed, "boot"),
+            None => ((now_ms.saturating_sub(started_ms)) as f64, "daemon"),
+        };
+
+        let post = crate::post::run(&layout, wall_s);
+        let health = self.health(actual, now_ms);
+        let wanted_running = !health.packages.is_empty()
+            && health
+                .packages
+                .iter()
+                .all(|package| package.readiness != Readiness::NotRunning);
+
+        // `Some(true)` only when there is something to be true *about*. A robot the desired state
+        // asks nothing of has no package health to report, and reporting one would confirm a slot
+        // on the strength of an empty list — which is how an update that broke every driver looks
+        // exactly like an update that installed nothing.
+        let packages_healthy = if health.packages.is_empty() {
+            None
+        } else {
+            Some(wanted_running)
+        };
+
+        let mut updater = core::mem::replace(
+            &mut self.updater,
+            Box::new(crate::ota::RecordingUpdater::default()),
+        );
+        let confirmation = crate::ota::confirm(
+            &layout,
+            updater.as_mut(),
+            &self.slots.read().active,
+            elapsed_ms,
+            clock,
+            &crate::ota::BootHealth {
+                post_passed: Some(post.may_run()),
+                packages_healthy,
+                converged: Some(converged),
+            },
+        );
+        self.updater = updater;
+        confirmation
+    }
+
+    /// §54.2's context, as far as this daemon can honestly fill it in.
+    ///
+    /// **Most of §54.2's branches are not `skynetd`'s to observe, and this method is written so that
+    /// shows** — the same shape [`Daemon::refresh_operating_state`] takes, and for the same reason.
+    /// §33.1 keeps the daemon off the actuator path, so joint positions, the gripper, the battery,
+    /// the base pose and the guard set all live on the far side of a channel that does not exist.
+    /// They are left absent rather than filled with plausible values, and §54.2's first rule then
+    /// refuses the preconditions that named them, *with the path named*.
+    ///
+    /// What this process does own is the four branches below, and every one of them is a file or a
+    /// decision it already makes:
+    ///
+    /// | Branch | Source |
+    /// |---|---|
+    /// | `robot.state.operating` | §27's machine, as of the last observation |
+    /// | `robot.calibration.*` | [`crate::calibration::status`] over `/data/state/calibration` |
+    /// | `robot.frames.*` | the embodiment descriptor's graph, flattened (§44) |
+    /// | `env.*` | §55.2's cell, out of the **signed** operator profile (§38.1) |
+    ///
+    /// `robot.tier` is absent, and that is a finding rather than an omission: nothing on this robot
+    /// decides its tier. §15 awards one from conformance evidence and §11 delivers it in desired
+    /// state, and neither path is written — so a `tier` here would be this module choosing one,
+    /// which is precisely the invented fact the whole arrangement exists to prevent.
+    ///
+    /// `skill.grants` is filled per invocation by the runtime, because a grant belongs to a package
+    /// and two skills on one robot do not hold the same tokens.
+    pub fn live_inputs(&self, wall_s: Option<f64>) -> LiveInputs {
+        let layout = self.store.layout();
+        let body = crate::embodiment::load(layout);
+
+        // §44's graph, flattened. A graph that does not flatten reaches a precondition as the
+        // validator's own fault — code, subjects and sentence — beside no resolved list at all.
+        let (frames_resolved, frames_fault) =
+            match body.known().and_then(|k| k.descriptor.frames.as_ref()) {
+                None => (Vec::new(), None),
+                Some(graph) => match skynet_contracts::kinematics::flatten(graph) {
+                    Ok(flat) => (
+                        flat.frames()
+                            .iter()
+                            .map(|frame| frame.name.to_string())
+                            .collect(),
+                        None,
+                    ),
+                    Err(fault) => (Vec::new(), Some(fault)),
+                },
+            };
+
+        // §45's verdicts, flattened to the two facts §54.2 asks for: valid, and how old.
+        let calibration = crate::calibration::status(layout, wall_s)
+            .held
+            .iter()
+            .map(|held| CalibrationFact {
+                set: held.set.clone(),
+                validity: held.validity.clone(),
+                // Both readings or nothing. An age computed against a clock this robot does not
+                // have would make every record look as though it were taken this second.
+                age_s: match (wall_s, held.record.as_ref().and_then(|r| r.conditions.at_s)) {
+                    (Some(now), Some(taken)) if now >= taken => Some(now - taken),
+                    _ => None,
+                },
+            })
+            .collect();
+
+        // §55.2's cell, from the profile in force. `active.json` is written only for a profile
+        // whose signature verified (`reconcile.rs` step 4), so this is the signed document §55.2
+        // asks for and not a second, unsigned path into the precondition context.
+        let env = observe::read_json(&layout.active_profile())
+            .and_then(|profile| profile.get_present("cell").cloned())
+            .map(|document| cell_environment(&cell_from_json(&document)));
+
+        LiveInputs {
+            operating_state: Some(self.operating_state),
+            // Not `Some(vec![])`. §33.1: there is no kernel channel, so nobody has asked which
+            // guards are running, and an empty list would be this daemon claiming none are.
+            guards_active: None,
+            calibration,
+            frames_resolved,
+            frames_fault,
+            env,
+            ..LiveInputs::default()
+        }
+    }
+
+    /// Advance §54.4's lifecycle for every live invocation, and do what it asks.
+    ///
+    /// Called from the same loop as [`Daemon::reconcile`] and after it, because the runtime reads
+    /// which units are running and the reconciler is what changes that. Running it before would
+    /// mean every skill saw the previous pass's process table, and a skill that had just exited
+    /// would take one extra pass to notice.
+    ///
+    /// Returns what happened, so the caller can record it. The black box write is the caller's for
+    /// the reason every other one is: the ring has exactly one writer and this daemon is not
+    /// always it.
+    pub fn advance_skills(
+        &mut self,
+        now_ms: u64,
+        wall_s: Option<f64>,
+        actual: &Actual,
+    ) -> Vec<crate::skill::Report> {
+        let inputs = self.live_inputs(wall_s);
+        let running = crate::skill::running_set(actual);
+        let grants = actual.grants.clone();
+
+        let mut runtime = core::mem::take(&mut self.skills);
+        let reports = {
+            let mut cycle = crate::skill::Cycle {
+                now_ms,
+                inputs: &inputs,
+                robot: self.operating_state,
+                // §33.1 again. Supplied rather than observed, and `guards_observable` is what keeps
+                // the false from being counted as an observation of nothing having tripped.
+                guard_tripped: false,
+                guards_observable: false,
+                running: &running,
+                leases: &mut self.leases,
+                grants: &grants,
+            };
+            runtime.advance_all(&mut cycle)
+        };
+        self.skills = runtime;
+
+        for report in &reports {
+            self.perform(&report.effects, now_ms);
+        }
+        if reports.iter().any(|report| !report.effects.is_empty()) {
+            let _ = self.write_leases();
+        }
+        reports
+    }
+
+    /// End every live invocation, releasing its leases and emitting its episode.
+    ///
+    /// The skill half of `POST /stop`, and it runs **before** the units are stopped. Stopping the
+    /// processes first would leave the lifecycles to discover on the next pass that their skills
+    /// had "returned", and §54.3 would judge them over a post-state nothing had changed —
+    /// recording a `failure` for a robot an operator stopped, which is a defensible-looking number
+    /// and a lie a marketplace would consume.
+    pub fn stop_skills(&mut self, now_ms: u64) -> Vec<crate::skill::Report> {
+        let mut runtime = core::mem::take(&mut self.skills);
+        let reports = runtime.stop_all(now_ms);
+        self.skills = runtime;
+        for report in &reports {
+            self.perform(&report.effects, now_ms);
+        }
+        if !reports.is_empty() {
+            let _ = self.write_leases();
+        }
+        reports
+    }
+
+    /// Do what §54.4's lifecycle asked for.
+    ///
+    /// Every failure here is loud rather than swallowed, and the reason differs per effect. A
+    /// `Start` that fails leaves a skill in `running` with nothing running, which the next pass
+    /// reads as a skill that finished — so it is reported, and the invocation ends with the
+    /// judgement §54.3 makes over a post-state nothing changed. An `Episode` that cannot be queued
+    /// is the one §34.4 already has an answer for.
+    fn perform(&mut self, effects: &[crate::skill::Effect], now_ms: u64) {
+        use crate::skill::Effect;
+        for effect in effects {
+            match effect {
+                Effect::Start { package } => {
+                    if let Outcome::Failed { reason } = self.start(package, now_ms) {
+                        eprintln!("skynetd: a skill unit would not start: {reason}");
+                    }
+                }
+                Effect::Stop { package } => {
+                    if let Err(error) = self.launcher.stop(package) {
+                        eprintln!("skynetd: a skill unit would not stop: {error}");
+                    }
+                }
+                Effect::ReleaseLeases { holder } => {
+                    self.leases.release_all(holder);
+                }
+                Effect::Episode { body } => {
+                    let queue = crate::outbound::Queue::of(self.store.layout());
+                    let Ok(text) = body.to_canonical() else {
+                        continue;
+                    };
+                    if let Err(error) = queue.enqueue(crate::outbound::Class::Episode, &text) {
+                        eprintln!(
+                            "skynetd: a skill episode could not be queued: {}",
+                            error.reason()
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// Record that a package exited, and let §33.5 decide what happens next.
     pub fn note_exit(&mut self, id: &str, kind: PackageKind, now_ms: u64, jitter: f64) {
         let record = self
@@ -925,6 +1293,29 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     }
 }
 
+/// A bundle refusal, as one sentence with the findings under it.
+///
+/// §64: the refusal names the fix, and for an OS update there are usually several — a signature to
+/// trust *and* a bench pass to book. Reporting the first would send an operator round the loop
+/// once per finding, at a reboot each.
+fn refusal_text(assessment: &crate::ota::Assessment) -> String {
+    if let Some(reason) = &assessment.because {
+        return reason.clone();
+    }
+    let mut text = format!("release `{}` was refused", assessment.version);
+    if let Some(verdict) = &assessment.verdict {
+        for fault in &verdict.faults {
+            if fault.severity == skynet_contracts::admission::Severity::Error {
+                text.push_str(&format!("\n  {}: {}", fault.code.as_str(), fault.message));
+            }
+        }
+    }
+    if let Some(note) = &assessment.bench_note {
+        text.push_str(&format!("\n  bench pass: {note}"));
+    }
+    text
+}
+
 fn refuse_id(id: &str) -> Outcome {
     Outcome::Failed {
         reason: format!(
@@ -941,12 +1332,19 @@ fn failed(error: StoreError) -> Outcome {
 }
 
 /// Write the operator profile in force (§38.3).
+///
+/// The whole profile rather than only its ceilings, because §55.2 puts the cell descriptor in this
+/// document and a writer that dropped it would give the cell a second, unsigned delivery path — or
+/// no delivery path at all, which is where it had been for two sessions. Only a **verified** profile
+/// reaches here (`reconcile.rs` step 4 emits no action for an unverified one), so a cell in
+/// `active.json` is by construction a cell somebody signed.
 fn write_profile(
     layout: &Layout,
     name: &str,
     digest: &str,
-    limits: &skynetd::desired::ProfileLimits,
+    profile: &skynetd::desired::DesiredProfile,
 ) -> std::io::Result<()> {
+    let limits = &profile.limits;
     let mut body = Json::obj();
     body.set_opt(
         "joint_velocity_max_rad_s",
@@ -970,6 +1368,13 @@ fn write_profile(
         .set("name", Json::from(name))
         .set("digest", Json::from(digest))
         .set("limits", body);
+    // Absent when the profile carries none. An empty object would be a cell with no name and no
+    // volumes, which `validate_cell` reports as unnamed and `cell_workspace_layer` correctly draws
+    // no layer for — but which a reader would have to interpret, where an absent key needs no
+    // interpretation at all.
+    if let Some(cell) = &profile.cell {
+        document.set("cell", cell.clone());
+    }
 
     let text = document
         .to_canonical()

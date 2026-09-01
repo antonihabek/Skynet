@@ -183,6 +183,50 @@
       "expected": "{\"changed\":true,\"detail\":\"`manipulation.grasp` is held by acme/pick-place\",\"from\":\"acquiring\",\"outcome\":\"aborted\",\"reason\":\"lease_denied\",\"release_leases\":true,\"to\":\"terminal\"}"
     },
     {
+      "id": "lease-never-granted",
+      "note": "The other half of §25.2, and the one no case had. A token the operator never granted reports no holder — \"nobody has the arm, this package may not ask for it\" — and the refusal has to say that rather than \"held by another package\", which sends an operator hunting for a package that does not exist when the fix is one grant. Found by writing a runtime, not by reading the document.",
+      "input": {
+        "phase": "acquiring",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "denied",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running",
+          "lease_token": "manipulation.grasp",
+          "lease_holder": ""
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"`manipulation.grasp` was never granted to this package, so §25.2 will not let it take the lease — nobody is holding it. Grant it, or take it out of `required_capabilities`.\",\"from\":\"acquiring\",\"outcome\":\"aborted\",\"reason\":\"lease_denied\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "lease-denied-with-nothing-named",
+      "note": "And a denial that names no token at all says so, rather than blaming a package. This is the shape a caller produces by forgetting a field, and inventing a holder for it would be the same lie in a quieter place.",
+      "input": {
+        "phase": "acquiring",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "denied",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"a required capability could not be leased, and nothing named which\",\"from\":\"acquiring\",\"outcome\":\"aborted\",\"reason\":\"lease_denied\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
       "id": "leases-acquired",
       "note": "Running.",
       "input": {

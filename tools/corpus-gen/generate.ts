@@ -73,10 +73,17 @@ import {
   shapeComposition, shapeDeadline, shapePreconditions, shapeSuccess,
   shapeCellFaults, shapeCellLayer,
   shapeStateProperties, shapeTransition, shapeWarningMatrix, shapeSkillTransition,
+  shapeLiveContext,
+  shapeBundleVerdict, shapeBootVerdict,
 } from '../../reference/typescript/shape.ts'
 import {
   CELL_FAULTS, cellEnvironment, cellWorkspaceLayer, validateCell, type CellDescriptor,
 } from '../../reference/typescript/cell.ts'
+import { liveContext, type LiveInputs } from '../../reference/typescript/live.ts'
+import {
+  admitBundle, BOOT_DECISIONS, BUNDLE_FAULTS, CERTIFICATION_GATED, confirmBoot, OS_COMPONENTS,
+  type BootEvidence, type BundleManifest, type UpdateSubject,
+} from '../../reference/typescript/ota.ts'
 import {
   evaluate as evaluateState, HOMING_STATES, KERNEL_STATES, OPERATING_STATES, POLICY_STATES,
   POST_VERDICTS, RHAL_STATES, STATE_REASONS, STOP_CAUSES,
@@ -4206,6 +4213,24 @@ lifecycleCase('lease-denied',
     lease_holder: 'acme/pick-place',
   }))
 
+lifecycleCase('lease-never-granted',
+  'The other half of §25.2, and the one no case had. A token the operator never granted reports no '
+  + 'holder — "nobody has the arm, this package may not ask for it" — and the refusal has to say '
+  + 'that rather than "held by another package", which sends an operator hunting for a package that '
+  + 'does not exist when the fix is one grant. Found by writing a runtime, not by reading the '
+  + 'document.',
+  'acquiring', progress({
+    leases: 'denied',
+    lease_token: 'manipulation.grasp',
+    lease_holder: '',
+  }))
+
+lifecycleCase('lease-denied-with-nothing-named',
+  'And a denial that names no token at all says so, rather than blaming a package. This is the '
+  + 'shape a caller produces by forgetting a field, and inventing a holder for it would be the same '
+  + 'lie in a quieter place.',
+  'acquiring', progress({ leases: 'denied' }))
+
 lifecycleCase('leases-acquired', 'Running.', 'acquiring', progress())
 
 lifecycleCase('running', 'Still running is a fixed point, which is what makes this safe to call '
@@ -4326,6 +4351,382 @@ boundedCase('an-unbounded-root-leaves-the-child-alone',
 
 boundedCase('neither-is-bounded',
   'And the honest answer for two skills that declared nothing is still nothing.', undefined, null)
+
+// ── §54.2's live context ─────────────────────────────────────────────────────
+//
+// The half of §54.2 that had no builder until a runtime needed one. `evaluatePreconditions` has
+// always taken a context as an argument, and nothing said what a robot puts in it — so every case
+// here is really a case about one rule: **a fact the robot does not know is absent, not defaulted.**
+//
+// The failure this pins is invisible from either side alone. An edition that filled an unknown
+// battery with `0` and an edition that filled it with `100` both look reasonable in a diff; one
+// refuses every skill and the other runs every skill, and no test of `evaluatePreconditions` would
+// catch either, because both would be handed a context that resolves.
+
+function liveCase(id: string, note: string, inputs: LiveInputs): void {
+  add('live', 'context', {
+    id,
+    note,
+    input: inputs as unknown as Record<string, unknown>,
+    expected: canonical(shapeLiveContext(liveContext(inputs))),
+  })
+}
+
+liveCase('nothing-observed',
+  'A robot nobody has observed. Six of the seven branches are absent; the one that is present is '
+  + 'an empty array, because a grant is a file the daemon owns and "this package was granted '
+  + 'nothing" is an answer rather than an absence. Everything else omits, because §54.2 refuses a '
+  + 'clause naming an unresolvable path and that refusal is the honest answer for a fact nobody '
+  + 'measured.',
+  {})
+
+liveCase('a-kernel-that-reports-no-guard-running',
+  'The distinction the guards branch exists to carry, and the correction this module made to '
+  + 'itself. An empty `robot.guards.active` is a kernel saying no guard is evaluating; an absent '
+  + 'one is nobody having asked a kernel. §33.1 puts `skynetd` on the far side of that line, so '
+  + 'the empty list it would otherwise supply would be a claim about a guard set — which is exactly '
+  + 'what §54.2’s first rule refuses to let anybody make.',
+  { guards_active: [] })
+
+liveCase('a-fully-observed-robot',
+  'Every branch §54.2 names, populated. The shape a skill publisher writes predicates against.',
+  {
+    joints: [
+      { name: 'shoulder_pan', position: 0.25 },
+      { name: 'elbow', position: -1.5 },
+    ],
+    gripper: 0.8,
+    battery_percent: 62,
+    base_pose: { xyz: [1, 2, 0], quaternion: [0, 0, 0, 1] },
+    operating_state: 'running',
+    guards_active: ['envelope', 'rate_limit', 'watchdog'],
+    guards_unavailable: ['workspace'],
+    calibration: [
+      { set: 'joint_zeros', validity: { state: 'valid', checked: ['age'] }, age_s: 3_600 },
+      { set: 'camera_extrinsics', validity: { state: 'absent' } },
+    ],
+    frames_resolved: ['base_link', 'tool0'],
+    tier: 'host',
+    grants: ['arm.left', 'sensing.camera'],
+    env: { cell: 'bench', door_closed: true, fixtures: ['jig'] },
+  })
+
+liveCase('a-battery-nobody-can-read',
+  'The case the whole module exists for. A robot with no battery sensor omits '
+  + 'robot.state.battery_percent, so a skill that asked about it is refused *with the path named*. '
+  + 'Filling it with 0 would refuse every skill and filling it with 100 would run every skill, and '
+  + 'both are one-line changes that look reasonable in a diff.',
+  { joints: [{ name: 'elbow', position: 0 }], operating_state: 'running' })
+
+liveCase('a-joint-reporting-nan',
+  'The fault drivers/mock injects. A non-finite reading is not a reading: the joint is absent from '
+  + 'the context and named in `unreadable`, so the precondition about it is refused and an operator '
+  + 'is told why rather than finding a joint quietly missing.',
+  { joints: [{ name: 'elbow', position: Number.NaN }, { name: 'wrist', position: 0.1 }] })
+
+liveCase('every-joint-unreadable',
+  'And robot.state.joints is then absent rather than an empty object. An empty object resolves, so '
+  + '`exists` on a joint path would answer *false* about a robot whose sensors are all failing — '
+  + 'which is the same word it uses for a body that has no such joint.',
+  { joints: [{ name: 'elbow', position: Number.NaN }] })
+
+liveCase('a-joint-whose-name-carries-a-dot',
+  'cell.ts found this from the other side and could refuse the key, because an operator can rename '
+  + 'a fact. Nobody can rename a body’s joint, so the name is reported instead: no precondition '
+  + 'will ever be able to address robot.state.joints.arm.1, and an operator who can see the joint '
+  + 'on the console needs to be told that rather than left to infer it from a refusal.',
+  { joints: [{ name: 'arm.1', position: 0.5 }, { name: 'arm_2', position: 0.5 }] })
+
+liveCase('grants-are-a-list-because-tokens-carry-dots',
+  'The decision this file makes that §54.2 does not. `skill.grants.<token>` is unaddressable for '
+  + 'every token that exists — arm.left, sensing.camera and locomotion.base all carry a dot — so '
+  + 'the branch is a sorted list read with `includes`, and the shape changes rather than the names.',
+  { grants: ['sensing.camera', 'arm.left', 'arm.left'] })
+
+liveCase('a-base-pose-with-one-bad-number',
+  'All seven numbers or none. §54.2 names "base pose" as one fact, and a context that published a '
+  + 'position with no orientation would let a precondition about a docked robot read true while it '
+  + 'faced the wrong way.',
+  { base_pose: { xyz: [1, Number.NaN, 0], quaternion: [0, 0, 0, 1] } })
+
+liveCase('a-calibration-set-with-no-clock',
+  'Valid, and of unknown age. §54.2 asks for "which parameter sets are valid, and their age", and a '
+  + 'robot with no wall clock knows the first and not the second — so `valid` is published and '
+  + '`age_s` is absent. Reporting an age of zero would make a stale calibration read as one taken '
+  + 'this second.',
+  { calibration: [{ set: 'joint_zeros', validity: { state: 'valid', checked: [] } }] })
+
+liveCase('every-calibration-state',
+  'All five, so an edition that collapsed `failed` into `absent` — or `unusable` into `failed`, '
+  + 'which §45.3 spends a paragraph separating — diverges here rather than in a support call. Only '
+  + '`valid` sets the boolean; the state word carries the rest.',
+  {
+    calibration: [
+      { set: 'joint_zeros', validity: { state: 'valid', checked: ['age'] }, age_s: 10 },
+      { set: 'camera_extrinsics', validity: { state: 'absent' } },
+      { set: 'hand_eye', validity: { state: 'failed', detail: 'residual 4 exceeds 1' } },
+      { set: 'imu_bias', validity: { state: 'expired', reason: 'age', detail: 'older than 86400s' } },
+      { set: 'force_torque_offset', validity: { state: 'unusable', detail: 'no method recorded' } },
+    ],
+  })
+
+liveCase('a-frame-graph-that-does-not-flatten',
+  '§44’s fault reaches a precondition whole — code, subjects and sentence — beside an empty '
+  + 'resolved list, so a skill that needs a frame is refused by `includes_all` over nothing rather '
+  + 'than by a path that does not resolve. Both refuse; only one tells the operator that the graph '
+  + 'is broken rather than that the frame is missing. The fault is the validator’s own shape and '
+  + 'not a string, which is the §64 invariant over the corpus arriving as a design constraint: '
+  + '`fault` in this system means something an operator can act on.',
+  {
+    frames_resolved: [],
+    frames_fault: {
+      code: 'parent_missing',
+      subjects: ['tool0'],
+      detail: 'tool0 names a parent nothing declares.',
+    },
+  })
+
+liveCase('an-unobserved-operating-state',
+  'Absent rather than `post`. §27’s machine defaults to POST because that is where a booting robot '
+  + 'is; a *context* that defaulted to it would be stating a state nobody measured, and a '
+  + 'precondition reading it would get an answer rather than a refusal.',
+  { battery_percent: 90 })
+
+liveCase('duplicated-and-unsorted-lists',
+  'Every list is sorted and de-duplicated on the way in, because two editions that agreed about the '
+  + 'contents and disagreed about the order would produce different bytes for the same robot — and '
+  + '`includes` would not notice, so nothing but the corpus would catch it.',
+  {
+    guards_active: ['workspace', 'envelope', 'workspace'],
+    frames_resolved: ['tool0', 'base_link', 'tool0'],
+    grants: ['b.token', 'a.token', 'b.token'],
+  })
+
+liveCase('an-env-branch-with-no-cell',
+  'A robot with no cell profile keeps the other six branches. §55.2 makes the cell a site-local '
+  + 'document that may simply not exist yet, and a context that refused to build without one would '
+  + 'take the battery check away from every robot nobody has surveyed.',
+  { battery_percent: 55, operating_state: 'hold' })
+
+// ── §12's two decisions ──────────────────────────────────────────────────────
+//
+// The third rule is the one §12 calls the single most important test in the suite:
+//
+// > An update that changes the Safety Kernel or the envelope is refused without a fresh bench pass.
+// > Without this rule, every guarantee in §7 and §15 is one silent update away from being void.
+//
+// Every case below that touches it is really asking one question: can this gate be got past by
+// somebody who wants to. The answers frozen here are that it cannot be got past by renaming the
+// component, by holding a pass for other bytes, by holding a pass that failed, or by shipping a
+// bundle with no digest for a pass to be bound to.
+
+function bundleCase(
+  id: string,
+  note: string,
+  bundle: BundleManifest,
+  subject: UpdateSubject,
+): void {
+  add('ota', 'bundle', {
+    id,
+    note,
+    input: { bundle, subject },
+    expected: canonical(shapeBundleVerdict(admitBundle(bundle, subject))),
+  })
+}
+
+const SIGNED_BUNDLE: BundleManifest = {
+  version: '1.4.0',
+  channel: 'stable',
+  digest: 'sha256:aaaa',
+  compatible: ['bench-arm-v1'],
+  changes: ['userspace'],
+}
+
+const HEALTHY_SUBJECT: UpdateSubject = {
+  running_version: '1.3.0',
+  board: 'bench-arm-v1',
+  channel: 'stable',
+  signature: 'verified',
+}
+
+bundleCase('an-ordinary-update',
+  'A signed image for this board, on the channel the desired state asked for, changing nothing '
+  + '§12 gates. Admitted, with no findings at all — the case that has to hold or every other one '
+  + 'is measuring a function that refuses everything.',
+  SIGNED_BUNDLE, HEALTHY_SUBJECT)
+
+bundleCase('a-kernel-change-with-no-bench-pass',
+  '§12’s third rule, stated plainly. This is the refusal the whole section exists for: an update '
+  + 'touching the safety kernel, on a robot that holds no bench pass, is refused — and the '
+  + 'component is named so an operator knows what they are booking bench time for.',
+  { ...SIGNED_BUNDLE, changes: ['safety_kernel', 'userspace'] }, HEALTHY_SUBJECT)
+
+bundleCase('an-envelope-change-with-no-bench-pass',
+  'The second of §12’s two names, and it is not a code change at all — an envelope is data in a '
+  + 'descriptor. That is exactly why the document names it beside the kernel: the guarantees in §7 '
+  + 'rest on the numbers as much as on the code that enforces them.',
+  { ...SIGNED_BUNDLE, changes: ['envelope'] }, HEALTHY_SUBJECT)
+
+bundleCase('a-kernel-change-a-bench-pass-covers',
+  'And the gate opens for evidence bound to these exact bytes. Admitted.',
+  { ...SIGNED_BUNDLE, changes: ['safety_kernel'] },
+  { ...HEALTHY_SUBJECT, bench: { image_digest: 'sha256:aaaa', tier: 'host', passed: true } })
+
+bundleCase('a-bench-pass-for-other-bytes',
+  'The anti-gaming case. A robot that has passed a bench test *at some point* is every robot the '
+  + 'gate exists to protect, so the pass is bound to a digest — and one taken against 1.3.0 says '
+  + 'nothing about 1.4.0. The same rule §56.3 applies to benchmark seeds, arriving in a different '
+  + 'section.',
+  { ...SIGNED_BUNDLE, changes: ['safety_kernel'] },
+  { ...HEALTHY_SUBJECT, bench: { image_digest: 'sha256:bbbb', tier: 'host', passed: true } })
+
+bundleCase('a-bench-pass-that-failed',
+  'A pass for the right bytes that records a failure. §12 refuses an update that has not passed, '
+  + 'which is a different sentence from one that has not been tried — and a gate reading only '
+  + '"is there a record" would admit this one.',
+  { ...SIGNED_BUNDLE, changes: ['safety_kernel'] },
+  { ...HEALTHY_SUBJECT, bench: { image_digest: 'sha256:aaaa', tier: 'host', passed: false } })
+
+bundleCase('a-gated-change-renamed',
+  'The way somebody would actually get past this gate: not by writing `safety_kernel`, but by '
+  + 'writing `rt-core`. An unrecognised component is gated for the same reason the two named ones '
+  + 'are — nobody has established what it changes — and the refusal says so rather than reporting '
+  + 'an unknown word as harmless.',
+  { ...SIGNED_BUNDLE, changes: ['rt-core'] }, HEALTHY_SUBJECT)
+
+bundleCase('a-gated-change-with-nothing-to-bind-a-pass-to',
+  'A bundle with no digest cannot be the subject of evidence, so a kernel change in one is refused '
+  + 'twice over and the two refusals are separate findings. An operator who fixed only the missing '
+  + 'digest would still not be able to apply it, and being told both at once is the point.',
+  { ...SIGNED_BUNDLE, digest: '', changes: ['safety_kernel'] },
+  { ...HEALTHY_SUBJECT, bench: { image_digest: '', tier: 'host', passed: true } })
+
+for (const signature of SIGNATURE_STATES) {
+  if (signature === 'verified') continue
+  bundleCase(`signature-${signature}`,
+    `§37.1’s states are four different facts with four different people at the end of them, and an `
+    + `OS image is where that matters most: \`failed\` is what tampering looks like, \`untrusted\` `
+    + `is a decision nobody has made, \`absent\` is the publisher’s problem and \`unverifiable\` is `
+    + `the operating system’s.`,
+    SIGNED_BUNDLE, { ...HEALTHY_SUBJECT, signature })
+}
+
+bundleCase('an-image-for-another-board',
+  'Refused, and the refusal names both what the bundle is for and what this machine is — because '
+  + 'the operator reading it is deciding whether the bundle is wrong or the inventory is.',
+  { ...SIGNED_BUNDLE, compatible: ['warehouse-amr-v2'] }, HEALTHY_SUBJECT)
+
+bundleCase('a-machine-that-does-not-know-what-it-is',
+  'A warning rather than a refusal. A robot that cannot report its board has not established a '
+  + 'mismatch, and refusing would make an unknown machine unupdatable — which is the state a robot '
+  + 'is in exactly when it most needs an update.',
+  SIGNED_BUNDLE, { ...HEALTHY_SUBJECT, board: null })
+
+bundleCase('a-bundle-that-declares-no-board',
+  'Also a warning, and for a different reason: §12 does not require the field, so refusing would '
+  + 'stop every image built before it existed. It is said out loud because "this image does not '
+  + 'know what it is for" is what somebody wants to have been told after flashing the wrong board.',
+  { ...SIGNED_BUNDLE, compatible: [] }, HEALTHY_SUBJECT)
+
+bundleCase('a-bundle-from-another-channel',
+  'Refused. A robot pulled onto `beta` by an image rather than by an operator is a robot nobody '
+  + 'moved.',
+  { ...SIGNED_BUNDLE, channel: 'beta' }, HEALTHY_SUBJECT)
+
+bundleCase('the-version-already-running',
+  'A warning, not a refusal: staging it again is harmless and applying it costs a reboot for '
+  + 'nothing. Refusing would break a robot re-converging on a desired state it already satisfies, '
+  + 'which is the ordinary case after a rollback.',
+  SIGNED_BUNDLE, { ...HEALTHY_SUBJECT, running_version: '1.4.0' })
+
+bundleCase('a-bundle-that-declares-nothing',
+  'Everything wrong at once, so the ordering of the findings is frozen. An operator gets one list '
+  + 'rather than four reboots.',
+  {}, { signature: 'absent' })
+
+// ── §12's second rule ────────────────────────────────────────────────────────
+
+function bootCase(id: string, note: string, evidence: BootEvidence): void {
+  add('ota', 'boot', {
+    id,
+    note,
+    input: evidence as unknown as Record<string, unknown>,
+    expected: canonical(shapeBootVerdict(confirmBoot(evidence))),
+  })
+}
+
+bootCase('an-ordinary-boot',
+  'Not the first boot into a new slot, so there is nothing to confirm and nothing to roll back. '
+  + 'The case that keeps a supervisor from marking a slot bad on a robot nobody updated.',
+  {})
+
+bootCase('nobody-has-checked-anything-yet',
+  'The case that matters most in this file. A supervisor that marked a slot good because it had '
+  + 'not yet been told otherwise would replace §12’s unattended recovery with a race between the '
+  + 'health check and the confirmation, so absence of evidence waits.',
+  { pending: true, elapsed_ms: 1_000 })
+
+bootCase('healthy',
+  'The self-test passed, every wanted package is running and the reconciler converged. Mark it '
+  + 'good, and the bootloader stops counting.',
+  {
+    pending: true,
+    elapsed_ms: 42_000,
+    post_passed: true,
+    packages_healthy: true,
+    converged: true,
+  })
+
+bootCase('two-of-three',
+  'Still waiting, and the report names which one is missing — because "the update did not take" '
+  + 'and "one driver would not start" send an engineer to different places.',
+  { pending: true, elapsed_ms: 60_000, post_passed: true, packages_healthy: true })
+
+bootCase('the-budget-expires',
+  '§12’s unattended recovery, which is the whole reason A/B costs the storage it costs. Ten '
+  + 'minutes in, the self-test has not passed; mark the slot bad and let the bootloader return.',
+  { pending: true, elapsed_ms: 600_000, post_passed: false })
+
+bootCase('one-millisecond-inside-the-budget',
+  'The boundary, frozen, because a comparison that was `>` rather than `>=` is one character and '
+  + 'would leave a robot waiting for ever at exactly the moment the budget ran out.',
+  { pending: true, elapsed_ms: 599_999, post_passed: false })
+
+bootCase('exactly-at-the-budget',
+  'And the other side of it.',
+  { pending: true, elapsed_ms: 600_000, post_passed: false })
+
+bootCase('a-budget-of-zero',
+  'Waits rather than rolling back. A budget that is not a positive number is no budget, and the '
+  + 'patient reading is the safe one here: an unattended rollback triggered by a misconfigured '
+  + 'budget is a working robot rebooted into an older image for no reason.',
+  { pending: true, elapsed_ms: 5_000, budget_ms: 0, post_passed: false })
+
+bootCase('a-narrowed-budget',
+  'An operator may narrow the ten-minute default, and the sentence carries the number they set '
+  + 'rather than the one this file ships.',
+  { pending: true, elapsed_ms: 31_000, budget_ms: 30_000, post_passed: true, packages_healthy: true })
+
+bootCase('healthy-but-not-pending',
+  'Health on an ordinary boot decides nothing. Confirming a slot nobody staged would be a '
+  + 'supervisor telling the bootloader about an update that never happened.',
+  { post_passed: true, packages_healthy: true, converged: true })
+
+vocabulary('os_components',
+  'What an OS bundle may declare that it changes — the stack §3 draws, and nothing invented beyond '
+  + 'it. Two entries carry a rule; the rest are here so that an unrecognised name is recognisable '
+  + 'as unrecognised.',
+  OS_COMPONENTS)
+vocabulary('certification_gated',
+  '§12’s two names. Not the whole rule — an unrecognised component is gated too — which is why '
+  + 'this set is frozen beside `os_components` rather than instead of it.',
+  CERTIFICATION_GATED)
+vocabulary('bundle_faults', 'Everything §12 can find wrong with an image, in the order the checks '
+  + 'run.', BUNDLE_FAULTS)
+vocabulary('boot_decisions',
+  'What a supervisor may tell a bootloader, weakest action first. `wait` is the default and the '
+  + 'only one of the four that is safe to reach by accident.',
+  BOOT_DECISIONS)
 
 // ── Write ────────────────────────────────────────────────────────────────────
 

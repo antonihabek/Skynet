@@ -6171,3 +6171,548 @@ Two contracts still exist with no caller, down from three:
 
 Neither repository has been committed or pushed. Both trees are clean of build artifacts, and every
 check above was run against the working tree as it stands.
+
+## 2026-09-01 (twentieth) — the loop, and the context nothing had ever built
+
+The previous session's log ended with a list one item long:
+
+> **§54 is finished except for the loop, and the list is now one item long.** Everything §54.4, §54.5
+> and §54.6 describe that is a decision has been made and frozen. What is left is a runtime:
+> something that calls `advance` every cycle, runs the skill's policy, writes the black box events
+> §54.4 asks for on every transition, and emits the episode.
+
+That is what this session built. Writing it turned up a second item nobody had listed — §54.2's
+context has seven branches and nothing had ever assembled one — and then a third, which is a bug in
+a contract three sessions old that only a caller could have found.
+
+### The half that was missing: `crates/skynet-contracts/src/live.rs`
+
+`evaluate_preconditions` has taken a context as an argument since the seventeenth session and
+`predicate::evaluate` since the sixteenth. **Nothing had ever built one.** Every corpus case, every
+test and every doc example handed those functions a context somebody had typed, so the question
+§54.2 actually asks — *what does a robot put in it* — had never been answered anywhere.
+
+It is a contract rather than daemon code for the reason every other file in that crate is one: the
+path a skill publisher writes into a predicate is a promise the OS makes about what it will supply,
+and a promise assembled ad hoc inside a daemon is undocumented, untested, and different in the next
+edition.
+
+**One rule decides every field.** §54.2's first: *"A precondition that cannot be evaluated refuses
+the skill, naming the path that was unresolvable. Not 'assume true', which is what free-text
+preconditions do by construction."* So a fact the robot does not know is **absent** — never `null`,
+never a plausible zero. That distinction is `skynet-json`'s oldest one and this is the module where
+it is load-bearing rather than tidy: a robot with no battery sensor reporting
+`robot.state.battery_percent = 0` refuses every skill, one reporting `100` runs every skill, and one
+that omits the path refuses only the skills that asked and names the path in the refusal.
+
+Three shape decisions the document does not make, and their reasons.
+
+* **Grants are a list, not an object, and the reason is a dot.** `cell.rs` found from the other side
+  that a fact key containing a dot is a fact no precondition can address, and answered by *refusing*
+  the key — an operator can rename a fact. A **capability token contains a dot by construction**:
+  `arm.left`, `sensing.camera`, `locomotion.base`. So `skill.grants.<token>` is unaddressable for
+  every token that exists and nobody can rename them. The shape changes rather than the names:
+  `skill.grants.tokens`, sorted, read with `includes` — which is the operation a precondition about
+  grants wanted anyway. `robot.frames.resolved` is a list for the second half of the same reason,
+  and because §54.2's question about frames is *"whether the frames the skill needs resolve"*, which
+  is containment and not lookup.
+* **Joints keep the object, and unaddressable names are reported rather than dropped.** The question
+  about a joint is its *value*, and a list cannot answer that. The OS cannot rename a body's joints
+  either, so a joint called `arm.1` is omitted and named in `unaddressable` — otherwise the symptom
+  is a precondition refusing with `robot.state.joints.arm.1` unresolvable and an operator who can see
+  the joint on the console.
+* **`robot.state.operating` is published**, which is inside §54.2's `robot.state.*` and is not one of
+  its four examples. *"Only when the robot is running"* is the first precondition anybody writes, and
+  §27's machine is the only part of `robot.state.*` this edition can actually observe.
+
+`skill.grants.tokens` is the **one** branch always present, even empty, and that exception has a
+reason the others do not: a grant is a file the daemon owns. "This package was granted nothing" is an
+answer. Every other branch is something the OS learns from a driver, a kernel, a clock or an
+operator's survey of a room, and any of them can be missing.
+
+That last rule was got wrong first and corrected inside the session, which is worth recording because
+the wrong version was defensible. The first draft made `robot.guards.active` always present and empty
+too, arguing that "no guard is running" is a fact the OS always has. It is not: guards run inside the
+kernel and §33.1 keeps `skynetd` on the far side of that line, so an empty list from this daemon
+would be a **claim** rather than an observation — the exact failure the module was written to prevent,
+made by the module itself. It is now `Option`, and the two states are different contexts: an empty
+list is a kernel reporting no guard is evaluating, and an absent branch is nobody having asked a
+kernel. A corpus case pins both.
+
+15 cases in `corpus/live/context.json`, a TypeScript mirror, and 14 tests — several of which assert
+against `predicate::evaluate` rather than against the document, because the property that matters is
+not what the context *contains* but what a clause reading it *answers*.
+
+### The corpus's §64 check found a shape before a reviewer did
+
+`robot.frames.fault` was a sentence in the first draft. `crates/skynet-corpus/tests/refusals.rs` —
+§64 made mechanical, walking every refusal the corpus contains — refused it: a `{"fault": …}` in this
+system carries a code, its subjects and a sentence, and a bare string under that key is a refusal
+that names no fix.
+
+It is now the frame validator's own `FrameFault`, which is better than the string in a way the check
+did not have to argue for: a precondition can name the **code**. *"Refuse when the graph has a
+cycle"* is a clause somebody will write, and a string forces them to match on prose.
+
+### `crates/skynetd-io/src/skill.rs` — the runtime
+
+**Decisions in, effects out.** `Runtime::advance_all` starts no process, writes no record and queues
+no episode; it returns `Effect`s and the daemon performs them. That is not tidiness. §54.4's terminal
+row is *"leases released, outcome recorded, episode emitted"* — three things that must happen exactly
+once, on the transition **into** `terminal` and never on a later pass over an invocation already
+there. A level-triggered loop performing them inline emits a second episode the first time anything
+re-enters the function, and the symptom is duplicate training rows in a dataset nobody is watching.
+As a returned list they are assertable, and the suite asserts them: one episode, one release, and a
+second pass over a terminal invocation producing nothing at all.
+
+**One live invocation per package.** §54.5 holds leases at the root invocation; §25.2's table holds
+them by holder string, and the holder here is the package id. The two agree because a second
+concurrent invocation of the same package is refused outright — a skill runs as one unit (§33.5) and
+the supervisor is keyed by package id, so two live invocations would be two lifecycles arguing about
+one process. Refusing keeps the lease holder equal to the thing an operator sees on the console.
+
+**§54.3 is judged over the same context a precondition reads.** The post-state is the live context
+observed after the skill returned, deliberately: a publisher writing `robot.state.gripper` in a
+criterion and in a precondition is naming one thing, and a second vocabulary for post-state would be
+§31.2's two-definitions failure wearing different clothes.
+
+**Composition is checked against the chain that will actually run**, not the one a manifest declared.
+`validate_composition` is reused rather than re-derived — a second implementation of "acyclic and
+depth-limited" is a second answer to the same question, and this one has a corpus behind it — and the
+edges are built from the live ancestor chain plus the new call.
+
+### What this edition cannot observe, and does not pretend to
+
+§33.1 keeps the daemon off the actuator path, so five of §54.2's seven branches have no source.
+`Daemon::live_inputs` is written so that shows, the same way `refresh_operating_state` is:
+
+| Branch | This edition |
+|---|---|
+| `robot.state.operating` | §27's machine, as of the last observation |
+| `robot.calibration.*` | `calibration::status` over `/data/state/calibration` |
+| `robot.frames.*` | the descriptor's graph, flattened (§44) |
+| `env.*` | §55.2's cell, out of the **signed** operator profile |
+| joints, gripper, battery, base pose | absent — no RHAL channel |
+| `robot.guards.active` | absent — no kernel channel, and an empty list would be a claim |
+| `robot.tier` | absent, and this is a finding rather than an omission |
+
+**Nothing on this robot decides its tier.** §15 awards one from conformance evidence and §11
+delivers it in desired state, and neither path is written — so a `tier` in the context would be this
+module choosing one, which is precisely the invented fact the arrangement exists to prevent. A skill
+whose precondition names `robot.tier` is refused, with the path named, which is the true answer.
+
+**`intervention_count` is absent from the episode rather than zero.** §54.4 asks the episode to carry
+it. There is no kernel channel, so nothing counts, and a zero is a number a marketplace reads as
+evidence of a clean run. `Cycle::guards_observable` is the switch and it is the same shape
+`calibration::conditions_now` uses for a temperature nothing reads. CI asserts the `Option` stays.
+
+### The fifteenth event code
+
+§54.4: *"Every transition is a black box event."* The vocabulary is a closed enum by design (§41.1),
+so the transition needed a code rather than a free string: `skill_transition = 15`, in both editions
+and in §26's schema text.
+
+**Every *changed* transition, not every evaluation**, and the decision lives in the recorder rather
+than in the lifecycle. A skill sitting in `running` for four hundred cycles would fill the ring with
+four hundred identical records and push out the cycles an incident needs — the completeness guarantee
+destroyed by the thing meant to strengthen it. `advance` is pure and reports what it found; what is
+worth a record belongs where the ring is. The consequence is stated rather than left to be found: a
+sealed recording shows a skill's **ladder** and not its dwell time, which is in the episode's duration
+and in the invocation's own timestamps, both of which outlive the ring.
+
+### `cell.rs` gets its caller, which was the second item on the previous list
+
+> `cell.rs` waits on the daemon reading a signed profile out of `/data/state/profiles/` (§38.1,
+> §38.3). Not blocked on a decision.
+
+It waited because nothing consumed `env.*`. The live context does, so the path is now built:
+`DesiredProfile` carries the cell document raw, `write_profile` writes it into `active.json`, and
+`live_inputs` reads it back through `cell_from_json` and `cell_environment`.
+
+The document travels **inside the profile** rather than beside it, which is how §55.2's *"signed like
+every other safety-relevant profile"* becomes true by construction rather than by a second check:
+`active.json` is written only for a profile whose signature verified (`reconcile.rs` step 4 emits no
+action for an unverified one), so a cell that reaches a precondition is a cell somebody signed. It is
+carried raw in `skynetd` because that crate is the pure half and the cell reader lives in
+`skynet-contracts`; decoding it there would have added a dependency the reconciler does not need.
+
+Two contracts still exist with no caller, down from three. `entitlement.rs` is the last, and it has
+waited since §51 for the same kind of reason.
+
+### A bug in a three-session-old contract, found by writing a caller
+
+§25.2 keeps a **grant** and a **lease** apart, and the fifteenth session's `Acquisition::into_progress`
+already reported the distinction correctly: a token the requester was never granted comes back with
+`holder: None`, because *"nobody has the arm, this package may not ask for it"* and *"somebody else is
+using the arm"* are different errands.
+
+`advance` then collapsed both into one sentence:
+
+```
+`arm.left` is held by another package
+```
+
+for a token **nobody was holding**. An operator reading that goes hunting for a package that does not
+exist, when the fix is one `POST /grants`. That is §64's failure exactly — a refusal that does not
+name the fix — sitting in the function §64's own corpus check walks, and invisible to it because the
+check reads shapes and this one is a sentence.
+
+It was invisible to the corpus too, and the reason is worth more than the fix: **every lifecycle case
+for `lease_denied` supplied a holder.** A case written from the document imagines the contended arm,
+because that is the scenario §25.2 spends its length on. The unconfigured robot — the ordinary one,
+the one a developer meets first — has no holder at all, and nobody had written it down.
+
+Fixed in both editions, with two new corpus cases: a token never granted, and a denial that names no
+token at all (which says so rather than blaming a package).
+
+### Three more corrections, all made during the session
+
+* **`finished` was a silent hang.** The first draft required having *seen* the unit running before a
+  missing one counted as a skill that returned, to cover the gap between issuing `Start` and the
+  launcher reporting the process. The gap it opened is worse: a unit that starts and exits between
+  two passes is never seen running, so the invocation sits in `running` until its timeout — and a
+  skill with no declared duration sits there for ever. It is now "not running, from the pass after
+  the start", whose own failure mode — a `Start` the launcher refused — is reported on stderr and
+  then judged by §54.3 over a post-state nothing changed, which is honest.
+* **A cycle is named before "already running".** Every ancestor of a nested call is live by
+  definition, so checking `already_running` first reported every cycle as a busy package and hid the
+  chain that produced it. The test is `a → b → a` rather than a self-call for exactly that reason.
+* **The ancestry edge must carry the parent's package, not its invocation id.** `validate_composition`
+  walks a graph of skills; an id in it makes every chain acyclic by accident, because ids are unique
+  by construction and a cycle can never close. The test caught it on the first run.
+
+### The surfaces
+
+* `GET /skills`, `GET /skills/{id}` (observer), `POST /skills` (operator), `POST /skills/{id}/stop`
+  (operator).
+* `POST /skills` answers **202, not 201**, and creates the invocation in `idle`. The reconcile loop
+  moves it, so a caller cannot get a skill past §54.2 by calling the route and reading the answer,
+  and a skill invoked from a console walks the same ladder as one invoked by anything else.
+* `POST /skills/{id}/stop` **makes the skill return; it does not abort it.** §54.4 names four things
+  that end a running skill and an operator stopping one is none of them; adding a fifth reason would
+  put a word in a closed vocabulary that no corpus case came out of the document. So the process is
+  stopped and the lifecycle sees what it would see for any skill whose code returned — which is also
+  the more honest answer, because a skill stopped halfway has not met its criteria and is recorded on
+  the evidence rather than on the fact that somebody pressed a button.
+* `POST /stop` ends every live invocation **first**, then stops the units. The other order would let
+  the next pass discover the skills had "returned" and record a `failure` for a robot an operator
+  stopped — a defensible-looking number and a lie a marketplace would consume.
+* The console gained a Skills panel. `aborted` is deliberately not coloured as a failure: §54.4 is
+  specific that a skill never allowed to start did not fail at its task, and a page painting the two
+  alike trains an operator to read a cell configuration problem as a broken skill.
+* The CLI gained `skynet skills`, `skynet skill run` and `skynet skill stop`, and
+  `check-golden-path.mjs` now knows `skill` dispatches a second word — so `skynet skill strat` in a
+  README fails the check. Verified by making it fail.
+
+### Three new CI invariants
+
+* **The runtime never decides a skill succeeded.** It may write `aborted`, which is a lifecycle fact
+  §54.4 owns. A `SkillOutcome::Success` or `::Failure` literal in `skynetd-io/src/skill.rs` fails the
+  job, because those are §54.3's and come out of `judge_success` over post-state. A runtime that can
+  write the word is a runtime that can be talked into writing it by the skill.
+* **An intervention count is absent rather than zero**, asserted from the direction it would be lost:
+  somebody deleting the `Option` to make a field always appear.
+* **The live context has no nulls in it.** A `null` resolves, so the clause is answered instead of
+  refused, and a robot with no battery sensor starts every skill that asked about its battery.
+
+### Where the numbers stand
+
+Rust: **982** tests, up from 947. `skynet-contracts` 323 → 337, `skynetd-io` 249 → 270. `cargo fmt
+--all --check` clean, `cargo clippy --workspace --all-targets` clean under `-D warnings`, and the
+TypeScript oracle type-checks.
+
+The corpus is **810 cases across 54 files**, up from 793 across 53:
+
+| File | Cases | What it pins |
+|---|---|---|
+| `live/context.json` | 15 | §54.2's seven branches, and what a robot that cannot observe one puts there |
+| `skill/lifecycle.json` | +2 | §25.2's other refusal, and a denial that names nothing |
+
+The vocabularies are unchanged at 41 — this session added no closed set, which is the right outcome
+for a session that built a loop rather than a decision.
+
+Checked that the corpus bites, twice:
+
+* `robot.guards.active` made unconditionally present — the shape rejected above — and **12 of 810
+  diverged**;
+* the calibration `valid` boolean loosened to "anything but absent", which is the direction that lets
+  a guard run on a stale calibration, and **1 of 810 diverged** — the case built to hold all five
+  states at once, which is the one that exists for it.
+
+Both reverted; all 810 reproduce byte for byte and regenerating is a no-op.
+
+### Changed in the Hub
+
+Nothing. `skill` and `live` are not among the ten mirrored contracts, and `node
+tools/check-contract-mirrors.mjs` passes with every pinned digest intact.
+
+### Not done, and what it waits on
+
+**§54.2's last paragraph.** *"`safety_notes` … is displayed at grant time and acknowledged once per
+skill per robot, recorded in the audit log."* Not built, and it is a **grant-time** flow rather than a
+run-time one — it belongs with `POST /grants` and the audit log, not with the lifecycle. Building
+half of it inside the runtime would put an acknowledgement check on the wrong side of the decision it
+is supposed to inform.
+
+**A per-invocation abort.** Deliberately absent. It needs a lifecycle reason §54.4 does not have, and
+inventing one puts a word in a closed vocabulary that no corpus case came out of the document.
+`POST /skills/{id}/stop` is what exists, and it means something different on purpose.
+
+**The policy runtime, still.** §54's lifecycle runs; nothing a skill's process does reaches a robot.
+No capture backend fills a stream, no policy sandbox receives a descriptor, and nothing turns a frame
+into a command. A skill on this edition starts a unit, is supervised, is judged and is recorded —
+against a body that does not move. The README now says that in the paragraph beside the one about
+the policy runtime, because the two are one word apart and a reader skimming would merge them.
+
+### Findings, restated
+
+1–9 unchanged from the seventeenth session; 10 and 11 from the eighteenth; 12 and 13 from the
+nineteenth.
+
+14. **A refusal can be correct in its data and wrong in its sentence, and only the sentence is read.**
+    New, and the general form of the `lease_denied` bug above. `Acquisition::into_progress` reported
+    §25.2's two refusals correctly for five sessions; `advance` rendered them as one sentence, and
+    every test and every corpus case checked the field rather than the prose. §64's mechanical check
+    walks shapes — a `detail` that is present, non-empty and a sentence passes it — so a *wrong*
+    sentence is exactly what it cannot see. The fix is one function; the exposure is that nothing
+    checks the other few hundred.
+15. **A context assembled by the thing that cannot observe it is where a platform starts lying.**
+    New. Five of §54.2's seven branches have no source on this edition, and each of them has an
+    obvious, reasonable, one-line default that would make the system appear to work: an empty guard
+    list, a tier of `guest`, a battery of 100, an age of zero. Every one of those turns a refusal
+    into a pass. The module is written so that the absence is the visible thing and the CI check is
+    written from the direction the absence would be removed, because the pressure to fill these in
+    will come from somebody making a demo work rather than from anybody deciding to lie.
+
+## 2026-09-01 (twenty-first) — §12, and the gate the document calls the most important test in the suite
+
+`ota` had been in the "not built" column since the first session and `Outcome::Unimplemented` had
+existed to name it. §12 gives OTA three rules it calls *"not standard practice"*, and the third one
+comes with a sentence the rest of this system is arranged around:
+
+> **OTA is not a route around certification.** An update that changes the Safety Kernel or the
+> envelope is **refused** without a fresh bench pass. Without this rule, every guarantee in §7 and
+> §15 is one silent update away from being void — so `ota.safety_gate` tests it, and it is the
+> single most important test in the suite.
+
+### Rule 1 was already built, and saying so is the first decision
+
+`skynetd::reconcile::plan` has emitted `StageOsImage` with `Gate::Open` and `ApplyOsImage` with
+`Gate::SafeState` since the fifth session. That **is** *"never apply mid-task"*, structurally: an
+apply cannot be emitted for a robot that is not at a declared safe state.
+
+So `skynet-contracts::ota` implements rules 2 and 3 and deliberately does not implement rule 1. A
+second copy of it would be §31.2's failure in miniature — two answers to a question already
+answered — and the module header says that rather than leaving a reader to notice the absence. A
+test asserts the two gates are still the way round they are, because the property now lives in one
+place and nothing else was watching it.
+
+### Rule 3, and the two ways it would be got past
+
+`admit_bundle` takes a release manifest and the robot it would be applied to, and returns every
+finding rather than the first — an OS update is the case where each trip round the loop costs a
+reboot.
+
+The gate itself is two rules, and each is one line to remove:
+
+**An unrecognised component is gated.** A bundle declares which components it changes. Two of them,
+`safety_kernel` and `envelope`, require a bench pass. A publisher wanting to ship a kernel change
+past a two-word matcher would not write `safety_kernel`; they would write `core`, or `rt`, or
+`platform`. So `gated()` returns true for §12's two names **and for anything this edition does not
+recognise**, and the refusal says which word it did not recognise and why that is enough.
+
+The two readings fail in opposite directions and the asymmetry is the whole argument. Strict: an
+update waits until somebody fixes a typo. Lenient: §7's guarantees are void and nothing says so.
+
+**A bench pass is bound to a digest.** The same rule §56.3 applies to benchmark seeds, arriving in
+another section: evidence that is not bound to what it is evidence *of* is not evidence. A gate
+satisfied by *"this robot has passed a bench test at some point"* is satisfied by every robot the
+gate exists to protect. A pass for other bytes is `bench_pass_stale`, a pass recording a failure is
+`bench_pass_failed`, and a bundle with no digest is refused twice over — once for having no digest
+and once for having nothing a pass could be bound to — because an operator who fixed only the first
+would still not be able to apply it.
+
+Three findings are **warnings** rather than refusals, and each because refusing would break a real
+robot: a bundle declaring no compatible machines (§12 does not require the field, and refusing would
+stop every image built before it existed), a machine that cannot report its board (refusing would
+make an unknown machine unupdatable, which is the state a robot is in exactly when it most needs an
+update), and the version already running (re-converging on a satisfied desired state is the ordinary
+case after a rollback).
+
+### Rule 2, and why it is a function rather than a script
+
+`confirm_boot` decides what to tell a bootloader about the slot the robot has just booted into:
+`not_pending`, `wait`, `confirm`, `roll_back`. Three properties, and each is why a rule of this shape
+is written down rather than left in a shell script somebody wrote once:
+
+* **Absence of evidence is not health.** Every check is an `Option<bool>` and `None` never confirms.
+  A supervisor that marked a slot good because it had not yet been told otherwise would replace
+  §12's unattended recovery with a race between the health check and the confirmation.
+* **The budget is what makes it unattended.** Without one, a robot that never becomes healthy waits
+  for ever in the state the rollback exists to leave. With one, the worst case is a reboot.
+* **A robot that is not pending decides nothing.** `mark bad` on an ordinary boot is a rollback of an
+  update nobody made.
+
+A budget that is not a positive number **waits** rather than rolling back, and that is the one place
+in the file where the patient reading is the safe one: an unattended rollback triggered by a
+misconfigured budget is a working robot rebooted into an older image for no reason.
+
+### `crates/skynetd-io/src/ota.rs` — the half that opens files
+
+Two documents, both signed, and the second matters more than it looks.
+
+A **release manifest** says what a bundle changes. A **bench pass** says somebody ran the suite
+against those exact bytes and it passed. §12's third rule is the conjunction of the two — so an
+unsigned bench pass on a robot's disk is §38.1's attacker exactly: *"somebody editing limits on a
+robot's disk"*, one file, no network, and the Safety Kernel replaced.
+
+So **a bench pass whose signature does not verify is not a bench pass.** It reaches the contract as
+`None` and the gate refuses for want of evidence, with a note saying it was the signature and not the
+file — because an operator who can see the pass on the disk and is being told there is none needs to
+know which.
+
+Two new trust domains, `skynet.release.v1` and `skynet.bench.v1`, for the reason the other five have
+one: a signature over a release digest must not be presentable as a signature over anything else.
+
+`Layout::release` and `Layout::bench_pass` flatten a version and a digest into one path component, so
+`1.4.0` and `1_4_0` name one file. Each document therefore declares its own identity and a mismatch
+is refused — the same rule `entitlement.rs` applies to a token's `package` field, and it is what
+makes the flattening safe rather than clever. Both directions have a test.
+
+`Updater` is a trait, with RAUC behind it and a recording implementation beside it, for the reason
+`Launcher` is one: `ota.rollback.works` asks for a deliberately broken image and unattended recovery,
+and a rollback that can only run on real hardware is a rollback nobody exercises until a fleet needs
+it. The whole ladder — wait, expire, `mark-bad`, keep the marker, and the ordinary boot afterwards
+that finds a marker for a version it is not running — is driven in the suite without a bootloader.
+
+### Four decisions in the daemon worth recording
+
+* **The image is assessed at stage *and* again at apply.** Not because anything is expected to have
+  changed, but because a stage and an apply are separated by a safe-state barrier that can be hours
+  wide (§33.4). In that gap a key can be revoked, a bench pass replaced, or a channel changed.
+  Re-running the gate costs nothing and is the difference between a rule that holds and one that held
+  when the bytes arrived.
+* **Nothing reboots from inside a reconcile pass.** `apply_image` marks the next boot as the one that
+  must prove itself and returns. A supervisor whose most destructive action has no confirmation and
+  no audit entry of its own is a supervisor nobody should run.
+* **The elapsed time comes from `/proc/uptime`, not from the daemon's own start.** §12's budget is a
+  *boot* budget, and a daemon that restarted twice while a driver crash-looped would otherwise reset
+  the clock on a rollback meant to be unattended. Where there is no `/proc`, the fallback is used and
+  the answer says which clock it was.
+* **`packages_healthy` is `None` when there are no packages.** A robot the desired state asks nothing
+  of has no package health to report, and reporting one would confirm a slot on the strength of an
+  empty list — which is how an update that broke every driver looks exactly like an update that
+  installed nothing.
+
+### One rollback state that only exists because the marker outlives the boot
+
+A pending marker naming a version the robot is **not** running is the rollback that already happened:
+the bootloader returned to the previous slot and the marker survived. It is cleared, and the boot is
+reported as ordinary. Leaving it would make the next ordinary boot look pending for ever.
+
+Its opposite is also deliberate: on a `roll_back`, the marker is **kept**. The rollback happens on
+the next boot, and a robot that forgot it had condemned the slot it is still running would report a
+healthy, pending-free state while running the image it just condemned.
+
+### The surfaces
+
+`GET /ota` (observer) carries the slots, the board, the channel, the verdict and the pending-boot
+state together, because they are one question — a console showing the slots without the verdict would
+render a robot that appears able to update and is refused every pass. It reads and never decides:
+a `GET` that told a bootloader anything would be a state change behind a verb that promises not to be
+one.
+
+`skynet ota` prints the same, findings in full. The console gained an OS image panel that lists the
+gated components **above** the findings, because *"this image touches the safety kernel"* is true
+whether or not the update is refused and is what somebody needs before they go and book bench time.
+
+`EventCode::Ota` finally has a writer: a `confirm` or a `roll_back` is recorded on §26's event
+channel. A `wait` is not — it is the ordinary state for most of a boot budget, and a record every
+pass would fill the ring with a robot deciding nothing.
+
+### One test changed, and the change is the point
+
+`the_plan_route_reports_a_deferral_with_its_reason` asserted `unimplemented`, using OTA as a stand-in
+for *"an action nobody can apply"*. It now asserts `failed`, with a reason naming the release: this
+robot is told to run `9.9.9` and holds no manifest describing it, and §12 will not install an image
+whose manifest nobody has seen — because the manifest is what says whether the update touches the
+Safety Kernel. `Unimplemented` is still reachable and still honest: an admitted release whose bundle
+is not on the disk, because §34's inbound fetcher is not written.
+
+### Where the numbers stand
+
+Rust: **1014** tests, up from 982. `skynet-contracts` 337 → 356, `skynetd-io` 270 → 283. `cargo fmt
+--all --check` clean, `cargo clippy --workspace --all-targets` clean under `-D warnings`, the
+TypeScript oracle type-checks, and the golden path still describes the repository.
+
+The corpus is **842 cases across 56 files**, up from 810 across 54:
+
+| File | Cases | What it pins |
+|---|---|---|
+| `ota/bundle.json` | 18 | §12's third rule from every direction somebody would come at it, plus §37.1's five signature states over an image |
+| `ota/boot.json` | 10 | Every boot decision, both sides of the budget boundary, and the two ways a budget stops being one |
+
+Four closed vocabularies added — `os_components`, `certification_gated`, `bundle_faults`,
+`boot_decisions` — taking `vocabulary/closed-sets.json` from 41 sets to 45. `certification_gated` is
+frozen **beside** `os_components` rather than instead of it, because it is not the whole rule: an
+unrecognised component is gated too, and a corpus holding only the two names would let an edition
+drop the half that does the work.
+
+The corpus was checked against the two ways rule 3 would actually be lost:
+
+* `gated()` narrowed to §12's two literal names — the rename hole — and **1 of 842 diverged**, plus
+  two unit tests;
+* the bench pass unbound from the digest — the stale-evidence hole — and **2 of 842 diverged**, plus
+  three unit tests.
+
+Both reverted; all 842 reproduce byte for byte and regenerating is a no-op. Both holes now have a CI
+invariant of their own, written from the direction they would be removed rather than asserting the
+behaviour, because both are a one-line deletion that looks reasonable in a diff.
+
+### Changed in the Hub
+
+Nothing. `ota` is not one of the ten mirrored contracts, and `node tools/check-contract-mirrors.mjs`
+passes with every pinned digest intact.
+
+### Not done, and what it waits on
+
+**The fetch.** §34's outbound queue is written and its inbound counterpart is not, so nothing goes
+and gets a bundle. `stage_image` reports `Unimplemented` with the path it looked in, rather than
+reporting success for a file nobody delivered. That is the honest half of §12 and it is the half a
+robot in a warehouse needs.
+
+**A real A/B device.** None of this has run against real RAUC. `RaucUpdater` shells out to the
+commands §12 names and `RecordingUpdater` is what the suite drives; the second is what makes the
+rollback testable at all and is not the same as having watched one. `ota.rollback.works` is a bench
+test and stays unclaimed.
+
+**Where a bench pass comes from.** This session reads one; nothing produces one. §15's suite runs
+on a robot and §57's `POST /devices/{id}/conformance` carries the result, and the loop from *"the
+suite passed"* to *"a signed document on this robot's disk"* has no implementation on either side.
+Until it does, a fleet applying a kernel update does it by an operator putting a file in place —
+which is exactly what §12 intends, and is not automation anybody should mistake for it.
+
+**§54.2's `safety_notes` acknowledgement**, unchanged from the twentieth session: a grant-time flow,
+not a run-time one.
+
+### Findings, restated
+
+1–9 from the seventeenth session; 10 and 11 from the eighteenth; 12 and 13 from the nineteenth; 14
+and 15 from the twentieth.
+
+16. **A vocabulary can be frozen and still lose the rule it was frozen for.** New. `certification_gated`
+    is two strings and freezing it proves an edition spells them the same way — and says nothing about
+    whether that edition gates anything else. The rule that carries the weight is *"and anything
+    unrecognised"*, which is a **function** and not a set, so the corpus holds it only through the
+    cases that exercise a name outside the vocabulary. One case does. That is thin for the rule §12
+    calls the most important in the suite, and it is why this one got a CI invariant as well: the
+    corpus proves two editions agree, and an invariant proves the surviving edition still has the
+    rule.
+17. **The most dangerous defaults in this system are the ones that make a demo work.** New, and the
+    general form of the twentieth session's finding 15. Every check in `confirm_boot` has an obvious
+    permissive default that would make a robot update smoothly on a bench: `post_passed` defaulting
+    to true, an empty package list counting as healthy, a zero budget meaning "no limit". Each turns
+    §12's unattended recovery into a coin toss, and each would be added by somebody trying to get an
+    update to go through on a machine where the self-test does not run — which is every development
+    machine. The CI invariant for this is written as a grep for the *defaults*, not for the behaviour,
+    because the behaviour is what a hurried change would preserve while removing the reason.

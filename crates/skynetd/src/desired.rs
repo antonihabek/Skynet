@@ -236,6 +236,19 @@ pub struct DesiredProfile {
     pub verified: bool,
     /// The ceilings.
     pub limits: ProfileLimits,
+    /// §55.2's cell descriptor, as the profile carries it.
+    ///
+    /// Carried **raw** rather than decoded here, and that is deliberate: `skynetd` is the pure half
+    /// and the cell reader lives in `skynet-contracts`, which this crate deliberately does not
+    /// depend on for the reconciler's sake. What matters at this layer is that the document travels
+    /// with the profile and is therefore covered by the profile's signature — §55.2 says a cell is
+    /// *"signed like every other safety-relevant profile"*, and the cheapest way to make that true
+    /// is to not give it a second delivery path.
+    ///
+    /// `None` is a profile with no cell, which is the ordinary case for a site nobody has surveyed
+    /// — and it is not the same as an empty cell, which would draw a workspace layer permitting
+    /// nothing.
+    pub cell: Option<Json>,
 }
 
 /// What the Hub says this robot should be.
@@ -371,6 +384,7 @@ impl DesiredState {
                         base_velocity_max_m_s: number(&limits, "base_velocity_max_m_s"),
                         max_delta_per_cycle: number(&limits, "max_delta_per_cycle"),
                     },
+                    cell: raw.get_present("cell").cloned(),
                 })
             }
         };

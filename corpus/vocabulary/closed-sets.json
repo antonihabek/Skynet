@@ -329,6 +329,38 @@
         "set": "lease_states"
       },
       "expected": "[\"pending\",\"held\",\"denied\"]"
+    },
+    {
+      "id": "os_components",
+      "note": "What an OS bundle may declare that it changes — the stack §3 draws, and nothing invented beyond it. Two entries carry a rule; the rest are here so that an unrecognised name is recognisable as unrecognised.",
+      "input": {
+        "set": "os_components"
+      },
+      "expected": "[\"bootloader\",\"kernel_image\",\"rhal_abi\",\"rhal_driver\",\"safety_kernel\",\"envelope\",\"skynetd\",\"policy_runtime\",\"userspace\"]"
+    },
+    {
+      "id": "certification_gated",
+      "note": "§12’s two names. Not the whole rule — an unrecognised component is gated too — which is why this set is frozen beside `os_components` rather than instead of it.",
+      "input": {
+        "set": "certification_gated"
+      },
+      "expected": "[\"safety_kernel\",\"envelope\"]"
+    },
+    {
+      "id": "bundle_faults",
+      "note": "Everything §12 can find wrong with an image, in the order the checks run.",
+      "input": {
+        "set": "bundle_faults"
+      },
+      "expected": "[\"unversioned\",\"undigested\",\"signature_failed\",\"signature_untrusted\",\"signature_absent\",\"signature_unverifiable\",\"incompatible\",\"compatibility_undeclared\",\"channel_mismatch\",\"certification_required\",\"bench_pass_stale\",\"bench_pass_failed\",\"already_running\"]"
+    },
+    {
+      "id": "boot_decisions",
+      "note": "What a supervisor may tell a bootloader, weakest action first. `wait` is the default and the only one of the four that is safe to reach by accident.",
+      "input": {
+        "set": "boot_decisions"
+      },
+      "expected": "[\"not_pending\",\"wait\",\"confirm\",\"roll_back\"]"
     }
   ]
 }

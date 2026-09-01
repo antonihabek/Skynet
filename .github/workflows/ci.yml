@@ -693,6 +693,99 @@ jobs:
           # And the module itself stays behind the feature, from the other side.
           grep -q '#\[cfg(feature = "test-signing")\]' crates/skynet-ed25519/src/lib.rs
 
+      # §54.3. "A skill that judges its own success is a skill that always succeeds — and on a
+      # platform where success rates feed a marketplace, self-reported outcomes are worth nothing."
+      #
+      # The runtime is allowed to record `aborted`, because that is a *lifecycle* fact — the skill
+      # was refused, timed out, lost a precondition, or the robot stopped — and §54.4 is where it
+      # comes from. It is not allowed to construct a `success` or a `failure`, because those are
+      # §54.3's and come out of `judge_success` over post-state. A literal here would be the runtime
+      # deciding an outcome it is not entitled to, which is the one thing this section exists to
+      # prevent and would look entirely reasonable in a diff.
+      - name: The runtime never decides a skill succeeded
+        run: |
+          if grep -nE 'SkillOutcome::(Success|Failure)' crates/skynetd-io/src/skill.rs; then
+            echo "::error::the skill runtime named a success or a failure directly."
+            echo "§54.3: the OS judges over post-state, through judge_success. A runtime that can"
+            echo "write the word is a runtime that can be talked into writing it by the skill."
+            exit 1
+          fi
+          grep -q 'judge_success' crates/skynetd-io/src/skill.rs
+
+      # §54.4 asks the episode to carry an intervention count, and this edition has no source for
+      # one: §33.1 keeps the daemon off the actuator path, so nothing counts. A zero would be
+      # consumed by a marketplace as evidence of a clean run.
+      #
+      # The switch is asserted present rather than the absence asserted, because the failure mode is
+      # somebody deleting the `Option` to make a field always appear — which is a one-line change
+      # that makes every episode claim a number nobody measured.
+      - name: An intervention count is absent rather than zero
+        run: |
+          grep -q 'pub guards_observable: bool' crates/skynetd-io/src/skill.rs
+          grep -q 'interventions: Option<u32>' crates/skynetd-io/src/skill.rs
+          if grep -nE 'intervention_count.*Json::Num\(0' crates/skynetd-io/src/skill.rs; then
+            echo "::error::an episode reported an intervention count of zero."
+            echo "§33.1: nothing on this robot counts interventions, so the honest episode omits"
+            echo "the field. A zero is a number a marketplace reads as a clean run."
+            exit 1
+          fi
+
+      # §54.2's first rule, from the direction it would actually be lost. "A precondition that
+      # cannot be evaluated refuses the skill, naming the path that was unresolvable" — which only
+      # works if an unknown fact is *absent* from the context. A `null` under one of these paths
+      # resolves, so the clause is answered instead of refused, and a robot with no battery sensor
+      # starts every skill that asked about its battery.
+      - name: The live context has no nulls in it
+        run: |
+          if grep -n 'Json::Null' crates/skynet-contracts/src/live.rs; then
+            echo "::error::the live precondition context can emit a null."
+            echo "§54.2: absent and null are different answers. An absent path refuses the clause"
+            echo "that named it; a null resolves, and the skill runs on a fact nobody measured."
+            exit 1
+          fi
+
+      # §12's third rule, which the specification calls "the single most important test in the
+      # suite": an update that changes the Safety Kernel or the envelope is refused without a fresh
+      # bench pass. Two halves of it are one line each to remove and neither would look wrong.
+      #
+      # The first is that an **unrecognised** component is gated. A publisher shipping a kernel
+      # change past the gate would not write `safety_kernel`, they would write `core` or `rt`, and a
+      # matcher that only knew the two named words would wave it through.
+      #
+      # The second is that a bench pass is bound to a **digest**. A gate that accepted "this robot
+      # has passed a bench test at some point" is satisfied by every robot the gate exists to
+      # protect.
+      - name: OTA is not a route around certification
+        run: |
+          grep -q 'CERTIFICATION_GATED' crates/skynet-contracts/src/ota.rs
+          if ! grep -q '!OS_COMPONENTS.contains(&component)' crates/skynet-contracts/src/ota.rs; then
+            echo "::error::an unrecognised component is no longer gated."
+            echo "§12: the gate is got past by renaming, not by admitting. A component nobody can"
+            echo "classify is one nobody has established is safe to change."
+            exit 1
+          fi
+          if ! grep -q 'bench.image_digest != bundle.digest' crates/skynet-contracts/src/ota.rs; then
+            echo "::error::a bench pass is no longer bound to the bundle it is evidence of."
+            echo "§12: evidence that is not bound to what it is evidence of is not evidence, and a"
+            echo "gate satisfied by any past pass is satisfied by every robot it protects."
+            exit 1
+          fi
+          # And the same rule in the oracle, because the corpus only holds them to each other.
+          grep -q 'OS_COMPONENTS as readonly string\[\]).includes(component)' reference/typescript/ota.ts
+
+      # §12's second rule. A health check that could confirm a slot it had not been told about
+      # replaces an unattended recovery with a race, so absence of evidence must never confirm.
+      - name: A boot nobody has checked is never confirmed
+        run: |
+          grep -q 'post_passed: Option<bool>' crates/skynet-contracts/src/ota.rs
+          if grep -nE 'post_passed.*unwrap_or\(true\)|packages_healthy.*unwrap_or\(true\)|converged.*unwrap_or\(true\)' \
+              crates/skynet-contracts/src/ota.rs; then
+            echo "::error::a boot health check defaults to passing."
+            echo "§12: the new slot must *pass* a health check within a boot budget. A check that"
+            echo "defaults to true confirms a slot on the strength of nobody having looked."
+            exit 1
+          fi
+
       # The workspace has no third-party dependencies. A vendor building a driver in 2036 should be
       # able to build this with no network, and the kernel cannot reach most of the ecosystem
       # anyway.

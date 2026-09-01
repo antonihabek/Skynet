@@ -1,0 +1,305 @@
+{
+  "corpus": "live",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "nothing-observed",
+      "note": "A robot nobody has observed. Six of the seven branches are absent; the one that is present is an empty array, because a grant is a file the daemon owns and \"this package was granted nothing\" is an answer rather than an absence. Everything else omits, because §54.2 refuses a clause naming an unresolvable path and that refusal is the honest answer for a fact nobody measured.",
+      "input": {},
+      "expected": "{\"context\":{\"robot\":{},\"skill\":{\"grants\":{\"tokens\":[]}}},\"unaddressable\":[],\"unreadable\":[]}"
+    },
+    {
+      "id": "a-kernel-that-reports-no-guard-running",
+      "note": "The distinction the guards branch exists to carry, and the correction this module made to itself. An empty `robot.guards.active` is a kernel saying no guard is evaluating; an absent one is nobody having asked a kernel. §33.1 puts `skynetd` on the far side of that line, so the empty list it would otherwise supply would be a claim about a guard set — which is exactly what §54.2’s first rule refuses to let anybody make.",
+      "input": {
+        "guards_active": []
+      },
+      "expected": "{\"context\":{\"robot\":{\"guards\":{\"active\":[]}},\"skill\":{\"grants\":{\"tokens\":[]}}},\"unaddressable\":[],\"unreadable\":[]}"
+    },
+    {
+      "id": "a-fully-observed-robot",
+      "note": "Every branch §54.2 names, populated. The shape a skill publisher writes predicates against.",
+      "input": {
+        "joints": [
+          {
+            "name": "shoulder_pan",
+            "position": 0.25
+          },
+          {
+            "name": "elbow",
+            "position": -1.5
+          }
+        ],
+        "gripper": 0.8,
+        "battery_percent": 62,
+        "base_pose": {
+          "xyz": [
+            1,
+            2,
+            0
+          ],
+          "quaternion": [
+            0,
+            0,
+            0,
+            1
+          ]
+        },
+        "operating_state": "running",
+        "guards_active": [
+          "envelope",
+          "rate_limit",
+          "watchdog"
+        ],
+        "guards_unavailable": [
+          "workspace"
+        ],
+        "calibration": [
+          {
+            "set": "joint_zeros",
+            "validity": {
+              "state": "valid",
+              "checked": [
+                "age"
+              ]
+            },
+            "age_s": 3600
+          },
+          {
+            "set": "camera_extrinsics",
+            "validity": {
+              "state": "absent"
+            }
+          }
+        ],
+        "frames_resolved": [
+          "base_link",
+          "tool0"
+        ],
+        "tier": "host",
+        "grants": [
+          "arm.left",
+          "sensing.camera"
+        ],
+        "env": {
+          "cell": "bench",
+          "door_closed": true,
+          "fixtures": [
+            "jig"
+          ]
+        }
+      },
+      "expected": "{\"context\":{\"env\":{\"cell\":\"bench\",\"door_closed\":true,\"fixtures\":[\"jig\"]},\"robot\":{\"calibration\":{\"camera_extrinsics\":{\"state\":\"absent\",\"valid\":false},\"joint_zeros\":{\"age_s\":3600,\"state\":\"valid\",\"valid\":true}},\"frames\":{\"resolved\":[\"base_link\",\"tool0\"]},\"guards\":{\"active\":[\"envelope\",\"rate_limit\",\"watchdog\"],\"unavailable\":[\"workspace\"]},\"state\":{\"base_pose\":{\"qw\":1,\"qx\":0,\"qy\":0,\"qz\":0,\"x\":1,\"y\":2,\"z\":0},\"battery_percent\":62,\"gripper\":0.8,\"joints\":{\"elbow\":-1.5,\"shoulder_pan\":0.25},\"operating\":\"running\"},\"tier\":\"host\"},\"skill\":{\"grants\":{\"tokens\":[\"arm.left\",\"sensing.camera\"]}}},\"unaddressable\":[],\"unreadable\":[]}"
+    },
+    {
+      "id": "a-battery-nobody-can-read",
+      "note": "The case the whole module exists for. A robot with no battery sensor omits robot.state.battery_percent, so a skill that asked about it is refused *with the path named*. Filling it with 0 would refuse every skill and filling it with 100 would run every skill, and both are one-line changes that look reasonable in a diff.",
+      "input": {
+        "joints": [
+          {
+            "name": "elbow",
+            "position": 0
+          }
+        ],
+        "operating_state": "running"
+      },
+      "expected": "{\"context\":{\"robot\":{\"state\":{\"joints\":{\"elbow\":0},\"operating\":\"running\"}},\"skill\":{\"grants\":{\"tokens\":[]}}},\"unaddressable\":[],\"unreadable\":[]}"
+    },
+    {
+      "id": "a-joint-reporting-nan",
+      "note": "The fault drivers/mock injects. A non-finite reading is not a reading: the joint is absent from the context and named in `unreadable`, so the precondition about it is refused and an operator is told why rather than finding a joint quietly missing.",
+      "input": {
+        "joints": [
+          {
+            "name": "elbow",
+            "position": null
+          },
+          {
+            "name": "wrist",
+            "position": 0.1
+          }
+        ]
+      },
+      "expected": "{\"context\":{\"robot\":{\"state\":{\"joints\":{\"wrist\":0.1}}},\"skill\":{\"grants\":{\"tokens\":[]}}},\"unaddressable\":[],\"unreadable\":[\"elbow\"]}"
+    },
+    {
+      "id": "every-joint-unreadable",
+      "note": "And robot.state.joints is then absent rather than an empty object. An empty object resolves, so `exists` on a joint path would answer *false* about a robot whose sensors are all failing — which is the same word it uses for a body that has no such joint.",
+      "input": {
+        "joints": [
+          {
+            "name": "elbow",
+            "position": null
+          }
+        ]
+      },
+      "expected": "{\"context\":{\"robot\":{},\"skill\":{\"grants\":{\"tokens\":[]}}},\"unaddressable\":[],\"unreadable\":[\"elbow\"]}"
+    },
+    {
+      "id": "a-joint-whose-name-carries-a-dot",
+      "note": "cell.ts found this from the other side and could refuse the key, because an operator can rename a fact. Nobody can rename a body’s joint, so the name is reported instead: no precondition will ever be able to address robot.state.joints.arm.1, and an operator who can see the joint on the console needs to be told that rather than left to infer it from a refusal.",
+      "input": {
+        "joints": [
+          {
+            "name": "arm.1",
+            "position": 0.5
+          },
+          {
+            "name": "arm_2",
+            "position": 0.5
+          }
+        ]
+      },
+      "expected": "{\"context\":{\"robot\":{\"state\":{\"joints\":{\"arm_2\":0.5}}},\"skill\":{\"grants\":{\"tokens\":[]}}},\"unaddressable\":[\"arm.1\"],\"unreadable\":[]}"
+    },
+    {
+      "id": "grants-are-a-list-because-tokens-carry-dots",
+      "note": "The decision this file makes that §54.2 does not. `skill.grants.<token>` is unaddressable for every token that exists — arm.left, sensing.camera and locomotion.base all carry a dot — so the branch is a sorted list read with `includes`, and the shape changes rather than the names.",
+      "input": {
+        "grants": [
+          "sensing.camera",
+          "arm.left",
+          "arm.left"
+        ]
+      },
+      "expected": "{\"context\":{\"robot\":{},\"skill\":{\"grants\":{\"tokens\":[\"arm.left\",\"sensing.camera\"]}}},\"unaddressable\":[],\"unreadable\":[]}"
+    },
+    {
+      "id": "a-base-pose-with-one-bad-number",
+      "note": "All seven numbers or none. §54.2 names \"base pose\" as one fact, and a context that published a position with no orientation would let a precondition about a docked robot read true while it faced the wrong way.",
+      "input": {
+        "base_pose": {
+          "xyz": [
+            1,
+            null,
+            0
+          ],
+          "quaternion": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "expected": "{\"context\":{\"robot\":{},\"skill\":{\"grants\":{\"tokens\":[]}}},\"unaddressable\":[],\"unreadable\":[\"base_pose\"]}"
+    },
+    {
+      "id": "a-calibration-set-with-no-clock",
+      "note": "Valid, and of unknown age. §54.2 asks for \"which parameter sets are valid, and their age\", and a robot with no wall clock knows the first and not the second — so `valid` is published and `age_s` is absent. Reporting an age of zero would make a stale calibration read as one taken this second.",
+      "input": {
+        "calibration": [
+          {
+            "set": "joint_zeros",
+            "validity": {
+              "state": "valid",
+              "checked": []
+            }
+          }
+        ]
+      },
+      "expected": "{\"context\":{\"robot\":{\"calibration\":{\"joint_zeros\":{\"state\":\"valid\",\"valid\":true}}},\"skill\":{\"grants\":{\"tokens\":[]}}},\"unaddressable\":[],\"unreadable\":[]}"
+    },
+    {
+      "id": "every-calibration-state",
+      "note": "All five, so an edition that collapsed `failed` into `absent` — or `unusable` into `failed`, which §45.3 spends a paragraph separating — diverges here rather than in a support call. Only `valid` sets the boolean; the state word carries the rest.",
+      "input": {
+        "calibration": [
+          {
+            "set": "joint_zeros",
+            "validity": {
+              "state": "valid",
+              "checked": [
+                "age"
+              ]
+            },
+            "age_s": 10
+          },
+          {
+            "set": "camera_extrinsics",
+            "validity": {
+              "state": "absent"
+            }
+          },
+          {
+            "set": "hand_eye",
+            "validity": {
+              "state": "failed",
+              "detail": "residual 4 exceeds 1"
+            }
+          },
+          {
+            "set": "imu_bias",
+            "validity": {
+              "state": "expired",
+              "reason": "age",
+              "detail": "older than 86400s"
+            }
+          },
+          {
+            "set": "force_torque_offset",
+            "validity": {
+              "state": "unusable",
+              "detail": "no method recorded"
+            }
+          }
+        ]
+      },
+      "expected": "{\"context\":{\"robot\":{\"calibration\":{\"camera_extrinsics\":{\"state\":\"absent\",\"valid\":false},\"force_torque_offset\":{\"state\":\"unusable\",\"valid\":false},\"hand_eye\":{\"state\":\"failed\",\"valid\":false},\"imu_bias\":{\"state\":\"expired\",\"valid\":false},\"joint_zeros\":{\"age_s\":10,\"state\":\"valid\",\"valid\":true}}},\"skill\":{\"grants\":{\"tokens\":[]}}},\"unaddressable\":[],\"unreadable\":[]}"
+    },
+    {
+      "id": "a-frame-graph-that-does-not-flatten",
+      "note": "§44’s fault reaches a precondition whole — code, subjects and sentence — beside an empty resolved list, so a skill that needs a frame is refused by `includes_all` over nothing rather than by a path that does not resolve. Both refuse; only one tells the operator that the graph is broken rather than that the frame is missing. The fault is the validator’s own shape and not a string, which is the §64 invariant over the corpus arriving as a design constraint: `fault` in this system means something an operator can act on.",
+      "input": {
+        "frames_resolved": [],
+        "frames_fault": {
+          "code": "parent_missing",
+          "subjects": [
+            "tool0"
+          ],
+          "detail": "tool0 names a parent nothing declares."
+        }
+      },
+      "expected": "{\"context\":{\"robot\":{\"frames\":{\"fault\":{\"code\":\"parent_missing\",\"detail\":\"tool0 names a parent nothing declares.\",\"subjects\":[\"tool0\"]}}},\"skill\":{\"grants\":{\"tokens\":[]}}},\"unaddressable\":[],\"unreadable\":[]}"
+    },
+    {
+      "id": "an-unobserved-operating-state",
+      "note": "Absent rather than `post`. §27’s machine defaults to POST because that is where a booting robot is; a *context* that defaulted to it would be stating a state nobody measured, and a precondition reading it would get an answer rather than a refusal.",
+      "input": {
+        "battery_percent": 90
+      },
+      "expected": "{\"context\":{\"robot\":{\"state\":{\"battery_percent\":90}},\"skill\":{\"grants\":{\"tokens\":[]}}},\"unaddressable\":[],\"unreadable\":[]}"
+    },
+    {
+      "id": "duplicated-and-unsorted-lists",
+      "note": "Every list is sorted and de-duplicated on the way in, because two editions that agreed about the contents and disagreed about the order would produce different bytes for the same robot — and `includes` would not notice, so nothing but the corpus would catch it.",
+      "input": {
+        "guards_active": [
+          "workspace",
+          "envelope",
+          "workspace"
+        ],
+        "frames_resolved": [
+          "tool0",
+          "base_link",
+          "tool0"
+        ],
+        "grants": [
+          "b.token",
+          "a.token",
+          "b.token"
+        ]
+      },
+      "expected": "{\"context\":{\"robot\":{\"frames\":{\"resolved\":[\"base_link\",\"tool0\"]},\"guards\":{\"active\":[\"envelope\",\"workspace\"]}},\"skill\":{\"grants\":{\"tokens\":[\"a.token\",\"b.token\"]}}},\"unaddressable\":[],\"unreadable\":[]}"
+    },
+    {
+      "id": "an-env-branch-with-no-cell",
+      "note": "A robot with no cell profile keeps the other six branches. §55.2 makes the cell a site-local document that may simply not exist yet, and a context that refused to build without one would take the battery check away from every robot nobody has surveyed.",
+      "input": {
+        "battery_percent": 55,
+        "operating_state": "hold"
+      },
+      "expected": "{\"context\":{\"robot\":{\"state\":{\"battery_percent\":55,\"operating\":\"hold\"}},\"skill\":{\"grants\":{\"tokens\":[]}}},\"unaddressable\":[],\"unreadable\":[]}"
+    }
+  ]
+}

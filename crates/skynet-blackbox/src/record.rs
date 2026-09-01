@@ -552,6 +552,20 @@ pub enum EventCode {
     /// concluded. §41.1 keeps the black box out of the logging business, so the findings stay in
     /// the report an operator reads and what lands here is the decision.
     Admission = 14,
+    /// A skill invocation moved between §54.4's phases.
+    ///
+    /// §54.4: *"Every transition is a black box event, and one episode is emitted per invocation."*
+    /// The two halves go to different places and that is the point — the episode is a *record* and
+    /// goes to the Hub through §34.4's queue, and the transitions are *evidence* and go here, where
+    /// they sit beside the cycles the skill was producing while it ran. A dispute about why a skill
+    /// aborted is answered by reading the two together.
+    ///
+    /// The subject is the invocation id and the detail is the phase, the reason and the outcome, so
+    /// a sealed recording carries the whole ladder without needing the runtime that produced it.
+    /// This is the fifteenth code and the vocabulary is still closed: §54.4 names a specific thing
+    /// that happens, which is exactly the bar §41.1 sets — ordinary logging would have arrived as a
+    /// free-string subject on an existing code, which is the shape that check refuses.
+    SkillTransition = 15,
 }
 
 impl EventCode {
@@ -572,6 +586,7 @@ impl EventCode {
             12 => EventCode::Sealed,
             13 => EventCode::ConfigChanged,
             14 => EventCode::Admission,
+            15 => EventCode::SkillTransition,
             _ => return None,
         })
     }
@@ -593,6 +608,7 @@ impl EventCode {
             EventCode::Sealed => "sealed",
             EventCode::ConfigChanged => "config_changed",
             EventCode::Admission => "admission",
+            EventCode::SkillTransition => "skill_transition",
         }
     }
 }

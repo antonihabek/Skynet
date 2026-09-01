@@ -90,21 +90,21 @@ it, which says no when the answer is no.
 | `docs/` — the full specification, nine parts | Complete |
 | `bindings/c`, `bindings/cpp` — the RHAL ABI | Written, compiling, layout-checked from both sides |
 | `crates/skynet-kernel` — the Safety Kernel | `no_std`, no `alloc`, 8 guards, forward kinematics and its own arithmetic, 101 tests |
-| `crates/skynet-contracts` — transport, admission, certification, readiness, observation, entitlement, birth, provenance, operating state | Ported from the reference; §25.1's observation assembler; §51's offline entitlement, whose enumeration has no variant meaning *stop*; §50's birth certificate, where a board swap is an expected finding with a remedy rather than a failure; §56's provenance classes, where a declared simulator can never reach the field leaderboard; §27's operating state machine, which four other sections had been describing in prose; §54.4's skill lifecycle and §54.5's two runtime limits; 323 tests |
+| `crates/skynet-contracts` — transport, admission, certification, readiness, observation, entitlement, birth, provenance, operating state, the live precondition context, OTA | Ported from the reference; §25.1's observation assembler; §51's offline entitlement, whose enumeration has no variant meaning *stop*; §50's birth certificate, where a board swap is an expected finding with a remedy rather than a failure; §56's provenance classes, where a declared simulator can never reach the field leaderboard; §27's operating state machine, which four other sections had been describing in prose; §54.4's skill lifecycle and §54.5's two runtime limits; §54.2's context, where a fact the robot cannot observe is **absent** rather than defaulted, so the precondition naming it is refused with the path named; §12's certification gate, where an unrecognised component is gated for the same reason the safety kernel is and a bench pass is bound to the digest it was taken against; 356 tests |
 | `crates/skynet-json` — canonical JSON | 16 tests |
 | `crates/skynet-rhal` — the Rust view of the ABI | 7 tests |
 | `crates/skynet-sha256` — SHA-256 | Held to the FIPS 180-4 vectors, 5 tests |
 | `crates/skynet-ed25519` — Ed25519 verification (§19) | SHA-512, the field, the curve; held to RFC 8032's vectors and to the encodings that divide implementations. Verification only — signing is a test feature. 41 tests |
 | `crates/skynet-urdf` — URDF import (§63.4) | XML reader, model, role suggestion, descriptor, collision geometry, 45 tests |
-| `crates/skynet-cli` — the `skynet` command | descriptor, transport, frames, role, driver new/check, plus the robot commands over the local socket and `blackbox`; 44 tests |
+| `crates/skynet-cli` — the `skynet` command | descriptor, transport, frames, role, driver new/check, plus the robot commands over the local socket, `blackbox`, `skill run` / `skill stop` / `skills`, and `ota`; 44 tests |
 | `crates/skynetd` — the supervisor's brain (§33) | Reconciler, supervision, health, leases — including §54.4's all-or-nothing acquisition; pure, 45 tests, and CI asserts it stays pure |
-| `crates/skynetd-io` — the I/O half, and the `skynetd` binary | Package store, systemd launcher, observation, local API, the on-robot console (§32.2), the black box on disk, the trust store (§19), §34.3's bearers and the outbound sender, §51's cached entitlement tokens, §50's birth certificate, §27's state observed once a pass and §33.4's barrier read off it, the loop; 249 tests plus an end-to-end run against real systemd |
+| `crates/skynetd-io` — the I/O half, and the `skynetd` binary | Package store, systemd launcher, observation, local API, the on-robot console (§32.2), the black box on disk, the trust store (§19), §34.3's bearers and the outbound sender, §51's cached entitlement tokens, §50's birth certificate, §27's state observed once a pass and §33.4's barrier read off it, **§54's skill runtime** — the loop that drives the lifecycle, assembles the precondition context, takes the leases, records every transition and emits one episode per invocation — **§12's OTA half**: the signed release manifest and bench pass, the RAUC updater behind a trait, and the boot that confirms or condemns its own slot, the loop; 283 tests plus an end-to-end run against real systemd |
 | `crates/skynet-blackbox` — the black box (§13, §26) | The preallocated ring, the MCAP writer, sealing, deterministic replay; `no_std`, 31 tests. Record format **2**: a frame now records the capture paths that produced nothing, and an unmeasurable skew rather than a zero one |
 | `crates/skynet-ring` — the SPSC command ring (§25) | The only channel from a policy to the kernel: 4 KiB slots, a seqlock, latest-wins, never blocks. `no_std`, no `alloc`, no `unsafe`; 18 tests including a two-thread torture run |
 | `crates/skynet-ring-shm` — the `memfd` under it | Creates, seals and maps the anonymous file; the consumer's mapping carries no `PROT_WRITE`. 9 tests, one of which re-executes itself so a command crosses two real processes |
 | `crates/skynet-capture` — the capture-side split (§47.4) | A latest-wins slot for the policy and a bounded queue for the black box, which must never be one queue. Moves buffer handles, never pixels; every displaced or refused frame is handed back, and a run of drops is one annotated gap. `no_std`, no `alloc`, no `unsafe`; 17 tests |
-| `corpus/` — the conformance corpus | 793 cases, 53 files, of which 41 are the closed vocabularies both editions must spell identically |
-| `crates/skynet-corpus` — the corpus runner | Reproduces all 793 byte for byte |
+| `corpus/` — the conformance corpus | 842 cases, 56 files, of which 45 are the closed vocabularies both editions must spell identically |
+| `crates/skynet-corpus` — the corpus runner | Reproduces all 842 byte for byte |
 | `reference/typescript/` — the oracle | Vendored from the Hub; generates the corpus |
 | `bindings/python` — the Python RHAL | Driver protocol plus a ctypes ABI view, offset-asserted |
 | `drivers/mock` — the mock robot | 24 sim-conformance checks, no hardware |
@@ -112,10 +112,27 @@ it, which says no when the answer is no.
 | `drivers/lerobot` — the LeRobot bridge (§67) | Role tables, 70 checks against a fake; Guest tier |
 | `drivers/mujoco` — the MuJoCo simulator driver (§70) | 103 checks against real physics; Guest tier, twice over |
 
-**Not built, and the specification says so on its own behalf:** the policy runtime, OTA, the
+**Not built, and the specification says so on its own behalf:** the policy runtime, the
 safety MCU, and every driver that talks to real hardware — `ros2_control`, EtherCAT, CANopen and the
 vendor SDKs. The realistic figure for a robot moving under this is several engineer-years. §59.5
 states that plainly and this README does not improve on it.
+
+OTA is a partial entry rather than either column, and the half that is missing is one nobody can
+close from here. §12's three rules are built and held to a corpus: an apply waits for a declared safe
+state, a boot confirms or condemns its own slot within a budget, and an image that changes the Safety
+Kernel or the envelope is refused without a bench pass bound to its digest. What is **not** built is
+the fetch — §34's inbound half — so a bundle has to be on the robot before it can be staged, and
+`skynetd` says so rather than reporting success for a file nobody delivered. Nor has any of it run
+against real RAUC on a real A/B device; the updater is a trait with a recording implementation, which
+is what makes §12's unattended rollback testable at all and is not the same as having watched one.
+
+§54's skill runtime is built and is **not** the policy runtime, which is a distinction worth making
+here because the two are one paragraph apart. What runs is the *lifecycle*: preconditions evaluated
+against a live context, leases taken and rolled back together, a timeout enforced, success judged by
+the OS over post-state, every transition recorded and one episode emitted per invocation. What a
+skill's own process then does with a robot is still nothing, because no policy sandbox receives a
+descriptor and nothing turns a frame into a command. A skill on this edition starts a unit, is
+supervised, is judged and is recorded — against a body that does not move.
 
 §25's command path is a **half** entry rather than either column, and the halves are worth naming
 separately — this paragraph said the `memfd` was unbuilt for a session after `skynet-ring-shm`
@@ -168,6 +185,11 @@ skynet status --socket /tmp/robot/run/skynetd.sock     # needs no credential (§
 skynet estop  --socket /tmp/robot/run/skynetd.sock     # nor does this
 skynetd credential add --root /tmp/robot --label laptop --role operator
 skynet ps --socket /tmp/robot/run/skynetd.sock --token <token>
+
+# Invoke a skill (§54.1). Accepted, not started: the next reconcile pass evaluates §54.2's
+# preconditions against a live context and may refuse it, naming the clause.
+skynet skill run openrobot/pick --args '{"target":"cup"}'   --socket /tmp/robot/run/skynetd.sock --token <token>
+skynet skills --socket /tmp/robot/run/skynetd.sock --token <token>
 ```
 
 Two things it will not do, and says so rather than pretending:

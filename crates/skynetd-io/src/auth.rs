@@ -345,6 +345,16 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         // §39.1 gives observer "the black box index" and operator "seal and download the black
         // box". The index is a count and a window; the file is every command the robot was given.
         ("GET", ["blackbox"]) => Role::Observer,
+        // What the robot has been asked to do and how it went. §39.1 gives observer "read health,
+        // guards, plan", and a list of invocations is the same kind of fact — it names no
+        // arguments a caller supplied and no criterion a publisher wrote, only the ladder.
+        // Which image is in which slot, and whether the next one may be installed. §39.1 gives
+        // observer "read health, guards, plan", and this is the same kind of fact — it names no
+        // key, carries no bundle, and is the panel somebody reads when a fleet has stopped
+        // updating.
+        ("GET", ["ota"]) => Role::Observer,
+        ("GET", ["skills"]) => Role::Observer,
+        ("GET", ["skills", _]) => Role::Observer,
 
         ("POST", ["packages", _, "start"]) => Role::Operator,
         ("POST", ["packages", _, "stop"]) => Role::Operator,
@@ -352,6 +362,11 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         ("DELETE", ["grants", ..]) => Role::Operator,
         ("POST", ["packages", _, "rollback"]) => Role::Operator,
         ("POST", ["blackbox", "seal"]) => Role::Operator,
+        // Invoking a skill is asking the robot to move, so it sits with starting a package rather
+        // than with reading one. §54.4 puts the kernel under it either way — a skill is not an
+        // exemption — but the role is what decides who may ask.
+        ("POST", ["skills"]) => Role::Operator,
+        ("POST", ["skills", _, "stop"]) => Role::Operator,
         ("GET", ["blackbox", _]) => Role::Operator,
 
         ("POST", ["packages"]) => Role::Admin,

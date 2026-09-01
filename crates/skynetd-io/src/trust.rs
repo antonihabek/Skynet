@@ -104,6 +104,36 @@ pub const ENTITLEMENT_DOMAIN: &str = "skynet.entitlement.v1
 pub const BIRTH_DOMAIN: &str = "skynet.birth.v1
 ";
 
+/// The sixth. §12 signs OS bundles *"with the same Ed25519 machinery the Hub already uses for
+/// release signatures"*, and a release manifest is the document that says what a bundle changes —
+/// which is the input to §12's certification gate. Its own tag, for the reason all five above have
+/// one: a signature over a release digest must not be presentable as a signature over anything else.
+pub const RELEASE_DOMAIN: &str = "skynet.release.v1
+";
+
+/// The seventh, and the one with the most riding on it. A bench pass is the evidence §12's third
+/// rule requires before an update may touch the Safety Kernel or the envelope, so an unsigned one
+/// on a robot's disk is §38.1's attacker — *"somebody editing limits on a robot's disk"* — arriving
+/// through the gate the document calls the single most important test in the suite.
+pub const BENCH_DOMAIN: &str = "skynet.bench.v1
+";
+
+/// The message a publisher's signature over a release manifest is made over (§12).
+pub fn release_message(digest: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(RELEASE_DOMAIN.len() + digest.len());
+    out.extend_from_slice(RELEASE_DOMAIN.as_bytes());
+    out.extend_from_slice(digest.as_bytes());
+    out
+}
+
+/// The message a signature over a bench pass is made over (§12, §15).
+pub fn bench_message(digest: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(BENCH_DOMAIN.len() + digest.len());
+    out.extend_from_slice(BENCH_DOMAIN.as_bytes());
+    out.extend_from_slice(digest.as_bytes());
+    out
+}
+
 /// The message a package signature is made over: the domain tag, then the version digest.
 pub fn package_message(digest: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(PACKAGE_DOMAIN.len() + digest.len());

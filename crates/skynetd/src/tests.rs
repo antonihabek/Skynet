@@ -524,6 +524,7 @@ fn narrowing_a_profile_is_immediate_and_widening_one_is_not() {
         signature: None,
         verified: true,
         limits: tight.clone(),
+        cell: None,
     });
     let narrowing = plan(&want, &in_force);
     assert_eq!(narrowing.actions[0].gate, Gate::Open);
@@ -550,6 +551,7 @@ fn an_unsigned_profile_produces_no_action_at_all() {
         signature: None,
         verified: false,
         limits: ProfileLimits::default(),
+        cell: None,
     });
     let actual = Actual {
         os: OsSlots {

@@ -148,8 +148,15 @@ function checkCommands(document, source, known) {
   }
 }
 
-/** Commands that dispatch a second word. Everything else takes arguments, not subcommands. */
-const KNOWN_SUBCOMMANDED = new Set(['driver', 'descriptor'])
+/**
+ * Commands that dispatch a second word. Everything else takes arguments, not subcommands.
+ *
+ * `skill` is here and `skills` is not, which is the distinction the CLI itself draws: `skill run`
+ * and `skill stop` act on two different nouns and dispatch on the verb, while `skills` is a listing
+ * that takes flags. A `skill` left out of this set would let `skynet skill strat` into a README
+ * unchallenged, which is exactly the drift this tool exists to catch.
+ */
+const KNOWN_SUBCOMMANDED = new Set(['driver', 'descriptor', 'skill'])
 
 function fenced(source) {
   return [...source.matchAll(/```(?:bash|sh|console)?\n([\s\S]*?)```/g)].map(match => match[1])

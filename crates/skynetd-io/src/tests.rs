@@ -1291,6 +1291,8 @@ fn console_fixture() {
         "watchdog",
         "post",
         "state",
+        "skills",
+        "ota",
     ] {
         let response = fixture.raw("GET", &format!("/{route}"), Some("observer-token"));
         std::fs::write(out.join(route), &response.body).unwrap();
@@ -3339,11 +3341,21 @@ fn the_plan_route_reports_a_deferral_with_its_reason() {
     let pass = body.get("pass").expect("the pass is nested under `pass`");
     assert_eq!(pass.get("converged"), Some(&Json::Bool(false)));
     let applied = pass.get("applied").and_then(Json::as_arr).unwrap();
+    // `failed` rather than `unimplemented`, and the change is the point rather than an
+    // adjustment. This case used OTA as a stand-in for "an action nobody can apply", which it was
+    // until §12 was built. It is now an action that *is* applied and refuses: this robot has been
+    // told to run 9.9.9 and holds no release manifest describing it, and §12 will not install an
+    // image whose manifest nobody has seen — because the manifest is what says whether the update
+    // touches the Safety Kernel.
     assert_eq!(
         applied[0].get("outcome").and_then(Json::as_str),
-        Some("unimplemented")
+        Some("failed")
     );
-    assert!(applied[0].get("reason").is_some());
+    let reason = applied[0]
+        .get("reason")
+        .and_then(Json::as_str)
+        .unwrap_or_default();
+    assert!(reason.contains("9.9.9"), "{reason}");
 }
 
 /// One route, one shape — the assertion that was missing while the console could not render.
@@ -3995,4 +4007,1292 @@ fn a_robot_with_no_recorder_says_so_rather_than_pretending() {
         .and_then(Json::as_str)
         .unwrap_or_default();
     assert!(detail.contains("no black box"), "{detail}");
+}
+
+// ── §54.4's lifecycle, driven ────────────────────────────────────────────────
+//
+// The contract's own suite proves `advance` answers correctly for a given `Progress`. These prove
+// the half nothing could test until there was a loop: that the runtime *assembles* the right
+// progress, performs each effect exactly once, and stops.
+
+mod skills {
+    use super::*;
+    use crate::skill::{Cycle, Effect, Request, Runtime};
+    use skynet_contracts::live::LiveInputs;
+    use skynet_contracts::skill::{Clause, ClauseOrigin, SkillOutcome, SkillPhase};
+    use skynetd::lease::LeaseTable;
+    use std::collections::BTreeSet;
+
+    /// A skill manifest with the fields §54 reads.
+    fn skill_manifest(id: &str, seconds: Option<f64>, tokens: &[&str]) -> Json {
+        let mut m = manifest(id, "1.0.0", "skill");
+        if let Some(seconds) = seconds {
+            m.set("expected_duration_seconds", Json::Num(seconds));
+        }
+        if !tokens.is_empty() {
+            m.set(
+                "required_capabilities",
+                Json::Arr(tokens.iter().map(|t| Json::from(*t)).collect()),
+            );
+        }
+        m
+    }
+
+    fn clause(statement: &str, predicate: Option<&str>, hold: bool) -> Clause {
+        Clause {
+            statement: statement.to_string(),
+            predicate: predicate.map(|text| Json::parse(text).expect("the predicate parses")),
+            hold,
+            origin: ClauseOrigin::Skill,
+        }
+    }
+
+    fn with_clauses(manifest: &mut Json, key: &str, clauses: &[(&str, Option<&str>, bool)]) {
+        let mut list = Json::arr();
+        for (statement, predicate, hold) in clauses {
+            let mut entry = Json::obj();
+            entry.set("statement", Json::from(*statement));
+            entry.set("hold", Json::Bool(*hold));
+            if let Some(text) = predicate {
+                entry.set(
+                    "predicate",
+                    Json::parse(text).expect("the predicate parses"),
+                );
+            }
+            list.push(entry);
+        }
+        manifest.set(key, list);
+    }
+
+    /// The world, arranged.
+    struct World {
+        leases: LeaseTable,
+        running: BTreeSet<String>,
+        grants: Vec<(String, String)>,
+        inputs: LiveInputs,
+        robot: OperatingState,
+        now_ms: u64,
+    }
+
+    impl World {
+        fn new() -> Self {
+            Self {
+                leases: LeaseTable::new(),
+                running: BTreeSet::new(),
+                grants: Vec::new(),
+                inputs: LiveInputs {
+                    battery_percent: Some(80.0),
+                    operating_state: Some(OperatingState::Running),
+                    ..LiveInputs::default()
+                },
+                robot: OperatingState::Running,
+                now_ms: 0,
+            }
+        }
+
+        fn step(&mut self, runtime: &mut Runtime, by_ms: u64) -> Vec<crate::skill::Report> {
+            self.now_ms += by_ms;
+            let mut cycle = Cycle {
+                now_ms: self.now_ms,
+                inputs: &self.inputs,
+                robot: self.robot,
+                guard_tripped: false,
+                guards_observable: false,
+                running: &self.running,
+                leases: &mut self.leases,
+                grants: &self.grants,
+            };
+            let reports = runtime.advance_all(&mut cycle);
+            // The launcher, modelled: a `Start` makes the unit appear and a `Stop` removes it.
+            for report in &reports {
+                for effect in &report.effects {
+                    match effect {
+                        Effect::Start { package } => {
+                            self.running.insert(package.clone());
+                        }
+                        Effect::Stop { package } => {
+                            self.running.remove(package);
+                        }
+                        Effect::ReleaseLeases { holder } => {
+                            self.leases.release_all(holder);
+                        }
+                        Effect::Episode { .. } => {}
+                    }
+                }
+            }
+            reports
+        }
+    }
+
+    fn invoke(runtime: &mut Runtime, manifest: &Json, operator: &[Clause]) -> String {
+        runtime
+            .execute(
+                &Request {
+                    package: manifest
+                        .get("id")
+                        .and_then(Json::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    arguments: Json::obj(),
+                    parent: None,
+                    overrun_factor: None,
+                },
+                manifest,
+                "sha256:test",
+                operator,
+                0,
+            )
+            .expect("the invocation is accepted")
+    }
+
+    fn phases(reports: &[crate::skill::Report]) -> Vec<&'static str> {
+        reports
+            .iter()
+            .map(|report| report.transition.to.as_str())
+            .collect()
+    }
+
+    /// The whole ladder, one pass at a time, on a skill that does everything right.
+    #[test]
+    fn an_invocation_walks_the_diagram_and_ends_with_one_episode() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        let mut m = skill_manifest("acme/pick", Some(10.0), &["arm.left"]);
+        with_clauses(
+            &mut m,
+            "preconditions",
+            &[(
+                "the battery is above 20%",
+                Some(r#"{"op":"gte","path":"robot.state.battery_percent","value":20}"#),
+                true,
+            )],
+        );
+        with_clauses(
+            &mut m,
+            "success_criteria",
+            &[(
+                "the battery is still above 10%",
+                Some(r#"{"op":"gte","path":"robot.state.battery_percent","value":10}"#),
+                false,
+            )],
+        );
+        world
+            .grants
+            .push(("acme/pick".to_string(), "arm.left".to_string()));
+
+        let id = invoke(&mut runtime, &m, &[]);
+
+        assert_eq!(phases(&world.step(&mut runtime, 1)), ["preconditions"]);
+        assert_eq!(phases(&world.step(&mut runtime, 1)), ["acquiring"]);
+
+        // Entering `running` starts the unit, and nothing else.
+        let reports = world.step(&mut runtime, 1);
+        assert_eq!(phases(&reports), ["running"]);
+        assert_eq!(
+            reports[0].effects,
+            [Effect::Start {
+                package: "acme/pick".to_string()
+            }]
+        );
+        assert_eq!(
+            world.leases.holder("arm.left"),
+            Some("acme/pick"),
+            "§25.2's lease is taken by the package, which is what an operator sees"
+        );
+
+        // Running is a fixed point while the skill's own code runs.
+        assert_eq!(phases(&world.step(&mut runtime, 100)), ["running"]);
+        assert!(world.step(&mut runtime, 100)[0].effects.is_empty());
+
+        // The unit exits: the skill returned.
+        world.running.remove("acme/pick");
+        assert_eq!(phases(&world.step(&mut runtime, 1)), ["verifying"]);
+
+        let reports = world.step(&mut runtime, 1);
+        assert_eq!(phases(&reports), ["terminal"]);
+        let episodes: Vec<&Effect> = reports[0]
+            .effects
+            .iter()
+            .filter(|effect| matches!(effect, Effect::Episode { .. }))
+            .collect();
+        assert_eq!(episodes.len(), 1, "§54.4: one episode per invocation");
+        assert!(reports[0].effects.contains(&Effect::ReleaseLeases {
+            holder: "acme/pick".to_string()
+        }));
+        assert_eq!(world.leases.holder("arm.left"), None);
+
+        let invocation = runtime.get(&id).expect("the invocation is kept");
+        assert_eq!(invocation.outcome, Some(SkillOutcome::Success));
+        assert!(invocation.terminal());
+
+        // And a second pass over a terminal invocation does nothing at all — which is the failure
+        // that would otherwise fill a dataset with duplicate rows nobody is watching for.
+        assert!(world.step(&mut runtime, 1).is_empty());
+    }
+
+    /// §54.6's `skill.preconditions.enforced`, through the runtime rather than through the contract.
+    #[test]
+    fn a_false_precondition_refuses_before_any_lease_is_taken() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        world.inputs.battery_percent = Some(4.0);
+        let mut m = skill_manifest("acme/pick", Some(10.0), &["arm.left"]);
+        with_clauses(
+            &mut m,
+            "preconditions",
+            &[(
+                "the battery is above 20%",
+                Some(r#"{"op":"gte","path":"robot.state.battery_percent","value":20}"#),
+                false,
+            )],
+        );
+        world
+            .grants
+            .push(("acme/pick".to_string(), "arm.left".to_string()));
+
+        let id = invoke(&mut runtime, &m, &[]);
+        world.step(&mut runtime, 1);
+        let reports = world.step(&mut runtime, 1);
+
+        assert_eq!(phases(&reports), ["terminal"]);
+        assert_eq!(
+            runtime.get(&id).unwrap().outcome,
+            Some(SkillOutcome::Aborted),
+            "a skill never allowed to start did not fail at its task"
+        );
+        assert_eq!(
+            world.leases.holder("arm.left"),
+            None,
+            "nothing was acquired, so nothing is held"
+        );
+        assert!(
+            !reports[0]
+                .effects
+                .iter()
+                .any(|e| matches!(e, Effect::Start { .. })),
+            "and nothing was started"
+        );
+        // §54.4 says one episode per invocation and a refused invocation is an invocation. The
+        // reason is what tells a consumer this row is not training data.
+        let Effect::Episode { body } = reports[0]
+            .effects
+            .iter()
+            .find(|e| matches!(e, Effect::Episode { .. }))
+            .expect("an episode")
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            body.get("reason").and_then(Json::as_str),
+            Some("preconditions_refused")
+        );
+        assert!(
+            body.get("duration_ms").is_none(),
+            "nothing ran, so there is no duration to report"
+        );
+        assert!(
+            body.get("intervention_count").is_none(),
+            "and nothing counts interventions on this robot, so the count is absent, not zero"
+        );
+    }
+
+    /// A precondition naming a fact this robot does not have. §54.2's first rule, end to end.
+    #[test]
+    fn a_precondition_the_robot_cannot_evaluate_refuses_it() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        // No joints: §33.1 keeps the daemon off the actuator path, so this is the ordinary case.
+        let mut m = skill_manifest("acme/pick", Some(10.0), &[]);
+        with_clauses(
+            &mut m,
+            "preconditions",
+            &[(
+                "the elbow is near zero",
+                Some(r#"{"op":"lte","path":"robot.state.joints.elbow","value":0.1}"#),
+                false,
+            )],
+        );
+
+        let id = invoke(&mut runtime, &m, &[]);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        let invocation = runtime.get(&id).unwrap();
+        assert!(invocation.terminal());
+        assert!(
+            invocation.detail.contains("the elbow is near zero"),
+            "the refusal carries the publisher's own sentence: {}",
+            invocation.detail
+        );
+    }
+
+    /// §54.6's `skill.preconditions.rechecked`. The battery starts fine and falls mid-run.
+    #[test]
+    fn a_hold_precondition_falsified_mid_run_stops_the_skill() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        world.inputs.battery_percent = Some(62.0);
+        let mut m = skill_manifest("acme/pick", Some(10.0), &[]);
+        with_clauses(
+            &mut m,
+            "preconditions",
+            &[(
+                "the battery is above 20%",
+                Some(r#"{"op":"gte","path":"robot.state.battery_percent","value":20}"#),
+                true,
+            )],
+        );
+
+        let id = invoke(&mut runtime, &m, &[]);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        assert_eq!(phases(&world.step(&mut runtime, 1)), ["running"]);
+
+        world.inputs.battery_percent = Some(11.0);
+        let reports = world.step(&mut runtime, 1);
+        assert_eq!(phases(&reports), ["terminal"]);
+        assert_eq!(reports[0].transition.reason.as_str(), "hold_lost");
+        assert_eq!(
+            runtime.get(&id).unwrap().outcome,
+            Some(SkillOutcome::Aborted)
+        );
+        assert!(
+            reports[0].effects.contains(&Effect::Stop {
+                package: "acme/pick".to_string()
+            }),
+            "the skill it started is the skill it stops"
+        );
+    }
+
+    /// §54.6's `skill.timeout.enforced`.
+    #[test]
+    fn an_overrunning_skill_is_stopped_and_recorded_aborted() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        let m = skill_manifest("acme/slow", Some(1.0), &[]);
+        let id = invoke(&mut runtime, &m, &[]);
+
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        // One second declared, doubled by the default overrun factor: 2000 ms.
+        assert_eq!(phases(&world.step(&mut runtime, 1_999)), ["running"]);
+        let reports = world.step(&mut runtime, 2);
+        assert_eq!(phases(&reports), ["terminal"]);
+        assert_eq!(reports[0].transition.reason.as_str(), "timeout");
+        assert_eq!(
+            runtime.get(&id).unwrap().outcome,
+            Some(SkillOutcome::Aborted)
+        );
+    }
+
+    /// §54.3, and the reason it is the OS that judges: the skill returning is not the skill winning.
+    #[test]
+    fn a_skill_that_returns_against_a_false_criterion_is_recorded_failure() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        let mut m = skill_manifest("acme/pick", Some(10.0), &[]);
+        with_clauses(
+            &mut m,
+            "success_criteria",
+            &[(
+                "the battery is above 90%",
+                Some(r#"{"op":"gte","path":"robot.state.battery_percent","value":90}"#),
+                false,
+            )],
+        );
+        let id = invoke(&mut runtime, &m, &[]);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        world.running.remove("acme/pick");
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        assert_eq!(
+            runtime.get(&id).unwrap().outcome,
+            Some(SkillOutcome::Failure)
+        );
+    }
+
+    /// And a criterion nothing can read is `unlabeled`, never a pass.
+    #[test]
+    fn an_unenforceable_criterion_is_unlabeled_rather_than_a_pass() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        let mut m = skill_manifest("acme/pick", Some(10.0), &[]);
+        with_clauses(
+            &mut m,
+            "success_criteria",
+            &[("the cup is upright", None, false)],
+        );
+        let id = invoke(&mut runtime, &m, &[]);
+        for _ in 0..3 {
+            world.step(&mut runtime, 1);
+        }
+        world.running.remove("acme/pick");
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        assert_eq!(
+            runtime.get(&id).unwrap().outcome,
+            Some(SkillOutcome::Unlabeled)
+        );
+    }
+
+    /// §25.2 through §54.4's `acquiring` stage: denied if held.
+    #[test]
+    fn a_capability_another_package_holds_denies_the_skill() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        world
+            .leases
+            .acquire("other/policy", "arm.left", true, false);
+        let m = skill_manifest("acme/pick", Some(10.0), &["arm.left"]);
+        world
+            .grants
+            .push(("acme/pick".to_string(), "arm.left".to_string()));
+
+        let id = invoke(&mut runtime, &m, &[]);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        let reports = world.step(&mut runtime, 1);
+        assert_eq!(phases(&reports), ["terminal"]);
+        assert_eq!(reports[0].transition.reason.as_str(), "lease_denied");
+        assert!(
+            reports[0].transition.detail.contains("other/policy"),
+            "the refusal names who has the arm: {}",
+            reports[0].transition.detail
+        );
+        assert_eq!(
+            world.leases.holder("arm.left"),
+            Some("other/policy"),
+            "and the holder keeps it"
+        );
+        assert_eq!(
+            runtime.get(&id).unwrap().outcome,
+            Some(SkillOutcome::Aborted)
+        );
+    }
+
+    /// A token the operator never granted is refused before the arm is touched, and the two
+    /// refusals read differently — §25.2's grant-before-holder rule, surviving the runtime.
+    #[test]
+    fn a_capability_nobody_granted_is_a_different_refusal_from_one_somebody_holds() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        let m = skill_manifest("acme/pick", Some(10.0), &["arm.left"]);
+        let id = invoke(&mut runtime, &m, &[]);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        let reports = world.step(&mut runtime, 1);
+        assert_eq!(reports[0].transition.reason.as_str(), "lease_denied");
+        assert!(
+            reports[0].transition.detail.contains("never granted"),
+            "nobody has the arm; this package may not ask for it, and the fix is a grant: {}",
+            reports[0].transition.detail
+        );
+        assert!(
+            !reports[0].transition.detail.contains("is held by"),
+            "and it must not send an operator looking for a package that does not exist: {}",
+            reports[0].transition.detail
+        );
+        assert!(runtime.get(&id).unwrap().terminal());
+    }
+
+    /// §54.5's acquisition rollback, arriving through the front door. A skill that got two of its
+    /// three tokens would hold two joints it cannot use and refuse them to everything else.
+    #[test]
+    fn a_partial_acquisition_rolls_back_what_this_call_took() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        world
+            .leases
+            .acquire("other/policy", "arm.right", true, false);
+        let m = skill_manifest("acme/pick", Some(10.0), &["arm.left", "arm.right"]);
+        for token in ["arm.left", "arm.right"] {
+            world
+                .grants
+                .push(("acme/pick".to_string(), token.to_string()));
+        }
+        invoke(&mut runtime, &m, &[]);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        assert_eq!(
+            world.leases.holder("arm.left"),
+            None,
+            "the token this call did take is given back, or the next package to want it gets no \
+             reason on any screen"
+        );
+    }
+
+    /// §54.2's third rule. The site adds a clause the publisher never wrote, and it refuses.
+    #[test]
+    fn an_operator_may_add_a_precondition_the_publisher_never_imagined() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        world.inputs.env = Some(Json::parse(r#"{"door_closed":false}"#).unwrap());
+        let m = skill_manifest("acme/pick", Some(10.0), &[]);
+        let site = vec![clause(
+            "the cell door is closed",
+            Some(r#"{"op":"eq","path":"env.door_closed","value":true}"#),
+            false,
+        )];
+
+        let id = invoke(&mut runtime, &m, &site);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        let invocation = runtime.get(&id).unwrap();
+        assert!(invocation.terminal());
+        assert!(
+            invocation.detail.contains("the cell door is closed"),
+            "{}",
+            invocation.detail
+        );
+    }
+
+    /// §27's machine reaching the lifecycle: a robot that is not commanding has no running skills.
+    #[test]
+    fn a_robot_that_stops_commanding_ends_the_skill() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        let m = skill_manifest("acme/pick", Some(10.0), &[]);
+        let id = invoke(&mut runtime, &m, &[]);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        assert_eq!(phases(&world.step(&mut runtime, 1)), ["running"]);
+
+        world.robot = OperatingState::Safe;
+        let reports = world.step(&mut runtime, 1);
+        assert_eq!(reports[0].transition.reason.as_str(), "robot_stopped");
+        assert_eq!(
+            runtime.get(&id).unwrap().outcome,
+            Some(SkillOutcome::Aborted)
+        );
+    }
+
+    /// `hold` is not an aborting state, and it is the exclusion worth a test: it is where §27 sits
+    /// between a lease being granted and a policy commanding, so aborting on it would kill every
+    /// skill in the moment it started.
+    #[test]
+    fn a_robot_holding_does_not_end_the_skill() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        world.robot = OperatingState::Hold;
+        let m = skill_manifest("acme/pick", Some(10.0), &[]);
+        let id = invoke(&mut runtime, &m, &[]);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        assert_eq!(runtime.get(&id).unwrap().phase, SkillPhase::Running);
+    }
+
+    /// §54.5's first limit at runtime: a nested call runs under the root's leases.
+    #[test]
+    fn a_nested_call_does_not_acquire_and_is_bounded_by_its_root() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        let root_manifest = skill_manifest("acme/root", Some(10.0), &["arm.left"]);
+        world
+            .grants
+            .push(("acme/root".to_string(), "arm.left".to_string()));
+        let root = invoke(&mut runtime, &root_manifest, &[]);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+
+        // A child declaring nothing is still bounded, which is the composition failure §54.5 names.
+        let child_manifest = skill_manifest("acme/child", None, &["arm.left"]);
+        let child = runtime
+            .execute(
+                &Request {
+                    package: "acme/child".to_string(),
+                    arguments: Json::obj(),
+                    parent: Some(root.clone()),
+                    overrun_factor: None,
+                },
+                &child_manifest,
+                "sha256:child",
+                &[],
+                world.now_ms,
+            )
+            .expect("a nested call is accepted");
+
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        let nested = runtime.get(&child).unwrap();
+        assert_eq!(nested.phase, SkillPhase::Running);
+        assert_eq!(
+            nested.to_json().get("leases").and_then(Json::as_str),
+            Some("pending"),
+            "§54.5: leases are held by the root invocation, not re-acquired per call"
+        );
+        assert!(
+            nested
+                .to_json()
+                .get("deadline_ms")
+                .and_then(Json::as_f64)
+                .is_some(),
+            "and an unbounded child under a bounded root is still bounded"
+        );
+    }
+
+    /// §54.5's acyclicity, applied to the chain that is actually about to run.
+    ///
+    /// `a → b → a`, because the interesting ordering question is here: every ancestor of a nested
+    /// call is live by definition, so a runtime that checked "already running" first would report
+    /// every cycle as a busy package and never show the chain.
+    #[test]
+    fn a_call_that_would_re_enter_its_own_root_is_refused_with_the_chain_named() {
+        let mut runtime = Runtime::new();
+        let a = skill_manifest("acme/a", Some(10.0), &[]);
+        let b = skill_manifest("acme/b", Some(10.0), &[]);
+
+        let root = invoke(&mut runtime, &a, &[]);
+        let middle = runtime
+            .execute(
+                &Request {
+                    package: "acme/b".to_string(),
+                    arguments: Json::obj(),
+                    parent: Some(root),
+                    overrun_factor: None,
+                },
+                &b,
+                "sha256:b",
+                &[],
+                0,
+            )
+            .expect("one level down is fine");
+
+        let refusal = runtime
+            .execute(
+                &Request {
+                    package: "acme/a".to_string(),
+                    arguments: Json::obj(),
+                    parent: Some(middle),
+                    overrun_factor: None,
+                },
+                &a,
+                "sha256:a",
+                &[],
+                0,
+            )
+            .expect_err("a cycle is refused");
+        assert_eq!(refusal.code, "cycle");
+        assert!(
+            refusal.detail.contains("acme/a → acme/b → acme/a"),
+            "the chain is what an operator reads: {}",
+            refusal.detail
+        );
+    }
+
+    #[test]
+    fn a_second_invocation_of_a_live_skill_is_refused() {
+        let mut runtime = Runtime::new();
+        let m = skill_manifest("acme/pick", Some(10.0), &[]);
+        invoke(&mut runtime, &m, &[]);
+        let refusal = runtime
+            .execute(
+                &Request {
+                    package: "acme/pick".to_string(),
+                    arguments: Json::obj(),
+                    parent: None,
+                    overrun_factor: None,
+                },
+                &m,
+                "sha256:test",
+                &[],
+                0,
+            )
+            .expect_err("one live invocation per package");
+        assert_eq!(refusal.code, "already_running");
+    }
+
+    /// §54.1's distinction, enforced at the door. A policy is not something you invoke.
+    #[test]
+    fn a_policy_cannot_be_invoked_as_a_skill() {
+        let mut runtime = Runtime::new();
+        let policy = manifest("acme/drive", "1.0.0", "policy");
+        let refusal = runtime
+            .execute(
+                &Request {
+                    package: "acme/drive".to_string(),
+                    arguments: Json::obj(),
+                    parent: None,
+                    overrun_factor: None,
+                },
+                &policy,
+                "sha256:test",
+                &[],
+                0,
+            )
+            .expect_err("a policy is not invoked");
+        assert_eq!(refusal.code, "not_a_skill");
+        assert!(
+            refusal.detail.contains("POST /packages/acme:drive/start"),
+            "§64: the refusal names the fix, spelled so the route actually answers it — {}",
+            refusal.detail
+        );
+    }
+
+    /// A stop takes every live invocation with it, and emits their episodes rather than losing
+    /// the record of what was running when somebody pressed the button.
+    #[test]
+    fn stopping_the_robot_ends_every_invocation_with_an_episode() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        let m = skill_manifest("acme/pick", Some(10.0), &[]);
+        invoke(&mut runtime, &m, &[]);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+
+        let reports = runtime.stop_all(world.now_ms);
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].transition.outcome, Some(SkillOutcome::Aborted));
+        assert_eq!(
+            reports[0]
+                .effects
+                .iter()
+                .filter(|e| matches!(e, Effect::Episode { .. }))
+                .count(),
+            1
+        );
+        assert!(runtime.stop_all(world.now_ms).is_empty());
+    }
+}
+
+// ── The skill routes ─────────────────────────────────────────────────────────
+
+/// Install an activated skill package, so `POST /skills` has a manifest to read.
+///
+/// POSIX only, like every other test that activates: §37.1 requires the atomic symlink swap and
+/// `Store::activate` refuses to fake one.
+#[cfg(unix)]
+fn install_skill(fixture: &Fixture, id: &str, extra: impl Fn(&mut Json)) -> String {
+    let source = fixture
+        .root
+        .path()
+        .join(format!("src-{}", id.replace('/', "-")));
+    let mut m = manifest(id, "1.0.0", "skill");
+    m.set("expected_duration_seconds", Json::Num(5.0));
+    extra(&mut m);
+    let digest = write_package(&source, &m, &[("bin/run", "#!/bin/sh\n")]);
+    let parsed = PackageId::parse(id).unwrap();
+    fixture
+        .daemon
+        .store
+        .stage(&parsed, "skill", "1.0.0", &digest, &source)
+        .unwrap();
+    fixture.daemon.store.activate(&parsed, &digest).unwrap();
+    digest
+}
+
+#[test]
+#[cfg(unix)]
+fn invoking_a_skill_is_accepted_and_not_started() {
+    let mut fixture = Fixture::new("skill-execute");
+    fixture.provision();
+    install_skill(&fixture, "acme/pick", |_| {});
+
+    let (status, body) = fixture.request(
+        "POST",
+        "/skills",
+        Some("admin-token"),
+        r#"{"skill":"acme/pick","arguments":{"target":"cup"}}"#,
+    );
+    assert_eq!(status, 202, "accepted, not created: {body:?}");
+    assert_eq!(body.get("phase").and_then(Json::as_str), Some("idle"));
+
+    let (status, list) = fixture.request("GET", "/skills", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    let rows = list.get("invocations").and_then(Json::as_arr).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].get("package").and_then(Json::as_str),
+        Some("acme/pick")
+    );
+    assert_eq!(rows[0].get("phase").and_then(Json::as_str), Some("idle"));
+}
+
+#[test]
+#[cfg(unix)]
+fn invoking_a_skill_needs_an_operator_and_reading_one_does_not() {
+    assert_eq!(requirement("GET", &["skills"]).0, Role::Observer);
+    assert_eq!(requirement("GET", &["skills", "inv-1"]).0, Role::Observer);
+    assert_eq!(requirement("POST", &["skills"]).0, Role::Operator);
+    assert_eq!(
+        requirement("POST", &["skills", "inv-1", "stop"]).0,
+        Role::Operator
+    );
+
+    let mut fixture = Fixture::new("skill-roles");
+    fixture.provision();
+    install_skill(&fixture, "acme/pick", |_| {});
+    let (status, _) = fixture.request(
+        "POST",
+        "/skills",
+        Some("observer-token"),
+        r#"{"skill":"acme/pick"}"#,
+    );
+    assert_eq!(
+        status, 403,
+        "an observer may watch a skill and not start one"
+    );
+}
+
+#[test]
+fn invoking_a_package_that_is_not_installed_says_so() {
+    let mut fixture = Fixture::new("skill-missing");
+    fixture.provision();
+    let (status, body) = fixture.request(
+        "POST",
+        "/skills",
+        Some("admin-token"),
+        r#"{"skill":"acme/absent"}"#,
+    );
+    assert_eq!(status, 404);
+    let detail = body
+        .get("detail")
+        .and_then(Json::as_str)
+        .unwrap_or_default();
+    assert!(detail.contains("no activated version"), "{detail}");
+}
+
+/// The cell reaching a precondition, which is the second contract this session gave a caller.
+#[test]
+fn a_signed_profile_carries_the_cell_into_the_precondition_context() {
+    let fixture = Fixture::new("skill-cell");
+    let layout = fixture.daemon.store.layout().clone();
+    std::fs::create_dir_all(layout.profiles()).unwrap();
+    std::fs::write(
+        layout.active_profile(),
+        r#"{"name":"site-a","digest":"sha256:x","limits":{},"cell":{"name":"bench","facts":{"door_closed":true},"fixtures":[{"name":"jig"}]}}"#,
+    )
+    .unwrap();
+
+    let inputs = fixture.daemon.live_inputs(None);
+    let built = skynet_contracts::live::live_context(&inputs);
+    let env = built.context.get("env").expect("the cell reaches env.*");
+    assert_eq!(env.get("cell").and_then(Json::as_str), Some("bench"));
+    assert_eq!(env.get("door_closed"), Some(&Json::Bool(true)));
+    assert_eq!(
+        env.get("fixtures")
+            .and_then(Json::as_arr)
+            .map(<[Json]>::len),
+        Some(1)
+    );
+}
+
+/// And what the daemon will *not* claim. §33.1 keeps it off the actuator path, so five of §54.2's
+/// branches are absent — which refuses the preconditions that named them, with the path named.
+#[test]
+fn the_daemon_claims_nothing_it_cannot_observe() {
+    let fixture = Fixture::new("skill-context-honesty");
+    let inputs = fixture.daemon.live_inputs(None);
+    assert!(inputs.joints.is_empty());
+    assert!(inputs.battery_percent.is_none());
+    assert!(inputs.gripper.is_none());
+    assert!(inputs.base_pose.is_none());
+    assert!(
+        inputs.guards_active.is_none(),
+        "there is no kernel channel, so nobody has asked which guards are running — and an empty \
+         list would be this daemon answering for one"
+    );
+    assert!(
+        inputs.tier.is_none(),
+        "nothing on this robot decides its tier: §15 awards one from conformance evidence and §11 \
+         delivers it in desired state, and neither path is written"
+    );
+    assert_eq!(inputs.operating_state, Some(OperatingState::Post));
+}
+
+// ── §12, on a machine ────────────────────────────────────────────────────────
+//
+// The contract's own suite proves `admit_bundle` and `confirm_boot` answer correctly for given
+// inputs. These prove the half a pure function cannot: that the documents are read and *verified*,
+// that an unsigned bench pass is not a bench pass, and that §12's unattended rollback can be driven
+// end to end without a bootloader — which is what `ota.rollback.works` asks for and what a rollback
+// nobody can exercise until a fleet needs it does not have.
+
+mod ota {
+    use super::*;
+    use crate::ota::{
+        assess, confirm, read_bench_pass, read_pending, BootHealth, RecordingUpdater,
+    };
+    use crate::trust::{bench_message, release_message, TrustStore};
+    use skynet_contracts::ota::BootDecision;
+
+    fn write_signed(fixture: &Fixture, path: &std::path::Path, document: &Json, domain: u8) {
+        let canonical = document.to_canonical().unwrap();
+        let digest =
+            String::from_utf8_lossy(&skynet_sha256::hex_bytes(canonical.as_bytes())).into_owned();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, canonical.as_bytes()).unwrap();
+
+        let key = driver_key(domain);
+        let message = if domain == 7 {
+            release_message(&digest)
+        } else {
+            bench_message(&digest)
+        };
+        let signature = hex_of(&key.sign(&message));
+        let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
+        std::fs::write(
+            path.parent().unwrap().join(format!("{stem}.sig.json")),
+            format!(
+                "{{\"key\":\"{}\",\"value\":\"{signature}\"}}",
+                public_hex(&key)
+            ),
+        )
+        .unwrap();
+        let _ = fixture;
+    }
+
+    fn release_document(changes: &[&str]) -> Json {
+        let mut document = Json::obj();
+        document.set("version", Json::from("1.4.0"));
+        document.set("channel", Json::from("stable"));
+        document.set("digest", Json::from("sha256:aaaa"));
+        document.set("compatible", Json::Arr(vec![Json::from("bench-arm")]));
+        document.set(
+            "changes",
+            Json::Arr(changes.iter().map(|c| Json::from(*c)).collect()),
+        );
+        document
+    }
+
+    fn bench_document(passed: bool) -> Json {
+        let mut document = Json::obj();
+        document.set("image_digest", Json::from("sha256:aaaa"));
+        document.set("tier", Json::from("host"));
+        document.set("passed", Json::Bool(passed));
+        document
+    }
+
+    /// A fixture with a release manifest signed by a key this robot trusts.
+    fn with_release(label: &str, changes: &[&str]) -> Fixture {
+        let mut fixture = Fixture::new(label);
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        write_trust(&fixture, "publisher", &public_hex(&driver_key(7)));
+        write_signed(
+            &fixture,
+            &layout.release("1.4.0"),
+            &release_document(changes),
+            7,
+        );
+        fixture
+    }
+
+    fn assess_it(fixture: &Fixture) -> crate::ota::Assessment {
+        let layout = fixture.daemon.store.layout();
+        assess(
+            layout,
+            &TrustStore::load(layout),
+            "1.4.0",
+            "1.3.0",
+            Some("bench-arm".to_string()),
+            "stable",
+        )
+    }
+
+    #[test]
+    fn a_release_nobody_has_described_is_refused_rather_than_installed() {
+        let mut fixture = Fixture::new("ota-no-manifest");
+        fixture.provision();
+        let assessment = assess_it(&fixture);
+        assert!(!assessment.admitted());
+        let because = assessment.because.unwrap_or_default();
+        assert!(
+            because.contains("nothing on this robot describes"),
+            "{because}"
+        );
+        assert!(
+            because.contains("Safety Kernel"),
+            "the refusal says why a manifest is required rather than only that one is: {because}"
+        );
+    }
+
+    #[test]
+    fn an_ordinary_signed_release_is_admitted() {
+        let fixture = with_release("ota-ordinary", &["userspace"]);
+        let assessment = assess_it(&fixture);
+        assert!(assessment.admitted(), "{:?}", assessment.verdict);
+    }
+
+    /// §12's third rule, through the documents rather than through the contract.
+    #[test]
+    fn a_kernel_change_is_refused_until_a_signed_bench_pass_covers_it() {
+        let fixture = with_release("ota-gate", &["safety_kernel"]);
+        let layout = fixture.daemon.store.layout().clone();
+
+        let assessment = assess_it(&fixture);
+        assert!(!assessment.admitted());
+        assert_eq!(
+            assessment
+                .verdict
+                .as_ref()
+                .unwrap()
+                .gated_components
+                .as_slice(),
+            ["safety_kernel"]
+        );
+
+        // The same bench pass, unsigned. Not a bench pass.
+        let canonical = bench_document(true).to_canonical().unwrap();
+        std::fs::create_dir_all(layout.bench_pass("sha256:aaaa").parent().unwrap()).unwrap();
+        std::fs::write(layout.bench_pass("sha256:aaaa"), canonical.as_bytes()).unwrap();
+        let assessment = assess_it(&fixture);
+        assert!(
+            !assessment.admitted(),
+            "an unsigned bench pass is not a bench pass"
+        );
+        let note = assessment.bench_note.unwrap_or_default();
+        assert!(note.contains("absent"), "{note}");
+        assert!(
+            note.contains("§38.1"),
+            "and the refusal says which attacker this is: {note}"
+        );
+
+        // Signed by a key the robot trusts. Now it is one.
+        write_signed(
+            &fixture,
+            &layout.bench_pass("sha256:aaaa"),
+            &bench_document(true),
+            8,
+        );
+        std::fs::write(
+            layout.trust(),
+            format!(
+                "{{\"keys\":[{{\"label\":\"publisher\",\"key\":\"{}\"}},{{\"label\":\"bench\",\"key\":\"{}\"}}]}}",
+                public_hex(&driver_key(7)),
+                public_hex(&driver_key(8)),
+            ),
+        )
+        .unwrap();
+        let assessment = assess_it(&fixture);
+        assert!(assessment.admitted(), "{:?}", assessment.verdict);
+    }
+
+    #[test]
+    fn a_bench_pass_filed_under_other_bytes_is_refused_with_both_digests_named() {
+        let fixture = with_release("ota-bench-mismatch", &["safety_kernel"]);
+        let layout = fixture.daemon.store.layout().clone();
+        let mut document = bench_document(true);
+        document.set("image_digest", Json::from("sha256:bbbb"));
+        std::fs::create_dir_all(layout.bench_pass("sha256:aaaa").parent().unwrap()).unwrap();
+        std::fs::write(
+            layout.bench_pass("sha256:aaaa"),
+            document.to_canonical().unwrap().as_bytes(),
+        )
+        .unwrap();
+
+        let (pass, note) = read_bench_pass(&layout, &TrustStore::load(&layout), "sha256:aaaa");
+        assert!(pass.is_none());
+        let note = note.unwrap_or_default();
+        assert!(
+            note.contains("sha256:aaaa") && note.contains("sha256:bbbb"),
+            "{note}"
+        );
+    }
+
+    /// The lossy flattening, from the direction it would be exploited.
+    #[test]
+    fn a_manifest_filed_under_another_version_is_refused() {
+        let mut fixture = Fixture::new("ota-filed-wrong");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        write_trust(&fixture, "publisher", &public_hex(&driver_key(7)));
+        // `1.4.0` and `1_4_0` flatten to one path, so a document declaring the other one is filed
+        // where this robot looks for this one.
+        let mut document = release_document(&["userspace"]);
+        document.set("version", Json::from("1_4_0"));
+        write_signed(&fixture, &layout.release("1.4.0"), &document, 7);
+
+        let assessment = assess_it(&fixture);
+        assert!(!assessment.admitted());
+        let because = assessment.because.unwrap_or_default();
+        assert!(because.contains("declares itself"), "{because}");
+    }
+
+    // ── §12's second rule, driven ────────────────────────────────────────────
+
+    fn healthy() -> BootHealth {
+        BootHealth {
+            post_passed: Some(true),
+            packages_healthy: Some(true),
+            converged: Some(true),
+        }
+    }
+
+    #[test]
+    fn an_ordinary_boot_tells_the_bootloader_nothing() {
+        let fixture = Fixture::new("ota-boot-ordinary");
+        let layout = fixture.daemon.store.layout().clone();
+        let mut updater = RecordingUpdater::default();
+        let confirmation = confirm(&layout, &mut updater, "1.4.0", 1_000.0, "boot", &healthy());
+        assert_eq!(confirmation.verdict.decision, BootDecision::NotPending);
+        assert!(updater.calls.is_empty(), "{:?}", updater.calls);
+    }
+
+    #[test]
+    fn a_healthy_first_boot_marks_the_slot_good_and_forgets_it() {
+        let fixture = Fixture::new("ota-boot-good");
+        let layout = fixture.daemon.store.layout().clone();
+        crate::ota::mark_pending(&layout, "1.4.0", 600_000.0).unwrap();
+
+        let mut updater = RecordingUpdater::default();
+        let confirmation = confirm(&layout, &mut updater, "1.4.0", 42_000.0, "boot", &healthy());
+        assert_eq!(confirmation.verdict.decision, BootDecision::Confirm);
+        assert_eq!(updater.calls, ["mark-good"]);
+        assert!(
+            read_pending(&layout).is_none(),
+            "a confirmed slot is not still on probation"
+        );
+    }
+
+    /// §12's `ota.rollback.works`, as far as it can be driven without a bootloader: a deliberately
+    /// unhealthy boot, a budget that expires, and an unattended `mark-bad`.
+    #[test]
+    fn an_unhealthy_boot_rolls_back_when_the_budget_expires() {
+        let fixture = Fixture::new("ota-boot-bad");
+        let layout = fixture.daemon.store.layout().clone();
+        crate::ota::mark_pending(&layout, "1.4.0", 30_000.0).unwrap();
+
+        let unhealthy = BootHealth {
+            post_passed: Some(false),
+            ..BootHealth::default()
+        };
+        let mut updater = RecordingUpdater::default();
+
+        // Inside the budget: nothing is said.
+        let confirmation = confirm(&layout, &mut updater, "1.4.0", 29_999.0, "boot", &unhealthy);
+        assert_eq!(confirmation.verdict.decision, BootDecision::Wait);
+        assert!(updater.calls.is_empty());
+
+        // Past it: the slot is condemned.
+        let confirmation = confirm(&layout, &mut updater, "1.4.0", 30_000.0, "boot", &unhealthy);
+        assert_eq!(confirmation.verdict.decision, BootDecision::RollBack);
+        assert_eq!(updater.calls, ["mark-bad"]);
+        assert!(
+            read_pending(&layout).is_some(),
+            "the marker is kept: the rollback happens on the next boot, and a robot that forgot it \
+             had condemned this slot would report a healthy pending-free state while still running \
+             the image it just condemned"
+        );
+    }
+
+    /// The end of the rollback story, which nothing else would clear up.
+    #[test]
+    fn a_marker_for_a_version_the_robot_is_not_running_is_the_rollback_that_happened() {
+        let fixture = Fixture::new("ota-boot-returned");
+        let layout = fixture.daemon.store.layout().clone();
+        crate::ota::mark_pending(&layout, "1.4.0", 30_000.0).unwrap();
+
+        let mut updater = RecordingUpdater::default();
+        // The bootloader returned to 1.3.0 and the marker outlived it.
+        let confirmation = confirm(&layout, &mut updater, "1.3.0", 5_000.0, "boot", &healthy());
+        assert_eq!(confirmation.verdict.decision, BootDecision::NotPending);
+        assert_eq!(confirmation.version.as_deref(), Some("1.4.0"));
+        assert!(
+            updater.calls.is_empty(),
+            "nothing more to tell the bootloader"
+        );
+        assert!(
+            read_pending(&layout).is_none(),
+            "and the next ordinary boot must not look pending"
+        );
+    }
+
+    #[test]
+    fn a_bootloader_that_cannot_be_reached_is_reported_rather_than_swallowed() {
+        let fixture = Fixture::new("ota-boot-refused");
+        let layout = fixture.daemon.store.layout().clone();
+        crate::ota::mark_pending(&layout, "1.4.0", 600_000.0).unwrap();
+
+        let mut updater = RecordingUpdater {
+            refuse: Some("rauc is not installed".to_string()),
+            ..RecordingUpdater::default()
+        };
+        let confirmation = confirm(&layout, &mut updater, "1.4.0", 1_000.0, "boot", &healthy());
+        assert_eq!(confirmation.verdict.decision, BootDecision::Confirm);
+        assert!(confirmation.failed.is_some());
+        assert!(
+            read_pending(&layout).is_some(),
+            "a slot the bootloader was never told about is still on probation"
+        );
+    }
+
+    /// §12's first rule is the reconciler's, and this is the assertion that it still is.
+    #[test]
+    fn applying_an_image_waits_for_a_safe_state_and_staging_does_not() {
+        use skynetd::reconcile::{ActionKind, Gate};
+        let mut fixture = Fixture::new("ota-gate-order");
+        fixture.provision();
+        fixture.write_desired(
+            r#"{"generation":1,"os":{"channel":"stable","version":"1.4.0"},"packages":[]}"#,
+        );
+        fixture.daemon.reload();
+
+        let plan =
+            skynetd::reconcile::plan(&fixture.daemon.desired, &fixture.daemon.observe(1_000));
+        assert!(matches!(
+            plan.actions[0].kind,
+            ActionKind::StageOsImage { .. }
+        ));
+        assert_eq!(
+            plan.actions[0].gate,
+            Gate::Open,
+            "staging touches nothing the robot is doing"
+        );
+
+        // Once staged, the apply is what waits. §12: never apply mid-task.
+        let mut fixture = Fixture::new("ota-gate-order-2");
+        fixture.provision();
+        fixture.write_desired(
+            r#"{"generation":1,"os":{"channel":"stable","version":"1.4.0"},"packages":[]}"#,
+        );
+        fixture.daemon.reload();
+        fixture.daemon.slots = FixedSlots(skynetd::actual::OsSlots {
+            active: "1.3.0".to_string(),
+            staged: Some("1.4.0".to_string()),
+        });
+        let plan =
+            skynetd::reconcile::plan(&fixture.daemon.desired, &fixture.daemon.observe(1_000));
+        assert!(matches!(
+            plan.actions[0].kind,
+            ActionKind::ApplyOsImage { .. }
+        ));
+        assert_eq!(plan.actions[0].gate, Gate::SafeState);
+    }
+
+    #[test]
+    fn the_ota_route_reports_the_slots_and_the_verdict_together() {
+        let mut fixture = with_release("ota-route", &["safety_kernel"]);
+        fixture.write_desired(
+            r#"{"generation":1,"os":{"channel":"stable","version":"1.4.0"},"packages":[]}"#,
+        );
+        fixture.daemon.reload();
+
+        let (status, body) = fixture.request("GET", "/ota", Some("observer-token"), "");
+        assert_eq!(status, 200);
+        assert_eq!(body.get("wanted").and_then(Json::as_str), Some("1.4.0"));
+        let assessment = body.get("assessment").expect("an assessment");
+        assert_eq!(assessment.get("admitted"), Some(&Json::Bool(false)));
+        let gated = assessment
+            .get("verdict")
+            .and_then(|verdict| verdict.get("gated_components"))
+            .and_then(Json::as_arr)
+            .unwrap();
+        assert_eq!(gated.len(), 1);
+        assert_eq!(body.get("pending"), Some(&Json::Null));
+    }
+
+    #[test]
+    fn reading_the_ota_state_needs_an_observer_and_changes_nothing() {
+        assert_eq!(requirement("GET", &["ota"]).0, Role::Observer);
+        let mut fixture = Fixture::new("ota-role");
+        fixture.provision();
+        let (status, _) = fixture.request("GET", "/ota", None, "");
+        assert_eq!(status, 401);
+    }
 }

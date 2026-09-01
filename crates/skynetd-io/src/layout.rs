@@ -387,6 +387,66 @@ impl Layout {
             .join(format!("{}.sig.json", flatten(package)))
     }
 
+    /// `/data/state/os` (§12) — what this robot has been told about OS releases.
+    ///
+    /// Under `state/` rather than under `/boot`, and the distinction is §28's: `/boot` and the two
+    /// rootfs slots belong to the bootloader and RAUC, and this directory holds the *documents* —
+    /// the release manifests a check-in cached and the bench passes that gate them. A robot with no
+    /// network still has to be able to answer "may this image be applied", so those documents live
+    /// where `/data` lives, which survives an update.
+    pub fn os(&self) -> PathBuf {
+        self.state().join("os")
+    }
+
+    /// The cached release manifest for one version (§57's `GET /os/releases`).
+    ///
+    /// One file per version, named by the version, so an operator can list the directory and see
+    /// what this robot believes it may install. A version is not a path component the way a package
+    /// id is not — see [`release_name`] — so it is flattened by the same rule.
+    pub fn release(&self, version: &str) -> PathBuf {
+        self.os()
+            .join("releases")
+            .join(format!("{}.json", flatten(version)))
+    }
+
+    /// The publisher's detached signature over one release manifest's digest (§12).
+    pub fn release_signature(&self, version: &str) -> PathBuf {
+        self.os()
+            .join("releases")
+            .join(format!("{}.sig.json", flatten(version)))
+    }
+
+    /// A bench pass, keyed by the **image digest** it was taken against (§12, §15).
+    ///
+    /// By digest and not by version, because that is what §12's third rule binds evidence to: a
+    /// pass for `1.4.0` is meaningless if `1.4.0` was rebuilt, and the digest is the only name that
+    /// cannot be reused.
+    pub fn bench_pass(&self, image_digest: &str) -> PathBuf {
+        self.os()
+            .join("bench")
+            .join(format!("{}.json", flatten(image_digest)))
+    }
+
+    /// The detached signature over a bench pass (§12).
+    ///
+    /// Signed for the reason the operator profile is (§38.1): this document decides whether an
+    /// update touching the Safety Kernel may be applied, so an unsigned one on a robot's disk is
+    /// exactly the attacker §38.1 names — somebody editing safety-relevant configuration locally —
+    /// arriving through the one gate §12 calls the most important in the suite.
+    pub fn bench_pass_signature(&self, image_digest: &str) -> PathBuf {
+        self.os()
+            .join("bench")
+            .join(format!("{}.sig.json", flatten(image_digest)))
+    }
+
+    /// The slot this robot applied and has not yet confirmed (§12's second rule).
+    ///
+    /// A file rather than memory, because the whole point is that it survives the reboot the apply
+    /// causes: the daemon that writes it is not the daemon that reads it.
+    pub fn pending_boot(&self) -> PathBuf {
+        self.os().join("pending.json")
+    }
+
     /// `/data/blackbox` (§28) — preallocated, so a full disk cannot silence it.
     pub fn blackbox(&self) -> PathBuf {
         self.data().join("blackbox")
