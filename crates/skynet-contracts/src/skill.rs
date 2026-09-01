@@ -1096,6 +1096,38 @@ fn abort_reason(progress: &Progress) -> Option<(LifecycleReason, String)> {
     None
 }
 
+/// What a denied acquisition tells the operator, which is two different errands.
+///
+/// §25.2 keeps a *grant* and a *lease* apart: holding a grant makes a package eligible to take an
+/// exclusive lease, and two packages may hold the same grant while only one holds the lease. So a
+/// refusal has two shapes and they send an operator to opposite places —
+///
+/// * **a holder is named:** somebody else is using it. Stop that package, or wait.
+/// * **no holder:** nobody has it, and this package was never granted it. Grant it, or take it out
+///   of `required_capabilities`.
+///
+/// `Acquisition::into_progress` has always reported the second as `holder: None`, and this function
+/// is where that survives into the sentence. The version it replaced said "is held by another
+/// package" for both, which is a refusal that sends an operator hunting for a package that does not
+/// exist — §64's failure exactly, and one no corpus case had caught because a case written from the
+/// document imagines the contended arm rather than the unconfigured one.
+fn lease_denied_detail(progress: &Progress) -> String {
+    if progress.lease_token.is_empty() {
+        return "a required capability could not be leased, and nothing named which".to_string();
+    }
+    if progress.lease_holder.is_empty() {
+        return format!(
+            "`{}` was never granted to this package, so §25.2 will not let it take the lease — \
+             nobody is holding it. Grant it, or take it out of `required_capabilities`.",
+            progress.lease_token
+        );
+    }
+    format!(
+        "`{}` is held by {}",
+        progress.lease_token, progress.lease_holder
+    )
+}
+
 /// §54.4's lifecycle, advanced by one evaluation.
 ///
 /// Pure, clockless and total: `elapsed_ms` is supplied for the same reason the kernel takes `now_ms`
@@ -1176,19 +1208,7 @@ pub fn advance(phase: SkillPhase, progress: &Progress) -> SkillTransition {
                 SkillPhase::Terminal,
                 LifecycleReason::LeaseDenied,
                 Some(SkillOutcome::Aborted),
-                if progress.lease_token.is_empty() {
-                    "a required capability is held by another package".to_string()
-                } else {
-                    format!(
-                        "`{}` is held by {}",
-                        progress.lease_token,
-                        if progress.lease_holder.is_empty() {
-                            "another package"
-                        } else {
-                            progress.lease_holder.as_str()
-                        }
-                    )
-                },
+                lease_denied_detail(progress),
             ),
             LeaseState::Pending => done(
                 SkillPhase::Acquiring,

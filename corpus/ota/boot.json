@@ -1,0 +1,107 @@
+{
+  "corpus": "ota",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "an-ordinary-boot",
+      "note": "Not the first boot into a new slot, so there is nothing to confirm and nothing to roll back. The case that keeps a supervisor from marking a slot bad on a robot nobody updated.",
+      "input": {},
+      "expected": "{\"decision\":\"not_pending\",\"detail\":\"This boot is not the first into a new slot, so there is nothing to confirm and nothing to roll back.\",\"missing\":[]}"
+    },
+    {
+      "id": "nobody-has-checked-anything-yet",
+      "note": "The case that matters most in this file. A supervisor that marked a slot good because it had not yet been told otherwise would replace §12’s unattended recovery with a race between the health check and the confirmation, so absence of evidence waits.",
+      "input": {
+        "pending": true,
+        "elapsed_ms": 1000
+      },
+      "expected": "{\"decision\":\"wait\",\"detail\":\"1000 ms into a 600000 ms budget, with converged, packages, post still to pass. Saying nothing to the bootloader until they do or the budget expires.\",\"missing\":[\"converged\",\"packages\",\"post\"]}"
+    },
+    {
+      "id": "healthy",
+      "note": "The self-test passed, every wanted package is running and the reconciler converged. Mark it good, and the bootloader stops counting.",
+      "input": {
+        "pending": true,
+        "elapsed_ms": 42000,
+        "post_passed": true,
+        "packages_healthy": true,
+        "converged": true
+      },
+      "expected": "{\"decision\":\"confirm\",\"detail\":\"The self-test passed, every wanted package is running and the reconciler converged, 42000 ms into a 600000 ms budget. The slot is good.\",\"missing\":[]}"
+    },
+    {
+      "id": "two-of-three",
+      "note": "Still waiting, and the report names which one is missing — because \"the update did not take\" and \"one driver would not start\" send an engineer to different places.",
+      "input": {
+        "pending": true,
+        "elapsed_ms": 60000,
+        "post_passed": true,
+        "packages_healthy": true
+      },
+      "expected": "{\"decision\":\"wait\",\"detail\":\"60000 ms into a 600000 ms budget, with converged still to pass. Saying nothing to the bootloader until they do or the budget expires.\",\"missing\":[\"converged\"]}"
+    },
+    {
+      "id": "the-budget-expires",
+      "note": "§12’s unattended recovery, which is the whole reason A/B costs the storage it costs. Ten minutes in, the self-test has not passed; mark the slot bad and let the bootloader return.",
+      "input": {
+        "pending": true,
+        "elapsed_ms": 600000,
+        "post_passed": false
+      },
+      "expected": "{\"decision\":\"roll_back\",\"detail\":\"600000 ms have passed and the budget is 600000 ms, and converged, packages, post still have not passed. Marking the slot bad; the bootloader returns to the previous one.\",\"missing\":[\"converged\",\"packages\",\"post\"]}"
+    },
+    {
+      "id": "one-millisecond-inside-the-budget",
+      "note": "The boundary, frozen, because a comparison that was `>` rather than `>=` is one character and would leave a robot waiting for ever at exactly the moment the budget ran out.",
+      "input": {
+        "pending": true,
+        "elapsed_ms": 599999,
+        "post_passed": false
+      },
+      "expected": "{\"decision\":\"wait\",\"detail\":\"599999 ms into a 600000 ms budget, with converged, packages, post still to pass. Saying nothing to the bootloader until they do or the budget expires.\",\"missing\":[\"converged\",\"packages\",\"post\"]}"
+    },
+    {
+      "id": "exactly-at-the-budget",
+      "note": "And the other side of it.",
+      "input": {
+        "pending": true,
+        "elapsed_ms": 600000,
+        "post_passed": false
+      },
+      "expected": "{\"decision\":\"roll_back\",\"detail\":\"600000 ms have passed and the budget is 600000 ms, and converged, packages, post still have not passed. Marking the slot bad; the bootloader returns to the previous one.\",\"missing\":[\"converged\",\"packages\",\"post\"]}"
+    },
+    {
+      "id": "a-budget-of-zero",
+      "note": "Waits rather than rolling back. A budget that is not a positive number is no budget, and the patient reading is the safe one here: an unattended rollback triggered by a misconfigured budget is a working robot rebooted into an older image for no reason.",
+      "input": {
+        "pending": true,
+        "elapsed_ms": 5000,
+        "budget_ms": 0,
+        "post_passed": false
+      },
+      "expected": "{\"decision\":\"wait\",\"detail\":\"5000 ms into a 0 ms budget, with converged, packages, post still to pass. Saying nothing to the bootloader until they do or the budget expires.\",\"missing\":[\"converged\",\"packages\",\"post\"]}"
+    },
+    {
+      "id": "a-narrowed-budget",
+      "note": "An operator may narrow the ten-minute default, and the sentence carries the number they set rather than the one this file ships.",
+      "input": {
+        "pending": true,
+        "elapsed_ms": 31000,
+        "budget_ms": 30000,
+        "post_passed": true,
+        "packages_healthy": true
+      },
+      "expected": "{\"decision\":\"roll_back\",\"detail\":\"31000 ms have passed and the budget is 30000 ms, and converged still has not passed. Marking the slot bad; the bootloader returns to the previous one.\",\"missing\":[\"converged\"]}"
+    },
+    {
+      "id": "healthy-but-not-pending",
+      "note": "Health on an ordinary boot decides nothing. Confirming a slot nobody staged would be a supervisor telling the bootloader about an update that never happened.",
+      "input": {
+        "post_passed": true,
+        "packages_healthy": true,
+        "converged": true
+      },
+      "expected": "{\"decision\":\"not_pending\",\"detail\":\"This boot is not the first into a new slot, so there is nothing to confirm and nothing to roll back.\",\"missing\":[]}"
+    }
+  ]
+}

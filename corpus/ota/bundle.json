@@ -1,0 +1,444 @@
+{
+  "corpus": "ota",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "an-ordinary-update",
+      "note": "A signed image for this board, on the channel the desired state asked for, changing nothing §12 gates. Admitted, with no findings at all — the case that has to hold or every other one is measuring a function that refuses everything.",
+      "input": {
+        "bundle": {
+          "version": "1.4.0",
+          "channel": "stable",
+          "digest": "sha256:aaaa",
+          "compatible": [
+            "bench-arm-v1"
+          ],
+          "changes": [
+            "userspace"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "verified"
+        }
+      },
+      "expected": "{\"admitted\":true,\"faults\":[],\"gated_components\":[]}"
+    },
+    {
+      "id": "a-kernel-change-with-no-bench-pass",
+      "note": "§12’s third rule, stated plainly. This is the refusal the whole section exists for: an update touching the safety kernel, on a robot that holds no bench pass, is refused — and the component is named so an operator knows what they are booking bench time for.",
+      "input": {
+        "bundle": {
+          "version": "1.4.0",
+          "channel": "stable",
+          "digest": "sha256:aaaa",
+          "compatible": [
+            "bench-arm-v1"
+          ],
+          "changes": [
+            "safety_kernel",
+            "userspace"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "verified"
+        }
+      },
+      "expected": "{\"admitted\":false,\"faults\":[{\"code\":\"certification_required\",\"message\":\"This update changes safety_kernel, and §12 refuses one that changes the safety kernel or the envelope without a fresh bench pass for these exact bytes. This robot holds no bench pass at all.\",\"severity\":\"error\",\"subjects\":[\"safety_kernel\"]}],\"gated_components\":[\"safety_kernel\"]}"
+    },
+    {
+      "id": "an-envelope-change-with-no-bench-pass",
+      "note": "The second of §12’s two names, and it is not a code change at all — an envelope is data in a descriptor. That is exactly why the document names it beside the kernel: the guarantees in §7 rest on the numbers as much as on the code that enforces them.",
+      "input": {
+        "bundle": {
+          "version": "1.4.0",
+          "channel": "stable",
+          "digest": "sha256:aaaa",
+          "compatible": [
+            "bench-arm-v1"
+          ],
+          "changes": [
+            "envelope"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "verified"
+        }
+      },
+      "expected": "{\"admitted\":false,\"faults\":[{\"code\":\"certification_required\",\"message\":\"This update changes envelope, and §12 refuses one that changes the safety kernel or the envelope without a fresh bench pass for these exact bytes. This robot holds no bench pass at all.\",\"severity\":\"error\",\"subjects\":[\"envelope\"]}],\"gated_components\":[\"envelope\"]}"
+    },
+    {
+      "id": "a-kernel-change-a-bench-pass-covers",
+      "note": "And the gate opens for evidence bound to these exact bytes. Admitted.",
+      "input": {
+        "bundle": {
+          "version": "1.4.0",
+          "channel": "stable",
+          "digest": "sha256:aaaa",
+          "compatible": [
+            "bench-arm-v1"
+          ],
+          "changes": [
+            "safety_kernel"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "verified",
+          "bench": {
+            "image_digest": "sha256:aaaa",
+            "tier": "host",
+            "passed": true
+          }
+        }
+      },
+      "expected": "{\"admitted\":true,\"faults\":[],\"gated_components\":[\"safety_kernel\"]}"
+    },
+    {
+      "id": "a-bench-pass-for-other-bytes",
+      "note": "The anti-gaming case. A robot that has passed a bench test *at some point* is every robot the gate exists to protect, so the pass is bound to a digest — and one taken against 1.3.0 says nothing about 1.4.0. The same rule §56.3 applies to benchmark seeds, arriving in a different section.",
+      "input": {
+        "bundle": {
+          "version": "1.4.0",
+          "channel": "stable",
+          "digest": "sha256:aaaa",
+          "compatible": [
+            "bench-arm-v1"
+          ],
+          "changes": [
+            "safety_kernel"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "verified",
+          "bench": {
+            "image_digest": "sha256:bbbb",
+            "tier": "host",
+            "passed": true
+          }
+        }
+      },
+      "expected": "{\"admitted\":false,\"faults\":[{\"code\":\"bench_pass_stale\",\"message\":\"The bench pass this robot holds was taken against `sha256:bbbb` and this bundle is `sha256:aaaa`. Evidence that is not bound to what it is evidence of is not evidence — book a fresh bench pass for these bytes.\",\"severity\":\"error\",\"subjects\":[\"safety_kernel\"]}],\"gated_components\":[\"safety_kernel\"]}"
+    },
+    {
+      "id": "a-bench-pass-that-failed",
+      "note": "A pass for the right bytes that records a failure. §12 refuses an update that has not passed, which is a different sentence from one that has not been tried — and a gate reading only \"is there a record\" would admit this one.",
+      "input": {
+        "bundle": {
+          "version": "1.4.0",
+          "channel": "stable",
+          "digest": "sha256:aaaa",
+          "compatible": [
+            "bench-arm-v1"
+          ],
+          "changes": [
+            "safety_kernel"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "verified",
+          "bench": {
+            "image_digest": "sha256:aaaa",
+            "tier": "host",
+            "passed": false
+          }
+        }
+      },
+      "expected": "{\"admitted\":false,\"faults\":[{\"code\":\"bench_pass_failed\",\"message\":\"A bench pass exists for these bytes and it records a failure. This update changes safety_kernel, and §12 refuses one that has not passed rather than one that has not been tried.\",\"severity\":\"error\",\"subjects\":[\"safety_kernel\"]}],\"gated_components\":[\"safety_kernel\"]}"
+    },
+    {
+      "id": "a-gated-change-renamed",
+      "note": "The way somebody would actually get past this gate: not by writing `safety_kernel`, but by writing `rt-core`. An unrecognised component is gated for the same reason the two named ones are — nobody has established what it changes — and the refusal says so rather than reporting an unknown word as harmless.",
+      "input": {
+        "bundle": {
+          "version": "1.4.0",
+          "channel": "stable",
+          "digest": "sha256:aaaa",
+          "compatible": [
+            "bench-arm-v1"
+          ],
+          "changes": [
+            "rt-core"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "verified"
+        }
+      },
+      "expected": "{\"admitted\":false,\"faults\":[{\"code\":\"certification_required\",\"message\":\"This update changes rt-core, and §12 refuses one that changes the safety kernel or the envelope without a fresh bench pass for these exact bytes. rt-core is not a component this edition recognises, and an unrecognised component is gated for the same reason the two named ones are: nobody has established what it changes. This robot holds no bench pass at all.\",\"severity\":\"error\",\"subjects\":[\"rt-core\"]}],\"gated_components\":[\"rt-core\"]}"
+    },
+    {
+      "id": "a-gated-change-with-nothing-to-bind-a-pass-to",
+      "note": "A bundle with no digest cannot be the subject of evidence, so a kernel change in one is refused twice over and the two refusals are separate findings. An operator who fixed only the missing digest would still not be able to apply it, and being told both at once is the point.",
+      "input": {
+        "bundle": {
+          "version": "1.4.0",
+          "channel": "stable",
+          "digest": "",
+          "compatible": [
+            "bench-arm-v1"
+          ],
+          "changes": [
+            "safety_kernel"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "verified",
+          "bench": {
+            "image_digest": "",
+            "tier": "host",
+            "passed": true
+          }
+        }
+      },
+      "expected": "{\"admitted\":false,\"faults\":[{\"code\":\"undigested\",\"message\":\"This bundle names no digest. §12's certification gate binds a bench pass to the exact bytes it was taken against, and bytes with no name cannot be bound to.\",\"severity\":\"error\",\"subjects\":[]},{\"code\":\"bench_pass_stale\",\"message\":\"The bench pass this robot holds was taken against `nothing` and this bundle is `nothing`. Evidence that is not bound to what it is evidence of is not evidence — book a fresh bench pass for these bytes.\",\"severity\":\"error\",\"subjects\":[\"safety_kernel\"]}],\"gated_components\":[\"safety_kernel\"]}"
+    },
+    {
+      "id": "signature-failed",
+      "note": "§37.1’s states are four different facts with four different people at the end of them, and an OS image is where that matters most: `failed` is what tampering looks like, `untrusted` is a decision nobody has made, `absent` is the publisher’s problem and `unverifiable` is the operating system’s.",
+      "input": {
+        "bundle": {
+          "version": "1.4.0",
+          "channel": "stable",
+          "digest": "sha256:aaaa",
+          "compatible": [
+            "bench-arm-v1"
+          ],
+          "changes": [
+            "userspace"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "failed"
+        }
+      },
+      "expected": "{\"admitted\":false,\"faults\":[{\"code\":\"signature_failed\",\"message\":\"A signature was present and did not verify. The bytes are attested to somebody other than the manifest claims, which is what tampering looks like — do not install this, and find out where it came from.\",\"severity\":\"error\",\"subjects\":[]}],\"gated_components\":[]}"
+    },
+    {
+      "id": "signature-untrusted",
+      "note": "§37.1’s states are four different facts with four different people at the end of them, and an OS image is where that matters most: `failed` is what tampering looks like, `untrusted` is a decision nobody has made, `absent` is the publisher’s problem and `unverifiable` is the operating system’s.",
+      "input": {
+        "bundle": {
+          "version": "1.4.0",
+          "channel": "stable",
+          "digest": "sha256:aaaa",
+          "compatible": [
+            "bench-arm-v1"
+          ],
+          "changes": [
+            "userspace"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "untrusted"
+        }
+      },
+      "expected": "{\"admitted\":false,\"faults\":[{\"code\":\"signature_untrusted\",\"message\":\"The signature verifies against a key this robot has not been told to believe. Add the key with `skynetd trust add`, or find out why a stranger signed an OS image for this fleet.\",\"severity\":\"error\",\"subjects\":[]}],\"gated_components\":[]}"
+    },
+    {
+      "id": "signature-absent",
+      "note": "§37.1’s states are four different facts with four different people at the end of them, and an OS image is where that matters most: `failed` is what tampering looks like, `untrusted` is a decision nobody has made, `absent` is the publisher’s problem and `unverifiable` is the operating system’s.",
+      "input": {
+        "bundle": {
+          "version": "1.4.0",
+          "channel": "stable",
+          "digest": "sha256:aaaa",
+          "compatible": [
+            "bench-arm-v1"
+          ],
+          "changes": [
+            "userspace"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "absent"
+        }
+      },
+      "expected": "{\"admitted\":false,\"faults\":[{\"code\":\"signature_absent\",\"message\":\"Nobody signed this bundle. §12 signs images with the same Ed25519 machinery as releases, and an unsigned root filesystem is a root filesystem anybody on the path could have written.\",\"severity\":\"error\",\"subjects\":[]}],\"gated_components\":[]}"
+    },
+    {
+      "id": "signature-unverifiable",
+      "note": "§37.1’s states are four different facts with four different people at the end of them, and an OS image is where that matters most: `failed` is what tampering looks like, `untrusted` is a decision nobody has made, `absent` is the publisher’s problem and `unverifiable` is the operating system’s.",
+      "input": {
+        "bundle": {
+          "version": "1.4.0",
+          "channel": "stable",
+          "digest": "sha256:aaaa",
+          "compatible": [
+            "bench-arm-v1"
+          ],
+          "changes": [
+            "userspace"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "unverifiable"
+        }
+      },
+      "expected": "{\"admitted\":false,\"faults\":[{\"code\":\"signature_unverifiable\",\"message\":\"This platform cannot check a signature at all, so it cannot establish that this image is the one the fleet published. That is the operating system's problem rather than the publisher's.\",\"severity\":\"error\",\"subjects\":[]}],\"gated_components\":[]}"
+    },
+    {
+      "id": "an-image-for-another-board",
+      "note": "Refused, and the refusal names both what the bundle is for and what this machine is — because the operator reading it is deciding whether the bundle is wrong or the inventory is.",
+      "input": {
+        "bundle": {
+          "version": "1.4.0",
+          "channel": "stable",
+          "digest": "sha256:aaaa",
+          "compatible": [
+            "warehouse-amr-v2"
+          ],
+          "changes": [
+            "userspace"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "verified"
+        }
+      },
+      "expected": "{\"admitted\":false,\"faults\":[{\"code\":\"incompatible\",\"message\":\"This bundle is built for warehouse-amr-v2, and this machine is `bench-arm-v1`.\",\"severity\":\"error\",\"subjects\":[\"warehouse-amr-v2\"]}],\"gated_components\":[]}"
+    },
+    {
+      "id": "a-machine-that-does-not-know-what-it-is",
+      "note": "A warning rather than a refusal. A robot that cannot report its board has not established a mismatch, and refusing would make an unknown machine unupdatable — which is the state a robot is in exactly when it most needs an update.",
+      "input": {
+        "bundle": {
+          "version": "1.4.0",
+          "channel": "stable",
+          "digest": "sha256:aaaa",
+          "compatible": [
+            "bench-arm-v1"
+          ],
+          "changes": [
+            "userspace"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": null,
+          "channel": "stable",
+          "signature": "verified"
+        }
+      },
+      "expected": "{\"admitted\":true,\"faults\":[{\"code\":\"compatibility_undeclared\",\"message\":\"This machine does not report what it is, so the bundle's compatibility with bench-arm-v1 could not be checked.\",\"severity\":\"warning\",\"subjects\":[\"bench-arm-v1\"]}],\"gated_components\":[]}"
+    },
+    {
+      "id": "a-bundle-that-declares-no-board",
+      "note": "Also a warning, and for a different reason: §12 does not require the field, so refusing would stop every image built before it existed. It is said out loud because \"this image does not know what it is for\" is what somebody wants to have been told after flashing the wrong board.",
+      "input": {
+        "bundle": {
+          "version": "1.4.0",
+          "channel": "stable",
+          "digest": "sha256:aaaa",
+          "compatible": [],
+          "changes": [
+            "userspace"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "verified"
+        }
+      },
+      "expected": "{\"admitted\":true,\"faults\":[{\"code\":\"compatibility_undeclared\",\"message\":\"This bundle declares no compatible machines, so nothing here can tell whether it is built for this one.\",\"severity\":\"warning\",\"subjects\":[]}],\"gated_components\":[]}"
+    },
+    {
+      "id": "a-bundle-from-another-channel",
+      "note": "Refused. A robot pulled onto `beta` by an image rather than by an operator is a robot nobody moved.",
+      "input": {
+        "bundle": {
+          "version": "1.4.0",
+          "channel": "beta",
+          "digest": "sha256:aaaa",
+          "compatible": [
+            "bench-arm-v1"
+          ],
+          "changes": [
+            "userspace"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "verified"
+        }
+      },
+      "expected": "{\"admitted\":false,\"faults\":[{\"code\":\"channel_mismatch\",\"message\":\"The desired state asks for the `stable` channel and this bundle is `beta`. A robot pulled onto another channel by an image rather than by an operator is a robot nobody moved.\",\"severity\":\"error\",\"subjects\":[]}],\"gated_components\":[]}"
+    },
+    {
+      "id": "the-version-already-running",
+      "note": "A warning, not a refusal: staging it again is harmless and applying it costs a reboot for nothing. Refusing would break a robot re-converging on a desired state it already satisfies, which is the ordinary case after a rollback.",
+      "input": {
+        "bundle": {
+          "version": "1.4.0",
+          "channel": "stable",
+          "digest": "sha256:aaaa",
+          "compatible": [
+            "bench-arm-v1"
+          ],
+          "changes": [
+            "userspace"
+          ]
+        },
+        "subject": {
+          "running_version": "1.4.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "verified"
+        }
+      },
+      "expected": "{\"admitted\":true,\"faults\":[{\"code\":\"already_running\",\"message\":\"This robot is already running `1.4.0`. Staging it again is harmless and applying it costs a reboot for nothing.\",\"severity\":\"warning\",\"subjects\":[]}],\"gated_components\":[]}"
+    },
+    {
+      "id": "a-bundle-that-declares-nothing",
+      "note": "Everything wrong at once, so the ordering of the findings is frozen. An operator gets one list rather than four reboots.",
+      "input": {
+        "bundle": {},
+        "subject": {
+          "signature": "absent"
+        }
+      },
+      "expected": "{\"admitted\":false,\"faults\":[{\"code\":\"unversioned\",\"message\":\"This bundle names no version, so nothing can say what the robot would be running afterwards. Rebuild it with a version.\",\"severity\":\"error\",\"subjects\":[]},{\"code\":\"undigested\",\"message\":\"This bundle names no digest. §12's certification gate binds a bench pass to the exact bytes it was taken against, and bytes with no name cannot be bound to.\",\"severity\":\"error\",\"subjects\":[]},{\"code\":\"signature_absent\",\"message\":\"Nobody signed this bundle. §12 signs images with the same Ed25519 machinery as releases, and an unsigned root filesystem is a root filesystem anybody on the path could have written.\",\"severity\":\"error\",\"subjects\":[]},{\"code\":\"compatibility_undeclared\",\"message\":\"This bundle declares no compatible machines, so nothing here can tell whether it is built for this one.\",\"severity\":\"warning\",\"subjects\":[]}],\"gated_components\":[]}"
+    }
+  ]
+}

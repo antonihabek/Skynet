@@ -63,9 +63,11 @@ pub mod http;
 pub mod launch;
 pub mod layout;
 pub mod observe;
+pub mod ota;
 pub mod outbound;
 pub mod post;
 pub mod runtime;
+pub mod skill;
 pub mod store;
 pub mod trust;
 

@@ -577,6 +577,196 @@ function renderPlan(feed) {
     'are the numbers this panel will show.'))
 }
 
+/**
+ * §12's A/B slots, and whether the wanted image may be applied.
+ *
+ * The verdict is drawn even when it is a refusal with several findings, and all of them are shown:
+ * an OS update is the one case where each attempt round the loop costs a reboot, so a panel showing
+ * the first problem would cost an operator a reboot per finding.
+ *
+ * The gated components are called out **above** the findings, because they are true whether or not
+ * the update is refused. "This image touches the safety kernel" is what somebody needs before they
+ * go and book bench time; the refusal is only what happens if they have not.
+ */
+function renderOta(feed) {
+  const body = clear($('ota-body'))
+
+  if (!feed.value) {
+    body.appendChild(el('p', 'note', feed.detail || 'no answer yet'))
+    return
+  }
+
+  const fields = el('dl', 'fields')
+  const row = (label, value, tone) => {
+    fields.appendChild(el('dt', null, label))
+    const dd = el('dd')
+    if (tone) dd.appendChild(pill(value, tone))
+    else dd.textContent = value
+    fields.appendChild(dd)
+  }
+  row('Active', feed.value.active || 'unknown')
+  row('Staged', feed.value.staged || 'nothing')
+  row('Channel', feed.value.channel || 'none')
+  row('Board', feed.value.board || 'unreported')
+  body.appendChild(fields)
+
+  if (feed.value.pending) {
+    // The one state on this panel that is not a report. A pending boot is a robot on probation, and
+    // it says so rather than being a version string that looks like the others.
+    body.appendChild(el('p', 'note',
+      `This boot is proving itself: \`${feed.value.pending.version}\` was applied and the `
+      + `bootloader returns to the previous slot unless it passes within `
+      + `${feed.value.pending.budget_ms} ms (\u00a712).`))
+  }
+
+  const assessment = feed.value.assessment
+  if (!assessment) {
+    body.appendChild(el('p', 'note',
+      'The desired state names no OS version, so there is nothing to assess.'))
+    return
+  }
+
+  const verdict = el('p')
+  verdict.appendChild(el('strong', null, assessment.version + ' '))
+  verdict.appendChild(pill(assessment.admitted ? 'admitted' : 'refused',
+    assessment.admitted ? 'ok' : 'bad'))
+  body.appendChild(verdict)
+
+  if (assessment.because) {
+    body.appendChild(el('p', 'note', assessment.because))
+  }
+
+  const gated = (assessment.verdict && assessment.verdict.gated_components) || []
+  if (gated.length > 0) {
+    body.appendChild(el('p', 'note',
+      `This image changes ${gated.join(', ')}. \u00a712 refuses an update touching the safety `
+      + 'kernel or the envelope without a bench pass for these exact bytes \u2014 which is a thing '
+      + 'to book, not a thing to retry.'))
+  }
+
+  const faults = (assessment.verdict && assessment.verdict.faults) || []
+  if (faults.length > 0) {
+    const table = el('table', 'subpanel')
+    const head = el('tr')
+    for (const label of ['', 'Finding', 'What to do']) head.appendChild(el('th', null, label))
+    table.appendChild(head)
+    for (const fault of faults) {
+      const line = el('tr')
+      const severity = el('td')
+      severity.appendChild(pill(fault.severity, fault.severity === 'error' ? 'bad' : 'warn'))
+      line.appendChild(severity)
+      line.appendChild(el('td', null, fault.code))
+      line.appendChild(el('td', 'dim', fault.message))
+      table.appendChild(line)
+    }
+    body.appendChild(table)
+  }
+
+  if (assessment.bench_note) {
+    body.appendChild(el('p', 'note', 'Bench pass: ' + assessment.bench_note))
+  }
+  if (feed.value.note) {
+    body.appendChild(el('p', 'note', feed.value.note))
+  }
+}
+
+/**
+ * §54.4's invocations, as a ladder rather than a status word.
+ *
+ * The phase alone is not enough to act on and the reason alone is not enough to place, so both are
+ * shown on every row — an operator looking at `terminal / lease_denied` needs the second word to
+ * know whether to grant a token, stop another package, or call the publisher.
+ *
+ * The outcome is drawn only for a terminal invocation, and `aborted` is *not* coloured as a
+ * failure. §54.4 is specific that a skill refused before it started did not fail at its task, and a
+ * console that painted the two the same would train an operator to read a cell configuration
+ * problem as a broken skill.
+ */
+function renderSkills(feed) {
+  const body = clear($('skills-body'))
+
+  if (!feed.value) {
+    body.appendChild(el('p', 'note', feed.detail || 'no answer yet'))
+    return
+  }
+  const list = feed.value.invocations || []
+  if (list.length === 0) {
+    // §32.3: an empty state says what is absent. Nothing has been invoked is a fact, and it is not
+    // the same fact as a robot that cannot run skills.
+    body.appendChild(el('p', 'note',
+      'Nothing has been invoked. A skill is installed like any other package and run on demand ' +
+      '(§54.1); POST /skills starts one.'))
+    return
+  }
+
+  const table = el('table')
+  const head = el('tr')
+  for (const label of ['Invocation', 'Skill', 'Phase', 'Reason', 'Outcome', 'Leases', 'Detail', '']) {
+    head.appendChild(el('th', null, label))
+  }
+  table.appendChild(head)
+
+  for (const entry of list) {
+    const row = el('tr')
+    row.appendChild(el('td', 'dim', entry.id))
+
+    const skill = el('td')
+    skill.textContent = entry.package
+    if (entry.parent) skill.title = 'nested under ' + entry.parent
+    row.appendChild(skill)
+
+    const phase = el('td')
+    phase.appendChild(pill(entry.phase,
+      entry.phase === 'running' ? 'ok' : entry.phase === 'terminal' ? 'off' : 'warn'))
+    row.appendChild(phase)
+
+    row.appendChild(el('td', 'dim', entry.reason))
+
+    // Three outcomes and three readings. `aborted` is deliberately not `bad`: §54.4 says a skill
+    // that was never allowed to start did not fail at its task, and colouring it as a failure is
+    // how a success rate becomes a punishment for an operator's cell configuration.
+    const outcome = el('td')
+    if (entry.outcome === 'success') outcome.appendChild(pill('success', 'ok'))
+    else if (entry.outcome === 'failure') outcome.appendChild(pill('failure', 'bad'))
+    else if (entry.outcome === 'aborted') outcome.appendChild(pill('aborted', 'warn'))
+    else if (entry.outcome === 'unlabeled') outcome.appendChild(pill('unlabeled', 'off'))
+    row.appendChild(outcome)
+
+    const leases = el('td')
+    leases.appendChild(pill(entry.leases,
+      entry.leases === 'held' ? 'ok' : entry.leases === 'denied' ? 'bad' : 'off'))
+    if ((entry.capabilities || []).length > 0) {
+      leases.title = entry.capabilities.join(', ')
+    }
+    row.appendChild(leases)
+
+    row.appendChild(el('td', 'dim', entry.detail || ''))
+
+    const actions = el('td', 'actions')
+    if (entry.phase !== 'terminal') {
+      const stop = el('button', null, 'Stop')
+      stop.addEventListener('click', () => stopSkill(entry.id))
+      actions.appendChild(stop)
+    }
+    row.appendChild(actions)
+
+    table.appendChild(row)
+  }
+  body.appendChild(table)
+
+  // The one thing a reader of this table would otherwise get wrong. It is written under the table
+  // rather than in a tooltip because it changes what the *outcome* column means.
+  body.appendChild(el('p', 'note',
+    'The outcome is the OS\u2019s, not the skill\u2019s (\u00a754.3): a skill that judged its ' +
+    'own success would always succeed. A criterion nothing on this robot can evaluate is ' +
+    '`unlabeled` rather than a pass.'))
+}
+
+async function stopSkill(id) {
+  await call('POST', '/skills/' + encodeURIComponent(id) + '/stop')
+  refresh()
+}
+
 function renderPackages(feed) {
   const body = clear($('packages-body'))
 
@@ -1402,6 +1592,8 @@ const feeds = [
   bodyFeed,
   new Feed('plan', '/plan', renderPlan),
   new Feed('packages', '/packages', renderPackages),
+  new Feed('ota', '/ota', renderOta),
+  new Feed('skills', '/skills', renderSkills),
   new Feed('health', '/health', renderHealth),
   new Feed('blackbox', '/blackbox', renderBlackbox),
   new Feed('post', '/post', renderPost),

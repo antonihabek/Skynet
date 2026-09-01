@@ -86,7 +86,7 @@ export const KINDS = { cycle: 1, frame: 2, event: 3, gap: 4 } as const
 export const EVENT_CODES = [
   'lease_granted', 'lease_released', 'lease_preempted', 'estop', 'estop_cleared',
   'package_started', 'package_stopped', 'grant_changed', 'ota', 'clock_step',
-  'recording_started', 'sealed', 'config_changed', 'admission',
+  'recording_started', 'sealed', 'config_changed', 'admission', 'skill_transition',
 ] as const
 
 export const GAP_REASONS = ['writer_behind', 'encoder_behind', 'not_recording', 'write_failed'] as const
@@ -570,7 +570,7 @@ export function wire(): { id: number; topic: string; name: string; definition: s
         'string',
         'lease_granted, lease_released, lease_preempted, estop, estop_cleared, package_started, '
         + 'package_stopped, grant_changed, ota, clock_step, recording_started, sealed, '
-        + 'config_changed, admission, or gap.',
+        + 'config_changed, admission, skill_transition, or gap.',
       ),
       subject: field('string', 'What it happened to: a package id, a capability token, a slot.'),
       detail: field('string', 'A sentence about it.'),

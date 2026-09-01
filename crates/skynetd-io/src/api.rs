@@ -189,6 +189,14 @@ pub fn handle<L: Launcher, S: Slots>(
         ("POST", ["packages", id, "rollback"]) => act(context, id, Verb::Rollback),
         ("POST", ["grants"]) => edit_grant(context, request, true),
         ("DELETE", ["grants", id, token]) => remove_grant(context, id, token),
+        ("GET", ["ota"]) => ok(ota(context)),
+        ("GET", ["skills"]) => ok(context.daemon.skills.to_json()),
+        ("GET", ["skills", id]) => match context.daemon.skills.get(id) {
+            Some(invocation) => ok(invocation.to_json()),
+            None => error(404, "no such invocation"),
+        },
+        ("POST", ["skills"]) => execute_skill(context, request),
+        ("POST", ["skills", id, "stop"]) => stop_skill(context, id),
 
         // A path nobody serves, and a method nobody serves on a path somebody does, are different
         // answers. A client that gets 404 for a `POST` to a real route goes looking for a typo.
@@ -221,6 +229,10 @@ fn known_path(segments: &[&str]) -> bool {
             | ["plan"]
             | ["grants"]
             | ["grants", _, _]
+            | ["ota"]
+            | ["skills"]
+            | ["skills", _]
+            | ["skills", _, _]
     )
 }
 
@@ -376,6 +388,13 @@ fn status<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
 }
 
 fn stop_all<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
+    // §54.4's lifecycles first, and the order matters. Every live invocation is driven to
+    // `terminal` with `aborted`, which releases its leases and emits its episode — so a stop does
+    // not lose the record of what the robot was doing when somebody pressed the button, which is
+    // the one moment that record is worth most. Doing it after would mean stopping the units first
+    // and letting the next pass discover the skills had "returned", which would judge them by
+    // §54.3 and record a `failure` for a robot an operator stopped.
+    let ended = context.daemon.stop_skills(context.now_ms);
     let outcomes = context.daemon.stop_all();
     let mut stopped = Json::arr();
     let mut failed = Json::arr();
@@ -392,15 +411,29 @@ fn stop_all<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
             }
         }
     }
+    let mut invocations = Json::arr();
+    for report in &ended {
+        let mut item = Json::obj();
+        item.set("invocation", Json::from(report.invocation.as_str()))
+            .set("skill", Json::from(report.package.as_str()))
+            .set("from", Json::from(report.transition.from.as_str()))
+            .set("outcome", Json::from("aborted"));
+        invocations.push(item);
+    }
+
     let mut body = Json::obj();
-    body.set("stopped", stopped).set("failed", failed).set(
-        "note",
-        Json::from(
-            "This stops the processes producing commands. skynetd never touches an actuator \
-             (§33.1); the kernel sees no fresh commands, the watchdog observes it, and the robot \
-             comes to a controlled stop.",
-        ),
-    );
+    body.set("stopped", stopped)
+        .set("failed", failed)
+        .set("invocations", invocations)
+        .set(
+            "note",
+            Json::from(
+                "This stops the processes producing commands. skynetd never touches an actuator \
+                 (§33.1); the kernel sees no fresh commands, the watchdog observes it, and the \
+                 robot comes to a controlled stop. Any skill that was running is recorded aborted \
+                 and its episode emitted.",
+            ),
+        );
     body
 }
 
@@ -958,6 +991,208 @@ fn grant_body(id: &PackageId, token: &str, outcome: &str) -> Json {
 ///
 /// The window, the geometry, what is missing, and the sealed files. Not the recording: an index a
 /// console polls must not be tens of megabytes.
+/// `GET /ota` — §12's state, and what §12 would say about the version the Hub is asking for.
+///
+/// Three facts on one route because they are one question. Which images are in the two slots is
+/// where the robot **is**; the verdict is whether it may move; the pending-boot state is whether
+/// the last move is still on probation. A console showing the slots without the verdict would
+/// render a robot that appears able to update and is refused every pass, which is the §32.2 failure
+/// this file exists not to commit.
+fn ota<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
+    let slots = context.daemon.slots.read();
+    let wanted = context.daemon.desired.os_version.clone();
+
+    let mut out = Json::obj();
+    out.set("active", Json::from(slots.active.as_str()));
+    out.set(
+        "staged",
+        match &slots.staged {
+            Some(version) => Json::from(version.as_str()),
+            None => Json::Null,
+        },
+    );
+    out.set(
+        "channel",
+        Json::from(context.daemon.desired.os_channel.as_str()),
+    );
+    out.set(
+        "board",
+        match context.daemon.board() {
+            Some(board) => Json::Str(board),
+            None => Json::Null,
+        },
+    );
+    out.set(
+        "wanted",
+        if wanted.is_empty() {
+            Json::Null
+        } else {
+            Json::from(wanted.as_str())
+        },
+    );
+    out.set(
+        "assessment",
+        if wanted.is_empty() {
+            Json::Null
+        } else {
+            context.daemon.assess_image(&wanted).to_json()
+        },
+    );
+
+    // The pending-boot marker, read rather than decided: this route must not be able to confirm or
+    // roll back a slot. §39.1 gives an observer read access, and a GET that told a bootloader
+    // anything would be a state change behind a verb that promises not to be one.
+    out.set(
+        "pending",
+        match crate::ota::read_pending(context.daemon.store.layout()) {
+            Some(pending) => {
+                let mut entry = Json::obj();
+                entry.set("version", Json::Str(pending.version));
+                entry.set("budget_ms", Json::Num(pending.budget_ms));
+                entry
+            }
+            None => Json::Null,
+        },
+    );
+    out.set(
+        "note",
+        Json::from(
+            "§12's third rule is what `assessment` reports: an update that changes the Safety \
+             Kernel or the envelope is refused without a bench pass for these exact bytes. Nothing \
+             here fetches a bundle — §34's inbound half is not written — so an image has to be put \
+             on the robot before it can be staged.",
+        ),
+    );
+    out
+}
+
+/// §54.1's `execute({ skill, arguments, timeout_s })`, arriving over §32.2's local API.
+///
+/// Nothing runs in this handler. The invocation is created in `idle`, and the reconcile loop moves
+/// it — so an operator cannot get a skill past §54.2 by calling this and reading the answer, and a
+/// skill invoked from a console walks the same ladder as one invoked by anything else.
+///
+/// The response is therefore `202`, not `201`: the robot has accepted the invocation and has not
+/// yet decided whether it may start. A `201` would say a skill was created and running, which is
+/// the one thing §54.4 spends its length on not being true yet.
+fn execute_skill<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    request: &Request,
+) -> Response {
+    let Ok(text) = std::str::from_utf8(&request.body) else {
+        return error(400, "the body is not UTF-8");
+    };
+    let Ok(body) = Json::parse(text) else {
+        return error(400, "the body is not JSON");
+    };
+    let Some(package) = body.get("skill").and_then(Json::as_str) else {
+        return error(400, "no `skill`: name the package to invoke");
+    };
+    // `namespace/name`, as the desired state and every manifest spell it. Not the `namespace:name`
+    // a *route segment* has to use — this arrives in a JSON body, where a slash is an ordinary
+    // character, and asking a caller to escape one here would be a second spelling of an id for no
+    // reason.
+    let Ok(id) = PackageId::parse(package) else {
+        return error(400, "that is not a package id");
+    };
+    let Some(digest) = context.daemon.store.active_digest(&id) else {
+        return error(
+            404,
+            &format!("`{package}` has no activated version, so there is nothing to invoke"),
+        );
+    };
+    let manifest = match context.daemon.store.manifest(&digest) {
+        Ok(manifest) => manifest,
+        Err(failure) => return error(500, &failure.to_string()),
+    };
+
+    // §54.2's third rule: the operator may add preconditions and the skill may not remove them.
+    // Read from the profile in force, which is the signed document (§38.1).
+    let profile = crate::observe::read_json(&context.daemon.store.layout().active_profile());
+    let operator = crate::skill::operator_clauses(profile.as_ref(), package);
+
+    let invocation = crate::skill::Request {
+        package: package.to_string(),
+        arguments: body.get("arguments").cloned().unwrap_or_else(Json::obj),
+        parent: body
+            .get("parent")
+            .and_then(Json::as_str)
+            .map(str::to_string),
+        overrun_factor: body.get_present("overrun_factor").and_then(Json::as_f64),
+    };
+
+    match context
+        .daemon
+        .skills
+        .execute(&invocation, &manifest, &digest, &operator, context.now_ms)
+    {
+        Err(refusal) => {
+            let mut payload = Json::obj();
+            payload.set("code", Json::Str(refusal.code.to_string()));
+            payload.set("detail", Json::Str(refusal.detail));
+            Response::json(409, encode(&payload))
+        }
+        Ok(accepted) => {
+            let mut payload = Json::obj();
+            payload.set("invocation", Json::Str(accepted.clone()));
+            payload.set("skill", Json::Str(package.to_string()));
+            payload.set("phase", Json::Str("idle".to_string()));
+            payload.set(
+                "note",
+                Json::Str(
+                    "Accepted, not started. §54.2 is evaluated on the next reconcile pass and may \
+                     refuse it; watch GET /skills/<id>."
+                        .to_string(),
+                ),
+            );
+            Response::json(202, encode(&payload))
+        }
+    }
+}
+
+/// Stop a running skill's unit.
+///
+/// **This makes the skill return; it does not abort it**, and the difference is deliberate. §54.4
+/// names four things that end a running skill — a timeout, a guard trip, a lost `hold` precondition
+/// and a robot that stopped commanding — and an operator stopping one skill is none of them. Adding
+/// a fifth reason would put a word in a closed vocabulary that no corpus case came out of the
+/// document, so instead the process is stopped and the lifecycle sees what it would see for any
+/// skill whose code returned: `running → verifying`, and §54.3 judges it over post-state.
+///
+/// That is also the more honest answer. A skill stopped halfway has not satisfied its success
+/// criteria, so it is recorded `failure` or `unlabeled` on the evidence rather than on the fact that
+/// somebody pressed a button.
+fn stop_skill<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, id: &str) -> Response {
+    let Some(invocation) = context.daemon.skills.get(id) else {
+        return error(404, "no such invocation");
+    };
+    if invocation.terminal() {
+        return error(
+            409,
+            &format!("{id} is already over; its leases are released and its episode is emitted"),
+        );
+    }
+    let package = invocation.package.clone();
+    match context.daemon.launcher.stop(&package) {
+        Ok(()) => {
+            let mut payload = Json::obj();
+            payload.set("invocation", Json::Str(id.to_string()));
+            payload.set("skill", Json::Str(package));
+            payload.set(
+                "note",
+                Json::Str(
+                    "Stopped. The next pass reads this as a skill that returned, so §54.3 judges \
+                     it over post-state rather than recording it aborted — a skill stopped halfway \
+                     has not met its criteria, and that is the evidence rather than the button."
+                        .to_string(),
+                ),
+            );
+            ok(payload)
+        }
+        Err(failure) => error(500, &failure.to_string()),
+    }
+}
+
 fn blackbox_index<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Response {
     let Some(recorder) = context.blackbox.as_ref() else {
         return error(503, UNAVAILABLE);

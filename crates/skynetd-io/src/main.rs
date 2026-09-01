@@ -244,7 +244,12 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         // §33's own documentation calls "a legitimate way to operate a robot" — had a black box
         // holding `recording_started` and not one thing that happened afterwards. It was not a
         // decision; it was two call sites, one of which grew a recorder.
-        let passes = converge_and_record(&mut daemon, recorder.as_mut(), &layout, now);
+        // `now` as the start, because a one-shot pass *is* the whole of this process's life. On a
+        // machine with /proc that reading is ignored anyway — §12's budget is a boot budget — and
+        // where there is no /proc it means the fallback reports zero elapsed, which holds the boot
+        // gate at `wait`. That is the safe direction: a `skynet reconcile` run should not be able
+        // to roll a robot back on the strength of a clock that measured one command.
+        let passes = converge_and_record(&mut daemon, recorder.as_mut(), &layout, now, now);
         for pass in &passes {
             print_pass(pass);
         }
@@ -331,7 +336,8 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
             let now = monotonic(origin);
             if now >= next_reconcile {
                 observe_state(&mut daemon);
-                let passes = converge_and_record(&mut daemon, recorder.as_mut(), &layout, now);
+                let passes =
+                    converge_and_record(&mut daemon, recorder.as_mut(), &layout, now, started_ms);
                 for (action, reason) in passes
                     .last()
                     .map(|pass| pass.deferred.as_slice())
@@ -1029,14 +1035,68 @@ fn converge_and_record<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::
     recorder: Option<&mut skynetd_io::blackbox::Recorder>,
     layout: &Layout,
     now_ms: u64,
+    started_ms: u64,
 ) -> Vec<skynetd_io::runtime::Pass> {
     let passes = daemon.converge(now_ms);
+
+    // §54.4's lifecycle, after the reconcile rather than before it. The runtime reads which units
+    // are running and the reconciler is what changes that, so running it first would mean every
+    // skill saw the previous pass's process table and a skill that had just exited took an extra
+    // pass to be noticed.
+    //
+    // Wall time for the same reason `GET /calibration` takes it: §54.2 asks for a calibration's
+    // *age*, which is a comparison against a clock, and §35.1 permits exactly this — it is a
+    // record's age and not a control decision.
+    let wall_s = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|elapsed| elapsed.as_secs() as f64);
+    let actual = daemon.observe(now_ms);
+    let skills = daemon.advance_skills(now_ms, wall_s, &actual);
+
+    // §12's second rule, after the reconcile for the same reason the skills are: two of the three
+    // health inputs — whether the wanted packages are running, and whether the plan converged — are
+    // what the pass just established. Running it first would judge a boot on the previous pass's
+    // evidence, and on the *first* pass after an update that is evidence from the old image.
+    let confirmation = daemon.confirm_boot(
+        started_ms,
+        now_ms,
+        wall_s,
+        &actual,
+        passes.last().is_some_and(|pass| pass.converged()),
+    );
+    if let Some(detail) = &confirmation.failed {
+        // Loud, because a health gate that could not reach the bootloader is a robot whose
+        // unattended recovery has quietly stopped being unattended.
+        eprintln!("skynetd: §12's boot gate could not reach the bootloader: {detail}");
+    }
+
     let Some(recorder) = recorder else {
         return passes;
     };
     let mono_ns = now_ms.saturating_mul(1_000_000);
     for pass in &passes {
         record_pass(recorder, mono_ns, pass);
+    }
+    record_skills(recorder, mono_ns, &skills);
+    // §26 lists OTA on the event channel, and this is the half of it that happens without an
+    // operator. A `wait` is not recorded: it is the ordinary state for most of a boot budget, and a
+    // record every pass would fill the ring with a robot deciding nothing.
+    if matches!(
+        confirmation.verdict.decision,
+        skynet_contracts::ota::BootDecision::Confirm
+            | skynet_contracts::ota::BootDecision::RollBack
+    ) {
+        let _ = recorder.event(
+            mono_ns,
+            skynet_blackbox::record::EventCode::Ota,
+            confirmation.version.as_deref().unwrap_or("(unknown)"),
+            &format!(
+                "boot {} — {}",
+                confirmation.verdict.decision.as_str(),
+                confirmation.verdict.detail
+            ),
+        );
     }
     let mirrored = skynetd_io::blackbox::mirror_audit(layout, recorder, mono_ns);
     if mirrored.remaining > 0 {
@@ -1046,6 +1106,37 @@ fn converge_and_record<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::
         );
     }
     passes
+}
+
+/// §54.4: *"Every transition is a black box event."*
+///
+/// Every transition, not every changed one. A skill sitting in `running` for four hundred cycles
+/// would fill the ring with four hundred identical records and push out the cycles the incident
+/// needs, which is the completeness guarantee (§13) destroyed by the thing meant to strengthen it.
+/// So the unchanged ones are dropped here rather than in the lifecycle — `advance` is a pure
+/// function and reports what it found, and the decision about what is worth a record belongs where
+/// the ring is.
+///
+/// The consequence is stated rather than left to be discovered: a sealed recording shows a skill's
+/// *ladder* and not its dwell time. How long it sat in each phase is in the episode's duration and
+/// in the invocation's own timestamps, both of which outlive the ring.
+fn record_skills(
+    recorder: &mut skynetd_io::blackbox::Recorder,
+    mono_ns: u64,
+    reports: &[skynetd_io::skill::Report],
+) {
+    use skynet_blackbox::record::EventCode;
+    for report in reports {
+        if !report.transition.changed {
+            continue;
+        }
+        let _ = recorder.event(
+            mono_ns,
+            EventCode::SkillTransition,
+            &report.invocation,
+            &report.event_detail(),
+        );
+    }
 }
 
 fn record_pass(
