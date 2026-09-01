@@ -242,23 +242,15 @@ pub fn is_reserved(token: &str) -> bool {
     RESERVED_CAPABILITIES.contains(&token)
 }
 
-/// Whether a warning tone must sound on this transition (§49.1).
-///
-/// > It sounds on transition into `RUNNING` and on resumption after a stop.
-///
-/// The states are §27's, as strings rather than as an enumeration, because **§27's state machine
-/// does not exist in this codebase yet** — `post.rs` refers to it in prose and nothing declares it.
-/// A function here that invented the enumeration would be putting §27's design decision in §49's
-/// module, which is how a state machine ends up with two definitions. Strings until there is one,
-/// and then this becomes a two-line change.
-///
-/// Unknown state names read as **not a transition into RUNNING**, which is the direction that
-/// under-sounds rather than over-sounds — and that is the wrong direction for a safety control, so
-/// it is worth being explicit: this function is not the enforcement point. `skynetd` owning the
-/// tone is, and this answers a question about a transition it was given.
-pub fn warning_required(from: &str, to: &str) -> bool {
-    to.eq_ignore_ascii_case("running") && !from.eq_ignore_ascii_case("running")
-}
+// §49.1's other half — *when* the tone sounds — used to live here as `warning_required(from, to)`,
+// taking two strings, with a comment saying it would become an enumeration "when there is one" and
+// that this "becomes a two-line change". §27's machine is declared now, in
+// [`crate::opstate`], and the function went with it.
+//
+// It belongs there rather than here because the predicate is a property of a transition and this
+// module knows about packages. Keeping the two halves of §49.1 together would have been filing by
+// section number rather than by what the code depends on — and the string comparison it used in the
+// meantime was under-inclusive, which `opstate.rs` records in full.
 
 /// Every rejection code.
 /// Reproduced into `corpus/vocabulary/closed-sets.json`, so an edition that gained a variant the

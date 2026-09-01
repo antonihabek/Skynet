@@ -11,10 +11,16 @@ authors.workspace = true
 [dependencies]
 skynet-json = { path = "../skynet-json" }
 
-# `skynet-contracts` is deliberately absent for now. `admitPackage` and `resolveTransport` belong to
-# the *apply* half of the install path (§37.1) — verify, admit, resolve transport, stage, activate —
-# and that half is not written. Adding the dependency before there is code that calls it would make
-# the manifest a statement about what somebody intends rather than about what this crate does.
+# `skynet-contracts` was deliberately absent until §27's operating state machine was declared in it,
+# and the rule that kept it out is the one that now lets it in: *"adding the dependency before there
+# is code that calls it would make the manifest a statement about what somebody intends rather than
+# about what this crate does."* There is code that calls it — `SafeState` is derived from
+# `OperatingState` rather than asserted by a caller (§33.4).
+#
+# It brings `skynet-json`, `skynet-kernel` and `skynet-sha256`, all `no_std`, and none of them is
+# `skynet-rhal`. `admitPackage` and `resolveTransport` are still uncalled from here, because the
+# *apply* half of the install path (§37.1) is still unwritten.
+skynet-contracts = { path = "../skynet-contracts" }
 
 # Deliberately **not** `skynet-rhal`, and there is a CI invariant asserting it stays that way.
 #

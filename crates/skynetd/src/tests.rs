@@ -1152,3 +1152,162 @@ fn an_unrecognised_token_is_exclusive_rather_than_shared() {
         PreemptionOutcome::Denied(LeaseDenial::Held { .. })
     ));
 }
+// ── §54.4's `acquiring` stage, over a whole skill's tokens ───────────────────
+
+mod acquiring_a_whole_skill {
+    use crate::lease::LeaseTable;
+    use skynet_contracts::skill::{advance, LeaseState, Progress, SkillPhase};
+
+    fn tokens(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| name.to_string()).collect()
+    }
+
+    fn everything(_token: &str) -> bool {
+        true
+    }
+
+    #[test]
+    fn a_skill_that_gets_every_token_is_held() {
+        let mut table = LeaseTable::new();
+        let result = table.acquire_all(
+            "acme/wipe",
+            &tokens(&["manipulation.grasp", "locomotion.walk"]),
+            everything,
+            false,
+        );
+        assert_eq!(result.state, LeaseState::Held);
+        assert_eq!(result.taken.len(), 2);
+        assert_eq!(table.holder("manipulation.grasp"), Some("acme/wipe"));
+    }
+
+    /// The property that only becomes visible from §54.4: **acquisition is all or nothing.**
+    ///
+    /// A skill that got two of its three tokens holds two joints it cannot use and refuses them to
+    /// everything else, and the symptom is a second package that will not start with no reason on
+    /// any screen — the leaked-lease failure arriving through the front door.
+    #[test]
+    fn a_denial_rolls_back_everything_this_call_took() {
+        let mut table = LeaseTable::new();
+        table.acquire("other/policy", "locomotion.walk", true, false);
+
+        let result = table.acquire_all(
+            "acme/wipe",
+            &tokens(&["manipulation.grasp", "locomotion.walk", "manipulation.lift"]),
+            everything,
+            false,
+        );
+
+        assert_eq!(result.state, LeaseState::Denied);
+        assert_eq!(result.token.as_deref(), Some("locomotion.walk"));
+        assert_eq!(result.holder.as_deref(), Some("other/policy"));
+        assert!(result.taken.is_empty());
+
+        // The one it did take before the refusal is back, and the one it never reached was never
+        // taken. Anything else is an arm this skill is holding and cannot use.
+        assert_eq!(table.holder("manipulation.grasp"), None);
+        assert_eq!(table.holder("manipulation.lift"), None);
+        // And the holder that refused it still holds it.
+        assert_eq!(table.holder("locomotion.walk"), Some("other/policy"));
+    }
+
+    /// It rolls back what **this call** took, and nothing else. A token the requester already held
+    /// is not this acquisition's to give away — and a level-triggered loop calling `acquire_all`
+    /// every pass would otherwise drop a lease it was in the middle of using.
+    #[test]
+    fn a_rollback_does_not_release_what_the_requester_already_held() {
+        let mut table = LeaseTable::new();
+        table.acquire("acme/wipe", "manipulation.grasp", true, false);
+        table.acquire("other/policy", "locomotion.walk", true, false);
+
+        let result = table.acquire_all(
+            "acme/wipe",
+            &tokens(&["manipulation.grasp", "locomotion.walk"]),
+            everything,
+            false,
+        );
+
+        assert_eq!(result.state, LeaseState::Denied);
+        assert_eq!(
+            table.holder("manipulation.grasp"),
+            Some("acme/wipe"),
+            "a lease held before the call survives the call"
+        );
+    }
+
+    /// §25.2 checks the grant before the holder, "so a package with no permission is told it has no
+    /// permission rather than that somebody else is using the arm". That distinction has to survive
+    /// the projection, and `holder: None` is how it does.
+    #[test]
+    fn an_ungranted_token_names_no_holder() {
+        let mut table = LeaseTable::new();
+        let result = table.acquire_all(
+            "acme/wipe",
+            &tokens(&["manipulation.grasp"]),
+            |_| false,
+            false,
+        );
+        assert_eq!(result.state, LeaseState::Denied);
+        assert_eq!(result.token.as_deref(), Some("manipulation.grasp"));
+        assert_eq!(
+            result.holder, None,
+            "nobody has the arm; this package may not ask for it"
+        );
+    }
+
+    /// A skill declaring no capabilities acquires nothing and is held, which is the honest answer:
+    /// there was nothing to arbitrate. Refusing it would stop every skill that only reads.
+    #[test]
+    fn a_skill_that_needs_nothing_is_held() {
+        let mut table = LeaseTable::new();
+        let result = table.acquire_all("acme/look", &[], everything, false);
+        assert_eq!(result.state, LeaseState::Held);
+        assert!(result.taken.is_empty());
+    }
+
+    /// §25.2's one pre-emption, reported so it can become a black box event.
+    #[test]
+    fn a_safety_behaviour_displaces_and_the_displacement_is_reported() {
+        let mut table = LeaseTable::new();
+        table.acquire("acme/wipe", "manipulation.grasp", true, false);
+
+        let result = table.acquire_all(
+            "vendor/fall-arrest",
+            &tokens(&["manipulation.grasp"]),
+            everything,
+            true,
+        );
+        assert_eq!(result.state, LeaseState::Held);
+        assert_eq!(
+            result.displaced,
+            vec![("manipulation.grasp".to_string(), "acme/wipe".to_string())]
+        );
+    }
+
+    /// The projection the contract's documentation promised lived at a call site. This is the join
+    /// between §25.2's table and §54.4's `acquiring` stage, and it is the only place the two meet.
+    #[test]
+    fn the_acquisition_drives_the_lifecycle() {
+        let mut table = LeaseTable::new();
+        table.acquire("other/policy", "manipulation.grasp", true, false);
+
+        let mut progress = Progress {
+            invoked: true,
+            entry_permitted: Some(true),
+            ..Progress::default()
+        };
+        table
+            .acquire_all(
+                "acme/wipe",
+                &tokens(&["manipulation.grasp"]),
+                everything,
+                false,
+            )
+            .into_progress(&mut progress);
+
+        let transition = advance(SkillPhase::Acquiring, &progress);
+        assert_eq!(transition.to, SkillPhase::Terminal);
+        assert!(transition.detail.contains("manipulation.grasp"));
+        assert!(transition.detail.contains("other/policy"));
+        assert!(transition.release_leases);
+    }
+}

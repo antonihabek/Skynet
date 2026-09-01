@@ -40,6 +40,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
+use skynet_contracts::opstate::{
+    evaluate as evaluate_state, Conditions, OperatingState, StateReason, Transition,
+};
 use skynet_json::Json;
 use skynetd::actual::Actual;
 use skynetd::desired::{DesiredState, PackageKind, RunState};
@@ -239,6 +242,20 @@ pub struct Daemon<L: Launcher, S: Slots> {
     /// the operator, and [`SafeState::No`] is the default because deferring is the direction that
     /// reduces what the robot does.
     pub safe_state: SafeState,
+    /// Where §27's machine says this robot is, as of the last observation.
+    ///
+    /// Starts at [`OperatingState::Post`], which is where §48.1 puts a robot that has just booted
+    /// and is the only starting value that is not a claim. It is a *field* rather than a
+    /// recomputation at every read because §27's machine has exactly one bit of memory — `SAFE` is
+    /// sticky — and the bit has to live somewhere.
+    pub operating_state: OperatingState,
+    /// Why it is there, from the last observation.
+    ///
+    /// Kept beside the state rather than recomputed, because the two must describe one evaluation.
+    /// A console showing `safe` with a reason from a different pass would be worse than one showing
+    /// no reason at all — and `safe` on its own reads as a robot somebody stopped rather than as a
+    /// robot nothing has observed.
+    pub state_reason: StateReason,
     /// The last pass, for `GET /plan` and `skynet doctor`.
     pub last_pass: Option<Pass>,
     /// Which rung the desired state came from.
@@ -267,6 +284,8 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             supervision: BTreeMap::new(),
             leases: LeaseTable::new(),
             safe_state: SafeState::No,
+            operating_state: OperatingState::Post,
+            state_reason: StateReason::PostIncomplete,
             last_pass: None,
             desired_source,
             desired: nothing(),
@@ -350,10 +369,49 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     /// swapped under a moving arm.
     pub fn refresh_safe_state(&mut self) {
         let path = self.store.layout().safe_state();
-        self.safe_state = match fs::read_to_string(&path) {
+        let declared = match fs::read_to_string(&path) {
             Ok(text) if text.trim() == "yes" => SafeState::Yes,
             _ => SafeState::No,
         };
+        // Narrowed by §27's machine, never widened by it. Both sources may close the barrier and
+        // neither may open it alone — see [`SafeState::and`]. On this edition the machine says
+        // `safe`, because there is no kernel and no RHAL, so the operator's declaration is still
+        // what decides; when the kernel channel exists and reports a policy commanding, the
+        // declaration stops being able to outvote it.
+        self.safe_state = declared.and(SafeState::from_state(self.operating_state));
+    }
+
+    /// Re-evaluate §27's operating state over what this process can observe.
+    ///
+    /// **Most of §27's conditions are not `skynetd`'s to observe, and this method is written so
+    /// that shows.** §33.1 keeps the daemon away from the actuator path — CI asserts it cannot even
+    /// depend on `skynet-rhal` — and the kernel, the RHAL, the guard set and the homing state are
+    /// all on the far side of that line, exactly as §48.5 found for five of §48.2's eight checks.
+    /// So they are left at their defaults, which are the least capable readings, and the machine
+    /// answers `safe` with `rhal_lost`.
+    ///
+    /// That is not a placeholder producing a plausible-looking state. It is the true one:
+    /// [`crate::post`] already says as much about the same edition — "`may_run` is false, and that
+    /// is the correct answer for a robot with no kernel, no driver and no proven stop path". What
+    /// this method adds is that the answer now has a *reason* attached which names the missing
+    /// input, rather than being a string three modules spell differently.
+    ///
+    /// The self-test is the one condition this process owns, and it is supplied. `wall_s` is passed
+    /// for the reason it is everywhere else: calibration expiry is a comparison against a clock,
+    /// and a function that read one could not be tested against a fixed one (§35.2).
+    pub fn refresh_operating_state(&mut self, wall_s: Option<f64>) -> Transition {
+        let report = crate::post::run(self.store.layout(), wall_s);
+        let conditions = Conditions {
+            post: report.post_verdict(),
+            // Everything below is §33.1's line. Left at the default rather than assigned a
+            // hopeful value, because a supervisor that reported a plausible fleet status from
+            // nothing is the exact failure this project is arranged around.
+            ..Conditions::default()
+        };
+        let transition = evaluate_state(self.operating_state, &conditions);
+        self.operating_state = transition.to;
+        self.state_reason = transition.reason;
+        transition
     }
 
     /// Re-read the desired state from disk, walking §33.8's ladder.

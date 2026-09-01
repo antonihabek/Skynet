@@ -131,10 +131,16 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
 
     let mut daemon = Daemon::new(store, launcher, RaucSlots);
     daemon.reload();
-    daemon.refresh_safe_state();
+    observe_state(&mut daemon);
     eprintln!(
-        "skynetd: safe state is declared, not measured — `{}` says {}. There is no kernel channel \
-         to ask (§33.1), so §33.4's barrier is standing on an operator's word.",
+        "skynetd: §27 state is `{}`, because {}. §33.4's barrier is `{}` says {}, narrowed by that \
+         state — and the state rests on one of §27's eight conditions, because the other seven are \
+         the kernel's and there is no channel to ask (§33.1).",
+        daemon.operating_state.as_str(),
+        // The reason as well as the state. `safe` on its own reads as a robot somebody stopped
+        // rather than as a robot nothing has observed, and those send an operator to opposite ends
+        // of the building.
+        daemon.state_reason.as_str(),
         layout.safe_state().display(),
         if daemon.safe_state.is_safe() {
             "yes"
@@ -232,7 +238,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
 
     if once {
         let now = monotonic(origin);
-        daemon.refresh_safe_state();
+        observe_state(&mut daemon);
         // Through the same function the loop uses, and that is the whole of the fix. `once` used to
         // converge directly and record nothing, so a robot operated entirely through it — which
         // §33's own documentation calls "a legitimate way to operate a robot" — had a black box
@@ -324,7 +330,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         loop {
             let now = monotonic(origin);
             if now >= next_reconcile {
-                daemon.refresh_safe_state();
+                observe_state(&mut daemon);
                 let passes = converge_and_record(&mut daemon, recorder.as_mut(), &layout, now);
                 for (action, reason) in passes
                     .last()
@@ -1121,4 +1127,25 @@ fn wall_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+/// Wall time in seconds, for §45.4's age comparison. Same clock, same rule, same non-use.
+fn wall_s() -> Option<f64> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|elapsed| elapsed.as_secs() as f64)
+}
+
+/// One observation of §27's machine, then §33.4's barrier read off it.
+///
+/// The order is the whole point and it is easy to get backwards: the state is observed first, and
+/// the barrier is derived from it. A `refresh_safe_state` that ran first would narrow this pass
+/// against the previous pass's state, which on the pass that matters — the one where a policy
+/// started — is the pass that would apply a driver swap under it.
+fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>(
+    daemon: &mut Daemon<L, S>,
+) {
+    daemon.refresh_operating_state(wall_s());
+    daemon.refresh_safe_state();
 }

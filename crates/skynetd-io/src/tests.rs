@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use skynet_contracts::opstate::OperatingState;
 use skynet_json::Json;
 use skynetd::actual::{UnitState, UnitStatus};
 use skynetd::desired::PackageKind;
@@ -1063,6 +1064,13 @@ fn console_fixture() {
     // gets one of them wrong, so the watchdog panel has the case it exists for rather than an
     // honest blank.
     write_embodiment(&fixture, BENCH_ARM_WATCHDOG);
+
+    // §27's machine, observed once — because the page renders what the daemon has seen, and a
+    // daemon that has never looked reports `post`. A fixture left at the initial value would draw
+    // the panel for a robot mid-boot rather than for the one the rest of this fixture describes,
+    // which is the drift the fixture exists to prevent: the answers come from `api::handle` so
+    // that the page is rendered against a robot that exists.
+    fixture.daemon.refresh_operating_state(None);
     let vendor = driver_key(31);
     write_trust(&fixture, "bench-robotics", &public_hex(&vendor));
 
@@ -1282,6 +1290,7 @@ fn console_fixture() {
         "outbound",
         "watchdog",
         "post",
+        "state",
     ] {
         let response = fixture.raw("GET", &format!("/{route}"), Some("observer-token"));
         std::fs::write(out.join(route), &response.body).unwrap();
@@ -2761,19 +2770,125 @@ fn a_safe_state_is_only_ever_declared_explicitly() {
     assert_eq!(daemon.safe_state, SafeState::Yes);
 }
 
+/// The note used to say the safe state was "declared, not measured", and that was the whole truth
+/// until §27's machine existed. It is now declared **and** narrowed by that machine, and the note
+/// has to say so — a console repeating a sentence that stopped being true is exactly the failure
+/// §32.2 spends its length on.
+///
+/// What is still true, and still said: nothing here has *measured* anything about the body.
 #[test]
-fn status_says_the_safe_state_was_declared_rather_than_measured() {
+fn status_says_where_the_safe_state_came_from_and_that_nothing_measured_it() {
     let mut fixture = Fixture::new("safe-state-status");
     let (_, body) = fixture.request("GET", "/status", None, "");
     assert_eq!(
         body.get("safe_state_source").and_then(Json::as_str),
-        Some("declared")
+        Some("declared_and_derived")
     );
-    assert!(body
+    let note = body
         .get("safe_state_note")
         .and_then(Json::as_str)
-        .unwrap_or_default()
-        .contains("not measured"));
+        .unwrap_or_default();
+    assert!(note.contains("narrowed"), "the note names both sources");
+    assert!(
+        note.contains("measured the body"),
+        "and still says nothing measured the body"
+    );
+}
+
+/// §27's state reaches `GET /status`, which its own route table has claimed since the module was
+/// written. A robot that has just booted and observed nothing is in `post`, and one pass of the
+/// loop moves it to `safe` with `rhal_lost` — because this edition has no kernel and no RHAL, and
+/// the machine says the least capable thing rather than the hopeful one.
+#[test]
+fn status_carries_the_operating_state_and_the_reason_it_is_there() {
+    let mut fixture = Fixture::new("state-status");
+    let (_, before) = fixture.request("GET", "/status", None, "");
+    assert_eq!(before.get("state").and_then(Json::as_str), Some("post"));
+    assert_eq!(
+        before.get("state_reason").and_then(Json::as_str),
+        Some("post_incomplete"),
+        "a daemon that has not observed has not observed a failure either"
+    );
+
+    fixture.daemon.refresh_operating_state(None);
+    let (_, after) = fixture.request("GET", "/status", None, "");
+    assert_eq!(after.get("state").and_then(Json::as_str), Some("safe"));
+    assert_eq!(
+        after.get("state_reason").and_then(Json::as_str),
+        Some("rhal_lost")
+    );
+}
+
+/// `GET /state` says which of §27's eight conditions anybody looked at, and this edition looks at
+/// one. A page that showed the state without that would be reporting a robot as safe when the
+/// truth is that nothing has looked at it.
+#[test]
+fn the_state_route_admits_how_little_it_observed() {
+    let mut fixture = Fixture::new("state-route");
+    fixture.provision();
+    fixture.daemon.refresh_operating_state(None);
+    let (status, body) = fixture.request("GET", "/state", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(body.get("state").and_then(Json::as_str), Some("safe"));
+    assert_eq!(body.get("reason").and_then(Json::as_str), Some("rhal_lost"));
+    // The three properties other sections read off the state, rendered rather than re-derived.
+    assert_eq!(body.get("safe_state").and_then(Json::as_bool), Some(true));
+    assert_eq!(body.get("commands").and_then(Json::as_bool), Some(false));
+    assert_eq!(body.get("sticky").and_then(Json::as_bool), Some(true));
+
+    let observed = body.get("observed").expect("the observation map");
+    assert_eq!(observed.get("post").and_then(Json::as_bool), Some(true));
+    for unobserved in [
+        "kernel",
+        "rhal",
+        "homing",
+        "stop",
+        "guard_hold",
+        "guards",
+        "policy",
+    ] {
+        assert_eq!(
+            observed.get(unobserved).and_then(Json::as_bool),
+            Some(false),
+            "`{unobserved}` is not this process's to observe (§33.1)"
+        );
+    }
+}
+
+/// The narrowing, from the direction that matters. §33.4's asymmetry says either source may close
+/// the barrier and neither opens it alone — so an operator's `yes` cannot outvote a machine that
+/// can see a policy commanding, whatever else is true.
+///
+/// The state has to be set directly, because no observation this edition can make produces
+/// `running`: the kernel and the RHAL are on the far side of §33.1. That is the point of asserting
+/// it now rather than when the channel exists — the rule is in place before anything can trip it.
+#[test]
+fn a_declared_safe_state_cannot_outvote_a_robot_that_is_commanding() {
+    let fixture = Fixture::new("safe-state-narrowing");
+    let layout = fixture.daemon.store.layout().clone();
+    let mut daemon = fixture.daemon;
+    std::fs::write(layout.safe_state(), "yes").unwrap();
+
+    daemon.operating_state = OperatingState::Hold;
+    daemon.refresh_safe_state();
+    assert_eq!(daemon.safe_state, SafeState::Yes, "hold is a safe state");
+
+    for commanding in [OperatingState::Running, OperatingState::Degraded] {
+        daemon.operating_state = commanding;
+        daemon.refresh_safe_state();
+        assert_eq!(
+            daemon.safe_state,
+            SafeState::No,
+            "`{}` is a policy commanding the body",
+            commanding.as_str()
+        );
+    }
+
+    // And the state most likely to be mistaken for a safe one by somebody watching a robot slow
+    // down. §33.4's barrier does not open mid-ramp.
+    daemon.operating_state = OperatingState::Stopping;
+    daemon.refresh_safe_state();
+    assert_eq!(daemon.safe_state, SafeState::No);
 }
 
 // ── The body (§5) ────────────────────────────────────────────────────────────

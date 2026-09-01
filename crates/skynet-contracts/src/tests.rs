@@ -980,31 +980,11 @@ mod the_warning_channel {
         assert!(RESERVED_CAPABILITIES.contains(&WARNING_CHANNEL));
     }
 
-    #[test]
-    fn the_tone_sounds_entering_running_and_not_while_already_there() {
-        assert!(warning_required("hold", "running"));
-        assert!(warning_required("safe", "running"));
-        // "Resumption after a stop" is the same transition, which is why one rule covers both.
-        assert!(warning_required("stopping", "running"));
-        assert!(!warning_required("running", "running"));
-        assert!(!warning_required("running", "hold"));
-        assert!(!warning_required("hold", "degraded"));
-    }
-
-    #[test]
-    fn the_transition_check_is_case_insensitive_because_the_states_are_prose_today() {
-        // §27's state machine is not an enumeration in this codebase yet, so these arrive as
-        // whatever a caller spelled. When it becomes one this function is a two-line change and
-        // this test is the one that should be deleted.
-        assert!(warning_required("HOLD", "RUNNING"));
-        assert!(!warning_required("RUNNING", "running"));
-    }
-
-    #[test]
-    fn an_unknown_state_does_not_sound_the_tone_and_that_is_recorded_as_a_limit() {
-        // Under-sounding is the wrong direction for a safety control. It is acceptable only because
-        // this function answers a question about a transition it was handed; the enforcement point
-        // is `skynetd` owning the tone, which is not built.
-        assert!(!warning_required("hold", "nonsense"));
-    }
+    // §49.1's transition half moved to `crate::opstate` when §27's machine was declared, and the
+    // three tests that lived here went with it — including the one whose own comment said it "is
+    // the one that should be deleted" once the states stopped being prose. What it was protecting
+    // was case-insensitive string comparison, which a typed transition has no use for.
+    //
+    // One of the assertions it carried was `!warning_required("hold", "degraded")`, frozen as
+    // correct. It was not. See `opstate.rs`.
 }

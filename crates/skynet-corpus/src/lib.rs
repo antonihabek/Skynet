@@ -33,6 +33,7 @@ use skynet_contracts::certification;
 use skynet_contracts::certification::award_certification;
 use skynet_contracts::embodiment as contracts_embodiment;
 use skynet_contracts::json;
+use skynet_contracts::opstate;
 use skynet_contracts::predicate;
 use skynet_contracts::readiness::{evaluate_readiness, summarize_readiness, ReadinessReport};
 use skynet_contracts::roles;
@@ -413,6 +414,35 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             skill::composition_to_json(&skill::validate_composition(root, &calls, max_depth))
         }
 
+        // §54.4's lifecycle. Every case pins the phase, the reason, the outcome and
+        // `release_leases` together, because they are one answer — and an edition could get the
+        // phase right while releasing a lease at the wrong moment, which is the failure with no
+        // symptom until the next invocation is refused the arm.
+        "skill" if label.contains("lifecycle") => {
+            let phase = input
+                .get("phase")
+                .and_then(Json::as_str)
+                .and_then(skill::SkillPhase::parse)
+                .ok_or("no readable `phase`")?;
+            let progress = skill::progress_from_json(input.get("progress").unwrap_or(&Json::Null));
+            skill::transition_to_json(&skill::advance(phase, &progress))
+        }
+
+        // §54.5's third limit, which is arithmetic rather than a machine and is pinned separately
+        // for that reason: a bound that was wrong by a factor would still walk the diagram.
+        "skill" if label.contains("bounded-deadline") => {
+            let child = skill::skill_deadline(
+                input
+                    .get_present("expected_duration_seconds")
+                    .and_then(Json::as_f64),
+                skill::DEFAULT_OVERRUN_FACTOR,
+            );
+            let remaining = input
+                .get_present("root_remaining_ms")
+                .and_then(Json::as_f64);
+            skill::deadline_to_json(&skill::bounded_deadline(&child, remaining))
+        }
+
         // §55.2's cell descriptor. Two files, because the document has two consumers and an
         // edition could agree about one while disagreeing about the other: `validate` is what an
         // operator sees when they save it, `context` is what a precondition and the workspace guard
@@ -430,6 +460,25 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             out.set("layer", layer.get("layer").cloned().unwrap_or(Json::Null));
             out
         }
+
+        // §27's machine, extended by §48.1. Three files, because the machine has three separable
+        // ways to be wrong: where it goes and why, what a state *means* to the sections that read
+        // it, and §49.1's tone over every ordered pair. An edition could agree about the first and
+        // disagree about either of the others, and only the first is a computation.
+        "opstate" if label.contains("evaluate") => {
+            let previous = input
+                .get("previous")
+                .and_then(Json::as_str)
+                .and_then(opstate::OperatingState::parse)
+                .ok_or("no readable `previous`")?;
+            let conditions =
+                opstate::conditions_from_json(input.get("conditions").unwrap_or(&Json::Null));
+            opstate::transition_to_json(&opstate::evaluate(previous, &conditions))
+        }
+
+        "opstate" if label.contains("properties") => opstate::state_properties_to_json(),
+
+        "opstate" if label.contains("warning") => opstate::warning_matrix_to_json(),
 
         // The closed vocabularies, as data rather than as a computation.
         //
@@ -507,6 +556,47 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
                     .map(|code| code.as_str())
                     .collect(),
                 "cell_faults" => cell::CELL_FAULTS.iter().map(|code| code.as_str()).collect(),
+                "operating_states" => opstate::state_names(),
+                "state_reasons" => opstate::STATE_REASONS
+                    .iter()
+                    .map(|reason| reason.as_str())
+                    .collect(),
+                "stop_causes" => opstate::STOP_CAUSES
+                    .iter()
+                    .map(|cause| cause.as_str())
+                    .collect(),
+                "post_verdicts" => opstate::POST_VERDICTS
+                    .iter()
+                    .map(|verdict| verdict.as_str())
+                    .collect(),
+                "homing_states" => opstate::HOMING_STATES
+                    .iter()
+                    .map(|state| state.as_str())
+                    .collect(),
+                "rhal_states" => opstate::RHAL_STATES
+                    .iter()
+                    .map(|state| state.as_str())
+                    .collect(),
+                "policy_states" => opstate::POLICY_STATES
+                    .iter()
+                    .map(|state| state.as_str())
+                    .collect(),
+                "kernel_states" => opstate::KERNEL_STATES
+                    .iter()
+                    .map(|state| state.as_str())
+                    .collect(),
+                "skill_phases" => skill::SKILL_PHASES
+                    .iter()
+                    .map(|phase| phase.as_str())
+                    .collect(),
+                "lifecycle_reasons" => skill::LIFECYCLE_REASONS
+                    .iter()
+                    .map(|reason| reason.as_str())
+                    .collect(),
+                "lease_states" => skill::LEASE_STATES
+                    .iter()
+                    .map(|state| state.as_str())
+                    .collect(),
                 "predicate_outcomes" => predicate::OUTCOMES
                     .iter()
                     .map(|outcome| outcome.as_str())

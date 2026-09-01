@@ -241,6 +241,94 @@
         "set": "cell_faults"
       },
       "expected": "[\"unnamed\",\"fact_key_unusable\",\"fact_key_reserved\",\"volume_frame_missing\",\"volume_shape_invalid\",\"fixture_unnamed\",\"duplicate_fixture\",\"parking_channel_unnamed\",\"duplicate_parking_channel\"]"
+    },
+    {
+      "id": "operating_states",
+      "note": "§27's five states plus §48.1's two, ordered least capable first — the order `evaluate` descends through its rules.",
+      "input": {
+        "set": "operating_states"
+      },
+      "expected": "[\"safe\",\"stopping\",\"post\",\"unhomed\",\"hold\",\"degraded\",\"running\"]"
+    },
+    {
+      "id": "state_reasons",
+      "note": "Why the machine is where it is. One per rule, in rule order, because two rules produce `hold` and only the reason tells an operator which one — \"a guard asked for a hold\" and \"there is nothing to run\" are the same state and different errands.",
+      "input": {
+        "set": "state_reasons"
+      },
+      "expected": "[\"rhal_lost\",\"safe_sticky\",\"post_failed\",\"stop_complete\",\"stopping_watchdog\",\"stopping_proximity\",\"stopping_balance\",\"stopping_operator\",\"post_incomplete\",\"homing_pending\",\"kernel_down\",\"guard_hold\",\"no_policy\",\"policy_not_ready\",\"guards_unavailable\",\"rhal_degraded\",\"nominal\"]"
+    },
+    {
+      "id": "stop_causes",
+      "note": "§27's four causes of a controlled stop, and no fifth. Closed on purpose: a fifth cause is a fifth thing that stops a robot.",
+      "input": {
+        "set": "stop_causes"
+      },
+      "expected": "[\"watchdog\",\"proximity\",\"balance\",\"operator\"]"
+    },
+    {
+      "id": "post_verdicts",
+      "note": "§48.2's report rolled up to the one input §27's machine takes from it. Three rather than §48.4's four outcomes, because the four are per check.",
+      "input": {
+        "set": "post_verdicts"
+      },
+      "expected": "[\"passed\",\"failed\",\"incomplete\"]"
+    },
+    {
+      "id": "homing_states",
+      "note": "Whether a body knows where its joints are (§48.3).",
+      "input": {
+        "set": "homing_states"
+      },
+      "expected": "[\"not_required\",\"pending\",\"complete\"]"
+    },
+    {
+      "id": "rhal_states",
+      "note": "Present, degraded, lost. The last is separate from the middle because the difference between them is the whole of SAFE.",
+      "input": {
+        "set": "rhal_states"
+      },
+      "expected": "[\"present\",\"degraded\",\"lost\"]"
+    },
+    {
+      "id": "policy_states",
+      "note": "Nothing to run, something that is not ready, and a lease granted with a plan resolved.",
+      "input": {
+        "set": "policy_states"
+      },
+      "expected": "[\"none\",\"held\",\"ready\"]"
+    },
+    {
+      "id": "kernel_states",
+      "note": "Live or down. §27: \"a robot with a policy and no kernel must not exist\".",
+      "input": {
+        "set": "kernel_states"
+      },
+      "expected": "[\"live\",\"down\"]"
+    },
+    {
+      "id": "skill_phases",
+      "note": "§54.4's stages. `terminal` is one phase rather than three, because the outcome that distinguishes the diagram's three arrows is `skill_outcomes` — the Hub's `EpisodeOutcome`, not a second vocabulary.",
+      "input": {
+        "set": "skill_phases"
+      },
+      "expected": "[\"idle\",\"preconditions\",\"acquiring\",\"running\",\"verifying\",\"terminal\"]"
+    },
+    {
+      "id": "lifecycle_reasons",
+      "note": "Why an invocation is where it is. Four of these end in `terminal` with `aborted`, and only the reason tells an operator whether to call the publisher, look at the cell, find the package holding the arm, or read the black box.",
+      "input": {
+        "set": "lifecycle_reasons"
+      },
+      "expected": "[\"not_invoked\",\"invoked\",\"preconditions_pending\",\"preconditions_refused\",\"preconditions_met\",\"leases_held_by_root\",\"lease_pending\",\"lease_denied\",\"leases_acquired\",\"timeout\",\"hold_lost\",\"guard_tripped\",\"robot_stopped\",\"running\",\"verifying\",\"verdict_pending\",\"judged\",\"terminal\"]"
+    },
+    {
+      "id": "lease_states",
+      "note": "§25.2's arbitration, as the one fact the lifecycle needs from it — deliberately not a copy of the supervisor's richer outcome, because two definitions of a lease result is §31.2's failure in miniature.",
+      "input": {
+        "set": "lease_states"
+      },
+      "expected": "[\"pending\",\"held\",\"denied\"]"
     }
   ]
 }

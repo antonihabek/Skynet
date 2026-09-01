@@ -1,0 +1,666 @@
+{
+  "corpus": "skill",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "nobody-asked",
+      "note": "The value of an invocation nobody has made. Every default is \"not gathered\", and nothing about it advances — the same opening assertion §27's machine has, for the same reason.",
+      "input": {
+        "phase": "idle",
+        "progress": {}
+      },
+      "expected": "{\"changed\":false,\"detail\":\"nothing has asked for this skill\",\"from\":\"idle\",\"outcome\":null,\"reason\":\"not_invoked\",\"release_leases\":false,\"to\":\"idle\"}"
+    },
+    {
+      "id": "invoked",
+      "note": "An invocation arrived. §54.1: a skill is invoked with arguments and terminates, which is the whole distinction from a policy.",
+      "input": {
+        "phase": "idle",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"an invocation arrived\",\"from\":\"idle\",\"outcome\":null,\"reason\":\"invoked\",\"release_leases\":false,\"to\":\"preconditions\"}"
+    },
+    {
+      "id": "preconditions-unevaluated",
+      "note": "The case that matters most in this file. A runtime that has not evaluated §54.2 yet must not be able to start a skill by failing to ask, so `null` holds the machine where it is rather than letting it through. \"Not assume true, which is what free-text preconditions do by construction.\"",
+      "input": {
+        "phase": "preconditions",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": null,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running"
+        }
+      },
+      "expected": "{\"changed\":false,\"detail\":\"the entry predicates have not been evaluated, and an unevaluated precondition is not a satisfied one\",\"from\":\"preconditions\",\"outcome\":null,\"reason\":\"preconditions_pending\",\"release_leases\":false,\"to\":\"preconditions\"}"
+    },
+    {
+      "id": "preconditions-refused",
+      "note": "§54.6's `skill.preconditions.enforced`: refused, with the predicate named. The naming is shared between two functions — `evaluatePreconditions` finds the clause and the lifecycle carries it into what an operator reads — and neither is complete alone.",
+      "input": {
+        "phase": "preconditions",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": false,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running",
+          "refused_clause": "the cell door is closed"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"refused by: the cell door is closed\",\"from\":\"preconditions\",\"outcome\":\"aborted\",\"reason\":\"preconditions_refused\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "preconditions-refused-unnamed",
+      "note": "And a refusal with no clause to name still refuses. A caller that lost the report must not be able to turn a refusal into a start.",
+      "input": {
+        "phase": "preconditions",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": false,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"refused by a precondition\",\"from\":\"preconditions\",\"outcome\":\"aborted\",\"reason\":\"preconditions_refused\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "preconditions-met",
+      "note": "On to §25.2.",
+      "input": {
+        "phase": "preconditions",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"every evaluated precondition held\",\"from\":\"preconditions\",\"outcome\":null,\"reason\":\"preconditions_met\",\"release_leases\":false,\"to\":\"acquiring\"}"
+    },
+    {
+      "id": "nested-call-does-not-acquire",
+      "note": "§54.5: \"leases are held by the root invocation, not re-acquired per call. Nested acquisition is how you get a skill deadlocking against its own child.\" The one composition limit that is not a graph property, and it lives here.",
+      "input": {
+        "phase": "preconditions",
+        "progress": {
+          "invoked": true,
+          "root": false,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"a nested call runs under the root invocation's leases (§54.5)\",\"from\":\"preconditions\",\"outcome\":null,\"reason\":\"leases_held_by_root\",\"release_leases\":false,\"to\":\"running\"}"
+    },
+    {
+      "id": "lease-pending",
+      "note": "A lease nobody has taken is not one that was granted — the same rule as the precondition above, arrived at from §25.2 rather than from §54.2.",
+      "input": {
+        "phase": "acquiring",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "pending",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running"
+        }
+      },
+      "expected": "{\"changed\":false,\"detail\":\"the leases for `required_capabilities` have not been taken\",\"from\":\"acquiring\",\"outcome\":null,\"reason\":\"lease_pending\",\"release_leases\":false,\"to\":\"acquiring\"}"
+    },
+    {
+      "id": "lease-denied",
+      "note": "§25.2 refuses rather than interleaves: \"two policies alternating commands to the same joint produce a trajectory neither was trained on and neither can be held responsible for.\" The token and the holder reach the detail, because an operator has to know which package to stop.",
+      "input": {
+        "phase": "acquiring",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "denied",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running",
+          "lease_token": "manipulation.grasp",
+          "lease_holder": "acme/pick-place"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"`manipulation.grasp` is held by acme/pick-place\",\"from\":\"acquiring\",\"outcome\":\"aborted\",\"reason\":\"lease_denied\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "leases-acquired",
+      "note": "Running.",
+      "input": {
+        "phase": "acquiring",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"every required capability is leased\",\"from\":\"acquiring\",\"outcome\":null,\"reason\":\"leases_acquired\",\"release_leases\":false,\"to\":\"running\"}"
+    },
+    {
+      "id": "running",
+      "note": "Still running is a fixed point, which is what makes this safe to call every cycle from a loop that runs faster than the work.",
+      "input": {
+        "phase": "running",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running"
+        }
+      },
+      "expected": "{\"changed\":false,\"detail\":\"the skill is running\",\"from\":\"running\",\"outcome\":null,\"reason\":\"running\",\"release_leases\":false,\"to\":\"running\"}"
+    },
+    {
+      "id": "timeout",
+      "note": "§54.6's `skill.timeout.enforced`. A 10 s estimate at the default factor of 2 is 20 000 ms, and the comparison is inclusive: a skill that has used exactly its budget has used it.",
+      "input": {
+        "phase": "running",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 20000,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"past 20000 ms, which is the declared estimate times 2\",\"from\":\"running\",\"outcome\":\"aborted\",\"reason\":\"timeout\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "just-inside-the-deadline",
+      "note": "One millisecond the other side of it.",
+      "input": {
+        "phase": "running",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 19999,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running"
+        }
+      },
+      "expected": "{\"changed\":false,\"detail\":\"the skill is running\",\"from\":\"running\",\"outcome\":null,\"reason\":\"running\",\"release_leases\":false,\"to\":\"running\"}"
+    },
+    {
+      "id": "unenforceable-deadline-never-expires",
+      "note": "A skill that declares no duration produces an unenforceable deadline, and `skillDeadline` deliberately does not decide whether such a skill may run. Neither does this: what it does not do is invent a ceiling.",
+      "input": {
+        "phase": "running",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 1000000000000,
+          "deadline": {
+            "deadline_ms": null,
+            "enforceable": false,
+            "factor": 2
+          },
+          "robot": "running"
+        }
+      },
+      "expected": "{\"changed\":false,\"detail\":\"the skill is running\",\"from\":\"running\",\"outcome\":null,\"reason\":\"running\",\"release_leases\":false,\"to\":\"running\"}"
+    },
+    {
+      "id": "hold-lost",
+      "note": "§54.6's `skill.preconditions.rechecked`. §54.2: \"battery dropping below reserve mid-skill should stop the skill, not be discovered at the end.\"",
+      "input": {
+        "phase": "running",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running",
+          "hold_lost": true
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"a precondition marked `hold` stopped being true, and §54.2 re-checks those every cycle rather than only at entry\",\"from\":\"running\",\"outcome\":\"aborted\",\"reason\":\"hold_lost\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "guard-tripped",
+      "note": "A skill is not an exemption from the kernel.",
+      "input": {
+        "phase": "running",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running",
+          "guard_tripped": true
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"a guard tripped, and a skill is not an exemption\",\"from\":\"running\",\"outcome\":\"aborted\",\"reason\":\"guard_tripped\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "robot-stopping",
+      "note": "§54.4's `running` row read through §27's machine: `stopping` is not a state a policy commands in, so a skill running on a robot in it is over.",
+      "input": {
+        "phase": "running",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "stopping"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"§27 says the robot is `stopping`, which is not a state a policy commands in\",\"from\":\"running\",\"outcome\":\"aborted\",\"reason\":\"robot_stopped\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "robot-safe",
+      "note": "§54.4's `running` row read through §27's machine: `safe` is not a state a policy commands in, so a skill running on a robot in it is over.",
+      "input": {
+        "phase": "running",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "safe"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"§27 says the robot is `safe`, which is not a state a policy commands in\",\"from\":\"running\",\"outcome\":\"aborted\",\"reason\":\"robot_stopped\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "robot-post",
+      "note": "§54.4's `running` row read through §27's machine: `post` is not a state a policy commands in, so a skill running on a robot in it is over.",
+      "input": {
+        "phase": "running",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "post"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"§27 says the robot is `post`, which is not a state a policy commands in\",\"from\":\"running\",\"outcome\":\"aborted\",\"reason\":\"robot_stopped\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "robot-unhomed",
+      "note": "§54.4's `running` row read through §27's machine: `unhomed` is not a state a policy commands in, so a skill running on a robot in it is over.",
+      "input": {
+        "phase": "running",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "unhomed"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"§27 says the robot is `unhomed`, which is not a state a policy commands in\",\"from\":\"running\",\"outcome\":\"aborted\",\"reason\":\"robot_stopped\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "robot-hold-does-not-abort",
+      "note": "The exclusion worth pinning. `hold` is where §27's machine sits between a lease being granted and a policy actually commanding, so aborting on it would kill every skill in the moment it started. A guard asking for a hold arrives as `guard_tripped` instead.",
+      "input": {
+        "phase": "running",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "hold"
+        }
+      },
+      "expected": "{\"changed\":false,\"detail\":\"the skill is running\",\"from\":\"running\",\"outcome\":null,\"reason\":\"running\",\"release_leases\":false,\"to\":\"running\"}"
+    },
+    {
+      "id": "robot-degraded-does-not-abort",
+      "note": "§27's `DEGRADED` row runs. §45.5 makes an unavailable guard the ordinary case, and a skill refusing to proceed on one would refuse on most real robots.",
+      "input": {
+        "phase": "running",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "degraded"
+        }
+      },
+      "expected": "{\"changed\":false,\"detail\":\"the skill is running\",\"from\":\"running\",\"outcome\":null,\"reason\":\"running\",\"release_leases\":false,\"to\":\"running\"}"
+    },
+    {
+      "id": "the-cause-outranks-its-consequence",
+      "note": "Every abort condition at once. A timeout makes the OS stop the skill under a controlled stop and a guard trip stops the robot, so both *produce* a robot that is no longer commanding — and reporting the robot state here would hide the cause behind its own consequence. Timeout wins.",
+      "input": {
+        "phase": "running",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 20000,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "stopping",
+          "hold_lost": true,
+          "guard_tripped": true
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"past 20000 ms, which is the declared estimate times 2\",\"from\":\"running\",\"outcome\":\"aborted\",\"reason\":\"timeout\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "finished",
+      "note": "Verified rather than believed. §54.3: \"a skill that judges its own success is a skill that always succeeds.\"",
+      "input": {
+        "phase": "running",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running",
+          "finished": true
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"the skill returned; §54.3 has not judged it yet\",\"from\":\"running\",\"outcome\":null,\"reason\":\"verifying\",\"release_leases\":false,\"to\":\"verifying\"}"
+    },
+    {
+      "id": "verdict-pending",
+      "note": "And an unjudged skill is not a successful one.",
+      "input": {
+        "phase": "verifying",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running",
+          "finished": true
+        }
+      },
+      "expected": "{\"changed\":false,\"detail\":\"the success criteria have not been judged, and §54.3 will not let the skill judge itself\",\"from\":\"verifying\",\"outcome\":null,\"reason\":\"verdict_pending\",\"release_leases\":false,\"to\":\"verifying\"}"
+    },
+    {
+      "id": "judged-success",
+      "note": "§54.3's verdict reaches the terminal phase unchanged. `success` is the Hub's `EpisodeOutcome` and not a second vocabulary, so an aborted skill becomes a labelled training example rather than a gap.",
+      "input": {
+        "phase": "verifying",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running",
+          "finished": true,
+          "outcome": "success"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"§54.3 judged this success\",\"from\":\"verifying\",\"outcome\":\"success\",\"reason\":\"judged\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "judged-failure",
+      "note": "§54.3's verdict reaches the terminal phase unchanged. `failure` is the Hub's `EpisodeOutcome` and not a second vocabulary, so an aborted skill becomes a labelled training example rather than a gap.",
+      "input": {
+        "phase": "verifying",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running",
+          "finished": true,
+          "outcome": "failure"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"§54.3 judged this failure\",\"from\":\"verifying\",\"outcome\":\"failure\",\"reason\":\"judged\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "judged-aborted",
+      "note": "§54.3's verdict reaches the terminal phase unchanged. `aborted` is the Hub's `EpisodeOutcome` and not a second vocabulary, so an aborted skill becomes a labelled training example rather than a gap.",
+      "input": {
+        "phase": "verifying",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running",
+          "finished": true,
+          "outcome": "aborted"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"§54.3 judged this aborted\",\"from\":\"verifying\",\"outcome\":\"aborted\",\"reason\":\"judged\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "judged-unlabeled",
+      "note": "§54.3's verdict reaches the terminal phase unchanged. `unlabeled` is the Hub's `EpisodeOutcome` and not a second vocabulary, so an aborted skill becomes a labelled training example rather than a gap.",
+      "input": {
+        "phase": "verifying",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running",
+          "finished": true,
+          "outcome": "unlabeled"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"§54.3 judged this unlabeled\",\"from\":\"verifying\",\"outcome\":\"unlabeled\",\"reason\":\"judged\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "abort-during-verification",
+      "note": "A skill whose robot fell over during verification did not succeed at anything, whatever a criterion evaluated to on the way down. The abort outranks the verdict.",
+      "input": {
+        "phase": "verifying",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running",
+          "finished": true,
+          "outcome": "success",
+          "guard_tripped": true
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"a guard tripped, and a skill is not an exemption\",\"from\":\"verifying\",\"outcome\":\"aborted\",\"reason\":\"guard_tripped\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "already-over",
+      "note": "A skill already terminal releases nothing. A release emitted every cycle after a skill ended would be a release racing the next invocation's acquisition, which is the one way §25.2's arbitration can be lost by the thing that implements it.",
+      "input": {
+        "phase": "terminal",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running",
+          "outcome": "success"
+        }
+      },
+      "expected": "{\"changed\":false,\"detail\":\"this invocation is over\",\"from\":\"terminal\",\"outcome\":\"success\",\"reason\":\"terminal\",\"release_leases\":false,\"to\":\"terminal\"}"
+    }
+  ]
+}

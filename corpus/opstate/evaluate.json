@@ -1,0 +1,521 @@
+{
+  "corpus": "opstate",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "nominal",
+      "note": "Booted, homed, kernel live, body present, policy holding its lease. Every rule above `nominal` declined, which is the strongest statement this corpus makes about the ordering: the reason names the last rule standing.",
+      "input": {
+        "previous": "hold",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready"
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"hold\",\"reason\":\"nominal\",\"to\":\"running\",\"warning\":true}"
+    },
+    {
+      "id": "observed-nothing",
+      "note": "The most important case in this file. A caller that has observed nothing has established nothing, and every default is the least capable reading — so an empty conditions object is a robot in SAFE with a lost RHAL, not a robot licensed to run by an object literal.",
+      "input": {
+        "previous": "post",
+        "conditions": {}
+      },
+      "expected": "{\"changed\":true,\"from\":\"post\",\"reason\":\"rhal_lost\",\"to\":\"safe\",\"warning\":false}"
+    },
+    {
+      "id": "observed-nothing-from-running",
+      "note": "The same conditions from the other end. Nothing about having been running survives an observation that establishes nothing.",
+      "input": {
+        "previous": "running",
+        "conditions": {}
+      },
+      "expected": "{\"changed\":true,\"from\":\"running\",\"reason\":\"rhal_lost\",\"to\":\"safe\",\"warning\":false}"
+    },
+    {
+      "id": "rhal-lost",
+      "note": "The kernel lost the body. First rule, because it is the condition under which nothing else can be known: no observed joint state, no estop reading, no guard that can evaluate. It outranks a ready policy and a passing self-test.",
+      "input": {
+        "previous": "running",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "lost",
+          "policy": "ready"
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"running\",\"reason\":\"rhal_lost\",\"to\":\"safe\",\"warning\":false}"
+    },
+    {
+      "id": "post-failed",
+      "note": "§48.2: SAFE, not DEGRADED. Sticky, needs a human, \"because a robot that failed its own self-test should not be talked into running by a reconcile loop\".",
+      "input": {
+        "previous": "post",
+        "conditions": {
+          "post": "failed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready"
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"post\",\"reason\":\"post_failed\",\"to\":\"safe\",\"warning\":false}"
+    },
+    {
+      "id": "stop-complete",
+      "note": "The ramp finished. §27 puts this in the SAFE row beside a lost RHAL.",
+      "input": {
+        "previous": "stopping",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready",
+          "stop": "operator",
+          "stop_settled": true
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"stopping\",\"reason\":\"stop_complete\",\"to\":\"safe\",\"warning\":false}"
+    },
+    {
+      "id": "stopping-watchdog",
+      "note": "§46 fired. The cause reaches the reason, because \"the robot is stopping\" and \"the watchdog stopped it\" send an operator to different places.",
+      "input": {
+        "previous": "running",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready",
+          "stop": "watchdog"
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"running\",\"reason\":\"stopping_watchdog\",\"to\":\"stopping\",\"warning\":false}"
+    },
+    {
+      "id": "stopping-proximity",
+      "note": "Something came inside the stop distance.",
+      "input": {
+        "previous": "running",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready",
+          "stop": "proximity"
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"running\",\"reason\":\"stopping_proximity\",\"to\":\"stopping\",\"warning\":false}"
+    },
+    {
+      "id": "stopping-balance",
+      "note": "The balance guard.",
+      "input": {
+        "previous": "running",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready",
+          "stop": "balance"
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"running\",\"reason\":\"stopping_balance\",\"to\":\"stopping\",\"warning\":false}"
+    },
+    {
+      "id": "stopping-operator",
+      "note": "A person asked.",
+      "input": {
+        "previous": "running",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready",
+          "stop": "operator"
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"running\",\"reason\":\"stopping_operator\",\"to\":\"stopping\",\"warning\":false}"
+    },
+    {
+      "id": "stop-during-post",
+      "note": "An operator stop is honoured whatever the robot is doing, including booting — which is why the stop rule sits above the POST rules rather than below them.",
+      "input": {
+        "previous": "post",
+        "conditions": {
+          "post": "incomplete",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready",
+          "stop": "operator"
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"post\",\"reason\":\"stopping_operator\",\"to\":\"stopping\",\"warning\":false}"
+    },
+    {
+      "id": "settled-with-no-stop",
+      "note": "`stop_settled` is read only when a stop is commanded. A caller that left it set between stops would otherwise pin every robot on a fleet in SAFE.",
+      "input": {
+        "previous": "running",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready",
+          "stop_settled": true
+        }
+      },
+      "expected": "{\"changed\":false,\"from\":\"running\",\"reason\":\"nominal\",\"to\":\"running\",\"warning\":false}"
+    },
+    {
+      "id": "post-incomplete",
+      "note": "§48.4’s third answer, and the distinction the section spends its length on. Nothing failed and nothing was established, so this robot does not need a human — it needs the rest of the operating system. `post`, not `safe`.",
+      "input": {
+        "previous": "post",
+        "conditions": {
+          "post": "incomplete",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready"
+        }
+      },
+      "expected": "{\"changed\":false,\"from\":\"post\",\"reason\":\"post_incomplete\",\"to\":\"post\",\"warning\":false}"
+    },
+    {
+      "id": "post-unstated",
+      "note": "A conditions document that does not mention the self-test is a self-test that has not run, which is `incomplete` rather than a pass.",
+      "input": {
+        "previous": "post",
+        "conditions": {
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready"
+        }
+      },
+      "expected": "{\"changed\":false,\"from\":\"post\",\"reason\":\"post_incomplete\",\"to\":\"post\",\"warning\":false}"
+    },
+    {
+      "id": "homing-pending",
+      "note": "§48.1: joint positions are unknown, forward kinematics is meaningless, every pose-dependent guard is unavailable. Homing is the only motion permitted (§48.3).",
+      "input": {
+        "previous": "post",
+        "conditions": {
+          "post": "passed",
+          "homing": "pending",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready"
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"post\",\"reason\":\"homing_pending\",\"to\":\"unhomed\",\"warning\":false}"
+    },
+    {
+      "id": "homing-not-required",
+      "note": "\"A body that needs no homing declares so and the state is skipped.\"",
+      "input": {
+        "previous": "post",
+        "conditions": {
+          "post": "passed",
+          "homing": "not_required",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready"
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"post\",\"reason\":\"nominal\",\"to\":\"running\",\"warning\":true}"
+    },
+    {
+      "id": "homing-unstated",
+      "note": "And a body that has declared nothing is a body whose joint positions are unknown, so silence reads as `pending` rather than as `not_required`.",
+      "input": {
+        "previous": "post",
+        "conditions": {
+          "post": "passed",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready"
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"post\",\"reason\":\"homing_pending\",\"to\":\"unhomed\",\"warning\":false}"
+    },
+    {
+      "id": "kernel-down",
+      "note": "§27: \"a robot with a policy and no kernel must not exist, so the runtime refuses to start if the kernel is not live\". Refusing to start is HOLD — the safe resting state — rather than SAFE: nothing has gone wrong, and a sticky state needing a human would be the wrong answer for a kernel that is merely still starting.",
+      "input": {
+        "previous": "hold",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "down",
+          "rhal": "present",
+          "policy": "ready"
+        }
+      },
+      "expected": "{\"changed\":false,\"from\":\"hold\",\"reason\":\"kernel_down\",\"to\":\"hold\",\"warning\":false}"
+    },
+    {
+      "id": "kernel-down-outranks-a-ready-policy",
+      "note": "A policy ready to command a body with no kernel between it and the joints is the one arrangement §27 refuses outright, and it is refused from `running` as readily as from `hold`.",
+      "input": {
+        "previous": "running",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "down",
+          "rhal": "present",
+          "policy": "ready",
+          "guards_unavailable": true
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"running\",\"reason\":\"kernel_down\",\"to\":\"hold\",\"warning\":false}"
+    },
+    {
+      "id": "guard-hold",
+      "note": "§27’s HOLD row, first half. A guard asking for a hold outranks a policy that would like to run, which is the whole point of a guard.",
+      "input": {
+        "previous": "running",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready",
+          "guard_hold": true
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"running\",\"reason\":\"guard_hold\",\"to\":\"hold\",\"warning\":false}"
+    },
+    {
+      "id": "no-policy",
+      "note": "§27’s HOLD row, second half. There is nothing to run.",
+      "input": {
+        "previous": "running",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "none"
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"running\",\"reason\":\"no_policy\",\"to\":\"hold\",\"warning\":false}"
+    },
+    {
+      "id": "policy-not-ready",
+      "note": "The same state and a completely different situation: there is something to run and it has no lease or no plan. Only this one has a remedy — §25.2’s arbitration table is where an operator goes to find out who else is holding the arm — which is why the reason is split and the state is not.",
+      "input": {
+        "previous": "hold",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "held"
+        }
+      },
+      "expected": "{\"changed\":false,\"from\":\"hold\",\"reason\":\"policy_not_ready\",\"to\":\"hold\",\"warning\":false}"
+    },
+    {
+      "id": "guards-unavailable",
+      "note": "A guard is unavailable under a ready policy. §45.5 is the usual source, and it is an ordinary condition rather than an exotic one.",
+      "input": {
+        "previous": "running",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready",
+          "guards_unavailable": true
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"running\",\"reason\":\"guards_unavailable\",\"to\":\"degraded\",\"warning\":false}"
+    },
+    {
+      "id": "rhal-degraded",
+      "note": "The body reports RHAL_DEGRADED and is still answering. Distinct from `lost`, which is the whole of SAFE.",
+      "input": {
+        "previous": "running",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "degraded",
+          "policy": "ready"
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"running\",\"reason\":\"rhal_degraded\",\"to\":\"degraded\",\"warning\":false}"
+    },
+    {
+      "id": "degraded-prefers-the-specific-reason",
+      "note": "Both conditions hold. The unavailable guard is reported, because it names something an operator can look up and \"the body says it is impaired\" does not.",
+      "input": {
+        "previous": "running",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "degraded",
+          "policy": "ready",
+          "guards_unavailable": true
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"running\",\"reason\":\"guards_unavailable\",\"to\":\"degraded\",\"warning\":false}"
+    },
+    {
+      "id": "an-unavailable-guard-with-no-policy-is-hold",
+      "note": "The decision the ordering encodes, and the one place this machine could most plausibly have been built differently. §27’s DEGRADED row says the robot \"**runs**, reports, and refuses any package whose grants depend on the failed guard\" — so `degraded` is the impaired *running* state, not a third resting one. Calling this robot degraded would tell a console it is running while it stands still.",
+      "input": {
+        "previous": "hold",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "none",
+          "guards_unavailable": true
+        }
+      },
+      "expected": "{\"changed\":false,\"from\":\"hold\",\"reason\":\"no_policy\",\"to\":\"hold\",\"warning\":false}"
+    },
+    {
+      "id": "entering-degraded-sounds-the-tone",
+      "note": "The bug the string comparison froze as correct. `hold → degraded` is a policy beginning to command a body; it is not a transition into `running`, and the old predicate compared against that literal. A robot with a lapsed calibration would have begun autonomous motion in silence.",
+      "input": {
+        "previous": "hold",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready",
+          "guards_unavailable": true
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"hold\",\"reason\":\"guards_unavailable\",\"to\":\"degraded\",\"warning\":true}"
+    },
+    {
+      "id": "safe-is-sticky",
+      "note": "\"A robot that recovers itself from a safety stop is a robot that resumes moving while somebody is standing next to it working out what happened.\" Every condition is nominal and it does not move.",
+      "input": {
+        "previous": "safe",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready"
+        }
+      },
+      "expected": "{\"changed\":false,\"from\":\"safe\",\"reason\":\"safe_sticky\",\"to\":\"safe\",\"warning\":false}"
+    },
+    {
+      "id": "safe-cleared",
+      "note": "The explicit human action §27 requires, by name — because §13 takes the transition and \"somebody cleared the safety stop\" is worth exactly as much as the name of the somebody. The tone sounds, which is §49.1’s \"resumption after a stop\".",
+      "input": {
+        "previous": "safe",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready",
+          "cleared_by": "operator:ana"
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"safe\",\"reason\":\"nominal\",\"to\":\"running\",\"warning\":true}"
+    },
+    {
+      "id": "safe-cleared-by-nobody",
+      "note": "An empty clearance is not a clearance. A caller with nobody to name should not have one, and `\"\"` must not be a way to unstick SAFE in one edition and not the other.",
+      "input": {
+        "previous": "safe",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready",
+          "cleared_by": ""
+        }
+      },
+      "expected": "{\"changed\":false,\"from\":\"safe\",\"reason\":\"safe_sticky\",\"to\":\"safe\",\"warning\":false}"
+    },
+    {
+      "id": "safe-cleared-while-the-condition-persists",
+      "note": "What made it unnecessary to invent a destination for a cleared SAFE, which §27 does not name. Clearing clears the *stickiness*; the conditions still decide. A robot whose estop is still pressed goes straight back — with the reason that put it there rather than the one it was cleared by.",
+      "input": {
+        "previous": "safe",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready",
+          "stop": "operator",
+          "stop_settled": true,
+          "cleared_by": "operator:ana"
+        }
+      },
+      "expected": "{\"changed\":false,\"from\":\"safe\",\"reason\":\"stop_complete\",\"to\":\"safe\",\"warning\":false}"
+    },
+    {
+      "id": "safe-with-a-failing-self-test-reports-the-self-test",
+      "note": "And an uncleared SAFE whose condition still holds reports the condition rather than the stickiness: `safe_sticky` would send an operator to press a button they already pressed.",
+      "input": {
+        "previous": "safe",
+        "conditions": {
+          "post": "failed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready"
+        }
+      },
+      "expected": "{\"changed\":false,\"from\":\"safe\",\"reason\":\"post_failed\",\"to\":\"safe\",\"warning\":false}"
+    },
+    {
+      "id": "re-evaluating-the-state-it-produced",
+      "note": "Running from `running` under unchanged conditions changes nothing and sounds nothing. §33.3’s loop runs on a timer and on every event, so a machine that re-announced itself would fill a black box with transitions that did not happen.",
+      "input": {
+        "previous": "running",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready"
+        }
+      },
+      "expected": "{\"changed\":false,\"from\":\"running\",\"reason\":\"nominal\",\"to\":\"running\",\"warning\":false}"
+    },
+    {
+      "id": "re-entering-hold-from-hold",
+      "note": "The same property on the resting side.",
+      "input": {
+        "previous": "hold",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "none"
+        }
+      },
+      "expected": "{\"changed\":false,\"from\":\"hold\",\"reason\":\"no_policy\",\"to\":\"hold\",\"warning\":false}"
+    }
+  ]
+}
