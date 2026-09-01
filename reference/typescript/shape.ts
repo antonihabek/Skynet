@@ -28,6 +28,11 @@ import {
   guardsFedBy, validityDetail, type GuardUnavailable, type Validity,
 } from './calibration.ts'
 import {
+  commandsAutonomously, isSafeState, isSticky, OPERATING_STATES, warningRequired,
+  type Transition,
+} from './opstate.ts'
+import type { SkillTransition } from './skill.ts'
+import {
   CHAIN, WINDOWS, checkNesting, hostBlockedByCommandLoss, type Windows,
 } from './watchdog.ts'
 import { toRecord, type Frame as ObservationFrame } from './observation.ts'
@@ -535,5 +540,63 @@ export function shapeCellLayer(layer: WorkspaceLayer | null): unknown {
         shape: shapeVolumeShape(volume.shape),
       })),
     },
+  }
+}
+
+/** §27's machine, as one evaluation. Every field is a primitive; there is nothing nullable here. */
+export function shapeTransition(transition: Transition): unknown {
+  return {
+    from: transition.from,
+    to: transition.to,
+    reason: transition.reason,
+    changed: transition.changed,
+    warning: transition.warning,
+  }
+}
+
+/**
+ * The three properties other sections read off a state, for every state.
+ *
+ * Pinned beside the transitions because §33.4's barrier, §49.1's tone and §27's stickiness are read
+ * off the *state* rather than off the transition — an edition could agree about every evaluation
+ * while disagreeing about what a state means, and no evaluation case would see it.
+ */
+export function shapeStateProperties(): unknown {
+  return OPERATING_STATES.map(state => ({
+    state,
+    safe_state: isSafeState(state),
+    commands: commandsAutonomously(state),
+    sticky: isSticky(state),
+  }))
+}
+
+/**
+ * Every ordered pair of states and whether it sounds §49.1's tone.
+ *
+ * Forty-nine rows, which is small enough to freeze in full — and the only way to be sure two
+ * editions agree about a predicate whose failure mode is silence.
+ */
+export function shapeWarningMatrix(): unknown {
+  return OPERATING_STATES.flatMap(
+    from => OPERATING_STATES.map(to => ({ from, to, warning: warningRequired(from, to) })),
+  )
+}
+
+/**
+ * §54.4's lifecycle, as one evaluation.
+ *
+ * `outcome` is **nullable rather than absent**, which is this file's rule applied to the field it
+ * matters most for: "this transition is not terminal" is a fact, and a consumer that had to
+ * distinguish a missing key from a null would get it wrong exactly once.
+ */
+export function shapeSkillTransition(transition: SkillTransition): unknown {
+  return {
+    from: transition.from,
+    to: transition.to,
+    reason: transition.reason,
+    outcome: nullable(transition.outcome),
+    detail: transition.detail,
+    release_leases: transition.release_leases,
+    changed: transition.changed,
   }
 }

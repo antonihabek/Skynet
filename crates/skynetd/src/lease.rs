@@ -23,6 +23,8 @@
 //! given a slightly higher one, and then a third, and the property that exactly one thing can
 //! pre-empt is gone with nobody having decided to give it up.
 
+use skynet_contracts::skill::{LeaseState, Progress};
+
 /// Why a lease request was refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeaseDenial {
@@ -185,5 +187,100 @@ impl LeaseTable {
             .collect();
         self.leases.retain(|lease| lease.holder != holder);
         released
+    }
+}
+/// What acquiring a whole skill's `required_capabilities` produced.
+///
+/// §54.4's `acquiring` stage takes leases for a **list** of tokens, and a list is where the
+/// single-token rule above needs one more property that §25.2 does not have to state because it is
+/// only visible from here: **acquisition is all or nothing.**
+///
+/// A skill that got two of its three tokens holds two joints it cannot use and refuses them to
+/// everything else, and the symptom is a second package that will not start with no reason on any
+/// screen — the same symptom as the leaked lease [`LeaseTable::release_all`] exists to prevent,
+/// arriving through the front door instead. So a denial rolls back everything this call took.
+///
+/// It rolls back only what **this call** took. A requester that already held a token before asking
+/// keeps it, because it is not this acquisition's to give away.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Acquisition {
+    /// The one fact §54.4's lifecycle acts on.
+    pub state: LeaseState,
+    /// The token that was refused, when one was.
+    pub token: Option<String>,
+    /// Who holds it, when somebody does. `None` for a token the requester was never granted, which
+    /// is a different errand: nobody has the arm, this package may not ask for it.
+    pub holder: Option<String>,
+    /// Everything taken, in request order — empty after a rollback.
+    pub taken: Vec<String>,
+    /// Anything displaced, for §25.2's black box event.
+    pub displaced: Vec<(String, String)>,
+}
+
+impl LeaseTable {
+    /// Take every token a skill declared, or none of them.
+    ///
+    /// `granted` answers "does this package hold a grant for this token", which is admission's
+    /// decision (§8) rather than this table's. It is a closure rather than a list so that the
+    /// caller's own grant lookup stays the single source of that answer.
+    pub fn acquire_all<F: Fn(&str) -> bool>(
+        &mut self,
+        requester: &str,
+        tokens: &[String],
+        granted: F,
+        safety_behaviour: bool,
+    ) -> Acquisition {
+        let mut taken: Vec<String> = Vec::new();
+        let mut displaced: Vec<(String, String)> = Vec::new();
+
+        for token in tokens {
+            match self.acquire(requester, token, granted(token), safety_behaviour) {
+                PreemptionOutcome::Acquired => taken.push(token.clone()),
+                PreemptionOutcome::Preempted { displaced: holder } => {
+                    taken.push(token.clone());
+                    displaced.push((token.clone(), holder));
+                }
+                // Already ours, from an earlier pass of a level-triggered loop. Not taken *here*,
+                // so a rollback below must not give it away.
+                PreemptionOutcome::AlreadyHeld => {}
+                PreemptionOutcome::Denied(denial) => {
+                    for rollback in &taken {
+                        self.release(requester, rollback);
+                    }
+                    return Acquisition {
+                        state: LeaseState::Denied,
+                        token: Some(token.clone()),
+                        holder: match denial {
+                            LeaseDenial::Held { holder } => Some(holder),
+                            LeaseDenial::NotGranted => None,
+                        },
+                        taken: Vec::new(),
+                        displaced: Vec::new(),
+                    };
+                }
+            }
+        }
+
+        Acquisition {
+            state: LeaseState::Held,
+            token: None,
+            holder: None,
+            taken,
+            displaced,
+        }
+    }
+}
+
+impl Acquisition {
+    /// Fill in §54.4's `acquiring` evidence.
+    ///
+    /// This is the projection the contract's own documentation promised lived at a call site rather
+    /// than as a second enumeration: [`LeaseState`] answers the one part the lifecycle acts on, and
+    /// [`PreemptionOutcome`] keeps the rest. Writing it here rather than in `skynet-contracts` is
+    /// what keeps the richer answer out of a `no_std` crate that has no use for it.
+    pub fn into_progress(self, progress: &mut Progress) {
+        progress.leases = self.state;
+        progress.lease_token = self.token.unwrap_or_default();
+        progress.lease_holder = self.holder.unwrap_or_default();
     }
 }

@@ -5686,3 +5686,488 @@ a decision; all three are blocked on the same missing loop.
 
 Neither repository has been committed or pushed. Both trees are clean of build artifacts, and every
 check above was run against the working tree as it stands.
+## 2026-09-01 (eighteenth) — §27's state machine, declared at last, and the four holes it closes
+
+Six sections describe §27's operating state machine. None of them declared it, and the last two
+sessions recorded that as a finding rather than fixing it. The most explicit record is a comment
+this repository wrote about its own code:
+
+> The states are §27's, as strings rather than as an enumeration, because **§27's state machine does
+> not exist in this codebase yet** — `post.rs` refers to it in prose and nothing declares it. A
+> function here that invented the enumeration would be putting §27's design decision in §49's
+> module, which is how a state machine ends up with two definitions. Strings until there is one, and
+> then this becomes a two-line change.
+
+There is one now.
+
+### What the machine is, and the decision that shaped it
+
+`crates/skynet-contracts/src/opstate.rs` and `reference/typescript/opstate.ts`. Seven states —
+§27's `HOLD`, `RUNNING`, `DEGRADED`, `STOPPING`, `SAFE`, with §48.1's `POST` and `UNHOMED` in front
+of them — eight observed conditions, seventeen reasons, and one function.
+
+**It is a function of what is observed, not a table of edges**, and that is §33.3's decision applied
+to state rather than to packages:
+
+> An edge-triggered supervisor acts on transitions … Miss one edge, because the process was
+> restarting or the disk was full or the network dropped mid-message, and the system stays wrong
+> forever. A level-triggered supervisor asks "what is true, what should be true, what is the
+> difference" and converges from *any* starting state, including states nobody anticipated.
+
+§27 gives a table of **entry conditions**, not a list of edges, and that is the shape it should
+keep. `evaluate(previous, conditions)` is total, pure and clockless; every state is reachable from
+every other by the conditions changing; there is no edge to miss and recovery is not a special case.
+Re-evaluating from the state it produced changes nothing, which is what makes it safe to call from a
+loop that runs on a timer and on every event.
+
+**The machine has exactly one bit of memory, and that bit is `SAFE`.** `previous` is an argument for
+one reason — §27's "`SAFE` is deliberately sticky" — and being explicit about the one exception is
+what keeps it from quietly becoming three. A machine that remembered why it was degraded, or which
+policy was running before the stop, would be a machine whose state could disagree with the robot's.
+
+**Every default is the least capable reading.** `Conditions::default()` is a robot with no kernel,
+no RHAL, no self-test and homing pending, and it evaluates to `safe` / `rhal_lost`. A caller who has
+observed nothing has established nothing, and a machine that read "nobody told me about the kernel"
+as "the kernel is live" would be the single most dangerous line in this repository. It is the first
+assertion in the suite and the second case in the corpus.
+
+### Two things §27 does not say, and how they were answered without inventing
+
+**Where a cleared `SAFE` goes.** §27 says leaving it "requires an explicit human action" and never
+names a destination. Nothing here invents one: a clearance clears the **stickiness**, and the state
+is then whatever the conditions say. That has the property worth having and no design in it — an
+operator clearing `SAFE` on a robot whose POST still fails, or whose estop is still pressed, gets
+`SAFE` straight back, and gets *the reason that put it there* rather than the one they cleared.
+`safe_sticky` is reported only when every condition would otherwise have let the robot go.
+
+**Whether `DEGRADED` outranks `HOLD`.** It does not, and this is the one place the machine could
+most plausibly have been built differently. §27's `DEGRADED` row says the robot "**runs**, reports,
+and refuses any package whose grants depend on the failed guard" — so it is the impaired *running*
+state, not a third resting one. The degraded rules therefore sit below the policy rules: a robot with
+an unavailable guard and nothing to run is `hold`, because calling it degraded would tell a console a
+robot is running while it stands still. Inverting exactly this ordering is the change used to prove
+the corpus bites, below.
+
+The rest of the ordering is §33.4's asymmetry, stated out loud: *"anything that reduces what the
+robot may do applies immediately … because making a robot less capable is never the dangerous
+direction."* The rules are tried least-capable-first, and where two conditions both hold the one that
+stops the robot wins — which is also what an operator needs, because the condition holding the robot
+is the condition they have to clear.
+
+### §49.1's tone was under-inclusive, and the comment saying why is what found it
+
+The old predicate was `to == "running" && from != "running"` over two strings. `hold → degraded` is a
+policy beginning to command a body. It is not a transition into `running`, so **the tone did not
+sound** — on a robot with a lapsed calibration, which §45.5 makes the ordinary case rather than the
+exotic one. A safety control whose failure mode is silence had a hole in it for exactly the robots
+most likely to fall through it.
+
+Phrased over `commands_autonomously()` the two spellings cannot come apart, and the rule now matches
+the sentence it implements rather than one example from it. "Resumption after a stop" falls out:
+`stopping` and `safe` command nothing, so leaving either for a commanding state sounds.
+
+The function **moved** rather than being fixed in place. It belongs beside the state machine, not
+beside package admission — filing it with the reserved-token rule because both sentences are in §49
+would have been filing by section number rather than by what the code depends on. `package.ts` keeps
+`hri.warning`; `opstate.ts` gets `warningRequired`.
+
+Three tests went with it, including the one whose own comment said it "is the one that should be
+deleted" once the states stopped being prose. One of its assertions was
+`!warning_required("hold", "degraded")` — the wrong answer, frozen as correct, in a test written to
+protect case-insensitivity.
+
+### The four string-typed holes, closed
+
+* **`post.rs`** returned `"safe" | "unhomed" | "post_incomplete"` as a `&'static str` described as
+  "the state §48.1's machine should be in after this". It was never quite that. POST supplies **one
+  of §27's eight conditions**, and it now returns a `PostVerdict`; §48.4's three words are still
+  produced, *derived from* that verdict so the two cannot disagree about a robot. A self-test cannot
+  know whether the body needs homing, whether the kernel came up, or whether anybody stopped the
+  robot while it ran.
+* **`SafeState`** was a newtype whose own comment worried that "false at a call site that also takes
+  three other booleans is how a barrier gets inverted", and every caller asserted it anyway.
+  `SafeState::from_state` reads it off the machine, and a caller asserting a safe state while a
+  policy commands is no longer expressible. `stopping` is the entry that makes it worth having: a
+  robot mid-ramp is the state most likely to be declared safe by somebody watching it slow down.
+* **`Daemon::refresh_safe_state`** now *narrows* the operator's declaration by the machine rather
+  than replacing it — §33.4's asymmetry applied to the two sources of one fact. Either may close the
+  barrier; neither opens it alone. On this edition the machine says `safe`, so the declaration still
+  decides; when the kernel channel exists and reports a policy commanding, a file somebody left set
+  to `yes` stops being able to outvote it. The rule is in place before anything can trip it, and
+  there is a test asserting it from that direction.
+* **The console's Status panel** said, in as many words: *"State machine — unreported: §27's HOLD /
+  RUNNING / DEGRADED / STOPPING / SAFE needs the kernel and the policy runtime, and neither is
+  written."* It has its own panel now.
+
+`skynetd` took its first dependency on `skynet-contracts`, and the rule that had kept it out is the
+one that let it in: *"adding the dependency before there is code that calls it would make the
+manifest a statement about what somebody intends rather than about what this crate does."* There is
+code that calls it. CI's `skynetd cannot reach the RHAL` invariant is unaffected — the edge is
+`skynet-json`, `skynet-kernel`, `skynet-sha256`, all `no_std`, none of them the RHAL — and the
+purity check still passes because the contracts do no I/O.
+
+### `GET /state`, and the field that keeps it from being a lie
+
+The state, the reason, the three properties other sections read off it, and **which of §27's eight
+conditions anybody actually observed**. One: the self-test. §33.1 keeps `skynetd` away from the
+actuator path, so the kernel, the RHAL, the guard set, the stop and the homing state are on the far
+side of a line this process may not cross — which is §48.5's finding about POST's own table arriving
+a second time, from a different direction.
+
+That is not a placeholder producing a plausible-looking state. It is the true one, and `post.rs`
+already said as much about the same edition: *"`may_run` is false, and that is the correct answer for
+a robot with no kernel, no driver and no proven stop path."* What the machine adds is that the answer
+now carries a **reason naming the missing input**, instead of being a string three modules spelled
+differently.
+
+### Looking at the console found three things, which is now five sessions running
+
+The fixture was rendered and read, which is the practice that has found something every time.
+
+1. **The fixture drew a robot mid-boot.** It never called `refresh_operating_state`, so the panel
+   showed `post` / `post_incomplete` while the rest of the fixture described a robot with a body, a
+   trust store and four calibration states. The whole point of building the fixture from
+   `api::handle` is that the page is rendered against a robot that exists.
+2. **"one of nine conditions" was wrong in five places.** There are eight. `Conditions` has ten
+   fields, two of which are not observations — `stop_settled` belongs to `stop`, and `cleared_by` is
+   an operator's action. A count nothing counts is the kind of number that survives for years.
+3. **"Needs a human to leave: yes" read as an errand when nobody was waiting on one.** True —
+   `safe` is sticky — and useless: on this robot the *condition* is what is holding it, and a
+   clearance would put it straight back. The daemon already distinguishes the two, because
+   `safe_sticky` is reported only when nothing else is holding the robot, so the row now says which
+   case it is and what clearing would achieve.
+
+The same reasoning caught a fourth in the daemon's own output: the startup line said "safe state is
+declared, not measured", which stopped being the whole truth the moment the machine narrowed it, and
+`GET /status` reported `safe_state_source: "declared"`. Both now say `declared_and_derived` and name
+both sources — and both still say, because it is still true, that nothing here has measured the body.
+
+`GET /status` also gained `state` and `state_reason`, which its own route table has claimed it
+carried since the module was written and which it did not.
+
+### Where the numbers stand
+
+Rust: **902** tests, up from 865. `cargo fmt --all --check` clean, `cargo clippy --workspace
+--all-targets` clean under `-D warnings`, and `skynet-contracts` still builds for
+`thumbv7em-none-eabihf` — the state machine is `no_std` with `alloc`, so an L2 edition on a robot
+with no operating system underneath it can still answer what state it is in.
+
+The corpus is **753 cases across 51 files**, up from 709 across 48. Three new files:
+
+| File | Cases | What it pins |
+|---|---|---|
+| `opstate/evaluate.json` | 34 | Every rule, every reason, both stickiness paths, and the two idempotence cases |
+| `opstate/properties.json` | 1 | What a state *means* to §33.4, §49.1 and §27, for all seven |
+| `opstate/warning.json` | 1 | All forty-nine ordered pairs of §49.1's tone, in full |
+
+The second and third are there because they are the divergences no evaluation case can see: those
+answers are read *off* a state rather than produced by the machine, and an edition could reproduce
+every transition while disagreeing about whether `stopping` is a safe state. The warning matrix is
+frozen whole rather than sampled because the failure mode of that predicate is silence — and the
+version it replaced was under-inclusive for exactly one pair family, `→ degraded`, which a sampled
+corpus is not guaranteed to hold.
+
+Eight closed vocabularies were added, taking `vocabulary/closed-sets.json` from 30 sets to 38. The
+states and the reasons are emitted in **rule order, not sorted**, and the order is load-bearing
+twice: the states run least-capable-first, matching the order `evaluate` descends through, and the
+reasons are one per rule in the same sequence.
+
+The corpus was checked for the failure a corpus can have, which is passing because nothing ran. The
+degraded rule was moved above the policy rules — the alternative design the ordering deliberately
+rejects — and **3 of 753 cases diverged**, naming the states and the reasons. Reverted, all 753
+reproduce byte for byte, and regenerating is a no-op.
+
+### Changed in the Hub
+
+`reference/typescript/package.ts` lost `warningRequired`, which makes it a mirrored contract that
+moved. `node tools/check-contract-mirrors.mjs` reported `DIVERGED package — 23 line(s) differ` and
+`CHANGED package` against its pin before the sync, which is the behaviour the sixteenth session built
+it for, on its second real divergence. Synced: `lib/skynet/os/package.ts` and both pin files.
+Nothing in the Hub imported the function.
+
+`opstate` is **not** added to the mirror list, and the reason is recorded in
+`tools/check-contract-mirrors.mjs` beside the others. Two reasons, and the second is the durable one:
+
+* §27's machine describes what a robot is doing right now, and the Hub has nowhere to put that —
+  `skynet_device_state` is one of the four tables §32.4 items 2 and 5 have been waiting on for three
+  sessions.
+* Every mirrored module answers a question **from declared facts**, which is why both sides can
+  compute it and neither is authoritative. §27's machine answers from *observations of a body*, and
+  the Hub has none. It would be displaying a robot's answer rather than computing a second opinion,
+  which is a renderer rather than a mirrored contract — and mirroring it would suggest a
+  disagreement between the two was possible.
+
+The Hub's own suite was run: **1,227 of 1,229 pass**, and the two failures are the in-progress
+`botmarket24.com` → `robotoverflow.com` rename sitting uncommitted in that working tree
+(`sitemap-urls` and `hreflang-gating` both assert the old domain). `npx tsc --noEmit` reports one
+error from the same rename, in `lib/global-delivery`. Neither is this session's, and neither is
+anywhere near `lib/skynet/`. The eleven mirror assertions in `lib/__tests__/skynet-os-mirrors.test.ts`
+pass.
+
+### What §27 still waits on, and what it has stopped blocking
+
+The machine is complete and eight of its conditions have one observer between them. **What is
+missing is not a decision — it is the kernel channel**, and that is the same missing piece §48.5
+found for five of POST's eight checks and the fifteenth session found for `Reading::Stale`.
+
+What has stopped waiting:
+
+* **§54.4's skill lifecycle** was recorded as blocked on "capability **leases**, which do not exist,
+  and §27's state machine, which is referred to in prose and declared nowhere". Half of that was
+  wrong when it was written — `skynetd::lease` has held §25.2's table since the fifteenth session —
+  and the other half is now false. What the lifecycle still needs is a loop to run in.
+* **§49.1's enforcement point.** "`skynetd` owns the tone" needs an audio device and a state
+  transition. The transition exists, is recorded on every evaluation, and carries `warning`.
+
+### Findings, restated
+
+1. **§52's table cites §25.2 for `sensors[].latency_ms`, and the mechanism is in §25.1.** Unchanged.
+2. **The ring's slot layout is a format, and §31.2's list does not name it.** Unchanged.
+3. **Nothing consumes `Reading::Stale`.** Unchanged, and still the control loop.
+4. **`resolveTransport()` returns `verdict: "direct"` for a policy that declared no action space.**
+   Unchanged, and still the most interesting one: all three editions agree and are wrong together.
+5. **§56.2's provenance class and the Hub's `EvaluationSource` are two axes.** Unchanged.
+6. **`npx eslint` still cannot run in the Hub.** Pre-existing and unrelated.
+7. **A compatibility finding whose rule could not be evaluated says the wrong thing.** Unchanged
+   from the seventeenth session; still a deliberate second piece of work.
+8. **§55.2 says "which volumes are forbidden" and the `workspace` guard admits only allow-lists.**
+   Unchanged; a safety-model decision.
+9. **§54.4's terminal states and the episode vocabulary are spelled differently.** Unchanged.
+10. **§27 does not say where a cleared `SAFE` goes.** New, and answered rather than left open: the
+    clearance clears the stickiness and the conditions decide. Recorded because it is a place the
+    document is silent and this edition is not, and a second edition reading §27 alone could
+    reasonably have sent it to `POST` instead. The corpus freezes this answer.
+11. **§27's `DEGRADED` row conflates two axes.** New. Four of its states say what the robot is
+    *doing* and one says how *healthy* it is, and the two are orthogonal in principle — a robot can
+    be holding with a guard unavailable. This edition resolves it by reading the row's own behaviour
+    column ("Runs, reports…") as making `degraded` a running state, which means a healthy-but-idle
+    robot and an impaired-but-idle robot both report `hold` and are told apart by the health report
+    rather than by the state. That is defensible and it is a choice; a document that wanted the
+    other answer would need a sixth state or a second field.
+
+### One thing tidied on the way past
+
+`README.md`'s table had been carrying counts from two sessions ago: `skynet-contracts` at 197 tests
+against 285, `skynetd-io` at 246 against 249, and the corpus at "483 cases, 39 files, of which 21 are
+the closed vocabularies" against 753, 51 and 38. It is §65's golden path — the document a driver
+author reads first — and a table of numbers nobody re-derives is one a reader learns to skip.
+
+Neither repository has been committed or pushed. Both trees are clean of build artifacts — the
+`node_modules` `npx tsc` needs was removed after the type-check — and every check above was run
+against the working tree as it stands.
+## 2026-09-01 (nineteenth) — §54.4's lifecycle, and the two things it turned out to need
+
+The previous session's log ended by saying what §54 was still waiting on:
+
+> **§54.4's skill lifecycle** was recorded as blocked on "capability **leases**, which do not exist,
+> and §27's state machine, which is referred to in prose and declared nowhere". Half of that was
+> wrong when it was written — `skynetd::lease` has held §25.2's table since the fifteenth session —
+> and the other half is now false. What the lifecycle still needs is a loop to run in.
+
+It needed less than that. A lifecycle is a decision about *where an invocation is*, and a decision
+is a function; the loop is what calls it. So `advance(phase, progress)` is written, and the sentence
+that had been true for three sessions — "three contracts now exist with no caller" — is down to two.
+
+### The machine
+
+`crates/skynet-contracts/src/skill.rs` and `reference/typescript/skill.ts`. Six phases, sixteen
+fields of evidence, eighteen reasons, one function.
+
+**A phase advances on evidence, and absence of evidence is not advancement.** `entry_permitted` is
+an `Option<bool>` rather than a `bool`, and that is the whole discipline in one field: a runtime
+that has not evaluated §54.2 yet must not be able to start a skill by *failing to ask*.
+`Progress::default()` is an invocation nobody has made, and it stays in `idle`. It is also what
+makes the machine safe to drive from a loop faster than the work — calling `advance` every cycle
+while the skill's own code runs returns `running → running`, and nothing has to remember it already
+asked.
+
+### Three things the document does not settle, decided and recorded
+
+**A refusal has to fit in the Hub's four words.** §54.4's diagram ends in `succeeded | failed |
+aborted` and its next paragraph says the outcome is `EpisodeOutcome` — `success | failure | aborted
+| unlabeled` — which is the seventeenth session's finding 9, still open. So a skill refused at
+`preconditions`, and one denied a lease, are terminal with **`aborted`**, and the reason is what
+tells them apart. `failure` would be a lie a marketplace consumes: a skill never allowed to start
+did not fail at its task, and a success rate computed over refusals would punish publishers for
+operators' cell configurations.
+
+**What stops a running skill, and in what order.** §54.4 names three arrows — timeout, guard trip,
+precondition lost — and its `running` row adds a fourth by implication: *"a skill is not an exemption
+from the kernel"*. A skill whose robot has stopped commanding is over, whatever stopped it, and §27's
+machine is what says so.
+
+The order is **causes before effects**. A timeout makes the OS stop the skill under a controlled
+stop; a guard trip stops the robot. Both therefore *produce* a robot that is no longer commanding,
+so reporting the robot state first would hide the cause behind its own consequence. The specific
+reasons are tried first and `robot_stopped` is the fallback for whatever the machine could not name.
+
+`hold` is deliberately **not** an aborting robot state, and it is the exclusion worth writing down:
+it is where §27's machine sits between a lease being granted and a policy actually commanding, so
+aborting on it would kill every skill in the moment it started. A guard asking for a hold reaches
+the lifecycle as `guard_tripped`, which is the input that means it. `degraded` is excluded for the
+opposite reason — §27's `DEGRADED` row runs, §45.5 makes an unavailable guard the ordinary case, and
+a skill refusing to proceed on one would refuse on most real robots.
+
+**`root` defaults to true**, and it is the one field whose safe default is the permissive one.
+§54.5 says leases are held by the root invocation and not re-acquired per call, so a *nested*
+invocation skips `acquiring` entirely. Defaulting to nested would let a caller who forgot the field
+past §25.2's arbitration altogether, which is two policies driving one elbow; defaulting to root
+costs a redundant acquisition that §25.2 answers `AlreadyHeld`.
+
+### §54.5's other two limits, which the lifecycle made cheap
+
+* **"Leases are held by the root invocation, not re-acquired per call."** The one composition limit
+  that is not a graph property, and it is a lifecycle transition: `preconditions → running`, skipping
+  `acquiring`, with its own reason.
+* **"The root's timeout bounds the whole tree."** `bounded_deadline` is the child's deadline or what
+  is left of the root's, whichever is sooner. Two properties fall out and both are the point: a child
+  that declares *no* duration is still bounded by its parent, so an unbounded skill nested under a
+  bounded one does not make the tree unbounded; and a root with nothing left bounds its child at
+  **zero** rather than at a negative number, which some other arithmetic could read as "no deadline".
+
+### The thing that only becomes visible from §54.4: acquisition is all or nothing
+
+§54.4's `acquiring` stage takes leases for a **list** of tokens, and §25.2 was written about one.
+The rule it does not have to state, because it is invisible from where it sits:
+
+**A skill that got two of its three tokens holds two joints it cannot use and refuses them to
+everything else.** The symptom is a second package that will not start with no reason on any screen
+— which is exactly the symptom `release_all` was written to prevent, arriving through the front door
+instead.
+
+So `LeaseTable::acquire_all` rolls back everything *this call* took when any token is refused, and
+rolls back **only** what this call took: a requester that already held a token keeps it, because it
+is not this acquisition's to give away, and a level-triggered loop calling it every pass would
+otherwise drop a lease in the middle of being used.
+
+It is also where the projection lives that `skill.rs` promised was at a call site rather than in a
+second enumeration. `LeaseState` — `pending | held | denied` — answers the one part the lifecycle
+acts on; `PreemptionOutcome` keeps the rest, including which package was displaced by §25.2's single
+pre-emption. Two definitions of a lease result would be §31.2's failure in miniature; a projection of
+one onto the other is a mapping, and `Acquisition::into_progress` is it.
+
+§25.2's grant-before-holder rule survives the projection, which is the detail worth checking: a
+token the requester was never granted reports `holder: None`, because "nobody has the arm, this
+package may not ask for it" and "somebody else is using the arm" are different errands.
+
+### §54.6's four conformance additions, half-written on purpose
+
+All four assert **runtime** behaviour and there is still no runtime. What now exists is the half that
+can exist without one: five tests that drive the *contract* end to end — the evaluation, the
+judgement and the lifecycle together — and assert the answer §54.6 requires, each named for the SCTS
+id it stands for.
+
+* `skill.preconditions.enforced` — a false predicate refuses, and the clause's own sentence reaches
+  the detail an operator reads. The naming is shared between `evaluate_preconditions`, which finds
+  the clause, and the lifecycle, which carries it; neither is complete alone, and asserting the join
+  is what makes the conformance test writable.
+* `skill.preconditions.rechecked` — the same clause satisfied at `entry` and false at `hold`, with a
+  battery that starts at 62% and reaches 11%, driving the lifecycle to `aborted`.
+* `skill.timeout.enforced` — an overrunning skill that *claims it finished*, stopped anyway.
+* `skill.success.independent` — a false criterion producing `failure` all the way into the terminal
+  transition, plus its mirror image: an unenforceable criterion producing `unlabeled`, because a
+  conformance test that only checked the failing case would pass on an edition that always reported
+  `failure`.
+
+**They are deliberately not added to `SCTS_TESTS`,** and that is a decision rather than an omission.
+That catalogue decides what a tier *requires*, and `award_certification` reports a required test with
+no result as `missing` — so adding four tests nothing can run would strip the tier from every robot
+on the strength of evidence nobody can produce. §54.6 also does not say which tier they belong to,
+and guessing one is how a certification rule nobody agreed to becomes load-bearing.
+
+### Where the numbers stand
+
+Rust: **947** tests, up from 902. `skynet-contracts` 285 → 323, `skynetd` 38 → 45. `cargo fmt --all
+--check` clean, `cargo clippy --workspace --all-targets` clean under `-D warnings`, and
+`skynet-contracts` still builds for `thumbv7em-none-eabihf` — the lifecycle is `no_std` with `alloc`,
+so a Guest-tier edition can decide whether a skill may start with no operating system underneath it.
+
+`skynetd` grew its second use of `skynet-contracts`, and CI's two invariants about that crate still
+hold: no `skynet-rhal` edge, and no I/O in the pure half.
+
+The corpus is **793 cases across 53 files**, up from 753 across 51:
+
+| File | Cases | What it pins |
+|---|---|---|
+| `skill/lifecycle.json` | 31 | Every transition, both refusals, all four aborts and their ordering, the two robot states that do *not* abort, and every terminal outcome |
+| `skill/bounded-deadline.json` | 6 | §54.5's third limit, including the unbounded child and the exhausted root |
+
+Three closed vocabularies added — `skill_phases`, `lifecycle_reasons`, `lease_states` — taking
+`vocabulary/closed-sets.json` from 38 sets to 41. The phases are emitted in **diagram order** and the
+reasons in **rule order**, and the first is load-bearing twice over: the suite asserts the machine
+never moves backwards through that list, so an edition that sorted it would be asserting a different
+property with the same words.
+
+The corpus was checked for the failure a corpus can have, twice, because this machine has two kinds
+of decision in it:
+
+* the deadline comparison was changed from `>=` to `>` — one character — and **2 of 793 cases
+  diverged**;
+* the robot-state check was moved to the top of the abort ladder, which is the effect-before-cause
+  mistake the ordering exists to prevent, and **5 of 793 diverged**, naming all four robot states and
+  the case built for exactly that question.
+
+Both reverted; all 793 reproduce byte for byte and regenerating is a no-op.
+
+### Changed in the Hub
+
+Nothing. `skill` is not one of the ten mirrored contracts and this session did not change one that
+is, so `node tools/check-contract-mirrors.mjs` passes untouched. The reason `skill` is still out of
+that list is recorded in the tool and unchanged: it answers questions a repository page will want,
+and that page needs UI and thirty-five locale catalogues.
+
+### One check that went red, and it is not this session's
+
+`node tools/check-mirrors.mjs` matched at the start of this session and reports
+`DIVERGED docs/skynet-build-plan.md` at the end of it. The Hub's copy changed at 10:47 while this
+work was in the OS repository, and the diff is the **`BotMarket` → `RobotOverflow` rename** that is
+in flight in that working tree: the title, the ecosystem paragraph, and `botmarket24.com` →
+`robotoverflow.com`, 24 lines of it.
+
+It has not been synced, and that is deliberate. `--sync` is the sanctioned remedy and BotMarket is
+the origin of all three shared documents, so the direction is not in doubt — but the rename is
+unfinished (two of the Hub's own tests and one `tsc` error are still on the old domain), and pulling
+a half-renamed specification into this repository would mean the OS's copy of the design says
+`RobotOverflow` while the Hub is still deciding. That is the owner's call and it is one command:
+`node tools/check-mirrors.mjs --sync ../BotMarket`.
+
+### Not done, and what it waits on
+
+**§54 is finished except for the loop, and the list is now one item long.** Everything §54.4, §54.5
+and §54.6 describe that is a decision has been made and frozen. What is left is a runtime: something
+that calls `advance` every cycle, runs the skill's policy, writes the black box events §54.4 asks for
+on every transition, and emits the episode.
+
+Two contracts still exist with no caller, down from three:
+
+* `cell.rs` waits on the daemon reading a signed profile out of `/data/state/profiles/` (§38.1,
+  §38.3). Not blocked on a decision.
+* `entitlement.rs` has waited since §51, for the same kind of reason.
+
+`skill.rs` is off that list: `LeaseTable::acquire_all` calls into it, which is one real caller for the
+`acquiring` half. The other five phases still have none.
+
+### Findings, restated
+
+1–9 unchanged from the seventeenth session; 10 and 11 unchanged from the eighteenth.
+
+12. **§54.4 says "one episode is emitted per invocation", and a refused invocation is an
+    invocation.** New. So a skill refused at `preconditions` — before anything ran, before a lease
+    was taken, with no duration and no observations — produces an episode, and §54.4's other
+    sentence says skills "generate training data as a side effect of being used". A row in a dataset
+    for a skill that never started is not training data. This edition follows the document rather
+    than inventing an exception: every terminal transition is one episode, and a consumer can tell
+    the empty ones by their reason. Whether the Hub's episode schema should carry that reason is a
+    schema decision on a live project, which is the same wall §32.4 items 2 and 5 have been at for
+    four sessions.
+13. **`is_shared` makes every `sensing.*` token non-exclusive, and `acquire_all` therefore cannot
+    fail on one.** New, and benign today, but worth recording because it is invisible from the
+    lifecycle: a skill whose `required_capabilities` are all sensing tokens can never be denied, so
+    its `acquiring` phase is a formality. That is correct — §25.2 says sensing is shared freely — but
+    it means `skill.preconditions.enforced` is the only gate on a read-only skill, and a future token
+    that *looks* like sensing and is not would be admitted by a prefix check. §25.2 argues for the
+    prefix over a maintained list and the argument still holds; the exposure is recorded rather than
+    changed.
+
+Neither repository has been committed or pushed. Both trees are clean of build artifacts, and every
+check above was run against the working tree as it stands.

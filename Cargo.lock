@@ -94,6 +94,7 @@ dependencies = [
 name = "skynetd"
 version = "0.1.0"
 dependencies = [
+ "skynet-contracts",
  "skynet-json",
 ]
 

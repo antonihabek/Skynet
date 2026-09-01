@@ -330,6 +330,11 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         // not status — it names which of a robot's safety proofs have and have not been made, which
         // is the kind of thing an observer credential exists for.
         ("GET", ["post"]) => Role::Observer,
+        // §27's state, and the same reasoning one line up. §39.1's unauthenticated caller gets
+        // "stop, and see status", and `GET /status` carries the state word for exactly that
+        // reason; this route carries the *reason* and which conditions nobody observed, which is
+        // diagnosis rather than status.
+        ("GET", ["state"]) => Role::Observer,
         ("GET", ["embodiment"]) => Role::Observer,
         ("GET", ["capacity"]) => Role::Observer,
         ("GET", ["packages"]) => Role::Observer,

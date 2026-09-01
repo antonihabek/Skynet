@@ -3,10 +3,16 @@
 //! The Rust edition of `reference/typescript/skill.ts`. Read that file for the design and for the
 //! asymmetry at the centre of it; this one records what the port costs.
 //!
-//! Everything here is pure. The lifecycle that will call it — `idle → preconditions → acquiring →
-//! running → verifying → terminal` — needs capability leases and §27's state machine, neither of
-//! which exists. These are the decisions that lifecycle will make, frozen now so that when
-//! something does loop it is not also inventing the rules.
+//! Everything here is pure, **including the lifecycle**. `idle → preconditions → acquiring →
+//! running → verifying → terminal` was recorded for two sessions as waiting on capability leases
+//! and on §27's state machine. Half of that was already wrong when it was written —
+//! `skynetd::lease` has held §25.2's table since the fifteenth session — and the other half stopped
+//! being true when [`crate::opstate`] was declared. So [`advance`] is here, and it is a function of
+//! a phase and the evidence gathered so far rather than a loop.
+//!
+//! What is still missing is the loop itself: something that calls this every cycle, runs the
+//! skill's policy, and writes the black box events. The decisions it will make are frozen and
+//! testable, so when something does loop it is not also inventing the rules.
 //!
 //! # The asymmetry, restated because it is the thing to get right
 //!
@@ -38,6 +44,9 @@ use alloc::vec::Vec;
 
 use skynet_json::Json;
 
+// §54.4's `running` row: "a skill is not an exemption from the kernel". The lifecycle reads §27's
+// machine rather than keeping a second opinion about whether the robot is commanding.
+use crate::opstate::OperatingState;
 use crate::predicate::{self, Outcome, UnevaluableReason};
 use crate::round_half_away;
 
@@ -732,6 +741,642 @@ pub fn composition_to_json(fault: &Option<CompositionFault>) -> Json {
     out
 }
 
+// ── §54.4 The lifecycle ──────────────────────────────────────────────────────
+//
+//     idle → preconditions → acquiring → running → verifying → succeeded | failed | aborted
+//               ↓ refused        ↓ denied     ↓ timeout / guard trip / precondition lost
+//
+// The Rust edition of the same half of `reference/typescript/skill.ts`. Read that file for the
+// design; the notes here are the port's.
+//
+// Two things this edition had to decide, and both are the same decision the rest of the crate keeps
+// making: **the defaults live in the reader, not in the caller.** [`Progress`] is a struct of plain
+// fields here and an object of optional ones in TypeScript, so "not gathered yet" has to be
+// spelled — and every field spells it as the value that does *not* advance the machine.
+//
+// `entry_permitted` is therefore an `Option<bool>` rather than a `bool`, which looks like
+// fastidiousness and is not: a runtime that has not evaluated §54.2 yet must not be able to start a
+// skill by failing to ask. `Progress::default()` is an invocation nobody has made, and it stays in
+// `idle`.
+
+/// §54.4's stages.
+///
+/// `terminal` is a phase rather than three, because §54.4's own table makes it one — *"Leases
+/// released, outcome recorded, episode emitted"* — and the outcome that distinguishes its three
+/// diagram arrows is [`SkillOutcome`], which is the Hub's `EpisodeOutcome` and not a second
+/// vocabulary. Reproduced into `corpus/vocabulary/closed-sets.json`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillPhase {
+    /// Nothing has asked for this skill.
+    Idle,
+    /// §54.2's predicates are being evaluated.
+    Preconditions,
+    /// §25.2's leases are being taken.
+    Acquiring,
+    /// The skill's policy runs, under the transport plan and the resolved clamps.
+    Running,
+    /// §54.3's criteria are being evaluated over post-state.
+    Verifying,
+    /// Leases released, outcome recorded, episode emitted.
+    Terminal,
+}
+
+impl SkillPhase {
+    /// The wire spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SkillPhase::Idle => "idle",
+            SkillPhase::Preconditions => "preconditions",
+            SkillPhase::Acquiring => "acquiring",
+            SkillPhase::Running => "running",
+            SkillPhase::Verifying => "verifying",
+            SkillPhase::Terminal => "terminal",
+        }
+    }
+
+    /// Read a phase back, for a report that crossed a wire. Exact, never case-insensitive.
+    pub fn parse(text: &str) -> Option<Self> {
+        SKILL_PHASES.iter().copied().find(|p| p.as_str() == text)
+    }
+}
+
+/// Every phase, in the order §54.4's diagram runs them.
+pub const SKILL_PHASES: [SkillPhase; 6] = [
+    SkillPhase::Idle,
+    SkillPhase::Preconditions,
+    SkillPhase::Acquiring,
+    SkillPhase::Running,
+    SkillPhase::Verifying,
+    SkillPhase::Terminal,
+];
+
+/// §25.2's arbitration, as the one fact the lifecycle needs from it.
+///
+/// Deliberately **not** a copy of `skynetd::lease::PreemptionOutcome`. That enumeration answers a
+/// richer question — acquired, pre-empted, already held, denied and why — and this one answers the
+/// only part the lifecycle acts on. Two definitions of a lease outcome would be §31.2's failure in
+/// miniature; a projection of one onto the other is a mapping, and it lives at the call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LeaseState {
+    /// Not taken yet. The default, because nobody has said otherwise.
+    #[default]
+    Pending,
+    /// Every token in `required_capabilities` is leased to this invocation.
+    Held,
+    /// Something is held by somebody else, and §25.2 refuses rather than interleaves.
+    Denied,
+}
+
+impl LeaseState {
+    /// The wire spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LeaseState::Pending => "pending",
+            LeaseState::Held => "held",
+            LeaseState::Denied => "denied",
+        }
+    }
+}
+
+/// Every lease state.
+pub const LEASE_STATES: [LeaseState; 3] =
+    [LeaseState::Pending, LeaseState::Held, LeaseState::Denied];
+
+/// Why the lifecycle is where it is.
+///
+/// One per rule, as in §27's machine and for the same reason: four reasons end in `terminal` with
+/// `aborted`, and only the reason tells an operator whether to call the publisher, look at the
+/// cell, find the package holding the arm, or read the black box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LifecycleReason {
+    /// Nothing has asked for this skill.
+    NotInvoked,
+    /// An invocation arrived.
+    Invoked,
+    /// §54.2 has not been evaluated, which is not a pass.
+    PreconditionsPending,
+    /// A precondition was false. §54.6's `skill.preconditions.enforced`.
+    PreconditionsRefused,
+    /// Every evaluated precondition held.
+    PreconditionsMet,
+    /// §54.5: a nested call runs under the root's leases and does not acquire.
+    LeasesHeldByRoot,
+    /// The leases have not been taken.
+    LeasePending,
+    /// §25.2 refused one. Denied if held.
+    LeaseDenied,
+    /// Every required capability is leased.
+    LeasesAcquired,
+    /// §54.4's timeout. `skill.timeout.enforced`.
+    Timeout,
+    /// A `hold` precondition stopped being true. `skill.preconditions.rechecked`.
+    HoldLost,
+    /// A guard tripped, which includes a guard asking for a hold.
+    GuardTripped,
+    /// §27 says the robot is not in a state a policy commands in.
+    RobotStopped,
+    /// Still running.
+    Running,
+    /// The skill returned and has not been judged.
+    Verifying,
+    /// §54.3 has not judged, and §54.3 will not let the skill judge itself.
+    VerdictPending,
+    /// §54.3 judged it.
+    Judged,
+    /// Already over.
+    Terminal,
+}
+
+impl LifecycleReason {
+    /// The wire spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LifecycleReason::NotInvoked => "not_invoked",
+            LifecycleReason::Invoked => "invoked",
+            LifecycleReason::PreconditionsPending => "preconditions_pending",
+            LifecycleReason::PreconditionsRefused => "preconditions_refused",
+            LifecycleReason::PreconditionsMet => "preconditions_met",
+            LifecycleReason::LeasesHeldByRoot => "leases_held_by_root",
+            LifecycleReason::LeasePending => "lease_pending",
+            LifecycleReason::LeaseDenied => "lease_denied",
+            LifecycleReason::LeasesAcquired => "leases_acquired",
+            LifecycleReason::Timeout => "timeout",
+            LifecycleReason::HoldLost => "hold_lost",
+            LifecycleReason::GuardTripped => "guard_tripped",
+            LifecycleReason::RobotStopped => "robot_stopped",
+            LifecycleReason::Running => "running",
+            LifecycleReason::Verifying => "verifying",
+            LifecycleReason::VerdictPending => "verdict_pending",
+            LifecycleReason::Judged => "judged",
+            LifecycleReason::Terminal => "terminal",
+        }
+    }
+}
+
+/// Every reason, in rule order.
+pub const LIFECYCLE_REASONS: [LifecycleReason; 18] = [
+    LifecycleReason::NotInvoked,
+    LifecycleReason::Invoked,
+    LifecycleReason::PreconditionsPending,
+    LifecycleReason::PreconditionsRefused,
+    LifecycleReason::PreconditionsMet,
+    LifecycleReason::LeasesHeldByRoot,
+    LifecycleReason::LeasePending,
+    LifecycleReason::LeaseDenied,
+    LifecycleReason::LeasesAcquired,
+    LifecycleReason::Timeout,
+    LifecycleReason::HoldLost,
+    LifecycleReason::GuardTripped,
+    LifecycleReason::RobotStopped,
+    LifecycleReason::Running,
+    LifecycleReason::Verifying,
+    LifecycleReason::VerdictPending,
+    LifecycleReason::Judged,
+    LifecycleReason::Terminal,
+];
+
+/// Everything one invocation has established so far.
+///
+/// Every field is evidence somebody gathered, and every default is "not gathered".
+#[derive(Debug, Clone, PartialEq)]
+pub struct Progress {
+    /// Somebody called `execute({ skill, arguments, timeout_s })` (§54.1).
+    pub invoked: bool,
+    /// Whether this is the root invocation (§54.5). A nested call does not acquire.
+    pub root: bool,
+    /// §54.2's entry evaluation. `None` until it has been run — which is not a pass.
+    pub entry_permitted: Option<bool>,
+    /// The clause a refusal names, from [`PreconditionReport::refused`].
+    pub refused_clause: String,
+    /// §25.2.
+    pub leases: LeaseState,
+    /// The token that was refused, and who holds it.
+    pub lease_token: String,
+    /// Who holds it.
+    pub lease_holder: String,
+    /// Milliseconds since the skill entered `running`. `None` while it has not.
+    pub elapsed_ms: Option<f64>,
+    /// §54.4's deadline, from [`skill_deadline`].
+    pub deadline: Deadline,
+    /// A `hold` precondition falsified mid-run (§54.2's second rule).
+    pub hold_lost: bool,
+    /// A guard tripped, which includes a guard asking for a hold.
+    pub guard_tripped: bool,
+    /// Where §27's machine says the robot is.
+    pub robot: OperatingState,
+    /// The skill's own code returned.
+    pub finished: bool,
+    /// §54.3's judgement. `None` until it has been made — which is not a success.
+    pub outcome: Option<SkillOutcome>,
+}
+
+impl Default for Progress {
+    /// An invocation nobody has made, on a robot nobody has observed.
+    ///
+    /// `root` defaults to **true**, which is the one field whose safe default is the permissive
+    /// one — and it is worth saying why. A root invocation *acquires*; a nested one is trusted to
+    /// be running under leases somebody else took. Defaulting to nested would let a caller that
+    /// forgot the field skip §25.2's arbitration entirely, which is two policies driving one elbow.
+    /// Defaulting to root costs a redundant acquisition that §25.2 answers `AlreadyHeld`.
+    fn default() -> Self {
+        Self {
+            invoked: false,
+            root: true,
+            entry_permitted: None,
+            refused_clause: String::new(),
+            leases: LeaseState::Pending,
+            lease_token: String::new(),
+            lease_holder: String::new(),
+            elapsed_ms: None,
+            deadline: Deadline {
+                deadline_ms: None,
+                enforceable: false,
+                factor: DEFAULT_OVERRUN_FACTOR,
+            },
+            hold_lost: false,
+            guard_tripped: false,
+            robot: OperatingState::Post,
+            finished: false,
+            outcome: None,
+        }
+    }
+}
+
+/// One evaluation of the lifecycle.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SkillTransition {
+    /// Where it was.
+    pub from: SkillPhase,
+    /// Where it is.
+    pub to: SkillPhase,
+    /// Why.
+    pub reason: LifecycleReason,
+    /// The episode outcome, present only on entering `terminal`.
+    pub outcome: Option<SkillOutcome>,
+    /// What a console shows beside the reason: the clause, the token, the state.
+    pub detail: String,
+    /// §54.4's terminal row: leases released. True only on the transition **into** `terminal`.
+    pub release_leases: bool,
+    /// Whether the phase changed.
+    pub changed: bool,
+}
+
+/// Whether a robot in this state has stopped a skill that was running.
+///
+/// `hold` is deliberately absent, and it is the one exclusion worth writing down: it is where §27's
+/// machine sits between a lease being granted and a policy actually commanding, so aborting on it
+/// would kill every skill in the moment it started. A guard asking for a hold reaches the lifecycle
+/// as [`Progress::guard_tripped`], which is the input that means it.
+///
+/// `degraded` is absent for the opposite reason: §27's `DEGRADED` row runs, and a skill refusing to
+/// proceed on a robot with one unavailable guard would refuse on most real robots (§45.5).
+fn robot_stopped_commanding(state: OperatingState) -> bool {
+    matches!(
+        state,
+        OperatingState::Stopping
+            | OperatingState::Safe
+            | OperatingState::Post
+            | OperatingState::Unhomed
+    )
+}
+
+/// Whether the deadline has passed. An unenforceable deadline never has.
+fn overran(progress: &Progress) -> bool {
+    let (Some(deadline), true) = (progress.deadline.deadline_ms, progress.deadline.enforceable)
+    else {
+        return false;
+    };
+    match progress.elapsed_ms {
+        Some(elapsed) if elapsed.is_finite() => elapsed >= deadline,
+        _ => false,
+    }
+}
+
+/// Why a running skill is over, or `None` if it is not.
+///
+/// **Causes before effects.** A timeout makes the OS stop the skill under a controlled stop, and a
+/// guard trip stops the robot; both therefore produce a robot that is no longer commanding.
+/// Reporting the robot state first would hide the cause behind its own consequence, so the specific
+/// reasons are tried first and `robot_stopped` is the fallback that catches whatever this machine
+/// could not name.
+fn abort_reason(progress: &Progress) -> Option<(LifecycleReason, String)> {
+    if overran(progress) {
+        return Some((
+            LifecycleReason::Timeout,
+            format!(
+                "past {} ms, which is the declared estimate times {}",
+                progress.deadline.deadline_ms.unwrap_or(0.0),
+                progress.deadline.factor
+            ),
+        ));
+    }
+    if progress.hold_lost {
+        return Some((
+            LifecycleReason::HoldLost,
+            "a precondition marked `hold` stopped being true, and §54.2 re-checks those every \
+             cycle rather than only at entry"
+                .to_string(),
+        ));
+    }
+    if progress.guard_tripped {
+        return Some((
+            LifecycleReason::GuardTripped,
+            "a guard tripped, and a skill is not an exemption".to_string(),
+        ));
+    }
+    if robot_stopped_commanding(progress.robot) {
+        return Some((
+            LifecycleReason::RobotStopped,
+            format!(
+                "§27 says the robot is `{}`, which is not a state a policy commands in",
+                progress.robot.as_str()
+            ),
+        ));
+    }
+    None
+}
+
+/// §54.4's lifecycle, advanced by one evaluation.
+///
+/// Pure, clockless and total: `elapsed_ms` is supplied for the same reason the kernel takes `now_ms`
+/// as a parameter (§35.2), which is what lets a timeout be tested without waiting for one.
+pub fn advance(phase: SkillPhase, progress: &Progress) -> SkillTransition {
+    let done = |to: SkillPhase,
+                reason: LifecycleReason,
+                outcome: Option<SkillOutcome>,
+                detail: String| SkillTransition {
+        from: phase,
+        to,
+        reason,
+        outcome,
+        detail,
+        // Only on the way in. A skill already terminal releases nothing, because it has nothing.
+        release_leases: to == SkillPhase::Terminal && phase != SkillPhase::Terminal,
+        changed: to != phase,
+    };
+
+    match phase {
+        SkillPhase::Idle => {
+            if progress.invoked {
+                done(
+                    SkillPhase::Preconditions,
+                    LifecycleReason::Invoked,
+                    None,
+                    "an invocation arrived".to_string(),
+                )
+            } else {
+                done(
+                    SkillPhase::Idle,
+                    LifecycleReason::NotInvoked,
+                    None,
+                    "nothing has asked for this skill".to_string(),
+                )
+            }
+        }
+
+        SkillPhase::Preconditions => match progress.entry_permitted {
+            // Absent is not permitted. A runtime that had not evaluated §54.2 yet must not be able
+            // to start a skill by failing to ask, which is the shape of every bug this repository
+            // is arranged around.
+            None => done(
+                SkillPhase::Preconditions,
+                LifecycleReason::PreconditionsPending,
+                None,
+                "the entry predicates have not been evaluated, and an unevaluated precondition is \
+                 not a satisfied one"
+                    .to_string(),
+            ),
+            Some(false) => done(
+                SkillPhase::Terminal,
+                LifecycleReason::PreconditionsRefused,
+                Some(SkillOutcome::Aborted),
+                if progress.refused_clause.is_empty() {
+                    "refused by a precondition".to_string()
+                } else {
+                    format!("refused by: {}", progress.refused_clause)
+                },
+            ),
+            // §54.5. A nested invocation does not acquire; the root holds the leases for the tree.
+            Some(true) if !progress.root => done(
+                SkillPhase::Running,
+                LifecycleReason::LeasesHeldByRoot,
+                None,
+                "a nested call runs under the root invocation's leases (§54.5)".to_string(),
+            ),
+            Some(true) => done(
+                SkillPhase::Acquiring,
+                LifecycleReason::PreconditionsMet,
+                None,
+                "every evaluated precondition held".to_string(),
+            ),
+        },
+
+        SkillPhase::Acquiring => match progress.leases {
+            LeaseState::Denied => done(
+                SkillPhase::Terminal,
+                LifecycleReason::LeaseDenied,
+                Some(SkillOutcome::Aborted),
+                if progress.lease_token.is_empty() {
+                    "a required capability is held by another package".to_string()
+                } else {
+                    format!(
+                        "`{}` is held by {}",
+                        progress.lease_token,
+                        if progress.lease_holder.is_empty() {
+                            "another package"
+                        } else {
+                            progress.lease_holder.as_str()
+                        }
+                    )
+                },
+            ),
+            LeaseState::Pending => done(
+                SkillPhase::Acquiring,
+                LifecycleReason::LeasePending,
+                None,
+                "the leases for `required_capabilities` have not been taken".to_string(),
+            ),
+            LeaseState::Held => done(
+                SkillPhase::Running,
+                LifecycleReason::LeasesAcquired,
+                None,
+                "every required capability is leased".to_string(),
+            ),
+        },
+
+        SkillPhase::Running => match abort_reason(progress) {
+            Some((reason, detail)) => done(
+                SkillPhase::Terminal,
+                reason,
+                Some(SkillOutcome::Aborted),
+                detail,
+            ),
+            None if progress.finished => done(
+                SkillPhase::Verifying,
+                LifecycleReason::Verifying,
+                None,
+                "the skill returned; §54.3 has not judged it yet".to_string(),
+            ),
+            None => done(
+                SkillPhase::Running,
+                LifecycleReason::Running,
+                None,
+                "the skill is running".to_string(),
+            ),
+        },
+
+        // A skill can still be stopped while its post-state is being judged, and the abort outranks
+        // the verdict: a skill whose robot fell over during verification did not succeed at
+        // anything, whatever a criterion evaluated to on the way down.
+        SkillPhase::Verifying => match abort_reason(progress) {
+            Some((reason, detail)) => done(
+                SkillPhase::Terminal,
+                reason,
+                Some(SkillOutcome::Aborted),
+                detail,
+            ),
+            None => match progress.outcome {
+                None => done(
+                    SkillPhase::Verifying,
+                    LifecycleReason::VerdictPending,
+                    None,
+                    "the success criteria have not been judged, and §54.3 will not let the skill \
+                     judge itself"
+                        .to_string(),
+                ),
+                Some(outcome) => done(
+                    SkillPhase::Terminal,
+                    LifecycleReason::Judged,
+                    Some(outcome),
+                    format!("§54.3 judged this {}", outcome.as_str()),
+                ),
+            },
+        },
+
+        SkillPhase::Terminal => done(
+            SkillPhase::Terminal,
+            LifecycleReason::Terminal,
+            progress.outcome,
+            "this invocation is over".to_string(),
+        ),
+    }
+}
+
+/// §54.5's third limit: *"The root's timeout bounds the whole tree. A child cannot extend its
+/// parent's budget."*
+///
+/// The child's own deadline, or what is left of the root's, whichever is sooner. Two properties
+/// fall out and both are the point:
+///
+/// * a child that declares **no** duration is still bounded, by its parent, so an unbounded skill
+///   nested under a bounded one does not make the tree unbounded;
+/// * a root with nothing left bounds its child at zero rather than at a negative number, so the
+///   child is stopped rather than handed a deadline already in the past that some other arithmetic
+///   could read as "no deadline".
+pub fn bounded_deadline(child: &Deadline, root_remaining_ms: Option<f64>) -> Deadline {
+    let Some(remaining) = root_remaining_ms.filter(|value| value.is_finite()) else {
+        return *child;
+    };
+    let remaining = if remaining > 0.0 { remaining } else { 0.0 };
+    match (child.enforceable, child.deadline_ms) {
+        (true, Some(own)) => Deadline {
+            deadline_ms: Some(if own < remaining { own } else { remaining }),
+            enforceable: true,
+            factor: child.factor,
+        },
+        _ => Deadline {
+            deadline_ms: Some(remaining),
+            enforceable: true,
+            factor: child.factor,
+        },
+    }
+}
+
+/// A transition, for the black box, `GET /skills` and the console.
+pub fn transition_to_json(transition: &SkillTransition) -> Json {
+    let mut out = Json::obj();
+    out.set("from", Json::Str(transition.from.as_str().to_string()));
+    out.set("to", Json::Str(transition.to.as_str().to_string()));
+    out.set("reason", Json::Str(transition.reason.as_str().to_string()));
+    out.set(
+        "outcome",
+        match transition.outcome {
+            Some(outcome) => Json::Str(outcome.as_str().to_string()),
+            // Nullable rather than absent: "this transition is not terminal" is a fact, and a
+            // consumer that had to distinguish a missing key from a null would get it wrong once.
+            None => Json::Null,
+        },
+    );
+    out.set("detail", Json::Str(transition.detail.clone()));
+    out.set("release_leases", Json::Bool(transition.release_leases));
+    out.set("changed", Json::Bool(transition.changed));
+    out
+}
+
+/// Read progress out of a document, for the corpus and for a report that crossed a wire.
+///
+/// Every unreadable field falls back to its default, which is the value that does not advance the
+/// machine. A caller that sent `"entry_permitted": "yes"` gets a skill that has not been evaluated.
+pub fn progress_from_json(input: &Json) -> Progress {
+    let flag = |key: &str| matches!(input.get(key), Some(Json::Bool(true)));
+    let word = |key: &str| {
+        input
+            .get(key)
+            .and_then(Json::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+
+    let deadline = match input.get("deadline") {
+        Some(document) => Deadline {
+            deadline_ms: document.get("deadline_ms").and_then(Json::as_f64),
+            enforceable: matches!(document.get("enforceable"), Some(Json::Bool(true))),
+            factor: document
+                .get("factor")
+                .and_then(Json::as_f64)
+                .unwrap_or(DEFAULT_OVERRUN_FACTOR),
+        },
+        None => Progress::default().deadline,
+    };
+
+    Progress {
+        invoked: flag("invoked"),
+        // Absent is root, matching `Progress::default` — see the note there.
+        root: !matches!(input.get("root"), Some(Json::Bool(false))),
+        entry_permitted: match input.get("entry_permitted") {
+            Some(Json::Bool(value)) => Some(*value),
+            _ => None,
+        },
+        refused_clause: word("refused_clause"),
+        leases: match input.get("leases").and_then(Json::as_str) {
+            Some("held") => LeaseState::Held,
+            Some("denied") => LeaseState::Denied,
+            _ => LeaseState::Pending,
+        },
+        lease_token: word("lease_token"),
+        lease_holder: word("lease_holder"),
+        elapsed_ms: input.get("elapsed_ms").and_then(Json::as_f64),
+        deadline,
+        hold_lost: flag("hold_lost"),
+        guard_tripped: flag("guard_tripped"),
+        robot: input
+            .get("robot")
+            .and_then(Json::as_str)
+            .and_then(OperatingState::parse)
+            .unwrap_or(OperatingState::Post),
+        finished: flag("finished"),
+        outcome: input
+            .get("outcome")
+            .and_then(Json::as_str)
+            .and_then(|word| {
+                SKILL_OUTCOMES
+                    .iter()
+                    .copied()
+                    .find(|outcome| outcome.as_str() == word)
+            }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1044,5 +1689,980 @@ mod tests {
         );
         assert_eq!(graph.len(), 1);
         assert!(read_calls(None).is_empty());
+    }
+
+    // ── §54.4's lifecycle ────────────────────────────────────────────────────
+
+    /// A skill that is going to work: invoked, root, preconditions met, leases held, inside its
+    /// deadline, on a robot that is running.
+    ///
+    /// Every test below starts here and breaks exactly one thing.
+    fn going_well() -> Progress {
+        Progress {
+            invoked: true,
+            root: true,
+            entry_permitted: Some(true),
+            leases: LeaseState::Held,
+            elapsed_ms: Some(100.0),
+            deadline: skill_deadline(Some(10.0), DEFAULT_OVERRUN_FACTOR),
+            robot: OperatingState::Running,
+            ..Progress::default()
+        }
+    }
+
+    fn step(phase: SkillPhase, progress: &Progress) -> (SkillPhase, LifecycleReason) {
+        let transition = advance(phase, progress);
+        (transition.to, transition.reason)
+    }
+
+    /// The single most important assertion here, and it is the same one §27's machine opens with.
+    ///
+    /// A `Progress` nobody has filled in is an invocation nobody has made. Nothing about it advances.
+    #[test]
+    fn an_invocation_nobody_has_made_stays_idle() {
+        let blank = Progress::default();
+        assert_eq!(
+            step(SkillPhase::Idle, &blank),
+            (SkillPhase::Idle, LifecycleReason::NotInvoked)
+        );
+        assert!(!advance(SkillPhase::Idle, &blank).changed);
+        assert!(!advance(SkillPhase::Idle, &blank).release_leases);
+    }
+
+    /// §54.2, from the direction that matters most: a runtime that has not evaluated the
+    /// preconditions yet must not be able to start a skill by failing to ask.
+    #[test]
+    fn an_unevaluated_precondition_is_not_a_satisfied_one() {
+        let progress = Progress {
+            entry_permitted: None,
+            ..going_well()
+        };
+        assert_eq!(
+            step(SkillPhase::Preconditions, &progress),
+            (
+                SkillPhase::Preconditions,
+                LifecycleReason::PreconditionsPending
+            )
+        );
+    }
+
+    /// §54.6's `skill.preconditions.enforced`: refused, with the predicate named.
+    ///
+    /// The naming is shared between two functions and neither is complete alone —
+    /// [`evaluate_preconditions`] finds the clause, and the lifecycle carries it into the detail an
+    /// operator reads. Asserting the join is what makes the conformance test writable.
+    #[test]
+    fn a_false_precondition_refuses_the_skill_and_names_the_clause() {
+        let progress = Progress {
+            entry_permitted: Some(false),
+            refused_clause: "the cell door is closed".to_string(),
+            ..going_well()
+        };
+        let transition = advance(SkillPhase::Preconditions, &progress);
+        assert_eq!(transition.to, SkillPhase::Terminal);
+        assert_eq!(transition.reason, LifecycleReason::PreconditionsRefused);
+        assert_eq!(transition.outcome, Some(SkillOutcome::Aborted));
+        assert!(transition.detail.contains("the cell door is closed"));
+    }
+
+    /// A refusal is `aborted`, never `failure`. A skill that was never allowed to start did not
+    /// fail at its task, and a success rate computed over refusals would punish publishers for
+    /// operators' cell configurations.
+    #[test]
+    fn a_refusal_is_never_recorded_as_a_failure() {
+        for progress in [
+            Progress {
+                entry_permitted: Some(false),
+                ..going_well()
+            },
+            Progress {
+                leases: LeaseState::Denied,
+                ..going_well()
+            },
+        ] {
+            for phase in [SkillPhase::Preconditions, SkillPhase::Acquiring] {
+                let transition = advance(phase, &progress);
+                assert_ne!(transition.outcome, Some(SkillOutcome::Failure));
+                assert_ne!(transition.outcome, Some(SkillOutcome::Success));
+            }
+        }
+    }
+
+    #[test]
+    fn a_denied_lease_names_the_token_and_the_holder() {
+        let progress = Progress {
+            leases: LeaseState::Denied,
+            lease_token: "manipulation.grasp".to_string(),
+            lease_holder: "acme/pick-place".to_string(),
+            ..going_well()
+        };
+        let transition = advance(SkillPhase::Acquiring, &progress);
+        assert_eq!(transition.to, SkillPhase::Terminal);
+        assert_eq!(transition.reason, LifecycleReason::LeaseDenied);
+        assert!(transition.detail.contains("manipulation.grasp"));
+        assert!(transition.detail.contains("acme/pick-place"));
+    }
+
+    /// §25.2 refuses rather than interleaves, and a lease nobody has taken yet is not one that was
+    /// granted — the same "absent is not a pass" rule as the preconditions above it.
+    #[test]
+    fn a_lease_nobody_has_taken_holds_the_skill_in_acquiring() {
+        let progress = Progress {
+            leases: LeaseState::Pending,
+            ..going_well()
+        };
+        assert_eq!(
+            step(SkillPhase::Acquiring, &progress),
+            (SkillPhase::Acquiring, LifecycleReason::LeasePending)
+        );
+    }
+
+    /// §54.5: *"Leases are held by the root invocation, not re-acquired per call. Nested
+    /// acquisition is how you get a skill deadlocking against its own child."*
+    #[test]
+    fn a_nested_call_skips_acquiring_entirely() {
+        let progress = Progress {
+            root: false,
+            ..going_well()
+        };
+        let transition = advance(SkillPhase::Preconditions, &progress);
+        assert_eq!(transition.to, SkillPhase::Running);
+        assert_eq!(transition.reason, LifecycleReason::LeasesHeldByRoot);
+    }
+
+    /// And the root does not. A default that skipped acquisition would let a caller who forgot the
+    /// field past §25.2's arbitration entirely, which is two policies driving one elbow.
+    #[test]
+    fn a_default_invocation_is_a_root_and_therefore_acquires() {
+        assert!(Progress::default().root);
+        let progress = Progress {
+            entry_permitted: Some(true),
+            ..Progress::default()
+        };
+        assert_eq!(
+            step(SkillPhase::Preconditions, &progress),
+            (SkillPhase::Acquiring, LifecycleReason::PreconditionsMet)
+        );
+    }
+
+    // ── What stops a running skill, and in which order ───────────────────────
+
+    /// §54.6's `skill.timeout.enforced`.
+    #[test]
+    fn an_overrunning_skill_is_stopped_and_recorded_aborted() {
+        // 10 s estimate, factor 2 → 20 000 ms.
+        let progress = Progress {
+            elapsed_ms: Some(20_000.0),
+            ..going_well()
+        };
+        let transition = advance(SkillPhase::Running, &progress);
+        assert_eq!(transition.to, SkillPhase::Terminal);
+        assert_eq!(transition.reason, LifecycleReason::Timeout);
+        assert_eq!(transition.outcome, Some(SkillOutcome::Aborted));
+        assert!(transition.release_leases);
+    }
+
+    /// The deadline is inclusive, and that is a decision rather than an accident: a skill that has
+    /// used exactly its budget has used it.
+    #[test]
+    fn the_deadline_is_reached_rather_than_passed() {
+        let deadline = skill_deadline(Some(10.0), DEFAULT_OVERRUN_FACTOR);
+        assert_eq!(deadline.deadline_ms, Some(20_000.0));
+        let just_inside = Progress {
+            elapsed_ms: Some(19_999.0),
+            ..going_well()
+        };
+        assert_eq!(
+            step(SkillPhase::Running, &just_inside).0,
+            SkillPhase::Running
+        );
+    }
+
+    /// A skill that declares no duration produces an unenforceable deadline, and an unenforceable
+    /// deadline never expires. `skill_deadline` deliberately does not decide whether an unbounded
+    /// skill may run; neither does this.
+    #[test]
+    fn an_unenforceable_deadline_never_times_out() {
+        let progress = Progress {
+            deadline: skill_deadline(None, DEFAULT_OVERRUN_FACTOR),
+            elapsed_ms: Some(1e12),
+            ..going_well()
+        };
+        assert_eq!(step(SkillPhase::Running, &progress).0, SkillPhase::Running);
+    }
+
+    /// §54.6's `skill.preconditions.rechecked`: a `hold` precondition falsified mid-run stops it.
+    #[test]
+    fn a_hold_precondition_lost_mid_run_stops_the_skill() {
+        let progress = Progress {
+            hold_lost: true,
+            ..going_well()
+        };
+        let transition = advance(SkillPhase::Running, &progress);
+        assert_eq!(transition.reason, LifecycleReason::HoldLost);
+        assert_eq!(transition.outcome, Some(SkillOutcome::Aborted));
+    }
+
+    #[test]
+    fn a_guard_trip_stops_the_skill_because_a_skill_is_not_an_exemption() {
+        let progress = Progress {
+            guard_tripped: true,
+            ..going_well()
+        };
+        assert_eq!(
+            step(SkillPhase::Running, &progress),
+            (SkillPhase::Terminal, LifecycleReason::GuardTripped)
+        );
+    }
+
+    /// §54.4's `running` row read through §27's machine: a robot that has stopped commanding has
+    /// ended the skill, whatever stopped it.
+    #[test]
+    fn a_robot_that_stopped_commanding_ends_the_skill() {
+        for state in [
+            OperatingState::Stopping,
+            OperatingState::Safe,
+            OperatingState::Post,
+            OperatingState::Unhomed,
+        ] {
+            let progress = Progress {
+                robot: state,
+                ..going_well()
+            };
+            assert_eq!(
+                step(SkillPhase::Running, &progress),
+                (SkillPhase::Terminal, LifecycleReason::RobotStopped),
+                "`{}` is not a state a policy commands in",
+                state.as_str()
+            );
+        }
+    }
+
+    /// `hold` is the exclusion worth asserting. It is where §27's machine sits between a lease
+    /// being granted and a policy actually commanding, so aborting on it would kill every skill in
+    /// the moment it started. And `degraded` runs — §45.5 makes an unavailable guard the ordinary
+    /// case, and a skill refusing to proceed on one would refuse on most real robots.
+    #[test]
+    fn hold_and_degraded_do_not_end_a_running_skill() {
+        for state in [OperatingState::Hold, OperatingState::Degraded] {
+            let progress = Progress {
+                robot: state,
+                ..going_well()
+            };
+            assert_eq!(
+                step(SkillPhase::Running, &progress).0,
+                SkillPhase::Running,
+                "`{}` must not abort a skill",
+                state.as_str()
+            );
+        }
+    }
+
+    /// Causes before effects. A timeout makes the OS stop the skill under a controlled stop, and a
+    /// guard trip stops the robot — so both *produce* a robot that is no longer commanding, and
+    /// reporting the robot state first would hide the cause behind its own consequence.
+    #[test]
+    fn the_cause_is_reported_rather_than_its_consequence() {
+        let everything = Progress {
+            elapsed_ms: Some(20_000.0),
+            hold_lost: true,
+            guard_tripped: true,
+            robot: OperatingState::Stopping,
+            ..going_well()
+        };
+        assert_eq!(
+            advance(SkillPhase::Running, &everything).reason,
+            LifecycleReason::Timeout
+        );
+
+        let no_timeout = Progress {
+            elapsed_ms: Some(1.0),
+            ..everything.clone()
+        };
+        assert_eq!(
+            advance(SkillPhase::Running, &no_timeout).reason,
+            LifecycleReason::HoldLost
+        );
+
+        let no_hold = Progress {
+            hold_lost: false,
+            ..no_timeout.clone()
+        };
+        assert_eq!(
+            advance(SkillPhase::Running, &no_hold).reason,
+            LifecycleReason::GuardTripped
+        );
+
+        let only_the_robot = Progress {
+            guard_tripped: false,
+            ..no_hold
+        };
+        assert_eq!(
+            advance(SkillPhase::Running, &only_the_robot).reason,
+            LifecycleReason::RobotStopped
+        );
+    }
+
+    // ── Verifying ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn a_finished_skill_is_verified_rather_than_believed() {
+        let progress = Progress {
+            finished: true,
+            ..going_well()
+        };
+        assert_eq!(
+            step(SkillPhase::Running, &progress),
+            (SkillPhase::Verifying, LifecycleReason::Verifying)
+        );
+        // And §54.3 has not judged yet, which is not a success.
+        assert_eq!(
+            step(SkillPhase::Verifying, &progress),
+            (SkillPhase::Verifying, LifecycleReason::VerdictPending)
+        );
+    }
+
+    #[test]
+    fn every_judgement_reaches_the_terminal_phase_unchanged() {
+        for outcome in SKILL_OUTCOMES {
+            let progress = Progress {
+                finished: true,
+                outcome: Some(outcome),
+                ..going_well()
+            };
+            let transition = advance(SkillPhase::Verifying, &progress);
+            assert_eq!(transition.to, SkillPhase::Terminal);
+            assert_eq!(transition.reason, LifecycleReason::Judged);
+            assert_eq!(transition.outcome, Some(outcome));
+        }
+    }
+
+    /// A skill whose robot fell over during verification did not succeed at anything, whatever a
+    /// criterion evaluated to on the way down.
+    #[test]
+    fn an_abort_during_verification_outranks_the_verdict() {
+        let progress = Progress {
+            finished: true,
+            outcome: Some(SkillOutcome::Success),
+            guard_tripped: true,
+            ..going_well()
+        };
+        let transition = advance(SkillPhase::Verifying, &progress);
+        assert_eq!(transition.reason, LifecycleReason::GuardTripped);
+        assert_eq!(transition.outcome, Some(SkillOutcome::Aborted));
+    }
+
+    // ── Leases, and the one place they are released ──────────────────────────
+
+    /// §54.4's terminal row, on **every** path into it — including the refusals. A skill refused
+    /// after its leases were taken must not keep them: that is the path where a lease leaks and the
+    /// next invocation is refused the arm with nothing on any screen to say why.
+    #[test]
+    fn every_path_into_terminal_releases_the_leases() {
+        let paths: [(SkillPhase, Progress); 5] = [
+            (
+                SkillPhase::Preconditions,
+                Progress {
+                    entry_permitted: Some(false),
+                    ..going_well()
+                },
+            ),
+            (
+                SkillPhase::Acquiring,
+                Progress {
+                    leases: LeaseState::Denied,
+                    ..going_well()
+                },
+            ),
+            (
+                SkillPhase::Running,
+                Progress {
+                    elapsed_ms: Some(20_000.0),
+                    ..going_well()
+                },
+            ),
+            (
+                SkillPhase::Running,
+                Progress {
+                    guard_tripped: true,
+                    ..going_well()
+                },
+            ),
+            (
+                SkillPhase::Verifying,
+                Progress {
+                    finished: true,
+                    outcome: Some(SkillOutcome::Success),
+                    ..going_well()
+                },
+            ),
+        ];
+        for (phase, progress) in paths {
+            let transition = advance(phase, &progress);
+            assert_eq!(transition.to, SkillPhase::Terminal);
+            assert!(
+                transition.release_leases,
+                "`{}` reached terminal without releasing",
+                phase.as_str()
+            );
+        }
+    }
+
+    /// And a skill already terminal releases nothing. A release emitted every cycle after a skill
+    /// ended would be a release racing the next invocation's acquisition, which is the one way
+    /// §25.2's arbitration can be lost by the thing that implements it.
+    #[test]
+    fn a_skill_already_over_releases_nothing_however_often_it_is_asked() {
+        let progress = Progress {
+            outcome: Some(SkillOutcome::Success),
+            ..going_well()
+        };
+        for _ in 0..3 {
+            let transition = advance(SkillPhase::Terminal, &progress);
+            assert_eq!(transition.to, SkillPhase::Terminal);
+            assert!(!transition.release_leases);
+            assert!(!transition.changed);
+            assert_eq!(transition.outcome, Some(SkillOutcome::Success));
+        }
+    }
+
+    // ── Totality, and the walk a whole invocation takes ──────────────────────
+
+    /// The happy path end to end, one `advance` at a time, with the evidence arriving as it would.
+    #[test]
+    fn a_whole_invocation_walks_the_diagram() {
+        let mut phase = SkillPhase::Idle;
+        let mut progress = Progress {
+            invoked: true,
+            deadline: skill_deadline(Some(10.0), DEFAULT_OVERRUN_FACTOR),
+            robot: OperatingState::Running,
+            ..Progress::default()
+        };
+
+        phase = advance(phase, &progress).to;
+        assert_eq!(phase, SkillPhase::Preconditions);
+
+        progress.entry_permitted = Some(true);
+        phase = advance(phase, &progress).to;
+        assert_eq!(phase, SkillPhase::Acquiring);
+
+        progress.leases = LeaseState::Held;
+        phase = advance(phase, &progress).to;
+        assert_eq!(phase, SkillPhase::Running);
+
+        progress.elapsed_ms = Some(500.0);
+        phase = advance(phase, &progress).to;
+        assert_eq!(phase, SkillPhase::Running, "still running is a fixed point");
+
+        progress.finished = true;
+        phase = advance(phase, &progress).to;
+        assert_eq!(phase, SkillPhase::Verifying);
+
+        progress.outcome = Some(SkillOutcome::Success);
+        let last = advance(phase, &progress);
+        assert_eq!(last.to, SkillPhase::Terminal);
+        assert_eq!(last.outcome, Some(SkillOutcome::Success));
+        assert!(last.release_leases);
+    }
+
+    /// Total, and self-consistent, over every phase and a wide sweep of evidence. The answers
+    /// themselves are pinned by the corpus; this asserts the invariants that hold for all of them.
+    #[test]
+    fn the_lifecycle_is_total_and_never_moves_backwards() {
+        let order = |phase: SkillPhase| {
+            SKILL_PHASES
+                .iter()
+                .position(|candidate| *candidate == phase)
+                .expect("every phase is in the list")
+        };
+
+        let mut evaluated = 0usize;
+        for phase in SKILL_PHASES {
+            for invoked in [false, true] {
+                for root in [false, true] {
+                    for entry in [None, Some(false), Some(true)] {
+                        for leases in LEASE_STATES {
+                            for elapsed in [None, Some(0.0), Some(1e9)] {
+                                for hold_lost in [false, true] {
+                                    for finished in [false, true] {
+                                        for robot in [OperatingState::Running, OperatingState::Safe]
+                                        {
+                                            let progress = Progress {
+                                                invoked,
+                                                root,
+                                                entry_permitted: entry,
+                                                leases,
+                                                elapsed_ms: elapsed,
+                                                deadline: skill_deadline(
+                                                    Some(10.0),
+                                                    DEFAULT_OVERRUN_FACTOR,
+                                                ),
+                                                hold_lost,
+                                                finished,
+                                                robot,
+                                                ..Progress::default()
+                                            };
+                                            let transition = advance(phase, &progress);
+                                            assert_eq!(transition.from, phase);
+                                            assert_eq!(transition.changed, transition.to != phase);
+                                            // The diagram has no back edges. A phase that could go
+                                            // backwards is a skill that could re-acquire a lease it
+                                            // already holds, or re-run its preconditions after it
+                                            // started — §54.5's deadlock, arrived at from inside.
+                                            assert!(
+                                                order(transition.to) >= order(phase),
+                                                "{} went back to {}",
+                                                phase.as_str(),
+                                                transition.to.as_str()
+                                            );
+                                            // An outcome is a terminal fact and nothing else.
+                                            if transition.outcome.is_some() {
+                                                assert_eq!(transition.to, SkillPhase::Terminal);
+                                            }
+                                            assert_eq!(
+                                                transition.release_leases,
+                                                transition.to == SkillPhase::Terminal
+                                                    && phase != SkillPhase::Terminal
+                                            );
+                                            evaluated += 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(evaluated, 6 * 2 * 2 * 3 * 3 * 3 * 2 * 2 * 2);
+    }
+
+    /// Every reason is reachable. A reason nothing produces is a word on a console that never
+    /// appears, and the way that happens is a rule being reordered above the one that produced it.
+    #[test]
+    fn every_lifecycle_reason_is_produced_by_some_evidence() {
+        let cases: [(SkillPhase, Progress); 18] = [
+            (SkillPhase::Idle, Progress::default()),
+            (
+                SkillPhase::Idle,
+                Progress {
+                    invoked: true,
+                    ..Progress::default()
+                },
+            ),
+            (
+                SkillPhase::Preconditions,
+                Progress {
+                    entry_permitted: None,
+                    ..going_well()
+                },
+            ),
+            (
+                SkillPhase::Preconditions,
+                Progress {
+                    entry_permitted: Some(false),
+                    ..going_well()
+                },
+            ),
+            (SkillPhase::Preconditions, going_well()),
+            (
+                SkillPhase::Preconditions,
+                Progress {
+                    root: false,
+                    ..going_well()
+                },
+            ),
+            (
+                SkillPhase::Acquiring,
+                Progress {
+                    leases: LeaseState::Pending,
+                    ..going_well()
+                },
+            ),
+            (
+                SkillPhase::Acquiring,
+                Progress {
+                    leases: LeaseState::Denied,
+                    ..going_well()
+                },
+            ),
+            (SkillPhase::Acquiring, going_well()),
+            (
+                SkillPhase::Running,
+                Progress {
+                    elapsed_ms: Some(1e9),
+                    ..going_well()
+                },
+            ),
+            (
+                SkillPhase::Running,
+                Progress {
+                    hold_lost: true,
+                    ..going_well()
+                },
+            ),
+            (
+                SkillPhase::Running,
+                Progress {
+                    guard_tripped: true,
+                    ..going_well()
+                },
+            ),
+            (
+                SkillPhase::Running,
+                Progress {
+                    robot: OperatingState::Safe,
+                    ..going_well()
+                },
+            ),
+            (SkillPhase::Running, going_well()),
+            (
+                SkillPhase::Running,
+                Progress {
+                    finished: true,
+                    ..going_well()
+                },
+            ),
+            (SkillPhase::Verifying, going_well()),
+            (
+                SkillPhase::Verifying,
+                Progress {
+                    outcome: Some(SkillOutcome::Success),
+                    ..going_well()
+                },
+            ),
+            (SkillPhase::Terminal, going_well()),
+        ];
+        let seen: Vec<LifecycleReason> = cases
+            .iter()
+            .map(|(phase, progress)| advance(*phase, progress).reason)
+            .collect();
+        for expected in LIFECYCLE_REASONS {
+            assert!(
+                seen.contains(&expected),
+                "no evidence produces `{}`",
+                expected.as_str()
+            );
+        }
+    }
+
+    // ── §54.5's third limit ──────────────────────────────────────────────────
+
+    #[test]
+    fn a_child_cannot_extend_its_parents_budget() {
+        let child = skill_deadline(Some(60.0), DEFAULT_OVERRUN_FACTOR);
+        assert_eq!(child.deadline_ms, Some(120_000.0));
+        let bounded = bounded_deadline(&child, Some(5_000.0));
+        assert_eq!(bounded.deadline_ms, Some(5_000.0));
+        assert!(bounded.enforceable);
+    }
+
+    #[test]
+    fn a_child_that_is_shorter_than_the_root_keeps_its_own_deadline() {
+        let child = skill_deadline(Some(1.0), DEFAULT_OVERRUN_FACTOR);
+        assert_eq!(
+            bounded_deadline(&child, Some(90_000.0)).deadline_ms,
+            Some(2_000.0)
+        );
+    }
+
+    /// An unbounded skill nested under a bounded one does not make the tree unbounded.
+    #[test]
+    fn an_unbounded_child_is_still_bounded_by_its_parent() {
+        let child = skill_deadline(None, DEFAULT_OVERRUN_FACTOR);
+        assert!(!child.enforceable);
+        let bounded = bounded_deadline(&child, Some(7_500.0));
+        assert_eq!(bounded.deadline_ms, Some(7_500.0));
+        assert!(bounded.enforceable);
+    }
+
+    /// A root with nothing left bounds its child at zero rather than at a negative number — which
+    /// some other arithmetic could read as "no deadline".
+    #[test]
+    fn a_root_with_nothing_left_bounds_its_child_at_zero() {
+        let child = skill_deadline(Some(60.0), DEFAULT_OVERRUN_FACTOR);
+        assert_eq!(bounded_deadline(&child, Some(-1.0)).deadline_ms, Some(0.0));
+        assert_eq!(bounded_deadline(&child, Some(0.0)).deadline_ms, Some(0.0));
+    }
+
+    /// A root that is itself unbounded bounds nothing, and the child keeps whatever it had —
+    /// including having nothing.
+    #[test]
+    fn an_unbounded_root_leaves_its_child_alone() {
+        let child = skill_deadline(Some(60.0), DEFAULT_OVERRUN_FACTOR);
+        assert_eq!(bounded_deadline(&child, None), child);
+        let unbounded = skill_deadline(None, DEFAULT_OVERRUN_FACTOR);
+        assert_eq!(bounded_deadline(&unbounded, None), unbounded);
+    }
+
+    // ── Reading and rendering ────────────────────────────────────────────────
+
+    #[test]
+    fn an_empty_document_reads_as_an_invocation_nobody_has_made() {
+        let parsed = progress_from_json(&Json::parse("{}").expect("parses"));
+        assert_eq!(parsed, Progress::default());
+    }
+
+    /// Unreadable fields fall back to the value that does not advance the machine.
+    #[test]
+    fn unreadable_fields_do_not_advance_the_machine() {
+        let parsed = progress_from_json(
+            &Json::parse(
+                r#"{"invoked":"yes","entry_permitted":"true","leases":"HELD",
+                    "robot":"Running","outcome":"succeeded"}"#,
+            )
+            .expect("parses"),
+        );
+        assert!(!parsed.invoked);
+        assert_eq!(parsed.entry_permitted, None);
+        assert_eq!(parsed.leases, LeaseState::Pending);
+        assert_eq!(parsed.robot, OperatingState::Post);
+        assert_eq!(parsed.outcome, None);
+    }
+
+    #[test]
+    fn the_json_shape_is_what_a_black_box_record_carries() {
+        let progress = Progress {
+            finished: true,
+            outcome: Some(SkillOutcome::Success),
+            ..going_well()
+        };
+        let json = transition_to_json(&advance(SkillPhase::Verifying, &progress));
+        let text = json.to_canonical().expect("canonical");
+        assert!(text.contains(r#""from":"verifying""#));
+        assert!(text.contains(r#""to":"terminal""#));
+        assert!(text.contains(r#""outcome":"success""#));
+        assert!(text.contains(r#""release_leases":true"#));
+
+        // Nullable rather than absent: "this transition is not terminal" is a fact.
+        let running = transition_to_json(&advance(SkillPhase::Running, &going_well()));
+        assert!(running
+            .to_canonical()
+            .expect("canonical")
+            .contains(r#""outcome":null"#));
+    }
+
+    #[test]
+    fn every_phase_round_trips_through_its_spelling() {
+        for phase in SKILL_PHASES {
+            assert_eq!(SkillPhase::parse(phase.as_str()), Some(phase));
+        }
+        assert_eq!(SkillPhase::parse("Running"), None);
+        assert_eq!(SkillPhase::parse("succeeded"), None);
+    }
+
+    // ── §54.6's four conformance additions ───────────────────────────────────
+    //
+    // §54.6 names four tests and every one of them asserts **runtime** behaviour:
+    //
+    // * `skill.preconditions.enforced` — a skill whose precondition is false is refused, with the
+    //   predicate named.
+    // * `skill.preconditions.rechecked` — a `hold` precondition falsified mid-run stops the skill.
+    // * `skill.timeout.enforced` — an overrunning skill is stopped and recorded `aborted`.
+    // * `skill.success.independent` — a skill claiming success against a false criterion is
+    //   recorded as failed.
+    //
+    // There is still no runtime, so these are not those tests. What they are is the half that can
+    // exist without one: each drives the **contract** end to end — the evaluation, the judgement
+    // and the lifecycle together — and asserts the answer §54.6 requires. When something loops, the
+    // conformance test is that loop plus these assertions, rather than these decisions again.
+    //
+    // They are deliberately **not** added to `SCTS_TESTS`. That catalogue decides what a tier
+    // requires, and `award_certification` reports a required test with no result as `missing` —
+    // so adding four tests nothing can run would strip the tier from every robot on the strength of
+    // evidence nobody can produce. §54.6 also does not say which tier they belong to, and guessing
+    // one is how a certification rule nobody agreed to becomes load-bearing.
+
+    /// `skill.preconditions.enforced`, over the two functions that share the job.
+    #[test]
+    fn scts_skill_preconditions_enforced() {
+        let clauses = resolve_clauses(
+            read_clauses(
+                Some(
+                    &Json::parse(
+                        r#"[{"statement":"the cell door is closed",
+                             "predicate":{"op":"eq","path":"env.door_closed","value":true}}]"#,
+                    )
+                    .expect("parses"),
+                ),
+                ClauseOrigin::Skill,
+            ),
+            Vec::new(),
+        );
+        let context = Json::parse(r#"{"env":{"door_closed":false}}"#).expect("parses");
+        let report = evaluate_preconditions(&clauses, &context, Phase::Entry);
+
+        assert!(!report.permitted);
+        let refused = report.refused.as_ref().expect("the refusal names a clause");
+        assert_eq!(refused.statement, "the cell door is closed");
+
+        // …and the lifecycle refuses on it, carrying the name into what an operator reads.
+        let progress = Progress {
+            invoked: true,
+            entry_permitted: Some(report.permitted),
+            refused_clause: refused.statement.clone(),
+            ..Progress::default()
+        };
+        let transition = advance(SkillPhase::Preconditions, &progress);
+        assert_eq!(transition.to, SkillPhase::Terminal);
+        assert_eq!(transition.reason, LifecycleReason::PreconditionsRefused);
+        assert_eq!(transition.outcome, Some(SkillOutcome::Aborted));
+        assert!(transition.detail.contains("the cell door is closed"));
+        assert!(transition.release_leases);
+    }
+
+    /// `skill.preconditions.rechecked` — §54.2's second rule, which is the one free-text
+    /// preconditions cannot have at all: "battery dropping below reserve mid-skill should stop the
+    /// skill, not be discovered at the end."
+    #[test]
+    fn scts_skill_preconditions_rechecked() {
+        let clauses = resolve_clauses(
+            read_clauses(
+                Some(
+                    &Json::parse(
+                        r#"[{"statement":"battery above reserve","hold":true,
+                             "predicate":{"op":"gte","path":"robot.state.battery_percent",
+                                          "value":20}}]"#,
+                    )
+                    .expect("parses"),
+                ),
+                ClauseOrigin::Skill,
+            ),
+            Vec::new(),
+        );
+
+        let charged = Json::parse(r#"{"robot":{"state":{"battery_percent":62}}}"#).expect("parses");
+        let flat = Json::parse(r#"{"robot":{"state":{"battery_percent":11}}}"#).expect("parses");
+
+        // It starts, because at entry the battery is fine.
+        assert!(evaluate_preconditions(&clauses, &charged, Phase::Entry).permitted);
+        // And the same clause, re-evaluated in the `hold` phase mid-run, is now false.
+        let held = evaluate_preconditions(&clauses, &flat, Phase::Hold);
+        assert!(!held.permitted);
+        assert_eq!(
+            held.results.len(),
+            1,
+            "only the `hold` clauses are re-checked"
+        );
+
+        let progress = Progress {
+            invoked: true,
+            entry_permitted: Some(true),
+            leases: LeaseState::Held,
+            elapsed_ms: Some(500.0),
+            deadline: skill_deadline(Some(30.0), DEFAULT_OVERRUN_FACTOR),
+            hold_lost: !held.permitted,
+            robot: OperatingState::Running,
+            ..Progress::default()
+        };
+        let transition = advance(SkillPhase::Running, &progress);
+        assert_eq!(transition.to, SkillPhase::Terminal);
+        assert_eq!(transition.reason, LifecycleReason::HoldLost);
+        assert_eq!(transition.outcome, Some(SkillOutcome::Aborted));
+    }
+
+    /// `skill.timeout.enforced` — stopped, and recorded `aborted` rather than `failure`, so it
+    /// "becomes a labelled training example rather than a gap".
+    #[test]
+    fn scts_skill_timeout_enforced() {
+        let deadline = skill_deadline(Some(4.0), DEFAULT_OVERRUN_FACTOR);
+        assert_eq!(deadline.deadline_ms, Some(8_000.0));
+
+        let progress = Progress {
+            invoked: true,
+            entry_permitted: Some(true),
+            leases: LeaseState::Held,
+            deadline,
+            elapsed_ms: Some(8_001.0),
+            // The skill even claims it finished. It still overran.
+            finished: true,
+            robot: OperatingState::Running,
+            ..Progress::default()
+        };
+        let transition = advance(SkillPhase::Running, &progress);
+        assert_eq!(transition.reason, LifecycleReason::Timeout);
+        assert_eq!(transition.outcome, Some(SkillOutcome::Aborted));
+        assert!(transition.release_leases);
+    }
+
+    /// `skill.success.independent` — §54.3: "a skill that judges its own success is a skill that
+    /// always succeeds."
+    ///
+    /// The skill's own claim is not an input to anything here. The only thing that decides is the
+    /// criterion evaluated over post-state, and this asserts that a false criterion produces
+    /// `failure` all the way into the terminal transition.
+    #[test]
+    fn scts_skill_success_independent() {
+        let criteria = resolve_clauses(
+            read_clauses(
+                Some(
+                    &Json::parse(
+                        r#"[{"statement":"the gripper is empty",
+                             "predicate":{"op":"eq","path":"robot.state.gripper","value":"open"}}]"#,
+                    )
+                    .expect("parses"),
+                ),
+                ClauseOrigin::Skill,
+            ),
+            Vec::new(),
+        );
+        let post_state =
+            Json::parse(r#"{"robot":{"state":{"gripper":"closed"}}}"#).expect("parses");
+
+        let judgement = judge_success(&criteria, &post_state);
+        assert_eq!(judgement.outcome, SkillOutcome::Failure);
+        assert_eq!(
+            judgement
+                .deciding
+                .as_ref()
+                .map(|result| result.statement.as_str()),
+            Some("the gripper is empty")
+        );
+
+        let progress = Progress {
+            invoked: true,
+            entry_permitted: Some(true),
+            leases: LeaseState::Held,
+            finished: true,
+            outcome: Some(judgement.outcome),
+            robot: OperatingState::Running,
+            ..Progress::default()
+        };
+        let transition = advance(SkillPhase::Verifying, &progress);
+        assert_eq!(transition.to, SkillPhase::Terminal);
+        assert_eq!(transition.outcome, Some(SkillOutcome::Failure));
+    }
+
+    /// And the other half of §54.3, because a conformance test that only checked the failing case
+    /// would pass on an edition that always reported `failure`.
+    #[test]
+    fn scts_skill_success_independent_does_not_invent_a_pass_either() {
+        let unenforceable = resolve_clauses(
+            read_clauses(
+                Some(&Json::parse(r#"["the cup is upright"]"#).expect("parses")),
+                ClauseOrigin::Skill,
+            ),
+            Vec::new(),
+        );
+        let judgement = judge_success(&unenforceable, &Json::obj());
+        assert_eq!(
+            judgement.outcome,
+            SkillOutcome::Unlabeled,
+            "honest ignorance beats an invented pass"
+        );
+
+        let progress = Progress {
+            invoked: true,
+            entry_permitted: Some(true),
+            leases: LeaseState::Held,
+            finished: true,
+            outcome: Some(judgement.outcome),
+            robot: OperatingState::Running,
+            ..Progress::default()
+        };
+        assert_eq!(
+            advance(SkillPhase::Verifying, &progress).outcome,
+            Some(SkillOutcome::Unlabeled)
+        );
     }
 }

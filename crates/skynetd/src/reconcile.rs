@@ -41,6 +41,8 @@
 //! A deferred action stays in the plan, carrying its [`Gate`], so an operator sees "waiting for a
 //! safe state" rather than an update that silently never happened.
 
+use skynet_contracts::opstate::OperatingState;
+
 use crate::actual::{Actual, UnitState};
 use crate::desired::{DesiredState, PackageKind, RunState};
 
@@ -61,6 +63,39 @@ impl SafeState {
     /// Whether the barrier is open.
     pub fn is_safe(self) -> bool {
         self == Self::Yes
+    }
+
+    /// The barrier, read off §27's operating state.
+    ///
+    /// This is what the newtype was waiting for. §33.4's barrier rests on "nothing is held, nothing
+    /// is mid-task", which is a property of the state the robot is in — and until §27's machine was
+    /// declared there was nowhere to read that from, so every caller asserted it. A caller asserting
+    /// a safe state while a policy is commanding is precisely the barrier inversion the comment
+    /// above this type worries about, and it is no longer expressible.
+    ///
+    /// [`OperatingState::Stopping`] is the entry that makes the derivation worth having: a robot
+    /// mid-ramp is the state most likely to be declared safe by somebody watching it slow down.
+    pub fn from_state(state: OperatingState) -> Self {
+        if state.is_safe_state() {
+            Self::Yes
+        } else {
+            Self::No
+        }
+    }
+
+    /// The barrier, narrowed by a second opinion.
+    ///
+    /// §33.4's asymmetry, applied to the two sources of this fact: "anything that reduces what the
+    /// robot may do applies immediately". Either source may **close** the barrier and neither may
+    /// open it alone, so a declaration somebody left set to `yes` cannot outvote a machine that can
+    /// see a policy running, and a machine on an edition that cannot observe the body cannot outvote
+    /// an operator who has not declared anything.
+    pub fn and(self, other: Self) -> Self {
+        if self.is_safe() && other.is_safe() {
+            Self::Yes
+        } else {
+            Self::No
+        }
     }
 }
 

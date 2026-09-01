@@ -1,0 +1,60 @@
+{
+  "corpus": "skill",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "root-bounds-a-longer-child",
+      "note": "§54.5: \"the root's timeout bounds the whole tree. A child cannot extend its parent's budget.\"",
+      "input": {
+        "expected_duration_seconds": 60,
+        "root_remaining_ms": 5000
+      },
+      "expected": "{\"deadline_ms\":5000,\"enforceable\":true,\"factor\":2}"
+    },
+    {
+      "id": "a-shorter-child-keeps-its-own",
+      "note": "The bound is a minimum, not a replacement.",
+      "input": {
+        "expected_duration_seconds": 1,
+        "root_remaining_ms": 90000
+      },
+      "expected": "{\"deadline_ms\":2000,\"enforceable\":true,\"factor\":2}"
+    },
+    {
+      "id": "an-unbounded-child-is-still-bounded",
+      "note": "A child that declares no duration is bounded by its parent, so an unbounded skill nested under a bounded one does not make the tree unbounded — which is the composition failure §54.5 names.",
+      "input": {
+        "expected_duration_seconds": null,
+        "root_remaining_ms": 7500
+      },
+      "expected": "{\"deadline_ms\":7500,\"enforceable\":true,\"factor\":2}"
+    },
+    {
+      "id": "a-root-with-nothing-left-bounds-at-zero",
+      "note": "Zero rather than a negative number: a deadline already in the past is one some other arithmetic could read as \"no deadline\", and the child would outlive the tree.",
+      "input": {
+        "expected_duration_seconds": 60,
+        "root_remaining_ms": -1
+      },
+      "expected": "{\"deadline_ms\":0,\"enforceable\":true,\"factor\":2}"
+    },
+    {
+      "id": "an-unbounded-root-leaves-the-child-alone",
+      "note": "Including leaving it unbounded. Nothing here invents a ceiling for a tree nobody bounded.",
+      "input": {
+        "expected_duration_seconds": 60,
+        "root_remaining_ms": null
+      },
+      "expected": "{\"deadline_ms\":120000,\"enforceable\":true,\"factor\":2}"
+    },
+    {
+      "id": "neither-is-bounded",
+      "note": "And the honest answer for two skills that declared nothing is still nothing.",
+      "input": {
+        "expected_duration_seconds": null,
+        "root_remaining_ms": null
+      },
+      "expected": "{\"deadline_ms\":null,\"enforceable\":false,\"factor\":2}"
+    }
+  ]
+}

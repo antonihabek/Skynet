@@ -10,10 +10,16 @@
  * | Outcome | None; it just runs | Succeeded, failed or aborted |
  * | Guards | Envelope applies | Envelope applies, **plus preconditions** |
  *
- * Everything here is pure. The lifecycle that calls it — `idle → preconditions → acquiring →
- * running → verifying → terminal` — needs capability leases and §27's state machine, neither of
- * which exists yet. These are the decisions that lifecycle will make, written down and frozen now
- * so that when something does loop, it is not also inventing the rules.
+ * Everything here is pure, **including the lifecycle**. `idle → preconditions → acquiring → running
+ * → verifying → terminal` was recorded for two sessions as waiting on capability leases and on
+ * §27's state machine. Half of that was already wrong when it was written — `skynetd::lease` has
+ * held §25.2's table since the fifteenth session — and the other half stopped being true when
+ * `opstate.ts` was declared. So [`advance`] is here, and it is a function of a phase and the
+ * evidence gathered so far rather than a loop.
+ *
+ * What is still missing is the loop itself: something that calls this every cycle, runs the skill's
+ * policy, and writes the black box events. The decisions it will make are frozen and testable, so
+ * when something does loop it is not also inventing the rules.
  *
  * ── The asymmetry, which is the substantive decision in this file ───────────
  *
@@ -46,6 +52,9 @@
 
 import { evaluatePredicateOutcome, type Outcome, type UnevaluableReason } from './predicate.ts'
 import type { Predicate } from './types.ts'
+// §54.4's `running` row: "a skill is not an exemption from the kernel". The lifecycle reads
+// §27's machine rather than keeping a second opinion about whether the robot is commanding.
+import type { OperatingState } from './opstate.ts'
 
 /**
  * One precondition or success criterion.
@@ -409,4 +418,328 @@ export function validateComposition(
 
   walk(root, [root])
   return fault
+}
+// ── §54.4 The lifecycle ──────────────────────────────────────────────────────
+//
+//     idle → preconditions → acquiring → running → verifying → succeeded | failed | aborted
+//               ↓ refused        ↓ denied     ↓ timeout / guard trip / precondition lost
+//
+// | Stage | What happens |
+// |---|---|
+// | `preconditions` | Predicates evaluated. A failure names the predicate and refuses. |
+// | `acquiring` | Capability leases taken for `required_capabilities` (§25.2). Denied if held. |
+// | `running` | The skill's policy runs under the transport plan and the resolved clamps, exactly like any other policy — a skill is not an exemption from the kernel |
+// | `verifying` | `success_criteria` evaluated over post-state |
+// | terminal | Leases released, outcome recorded, episode emitted |
+//
+// ── A phase advances on evidence, and absence of evidence is not advancement ──
+//
+// The rule that shapes every field below. `entry_permitted` is `null` until §54.2 has actually been
+// evaluated, `outcome` is `null` until §54.3 has judged, and both cases hold the lifecycle where it
+// is rather than moving it on. That is the same discipline as everywhere else in this repository —
+// a check that could not run has not passed — applied to a state machine rather than to a report.
+//
+// It also makes the machine safe to drive from a loop that runs faster than the work: calling
+// `advance` every cycle while the skill's own code is still running returns `running → running`,
+// and nothing has to remember that it already asked.
+//
+// ── The terminal vocabulary is the Hub's, and a refusal has to fit in it ─────
+//
+// §54.4's diagram ends in `succeeded | failed | aborted` and its next paragraph says the outcome
+// matches `EpisodeOutcome`, which is `success | failure | aborted | unlabeled`. The contract uses
+// the episode spelling, because that is the one that reaches a dataset — recorded as a finding by
+// the seventeenth session and unchanged.
+//
+// So a skill refused at `preconditions`, and one denied a lease, are terminal with `aborted`, and
+// the *reason* is what tells them apart. `failure` would be a lie a marketplace consumes: a skill
+// that was never allowed to start did not fail at its task, and a success rate computed over
+// refusals would punish publishers for operators' cell configurations.
+//
+// ── What aborts a running skill, and in which order ─────────────────────────
+//
+// §54.4 names three arrows — timeout, guard trip, precondition lost — and this adds one more from
+// §54.4's own `running` row: *"a skill is not an exemption from the kernel"*. A skill whose robot
+// has stopped commanding is over, whatever stopped it.
+//
+// The order is **causes before effects**. A timeout makes the OS stop the skill under a controlled
+// stop, and a guard trip stops the robot; both therefore *produce* a robot that is no longer
+// commanding. Reporting the robot state first would hide the cause behind its own consequence, so
+// the specific reasons are tried first and `robot_stopped` is the fallback that catches whatever
+// this machine could not name.
+//
+// `hold` is deliberately **not** an aborting robot state, and it is the one exclusion worth
+// writing down: it is where §27's machine sits between a lease being granted and a policy actually
+// commanding, so aborting on it would kill every skill in the moment it started. A guard asking for
+// a hold reaches this machine as `guard_tripped`, which is the input that means it.
+
+export const SKILL_PHASES = [
+  'idle',
+  'preconditions',
+  'acquiring',
+  'running',
+  'verifying',
+  'terminal',
+] as const
+
+export type SkillPhase = (typeof SKILL_PHASES)[number]
+
+/** §25.2's arbitration, as the one fact the lifecycle needs from it. */
+export const LEASE_STATES = ['pending', 'held', 'denied'] as const
+
+export type LeaseState = (typeof LEASE_STATES)[number]
+
+export const LIFECYCLE_REASONS = [
+  'not_invoked',
+  'invoked',
+  'preconditions_pending',
+  'preconditions_refused',
+  'preconditions_met',
+  'leases_held_by_root',
+  'lease_pending',
+  'lease_denied',
+  'leases_acquired',
+  'timeout',
+  'hold_lost',
+  'guard_tripped',
+  'robot_stopped',
+  'running',
+  'verifying',
+  'verdict_pending',
+  'judged',
+  'terminal',
+] as const
+
+export type LifecycleReason = (typeof LIFECYCLE_REASONS)[number]
+
+/**
+ * Everything one invocation has established so far.
+ *
+ * Every field is evidence somebody gathered, and every default is "not gathered". A `Progress` with
+ * nothing set is an invocation nobody has made, which is `idle` — the only starting value that is
+ * not a claim.
+ */
+export interface Progress {
+  /** Somebody called `execute({ skill, arguments, timeout_s })` (§54.1). */
+  invoked?: boolean
+  /**
+   * Whether this is the root invocation (§54.5).
+   *
+   * A nested call does **not** acquire: *"leases are held by the root invocation, not re-acquired
+   * per call. Nested acquisition is how you get a skill deadlocking against its own child."* So a
+   * non-root invocation skips `acquiring` entirely, which is that sentence made mechanical rather
+   * than left as advice to whoever writes the runtime.
+   */
+  root?: boolean
+  /** §54.2's entry evaluation. `null` until it has been run — which is not a pass. */
+  entry_permitted?: boolean | null
+  /** The clause a refusal names, from `PreconditionReport.refused`. */
+  refused_clause?: string
+  /** §25.2. */
+  leases?: LeaseState
+  /** The token that was refused, and who holds it — §25.2 refuses rather than interleaves. */
+  lease_token?: string
+  lease_holder?: string
+  /** Milliseconds since the skill entered `running`. `null` while it has not. */
+  elapsed_ms?: number | null
+  /** §54.4's deadline, from `skillDeadline`. */
+  deadline?: Deadline
+  /** A `hold` precondition falsified mid-run (§54.2's second rule). */
+  hold_lost?: boolean
+  /** A guard tripped, which includes a guard asking for a hold. */
+  guard_tripped?: boolean
+  /** Where §27's machine says the robot is. */
+  robot?: OperatingState
+  /** The skill's own code returned. */
+  finished?: boolean
+  /** §54.3's judgement. `null` until it has been made — which is not a success. */
+  outcome?: SkillOutcome | null
+}
+
+export interface SkillTransition {
+  from: SkillPhase
+  to: SkillPhase
+  reason: LifecycleReason
+  /** The episode outcome, present only on entering `terminal`. */
+  outcome: SkillOutcome | null
+  /** What a console shows beside the reason: the clause, the token, the state. */
+  detail: string
+  /**
+   * §54.4's terminal row: *"Leases released, outcome recorded, episode emitted."*
+   *
+   * True only on the transition **into** `terminal`, never on re-evaluating a skill that is already
+   * there. A release emitted every cycle after a skill ended would be a release racing the next
+   * invocation's acquisition, which is the one way §25.2's arbitration can be lost by the thing
+   * that implements it.
+   *
+   * And it is true on **every** path into `terminal`, including the refusals — a skill refused
+   * after its leases were taken must not keep them, and the path that does that is the one where a
+   * lease leaks and the next invocation is refused the arm with nothing on any screen to say why.
+   */
+  release_leases: boolean
+  changed: boolean
+}
+
+/** Whether a robot in this state has stopped a skill that was running. See the note above. */
+function robotStoppedCommanding(state: OperatingState): boolean {
+  return state === 'stopping' || state === 'safe' || state === 'post' || state === 'unhomed'
+}
+
+/** Whether the deadline has passed. An unenforceable deadline never has. */
+function overran(progress: Progress): boolean {
+  const deadline = progress.deadline
+  if (!deadline || !deadline.enforceable || deadline.deadline_ms === null) return false
+  const elapsed = progress.elapsed_ms
+  if (typeof elapsed !== 'number' || !Number.isFinite(elapsed)) return false
+  return elapsed >= deadline.deadline_ms
+}
+
+/**
+ * Why a running skill is over, or `null` if it is not.
+ *
+ * Causes before effects — see the note above. The order is the content of this function.
+ */
+function abortReason(progress: Progress): { reason: LifecycleReason, detail: string } | null {
+  if (overran(progress)) {
+    return {
+      reason: 'timeout',
+      detail: `past ${progress.deadline?.deadline_ms} ms, which is the declared estimate times `
+        + `${progress.deadline?.factor}`,
+    }
+  }
+  if (progress.hold_lost === true) {
+    return {
+      reason: 'hold_lost',
+      detail: 'a precondition marked `hold` stopped being true, and §54.2 re-checks those every '
+        + 'cycle rather than only at entry',
+    }
+  }
+  if (progress.guard_tripped === true) {
+    return { reason: 'guard_tripped', detail: 'a guard tripped, and a skill is not an exemption' }
+  }
+  const robot = progress.robot ?? 'post'
+  if (robotStoppedCommanding(robot)) {
+    return {
+      reason: 'robot_stopped',
+      detail: `§27 says the robot is \`${robot}\`, which is not a state a policy commands in`,
+    }
+  }
+  return null
+}
+
+/**
+ * §54.4's lifecycle, advanced by one evaluation.
+ *
+ * Pure, clockless and total: `elapsed_ms` is supplied for the same reason the kernel takes `now_ms`
+ * as a parameter (§35.2), which is what lets a timeout be tested without waiting for one.
+ */
+export function advance(phase: SkillPhase, progress: Progress = {}): SkillTransition {
+  const done = (
+    to: SkillPhase,
+    reason: LifecycleReason,
+    outcome: SkillOutcome | null,
+    detail: string,
+  ): SkillTransition => ({
+    from: phase,
+    to,
+    reason,
+    outcome,
+    detail,
+    // Only on the way in. A skill already terminal releases nothing, because it has nothing.
+    release_leases: to === 'terminal' && phase !== 'terminal',
+    changed: to !== phase,
+  })
+
+  switch (phase) {
+    case 'idle':
+      return progress.invoked === true
+        ? done('preconditions', 'invoked', null, 'an invocation arrived')
+        : done('idle', 'not_invoked', null, 'nothing has asked for this skill')
+
+    case 'preconditions': {
+      // Absent is not permitted. A runtime that had not evaluated §54.2 yet must not be able to
+      // start a skill by failing to ask — which is the shape of every bug this repository is
+      // arranged around.
+      if (progress.entry_permitted !== true && progress.entry_permitted !== false) {
+        return done('preconditions', 'preconditions_pending', null,
+          'the entry predicates have not been evaluated, and an unevaluated precondition is not a '
+          + 'satisfied one')
+      }
+      if (progress.entry_permitted === false) {
+        return done('terminal', 'preconditions_refused', 'aborted',
+          progress.refused_clause
+            ? `refused by: ${progress.refused_clause}`
+            : 'refused by a precondition')
+      }
+      // §54.5. A nested invocation does not acquire; the root holds the leases for the whole tree.
+      return progress.root === false
+        ? done('running', 'leases_held_by_root', null,
+          'a nested call runs under the root invocation\'s leases (§54.5)')
+        : done('acquiring', 'preconditions_met', null, 'every evaluated precondition held')
+    }
+
+    case 'acquiring': {
+      const leases = progress.leases ?? 'pending'
+      if (leases === 'denied') {
+        return done('terminal', 'lease_denied', 'aborted',
+          progress.lease_token
+            ? `\`${progress.lease_token}\` is held by ${progress.lease_holder || 'another package'}`
+            : 'a required capability is held by another package')
+      }
+      if (leases !== 'held') {
+        return done('acquiring', 'lease_pending', null,
+          'the leases for `required_capabilities` have not been taken')
+      }
+      return done('running', 'leases_acquired', null, 'every required capability is leased')
+    }
+
+    case 'running': {
+      const aborted = abortReason(progress)
+      if (aborted) return done('terminal', aborted.reason, 'aborted', aborted.detail)
+      return progress.finished === true
+        ? done('verifying', 'verifying', null, 'the skill returned; §54.3 has not judged it yet')
+        : done('running', 'running', null, 'the skill is running')
+    }
+
+    case 'verifying': {
+      // A skill can still be stopped while its post-state is being judged, and the abort outranks
+      // the verdict: a skill whose robot fell over during verification did not succeed at anything.
+      const aborted = abortReason(progress)
+      if (aborted) return done('terminal', aborted.reason, 'aborted', aborted.detail)
+      const outcome = progress.outcome
+      if (outcome === undefined || outcome === null) {
+        return done('verifying', 'verdict_pending', null,
+          'the success criteria have not been judged, and §54.3 will not let the skill judge itself')
+      }
+      return done('terminal', 'judged', outcome, `§54.3 judged this ${outcome}`)
+    }
+
+    case 'terminal':
+      return done('terminal', 'terminal', progress.outcome ?? null, 'this invocation is over')
+  }
+}
+
+/**
+ * §54.5's third limit: *"The root's timeout bounds the whole tree. A child cannot extend its
+ * parent's budget."*
+ *
+ * The child's own deadline, or what is left of the root's, whichever is sooner. Two properties fall
+ * out and both are the point:
+ *
+ * * a child that declares **no** duration is still bounded, by its parent, so an unbounded skill
+ *   nested under a bounded one does not make the tree unbounded;
+ * * a root with nothing left bounds its child at zero rather than at a negative number, so the
+ *   child is stopped rather than being handed a deadline already in the past that some other
+ *   arithmetic could read as "no deadline".
+ */
+export function boundedDeadline(child: Deadline, rootRemainingMs: number | null): Deadline {
+  if (rootRemainingMs === null || !Number.isFinite(rootRemainingMs)) return child
+  const remaining = Math.max(0, rootRemainingMs)
+  if (!child.enforceable || child.deadline_ms === null) {
+    return { deadline_ms: remaining, enforceable: true, factor: child.factor }
+  }
+  return {
+    deadline_ms: Math.min(child.deadline_ms, remaining),
+    enforceable: true,
+    factor: child.factor,
+  }
 }

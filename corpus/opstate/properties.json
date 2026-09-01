@@ -1,0 +1,12 @@
+{
+  "corpus": "opstate",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "every-state",
+      "note": "What each state means to the three sections that read it: §33.4’s safe-state barrier, §49.1’s tone, and §27’s stickiness. `stopping` is the row worth reading — a robot mid-ramp most looks like it is about to be safe and most certainly is not, and an OS update applied across it would change the meaning of the deceleration in flight.",
+      "input": {},
+      "expected": "[{\"commands\":false,\"safe_state\":true,\"state\":\"safe\",\"sticky\":true},{\"commands\":false,\"safe_state\":false,\"state\":\"stopping\",\"sticky\":false},{\"commands\":false,\"safe_state\":true,\"state\":\"post\",\"sticky\":false},{\"commands\":false,\"safe_state\":true,\"state\":\"unhomed\",\"sticky\":false},{\"commands\":false,\"safe_state\":true,\"state\":\"hold\",\"sticky\":false},{\"commands\":true,\"safe_state\":false,\"state\":\"degraded\",\"sticky\":false},{\"commands\":true,\"safe_state\":false,\"state\":\"running\",\"sticky\":false}]"
+    }
+  ]
+}

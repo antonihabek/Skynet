@@ -72,15 +72,22 @@ import {
   shapeWatchdog, shapePredicate, shapeSatisfies, shapeVersion,
   shapeComposition, shapeDeadline, shapePreconditions, shapeSuccess,
   shapeCellFaults, shapeCellLayer,
+  shapeStateProperties, shapeTransition, shapeWarningMatrix, shapeSkillTransition,
 } from '../../reference/typescript/shape.ts'
 import {
   CELL_FAULTS, cellEnvironment, cellWorkspaceLayer, validateCell, type CellDescriptor,
 } from '../../reference/typescript/cell.ts'
+import {
+  evaluate as evaluateState, HOMING_STATES, KERNEL_STATES, OPERATING_STATES, POLICY_STATES,
+  POST_VERDICTS, RHAL_STATES, STATE_REASONS, STOP_CAUSES,
+  type Conditions as OpConditions, type OperatingState,
+} from '../../reference/typescript/opstate.ts'
 import type { Volume } from '../../reference/typescript/kinematics.ts'
 import {
-  CLAUSE_ORIGINS, CLAUSE_OUTCOMES, COMPOSITION_FAULTS, evaluatePreconditions, judgeSuccess,
-  PHASES, readCalls, readClauses, resolveClauses, skillDeadline, SKILL_OUTCOMES,
-  validateComposition, type Phase,
+  advance as advanceSkill, boundedDeadline, CLAUSE_ORIGINS, CLAUSE_OUTCOMES, COMPOSITION_FAULTS,
+  DEFAULT_OVERRUN_FACTOR, evaluatePreconditions, judgeSuccess, LEASE_STATES, LIFECYCLE_REASONS,
+  PHASES, readCalls, readClauses, resolveClauses, skillDeadline, SKILL_OUTCOMES, SKILL_PHASES,
+  validateComposition, type Phase, type Progress as SkillProgress, type SkillPhase,
 } from '../../reference/typescript/skill.ts'
 import {
   evaluatePredicate, evaluatePredicateOutcome, OUTCOMES, PREDICATE_OPS, UNEVALUABLE_REASONS,
@@ -1126,6 +1133,55 @@ vocabulary('cell_faults',
   'What can be wrong with a cell descriptor (§55.2). Two of them — an unaddressable fact key and '
   + 'one that shadows a derived fact — could not have been named before §54.2 gave `env.*` a path '
   + 'vocabulary to be wrong in.', CELL_FAULTS)
+
+// §27's machine. Eight sets, and every one of them is a place an edition could quietly disagree
+// with another about what a robot is doing — which is the divergence with the worst consequence in
+// this file, because a fleet console and a robot are meant to be describing the same machine.
+//
+// `operating_states` and `state_reasons` are emitted in **rule order** rather than sorted, and the
+// order is load-bearing twice over: the states run least-capable-first, matching the order
+// `evaluate` descends through its rules, and the reasons are one per rule in the same sequence. An
+// edition that sorted either would still pass every evaluation case and would have lost the
+// property that makes the ordering readable.
+vocabulary('operating_states',
+  "§27's five states plus §48.1's two, ordered least capable first — the order `evaluate` "
+  + "descends through its rules.", OPERATING_STATES)
+vocabulary('state_reasons',
+  'Why the machine is where it is. One per rule, in rule order, because two rules produce `hold` '
+  + 'and only the reason tells an operator which one — "a guard asked for a hold" and "there is '
+  + 'nothing to run" are the same state and different errands.', STATE_REASONS)
+vocabulary('stop_causes',
+  "§27's four causes of a controlled stop, and no fifth. Closed on purpose: a fifth cause is a "
+  + 'fifth thing that stops a robot.', STOP_CAUSES)
+vocabulary('post_verdicts',
+  "§48.2's report rolled up to the one input §27's machine takes from it. Three rather than "
+  + "§48.4's four outcomes, because the four are per check.", POST_VERDICTS)
+vocabulary('homing_states', 'Whether a body knows where its joints are (§48.3).', HOMING_STATES)
+vocabulary('rhal_states',
+  'Present, degraded, lost. The last is separate from the middle because the difference between '
+  + 'them is the whole of SAFE.', RHAL_STATES)
+vocabulary('policy_states',
+  'Nothing to run, something that is not ready, and a lease granted with a plan resolved.',
+  POLICY_STATES)
+vocabulary('kernel_states',
+  'Live or down. §27: "a robot with a policy and no kernel must not exist".', KERNEL_STATES)
+
+// §54.4's lifecycle. `skill_phases` and `lifecycle_reasons` are emitted in **diagram order** and
+// **rule order** respectively, and both orders are load-bearing: the phases run forwards and the
+// suite asserts the machine never moves backwards through this list, so an edition that sorted them
+// would be asserting a different property with the same words.
+vocabulary('skill_phases',
+  "§54.4's stages. `terminal` is one phase rather than three, because the outcome that distinguishes "
+  + "the diagram's three arrows is `skill_outcomes` — the Hub's `EpisodeOutcome`, not a second "
+  + 'vocabulary.', SKILL_PHASES)
+vocabulary('lifecycle_reasons',
+  'Why an invocation is where it is. Four of these end in `terminal` with `aborted`, and only the '
+  + 'reason tells an operator whether to call the publisher, look at the cell, find the package '
+  + 'holding the arm, or read the black box.', LIFECYCLE_REASONS)
+vocabulary('lease_states',
+  "§25.2's arbitration, as the one fact the lifecycle needs from it — deliberately not a copy of "
+  + "the supervisor's richer outcome, because two definitions of a lease result is §31.2's failure "
+  + 'in miniature.', LEASE_STATES)
 
 // ── certification ────────────────────────────────────────────────────────────
 
@@ -3831,6 +3887,445 @@ cellContextCase('every-volume-unusable-means-no-layer',
   'And when nothing survives, there is no layer rather than an empty one — the same distinction '
   + 'again, arrived at from the other direction.',
   { name: 'bay-3', allowed: [{ frame: '', shape: BENCH.shape }] })
+
+// ── opstate ──────────────────────────────────────────────────────────────────
+//
+// §27's operating state machine, extended by §48.1. Four sections read this machine and until this
+// session none of them could: `post.rs` returned the state as a string, §49.1's tone compared two
+// strings, §33.4's barrier took a boolean a caller supplied, and §54.4's lifecycle waited.
+//
+// Three files, because the machine has three separable ways to be wrong and an edition could agree
+// about one while disagreeing about another:
+//
+//  * `evaluate`   — where the machine goes, and *why*. The reason is pinned beside the state
+//                   because two rules produce `hold` and only the reason distinguishes them.
+//  * `properties` — what a state *means* to §33.4, §49.1 and §27. No evaluation case can see a
+//                   divergence here, because these are read off the state rather than produced.
+//  * `warning`    — all forty-nine ordered pairs of §49.1's tone, in full. A predicate whose
+//                   failure mode is silence does not get sampled.
+
+function opConditions(overrides: OpConditions = {}): OpConditions {
+  return {
+    post: 'passed',
+    homing: 'complete',
+    kernel: 'live',
+    rhal: 'present',
+    policy: 'ready',
+    ...overrides,
+  }
+}
+
+function opCase(
+  id: string,
+  note: string,
+  previous: OperatingState,
+  conditions: OpConditions,
+): void {
+  add('opstate', 'evaluate', {
+    id,
+    note,
+    input: { previous, conditions },
+    expected: canonical(shapeTransition(evaluateState(previous, conditions))),
+  })
+}
+
+// The nominal robot, and the one nobody has looked at.
+
+opCase('nominal', 'Booted, homed, kernel live, body present, policy holding its lease. Every rule '
+  + 'above `nominal` declined, which is the strongest statement this corpus makes about the '
+  + 'ordering: the reason names the last rule standing.',
+  'hold', opConditions())
+
+opCase('observed-nothing', 'The most important case in this file. A caller that has observed '
+  + 'nothing has established nothing, and every default is the least capable reading — so an empty '
+  + 'conditions object is a robot in SAFE with a lost RHAL, not a robot licensed to run by an '
+  + 'object literal.',
+  'post', {})
+
+opCase('observed-nothing-from-running', 'The same conditions from the other end. Nothing about '
+  + 'having been running survives an observation that establishes nothing.',
+  'running', {})
+
+// §27's SAFE row, both halves.
+
+opCase('rhal-lost', 'The kernel lost the body. First rule, because it is the condition under which '
+  + 'nothing else can be known: no observed joint state, no estop reading, no guard that can '
+  + 'evaluate. It outranks a ready policy and a passing self-test.',
+  'running', opConditions({ rhal: 'lost' }))
+
+opCase('post-failed', '§48.2: SAFE, not DEGRADED. Sticky, needs a human, "because a robot that '
+  + 'failed its own self-test should not be talked into running by a reconcile loop".',
+  'post', opConditions({ post: 'failed' }))
+
+opCase('stop-complete', 'The ramp finished. §27 puts this in the SAFE row beside a lost RHAL.',
+  'stopping', opConditions({ stop: 'operator', stop_settled: true }))
+
+// §27's four stop causes, and no fifth.
+
+opCase('stopping-watchdog', '§46 fired. The cause reaches the reason, because "the robot is '
+  + 'stopping" and "the watchdog stopped it" send an operator to different places.',
+  'running', opConditions({ stop: 'watchdog' }))
+
+opCase('stopping-proximity', 'Something came inside the stop distance.',
+  'running', opConditions({ stop: 'proximity' }))
+
+opCase('stopping-balance', 'The balance guard.',
+  'running', opConditions({ stop: 'balance' }))
+
+opCase('stopping-operator', 'A person asked.',
+  'running', opConditions({ stop: 'operator' }))
+
+opCase('stop-during-post', 'An operator stop is honoured whatever the robot is doing, including '
+  + 'booting — which is why the stop rule sits above the POST rules rather than below them.',
+  'post', opConditions({ post: 'incomplete', stop: 'operator' }))
+
+opCase('settled-with-no-stop', '`stop_settled` is read only when a stop is commanded. A caller '
+  + 'that left it set between stops would otherwise pin every robot on a fleet in SAFE.',
+  'running', opConditions({ stop_settled: true }))
+
+// §48.
+
+opCase('post-incomplete', '§48.4’s third answer, and the distinction the section spends its '
+  + 'length on. Nothing failed and nothing was established, so this robot does not need a human — '
+  + 'it needs the rest of the operating system. `post`, not `safe`.',
+  'post', opConditions({ post: 'incomplete' }))
+
+opCase('post-unstated', 'A conditions document that does not mention the self-test is a self-test '
+  + 'that has not run, which is `incomplete` rather than a pass.',
+  'post', { homing: 'complete', kernel: 'live', rhal: 'present', policy: 'ready' })
+
+opCase('homing-pending', '§48.1: joint positions are unknown, forward kinematics is meaningless, '
+  + 'every pose-dependent guard is unavailable. Homing is the only motion permitted (§48.3).',
+  'post', opConditions({ homing: 'pending' }))
+
+opCase('homing-not-required', '"A body that needs no homing declares so and the state is skipped."',
+  'post', opConditions({ homing: 'not_required' }))
+
+opCase('homing-unstated', 'And a body that has declared nothing is a body whose joint positions '
+  + 'are unknown, so silence reads as `pending` rather than as `not_required`.',
+  'post', { post: 'passed', kernel: 'live', rhal: 'present', policy: 'ready' })
+
+// §27's HOLD row, and the kernel.
+
+opCase('kernel-down', '§27: "a robot with a policy and no kernel must not exist, so the runtime '
+  + 'refuses to start if the kernel is not live". Refusing to start is HOLD — the safe resting '
+  + 'state — rather than SAFE: nothing has gone wrong, and a sticky state needing a human would be '
+  + 'the wrong answer for a kernel that is merely still starting.',
+  'hold', opConditions({ kernel: 'down' }))
+
+opCase('kernel-down-outranks-a-ready-policy', 'A policy ready to command a body with no kernel '
+  + 'between it and the joints is the one arrangement §27 refuses outright, and it is refused from '
+  + '`running` as readily as from `hold`.',
+  'running', opConditions({ kernel: 'down', guards_unavailable: true }))
+
+opCase('guard-hold', '§27’s HOLD row, first half. A guard asking for a hold outranks a policy '
+  + 'that would like to run, which is the whole point of a guard.',
+  'running', opConditions({ guard_hold: true }))
+
+opCase('no-policy', '§27’s HOLD row, second half. There is nothing to run.',
+  'running', opConditions({ policy: 'none' }))
+
+opCase('policy-not-ready', 'The same state and a completely different situation: there is '
+  + 'something to run and it has no lease or no plan. Only this one has a remedy — §25.2’s '
+  + 'arbitration table is where an operator goes to find out who else is holding the arm — which is '
+  + 'why the reason is split and the state is not.',
+  'hold', opConditions({ policy: 'held' }))
+
+// §27's DEGRADED row, which is a running state.
+
+opCase('guards-unavailable', 'A guard is unavailable under a ready policy. §45.5 is the usual '
+  + 'source, and it is an ordinary condition rather than an exotic one.',
+  'running', opConditions({ guards_unavailable: true }))
+
+opCase('rhal-degraded', 'The body reports RHAL_DEGRADED and is still answering. Distinct from '
+  + '`lost`, which is the whole of SAFE.',
+  'running', opConditions({ rhal: 'degraded' }))
+
+opCase('degraded-prefers-the-specific-reason', 'Both conditions hold. The unavailable guard is '
+  + 'reported, because it names something an operator can look up and "the body says it is '
+  + 'impaired" does not.',
+  'running', opConditions({ guards_unavailable: true, rhal: 'degraded' }))
+
+opCase('an-unavailable-guard-with-no-policy-is-hold', 'The decision the ordering encodes, and the '
+  + 'one place this machine could most plausibly have been built differently. §27’s DEGRADED row '
+  + 'says the robot "**runs**, reports, and refuses any package whose grants depend on the failed '
+  + 'guard" — so `degraded` is the impaired *running* state, not a third resting one. Calling this '
+  + 'robot degraded would tell a console it is running while it stands still.',
+  'hold', opConditions({ guards_unavailable: true, policy: 'none' }))
+
+opCase('entering-degraded-sounds-the-tone', 'The bug the string comparison froze as correct. '
+  + '`hold → degraded` is a policy beginning to command a body; it is not a transition into '
+  + '`running`, and the old predicate compared against that literal. A robot with a lapsed '
+  + 'calibration would have begun autonomous motion in silence.',
+  'hold', opConditions({ guards_unavailable: true }))
+
+// §27's stickiness.
+
+opCase('safe-is-sticky', '"A robot that recovers itself from a safety stop is a robot that resumes '
+  + 'moving while somebody is standing next to it working out what happened." Every condition is '
+  + 'nominal and it does not move.',
+  'safe', opConditions())
+
+opCase('safe-cleared', 'The explicit human action §27 requires, by name — because §13 takes the '
+  + 'transition and "somebody cleared the safety stop" is worth exactly as much as the name of the '
+  + 'somebody. The tone sounds, which is §49.1’s "resumption after a stop".',
+  'safe', opConditions({ cleared_by: 'operator:ana' }))
+
+opCase('safe-cleared-by-nobody', 'An empty clearance is not a clearance. A caller with nobody to '
+  + 'name should not have one, and `""` must not be a way to unstick SAFE in one edition and not '
+  + 'the other.',
+  'safe', opConditions({ cleared_by: '' }))
+
+opCase('safe-cleared-while-the-condition-persists', 'What made it unnecessary to invent a '
+  + 'destination for a cleared SAFE, which §27 does not name. Clearing clears the *stickiness*; the '
+  + 'conditions still decide. A robot whose estop is still pressed goes straight back — with the '
+  + 'reason that put it there rather than the one it was cleared by.',
+  'safe', opConditions({ stop: 'operator', stop_settled: true, cleared_by: 'operator:ana' }))
+
+opCase('safe-with-a-failing-self-test-reports-the-self-test', 'And an uncleared SAFE whose '
+  + 'condition still holds reports the condition rather than the stickiness: `safe_sticky` would '
+  + 'send an operator to press a button they already pressed.',
+  'safe', opConditions({ post: 'failed' }))
+
+// Idempotence, which is what makes this safe to call from a level-triggered loop.
+
+opCase('re-evaluating-the-state-it-produced', 'Running from `running` under unchanged conditions '
+  + 'changes nothing and sounds nothing. §33.3’s loop runs on a timer and on every event, so a '
+  + 'machine that re-announced itself would fill a black box with transitions that did not happen.',
+  'running', opConditions())
+
+opCase('re-entering-hold-from-hold', 'The same property on the resting side.',
+  'hold', opConditions({ policy: 'none' }))
+
+// The properties, and the matrix.
+
+add('opstate', 'properties', {
+  id: 'every-state',
+  note: 'What each state means to the three sections that read it: §33.4’s safe-state barrier, '
+    + '§49.1’s tone, and §27’s stickiness. `stopping` is the row worth reading — a robot '
+    + 'mid-ramp most looks like it is about to be safe and most certainly is not, and an OS update '
+    + 'applied across it would change the meaning of the deceleration in flight.',
+  input: {},
+  expected: canonical(shapeStateProperties()),
+})
+
+add('opstate', 'warning', {
+  id: 'every-transition',
+  note: 'All forty-nine ordered pairs, and §49.1’s rule over them: the tone sounds when a state '
+    + 'that commands autonomously is entered from one that does not. Frozen in full rather than '
+    + 'sampled, because the failure mode of this predicate is a robot beginning to move in silence '
+    + '— and the version this replaced was under-inclusive for exactly one pair family, `→ '
+    + 'degraded`, which no sampled corpus would have been guaranteed to hold.',
+  input: {},
+  expected: canonical(shapeWarningMatrix()),
+})
+
+// ── §54.4's lifecycle ────────────────────────────────────────────────────────
+//
+// The state machine the four pure decisions above were frozen *for*, and which two sessions
+// recorded as blocked on capability leases and on §27's machine. Both exist, so this does.
+//
+// Every case pins the phase, the reason, the outcome and `release_leases` together, because they
+// are one answer and an edition could get the phase right while releasing a lease at the wrong
+// moment — which is the failure that has no symptom until the next invocation is refused the arm.
+
+function progress(overrides: SkillProgress = {}): SkillProgress {
+  return {
+    invoked: true,
+    root: true,
+    entry_permitted: true,
+    leases: 'held',
+    elapsed_ms: 100,
+    deadline: skillDeadline(10, DEFAULT_OVERRUN_FACTOR),
+    robot: 'running',
+    ...overrides,
+  }
+}
+
+function lifecycleCase(
+  id: string,
+  note: string,
+  phase: SkillPhase,
+  state: SkillProgress,
+): void {
+  add('skill', 'lifecycle', {
+    id,
+    note,
+    input: { phase, progress: state },
+    expected: canonical(shapeSkillTransition(advanceSkill(phase, state))),
+  })
+}
+
+lifecycleCase('nobody-asked', 'The value of an invocation nobody has made. Every default is "not '
+  + 'gathered", and nothing about it advances — the same opening assertion §27\'s machine has, for '
+  + 'the same reason.',
+  'idle', {})
+
+lifecycleCase('invoked', 'An invocation arrived. §54.1: a skill is invoked with arguments and '
+  + 'terminates, which is the whole distinction from a policy.',
+  'idle', progress())
+
+lifecycleCase('preconditions-unevaluated',
+  'The case that matters most in this file. A runtime that has not evaluated §54.2 yet must not be '
+  + 'able to start a skill by failing to ask, so `null` holds the machine where it is rather than '
+  + 'letting it through. "Not assume true, which is what free-text preconditions do by '
+  + 'construction."',
+  'preconditions', progress({ entry_permitted: null }))
+
+lifecycleCase('preconditions-refused',
+  '§54.6\'s `skill.preconditions.enforced`: refused, with the predicate named. The naming is shared '
+  + 'between two functions — `evaluatePreconditions` finds the clause and the lifecycle carries it '
+  + 'into what an operator reads — and neither is complete alone.',
+  'preconditions', progress({ entry_permitted: false, refused_clause: 'the cell door is closed' }))
+
+lifecycleCase('preconditions-refused-unnamed',
+  'And a refusal with no clause to name still refuses. A caller that lost the report must not be '
+  + 'able to turn a refusal into a start.',
+  'preconditions', progress({ entry_permitted: false }))
+
+lifecycleCase('preconditions-met', 'On to §25.2.', 'preconditions', progress())
+
+lifecycleCase('nested-call-does-not-acquire',
+  '§54.5: "leases are held by the root invocation, not re-acquired per call. Nested acquisition is '
+  + 'how you get a skill deadlocking against its own child." The one composition limit that is not '
+  + 'a graph property, and it lives here.',
+  'preconditions', progress({ root: false }))
+
+lifecycleCase('lease-pending',
+  'A lease nobody has taken is not one that was granted — the same rule as the precondition above, '
+  + 'arrived at from §25.2 rather than from §54.2.',
+  'acquiring', progress({ leases: 'pending' }))
+
+lifecycleCase('lease-denied',
+  '§25.2 refuses rather than interleaves: "two policies alternating commands to the same joint '
+  + 'produce a trajectory neither was trained on and neither can be held responsible for." The '
+  + 'token and the holder reach the detail, because an operator has to know which package to stop.',
+  'acquiring', progress({
+    leases: 'denied',
+    lease_token: 'manipulation.grasp',
+    lease_holder: 'acme/pick-place',
+  }))
+
+lifecycleCase('leases-acquired', 'Running.', 'acquiring', progress())
+
+lifecycleCase('running', 'Still running is a fixed point, which is what makes this safe to call '
+  + 'every cycle from a loop that runs faster than the work.',
+  'running', progress())
+
+lifecycleCase('timeout',
+  '§54.6\'s `skill.timeout.enforced`. A 10 s estimate at the default factor of 2 is 20 000 ms, and '
+  + 'the comparison is inclusive: a skill that has used exactly its budget has used it.',
+  'running', progress({ elapsed_ms: 20_000 }))
+
+lifecycleCase('just-inside-the-deadline', 'One millisecond the other side of it.',
+  'running', progress({ elapsed_ms: 19_999 }))
+
+lifecycleCase('unenforceable-deadline-never-expires',
+  'A skill that declares no duration produces an unenforceable deadline, and `skillDeadline` '
+  + 'deliberately does not decide whether such a skill may run. Neither does this: what it does not '
+  + 'do is invent a ceiling.',
+  'running', progress({ deadline: skillDeadline(undefined, DEFAULT_OVERRUN_FACTOR), elapsed_ms: 1e12 }))
+
+lifecycleCase('hold-lost',
+  '§54.6\'s `skill.preconditions.rechecked`. §54.2: "battery dropping below reserve mid-skill '
+  + 'should stop the skill, not be discovered at the end."',
+  'running', progress({ hold_lost: true }))
+
+lifecycleCase('guard-tripped', 'A skill is not an exemption from the kernel.',
+  'running', progress({ guard_tripped: true }))
+
+for (const state of ['stopping', 'safe', 'post', 'unhomed'] as const) {
+  lifecycleCase(`robot-${state}`,
+    `§54.4's \`running\` row read through §27's machine: \`${state}\` is not a state a policy `
+    + 'commands in, so a skill running on a robot in it is over.',
+    'running', progress({ robot: state }))
+}
+
+for (const state of ['hold', 'degraded'] as const) {
+  lifecycleCase(`robot-${state}-does-not-abort`,
+    state === 'hold'
+      ? 'The exclusion worth pinning. `hold` is where §27\'s machine sits between a lease being '
+        + 'granted and a policy actually commanding, so aborting on it would kill every skill in '
+        + 'the moment it started. A guard asking for a hold arrives as `guard_tripped` instead.'
+      : '§27\'s `DEGRADED` row runs. §45.5 makes an unavailable guard the ordinary case, and a '
+        + 'skill refusing to proceed on one would refuse on most real robots.',
+    'running', progress({ robot: state }))
+}
+
+lifecycleCase('the-cause-outranks-its-consequence',
+  'Every abort condition at once. A timeout makes the OS stop the skill under a controlled stop and '
+  + 'a guard trip stops the robot, so both *produce* a robot that is no longer commanding — and '
+  + 'reporting the robot state here would hide the cause behind its own consequence. Timeout wins.',
+  'running', progress({
+    elapsed_ms: 20_000, hold_lost: true, guard_tripped: true, robot: 'stopping',
+  }))
+
+lifecycleCase('finished', 'Verified rather than believed. §54.3: "a skill that judges its own '
+  + 'success is a skill that always succeeds."',
+  'running', progress({ finished: true }))
+
+lifecycleCase('verdict-pending', 'And an unjudged skill is not a successful one.',
+  'verifying', progress({ finished: true }))
+
+for (const outcome of SKILL_OUTCOMES) {
+  lifecycleCase(`judged-${outcome}`,
+    `§54.3's verdict reaches the terminal phase unchanged. \`${outcome}\` is the Hub's `
+    + '`EpisodeOutcome` and not a second vocabulary, so an aborted skill becomes a labelled '
+    + 'training example rather than a gap.',
+    'verifying', progress({ finished: true, outcome }))
+}
+
+lifecycleCase('abort-during-verification',
+  'A skill whose robot fell over during verification did not succeed at anything, whatever a '
+  + 'criterion evaluated to on the way down. The abort outranks the verdict.',
+  'verifying', progress({ finished: true, outcome: 'success', guard_tripped: true }))
+
+lifecycleCase('already-over',
+  'A skill already terminal releases nothing. A release emitted every cycle after a skill ended '
+  + 'would be a release racing the next invocation\'s acquisition, which is the one way §25.2\'s '
+  + 'arbitration can be lost by the thing that implements it.',
+  'terminal', progress({ outcome: 'success' }))
+
+// ── §54.5's third limit ──────────────────────────────────────────────────────
+
+function boundedCase(
+  id: string,
+  note: string,
+  expected_duration_seconds: number | undefined,
+  rootRemainingMs: number | null,
+): void {
+  const child = skillDeadline(expected_duration_seconds, DEFAULT_OVERRUN_FACTOR)
+  add('skill', 'bounded-deadline', {
+    id,
+    note,
+    input: { expected_duration_seconds: expected_duration_seconds ?? null, root_remaining_ms: rootRemainingMs },
+    expected: canonical(shapeDeadline(boundedDeadline(child, rootRemainingMs))),
+  })
+}
+
+boundedCase('root-bounds-a-longer-child',
+  '§54.5: "the root\'s timeout bounds the whole tree. A child cannot extend its parent\'s budget."',
+  60, 5_000)
+
+boundedCase('a-shorter-child-keeps-its-own',
+  'The bound is a minimum, not a replacement.', 1, 90_000)
+
+boundedCase('an-unbounded-child-is-still-bounded',
+  'A child that declares no duration is bounded by its parent, so an unbounded skill nested under a '
+  + 'bounded one does not make the tree unbounded — which is the composition failure §54.5 names.',
+  undefined, 7_500)
+
+boundedCase('a-root-with-nothing-left-bounds-at-zero',
+  'Zero rather than a negative number: a deadline already in the past is one some other arithmetic '
+  + 'could read as "no deadline", and the child would outlive the tree.',
+  60, -1)
+
+boundedCase('an-unbounded-root-leaves-the-child-alone',
+  'Including leaving it unbounded. Nothing here invents a ceiling for a tree nobody bounded.',
+  60, null)
+
+boundedCase('neither-is-bounded',
+  'And the honest answer for two skills that declared nothing is still nothing.', undefined, null)
 
 // ── Write ────────────────────────────────────────────────────────────────────
 

@@ -13,6 +13,7 @@
 //! | `POST /stop` | *(none)* | Stop every package. The software stop §32.2 puts on the console |
 //! | `GET /embodiment` | observer | What body this is (§5): slug, joints, frame graph, and the digest every recording carries |
 //! | `GET /capacity` | observer | What `admit_package` would be told about this robot (§8), or why it cannot be assembled |
+//! | `GET /state` | observer | §27's operating state, the reason, and which of its conditions anybody observed |
 //! | `GET /health` | observer | Per-package liveness and readiness, every field with its age |
 //! | `GET /packages` | observer | Installed, active digest, wanted state, grants |
 //! | `GET /packages/{ns}:{name}` | observer | One package, with its rollback target |
@@ -156,6 +157,7 @@ pub fn handle<L: Launcher, S: Slots>(
                 .map(|elapsed| elapsed.as_secs() as f64);
             ok(crate::post::run(context.daemon.store.layout(), wall_s).to_json())
         }
+        ("GET", ["state"]) => ok(operating_state(context)),
         ("GET", ["outbound"]) => {
             let layout = context.daemon.store.layout();
             ok(crate::outbound::Queue::of(layout).to_json_with(
@@ -327,6 +329,15 @@ fn status<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
             Json::Num(context.now_ms.saturating_sub(context.started_ms) as f64),
         )
         .set("packages_running", Json::Num(running as f64))
+        // §27's state, which `GET /status` has claimed to carry since this module's own route
+        // table was written and did not, because the machine was declared nowhere. `GET /state`
+        // is the same fact with the observation gaps spelled out; this is the one line a console
+        // header wants.
+        .set("state", Json::from(context.daemon.operating_state.as_str()))
+        .set(
+            "state_reason",
+            Json::from(context.daemon.state_reason.as_str()),
+        )
         .set(
             "safe_state",
             Json::from(if context.daemon.safe_state.is_safe() {
@@ -336,16 +347,18 @@ fn status<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
             }),
         )
         // Named, because a console reading "safe state: yes" would otherwise read it as something
-        // the robot measured. Nothing measured it: §33.1 keeps this daemon away from the body, so
-        // the barrier §33.4 rests on is standing on an operator's declaration until the kernel
-        // channel exists.
-        .set("safe_state_source", Json::from("declared"))
+        // the robot measured. Half of it still is not: §33.1 keeps this daemon away from the body,
+        // so the operator's declaration is one of the two sources and §27's machine is the other —
+        // and on this edition the machine is answering from one observed condition out of eight.
+        .set("safe_state_source", Json::from("declared_and_derived"))
         .set(
             "safe_state_note",
             Json::from(
-                "Declared by an operator in /data/state/safe-state, not measured. skynetd cannot \
-                 reach the body (§33.1), so nothing here has observed whether the robot is at a \
-                 safe state.",
+                "Declared by an operator in /data/state/safe-state, then narrowed by §27's \
+                 operating state. Either source may close the barrier and neither opens it alone. \
+                 Nothing here has measured the body: skynetd cannot reach it (§33.1), so the \
+                 machine is deciding from the self-test and eight unobserved conditions taken at \
+                 their least capable values.",
             ),
         )
         // Unconditionally true, and stated rather than assumed. §39.1 makes stop unauthenticated,
@@ -406,6 +419,63 @@ const AUDIT_WINDOW: usize = 50;
 /// here and reported as missing rather than skipped. §46.3 wants the nesting *"reported at startup
 /// rather than discovered in the field"*, and a report that quietly ignored the window it could not
 /// get would be reporting on a chain it had not established.
+/// `GET /state` — §27's operating state machine.
+///
+/// The state, the reason, and **which of §27's conditions anybody actually observed**. The third
+/// field is what keeps this endpoint from being a lie: this edition can observe one of them, the
+/// self-test, and every other condition is left at the least capable reading because §33.1 puts the
+/// kernel and the RHAL on the far side of a line this process may not cross.
+///
+/// A page rendering `safe` with nothing beside it would read as a robot somebody stopped. It is a
+/// robot nothing has looked at, which is a different sentence and a different errand.
+fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
+    let state = context.daemon.operating_state;
+
+    let mut out = Json::obj();
+    out.set("state", Json::Str(state.as_str().to_string()));
+    out.set(
+        "reason",
+        Json::Str(context.daemon.state_reason.as_str().to_string()),
+    );
+    // The three properties other sections read off the state, rendered rather than left for a
+    // console to re-derive. A page that decided for itself whether `stopping` was a safe state
+    // would be the second definition of §33.4's barrier.
+    out.set("safe_state", Json::Bool(state.is_safe_state()));
+    out.set("commands", Json::Bool(state.commands_autonomously()));
+    out.set("sticky", Json::Bool(state.is_sticky()));
+
+    // Which of the eight conditions anybody looked at. §48.5 made the same admission about POST's
+    // own table and it is the same line being drawn: a supervisor claiming a state it derived from
+    // defaults would be claiming to have observed a body it is forbidden to touch.
+    let mut observed = Json::obj();
+    observed.set("post", Json::Bool(true));
+    for condition in [
+        "kernel",
+        "rhal",
+        "homing",
+        "stop",
+        "guard_hold",
+        "guards",
+        "policy",
+    ] {
+        observed.set(condition, Json::Bool(false));
+    }
+    out.set("observed", observed);
+    out.set(
+        "partial",
+        Json::Str(
+            "one of §27's eight conditions was observed here: the self-test. §33.1 keeps skynetd \
+             from the actuator path, so the kernel, the RHAL, the guard set, the stop and the \
+             homing state are not this process's to read — and an unobserved condition is taken \
+             at the least capable value it could have, never at a hopeful one. So this answer is \
+             at least as pessimistic as the robot is, and the reason beside it names the \
+             condition that decided rather than a fault somebody found"
+                .to_string(),
+        ),
+    );
+    out
+}
+
 fn watchdog<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let body = crate::embodiment::load(context.daemon.store.layout());
     let known = body.known();

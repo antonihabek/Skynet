@@ -174,22 +174,17 @@ export function isReserved(token: string): boolean {
   return RESERVED_CAPABILITIES.includes(token)
 }
 
-/**
- * Whether a warning tone must sound on this transition (§49.1).
+/*
+ * §49.1's other half — *when* the tone sounds — used to live here, as `warningRequired(from, to)`,
+ * taking two strings with a comment saying it would become an enumeration when §27's state machine
+ * was declared somewhere. It is declared now, in `opstate.ts`, and the function went with it.
  *
- * > It sounds on transition into `RUNNING` and on resumption after a stop.
- *
- * The states are §27's, as strings rather than as a union, because **§27's state machine is not
- * declared anywhere in this system yet**. A function here that invented the enumeration would put
- * §27's design decision in §49's module, which is how a state machine ends up with two definitions.
- *
- * Unknown state names read as *not* a transition into RUNNING, which under-sounds rather than
- * over-sounds — the wrong direction for a safety control, and acceptable only because this answers
- * a question about a transition it was handed. The enforcement point is `skynetd` owning the tone.
+ * It belongs there rather than here for a reason worth recording: the predicate is a property of a
+ * transition, and this module knows about packages. Keeping it beside the reserved token because
+ * both sentences are in §49 would have been filing by section number rather than by what the code
+ * depends on — and the string comparison it had to use in the meantime was under-inclusive, which
+ * `opstate.ts` records in full.
  */
-export function warningRequired(from: string, to: string): boolean {
-  return to.toLowerCase() === 'running' && from.toLowerCase() !== 'running'
-}
 
 export interface PackageFinding {
   code: PackageRejectionCode

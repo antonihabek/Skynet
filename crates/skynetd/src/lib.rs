@@ -71,6 +71,6 @@ mod tests;
 pub use actual::{Actual, InstalledPackage, OsSlots, UnitState, UnitStatus};
 pub use desired::{DesiredPackage, DesiredState, PackageKind, ProfileLimits, RunState};
 pub use health::{Health, PackageHealth, Readiness};
-pub use lease::{LeaseDenial, LeaseTable, PreemptionOutcome};
+pub use lease::{Acquisition, LeaseDenial, LeaseTable, PreemptionOutcome};
 pub use reconcile::{plan, Action, ActionKind, Gate, Plan, SafeState};
 pub use supervise::{CrashPolicy, RestartDecision, Supervision, SupervisionState};

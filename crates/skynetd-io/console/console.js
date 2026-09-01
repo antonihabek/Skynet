@@ -60,6 +60,20 @@ function pill(text, kind) {
   return el('span', 'pill ' + (kind || 'off'), text)
 }
 
+/**
+ * How to colour a §27 state, by what it does rather than by what it is called.
+ *
+ * `safe` is the one worth writing down: it is a reassuring word and, on a robot whose body cannot
+ * be reached, it is the state that says so. `running` and `degraded` are the two where a policy is
+ * commanding joints, and they get the attention.
+ */
+function stateTone(state) {
+  if (state === 'running' || state === 'degraded') return 'warn'
+  if (state === 'stopping' || state === 'safe') return 'bad'
+  if (state === 'hold') return 'ok'
+  return 'off'
+}
+
 function duration(ms) {
   if (!Number.isFinite(ms) || ms < 0) return null
   const s = Math.floor(ms / 1000)
@@ -221,11 +235,23 @@ function renderStatus(feed) {
   enforcement.appendChild(el('span', 'dim', 'enforced, not awarded — no SCTS evidence on this robot'))
   add('Enforcement', enforcement)
 
-  // §27's state machine. Nothing implements it, so the console names the state it cannot report
-  // rather than picking the most likely one.
-  add('State machine', absent(
-    'unreported — §27’s HOLD / RUNNING / DEGRADED / STOPPING / SAFE needs the kernel and the ' +
-    'policy runtime, and neither is written'))
+  // §27's state machine, which this panel named as unreportable for six sessions because nothing
+  // declared it. It is declared now, and the honest report has two halves: the state, and how much
+  // of the machine's input anybody actually observed.
+  //
+  // The pill is coloured by what the state *does* rather than by its name. `safe` sounds
+  // reassuring and is the state a robot is in when its body cannot be reached; `running` sounds
+  // fine and is the one state where a policy is commanding joints. A console that coloured by the
+  // word would be reassuring about exactly the wrong rows.
+  const machine = el('span')
+  machine.appendChild(pill(s.state || 'unreported', stateTone(s.state)))
+  if (s.state_reason) {
+    machine.appendChild(document.createTextNode(' '))
+    // The reason, always. `safe` alone reads as a robot somebody stopped; `safe · rhal_lost` reads
+    // as a robot nothing has looked at, and those are opposite ends of the building.
+    machine.appendChild(el('span', 'dim', s.state_reason.replace(/_/g, ' ')))
+  }
+  add('State machine', machine)
 
   add('Uptime', duration(s.uptime_ms) || absent('not reported'))
   add('Packages running', Number.isFinite(s.packages_running) ? s.packages_running : absent('not reported'))
@@ -249,6 +275,99 @@ function renderStatus(feed) {
   if (s.safe_state_note) {
     note.hidden = false
     note.textContent = s.safe_state_note
+  } else {
+    note.hidden = true
+  }
+}
+
+/**
+ * §27's operating state machine.
+ *
+ * The panel this console said for six sessions it could not draw, because §27's machine was
+ * described in four places and declared in none. It is declared now, and this renders the two
+ * halves an operator standing next to a robot needs: **where the machine says the robot is**, and
+ * **how much of the machine's input anybody actually looked at**.
+ *
+ * The second half is not a caveat somebody was being scrupulous about. §33.1 keeps `skynetd` away
+ * from the actuator path, so the kernel, the RHAL, the guard set, the stop and the homing state are
+ * all on the far side of a line this process may not cross — and every unobserved condition is read
+ * at its least capable value. That is why a robot with nothing wrong with it reports `safe`. A page
+ * that showed the word without the reason would be describing a robot somebody stopped.
+ */
+function renderState(feed) {
+  const fields = clear($('state-fields'))
+  const note = $('state-note')
+  const add = (label, value) => {
+    fields.appendChild(el('dt', null, label))
+    const dd = el('dd')
+    if (typeof value === 'string') dd.textContent = value
+    else dd.appendChild(value)
+    fields.appendChild(dd)
+  }
+
+  if (!feed.value) {
+    note.hidden = false
+    note.textContent = feed.detail || 'no answer from the daemon yet'
+    return
+  }
+  const s = feed.value
+
+  const machine = el('span')
+  machine.appendChild(pill(s.state || 'unreported', stateTone(s.state)))
+  if (s.reason) {
+    machine.appendChild(document.createTextNode(' '))
+    machine.appendChild(el('span', 'dim', s.reason.replace(/_/g, ' ')))
+  }
+  add('State', machine)
+
+  // The three properties other sections read off the state, rendered from the daemon's answer
+  // rather than re-derived here. A page that decided for itself whether `stopping` was a safe
+  // state would be the second definition of §33.4's barrier, which is the failure §31.2 is about.
+  add('Commands the body', s.commands ? pill('yes', 'warn') : pill('no', 'ok'))
+  add('§33.4 barrier', s.safe_state ? pill('open', 'ok') : pill('shut', 'off'))
+  // Sticky, *and whether the stickiness is what is holding it*. §27 makes `safe` require an
+  // explicit human action, and a row saying so on a robot whose RHAL is missing would send an
+  // operator to clear a stop nobody set — the condition is what is holding it, and clearing would
+  // put it straight back. The daemon already distinguishes the two: `safe_sticky` is the reason
+  // reported only when every condition would otherwise have let the robot go.
+  const human = el('span')
+  if (!s.sticky) {
+    human.appendChild(pill('no', 'ok'))
+  } else if (s.reason === 'safe_sticky') {
+    human.appendChild(pill('yes', 'warn'))
+    human.appendChild(document.createTextNode(' '))
+    human.appendChild(el('span', 'dim', 'nothing else is holding it — a clearance releases it'))
+  } else {
+    human.appendChild(pill('yes', 'warn'))
+    human.appendChild(document.createTextNode(' '))
+    human.appendChild(el('span', 'dim',
+      'and clearing it now would not release it: ' + String(s.reason || '').replace(/_/g, ' ') +
+      ' would put it straight back'))
+  }
+  add('Needs a human to leave', human)
+
+  // Which of §27's conditions anybody looked at. The list, not a count, because "1 of 9" tells an
+  // operator how bad it is and this tells them which one they have.
+  const observed = s.observed || {}
+  const names = Object.keys(observed).sort()
+  const seen = names.filter(name => observed[name])
+  const unseen = names.filter(name => !observed[name])
+
+  const inputs = el('span')
+  if (seen.length) {
+    inputs.appendChild(pill(seen.join(', '), 'ok'))
+  } else {
+    inputs.appendChild(absent('nothing'))
+  }
+  if (unseen.length) {
+    inputs.appendChild(document.createTextNode(' '))
+    inputs.appendChild(el('span', 'dim', 'not observed: ' + unseen.join(', ')))
+  }
+  add('Conditions observed', inputs)
+
+  if (s.partial) {
+    note.hidden = false
+    note.textContent = s.partial
   } else {
     note.hidden = true
   }
@@ -1279,6 +1398,7 @@ const bodyFeed = new Feed('embodiment', '/embodiment', renderEmbodiment)
 
 const feeds = [
   new Feed('status', '/status', renderStatus),
+  new Feed('state', '/state', renderState),
   bodyFeed,
   new Feed('plan', '/plan', renderPlan),
   new Feed('packages', '/packages', renderPackages),

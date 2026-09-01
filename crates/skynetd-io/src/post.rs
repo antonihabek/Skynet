@@ -44,6 +44,7 @@
 //! silently omitted the five would be a supervisor claiming to have proved a stop path it is
 //! forbidden from touching.
 
+use skynet_contracts::opstate::{OperatingState, PostVerdict};
 use skynet_json::Json;
 
 use crate::layout::Layout;
@@ -118,14 +119,42 @@ impl Report {
             .any(|check| check.outcome == Outcome::Fail)
     }
 
-    /// The state §48.1's machine should be in after this.
-    pub fn verdict(&self) -> &'static str {
+    /// The one input §27's machine takes from the self-test.
+    ///
+    /// This used to be the *whole* answer: a `&'static str` returning `"safe"`, `"unhomed"` or
+    /// `"post_incomplete"`, described as "the state §48.1's machine should be in after this". It
+    /// was never quite that, and the reason the string survived is that §27's machine was declared
+    /// nowhere for it to be a value of. It is declared now, in
+    /// [`skynet_contracts::opstate`], and POST supplies **one of its eight conditions**.
+    ///
+    /// So the tri-state is what leaves this module, and the state is decided by the machine with
+    /// the other eight in hand. A self-test cannot know whether the body needs homing, whether the
+    /// kernel came up, or whether anybody stopped the robot while it ran.
+    pub fn post_verdict(&self) -> PostVerdict {
         if self.failed() {
-            "safe"
+            PostVerdict::Failed
         } else if self.may_run() {
-            "unhomed"
+            PostVerdict::Passed
         } else {
-            "post_incomplete"
+            PostVerdict::Incomplete
+        }
+    }
+
+    /// §48.4's own word for where this leaves the robot.
+    ///
+    /// Kept, because §48.4 gives these three spellings and `post_incomplete` is one of them — it is
+    /// a *verdict* rather than a state, and the distinction is the section's point: "the verdict for
+    /// that state is `post_incomplete` rather than `safe`, because a robot whose checks could not
+    /// run does not need a human."
+    ///
+    /// Derived from [`Report::post_verdict`] rather than computed a second time, so the two cannot
+    /// disagree about a robot. `unhomed` is what a passing self-test licenses — the next state in
+    /// §48.1's chain, not a claim that the robot is running.
+    pub fn verdict(&self) -> &'static str {
+        match self.post_verdict() {
+            PostVerdict::Failed => OperatingState::Safe.as_str(),
+            PostVerdict::Passed => OperatingState::Unhomed.as_str(),
+            PostVerdict::Incomplete => "post_incomplete",
         }
     }
 
@@ -144,6 +173,11 @@ impl Report {
         let mut out = Json::obj();
         out.set("checks", checks);
         out.set("verdict", Json::Str(self.verdict().to_string()));
+        // The machine's input, beside §48.4's word for it. Both, because they answer different
+        // questions: `verdict` is what §48.4 tells a person, and `post` is what §27's evaluator
+        // reads — and a console that showed only the first would be describing a robot's state
+        // from one of eight conditions.
+        out.set("post", Json::Str(self.post_verdict().as_str().to_string()));
         out.set("may_run", Json::Bool(self.may_run()));
         out.set("failed", Json::Bool(self.failed()));
         // Said in the payload, because a page listing eight checks with three answers would

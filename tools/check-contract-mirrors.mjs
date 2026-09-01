@@ -100,6 +100,19 @@ const HERE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
  * That move is the reason to be careful with `semver`: it is one of the most-imported modules in
  * that repository, and a mirrored contract cannot be edited there in passing any more.
  *
+ * `opstate` (§27) is the newest name that is not here, and it is a different kind of absence from
+ * all of the above. It is not waiting on a page or a table so much as on a *consumer*: §27's machine
+ * describes what a robot is doing right now, and the Hub has nowhere to put that — `skynet_device_state`
+ * is one of the four tables §32.4 items 2 and 5 have been waiting on for three sessions. A fleet page
+ * showing `hold` beside `degraded` is exactly what it is for, and that page does not exist.
+ *
+ * There is a second reason, and it is the one that would still hold if the table landed tomorrow.
+ * Every module in the list above answers a question **from declared facts**, which is why both sides
+ * can compute it and neither is authoritative. §27's machine answers from *observations of a body*,
+ * and the Hub has none: it would be running the evaluator over conditions a robot sent it, which is
+ * displaying a robot's answer rather than computing a second opinion. That is a renderer, not a
+ * mirrored contract, and mirroring it would suggest a disagreement between the two was possible.
+ *
  * Add a name to this list and run `--sync`; nothing else is needed.
  */
 const MIRRORS = [
