@@ -501,6 +501,33 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         }
     }
 
+    /// The context every incident carries: what this robot was, **at the fault**.
+    ///
+    /// §13 seals a recording at the moment something goes wrong and §34.4 delivers it whenever the
+    /// link comes back — which can be hours later, or after a reboot, or after the robot has moved
+    /// on two generations. So the moment the incident describes and the moment the Hub receives it
+    /// are different moments, and until this existed the Hub filled the gap from
+    /// `skynet_device_state` at receipt: a statement about *now*, attached to an event in the past.
+    ///
+    /// The two fields here are the ones a supervisor can state exactly and cheaply without an
+    /// observation pass. **The three digests are not among them**, and that absence is the reason
+    /// this is a method with a comment rather than three more `set` calls: §10's attestation needs a
+    /// trust store, a release manifest and a descriptor read, and an incident path that did all
+    /// three would be doing work on the one code path §34.4 says is never dropped.
+    ///
+    /// So an incident says which generation and which §27 state, and does not say which policy. The
+    /// Hub reports that as a gap rather than substituting the current one.
+    fn incident_context(&self) -> Json {
+        let mut context = Json::obj();
+        // The generation in force when this happened, not the one the robot reaches later.
+        context.set("generation", Json::Num(self.desired.generation as f64));
+        // §27's state at the fault. `SAFE` is sticky, so this is frequently the single most useful
+        // field on the row: it says whether the robot had already stopped when the incident was
+        // raised or was still moving.
+        context.set("state", Json::from(self.operating_state.as_str()));
+        context
+    }
+
     /// Queue §38.1's alarm. Best effort, and loud when it fails.
     ///
     /// The limits are not applied either way — `verified` is false, so the ceilings stay where they
@@ -509,7 +536,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     /// being raised is itself the thing an operator needs to know.
     fn raise_profile_incident(&self, digest: &str, detail: &str) {
         let queue = crate::outbound::Queue::of(self.store.layout());
-        let mut incident = Json::obj();
+        let mut incident = self.incident_context();
         incident.set("kind", Json::Str("profile_signature_failed".to_string()));
         incident.set("digest", Json::Str(digest.to_string()));
         incident.set("detail", Json::Str(detail.to_string()));

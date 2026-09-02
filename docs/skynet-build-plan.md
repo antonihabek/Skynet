@@ -3158,3 +3158,815 @@ Unchanged from the eighth session, plus the OS-specific gaps this session names 
 | A field-conformance figure that is not null | §74's route exists and the windows arrive; `cycles` is one of six counters nothing on the current OS edition measures, so the figure is honestly absent rather than absent for want of plumbing. |
 | Episodes | `Class::Episode` is now the only queue class with a route and no producer. |
 | `/skynet/os/editions` | §32.4 item 2, and its own reason for waiting: it is *"needed the moment there is more than one"*, and there is one. A page listing the other eight rows of §31.3's matrix would be listing editions that do not exist. |
+
+---
+
+## Session — 2026-09-02 (tenth): the vendor gets a say
+
+The ninth session built nine of §57's ten and left one line in *Still not built*:
+
+> `POST /robots/{slug}/attestations` — one of §57's ten. Untouched — §50's birth certificates, and
+> it wants the `birth` contract mirrored.
+
+It exists now. So does the contract, in a language it did not previously have.
+
+### §50.3 is the sentence the whole thing exists to make false
+
+> Without it, *"this is a Unitree G1 with these joint ratings"* is a claim the robot makes about
+> itself, and the entire safety envelope rests on believing it.
+
+Every other surface on this platform is downstream of that sentence. A transport plan is computed
+against a descriptor; a conformance result is a measurement of a body; a calibration record says a
+camera on *that* machine was measured; §12's gate reads a certification about a robot. All four ask
+"which machine is this" and, until this session, took the machine's own word for it.
+
+A birth certificate is the first document on the platform signed by a party who actually knows —
+the vendor, at manufacture, over a key generated inside a secure element that the private half
+never left. §50.2 keeps two facts apart and both halves matter:
+
+```
+the birth certificate proves   what it is     — the vendor, at manufacture
+pairing (§10) proves           whose it is    — the operator, in a warehouse
+```
+
+So the table holds no ownership. `namespace_id` on `skynet_attestations` records **whose key was
+checked**, not whose robot it is, and that difference is written into the migration header rather
+than left to be inferred from a column name.
+
+### The contract had one edition and needed two
+
+`crates/skynet-contracts/src/birth.rs` had existed since Part V. There was no TypeScript oracle,
+which meant there was no corpus, which meant the Rust edition was the only edition and nothing held
+it to anything. The mirror tool's own comment said as much: *"`birth` waits on §57's `POST
+/robots/{slug}/attestations`, which is unwritten."*
+
+Writing the endpoint required the contract, so `reference/typescript/birth.ts` was written first —
+and the ordering is the interesting part, because a hand-written second edition of a finished
+module is exactly where a paraphrase creeps in.
+
+**The Rust edition reproduced the corpus on the first run.** Eleven cases and three vocabularies,
+generated from the TypeScript, byte-identical on the other side without a single adjustment. That
+is worth recording precisely because it is the boring outcome: it means the messages, the finding
+order, the subject ordering and the empty-string handling all matched, and none of those was
+checked by anything until the corpus existed.
+
+#### The findings are frozen with their sentences, not their codes
+
+§50 gives its own reason and the corpus takes it literally:
+
+> The remedies for *"the serial does not match"*, *"the descriptor digest does not match"* and
+> *"the vendor's key is not one this robot trusts"* are three different phone calls.
+
+An edition that agreed about every code while paraphrasing the messages would send people to the
+wrong one, and would pass a corpus that only froze codes.
+
+#### `subjects` moved onto the finding, in both editions
+
+Rust carries a `Finding` enum with associated data; TypeScript carries a code and a list. The
+projection between them is `Finding::subjects()`, added to `birth.rs` rather than to the encoder,
+and its ordering is load-bearing: **what the certificate says, then what the machine reports**,
+never the reverse. A reader who has to work out which of two hex strings came from the document is
+a reader who will get it wrong once.
+
+| Check | Result |
+|---|---|
+| `node tools/corpus-gen/generate.ts` | 66 files, **954 cases** (+14) |
+| `cargo test -p skynet-corpus` | all 954 reproduced byte for byte |
+| `cargo test -p skynet-contracts birth` | 21 passed (+3) |
+| `npx tsc -p .` (OS repo) | Clean |
+| `node tools/check-contract-mirrors.mjs` | **17** contracts match |
+
+### The asymmetry that makes mirroring `birth` correct
+
+Worth stating, because "the Hub touches this now" has never been the test for adding a name to the
+mirror list, and this one splits cleanly down the middle:
+
+```
+decide the signature   →  only the Hub can. It holds the vendor's registered key.
+check what it proves   →  the same question the robot answers at boot. Shared.
+```
+
+`decideSignature` is the Hub's, and it produces one of §37.1's five states — `absent`,
+`unverifiable`, `failed`, `untrusted`, `verified`. Then `check` from `lib/skynet/os/birth` runs,
+byte-identical to the robot's copy. Deciding and checking are two jobs and only the second is
+shared.
+
+That is also why `skynet_attestations` stores `signature_state` rather than the `verified boolean`
+its two sibling tables carry. The four states that are not `verified` send four different people to
+four different places, and a boolean would throw the reason away at the point of storage — after
+which the badge would be recomputed from a column that no longer knew.
+
+### A second cross-edition vector, and the reason it is not optional
+
+A birth certificate **binds an embodiment descriptor digest**. So a vendor signing a certificate
+signs a document containing a hex string that is also a descriptor digest — and without separate
+domain tags, a signature over one could be presented as a signature over the other. The whole of
+§50.3 would then rest on a substitution nobody would notice.
+
+`crates/skynetd-io/src/birth_vector.rs` and `lib/__tests__/skynet-attestations.test.ts` freeze the
+same four numbers, the way the embodiment pair has since §5. The two vectors deliberately use **the
+same seed and the same key**, so the assertion that they produce different digests and different
+signatures is the assertion that both tags actually reach the hash and the message.
+
+```
+skynet.embodiment.v1  digest 29fe4b8d…  signature cde12b51…
+skynet.birth.v1       digest fded47c4…  signature e0fac9e0…
+```
+
+The sharper form of the test is the third one: signing the *embodiment* vector's digest under the
+*birth* domain must not reproduce the embodiment vector's signature. It does not.
+
+### What is observed never comes from the submission
+
+The decision that shapes the whole route. A vendor files the document; everything it is compared
+against comes from the machine's own reports. One party filling in both sides of a comparison
+produces a certificate that confirms itself, which is the self-attestation §50.3 describes with
+extra steps.
+
+| Field | Source | How it got there |
+|---|---|---|
+| `device_key` | `skynet_devices.device_key` | The robot presented it at pairing (§10) |
+| `serial` | `skynet_devices.serial` | The same |
+| `descriptor_digest` | `skynet_device_state.embodiment_digest` | §10's check-in attestation |
+| `hardware_revision` | **nothing** | Nothing on either side of this platform reports one |
+
+The fourth row is left absent rather than filled from the certificate, so `check` reports it as
+`unobservable` — *"the binding is neither confirmed nor contradicted"* — on every robot. The GET
+answer names it once at the top level as `unobservable_here` rather than leaving a reader to notice
+that every verdict carries the same finding, because it is a property of the platform and not of
+any one certificate.
+
+**Not paired is the ordinary case, not an error.** §50.2 ships a robot with a certificate and no
+namespace — *"it belongs to nobody yet"* — so a certificate filed before anybody pairs the machine
+has every binding unchecked, and that is the correct reading.
+
+### Two partial unique indexes, each a physical fact
+
+```sql
+UNIQUE (robot_id, serial)  WHERE superseded_at IS NULL   -- one current certificate per machine
+UNIQUE (device_key)        WHERE superseded_at IS NULL   -- one element attests one machine
+```
+
+A serial identifies a machine; a device key identifies the secure element currently in it. §50.4
+makes a mainboard swap produce a robot whose certificate no longer matches its hardware — same
+serial, new element — and the remedy is a vendor-signed re-issue, which supersedes rather than
+overwrites. An investigation into what a robot was in March needs the document that was in force in
+March, and a board swap is exactly the event that makes the two differ.
+
+The second index is the sharper one: **two current certificates over one device key is a cloned
+identity**, and the database refuses it rather than a code path noticing. The route checks it too,
+so the refusal is a sentence rather than a constraint name.
+
+### The reading is the robot's reading, not a tidied version of it
+
+The bug this session came closest to shipping. `parseCertificate` originally trimmed whitespace,
+lower-cased the device key and truncated over-long fields — all of which look like hygiene and none
+of which the robot does.
+
+A vendor writing `"device_key": "79B5…"` would then have produced a Hub row holding the lower-case
+form and a robot holding the upper-case one, and the two would have compared *different strings
+against the same secure element* while both reported a verdict. Neither could see the other making
+the comparison.
+
+So the reading is now `skynetd_io::birth::from_json`'s, function for function: the value when it is
+a string, the empty string otherwise, nothing normalised. A badly written document is **refused
+with a sentence** instead — including an over-long serial, because a truncated serial is a
+certificate about a machine whose number is not the one the vendor wrote, and it would sit in the
+table looking perfectly well formed.
+
+`claims_ownership` moved the same way, to `get_present`'s rule: `"namespace": ""` is still a vendor
+who put the field in the document. An emptiness test would have reported an assertion the robot
+reports and this Hub does not.
+
+### Ed25519 verification stopped being duplicated on the way past
+
+`rawKeyFromDer` and the raw-hex verifier lived in `lib/skynet/robots/embodiment.ts` and were about
+to acquire a second copy. They are now in `lib/skynet/signing.ts` — the module whose whole subject
+is *"the platform never holds a private key; it stores public ones and verifies with them"* — and
+`verifyEmbodimentSignature` is a four-line wrapper. Three copies of Ed25519 verification in one
+codebase is three chances to get the `null` algorithm argument wrong in a way that returns `true`.
+
+`embodiment.ts` re-exports `rawKeyFromDer`, so every existing import still resolves; its seventeen
+tests pass unchanged.
+
+### On the device page
+
+§32.1's page gains a **Birth certificate** panel, above calibration, because identity precedes
+measurement. Three badges rather than one:
+
+* **does this document attest anything** — false when the signature cannot be believed or the key
+  is another machine's;
+* **was every binding it makes actually checked** — the question a single green tick answers with
+  the first, which is precisely how an unchecked comparison comes to read as a match;
+* the signature state, spelled out.
+
+The findings render as full sentences rather than codes, for §50's own reason. A device with no
+certificate gets the sentence rather than an empty panel: *"what it is remains a claim it makes
+about itself."*
+
+The existing panel named "attestation" on that page is §10's **image** attestation — what software
+the robot is running. The two are now adjacent and are different facts attested by different
+parties, so both the component and the view type say which is which.
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | Clean |
+| `npx vitest run lib/__tests__/skynet-*.test.ts` | **608 passed** (29 files; +37 attestations, +1 audit vocabulary) |
+| `npx next build` | `/api/skynet/v1/robots/[slug]/attestations` registers |
+| `node scripts/i18n-catalog.mjs audit` | All 35 catalogs OK, **5468** keys |
+| `cargo test` (OS repo) | 1139 passed |
+| `node tools/check-contract-mirrors.mjs` | 17 contracts match |
+| `node tools/check-mirrors.mjs` | The amended architecture document is synced to both trees |
+
+### §57 is now answered in full, and §57.1 records what that is worth
+
+All eleven endpoints exist — ten from §57's own count plus §74's telemetry route. The architecture
+document gained a §57.1 saying so, and the useful half of it is not the list: it is the column
+beside the list saying **which carry evidence and which carry assertions**, which is invisible from
+a set of routes that all return 200.
+
+Two rows are the ones to read together. Conformance is *asserted* — §57 calls those results signed
+and no runner on any robot signs one — and certification is computed from conformance, so §12's
+gate, the one deciding whether an OS update may change the safety kernel, reads evidence nobody
+signed. A birth certificate closes the smaller half of that: it establishes **what the machine is**,
+which is the subject every other measurement is about. It does not establish that the measurements
+were taken.
+
+### ⚠ The migration is not applied
+
+Six now, in order:
+
+* `20260902120000_skynet_os_fleet.sql` — the three fleet tables, plus five columns on
+  `skynet_devices`;
+* `20260902140000_skynet_os_releases.sql` — the release channel;
+* `20260902160000_skynet_certification.sql` — conformance evidence and the award;
+* `20260902180000_skynet_telemetry.sql` — §74's windows;
+* `20260902200000_skynet_calibration.sql` — §45's records;
+* `20260902220000_skynet_attestations.sql` — §50's certificates.
+
+None has been run: applying DDL to the live project is the owner's call rather than a session's.
+Until they are, the routes above fail with a PostgREST "no such table" and every test still passes,
+because they exercise the decision layer and not the storage.
+
+Then: `node scripts/skynet-verify-migrations.mjs` to confirm — it parses the migration files, so
+`skynet_attestations` is already in its sweep — and `node scripts/skynet-verify-rls.mjs`, where the
+new table joins the **readable** list rather than the invisible one. That placement is a decision
+and not an oversight: §50.3's argument is that a certificate nobody can inspect is a document
+rather than an attestation, the state most worth making visible is an *unsigned* one, and the table
+can be public at all only because §50.2 kept ownership out of it.
+
+### Still not built
+
+| Item | Why not |
+|---|---|
+| The sealed black box itself | §17 calls the incident route an upload. It accepts a document. §13's seal produces hundreds of megabytes and needs the artifact path plus a size budget nobody has set. `skynet_incidents.artifact_id` exists and is always NULL so the gap is visible in the schema. |
+| A robot that files its own certificate | The bench and vendor paths work; nothing on a robot posts to this route. `skynetd` reads its certificate at boot and serves the verdict on its own console (§32.2), which is the same function over the same document — so the two agree today and neither tells the other. |
+| A hardware revision anybody can observe | §50.2 binds it and nothing on either side reports one, so the comparison is `unobservable` on every machine. Named in the GET answer rather than left to be inferred. |
+| A robot that reports its own calibration | Unchanged. `skynetd` holds records and serves them on its own console; no queue class carries them. |
+| A signed conformance result | Unchanged, and now the sharpest gap on the platform: it is the one input to §12's gate that is asserted rather than attested, and §50 has just demonstrated what the attested version looks like. |
+| A field-conformance figure that is not null | §74's route exists and the windows arrive; `cycles` is one of six counters nothing on the current OS edition measures. |
+| Episodes | `Class::Episode` is still the only queue class with a route and no producer. |
+| `/skynet/os/editions` | §32.4 item 2. Still one edition, so a page listing the matrix would be listing editions that do not exist. |
+
+---
+
+## Session — 2026-09-02 (tenth, continued): what a number is evidence of
+
+Building §50 made a second thing buildable, and the connection is the whole reason this half
+follows the first rather than waiting for its own session.
+
+§56.2 defines three provenance classes for on-robot evaluation results:
+
+| Class | Means | Leaderboard |
+|---|---|---|
+| `field` | A real robot, **valid birth certificate**, attested image, non-simulator driver | Eligible |
+| `simulated` | A simulator RHAL driver, which must declare itself | Eligible, separately ranked |
+| `unattested` | No device signature, or a device the Hub does not know | Accepted and never ranked |
+
+The second condition on the first row is a birth certificate. Until an hour ago this Hub had no way
+to evaluate it, and a `field` class would have been **three conditions wearing the name of four** —
+which is worse than not having the class at all, because it would have looked like evidence.
+
+### §56.1 is what the whole thing is downstream of
+
+> A leaderboard fed by self-reported on-robot numbers is trivially gameable — a publisher evaluating
+> their own policy on their own robot, choosing their own seeds, and reporting their own score is
+> not producing evidence. **So an on-robot evaluation result is only worth as much as its
+> attestation.**
+
+### The one mirrored contract where the Hub is the consumer
+
+Every other module under `lib/skynet/os/` is a *second opinion*: the robot decides and the Hub
+computes the same verdict so a person can read it. §56.2 inverts that — the **Hub** assigns the
+class — and the robot's edition exists so a robot can predict its own offline.
+
+That inversion argues for sharing the code more strongly rather than less. Two implementations of
+an anti-gaming rule that disagree is an anti-gaming rule with a hole, and a hole in this one always
+points the same way: towards admitting something.
+
+### Writing the second edition found a latent divergence
+
+`provenance.rs` had existed since Part VI and had no TypeScript oracle, so it had no corpus and
+nothing held it to anything. Writing `reference/typescript/provenance.ts` turned up a real bug
+before a single test ran:
+
+```rust
+format!("The robot rolled this run up to {on_robot} and the Hub to {on_hub}. …")
+```
+
+Rust's `Display` for `f64`, where every other sentence in that crate uses `crate::json::number_text`
+— ECMAScript's `ToString(Number)`, which is what the reference produces with `${value}`. The two
+agree for every score anybody will ever roll up and disagree above 1e21 and below 1e-6.
+
+It is a small window and it is in **§56.5's disagreement sentence** — the one module whose entire
+subject is two implementations disagreeing about a number. It is now `number_text` on both sides,
+and the corpus would have caught it the moment a case reached the window.
+
+The second edition reproduced everything else byte for byte on the first run.
+
+| Check | Result |
+|---|---|
+| `node tools/corpus-gen/generate.ts` | 68 files, **973 cases** (+19) |
+| `cargo test -p skynet-corpus` | all 973 reproduced byte for byte |
+| `npx tsc -p .` (OS repo) | Clean |
+| `node tools/check-contract-mirrors.mjs` | **18** contracts match |
+
+`subjects()` moved onto `Reason` the way it moved onto `birth::Finding`, with the same ordering rule
+— **what was expected, then what was supplied** — and one deliberate difference: `SeedsNotSupplied`
+projects to the two *counts* rather than the two lists. That is what its sentence reads, it is what
+a flat array of strings can hold without a separator a seed could collide with, and nothing is lost
+because a consumer wanting the seeds already holds both the bundle and the manifest.
+
+### It looked like a reconciliation and it was not
+
+`tools/check-contract-mirrors.mjs` had recorded, for several sessions, that `provenance` was waiting
+on *"a schema decision rather than an endpoint"* — `skynet_evaluations` already carrying `verified`
+and `source`, which look like a provenance class and are not.
+
+They are not two spellings of one axis. They are two axes:
+
+```
+verified   boolean                                — a registered platform worker measured it
+source     platform | self_reported | imported    — who submitted it
+provenance field | simulated | unattested         — what it is evidence of          (new)
+```
+
+The first two are about the **submission**; §56.2 is about the **run**. A platform worker can
+measure a simulated run, and a robot can produce an embodied one nobody verified. Collapsing them
+would have destroyed exactly the distinction §56 exists to draw — so `provenance` is a third column
+beside them, and the "reconciliation" was a decision not to reconcile.
+
+#### NULL is not `unattested`, and nothing was backfilled
+
+The sharpest line in the migration. `unattested` is a **verdict**: §56.2 reached it by looking at a
+run bundle and finding nothing to attribute. NULL is the absence of a verdict — no bundle was ever
+submitted, so §56 has not classified the run and cannot.
+
+Every row on the platform is in the second state. Backfilling them to `unattested` would have been
+the platform asserting a §56 verdict about runs it holds no bundle for — §15's *"absence is not a
+pass"* pointed the other way, since absence is not a failure either — and it would have emptied the
+existing leaderboard overnight.
+
+So a row with no class renders exactly as it did yesterday, and the tests assert that.
+
+### An eighth domain tag, and the broadest collision surface yet
+
+A run bundle binds a **policy digest, an embodiment descriptor digest and an OS image digest**.
+Three hex strings, each already signed under one of the seven existing tags — which makes a bundle
+the one document on this platform that contains other documents' subjects wholesale.
+
+Without its own tag, a device signature over a descriptor could be presented as a device signature
+over the run that names it, and §56.2 would class as `field` a result nobody attested. `BUNDLE_DOMAIN
+= "skynet.bundle.v1\n"` is the eighth, in `crates/skynetd-io/src/trust.rs` and in
+`lib/skynet/provenance.ts`.
+
+The tags also gained the check their comments have been describing for eight sessions:
+`every_domain_tag_is_distinct_and_newline_terminated`, plus the sharper form — one digest under the
+bundle domain and the embodiment domain must be two different messages. Eight schemes over one
+shape, and the tag is the only thing making a signature say what it is a signature *of*.
+
+### Every fact the class turns on comes from the Hub
+
+The rule the whole route is built around, and the one assertion in the test file that matters most:
+**`readBundle` produces a bundle with all four attestation facts false**, whatever the submitted
+body said. A bundle that could set its own `birth_attested` would be a publisher grading their own
+paper.
+
+| `RunBundle` field | Where this Hub gets it |
+|---|---|
+| `device_signature` | Decided here, and only against **this device's own key** |
+| `device_known` | Whether the second credential resolved to a device row |
+| `birth_attested` | §50's certificate, recomputed against what the Hub observes of the machine |
+| `image_attested` | §10's check-in attestation (`attestation_complete`) |
+| `simulator` | The bundle's, and §35.3 puts that obligation on the driver |
+
+`decideBundleSignature` is deliberately **narrower** than the birth certificate's equivalent. A
+certificate may be signed by any key registered to the vendor's namespace; a run bundle must be
+signed by the machine that produced it, because §56.2 asks whether the numbers are attributable to a
+machine — and a bundle signed by an operator's laptop key is attributable to a person who says a
+machine produced them.
+
+### Two credentials on one request
+
+§57 lists an attested evaluation result as an *"existing shape"* — `POST /evaluations` with a device
+credential and a signature field. Both credentials are read and neither substitutes for the other:
+
+```
+Authorization: Bearer sk_…      who may submit against these repositories
+X-Skynet-Device: skd_…          which machine produced the numbers
+```
+
+A robot has no permission to publish against somebody's repository and a person is not a machine, so
+a single header could only ever carry one of the two. `optionalDevice` returns `null` for every
+failure — absent, malformed, unknown, inactive — rather than throwing, because §56.2 accepts an
+unattributable result and never ranks it, and a refusal would turn *"this is not evidence"* into
+*"you may not record this"*.
+
+### On the board, the class is part of the key rather than a badge
+
+The eighth session's gap list had an item reading: *"Sim-vs-real result separation — the leaderboard
+distinguishes verified from self-reported, not simulated from embodied. These are different claims
+and should not share a column."*
+
+They no longer do.
+
+* **`unattested` reaches no board at all** — not even its own. §56.2: *"accepted and never ranked."*
+  The exclusion is in `getLeaderboard` and `recordProgression` rather than in the rendering, so no
+  display decision can accidentally admit one, and the count of held-back rows is carried rather
+  than dropped silently.
+* **The class is part of the leaderboard key.** One policy on one robot can hold a field record and
+  a simulated record at once; they are two claims. Collapsing them would let a simulated number
+  displace an embodied one, which is the single outcome §56 exists to prevent.
+* **Two columns on the table**, because there are two questions. *Evidence* (§56.2's class) sits
+  beside *Provenance* (`verified` / self-reported / imported) rather than inside it.
+
+A `simulated` badge is neutral rather than a warning: the driver declaring itself is §35.3's
+obligation being met, not a fault.
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | Clean |
+| `npx vitest run lib/__tests__/skynet-*.test.ts` | **639 passed** (30 files; +30 provenance) |
+| `npx next build` | Clean |
+| `node scripts/i18n-catalog.mjs audit` | All 35 catalogs OK, **5473** keys |
+| `cargo test` (OS repo) | **1141 passed** (+4 domain tags, +the corpus) |
+| `node tools/check-contract-mirrors.mjs` | 18 contracts match |
+| `node tools/check-mirrors.mjs` | §56.6 and §57's amended row synced to both trees |
+
+### ⚠ The migration is not applied
+
+Seven now, in order — the sixth from the first half of this session, and:
+
+* `20260902240000_skynet_provenance.sql` — §56.2's class on `skynet_evaluations`, plus the run
+  bundle, the reasons and the device that signed it.
+
+Additive only: four nullable columns and one partial index. Nothing is backfilled and no existing
+column changes, so applying it changes no page until a run bundle is submitted.
+
+### Still not built
+
+Unchanged from the first half, minus the sim-vs-real item, plus what §56 names rather than closes:
+
+| Item | Why not |
+|---|---|
+| A robot that produces a run bundle | The Hub classifies one and no `skynetd` edition emits one, so every row's class is NULL today. The receiving side is complete and the anti-gaming rule is enforced; nothing has yet tested it against a real robot. |
+| §56.5's roll-up comparison, wired | `compareScores` exists and nothing calls it, because nothing submits an on-robot score to disagree with. It is one line at the point a bundle carries a score. |
+| A signed conformance result | Unchanged, and the gap is now sharper by contrast: §56 shows what an attested result looks like, and §12's gate still reads conformance evidence that is asserted. |
+| The sealed black box itself | Unchanged. §56.4's replayability rests on a black box segment that this Hub records the hash of and cannot fetch. |
+| Episodes | `Class::Episode` is still the only queue class with a route and no producer. |
+| `/skynet/os/editions` | Still one edition. |
+
+---
+
+## Session — 2026-09-02 (tenth, third): an incident that knows when it happened
+
+Found while reading the incident path for something else, and it is a defect rather than a gap —
+the code was doing something it had a comment explaining, and the comment was right about the
+wrong moment.
+
+`skynet_incidents.generation` and `.state` carried this:
+
+> The generation and state the robot was in. Copied at receipt rather than joined at read time,
+> because `skynet_device_state` moves and an incident is a statement about a moment.
+
+The reasoning is correct and the moment is wrong. Copying at receipt beats joining at read time,
+and it is still not the moment the incident is about. §13 seals a recording **when something goes
+wrong**; §34.4 delivers it **whenever the link comes back** — those are two moments, and for the one
+class §34.4 promises never to drop they can be hours apart, across a reboot, two generations on.
+
+So a robot that faulted on generation 40 and reconnected on 42 had its incident filed under 42, and
+nothing on the row said so. An investigation reading it would have been reading a statement about
+the reconnection attached to an event in the past.
+
+### Fixed at the root, which is the robot
+
+`skynetd` now stamps every incident with the generation and §27 state **at the fault**, through a
+`Daemon::incident_context()` that every future incident site picks up for free rather than
+remembering to add.
+
+Two fields, and the choice of which two is the interesting part. They are the ones a supervisor can
+state **exactly and cheaply without an observation pass**. The three digests are deliberately not
+among them: §10's attestation needs a trust store, a release manifest and a descriptor read, and an
+incident path that did all three would be doing that work on the one queue class §34.4 says is never
+dropped.
+
+So an incident says which generation and does not say which policy — and the Hub reports that as a
+gap rather than substituting whatever the robot happens to be running now, which is the same
+substitution this whole change exists to end.
+
+`state` earns its place separately: §27's `SAFE` is sticky, so it is frequently the most useful
+field on the row. It says whether the robot had already stopped when the incident was raised or was
+still moving.
+
+### And a column that says which of the two happened
+
+The fallback stays, because a fleet contains robots on older editions for as long as the fleet
+exists and their incidents will go on arriving with no context at all. What changes is that the two
+are no longer indistinguishable:
+
+```
+fault    the robot said. The generation is a fact.
+receipt  the incident carried nothing. The generation is an upper bound.
+```
+
+`incidentContext` is **all or nothing** on purpose. An incident naming a generation and not a state
+would produce a row half about the fault and half about the receipt, which `context_at` could not
+describe — and that is worse than no context at all, because it would look precise.
+
+`occurred_at` is the one part that is optional rather than all-or-nothing: a generation and a §27
+state are what an investigation reads, and a missing timestamp does not demote them. What it must
+never do is default to `received_at`, which would make a delivery delay invisible.
+
+The device page renders the generation with an *(at receipt)* marker and its explanation, rather
+than rendering a fact and a guess identically.
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | Clean |
+| `npx vitest run lib/__tests__/skynet-*.test.ts` | **644 passed** (30 files; +5 incident context) |
+| `npx next build` | Clean |
+| `node scripts/i18n-catalog.mjs sync` | 2 new keys across 35 catalogs |
+| `cargo test` (OS repo) | 1141 passed; the profile-incident test now asserts the context is on the wire |
+
+### ⚠ The migration is not applied
+
+Eight now. The new one is `20260902260000_skynet_incident_context.sql` — two columns, additive, no
+backfill. Existing rows default to `context_at = 'receipt'`, which is exactly what they are.
+
+---
+
+## Session — 2026-09-02 (tenth, fourth): webhooks
+
+The eighth session's audit nominated this one by name:
+
+> **Webhooks** — Nothing exists. A lab's CI cannot react to a published version. Small and
+> self-contained; a good next one.
+
+Half right. It is self-contained and it is not small, because almost all of it is one problem.
+
+### A webhook is an SSRF primitive with a feature attached
+
+The whole difficulty is in one sentence: **a webhook is a user-supplied URL that the server
+fetches.** This platform runs on a host that can reach a cloud metadata endpoint, an internal
+Supabase address and a Redis instance, and the difference between a webhook feature and an
+authenticated proxy into all three is entirely in what the URL is allowed to be.
+
+Four defences, and each covers a hole the others do not:
+
+| | Defence | The hole it covers |
+|---|---|---|
+| 1 | `https://` only, no `user:pass@`, bounded length — at registration | Plaintext puts the payload *and its signature* on the wire; a credential in a URL ends up in this table, a log line and a screenshot |
+| 2 | A literal private, loopback or link-local address — at registration | The obvious one, and the only one a CHECK constraint could nearly express |
+| 3 | **The resolved address, at delivery** | The one a registration check always misses: an attacker controls the DNS record, and a hostname that resolved publicly on Tuesday resolves to `169.254.169.254` on Wednesday |
+| 4 | `redirect: 'manual'` | A 302 to a private address walks past all three above, because they ran on the URL the operator registered |
+
+Defence 3 is the one that matters and it is the one a lot of implementations skip, because at
+registration time everything looks fine. It runs immediately before **every** request, on every
+attempt, and it checks **every** address the hostname answers with — not the first, because a
+hostname resolving to one public address and one private one is a hostname whose resolution order
+would decide whether this is an attack.
+
+**What that leaves open is written down rather than papered over.** Between the resolution and the
+connection there is a window — the classic DNS-rebinding race. Closing it needs a socket-level hook
+this runtime does not offer. What remains is a race an attacker has to win repeatedly against a
+check on every attempt, rather than a check they beat once at registration; that is a real
+reduction and it is not a closure, and the module header says so.
+
+Each refusal names the range it hit, because *"private address"* and *"that is the cloud metadata
+endpoint"* send two very different people to two very different places — and only one of them is
+the person this list exists to stop.
+
+### The signature, and why there is a verifier in the repository
+
+```
+X-Skynet-Signature: t=<unix-seconds>,v1=<hex>
+                    HMAC-SHA256 over "<t>.<body>"
+```
+
+The timestamp is **inside the signed material**, not merely beside it. A receiver checks the age
+and then the MAC; an attacker who captured a delivery cannot present it later with a fresh `t`,
+because the MAC covers it. A scheme where the timestamp were an unsigned header would let whoever
+captured the request rewrite it.
+
+`verifySignature` is exported, and that is deliberate: a signing scheme with no verifier in the
+repository is a scheme whose first independent implementation is a guess. It is also what the tests
+use, so the documentation and the check are the same function.
+
+The secret is sealed with `skynet_secrets`' AES-256-GCM machinery and returned exactly once. A
+signing secret a support tool can print is a signing secret an attacker can read, and the receiver's
+entire guarantee is that a valid signature means this platform sent it. The audit row records the
+URL and never the secret — an audit log holding it would be the second place it is readable, and
+there is meant to be no first.
+
+### Three decisions in the schema
+
+**Empty means none, never all.** A webhook that subscribed to everything because a field was omitted
+would send a namespace's private activity to whoever holds the endpoint.
+
+**Suspended, not deleted, after 20 consecutive failures** — with the reason on the row. An operator
+whose CI went quiet has to be able to find out why *here*; a row that vanished would be
+indistinguishable from one nobody created.
+
+**A retry is a row, not a counter.** *"It failed twice and then worked"* and *"it worked"* are
+different histories, and the first is the one a receiver is debugging. Every attempt is kept,
+because the single most common question about a webhook is *"did you send it"* — and that is
+unanswerable without the table.
+
+`refused` is a status of its own, apart from `failed`: the URL did not pass the address checks, or
+the endpoint is suspended, or the secret could not be decrypted. Nothing was sent, it is not the
+receiver's problem, and retrying will not fix it.
+
+### Delivery is a cron, and the bound is the point
+
+A publish that awaited a receiver would be a publish whose latency is somebody else's server: a lab
+with a down endpoint would slow every release in its namespace, and one with a *hanging* endpoint
+would hold a request open until the platform's own timeout. That is the mechanism by which an
+optional feature takes down a required one.
+
+So `emit` writes rows and returns — it never throws, for the same reason — and
+`/api/cron/skynet/webhooks` drains fifty per run. Bounded rather than draining the table, because a
+run that could take an unbounded amount of time is a run that gets killed halfway with no record of
+where it was.
+
+### Two events wired, and one of them for a reason worth stating
+
+`version.published` is the one the audit asked for. It fires for **private** repositories too: a
+webhook is registered by the namespace that owns the repository, so this is a namespace being told
+about its own work, and a private repository is exactly where an internal pipeline lives.
+Visibility governs who may *read* a repository, not whether its owner may be told it changed.
+
+`incident.received` is the one somebody will page on, and its payload deliberately **does not carry
+the incident body**. That is §13's evidence, it can be a quarter of a megabyte, and a webhook
+payload is the wrong place for a document somebody will want to read whole. It carries what an
+alert needs — including `context_at`, so an alert never treats an upper-bound generation as the one
+the fault happened on.
+
+### And then the rest of them, because a vocabulary of one emitter is not a feature
+
+Five more, each one `emit` call at a site that already existed:
+
+| Event | Where, and the decision behind it |
+|---|---|
+| `version.signed` | `recordVersionSignature`. A stored signature is always a *valid* one — rule 2 of that module's header — so the event means exactly what a subscriber reads it as. |
+| `evaluation.completed` | **Only** the worker path. A self-reported submission finishes the moment it is filed, and firing there would tell a subscriber a benchmark had been run when somebody typed a number in. Carries §56.2's class, so a subscriber ranking results need not fetch the row to learn whether it may be ranked. |
+| `deployment.rollback` | The event most worth waking somebody for: the platform recording that a build somebody put on hardware was taken back off it. |
+| `attestation.filed` | Carries the signature **state** rather than a boolean, because four of the five mean the certificate attests nothing. |
+| `pull_request.merged` | A second event beside the `version.published` the merge already emits, and not a duplicate: one says a version exists, the other says whose work it was and which proposal carried it. |
+
+**`certification.awarded` was removed from the vocabulary.** It was declared in the first pass and
+then found to be unemittable: nothing in this Hub writes `skynet_certifications` — §15's award is
+recomputed on every read of `GET /certifications/{slug}` and never *issued*. A vocabulary is what a
+client builds a form from, and a form offering a subscription that structurally never delivers is a
+form that lies about what the platform does. It goes back in when something awards, and a test now
+pins the list so it cannot drift back in by accident.
+
+### A check that was failing on correct code
+
+`skynet-audit.test.ts` scans every `recordAudit` call site for a namespace, and it matched
+`namespaceId:` — so a call using the shorthand `namespaceId,` was reported as an offender. It fired
+on the first correct call site that used shorthand, which was this session's.
+
+Fixed as `/\bnamespaceId\s*[:,]/` rather than by contorting the call site. A check that fails on
+correct code is a check somebody weakens, and the weakened version is the one that stops catching
+the thing it was written for.
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | Clean |
+| `npx vitest run lib/__tests__/skynet-*.test.ts` | **676 passed** (31 files; +32 webhooks) |
+| `npx next build` | Three routes register: the two API routes and the cron |
+| `node scripts/i18n-catalog.mjs audit` | All 35 catalogs OK, **5514** keys, and it now checks value **types** |
+| `node --check scripts/skynet-verify-rls.mjs` | Parses; both webhook tables joined the **invisible** sweep |
+
+The RLS placement is the opposite of §50's, and the reason is worth the line: a birth certificate is
+public because §50.3's argument is that a certificate nobody can inspect is a document. A webhook
+list is invisible to anon *and* authenticated alike, because it is a map of where a namespace's
+automation lives, and the sealed signing secret is on the same row.
+
+### And §50 reached the page a buyer reads
+
+The robot registry page gained a **vendor attestation** panel, which is the surface §50.3's argument
+was actually about:
+
+> Without it, *"this is a Unitree G1 with these joint ratings"* is a claim the robot makes about
+> itself, and the entire safety envelope rests on believing it.
+
+Until this, a birth certificate was visible on a device page — which is behind `namespace.write`,
+and therefore visible only to the people who already knew. A buyer comparing two robots could not
+see that one vendor attests its machines and the other does not.
+
+Two numbers rather than one: **how many certificates are on file** and **how many actually attest
+the machine they name**. Those are different facts, and a panel showing only the first would be
+counting documents. The signature state is spelled out rather than reduced to a tick, because four
+of the five mean the certificate attests nothing and they are four different things to do about it.
+
+The panel is worth reading when it is empty, which is why it renders a sentence rather than
+disappearing.
+
+#### And an N+1 that would have been invisible until it was the page
+
+`attestationsFor` looked up the paired machine one certificate at a time — two round trips each,
+so twenty on a model with ten machines on file, on a **public, server-rendered** page anybody can
+load. It was fine as an API handler and became a problem the moment it rendered.
+
+`observedForMany` is the same answer in two queries regardless of how many certificates there are.
+The two share the shaping rather than each having their own, so they cannot drift into two readings
+of one comparison.
+
+### ⚠ The migration is not applied
+
+Nine now. The new one is `20260902280000_skynet_webhooks.sql` — two tables, both denied to anon and
+authenticated. Until it is applied, `emit` catches and returns 0, which is exactly the behaviour it
+has for a namespace with no webhooks: nothing else on the platform notices.
+
+### Still not built
+
+| Item | Why not |
+|---|---|
+| Anything that awards a certification | Which is why `certification.awarded` is not an event. §15's verdict is recomputed on every read and no path issues an award, so `skynet_certifications` is written by nothing. |
+| An org-namespace switcher on the page | `/skynet/settings/webhooks` manages the signed-in user's own namespace, the way the keys and secrets pages do. The API is namespace-scoped and works for an org today; the page has no control to point at one. |
+| Everything from the previous three entries | Unchanged. |
+
+### The page
+
+`/skynet/settings/webhooks`, built the way `SecretsClient` and `SigningKeysClient` are, with two
+decisions carried over and one new one.
+
+**The secret is a modal state of the component, not a row in the list.** A value that can never be
+fetched again must not be rendered somewhere a reader assumes they can come back to. There is no
+reveal control and there is no endpoint behind one — the same posture the secrets page takes, for
+the same reason.
+
+**There is no "subscribe to all" control**, and the help text says why rather than leaving it as an
+omission somebody files a request about. §19's rule in the interface: a subscription made by
+default sends a namespace's private activity to whoever holds the endpoint.
+
+**The delivery list is the feature.** Every attempt, retries included, because a receiver that
+failed twice and then succeeded is debugging all three. `refused` renders in a different tone from
+`failed`: one is ours and one is theirs, and collapsing them would send somebody to debug a server
+that was never contacted.
+
+The event checkboxes are built from the vocabulary the **server** returns rather than from a list in
+the component, so the form cannot offer an event the platform does not have — which is the mistake
+`certification.awarded` would have been if it had shipped.
+
+### Replay, and the way back from suspension
+
+Two actions on `POST .../webhooks/{id}`, and the first has a decision in it worth writing down.
+
+A **replay queues a new delivery** rather than re-sending the recorded request, and the reason is
+the signature scheme rather than tidiness: the MAC covers a timestamp, and a receiver refuses
+anything stale. That is the property making a captured delivery unreplayable by an attacker — so a
+legitimate replay is necessarily a new signature at a new moment, and re-sending the recorded
+headers would produce a request the receiver is right to reject.
+
+The payload is the original's, byte for byte, which is what makes it a replay rather than a new
+event: the `sent_at` inside still says when the thing actually happened. The attempt counter goes
+back to 1, because a manual replay is not a continuation of the platform's own retry chain and gets
+its own five attempts.
+
+**`enable`** takes an endpoint out of suspension and resets the failure count with it. Leaving the
+count at the limit would suspend it again on the very next failure, which is a re-enable that does
+not re-enable. It exists because the alternative was an operator deleting the endpoint to get a
+working one — and losing the delivery history they were about to read.
+
+A pending delivery has no replay button: it is already on its way, and replaying it would queue a
+second copy.
+
+### A check that did not exist, found by needing it
+
+Thirty-five catalogs briefly held a **number** where a string belongs. A generator bug put `17` into
+`en.json` under a title key, and `i18n-catalog.mjs sync` copies the English value verbatim for a
+missing key — so one wrong value became thirty-five in a single command.
+
+Every existing check passed the whole time. The keys were present, non-empty and known, which is all
+`audit` looked at. `next-intl` renders a number as itself, so the visible result would have been a
+page showing `17` where a heading goes, in every locale. The only thing that caught it was `tsc`,
+and only because one test file happens to import the catalog as `Record<string, string>`.
+
+So `audit` now checks value types, and checks **en.json first and loudly** — because a bad value
+there is a bad value everywhere after the next sync. Confirmed by injecting one and watching it
+fail, then removing it.
+
+Fixed for real rather than by hand-editing the one file: all thirty-four locale catalogs were
+repaired from `en.json` in place, preserving their key order, so the diff is only the broken values.

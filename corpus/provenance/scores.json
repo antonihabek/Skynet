@@ -1,0 +1,61 @@
+{
+  "corpus": "provenance",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "identical",
+      "note": "The ordinary case: both sides ran the same scoring contract over the same per-episode outcomes and got the same number.",
+      "input": {
+        "scores": {
+          "on_robot": 0.875,
+          "on_hub": 0.875
+        }
+      },
+      "expected": "{\"agree\":true,\"detail\":null}"
+    },
+    {
+      "id": "within-the-representation-tolerance",
+      "note": "The tolerance exists for the floating point representation and not for the arithmetic. A difference this small is two spellings of one number.",
+      "input": {
+        "scores": {
+          "on_robot": 0.30000000000000004,
+          "on_hub": 0.3
+        }
+      },
+      "expected": "{\"agree\":true,\"detail\":null}"
+    },
+    {
+      "id": "a-real-disagreement",
+      "note": "§56.5: a defect worth investigating rather than a rounding difference to paper over. It means the shared contract’s two implementations diverged, which is precisely what §31.4 exists to catch — and the sentence says the Hub’s number is the authoritative one.",
+      "input": {
+        "scores": {
+          "on_robot": 0.875,
+          "on_hub": 0.8751
+        }
+      },
+      "expected": "{\"agree\":false,\"detail\":\"The robot rolled this run up to 0.875 and the Hub to 0.8751. The Hub's number is authoritative, and the difference is a defect rather than a rounding artefact: both sides run the same scoring contract over the same per-episode outcomes, so they disagreeing means the implementations diverged — which is precisely what the conformance corpus (§31.4) exists to catch.\"}"
+    },
+    {
+      "id": "a-difference-just-outside-the-tolerance",
+      "note": "The boundary, frozen. A caller tempted to widen `1e-9` is a caller papering over the divergence this comparison exists to surface.",
+      "input": {
+        "scores": {
+          "on_robot": 1,
+          "on_hub": 1.00000001
+        }
+      },
+      "expected": "{\"agree\":false,\"detail\":\"The robot rolled this run up to 1 and the Hub to 1.00000001. The Hub's number is authoritative, and the difference is a defect rather than a rounding artefact: both sides run the same scoring contract over the same per-episode outcomes, so they disagreeing means the implementations diverged — which is precisely what the conformance corpus (§31.4) exists to catch.\"}"
+    },
+    {
+      "id": "two-robots-that-computed-nothing",
+      "note": "A non-finite score is not a score, and two of them are not an agreement. Returning true here would report a robot and a Hub that both failed to compute anything as being in perfect accord.",
+      "input": {
+        "scores": {
+          "on_robot": null,
+          "on_hub": null
+        }
+      },
+      "expected": "{\"agree\":false,\"detail\":\"The robot rolled this run up to NaN and the Hub to NaN. The Hub's number is authoritative, and the difference is a defect rather than a rounding artefact: both sides run the same scoring contract over the same per-episode outcomes, so they disagreeing means the implementations diverged — which is precisely what the conformance corpus (§31.4) exists to catch.\"}"
+    }
+  ]
+}

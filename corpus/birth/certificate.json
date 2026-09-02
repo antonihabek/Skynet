@@ -1,0 +1,288 @@
+{
+  "corpus": "birth",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "a-signed-certificate-over-this-machine",
+      "note": "The only case with no findings at all, and the one that has to hold or every other case is measuring a function that complains about everything. A vendor signed this key, and every field the document binds is a field the machine confirms.",
+      "input": {
+        "certificate": {
+          "device_key": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+          "model": "G1",
+          "serial": "SN-0001",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C",
+          "manufactured": "2026-03-14",
+          "calibration_digests": [
+            "cal-1"
+          ],
+          "claims_ownership": [],
+          "signature": "verified"
+        },
+        "observed": {
+          "device_key": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+          "serial": "SN-0001",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C"
+        }
+      },
+      "expected": "{\"attests\":true,\"findings\":[],\"fully_confirmed\":true,\"unchecked\":[]}"
+    },
+    {
+      "id": "unsigned-and-matching-everything",
+      "note": "§50.3, and the trap: every field below the signature \"passes\". Comparing a machine against a document nobody signed is comparing it to a story it told itself, so `attests` is false however well it matches — and `unattested` is first, because the document being unbelievable outranks any field of it agreeing.",
+      "input": {
+        "certificate": {
+          "device_key": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+          "model": "G1",
+          "serial": "SN-0001",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C",
+          "manufactured": "2026-03-14",
+          "calibration_digests": [
+            "cal-1"
+          ],
+          "claims_ownership": [],
+          "signature": "absent"
+        },
+        "observed": {
+          "device_key": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+          "serial": "SN-0001",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C"
+        }
+      },
+      "expected": "{\"attests\":false,\"findings\":[{\"code\":\"unattested\",\"message\":\"The birth certificate's signature is absent, so it attests nothing: everything it says about this machine is currently a claim the machine makes about itself, which is the situation a birth certificate exists to end. Register the vendor's key with this robot's trust store.\",\"subjects\":[\"absent\"]}],\"fully_confirmed\":false,\"unchecked\":[]}"
+    },
+    {
+      "id": "signed-by-a-key-nobody-here-trusts",
+      "note": "Distinct from unsigned, and the reason `SignatureState` is five states rather than a boolean: the remedy is a trust-store change and not a phone call to the vendor. Both void the certificate; they do not send the same person anywhere.",
+      "input": {
+        "certificate": {
+          "device_key": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+          "model": "G1",
+          "serial": "SN-0001",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C",
+          "manufactured": "2026-03-14",
+          "calibration_digests": [
+            "cal-1"
+          ],
+          "claims_ownership": [],
+          "signature": "untrusted"
+        },
+        "observed": {
+          "device_key": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+          "serial": "SN-0001",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C"
+        }
+      },
+      "expected": "{\"attests\":false,\"findings\":[{\"code\":\"unattested\",\"message\":\"The birth certificate's signature is untrusted, so it attests nothing: everything it says about this machine is currently a claim the machine makes about itself, which is the situation a birth certificate exists to end. Register the vendor's key with this robot's trust store.\",\"subjects\":[\"untrusted\"]}],\"fully_confirmed\":false,\"unchecked\":[]}"
+    },
+    {
+      "id": "a-replaced-mainboard",
+      "note": "§50.4: this is the expected result and not a fault. The secure element holds another key, so every other field binds to a machine this is not — the document is about a different robot, and the remedy is a vendor-signed re-issue that also invalidates the calibrations a board swap could have disturbed (§45.4).",
+      "input": {
+        "certificate": {
+          "device_key": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+          "model": "G1",
+          "serial": "SN-0001",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C",
+          "manufactured": "2026-03-14",
+          "calibration_digests": [
+            "cal-1"
+          ],
+          "claims_ownership": [],
+          "signature": "verified"
+        },
+        "observed": {
+          "device_key": "0000000000000000000000000000000000000000000000000000000000000001",
+          "serial": "SN-0001",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C"
+        }
+      },
+      "expected": "{\"attests\":false,\"findings\":[{\"code\":\"device_key_mismatch\",\"message\":\"This certificate was issued over device key 79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664 and the secure element holds 0000000000000000000000000000000000000000000000000000000000000001. The document is about a different machine. If the mainboard was replaced this is the expected result and not a fault — §50.4 — and the remedy is a vendor-signed re-issue, which also invalidates the calibrations a board swap could have disturbed.\",\"subjects\":[\"79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664\",\"0000000000000000000000000000000000000000000000000000000000000001\"]}],\"fully_confirmed\":false,\"unchecked\":[]}"
+    },
+    {
+      "id": "a-stale-serial",
+      "note": "The contrast with the case above, and the whole reason `voidsTheCertificate` is true for two findings rather than all of them: the key proves this document is about this machine, so a serial that disagrees narrows what is attested without removing it.",
+      "input": {
+        "certificate": {
+          "device_key": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+          "model": "G1",
+          "serial": "SN-0001",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C",
+          "manufactured": "2026-03-14",
+          "calibration_digests": [
+            "cal-1"
+          ],
+          "claims_ownership": [],
+          "signature": "verified"
+        },
+        "observed": {
+          "device_key": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+          "serial": "SN-0002",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C"
+        }
+      },
+      "expected": "{\"attests\":true,\"findings\":[{\"code\":\"serial_mismatch\",\"message\":\"The certificate names serial \\\"SN-0001\\\" and this machine reports \\\"SN-0002\\\". Ask the vendor to re-issue.\",\"subjects\":[\"SN-0001\",\"SN-0002\"]}],\"fully_confirmed\":false,\"unchecked\":[]}"
+    },
+    {
+      "id": "a-descriptor-this-vendor-never-attested",
+      "note": "§50.3’s field, and the gap §5’s `verified` flag cannot see: a descriptor can be perfectly well signed and be for a different machine. This is the only check that notices, and what it notices is that the joint ratings in force are ones nobody signed **for this body**.",
+      "input": {
+        "certificate": {
+          "device_key": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+          "model": "G1",
+          "serial": "SN-0001",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C",
+          "manufactured": "2026-03-14",
+          "calibration_digests": [
+            "cal-1"
+          ],
+          "claims_ownership": [],
+          "signature": "verified"
+        },
+        "observed": {
+          "device_key": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+          "serial": "SN-0001",
+          "descriptor_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "hardware_revision": "rev-C"
+        }
+      },
+      "expected": "{\"attests\":true,\"findings\":[{\"code\":\"descriptor_mismatch\",\"message\":\"The certificate attests descriptor 29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543 and this robot is running ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff. The joint ratings in force are ones nobody has signed for this machine. A vendor who has published an updated descriptor should re-issue the certificate over it; until then the envelope rests on the descriptor's own signature rather than on the vendor's attestation that it belongs to this body.\",\"subjects\":[\"29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543\",\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\"]}],\"fully_confirmed\":false,\"unchecked\":[]}"
+    },
+    {
+      "id": "a-vendor-asserting-ownership",
+      "note": "§50.2: the vendor attests what this robot is and has no business asserting whose it is. The machine is fine and the document overreached, so `attests` stays true — and the assertion is reported rather than silently dropped, because silently ignoring a field means the next vendor adds it too.",
+      "input": {
+        "certificate": {
+          "device_key": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+          "model": "G1",
+          "serial": "SN-0001",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C",
+          "manufactured": "2026-03-14",
+          "calibration_digests": [
+            "cal-1"
+          ],
+          "claims_ownership": [
+            "namespace",
+            "operator"
+          ],
+          "signature": "verified"
+        },
+        "observed": {
+          "device_key": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+          "serial": "SN-0001",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C"
+        }
+      },
+      "expected": "{\"attests\":true,\"findings\":[{\"code\":\"ownership_asserted\",\"message\":\"This certificate asserts ownership (namespace, operator), and ownership is not the vendor's to assert. §50.2 keeps two facts apart: the certificate proves what this robot is, and pairing proves whose it is. The assertion is ignored.\",\"subjects\":[\"namespace\",\"operator\"]}],\"fully_confirmed\":false,\"unchecked\":[]}"
+    },
+    {
+      "id": "a-robot-early-in-boot",
+      "note": "§7.2: an absent input makes a check unavailable, never passed. Nothing contradicted the certificate and nothing confirmed it either, and the four unchecked bindings are named — because the one thing worse than reporting nothing is reporting \"matches\" for a comparison nobody made.",
+      "input": {
+        "certificate": {
+          "device_key": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+          "model": "G1",
+          "serial": "SN-0001",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C",
+          "manufactured": "2026-03-14",
+          "calibration_digests": [
+            "cal-1"
+          ],
+          "claims_ownership": [],
+          "signature": "verified"
+        },
+        "observed": {}
+      },
+      "expected": "{\"attests\":true,\"findings\":[{\"code\":\"unobservable\",\"message\":\"The certificate binds the device key and this robot could not read its own. The binding is neither confirmed nor contradicted — it is unchecked, which is not the same as matching.\",\"subjects\":[\"the device key\"]},{\"code\":\"unobservable\",\"message\":\"The certificate binds a serial number and this robot could not read its own. The binding is neither confirmed nor contradicted — it is unchecked, which is not the same as matching.\",\"subjects\":[\"a serial number\"]},{\"code\":\"unobservable\",\"message\":\"The certificate binds an embodiment descriptor digest and this robot could not read its own. The binding is neither confirmed nor contradicted — it is unchecked, which is not the same as matching.\",\"subjects\":[\"an embodiment descriptor digest\"]},{\"code\":\"unobservable\",\"message\":\"The certificate binds a hardware revision and this robot could not read its own. The binding is neither confirmed nor contradicted — it is unchecked, which is not the same as matching.\",\"subjects\":[\"a hardware revision\"]}],\"fully_confirmed\":false,\"unchecked\":[\"the device key\",\"a serial number\",\"an embodiment descriptor digest\",\"a hardware revision\"]}"
+    },
+    {
+      "id": "an-element-that-could-not-be-read",
+      "note": "\"I could not read the element\" and \"the element holds another key\" are different facts and only the second is about a different machine. This one does not void the certificate.",
+      "input": {
+        "certificate": {
+          "device_key": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+          "model": "G1",
+          "serial": "SN-0001",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C",
+          "manufactured": "2026-03-14",
+          "calibration_digests": [
+            "cal-1"
+          ],
+          "claims_ownership": [],
+          "signature": "verified"
+        },
+        "observed": {
+          "device_key": null,
+          "serial": "SN-0001",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C"
+        }
+      },
+      "expected": "{\"attests\":true,\"findings\":[{\"code\":\"unobservable\",\"message\":\"The certificate binds the device key and this robot could not read its own. The binding is neither confirmed nor contradicted — it is unchecked, which is not the same as matching.\",\"subjects\":[\"the device key\"]}],\"fully_confirmed\":false,\"unchecked\":[\"the device key\"]}"
+    },
+    {
+      "id": "a-certificate-binding-nothing-against-a-machine-reporting-nothing",
+      "note": "The bug this shape prevents: an empty serial compared against a machine reporting an empty serial would \"match\", and a certificate that bound nothing would confirm everything. An unbound field is incomplete at any observation.",
+      "input": {
+        "certificate": {
+          "device_key": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+          "model": "G1",
+          "serial": "",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C",
+          "manufactured": "2026-03-14",
+          "calibration_digests": [
+            "cal-1"
+          ],
+          "claims_ownership": [],
+          "signature": "verified"
+        },
+        "observed": {
+          "device_key": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+          "serial": "",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C"
+        }
+      },
+      "expected": "{\"attests\":true,\"findings\":[{\"code\":\"incomplete\",\"message\":\"The certificate does not bind a serial number, which §50.2 requires it to. It is not a complete birth certificate and whatever it does bind is all it attests.\",\"subjects\":[\"a serial number\"]}],\"fully_confirmed\":false,\"unchecked\":[]}"
+    },
+    {
+      "id": "the-unsigned-constructor",
+      "note": "Every required field reported plus the signature, which is what a certificate somebody constructed and never filled in should read as. Five incomplete findings and not six: `manufactured` is provenance the module never compares to anything.",
+      "input": {
+        "certificate": {
+          "device_key": "",
+          "model": "",
+          "serial": "",
+          "descriptor_digest": "",
+          "hardware_revision": "",
+          "manufactured": "",
+          "calibration_digests": [],
+          "claims_ownership": [],
+          "signature": "absent"
+        },
+        "observed": {
+          "device_key": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+          "serial": "SN-0001",
+          "descriptor_digest": "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543",
+          "hardware_revision": "rev-C"
+        }
+      },
+      "expected": "{\"attests\":false,\"findings\":[{\"code\":\"unattested\",\"message\":\"The birth certificate's signature is absent, so it attests nothing: everything it says about this machine is currently a claim the machine makes about itself, which is the situation a birth certificate exists to end. Register the vendor's key with this robot's trust store.\",\"subjects\":[\"absent\"]},{\"code\":\"incomplete\",\"message\":\"The certificate does not bind the device key, which §50.2 requires it to. It is not a complete birth certificate and whatever it does bind is all it attests.\",\"subjects\":[\"the device key\"]},{\"code\":\"incomplete\",\"message\":\"The certificate does not bind a serial number, which §50.2 requires it to. It is not a complete birth certificate and whatever it does bind is all it attests.\",\"subjects\":[\"a serial number\"]},{\"code\":\"incomplete\",\"message\":\"The certificate does not bind an embodiment descriptor digest, which §50.2 requires it to. It is not a complete birth certificate and whatever it does bind is all it attests.\",\"subjects\":[\"an embodiment descriptor digest\"]},{\"code\":\"incomplete\",\"message\":\"The certificate does not bind a hardware revision, which §50.2 requires it to. It is not a complete birth certificate and whatever it does bind is all it attests.\",\"subjects\":[\"a hardware revision\"]},{\"code\":\"incomplete\",\"message\":\"The certificate does not bind a model, which §50.2 requires it to. It is not a complete birth certificate and whatever it does bind is all it attests.\",\"subjects\":[\"a model\"]}],\"fully_confirmed\":false,\"unchecked\":[]}"
+    }
+  ]
+}

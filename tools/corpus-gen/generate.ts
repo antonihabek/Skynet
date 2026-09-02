@@ -75,7 +75,8 @@ import {
   shapeStateProperties, shapeTransition, shapeWarningMatrix, shapeSkillTransition,
   shapeLiveContext,
   shapeBundleVerdict, shapeBootVerdict,
-  shapeAttestationReport, shapeCodeResult, shapeIdentityVerdict,
+  shapeAttestationReport, shapeAttested, shapeCodeResult, shapeIdentityVerdict,
+  shapeProvenance, shapeScores,
   shapeCheckIn, shapeClaimVerdict, shapeHealthReport,
   shapeCoverage, shapeOfferVerdict, shapeWindowReport,
 } from '../../reference/typescript/shape.ts'
@@ -92,6 +93,15 @@ import {
   MEASURE_STATES, normalizePairingCode,
   type Attestation, type Identity, type Measure, type Observed,
 } from '../../reference/typescript/identity.ts'
+import {
+  PROVENANCE_CLASSES, PROVENANCE_REASON_CODES, classify,
+  type RunBundle,
+} from '../../reference/typescript/provenance.ts'
+import {
+  BIRTH_FINDINGS, check as checkBirth, unsigned as unsignedCertificate,
+  OWNERSHIP_FIELDS as BIRTH_OWNERSHIP_FIELDS, REQUIRED_FIELDS as BIRTH_REQUIRED_FIELDS,
+  type BirthCertificate, type Observed as BirthObserved,
+} from '../../reference/typescript/birth.ts'
 import {
   checkIn, claimFor, CLAIMS, HEALTH_FIELDS, READINESS, STAGES, summarize,
   type CheckInInput, type HealthInput, type Progress,
@@ -5112,6 +5122,292 @@ vocabulary('measure_states',
   'The three states one of §10’s three digests can be in. `nothing` and `unmeasured` are two '
   + 'entries for §37.1’s reason: two facts with two different people at the end of them.',
   MEASURE_STATES)
+
+// ── §50's birth certificate ──────────────────────────────────────────────────
+//
+// The corpus this contract most needs, because §50's whole value is that two parties who have
+// never met agree about what one document proves. A vendor signs at manufacture; a Hub reads the
+// same certificate at pairing, months later and on another continent, and an operator reads it
+// again from a check-in. Three readers, and a disagreement between any two of them is a robot
+// whose identity means one thing in the factory and another in the warehouse.
+//
+// The findings are frozen with their **sentences**, not only their codes, for the reason §50
+// gives its own findings: the remedies are three different phone calls, and an edition that agreed
+// about every code while paraphrasing the messages would send people to the wrong one.
+
+function birthCase(
+  id: string,
+  note: string,
+  certificate: BirthCertificate,
+  observed: BirthObserved,
+): void {
+  add('birth', 'certificate', {
+    id,
+    note,
+    input: { certificate, observed },
+    expected: canonical(shapeAttested(checkBirth(certificate, observed))),
+  })
+}
+
+const DEVICE_KEY = '79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664'
+const OTHER_KEY = '0000000000000000000000000000000000000000000000000000000000000001'
+const BODY_DIGEST = '29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543'
+
+const CERTIFICATE: BirthCertificate = {
+  device_key: DEVICE_KEY,
+  model: 'G1',
+  serial: 'SN-0001',
+  descriptor_digest: BODY_DIGEST,
+  hardware_revision: 'rev-C',
+  manufactured: '2026-03-14',
+  calibration_digests: ['cal-1'],
+  claims_ownership: [],
+  signature: 'verified',
+}
+
+const MACHINE: BirthObserved = {
+  device_key: DEVICE_KEY,
+  serial: 'SN-0001',
+  descriptor_digest: BODY_DIGEST,
+  hardware_revision: 'rev-C',
+}
+
+birthCase('a-signed-certificate-over-this-machine',
+  'The only case with no findings at all, and the one that has to hold or every other case is '
+  + 'measuring a function that complains about everything. A vendor signed this key, and every '
+  + 'field the document binds is a field the machine confirms.',
+  CERTIFICATE, MACHINE)
+
+birthCase('unsigned-and-matching-everything',
+  '§50.3, and the trap: every field below the signature "passes". Comparing a machine against a '
+  + 'document nobody signed is comparing it to a story it told itself, so `attests` is false '
+  + 'however well it matches — and `unattested` is first, because the document being unbelievable '
+  + 'outranks any field of it agreeing.',
+  { ...CERTIFICATE, signature: 'absent' }, MACHINE)
+
+birthCase('signed-by-a-key-nobody-here-trusts',
+  'Distinct from unsigned, and the reason `SignatureState` is five states rather than a boolean: '
+  + 'the remedy is a trust-store change and not a phone call to the vendor. Both void the '
+  + 'certificate; they do not send the same person anywhere.',
+  { ...CERTIFICATE, signature: 'untrusted' }, MACHINE)
+
+birthCase('a-replaced-mainboard',
+  '§50.4: this is the expected result and not a fault. The secure element holds another key, so '
+  + 'every other field binds to a machine this is not — the document is about a different robot, '
+  + 'and the remedy is a vendor-signed re-issue that also invalidates the calibrations a board '
+  + 'swap could have disturbed (§45.4).',
+  CERTIFICATE, { ...MACHINE, device_key: OTHER_KEY })
+
+birthCase('a-stale-serial',
+  'The contrast with the case above, and the whole reason `voidsTheCertificate` is true for two '
+  + 'findings rather than all of them: the key proves this document is about this machine, so a '
+  + 'serial that disagrees narrows what is attested without removing it.',
+  CERTIFICATE, { ...MACHINE, serial: 'SN-0002' })
+
+birthCase('a-descriptor-this-vendor-never-attested',
+  '§50.3’s field, and the gap §5’s `verified` flag cannot see: a descriptor can be perfectly well '
+  + 'signed and be for a different machine. This is the only check that notices, and what it '
+  + 'notices is that the joint ratings in force are ones nobody signed **for this body**.',
+  CERTIFICATE, { ...MACHINE, descriptor_digest: 'f'.repeat(64) })
+
+birthCase('a-vendor-asserting-ownership',
+  '§50.2: the vendor attests what this robot is and has no business asserting whose it is. The '
+  + 'machine is fine and the document overreached, so `attests` stays true — and the assertion is '
+  + 'reported rather than silently dropped, because silently ignoring a field means the next '
+  + 'vendor adds it too.',
+  { ...CERTIFICATE, claims_ownership: ['namespace', 'operator'] }, MACHINE)
+
+birthCase('a-robot-early-in-boot',
+  '§7.2: an absent input makes a check unavailable, never passed. Nothing contradicted the '
+  + 'certificate and nothing confirmed it either, and the four unchecked bindings are named — '
+  + 'because the one thing worse than reporting nothing is reporting "matches" for a comparison '
+  + 'nobody made.',
+  CERTIFICATE, {})
+
+birthCase('an-element-that-could-not-be-read',
+  '"I could not read the element" and "the element holds another key" are different facts and '
+  + 'only the second is about a different machine. This one does not void the certificate.',
+  CERTIFICATE, { ...MACHINE, device_key: null })
+
+birthCase('a-certificate-binding-nothing-against-a-machine-reporting-nothing',
+  'The bug this shape prevents: an empty serial compared against a machine reporting an empty '
+  + 'serial would "match", and a certificate that bound nothing would confirm everything. An '
+  + 'unbound field is incomplete at any observation.',
+  { ...CERTIFICATE, serial: '' }, { ...MACHINE, serial: '' })
+
+birthCase('the-unsigned-constructor',
+  'Every required field reported plus the signature, which is what a certificate somebody '
+  + 'constructed and never filled in should read as. Five incomplete findings and not six: '
+  + '`manufactured` is provenance the module never compares to anything.',
+  unsignedCertificate('absent'), MACHINE)
+
+vocabulary('birth_findings',
+  'Everything §50 can find about a certificate, in the order of their cost. The first is about '
+  + 'the document rather than the machine, which is the order a reader needs.',
+  BIRTH_FINDINGS)
+vocabulary('birth_required_fields',
+  '§50.2’s bindings, in the order that section lists them. Written down once so that a decoder '
+  + 'and whatever eventually issues a certificate cannot disagree about which fields are required.',
+  BIRTH_REQUIRED_FIELDS)
+vocabulary('birth_ownership_fields',
+  'What a birth certificate must never carry. Ownership is established by pairing, by a different '
+  + 'party (§50.2).',
+  BIRTH_OWNERSHIP_FIELDS)
+
+// ── §56's provenance classes ──────────────────────────────────────────────────
+//
+// The corpus §56 most needs, because unlike every other contract here the **Hub** is the consumer:
+// §56.2 says the Hub assigns the class, and a robot's edition computes the same class only so it
+// can predict its own offline. Two implementations of an anti-gaming rule that disagree is an
+// anti-gaming rule with a hole, and the hole is always in the direction of admitting something.
+//
+// The order of the checks is what is really frozen here. Only one class is worth lying to obtain.
+
+function provenanceCase(
+  id: string,
+  note: string,
+  bundle: RunBundle,
+  expectedBenchmark = BENCHMARK,
+  expectedSeeds: string[] = SEEDS,
+): void {
+  add('provenance', 'classify', {
+    id,
+    note,
+    input: { bundle, expected_benchmark: expectedBenchmark, expected_seeds: expectedSeeds },
+    expected: canonical(shapeProvenance(classify(bundle, expectedBenchmark, expectedSeeds))),
+  })
+}
+
+const BENCHMARK = 'sha256:bench'
+const SEEDS = ['1', '2', '3']
+
+const FIELD_RUN: RunBundle = {
+  benchmark_digest: BENCHMARK,
+  policy_digest: 'sha256:policy',
+  embodiment_digest: 'sha256:body',
+  os_image_digest: 'sha256:image',
+  seeds: SEEDS,
+  blackbox_segment: 'sha256:segment',
+  tier: 'certified',
+  enforcement: 'kernel',
+  simulator: false,
+  device_signature: 'verified',
+  device_known: true,
+  birth_attested: true,
+  image_attested: true,
+}
+
+provenanceCase('a-field-result',
+  'All four of §56.2’s conditions, the benchmark’s own seeds, and a black box segment behind it. '
+  + 'The case that has to hold or every other one is measuring a function that refuses everything.',
+  FIELD_RUN)
+
+provenanceCase('an-unsigned-bundle-is-unattested-before-anything-else-is-read',
+  '§56.1: a number nobody can attribute is not evidence. Every other field in this bundle is '
+  + 'perfect and none of them is consulted — which is the point, because they are all claims the '
+  + 'bundle makes about itself.',
+  { ...FIELD_RUN, device_signature: 'absent' })
+
+provenanceCase('a-signature-that-verifies-from-a-device-nobody-registered',
+  'Nothing is wrong with the bytes; what is missing is a registered machine to attribute them to. '
+  + 'A separate reason from an unsigned bundle because it is a separate thing to go and do.',
+  { ...FIELD_RUN, device_known: false })
+
+provenanceCase('a-declared-simulator-is-simulated-however-perfect-it-is',
+  '§35.3 puts the obligation to declare on the driver and this is where it pays. Everything else '
+  + 'about this run is field-grade, and it is still not a field result — a simulator on the field '
+  + 'leaderboard is the single outcome the whole scheme exists to prevent.',
+  { ...FIELD_RUN, simulator: true })
+
+provenanceCase('an-unsigned-simulator-is-unattested-and-not-simulated',
+  'The order that must not be rearranged for tidiness. The simulator flag is one of the bundle’s '
+  + 'own claims, so a bundle nobody can attribute is `unattested` **before** the flag is read — '
+  + 'and it is `unattested` rather than `simulated`, which is the stricter of the two.',
+  { ...FIELD_RUN, simulator: true, device_signature: 'failed' })
+
+provenanceCase('a-robot-whose-birth-certificate-attests-nothing',
+  '§50 read from §56’s side: without it, “a real robot of this model with these joint ratings” '
+  + 'is a claim the machine makes about itself, and a leaderboard built on that is measuring a '
+  + 'story. Recorded, not ranked as field.',
+  { ...FIELD_RUN, birth_attested: false })
+
+provenanceCase('an-unattested-image',
+  'What produced these numbers is not established. The fourth of §56.2’s conditions, and the one '
+  + 'a publisher is most likely to think does not matter.',
+  { ...FIELD_RUN, image_attested: false })
+
+provenanceCase('three-of-the-four-conditions',
+  '§56.2 has three classes and not four. A bundle that meets three conditions has not established '
+  + 'that it is a field result, and `unattested` is exactly what that means — a fourth class would '
+  + 'be a leaderboard tier for nearly-evidence.',
+  { ...FIELD_RUN, birth_attested: false, image_attested: false })
+
+provenanceCase('seeds-the-robot-chose-for-itself',
+  '§56.3: seeds come from the benchmark and are never generated by the robot, because a robot that '
+  + 'picks its own picks easy ones — and it need not do so dishonestly for the number to be '
+  + 'worthless. This is not a run of that benchmark at all.',
+  { ...FIELD_RUN, seeds: ['7', '8', '9'] })
+
+provenanceCase('the-benchmarks-seeds-in-a-different-order',
+  'Order as well as membership. Two runs over the same seeds in a different order are two '
+  + 'different sequences of episodes, and a benchmark that fixes its seeds is fixing the sequence.',
+  { ...FIELD_RUN, seeds: ['3', '2', '1'] })
+
+provenanceCase('a-run-of-a-different-benchmark',
+  'Two benchmarks are two questions, and a score against one says nothing about the other. Caught '
+  + 'here rather than by a reviewer, because §56.1’s whole point is that a reviewer reading a '
+  + 'number cannot see any of this.',
+  { ...FIELD_RUN, benchmark_digest: 'sha256:other' })
+
+provenanceCase('attested-and-unreplayable',
+  '§56.4 is the one observation that never changes the class: a result can be perfectly attested '
+  + 'and have no recording behind it. Still `field`, and still reported — because a number with a '
+  + 'replayable recording is a different class of claim from a number in a table.',
+  { ...FIELD_RUN, blackbox_segment: null })
+
+// §56.5's roll-up comparison.
+
+function scoresCase(id: string, note: string, onRobot: number, onHub: number): void {
+  add('provenance', 'scores', {
+    id,
+    note,
+    input: { scores: { on_robot: onRobot, on_hub: onHub } },
+    expected: canonical(shapeScores(onRobot, onHub)),
+  })
+}
+
+scoresCase('identical', 'The ordinary case: both sides ran the same scoring contract over the same '
+  + 'per-episode outcomes and got the same number.', 0.875, 0.875)
+
+scoresCase('within-the-representation-tolerance',
+  'The tolerance exists for the floating point representation and not for the arithmetic. A '
+  + 'difference this small is two spellings of one number.',
+  0.1 + 0.2, 0.3)
+
+scoresCase('a-real-disagreement',
+  '§56.5: a defect worth investigating rather than a rounding difference to paper over. It means '
+  + 'the shared contract’s two implementations diverged, which is precisely what §31.4 exists to '
+  + 'catch — and the sentence says the Hub’s number is the authoritative one.',
+  0.875, 0.8751)
+
+scoresCase('a-difference-just-outside-the-tolerance',
+  'The boundary, frozen. A caller tempted to widen `1e-9` is a caller papering over the divergence '
+  + 'this comparison exists to surface.',
+  1, 1 + 1e-8)
+
+scoresCase('two-robots-that-computed-nothing',
+  'A non-finite score is not a score, and two of them are not an agreement. Returning true here '
+  + 'would report a robot and a Hub that both failed to compute anything as being in perfect '
+  + 'accord.',
+  Number.NaN, Number.NaN)
+
+vocabulary('provenance_classes',
+  '§56.2’s three classes, strongest to weakest. The order is the ranking, and an edition that '
+  + 'sorted these alphabetically would put `field` after `unattested`.',
+  PROVENANCE_CLASSES)
+vocabulary('provenance_reason_codes',
+  'Everything a classification can carry, in the order the checks run.',
+  PROVENANCE_REASON_CODES)
 
 // ── §11 and §17's check-in ───────────────────────────────────────────────────
 //
