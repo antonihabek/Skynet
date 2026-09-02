@@ -2526,8 +2526,14 @@ mod daemon {
         assert_eq!(observed.generation, 7);
     }
 
-    /// OTA is not written, and the action stays in the plan carrying that. A supervisor that
+    /// An OS update this robot cannot apply stays in the plan carrying why. A supervisor that
     /// dropped it would converge on a lie.
+    ///
+    /// The reason used to be *"OTA is not written"*. §75 wrote it, and the refusal this asserts is
+    /// now the real one: §12's third rule needs the release manifest, because the manifest is what
+    /// says whether the image touches the Safety Kernel, and this robot has never been sent one.
+    /// The outcome moved from `Unimplemented` to `Failed` with it — an absent document is a
+    /// condition of *this* robot that a later check-in can fix, not a missing feature.
     #[test]
     fn an_os_update_nobody_can_apply_is_reported_rather_than_dropped() {
         let mut fixture = Fixture::new("ota");
@@ -2543,8 +2549,14 @@ mod daemon {
         let (action, outcome) = &pass.applied[0];
         assert_eq!(api::action_name(&action.kind), "stage_os_image");
         match outcome {
-            Outcome::Unimplemented { reason } => assert!(reason.contains("§12")),
-            other => panic!("expected unimplemented, got {other:?}"),
+            // §64: the refusal names the document that is missing and the rule that wants it,
+            // because the person reading it has to know which of the two sides to go and fix.
+            Outcome::Failed { reason } => {
+                assert!(reason.contains("release `2.0.0`"), "{reason}");
+                assert!(reason.contains("§57"), "{reason}");
+                assert!(reason.contains("§12"), "{reason}");
+            }
+            other => panic!("expected a named refusal, got {other:?}"),
         }
         assert!(!pass.converged());
         assert_eq!(
@@ -8336,7 +8348,7 @@ mod cell {
     fn the_workspace_layer_is_computed_and_says_it_is_not_applied() {
         let mut fixture = with_cell(
             "cell-workspace",
-            r#"{"name":"bay-3","allowed":[{"frame":"base","shape":{"box":{"min":[0,0,0],"max":[2,2,2]}}}]}"#,
+            r#"{"name":"bay-3","allowed":[{"frame":"base","shape":{"kind":"box","min":[0,0,0],"max":[2,2,2]}}]}"#,
         );
         let (_, body) = fixture.request("GET", "/cell", Some("observer-token"), "");
         let workspace = body.get("workspace").expect("a layer");
@@ -8347,6 +8359,35 @@ mod cell {
             .get("workspace_note")
             .and_then(Json::as_str)
             .is_some_and(|note| note.contains("§33.1")));
+    }
+
+    /// The volume an operator drew and the reader could not parse.
+    ///
+    /// This one is here because the test above was written with a shape spelled
+    /// `{"box":{…}}` — which is not the spelling either edition reads — and asserted a volume it
+    /// never got. The route's answer to that document is the interesting one, and it is two
+    /// halves that have to arrive together: **no layer**, because a layer built from nothing an
+    /// operator can see is the widening direction, and a **fault that names the volume**, because
+    /// a null layer with no explanation is indistinguishable from a cell that draws nothing on
+    /// purpose (§55.2, and the `CellVolume::shape` option that exists for exactly this).
+    #[test]
+    fn a_volume_whose_shape_cannot_be_read_draws_no_layer_and_is_named() {
+        let mut fixture = with_cell(
+            "cell-unreadable",
+            r#"{"name":"bay-3","allowed":[{"frame":"base","shape":{"box":{"min":[0,0,0],"max":[2,2,2]}}}]}"#,
+        );
+        let (_, body) = fixture.request("GET", "/cell", Some("observer-token"), "");
+        assert_eq!(
+            body.get("workspace"),
+            Some(&Json::Null),
+            "an unreadable volume is not an empty layer: an empty layer forbids every frame it              names, and this cell named one"
+        );
+        let codes: Vec<&str> = body
+            .arr_or_empty("faults")
+            .iter()
+            .filter_map(|fault| fault.get("code").and_then(Json::as_str))
+            .collect();
+        assert!(codes.contains(&"volume_shape_invalid"), "{codes:?}");
     }
 
     #[test]

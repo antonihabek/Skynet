@@ -218,6 +218,13 @@ pub fn assess_window(window: &Window) -> WindowReport {
     // toward positive infinity and [`crate::round_half_away`] is half away from zero, and the two
     // disagree on exactly the negative halves a backwards clock produces. Truncation is the one
     // reading both editions can spell identically without a helper.
+    // The two comparisons are kept rather than folded into a range, which is the same expression
+    // for every number and a different one for `NaN`: a range says *not contained* and raises the
+    // fault, two comparisons say *neither greater nor less* and do not. The reference edition
+    // spells it with two comparisons, so this one does too — an edition difference reachable only
+    // by a value JSON cannot carry is still an edition difference, and the corpus exists to have
+    // none.
+    #[allow(clippy::manual_range_contains)]
     if skew > 60_000.0 || skew < -60_000.0 {
         faults.push(fault(
             WindowFaultCode::ImplausibleDuration,

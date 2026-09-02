@@ -8698,3 +8698,100 @@ counts 44 commands.
 §54.5 gained the sentence that says where each check lives and why there are two, because the
 version that only said "refused at install" is the version that let this sit for six sessions
 looking done.
+
+---
+
+## 2026-09-02 (thirty-fourth) — the suite the last commit left red
+
+`cargo test --workspace` failed on this branch before anything new was written. Two tests, both
+from the previous commit, and neither failure was a regression in the thing the commit was about —
+which is why they shipped: the work was the bundle route, the bundle route passed, and the two
+casualties were somewhere else.
+
+Starting a session on a red suite is starting without a baseline. Nothing built on top of it can be
+said to have broken anything, because everything is already broken.
+
+### The OTA test that had outlived its own subject
+
+`an_os_update_nobody_can_apply_is_reported_rather_than_dropped` asserted `Outcome::Unimplemented`
+with a reason containing "§12". It got a `Failed` naming release `2.0.0`.
+
+Both are the same *behaviour* — the action stays in the plan, the generation does not advance, the
+robot does not report itself up to date — and the reason changed underneath it because §75 wrote
+OTA. The refusal is no longer *"there is no bundle fetcher"*; it is *"nothing on this robot
+describes release `2.0.0`"*, which is a condition of this robot that the next check-in can fix
+rather than a feature nobody has written. `Failed` is the right variant for that and
+`Unimplemented` was the right variant for the other.
+
+The dead arm came with it. `Runtime::apply` still carried
+
+```rust
+#[allow(unreachable_patterns)]
+ActionKind::StageOsImage { .. } | ActionKind::ApplyOsImage { .. } => Outcome::Unimplemented { … }
+```
+
+behind the two arms that now handle both — an `#[allow]` whose only job was to stop the compiler
+saying the code was already dead. Removed, along with the `converge` doc comment that still gave
+*"an OS update while §12 is unwritten"* as its example of an action nobody can apply. §12 is
+written. The example is now the release manifest nobody has sent.
+
+### The cell test that was written against a document neither edition reads
+
+`the_workspace_layer_is_computed_and_says_it_is_not_applied` built its cell with
+
+```json
+{"frame":"base","shape":{"box":{"min":[0,0,0],"max":[2,2,2]}}}
+```
+
+and asserted one volume in the layer. The reader — and the corpus, and the reference edition —
+spell a shape `{"kind":"box","min":…,"max":…}`. So the volume was unreadable, the layer was `null`,
+and the assertion counted zero.
+
+Fixed by writing the document the way both editions read it. But the failure is worth more than the
+fix, because the *route's* answer to a malformed volume had no test at all, and it is an answer with
+two halves that only mean something together:
+
+* **No layer**, not an empty one. An empty layer forbids every frame it names, so a cell whose
+  geometry nobody could parse would refuse to let the robot move, with no volume anywhere to explain
+  why. `cell_workspace_layer` returns `None` and the route renders `null`.
+* **A `volume_shape_invalid` fault naming it.** Without that, `null` is indistinguishable from a
+  cell that draws nothing on purpose — and those are opposite situations. `CellVolume::shape` is an
+  `Option` for precisely this reason, and the comment on it says so; nothing had checked the route
+  honoured it.
+
+`a_volume_whose_shape_cannot_be_read_draws_no_layer_and_is_named` now pins both halves, using the
+same broken document that produced the red test.
+
+### And one warning
+
+`cargo clippy` wanted `skew > 60_000.0 || skew < -60_000.0` folded into
+`!(-60_000.0..=60_000.0).contains(&skew)`. It is the same expression for every number and a
+different one for `NaN`: the range says *not contained* and raises the fault, the two comparisons
+say *neither greater nor less* and do not. The reference edition spells it with two comparisons.
+An edition difference reachable only through a value JSON cannot carry is still an edition
+difference, and the corpus exists to have none — so the comparisons stay, with an `#[allow]` whose
+comment says which of the two readings is load-bearing.
+
+`cargo fmt` had one diff outstanding from the same commit.
+
+### Numbers
+
+Rust: **1221** tests, from 1219 green plus two that were not running and one new. `cargo fmt --all
+--check` and `cargo clippy --workspace --all-targets` clean, the mirrors match, the corpus passes,
+and the golden path counts 45 commands.
+
+### Findings, restated
+
+1–28 as before; 29–35 from the sessions above.
+
+36. **A commit can be green in the thing it was about and red beside it.** Both failures were in
+    subsystems the bundle work never touched — one had been true for however long OTA has been
+    written, one was a test that never passed. The habit that catches it is not a smarter test, it
+    is running the whole suite before writing anything, and treating a red suite as the session's
+    first task rather than as noise to work around. A baseline you did not measure is not a
+    baseline.
+37. **A test written against a document the reader rejects tests nothing, and looks like it tests
+    something.** It asserted a count and got zero, which is the same shape a genuine regression has.
+    The tell was that the fault list — which the route was filling in correctly the whole time —
+    already said `volume_shape_invalid`. When a test fails on a count, read what the code *did* say
+    before assuming it said nothing.
