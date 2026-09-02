@@ -2278,6 +2278,36 @@ as `brownout_undeclarable` at the moment it matters — when the RHAL is actuall
 nothing on the robot can say why. The robot keeps working: a hole in a vendor's declaration is a
 reason to say so, not a reason to stop a machine that is running.
 
+### 36.5 Where the numbers come from, on a machine
+
+| Field | Source |
+|---|---|
+| `energy_remaining_wh` | `/sys/class/power_supply/<pack>/energy_now`, µWh |
+| `state_of_charge` | `<pack>/capacity`, per cent — only when there is no `energy_now` |
+| `temperature_c` | the hottest `/sys/class/thermal/thermal_zone*/temp` |
+| `throttled_for_ms` | the daemon, from the instant the temperature first crossed the threshold |
+| `rhal_degraded`, `fault_code` | **nothing** — see below |
+
+**Which supply is the pack is a question and which zone is hottest is not.** Every
+`/sys/class/power_supply` entry declares its own `type`, so the batteries are found rather than
+guessed at; what remains is the genuine ambiguity, and a machine with two batteries has not said
+which drives the legs. Summing them would be a guess about whether the second is a backup cell, a
+tool battery or half of one pack — and §36.2's reserve is compared against the answer. So: no
+battery reads nothing, one battery is the pack, and more than one reads nothing and names them,
+until `state/power.json` says which. That is §34.3's shape for bearers, for §34.3's reason.
+
+The thermal zones need no declaration, because the maximum over every zone the kernel exposes *is*
+"the hottest thermal zone", whatever each zone measures. There is no question there to get wrong.
+
+`charge_now` × `voltage_now` is **not** converted to watt-hours, and that is deliberate: the product
+is an energy computed from a voltage that sags under load, so it under-reads exactly when the robot
+is working hardest. A named gap beats a number whose error moves with the thing it is measuring.
+
+**§36.4's override has no input on this edition.** `RHAL_DEGRADED` and its fault code come from the
+RHAL, and §33.1 keeps `skynetd` off that path — the daemon does not depend on the RHAL crate and CI
+asserts the edge is absent. So a robot can report `normal` while its bus is sagging, and `GET /power`
+says so in as many words rather than letting the word `normal` carry a claim it cannot make.
+
 ---
 
 ## 37. Package lifecycle
@@ -4616,7 +4646,7 @@ miniature, and currently trivial to fix.
 | IPC, observation assembly, arbitration | §25 | **Built** — the shared-memory ring and the command frame | — |
 | Boot, faults, POST, homing | §27, §48 | **Built** — §27's machine, POST's eight checks | Five of the eight are the kernel's, through a path §33.1 denies the daemon |
 | Networking and time | §34–35 | **Built** — bearers, metering, the outbound queue, backoff, two clocks kept apart | — |
-| Power and thermal | §36 | **Built** — the four states plus `unmetered`, the reserve, §36.3's ladder, §36.4's override; 31 tests, 28 corpus cases and seven frozen vocabularies | Nothing on a robot reads a gauge or a thermal zone, so `battery` and `temperature_c` are still absent in every check-in |
+| Power and thermal | §36 | **Built** — the four states plus `unmetered`, the reserve, §36.3's ladder, §36.4's override; the gauge and the thermal zones read from `/sys`; `GET /power` and `skynet power` | §36.4's override has no input: the RHAL flag and its fault code reach this daemon through a path §33.1 denies it, so no robot can report a brownout. Nothing acts on the assessment yet — §25.2 does not consult it before granting a lease |
 | Configuration, calibration | §38, §45 | **Built on both sides** | — |
 | Resource enforcement | §40 | **Built** — cgroup limits, the RT core | — |
 | Frames | §44 | **Built** — the graph, forward kinematics, both pose guards | — |

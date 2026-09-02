@@ -8953,3 +8953,156 @@ Two smaller ones, recorded here because they are the kind that survive by not be
     and an implementation must do something. The way out was to move the interpretation to the party
     that owns the vocabulary — the vendor declares which codes mean sag — which is a third option
     that only appears once somebody tries to write the code.
+
+---
+
+## 2026-09-02 (thirty-sixth) — the gauge, and the two columns that had never held a number
+
+The last session built §36's contract and left one line in §73:
+
+> Nothing on a robot reads a gauge or a thermal zone, so `battery` and `temperature_c` are still
+> absent in every check-in.
+
+This is that half. `crates/skynetd-io/src/power.rs` reads `/sys/class/power_supply` and
+`/sys/class/thermal`, and the two fields §33.6 has named since the health rollup existed now carry
+numbers on a machine that has them.
+
+They had never held one. Not "sometimes null" — the rollup contained `battery: Measured::none()` as
+a **literal**, so a check-in from a robot with a full battery said exactly what a check-in from a
+robot with no battery said. There was no code path that could have distinguished them.
+
+### Which supply is the pack is a question; which zone is hottest is not
+
+Every `/sys/class/power_supply` entry declares its own `type`, so the batteries are *found* rather
+than guessed at. What is left is the real ambiguity: a machine with two batteries has not said which
+one drives the legs. Summing them would be a guess about whether the second is a backup cell, a tool
+battery or half of one pack — and §36.2's reserve is compared against the answer.
+
+So: no battery reads nothing; one battery is the pack; more than one reads nothing and names them,
+until `state/power.json` says which. That is exactly §34.3's shape for bearers, and it is here for
+§34.3's reason — the parts a machine can measure are measured, the parts it cannot are declared, and
+every surface says which is which.
+
+A declaration naming a supply this machine does not have reads **nothing**, rather than falling back
+to whatever is present. The operator named a pack; substituting another is the OS deciding which
+battery the reserve is about.
+
+The thermal zones need no declaration at all, and the asymmetry is worth stating rather than
+noticing: the maximum over every zone the kernel exposes *is* "the hottest thermal zone", whatever
+each zone happens to measure. There is no question there to get wrong.
+
+### The conversion that was not done
+
+A gauge exposing `charge_now` and `voltage_now` but no `energy_now` can be turned into watt-hours by
+multiplying them, and every desktop battery applet does. It is not done here.
+
+The product is an energy computed from an *instantaneous* voltage, and voltage sags under load — so
+the figure under-reads exactly when the robot is working hardest, which is exactly when §36.1's
+bands are being consulted. A named gap beats a number whose error moves with the thing it is
+measuring, and the contract already has the fault for it (`capacity_undeclared`) and the other path
+(a fraction plus a declared `pack_capacity_wh`).
+
+### One health source, because two would eventually disagree
+
+The first wiring passed the reading into `checkin::health` as a fourth argument, leaving
+`Daemon::health` — which `GET /health` renders — still returning `battery: None`. That would have
+been a robot showing one battery figure on its own console and sending a different one to its Hub,
+which is the shape of divergence this repository spends most of its checks on.
+
+Rewritten so `Daemon::health` takes the reading and fills the two fields, and `checkin::health` reads
+them back out of the same struct. One source, one number, two renderings. `checkin::health` also
+lost a parameter on the way: its three measured fields are all taken in one pass, so there is one
+measurement instant and one `age_ms`, and `dated()` is that rule written once instead of three
+`match`es.
+
+### `throttled_for_ms` is the one thing §36 remembers
+
+A duration is not observable in a single reading. The instant the temperature first crossed the
+threshold lives on the daemon beside `counting`, and for `counting`'s reason: a throttle window that
+survived a reboot would be a robot reporting an hour of continuous throttling across a power cycle
+it spent switched off.
+
+It clears the moment the temperature drops back under, which makes "sustained" mean *continuously*
+rather than *cumulatively* — a body that crosses the line for a second every minute is not a body
+that has been throttling for an hour, and §36.3's DEGRADED is about the second robot.
+
+And the subtraction is `saturating_sub`, because §35.1 keeps two clocks and corrects them
+independently: a `now_ms` behind the instant the window opened is a corrected clock, and the
+alternative to zero is a wrapped `u64` reporting eighteen quintillion milliseconds of throttling.
+
+### `GET /power`, `skynet power`, and a note that says what the word cannot mean
+
+The route reports the contract's assessment and the reader's notes **apart**, and that is not
+tidiness: a fault is *§36 has a problem with what it was given* and a note is *this daemon could not
+read a number*. Different remedies, usually different people, and one merged list is how an operator
+learns to skim both.
+
+It also carries a `brownout_note`, because §36.4's override has no input on this edition — the RHAL
+flag and its fault code reach the daemon through a path §33.1 denies it. A robot can therefore report
+`normal` while its bus is sagging, so the route says in as many words that `normal` here means *the
+gauge agrees*, not *the bus does*. A word that cannot carry a claim should not be left looking like
+it does.
+
+The console needed no change at all, which is the pleasant confirmation that the wiring landed in the
+right place: it has rendered `Battery` and `Temperature` from `GET /health` since the panel was
+written, and both had been showing "unmeasured" for as long as the panel had existed.
+
+### A checker that would have admitted the false name it exists to catch
+
+`tools/check-golden-path.mjs` builds the CLI's command table by harvesting quoted literals followed
+by a `|` or a `=>`. Adding one command took the count from 45 to **48**, because `print_power`
+contained
+
+```rust
+match state { "critical" | "reserve" => term::bold(&headline), _ => headline }
+```
+
+and the harvester read the match arm as two more commands. Rewriting it as `state == "critical" ||
+…` took it to 47 — the regex reads the first `|` of a `||` as an alternation, so a boolean is a
+match arm as far as it is concerned.
+
+Both halves are now fixed: the CLI uses a slice (`["critical", "reserve"].contains(&state)`), and
+the regex guards its `\|` against `||`. The count is 46, which is 45 plus `power`.
+
+The cost of leaving it was small and pointed the wrong way: the check exists to catch a document
+writing a `skynet` command that does not exist, and every stray literal it absorbs is one more false
+name it would have waved through.
+
+### Numbers
+
+Rust: **1279** tests, up from 1252. Twenty-seven new — nineteen in `skynetd-io::power`, six on the
+route, two on the check-in. `cargo fmt --all --check` and `cargo clippy --workspace --all-targets`
+clean; the corpus regenerates byte-identically; both mirrors match; the golden path counts 46
+commands.
+
+The suite's own fixture now points its sensors at a directory that does not exist, and that is
+load-bearing: a daemon left on the real `/sys` would read *the build machine's* battery, so the same
+fixture would produce different check-in documents on a laptop and in a container, and the suite
+would pass on one and fail on the other for a reason nothing in it mentions.
+
+### What §36 still does not have
+
+* **The brownout override has no input**, as above. It is the same gap §48.2's self-test has, and it
+  closes when the kernel channel does.
+* **Nothing acts on the assessment.** `grants_new_leases` is computed, reported and read by nobody:
+  §25.2's lease table does not consult it, so a robot at `reserve` will still be handed a new task.
+  That is the next piece and it is the one with teeth — everything up to here is reporting.
+
+### Findings, restated
+
+1–28 as before; 29–40 from the sessions above.
+
+41. **A field that is a literal `None` is not an unmeasured field, it is an unwritten one, and they
+    render identically.** `battery: Measured::none()` sat in the rollup for as long as the rollup
+    existed, and every surface downstream correctly reported "unmeasured" — the console, the
+    check-in, the fleet page. The whole stack was honest and the bottom of it was a constant. The
+    tell is a `None` with no `if` above it.
+42. **Wiring a new reading into two consumers is where the divergence gets built.** The first
+    attempt filled the check-in and left `GET /health` on the old literal, which would have been a
+    robot with two battery figures. The habit that catches it: after adding a source, grep for every
+    consumer of the *field*, not of the function you just changed.
+43. **A check that harvests source text will absorb whatever the source starts saying.** One `match`
+    on two strings put two false command names into the set of things `skynet <x>` may be, silently,
+    in the check whose only job is to reject a `skynet <x>` that does not exist. Nothing failed. The
+    tell was a count that moved by three when one command was added — which is only visible if you
+    read the number the tool prints, rather than the word `ok` beside it.

@@ -281,6 +281,15 @@ impl Layout {
         self.state().join("safe-state")
     }
 
+    /// What an operator has declared about this machine's power hardware (§36).
+    ///
+    /// One field, and the file exists because of it: a machine with two batteries cannot be
+    /// resolved by measurement, and `crates/skynetd-io/src/power.rs` will not guess which is the
+    /// traction pack. Absent on every robot with one battery, which is most of them.
+    pub fn power(&self) -> PathBuf {
+        self.state().join("power.json")
+    }
+
     /// Local credentials, hashed (§39.2).
     pub fn credentials(&self) -> PathBuf {
         self.state().join("credentials.json")

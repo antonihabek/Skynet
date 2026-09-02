@@ -1199,7 +1199,13 @@ fn report_checkin<L, S>(
     }
 
     let actual = daemon.observe(now_ms);
-    let health = daemon.health(&actual, now_ms);
+    // §36's gauge, read in this pass and dated with it. The descriptor is loaded here rather than
+    // held on the daemon for the reason every other read in this function is fresh: the loop is
+    // level-triggered (§33.3), and a power profile cached at start-up would survive a descriptor
+    // somebody replaced on a running robot.
+    let body = skynetd_io::embodiment::load(layout);
+    let (_, reading) = skynetd_io::power::observe(&mut daemon.power, layout, &body, now_ms);
+    let health = daemon.health(&actual, now_ms, Some(&reading));
     let policy = skynetd_io::identity::running_policy(&daemon.store, &actual);
     let attestation =
         skynetd_io::identity::attestation(layout, &trust, &identity, &actual.os.active, &policy);
