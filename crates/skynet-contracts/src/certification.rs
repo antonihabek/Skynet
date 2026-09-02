@@ -447,10 +447,15 @@ pub fn award_certification(input: &CertificationInput) -> CertificationVerdict {
 /// which would reward a robot with a broken detector — a robot reporting zero cycles reports no
 /// conformance at all, and the caller gets `None` rather than a flattering 1.0.
 pub fn field_conformance(cycles: f64, interventions: f64) -> Option<f64> {
-    if cycles <= 0.0 {
+    if !cycles.is_finite() || cycles <= 0.0 {
         return None;
     }
     let ratio = (cycles - interventions) / cycles;
+    // Clamped rather than trusted. More interventions than cycles is a robot whose counters
+    // disagree with each other, and the honest floor for that is zero rather than a negative
+    // conformance figure §15 has no reading for — which matters because §15 checks this number
+    // against a floor, and a negative one sails under it into `suspended` for the right reason by
+    // accident. Above 1.0 is the dangerous direction and is the one this must never produce.
     Some(ratio.clamp(0.0, 1.0))
 }
 

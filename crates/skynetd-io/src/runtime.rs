@@ -51,7 +51,7 @@ use skynetd::desired::{DesiredState, PackageKind, RunState};
 use skynetd::health::{Health, PackageHealth, Readiness};
 use skynetd::lease::LeaseTable;
 use skynetd::reconcile::{Action, ActionKind, Plan, SafeState};
-use skynetd::supervise::{CrashPolicy, Supervision};
+use skynetd::supervise::{CrashPolicy, RestartDecision, Supervision};
 
 use crate::launch::{Cpus, LaunchError, Launcher, Limits, Unit};
 use crate::layout::{Layout, PackageId};
@@ -1499,7 +1499,18 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             .supervision
             .entry(id.to_string())
             .or_insert_with(|| Supervision::new(id, kind, CrashPolicy::default()));
-        record.on_exit(now_ms, jitter);
+        let decision = record.on_exit(now_ms, jitter);
+        // §74's `package_restarts`, which had no source and needed none it did not already have:
+        // the supervisor is what decides a restart, and this is where it decides one.
+        //
+        // Counted at the **decision** rather than at the start it leads to. The two are one pass
+        // apart, and a decision whose start never happened is a robot in worse trouble rather than
+        // better — a counter that waited for the start would under-report exactly the robot a fleet
+        // page is looking for. `Failed` and `AwaitOperator` are not restarts and are not counted;
+        // they are a package that stopped coming back, which the readiness column already says.
+        if matches!(decision, RestartDecision::RestartAt(_)) {
+            self.counting.restarts += 1;
+        }
         // Whatever it held, it is not holding now.
         self.leases.release_all(id);
         let _ = self.write_leases();

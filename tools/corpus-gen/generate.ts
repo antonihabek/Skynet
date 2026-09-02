@@ -6048,6 +6048,37 @@ coverageCase('overlapping-windows-are-merged-for-the-span-and-summed-for-the-cou
       counters: { cycles: 15_000 } },
   ])
 
+// §15's floor, from both sides. Every case above sits comfortably over 0.999, so none of them
+// discriminates the number the third suite exists to produce — an edition could compute
+// conformance differently and reproduce all four. These four are the ones that pin it.
+
+coverageCase('conformance-under-the-floor',
+  '§15 suspends below 0.999, "because a robot whose commands have been leaving its envelope is not '
+  + 'a lower-tier robot — it is one whose certificate no longer describes it." Thirty thousand '
+  + 'cycles and forty interventions is 0.99867, and this is the case the third suite exists for.',
+  [{ ...FIVE_MINUTES, counters: { cycles: 30_000, interventions: 40 } }])
+
+coverageCase('conformance-exactly-at-the-floor',
+  'Thirty interventions in thirty thousand cycles is exactly 0.999. §15 puts the floor at 0.999 '
+  + 'rather than 1.0 because "a hundred robots at 100 Hz produce tens of millions of cycles a day, '
+  + 'and demanding literal perfection would suspend every honest vendor on sensor noise" — so the '
+  + 'boundary is worth a vector of its own.',
+  [{ ...FIVE_MINUTES, counters: { cycles: 30_000, interventions: 30 } }])
+
+coverageCase('cycles-counted-and-no-interventions-counted',
+  'The one place §74.3\'s unmeasured-is-not-zero rule bends, and it bends because of what the '
+  + 'counters are: the thing that would have recorded an intervention is the same loop that '
+  + 'recorded the cycles, so a window with cycles and no interventions is a kernel that intervened '
+  + 'in none of them. Conformance is 1, not undefined.',
+  [{ ...FIVE_MINUTES, counters: { cycles: 30_000 } }])
+
+coverageCase('more-interventions-than-cycles',
+  'A robot whose counters disagree with each other. Clamped to zero rather than reported negative: '
+  + '§15 checks this against a floor, and a negative number sails under it — which happens to reach '
+  + 'the right verdict for the wrong reason, and would reach the wrong one the day somebody '
+  + 'compared it against anything else.',
+  [{ ...FIVE_MINUTES, counters: { cycles: 100, interventions: 250 } }])
+
 coverageCase('nothing-at-all',
   'No windows. Zero observed, zero spanned, no gaps and every counter unmeasured — which is a '
   + 'different answer from a robot that reported windows full of zeroes.',

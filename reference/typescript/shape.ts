@@ -46,7 +46,7 @@ import {
 } from './provenance.ts'
 import type { CheckIn, ClaimVerdict, HealthReport } from './checkin.ts'
 import type { OfferVerdict } from './intent.ts'
-import type { Coverage, WindowReport } from './telemetry.ts'
+import { conformanceOf, type Coverage, type WindowReport } from './telemetry.ts'
 import { attest as attestOfMeasures } from './identity.ts'
 import { HEALTH_FIELDS } from './checkin.ts'
 import type { SkillTransition } from './skill.ts'
@@ -976,6 +976,12 @@ export function shapeCoverage(value: Coverage): unknown {
   const totals: Record<string, number> = {}
   for (const [name, total] of Object.entries(value.totals)) totals[name] = total
   return {
+    // §15's third suite, over what was actually observed. Nullable rather than optional, and
+    // frozen here rather than left to each consumer, because this is the number that decides
+    // whether a certificate is suspended — and it had two implementations, in two crates, pinned
+    // by nothing. A value both editions compute and neither corpus holds is a value they are free
+    // to disagree about.
+    conformance: nullable(conformanceOf(value)),
     gaps: value.gaps.map(gap => ({ from_ms: gap.from_ms, to_ms: gap.to_ms })),
     observed_ms: value.observed_ms,
     spanned_ms: value.spanned_ms,

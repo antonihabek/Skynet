@@ -9355,3 +9355,115 @@ kernel's, through the channel §33.1 denies this daemon.
     sweep turns up an unused decision, the next question is not "who should call this" but "does
     anything compute what it decides about" — and here the answer was: three places, none of them
     the one the specification names.
+
+---
+
+## 2026-09-02 (thirty-ninth) — the other two orphans, and one formula written twice
+
+The sweep in the previous session flagged three genuine orphans and one was §37.1's transport stage.
+The other two were `field_conformance` and `conformance_of` — and the interesting thing about them
+is not that neither had a caller. It is that **they are the same formula.**
+
+```rust
+// certification.rs                       // telemetry.rs
+(cycles - interventions) / cycles         ((cycles - interventions) / cycles)
+    .clamp(0.0, 1.0)                          .clamp(0.0, 1.0)
+```
+
+Two crates, two doc comments arguing the same clamp, neither with a consumer, and nothing anywhere
+comparing them. §15's field conformance is *"the mechanism by which certification stops being a
+document and becomes a live property"* — the number that decides whether a robot's certificate is
+suspended — and it had two definitions.
+
+`conformance_of` now calls `field_conformance`, in both editions. One definition, and it belongs to
+the module that checks it against §15's floor.
+
+### A value both editions compute and neither corpus holds
+
+Worse than the duplication: **`conformance_of` was in no corpus at all.** `shapeCoverage` emitted
+gaps, totals, spans and unmeasured names, and not the one number the coverage is computed *for*.
+Two editions, free to disagree, with a green suite either way.
+
+It is in the shape now, and with it four cases that the existing five could not have discriminated —
+because every one of them sat comfortably above §15's floor:
+
+| Case | Conformance |
+|---|---|
+| under the floor — 40 interventions in 30,000 cycles | 0.99867 |
+| exactly at the floor — 30 in 30,000 | 0.999 |
+| cycles counted, interventions not | 1 |
+| more interventions than cycles | 0 |
+
+The tamper tests now bite: removing the clamp fails two vectors, and removing the
+absent-interventions rule fails two. Before them, both changes passed.
+
+The third case is the one that needed a decision. §74.3's rule is that unmeasured and zero are never
+the same, and here they are: a window that counted cycles and did not count interventions is a robot
+whose **kernel intervened in none of them**, because the counter that would have recorded one is the
+same loop that recorded the cycles. The rule bends exactly once and the reason is written where it
+bends. Absent *cycles* is still absent.
+
+### `package_restarts` had a source and had never been asked
+
+`skynetd-io/src/telemetry.rs` opened with:
+
+> **six of the eight counters have no source.** … `interventions` needs teleoperation and
+> `package_restarts` needs the supervisor to count them, **which it does not**.
+
+That last clause was a statement about the wiring dressed as a statement about the machine. §33.5's
+supervisor decides every restart on this robot — `on_exit` returns `RestartAt`, `Failed` or
+`AwaitOperator` — and the daemon threw the decision away.
+
+Counted at the **decision** rather than at the start it leads to. The two are one reconcile pass
+apart, and a decision whose start never happened is a robot in *worse* trouble, so a counter waiting
+for the start would under-report exactly the robot a fleet page is hunting for. `Failed` and
+`AwaitOperator` are not restarts and are not counted: they are a package that stopped coming back,
+which the readiness column already says.
+
+It is a count since the window opened rather than a reading taken at both ends — unlike
+`queue_dropped` beside it — because the supervisor keeps a *bounded* failure list whose entries
+expire out of §33.5's ten-minute window, and subtracting two readings of that would report a
+negative number of restarts on a robot that had been quiet.
+
+Three of eight now, and the five that remain are the four the kernel owns plus teleoperation.
+
+### Both freezes fired, which is why they exist
+
+Two tests failed the moment the counter appeared, and neither was a nuisance:
+
+* the unit test asserting which six counters are unmeasured;
+* **`reference/wire/telemetry.json`** — the frozen bytes this daemon puts on §17's wire, which the
+  Hub holds a copy of and asserts against.
+
+The wire fixture was re-frozen, resynced, and the Hub's own assertion updated — *"this edition
+measures two of the eight"* became three, with `package_restarts` asserted as **zero rather than
+undefined**, because a quiet robot has to be distinguishable from one that counts nothing or a fleet
+page filtering for churn has no robot to compare against.
+
+That is the twenty-seventh session's mechanism paying off again: a producer and a consumer in two
+repositories, and the change could not land in one without the other being made to say something.
+
+### Numbers
+
+Rust: **1291** tests, up from 1290. The corpus is **1015 cases across 73 files**, up from 1011 —
+four coverage vectors and the conformance field on every existing one. `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets`, both mirrors and the golden path clean; the Hub's two
+synced contracts typecheck.
+
+§73's telemetry row goes from *"six of eight counters have no source"* to five, and now says which
+five and why: four are the kernel's, one is teleoperation's.
+
+### Findings, restated
+
+1–28 as before; 29–47 from the sessions above.
+
+48. **Two orphans can be one duplicate.** The sweep found `field_conformance` and `conformance_of`
+    separately and the finding was not "two unused functions" — it was that §15's number had two
+    implementations. An unused function is cheap; an unused function that is a *second* copy of a
+    rule is a divergence waiting for the first caller. Worth asking of every sweep hit: is anything
+    else computing this?
+49. **"Which we do not" is a sentence to check, not to believe.** The telemetry module said
+    `package_restarts` needed a supervisor to count them, which it did not — written when it was
+    true of the wiring, and read for months as though it were true of the machine. The supervisor
+    was three lines away. The tell is a doc comment that explains an absence by naming a component
+    the repository already has.
