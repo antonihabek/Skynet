@@ -2345,6 +2345,43 @@ stage     unpack into /data/packages/<digest>/, still inert
 activate  atomic symlink swap, then register with the supervisor
 ```
 
+#### The `transport` stage, which for a long time was the only one that never ran
+
+Five of the six stages above have had an implementation since the store was written. `transport`
+had none, and the shape of the gap is one this document keeps finding: `resolveTransport()` had
+three callers — the Hub's repository page, `skynet transport`, and the conformance corpus — and not
+one of them was an install. `admitPackage()` has taken a `transport_verdict` since it was written,
+and on a robot it was always absent, with a comment saying there was no source embodiment to plan
+from. **A consumer with no producer.**
+
+There is one now. The package manifest carries `source_embodiment` — the body the policy was
+trained on and the action space it emits — which is the half the robot could not otherwise have.
+The other half is the descriptor it already holds (§28).
+
+Two options are decided at the install rather than declared by the publisher:
+
+* **`requested_hz` is the package's own `budget.control_hz`**, the rate it says it will run its loop
+  at on this robot — not the source embodiment's `control_hz`, which is the rate it was *trained*
+  at. A publisher may declare both and they may differ; the plan is made against the one the loop
+  will use, because a plan that cleared a rate the package never intends to run is a plan about a
+  different robot.
+* **`allow_retarget` is the operator's**, and §6.1 is why it cannot be the publisher's:
+  *"retargeting changes what the policy is doing. That should be a decision somebody made, not a
+  fallback that happens quietly."* So it is a flag on `skynetd stage` — the person running it is the
+  somebody — and a reconcile loop, which has no such person, passes `false`.
+
+Two ways there is nothing to plan, and neither is a pass:
+
+* **The package declares no action space.** A driver, an environment, a dataset: none of them
+  command a joint, and a transport verdict about them would answer a question nobody asked.
+* **This robot has no usable descriptor.** §7.2's rule applies — the absence is reported by the
+  surfaces that report descriptors, not converted into a verdict here. A `refused` invented from a
+  missing body would fail every install on an unprovisioned robot with a sentence about the policy.
+
+And the refusal names the channel. *"The policy's action space cannot be transported onto this
+body"* is true and tells nobody which joint to look at, so the report carries every binding that
+came out anything but `direct`, with its role, its method and its reason (§64).
+
 #### The verdict is recorded, not only printed
 
 Admission decides whether code may run on this machine, which makes it exactly the thing an incident
@@ -4647,7 +4684,7 @@ miniature, and currently trivial to fix.
 |---|---|---|---|
 | Thesis, tiers, the honest meaning of universal | §1–3 | Designed | — |
 | RHAL — ABI, structs, drivers | §4, §24, §66–71 | **Built** — C, C++ and Python headers; mock, MuJoCo and LeRobot drivers | No vendor has written one |
-| Embodiment descriptor and transport | §5–6, §44, §52 | **Built on both sides** | — |
+| Embodiment descriptor and transport | §5–6, §44, §52 | **Built on both sides** — and, since §37.1's `transport` stage, resolved at install on the robot | The ceilings the plan computes are handed to nothing: §6.3 gives them to the Safety Kernel, and no policy runtime exists to carry a command as far as one |
 | Safety Kernel — guards, limits, tiers | §7, §23.1, §25, §46 | **Built** — `no_std`, no allocator, 101 tests | Nothing has driven a physical joint |
 | Packages, permissions, admission | §8, §37 | **Built** | Nothing on a robot can *produce* a signature (§19) |
 | skynetd — reconciliation, supervision, health | §9, §33 | **Built** — level-triggered, six ordered stages | — |

@@ -9223,3 +9223,135 @@ the OS must refuse to show.
     says *no new leases* and *running task may finish*. Gating the acquisition gives both; gating
     the holding gives the first and breaks the second; a check in the daemon loop would have given
     neither cleanly. The second clause was never written as code, and it is tested.
+
+---
+
+## 2026-09-02 (thirty-eighth) — the sweep, and the install stage that never ran
+
+Finding 44, from an hour ago: *"a computed boolean nobody reads is not enforcement, and it looks
+exactly like enforcement."* The log has now recorded that shape four times — `read_calls`,
+`skynet_contracts::bundle`, `SkillManifest.task`, and `grants_new_leases` — each found by accident,
+each after months. So the first thing this session did was look for the rest of them mechanically.
+
+### The sweep
+
+Every `pub fn` in `skynet-contracts`, minus the corpus wire-shape helpers, against every reference
+to it anywhere in the workspace outside its own module, its own tests and the corpus runner.
+
+**Seven of eighty-eight decision functions had no consumer at all.** Four are legitimate API
+surface — a convenience wrapper (`role_key_of`), a borrow-chain helper (`with_frame_set`), a display
+formatter (`format_pairing_code`), a console sentence generator whose console does not exist yet
+(`explain_omissions`). Three were real:
+
+* `field_conformance` and `conformance_of` — §15's field suite, computed from a telemetry window and
+  read by nothing. Left for a session of its own; it belongs with the conformance runner §73 already
+  names as missing.
+* **`is_installable`** — *"Whether the OS will install a policy under this plan."*
+
+The third is the one worth an evening, and it is worse than the sweep suggested. It is not that the
+predicate has no caller: **`resolve_transport` itself has no caller on a robot.** Its three callers
+are the Hub's repository page, `skynet transport` (a developer diagnostic), and the corpus.
+
+### §37.1 has six stages and one of them had never run
+
+```
+resolve → fetch → verify → admit → transport → stage → activate
+```
+
+> `transport` — `resolveTransport()` against this body; a `refused` verdict fails the install
+
+§6 calls transport *"the heart of the system"* and §6.2 says it runs *"on the robot, at install
+time, with no network at all."* `admit_package` has taken a `transport_verdict: Option<_>` since
+admission was written, and on a robot it was `None` every time, with a comment saying why: *"there
+is no policy to plan for at stage time and no source embodiment to plan from."*
+
+Which was true, and was the whole of the gap. The manifest had no action space in it.
+
+`PackageManifest.source_embodiment` is the missing half — the body the policy was trained on and
+the channels it emits, which is exactly what `skynet transport` has been reading out of a file all
+along. The other half, the descriptor, has been on the robot since §28.
+
+So the stage runs. A policy whose required channel this body has no equivalent for is now **refused
+at install**, which §6 has said since Part I and no robot has ever done.
+
+### Two options, decided rather than declared
+
+**`requested_hz` is the package's `budget.control_hz`**, not the source embodiment's. Those are two
+declarations by one publisher in one document and they may disagree: the first is the rate the loop
+will run at *here*, the second is the rate it was *trained* at. The plan is made against the first,
+because a plan that cleared a rate the package never intends to run is a plan about a different
+robot.
+
+**`allow_retarget` is the operator's**, and §6.1 says why it cannot be the publisher's:
+*"retargeting changes what the policy is doing. That should be a decision somebody made, not a
+fallback that happens quietly."* A publisher setting it in a manifest is precisely the quiet
+fallback. So it is `--allow-retarget` on `skynetd stage` — the person running the command is the
+somebody — and the reconcile loop, which has nobody standing at it, passes `false`.
+
+Asking for it does not manufacture a solver, and there is a test that says so: a body declaring no
+IK solver refuses the channel however the flag is set, which is §6.1's *"the request is refused
+rather than promised and discovered at the first command."*
+
+### Two ways there is nothing to plan, and neither is a pass
+
+* **The package declares no action space** — a driver, an environment, a dataset. None of them
+  command a joint. A verdict about them would answer a question nobody asked.
+* **The robot has no usable descriptor.** §7.2's rule: the absence is reported by the surfaces that
+  report descriptors, not converted into a verdict here. A `refused` invented from a missing body
+  would fail every install on an unprovisioned robot with a sentence about the *policy* — which
+  would send an operator to the publisher for a problem in their own provisioning.
+
+Both produce `None`, which admission reads as *no verdict was reached* rather than as a pass. That
+distinction was already in `admit_package` and had never had a second case to distinguish.
+
+### The refusal names the channel
+
+`TransportRefused`'s message is *"The policy's action space cannot be transported onto this body."*
+True, and it tells nobody which joint to look at. So the report carries every binding that came out
+anything but `direct` — its index, its declared role, its method, its target and its reason — and
+the `direct` ones are omitted, because naming all forty on a humanoid buries the one that is
+blocked. That is §8.2's rule about findings, applied to the thing the findings are about.
+
+### The mirror check earned its place again
+
+`package.ts` is a mirrored contract, so adding `source_embodiment` to the Rust manifest and to the
+reference left `check-contract-mirrors.mjs` reporting `DIVERGED package — 18 line(s) differ`
+immediately. The Hub's copy took the same edit and the pins were rewritten from the two agreeing
+copies. Nothing about `admitPackage` changes — the Hub does not read the field, the robot does —
+which is exactly the case where a mirror would otherwise rot unnoticed for months.
+
+### Numbers
+
+Rust: **1290** tests, up from 1285. Five new, all on the stage: a policy that fits, a required
+channel that does not, the two absences, the retarget decision, and the rate the plan is made
+against. `cargo fmt --all --check` and `cargo clippy --workspace --all-targets` clean — the latter
+after boxing `Report::Ran`'s plan, because a binding per channel on a forty-joint body would
+otherwise make every `Report`, including the one that carries a single sentence, that size.
+
+The corpus is unchanged at 1011 cases, and that is the right answer: `admitPackage` does not read
+the new field, so no frozen vector moves. Both mirror checks match, the golden path counts 46
+commands.
+
+### What is still missing here
+
+§73's transport row said "—" in its last column, and it was wrong in the direction §73 is always
+wrong in. It now says the true thing: **the ceilings the plan computes are handed to nothing.** §6.3
+is explicit that deciding and enforcing are separate and that the clamp goes to the Safety Kernel —
+and `TransportClamp` has no reader on this robot, because no policy runtime exists to carry a
+command as far as a kernel. Planning at install is now real; enforcing at 1 kHz is still the
+kernel's, through the channel §33.1 denies this daemon.
+
+### Findings, restated
+
+1–28 as before; 29–45 from the sessions above.
+
+46. **The orphan sweep is worth running, and it is four lines of Python.** Every `pub fn` against
+    every reference to it outside its own module, its tests and the corpus. Four of the seven hits
+    were legitimate API surface, which is a false-positive rate a person can read in a minute — and
+    the three real ones included a whole install stage that had never executed. The log had recorded
+    this shape four times without anybody thinking to look for the fifth.
+47. **An orphaned predicate can be the smaller half of the problem.** `is_installable` had no
+    caller; the sharper fact was that the *function it asks about* had no caller either. When a
+    sweep turns up an unused decision, the next question is not "who should call this" but "does
+    anything compute what it decides about" — and here the answer was: three places, none of them
+    the one the specification names.

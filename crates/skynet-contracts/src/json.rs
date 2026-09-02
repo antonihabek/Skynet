@@ -728,6 +728,14 @@ pub fn manifest_from_json(value: &Json) -> Result<PackageManifest, DecodeError> 
             container_image: opt_string(runtime, "container_image"),
         }),
         depends_on,
+        // §6, for §37.1's `transport` stage. Read from `source_embodiment`, and a block that does
+        // not decode is an **error** rather than an absence: an action space nobody could parse and
+        // an action space nobody declared are opposite facts, and the second is a package that
+        // transports trivially while the first is a package nobody has checked.
+        source_embodiment: match value.get_present("source_embodiment") {
+            Some(block) => Some(source_from_json(block)?),
+            None => None,
+        },
         min_os_version: opt_string(value, "min_os_version"),
     })
 }
