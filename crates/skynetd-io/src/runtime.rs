@@ -742,10 +742,11 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     /// and then starting would otherwise take two reconcile intervals to arrive, and an interval is
     /// ten seconds.
     ///
-    /// The budget is what stops it spinning. An action nobody can apply — an OS update while §12 is
-    /// unwritten — stays in the plan for ever by design, so a loop with no bound would turn for
-    /// ever making no progress. [`MAX_PASSES`] is the bound and it is generous: §33.4 has six
-    /// stages, so a plan whose actions each enable the next arrives in six.
+    /// The budget is what stops it spinning. An action nobody can apply — an OS update whose
+    /// release manifest this robot has never been sent — stays in the plan for ever by design, so
+    /// a loop with no bound would turn for ever making no progress. [`MAX_PASSES`] is the bound and
+    /// it is generous: §33.4 has six stages, so a plan whose actions each enable the next arrives
+    /// in six.
     pub fn converge(&mut self, now_ms: u64) -> Vec<Pass> {
         let mut passes = Vec::new();
         for _ in 0..MAX_PASSES {
@@ -770,16 +771,6 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         match &action.kind {
             ActionKind::StageOsImage { version } => self.stage_image(version, now_ms),
             ActionKind::ApplyOsImage { version } => self.apply_image(version),
-            #[allow(unreachable_patterns)]
-            ActionKind::StageOsImage { .. } | ActionKind::ApplyOsImage { .. } => {
-                Outcome::Unimplemented {
-                    reason:
-                        "OTA (§12) is not written: there is no bundle fetcher, no RAUC install \
-                             and no health gate. The action stays in the plan rather than being \
-                             dropped, so the robot does not report itself up to date"
-                            .to_string(),
-                }
-            }
 
             ActionKind::FetchPackage { id, digest } => {
                 // Already present is the answer §37.1 wants — "skipping any blob already present" —

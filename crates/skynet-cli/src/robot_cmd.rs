@@ -1267,7 +1267,10 @@ fn print_cell(document: &Json) {
     println!(
         "cell {}   {} fixture(s)",
         term::bold(document.get("name").and_then(Json::as_str).unwrap_or("—")),
-        document.get("fixtures").and_then(Json::as_f64).unwrap_or(0.0),
+        document
+            .get("fixtures")
+            .and_then(Json::as_f64)
+            .unwrap_or(0.0),
     );
 
     if let Some(environment) = document.get("environment").and_then(Json::as_obj) {
