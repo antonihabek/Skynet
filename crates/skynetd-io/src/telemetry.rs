@@ -7,16 +7,17 @@
 //! # Almost every counter is unmeasured, and that is the report
 //!
 //! §74.3 keeps zero and unmeasured apart for §33.6's reason, and on this edition the distinction is
-//! not academic: **six of the eight counters have no source.** `cycles`, `guard_trips`, `clamps`
-//! and `estops` need a kernel, which this daemon does not host; `interventions` needs teleoperation
-//! (§17 of the Hub's own document) and `package_restarts` needs the supervisor to count them, which
-//! it does not.
+//! not academic: **five of the eight counters have no source.** `cycles`, `guard_trips`, `clamps`
+//! and `estops` need a kernel, which this daemon does not host, and `interventions` needs
+//! teleoperation (§17 of the Hub's own document).
 //!
-//! Two are real. `queue_dropped` is §34.4's own counter — the one the section is written around,
-//! *"this robot dropped forty thousand telemetry items last month"* — and `reconcile_passes` is what
-//! this loop actually did. Reporting those two and naming the other six is the whole content of a
-//! window today, and it is worth sending: a robot that is up, reconciling and dropping nothing is a
-//! fact, and the gaps between windows are what make a fleet page able to say when it was not.
+//! Three are real. `queue_dropped` is §34.4's own counter — the one the section is written around,
+//! *"this robot dropped forty thousand telemetry items last month"* — `reconcile_passes` is what
+//! this loop actually did, and `package_restarts` is §33.5's supervisor, which decides every
+//! restart on this machine and had simply never been asked how many. Reporting those three and
+//! naming the other five is the whole content of a window today, and it is worth sending: a robot
+//! that is up, reconciling and dropping nothing is a fact, and the gaps between windows are what
+//! make a fleet page able to say when it was not.
 //!
 //! # The window is closed by the same pass that opens the next one
 //!
@@ -47,6 +48,14 @@ pub struct Counting {
     pub passes: u64,
     /// Queue drops observed when it opened, across every class.
     pub dropped_at_open: u64,
+    /// Restarts §33.5's supervisor decided on since it opened (§74's `package_restarts`).
+    ///
+    /// A count since the window opened rather than a reading taken at both ends, which is the
+    /// difference between this and `dropped_at_open` beside it: the queue keeps a running total
+    /// this module can subtract, and the supervisor keeps a bounded failure list whose entries
+    /// expire out of §33.5's window. Subtracting two readings of that would report a *negative*
+    /// number of restarts on a robot that had been quiet for ten minutes.
+    pub restarts: u64,
 }
 
 impl Counting {
@@ -57,6 +66,7 @@ impl Counting {
             opened_monotonic_ms: monotonic_ms,
             passes: 0,
             dropped_at_open: dropped,
+            restarts: 0,
         }
     }
 
@@ -78,6 +88,7 @@ impl Counting {
             Some(dropped.saturating_sub(self.dropped_at_open) as f64),
         )
         .with("reconcile_passes", Some(self.passes as f64))
+        .with("package_restarts", Some(self.restarts as f64))
     }
 }
 
@@ -212,6 +223,7 @@ mod tests {
         let counting = Counting::opened(1_000.0, 500.0, 7);
         let mut counting = counting;
         counting.passes = 12;
+        counting.restarts = 3;
         let window = counting.close(301_000.0, 300_500.0, 9);
 
         assert_eq!(window.from_ms, Some(1_000.0));
@@ -219,21 +231,32 @@ mod tests {
         // Two drops happened inside the window, not the nine the queue has seen for its life.
         assert_eq!(window.counter("queue_dropped"), Some(2.0));
         assert_eq!(window.counter("reconcile_passes"), Some(12.0));
+        // §33.5's supervisor, counted since the window opened rather than read off a total.
+        assert_eq!(window.counter("package_restarts"), Some(3.0));
 
-        // And the six with no source are absent rather than zero — §74.3, which is the difference
+        // And the five with no source are absent rather than zero — §74.3, which is the difference
         // between "this robot has tripped no guards" and "nothing here counts guard trips".
         let report = assess_window(&window);
         assert!(report.usable);
-        for name in [
-            "cycles",
-            "guard_trips",
-            "clamps",
-            "interventions",
-            "estops",
-            "package_restarts",
-        ] {
+        for name in ["cycles", "guard_trips", "clamps", "interventions", "estops"] {
             assert!(report.unmeasured.contains(&name.to_string()), "{name}");
         }
+        assert!(
+            !report.unmeasured.contains(&"package_restarts".to_string()),
+            "and this one has a source now: {:?}",
+            report.unmeasured
+        );
+    }
+
+    /// A quiet robot reports **zero** restarts, not an absence, and the two are the whole of §74.3.
+    ///
+    /// A window carrying no `package_restarts` used to mean *nothing here counts restarts*. It now
+    /// means nothing else could mean it, so a robot that restarted nothing has to say so — and a
+    /// fleet page filtering for churn has a robot to compare against.
+    #[test]
+    fn a_window_with_no_restarts_reports_zero_rather_than_nothing() {
+        let window = Counting::opened(0.0, 0.0, 0).close(1_000.0, 1_000.0, 0);
+        assert_eq!(window.counter("package_restarts"), Some(0.0));
     }
 
     #[test]

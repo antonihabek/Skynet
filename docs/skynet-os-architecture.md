@@ -4690,7 +4690,7 @@ miniature, and currently trivial to fix.
 | skynetd — reconciliation, supervision, health | §9, §33 | **Built** — level-triggered, six ordered stages | — |
 | Identity, pairing, attestation, factory provisioning | §10, §50 | **Built on both sides** | `security.identity.attested` needs a TPM; no key is generated on a robot |
 | Desired state, fleet, OTA | §11–12, §14, §33.3 | **Built on both sides** — including §75's bundle fetch | No robot has yet applied an image from this Hub |
-| Black box, telemetry, replay | §13, §26, §41 | **Built** — ring, MCAP, sealing, deterministic replay; §74's telemetry on both sides | The sealed bytes do not cross §17 (§77); six of eight counters have no source |
+| Black box, telemetry, replay | §13, §26, §41 | **Built** — ring, MCAP, sealing, deterministic replay; §74's telemetry on both sides | The sealed bytes do not cross §17 (§77); five of eight counters have no source, and four of the five need the kernel |
 | Conformance and certification | §15, §31.4, §56 | **Built on both sides** | No runner executes the suite on a robot, and nothing signs a result |
 | LeRobot | §16, §67 | **Built** — the bridge and its self-test | — |
 | Hub contract | §17, §57 | **Built** — twelve endpoints, no breaking change | Two of them carry assertions rather than evidence (§57.1) |

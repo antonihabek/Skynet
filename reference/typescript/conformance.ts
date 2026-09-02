@@ -338,6 +338,11 @@ export function awardCertification(input: CertificationInput): CertificationVerd
  * conformance at all, and the caller gets `undefined` rather than a flattering 1.0.
  */
 export function fieldConformance(window: { cycles: number; interventions: number }): number | undefined {
-  if (window.cycles <= 0) return undefined
+  if (!Number.isFinite(window.cycles) || window.cycles <= 0) return undefined
+  // Clamped rather than trusted. More interventions than cycles is a robot whose counters disagree
+  // with each other, and the honest floor for that is zero rather than a negative conformance
+  // figure §15 has no reading for — which matters because §15 checks this number against a floor,
+  // and a negative one sails under it into `suspended` for the right reason by accident. Above 1 is
+  // the dangerous direction and is the one this must never produce.
   return Math.max(0, Math.min(1, (window.cycles - window.interventions) / window.cycles))
 }
