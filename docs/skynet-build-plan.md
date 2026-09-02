@@ -1,10 +1,10 @@
-# Build Skynet — Physical AI Platform for BotMarket
+# Build Skynet — Physical AI Platform for RobotOverflow
 
-You are the lead software architect and engineer for **Skynet**, a new major product within the existing **BotMarket** ecosystem.
+You are the lead software architect and engineer for **Skynet**, a new major product within the existing **RobotOverflow** ecosystem.
 
-Skynet is **not a standalone company or standalone website**. It is a product/module inside BotMarket, alongside:
+Skynet is **not a standalone company or standalone website**. It is a product/module inside RobotOverflow, alongside:
 
-- **BotMarket** — robot marketplace
+- **RobotOverflow** — robot marketplace
 - **BotNews** — robotics news
 - **BotGuides** — robotics guides
 - **BotPapers** — robotics research papers
@@ -14,7 +14,7 @@ Skynet is **not a standalone company or standalone website**. It is a product/mo
 
 The existing website is:
 
-**https://botmarket24.com/**
+**https://robotoverflow.com/**
 
 Skynet should feel like a natural part of the same ecosystem while having its own product identity and interface.
 
@@ -69,7 +69,7 @@ Do not blindly follow a predetermined stack.
 
 Evaluate the requirements and select a stack that can realistically evolve from an MVP into a large-scale platform.
 
-The existing BotMarket codebase and infrastructure should be inspected first so Skynet integrates cleanly rather than creating unnecessary parallel infrastructure.
+The existing RobotOverflow codebase and infrastructure should be inspected first so Skynet integrates cleanly rather than creating unnecessary parallel infrastructure.
 
 Prefer reusing existing infrastructure where technically sensible.
 
@@ -91,7 +91,7 @@ Before implementation:
 10. Inspect existing user/account models.
 11. Inspect existing SEO architecture.
 12. Inspect existing robots/database entities.
-13. Determine how Skynet should integrate with existing BotMarket data.
+13. Determine how Skynet should integrate with existing RobotOverflow data.
 
 Do not duplicate functionality that already exists.
 
@@ -288,7 +288,7 @@ Crucially, integrate this with the existing **Robot Database**.
 
 Do not create unnecessary duplicate robot entities.
 
-If a robot already exists in BotMarket's Robot Database, Skynet should reference it.
+If a robot already exists in RobotOverflow's Robot Database, Skynet should reference it.
 
 ---
 
@@ -868,7 +868,7 @@ Take inspiration from:
 - Kaggle
 - modern developer tools
 
-But create an original BotMarket/Skynet visual identity.
+But create an original RobotOverflow/Skynet visual identity.
 
 Prioritize:
 
@@ -886,14 +886,14 @@ Do not make the interface unnecessarily flashy.
 
 ---
 
-# 26. BotMarket ecosystem integration
+# 26. RobotOverflow ecosystem integration
 
-Skynet must be integrated into the existing BotMarket navigation.
+Skynet must be integrated into the existing RobotOverflow navigation.
 
 The ecosystem should conceptually become:
 
 ```text
-BotMarket
+RobotOverflow
 BotNews
 BotGuides
 BotPapers
@@ -1030,7 +1030,7 @@ You should distinguish between:
 - CLI foundations
 - Basic evaluation framework
 - Simulation abstraction
-- BotMarket integration
+- RobotOverflow integration
 
 ### Architect now, implement progressively
 
@@ -1086,7 +1086,7 @@ Work autonomously.
 
 ### Phase 1 — Discovery
 
-Inspect the existing BotMarket codebase and infrastructure.
+Inspect the existing RobotOverflow codebase and infrastructure.
 
 ### Phase 2 — Architecture
 
@@ -1103,7 +1103,7 @@ Produce a concise technical architecture document covering:
 - deployment
 - search
 - frontend architecture
-- integration with BotMarket
+- integration with RobotOverflow
 
 Then proceed with implementation.
 
@@ -1295,7 +1295,7 @@ Build the architecture around this lifecycle.
 
 Your job is not merely to reproduce Hugging Face's UI.
 
-Your job is to determine what **Hugging Face would look like if the artifact being distributed were a robot brain rather than an LLM**—and then build that product as **Skynet within the existing BotMarket ecosystem**.
+Your job is to determine what **Hugging Face would look like if the artifact being distributed were a robot brain rather than an LLM**—and then build that product as **Skynet within the existing RobotOverflow ecosystem**.
 
 Start by inspecting the existing codebase and producing the architecture decision. Then implement the platform end-to-end, prioritizing working core functionality over superficial breadth.
 ---
@@ -1339,7 +1339,7 @@ Verified against the working tree, not from memory:
 | 18 | CLI | `cli/skynet/` — login, clone, push, pull, run, evaluate, deploy |
 | 18 | Python SDK | `sdk/python/skynet/` — client + resources |
 | 4, 25 | Skynet UI | 26 pages under `app/[locale]/skynet/`, own visual identity |
-| 26 | BotMarket integration | Navbar pill + mobile links, Robot Database cross-link |
+| 26 | RobotOverflow integration | Navbar pill + mobile links, Robot Database cross-link |
 | 27 | SEO | `lib/skynet/seo.ts`, JSON-LD, canonicals, `sitemap-skynet.xml`, noindex rules |
 
 ### Gaps found (this session's work)
@@ -1401,7 +1401,7 @@ The real-world data collection path, previously schema-only with an unreachable 
 
 * `/skynet/robots/new` now exists; `robots/page.tsx:107` no longer 404s through `[slug]`.
 * The Robot Database lookup is the point of the form — linking an existing `botindex` record
-  keeps one robot profile across BotMarket instead of two (§7, §26). It prefills from the match.
+  keeps one robot profile across RobotOverflow instead of two (§7, §26). It prefills from the match.
 * Capabilities are picked from the known token set, because the compatibility engine matches
   those exact strings and free text would silently never match.
 * Added to the `next.config.ts` noindex rules with the other authoring surfaces.
@@ -1436,7 +1436,7 @@ skew tolerated, task trimmed and capped).
 ## ⛔ Blocker — the migration has never been applied
 
 `supabase/migrations/20260828120000_skynet_platform.sql` has **not** been run against the
-BotMarket database. Confirmed by loading `/en/skynet/` on the dev server:
+RobotOverflow database. Confirmed by loading `/en/skynet/` on the dev server:
 
 ```
 Could not list repositories: Could not find the table 'public.skynet_repos' in the schema cache
@@ -1467,7 +1467,7 @@ compatibility rules and the robot registry.
 
 ### Migration applied to production
 
-The blocker above is resolved. `efyazkprfdpligccotwc` (BotMarket) was connected and the schema
+The blocker above is resolved. `efyazkprfdpligccotwc` (RobotOverflow) was connected and the schema
 applied in four verified chunks, then seeded:
 
 | Check | Result |
@@ -1567,7 +1567,7 @@ clean, 104/104 tests, all routes present:
   `DeploymentsClient`, `DeploymentDetailClient`. Created `pending`; only a runtime check-in makes
   it `active`; a stopped deployment stays stopped.
 * **Organisations (§19)** — `/skynet/orgs` index, `POST /v1/namespaces` (connect an existing
-  BotMarket org to a handle), `GET|POST /v1/namespaces/{handle}/members`, `MembersPanel`,
+  RobotOverflow org to a handle), `GET|POST /v1/namespaces/{handle}/members`, `MembersPanel`,
   `ConnectOrgPanel`.
 * **Discussions index** — `/skynet/discussions` across all repositories.
 * 20 tests in `lib/__tests__/skynet-deployments.test.ts`.
@@ -2012,13 +2012,13 @@ Until it does:
 
 ### The problem
 
-Skynet had its own `skynet_members` table. BotMarket already has `org_members` — the roster the
+Skynet had its own `skynet_members` table. RobotOverflow already has `org_members` — the roster the
 marketplace bills seats against, the one the org settings page edits, the one people actually
 maintain. Every organisation therefore had two membership lists that could disagree, and the one
 that governed Skynet access was the copy nobody was looking at.
 
 The concrete failure: **nothing propagated a removal.** No route under `app/api/organisations/`
-referenced Skynet in any way. Taking somebody out of a BotMarket organisation left their
+referenced Skynet in any way. Taking somebody out of a RobotOverflow organisation left their
 `skynet_members` row untouched, so they kept read and write access to that organisation's private
 repositories — and to the robots those repositories deploy to — after they left.
 
@@ -2033,7 +2033,7 @@ There is one roster, and it belongs to the marketplace:
 * a **user** namespace has exactly one member — the profile in `skynet_namespaces.user_id`;
 * an **org** namespace's members *are* `org_members` for the organisation behind it.
 
-| BotMarket | Skynet | What it carries |
+| RobotOverflow | Skynet | What it carries |
 |---|---|---|
 | `owner` | `owner` | namespace administration, API tokens, deployment rollback |
 | `admin` | `maintainer` | publish and yank versions, deploy to hardware |
@@ -2643,3 +2643,518 @@ did not reach:
 4. Seed real repositories. Every surface built in the last four sessions renders an empty state.
 5. Launch checklist unchanged: `SKYNET_PUBLIC = true` **and** delete the Skynet noindex block at
    the end of the `headers()` array in `next.config.ts`.
+
+---
+
+## Session — 2026-09-02 (ninth): the Hub answers a robot
+
+Eight sessions built a hub for artifacts, versions, signatures, evaluations and deployments. Since
+then a separate repository has built twenty-four sessions of **Skynet OS** — a robot that pairs,
+pulls its desired state, reconciles against it and reports what it applied — and each of the last
+four of those sessions ended with the same line: *there is no Hub on the other side.*
+
+Four routes existed on paper (§17, §57) and nowhere else:
+
+```
+POST /devices/pair             a code becomes a credential          §10
+GET  /devices/{id}/desired     the Hub states intent                §11
+POST /devices/{id}/checkin     the robot says what it applied       §17
+POST /devices/{id}/incidents   the black box sends what it sealed   §13
+```
+
+All four exist now, over three new tables, and nothing about the wire format was invented here.
+
+### The contracts are imported, not restated
+
+`lib/skynet/os/` already held ten byte-identical copies of the OS reference modules, hashed against
+a manifest by `skynet-os-mirrors.test.ts`. Three joined it — `identity`, `checkin` and `intent` —
+and each earns its place from a different direction, which is worth writing down because *"the Hub
+touches this now"* is not the test:
+
+* **`identity`**, because both sides must agree what a pairing code *is*. The robot folds `I`, `L`
+  and `O` into `1`, `1` and `0` before sending, since §18's alphabet excludes them; a Hub that
+  minted from a different alphabet, or compared without folding, would refuse codes an operator
+  typed exactly as printed. `DEVICE_SCOPES` is the same property from the other end — the robot
+  refuses a credential carrying a scope outside its allow-list, so a Hub minting one outside it
+  produces a robot that pairs and then reports itself broken.
+* **`checkin`**, because this Hub is the only consumer of `claimFor`'s four states, and §17's rule
+  is enforced by whichever side decides what `applied: false` means.
+* **`intent`**, because `assessOffer`'s own header asks for it: *"the same function runs on the
+  robot and on a Hub checking what it just served."*
+
+### §17's rule, enforced by the party it is about
+
+> **The platform never claims a robot is running something it has not heard from.**
+
+`assessClaim` runs the reference's own `claimFor` over the check-in and compares the answer with
+what the document claimed. A check-in saying `applied: true` beside a pending list that is not empty
+is **recorded as sent and not believed** — stored whole, because it is evidence, and shown as not
+converged, with the disagreement written to the audit log where the next check-in cannot overwrite
+it.
+
+The interesting part is what it deliberately does *not* check. The obvious version runs `claimFor`
+against **this Hub's** generation, and it is wrong: a robot that has not yet pulled the newest
+intent is *behind*, not inconsistent, and `claimFor` would label it `inconsistent` — a word whose
+detail text blames the robot's supervisor. Every robot in a fleet is in that state for the seconds
+after an operator saves an edit, and a console that cried supervisor-bug at all of them is a console
+people stop reading. How far behind a robot is is a separate and honest number: `generation_lag`.
+
+### The three tables
+
+**`skynet_pairing_codes`.** The code is never stored — only an HMAC of it under
+`SKYNET_SECRETS_KEY`, and deliberately **no prefix**, which is the one place this schema breaks its
+own convention. Every other credential here has a `token_prefix` and it discloses nothing, because
+those are 32 random bytes. A pairing code is *eight characters of forty bits*: a four-character
+prefix leaves twenty, which a laptop enumerates. So a code is identified to an operator by the name
+they gave it and by when they made it, and by nothing derived from the secret. Keyed rather than
+plain sha256 for the same arithmetic — forty bits of unkeyed digest is a rainbow table — and with no
+key configured, minting **fails loudly**, exactly as the secret store does and for its reason.
+
+**`skynet_device_state`.** One row per device, updated in place: the Hub's intent on one side and
+the robot's last check-in on the other, and nothing that merges the two into a third thing. Not a
+history table — §34.4 collapses check-ins on the robot because only the newest matters, so storing
+every one here would be keeping a series the robot has already decided is not one.
+
+**`skynet_incidents`.** Append-only, because an incident is an event rather than a state. `kind` has
+no CHECK constraint on purpose: a robot on an older edition may report something this Hub has never
+heard of, and turning that into a 422 would discard the one queue class §34.4 promises never to
+drop.
+
+### Four decisions worth recording
+
+**An unconfigured device gets a document, not a 404.** Generation 0, no packages — which decodes on
+the robot and says "run nothing", already §33.8's safe default. A 404 would be indistinguishable,
+from the robot's side, from a Hub it could not reach, and §34.1 makes an unreachable Hub mean *carry
+on with the last good intent*. Those are opposite behaviours, and the difference is a robot that
+keeps running software an operator has deleted.
+
+**Every pairing refusal is the same refusal.** Expired, already redeemed, guessed at ten times and
+never existed are four rows and one sentence. `POST /devices/pair` is necessarily unauthenticated —
+obtaining the credential is what it is for — and a refusal that distinguished those four would let a
+caller sort a stream of guesses into "wrong" and "right but late".
+
+**`{id}` not matching the credential is a 404, not a 403.** §19 assumes a device credential is lost.
+The holder of a stolen one learns nothing from a refusal that separates *not yours* from *does not
+exist*, and a fleet's device ids are exactly what they would enumerate.
+
+**The generation is the server's.** `PUT /devices/{id}/desired` does not accept one. §11 rests
+idempotence on the counter and the robot enforces it by refusing a *different* document under a
+generation it has already applied; a counter a client could choose is one two operators choose
+simultaneously, and the result is a fleet that stops taking updates until somebody notices.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | Clean |
+| `npx vitest run lib/__tests__/skynet-*.test.ts` | **507 passed** (24 files; +19 fleet, +3 mirrors) |
+| `node scripts/i18n-catalog.mjs audit` | All 35 catalogs OK |
+| `node tools/check-contract-mirrors.mjs` (OS repo) | 13 contracts match |
+| `node --check scripts/skynet-verify-rls.mjs` | Parses; the three new tables are in the anon-sees-nothing sweep |
+
+One pre-existing failure was fixed on the way in: `skynet-org-membership.test.ts` reads
+`supabase/migrations/20260828210000_skynet_org_membership.sql`, and every migration file in the
+repository was deleted in the rename commit. The suite had been red since. The one file that test
+depends on is restored from history; the rest stay deleted, and the schema of record is
+`db/01.09.2026.sql`.
+
+Four i18n keys that were missing before this session are also filled in — the `transport` route's
+refusals had never been added to any catalogue, so those four errors rendered as their own key names
+in all 35 locales.
+
+
+### Then the pages the tables were the blocker for
+
+§32.4 orders the OS interface and puts *"devices, certification, and the on-robot console"* last,
+with one reason: *"these follow their tables and their first real device, and until then they would
+be showing invented state."* `skynet_device_state` and `skynet_incidents` exist as of an hour ago,
+so `/skynet/os/devices` and `/skynet/os/devices/[id]` are built — and the second half of that
+sentence turned out to be the interesting half.
+
+**There is no first real device.** Nothing has completed a round trip against this Hub. So the
+question the console faced three sessions ago is the one these pages faced: does the discipline hold
+when there is nothing to show?
+
+#### The fleet table, and the column that must never be a zero
+
+A robot that has never checked in has `null` in every reported column, and the tempting reading of
+`applied: null` is *not applied*. That renders a machine nobody has heard from beside one that is
+genuinely behind, in the same row shape, with the same tone. Worse, `generation - null` is 41 in
+JavaScript and reads on a page as *"41 generations behind"* — a specific, actionable, entirely
+invented number about a physical machine.
+
+So `silent` is its own tone, it sorts **first**, and `lagOf` returns null rather than a number for a
+robot that has said nothing. Both have tests, because both failures are one careless `?? 0` away and
+neither would look wrong.
+
+The same rule kills the summary tile everybody builds. *"38 of 40 converged"* counts robots that
+have never spoken as not-converged — arithmetic that is true and a sentence that misleads. The
+silent ones are counted on their own line.
+
+Rows sort by how much attention they want — silent, disputed, degraded, behind — rather than by
+insertion order or name. A fleet page is read top-down by somebody with limited time.
+
+#### The device page is mostly a list of what this Hub has not been told
+
+§32.1 asks `/skynet/os/devices/[id]` for *"active and unavailable guards with the missing input
+named, resolved limits and their provenance, current transport plan, black box index"*. This Hub can
+supply **one** of those four, and only because the incident route landed this morning.
+
+The other three all exist on the robot. It computes guard availability every control cycle, resolves
+the limits from the profile, and holds the transport plan it is running under; §32.2 puts all three
+on its own LAN console. Nothing carries any of them to a Hub. Every one could be approximated here —
+guards from the health rollup, limits from the profile digest, the plan from the policy version and
+the descriptor — and every approximation would be a confident statement about a machine that nobody
+measured.
+
+So `GET /devices/{id}/state` returns a `gaps` array naming all three with the reason each is missing,
+and the page renders it as a panel. That is the honest version of the page rather than a reduced one,
+and it is the same discipline that made the on-robot console worth building empty: what it reports is
+exactly the shape of what is not connected yet.
+
+#### Three states, kept as three
+
+The attestation panel renders `known`, `nothing` and `unmeasured` differently, because §10 keeps
+them apart and collapsing them is the specific mistake it warns about: *"there is no policy running"*
+and *"a policy is running and its digest could not be read"* send different people to different
+places. Health does the same with §33.6's ages — every reading is rendered with its age beside it,
+because a number without one reads as current, and the four-hour-old battery is the one somebody
+dispatches an engineer on.
+
+#### Also
+
+* `next.config.ts` gets `/:locale/skynet/os/devices/:path*` under `noindex, nofollow`, alongside
+  deployments and training, for a stronger version of the same reason: a fleet page names a physical
+  machine and the digest of what it is running, which is what an incident investigation wants and
+  also exactly what somebody choosing a target would.
+* The pairing form lives on the fleet page rather than in settings, because pairing is the action a
+  fleet's empty state asks for.
+* `.skynet-h3` joins the stylesheet — the device page is the first with more than one thing to say
+  about one subject.
+* 74 new English keys, in all 35 catalogues as English.
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | Clean |
+| `npx vitest run lib/__tests__/skynet-*.test.ts` | **517 passed** (24 files; +29 fleet in total) |
+| `npx next build` | Succeeds; `/skynet/os/devices` and `/skynet/os/devices/[id]` register |
+| `node scripts/i18n-catalog.mjs audit` | All 35 catalogs OK, 5364 keys |
+
+Both pages render their empty state today and will keep rendering it until the migration is applied
+and a robot pairs. That is the correct output and not a placeholder.
+
+
+### And the release channel, which was the last thing between §12 and a fleet that can update
+
+`GET /os/releases?channel=&tier=&arch=` is another of §57's nine, and it is the one with a
+consumer waiting: the robot's `admit_bundle` has been able to answer §12's third rule — *"an update
+that changes the Safety Kernel or the envelope is refused without a fresh bench pass"* — since its
+twenty-first session, and has had nothing to answer it about. `assess` reads a release manifest off
+the robot's disk and nothing had ever put one there, so the only verdict a fleet could produce was
+*"nothing on this robot describes release 1.4.0"*.
+
+#### The Hub does not decide whether a robot may update, and the schema says so
+
+§11's invariant is that **no control decision may require a network round trip**, and applying an OS
+image is the most consequential control decision in the system. So `skynet_os_releases` has no
+`admitted` column and the route does no per-device filtering. Either would be this Hub answering a
+question it is not the authority on, and the failure it invites is exactly the one §12 spends its
+length on: a fleet that applied an image because a server said it could.
+
+What the Hub *does* compute is the same verdict for a **person**, at publish time, through the same
+function — `ota` is now a mirrored contract, taking the set to fourteen. `POST /os/releases` answers
+with `assessment`, so a publisher is told *"this bundle changes the safety kernel and every robot
+will refuse it without a bench pass for these exact bytes"* before it is published rather than after
+forty robots have refused it.
+
+#### The vocabulary is the reference's, and it fails closed
+
+§12's anti-gaming rule is the sharpest thing in that contract: `OS_COMPONENTS` is an allow-list, and
+an unrecognised component is treated **as though it were the safety kernel** — because a publisher
+wanting to slip a kernel change past the gate would write `core` or `rt`, not `safety_kernel`.
+
+A Hub with its own retyped copy of that list would be the one place the strictness could quietly be
+lost, so `changes` has no CHECK constraint and is validated in the application against the mirrored
+list. There is one asymmetry, deliberately: the **Hub refuses** an unrecognised component and the
+**robot accepts and gates** it. Both are right. On a robot, refusing to parse a bundle is a robot
+that cannot update; on a Hub, at publish time, with the publisher present, a typo is a thing to fix
+now rather than a fleet-wide refusal to debug next week.
+
+#### Two smaller decisions
+
+**Identity is (channel, version, arch), not the digest.** Promoting a beta build to stable is the
+same bytes under a second channel, and it must not require rebuilding an image to change one string.
+
+**The read is public and unauthenticated.** A published OS release is a public statement, and the
+party most likely to fetch one holds nothing but a device credential — which `requireActor`
+deliberately refuses, because a device token is not a user. Requiring authentication would mean
+either widening that credential or inventing a second one for the least sensitive read on the
+platform. Publishing is gated on an explicit allow-list in the environment
+(`SKYNET_OS_PUBLISHERS`), which is empty by default and therefore nobody: the platform has no notion
+of a staff role, and inventing half of one behind the endpoint that ships operating systems is not
+the place to start.
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | Clean |
+| `npx vitest run lib/__tests__/skynet-*.test.ts` | **529 passed** (25 files; +11 releases) |
+| `npx next build` | `/api/skynet/v1/os/releases` registers |
+| `node tools/check-contract-mirrors.mjs` (OS repo) | 14 contracts match |
+
+`supabase/migrations/20260902140000_skynet_os_releases.sql` is the second migration this session
+that has **not** been applied.
+
+
+### Conformance and certification, where a certificate stops being a document
+
+Two more of §57's nine — `POST /devices/{id}/conformance` and `GET /certifications/{slug}` — over
+two tables whose separation is the whole design:
+
+```
+skynet_conformance_results   what somebody measured        — evidence, append-only
+skynet_certifications        what somebody awarded from it — a decision, at a moment
+```
+
+§15 ends on the sentence this arrangement exists to make true: field conformance *"is where
+certification stops being a document and becomes a live property."*
+
+#### The award is not a column on skynet_robots, because it decays
+
+A stored tier is right on the day it is written and quietly wrong afterwards. §15 lapses bench
+results after a year, carries an award in between on field conformance, and **suspends rather than
+downgrades** below 0.999 — *"a robot whose commands have been leaving its envelope is not a
+lower-tier robot, it is one whose certificate no longer describes it."*
+
+So the row records the award as issued — claimed tier, awarded tier, reasons, the evidence it rested
+on, when it lapses — and **every read recomputes** the verdict from `awardCertification`, the same
+mirrored function the robot's edition runs. `GET /certifications/{slug}` returns both, and a
+`divergence` sentence when they disagree. There are three ways to disagree and they mean three
+different things to do next: an award that has lapsed, an award the evidence no longer supports, and
+evidence that would support an award nobody has made.
+
+#### Absence is not a pass, and the schema had to make that possible
+
+§15's first award rule decides how results are *stored* as much as how they are read. A required
+test with no result is `missing`, never a silent success — so the writer must never be able to turn a
+re-run into an overwrite of a failure. The unique key is `(robot_id, suite, test_id, ran_at)`: two
+runs of one test are two measurements, both on the record, and the award reads the newest per test.
+An upsert on `(robot_id, suite, test_id)` would have been the obvious schema and would have let a
+second run silently delete the first one's failure.
+
+#### The robot comes from the credential, never the request
+
+A clean bench run filed against somebody else's robot is the most valuable forgery on this platform,
+because §12's certification gate reads it to decide whether an OS update that changes the safety
+kernel may be applied. §19 assumes a device credential is lost; the one thing a recovered one must
+not be able to do is make a statement about a machine it is not attached to. A device with no robot
+is refused rather than filed under a placeholder.
+
+#### Two things named rather than papered over
+
+**Nothing is signed.** §57 calls these *"signed SCTS results"* and no runner on any robot produces
+one, so `verified` is `false` on every row this route writes — set by the server or not at all. The
+gate's evidence is currently *asserted* rather than attested, and that sentence is in the route's
+header rather than only here.
+
+**Field conformance has never been measured, and is not assumed.** §34.4 gives telemetry a priority,
+a drop policy and a counter; neither §17's eight routes nor §57's nine gives it one, so nothing
+carries the cycle counts it is computed from. `certificationFor` therefore passes `undefined` rather
+than `1`, and the answer carries a `field_note` saying why. Passing 1 would award on evidence nobody
+collected, which is the one mistake §15's whole third suite exists to prevent.
+
+#### An unrecognised test id is stored and named, not refused
+
+A robot on a newer edition may measure a test this Hub's contract does not have. Refusing the
+submission would discard thirty-five recognised results over one name. `awardCertification` ignores
+what it does not know, so the row is inert until this Hub catches up — and the reporter is told which
+ids landed in that state, so the drift is visible from both ends rather than from neither.
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | Clean |
+| `npx vitest run lib/__tests__/skynet-*.test.ts` | **543 passed** (26 files; +14 certification) |
+| `npx next build` | `/api/skynet/v1/certifications/[slug]` and `.../conformance` register |
+| `node scripts/i18n-catalog.mjs audit` | All 35 catalogs OK |
+| `node --check scripts/skynet-verify-rls.mjs` | Parses; the three publicly-readable OS tables joined the readable sweep |
+
+
+### And the tenth endpoint, which the specification did not have
+
+`POST /devices/{id}/telemetry` is new to §57 as well as to this Hub. §34.4 gave the class a
+priority, a drop policy, a counter and a paragraph of its own; neither §17's eight endpoints nor
+§57's nine gave it anywhere to go, and for three sessions the robot's route table returned nothing
+for it on the grounds that guessing would be inventing a Hub surface.
+
+Building this side turned that from an observation into a decision, because **two things already
+built here were waiting on the same absence**: the field-conformance figure the section above had to
+pass as `undefined`, and §32.1's guard-trip-rate column — which a check-in structurally *cannot*
+carry, since a rate is a count over a window and §34.4 collapses check-ins precisely because every
+field in one is a statement about now.
+
+So the OS architecture document gained a Part X and a §74, and `skynet_telemetry_windows` is the
+table under it.
+
+#### A row is a window, and that buys the honesty for free
+
+Each row covers a half-open interval and carries counts over it — never a running total, which
+absorbs a drop and leaves a tidy series, and never a sample, which produces ten thousand rows after
+a week offline. What falls out is §47.4's rule *without an annotation*: a dropped window is visible
+because the windows stop tiling, and a Hub holding `[10:00, 10:05)` and `[10:15, 10:20)` knows
+exactly what it does not have.
+
+#### The denominator is what was observed
+
+The single reason this Hub mirrors `coverage` rather than writing its own. §15 puts a floor of 0.999
+on field conformance and **suspends** an award below it, so dividing by elapsed time rather than
+observed time is the difference between suspending a robot and not — and a robot that sent windows
+for one hour out of a day has demonstrated nothing about the other twenty-three.
+
+`certificationFor` now passes a real figure where it passed `undefined` an hour ago, and still passes
+`undefined` when nothing counted cycles. That distinction is load-bearing: `awardCertification`
+reads `undefined` as *no fleet data yet* and `1` as *a perfect measurement*, and substituting the
+second for the first would award a certified tier on the strength of a robot that has never reported.
+The answer carries a note saying which of the two absences it is, because *"no window has ever
+arrived"* and *"windows arrived and none counted a cycle"* send different people to different places.
+
+#### Every counter is nullable, and six are null on every robot
+
+§74.3 is §33.6's rule one field over: zero and unmeasured are opposite facts, and *"no measurement of
+guard trips"* rendered as `0` is the number an operator relaxes on. Four of the eight need a kernel,
+one needs teleoperation, one needs the supervisor to count restarts. A column default of 0 would have
+filled a fleet page with reassuring numbers nobody measured.
+
+#### A refused window is named back to the robot
+
+`assessWindow` is the same function the robot ran before queueing, so a refusal here should never
+fire — which is why the answer carries them rather than swallowing them. A robot whose clock has
+moved under it is producing windows nothing will ever count, and its own queue accounting would show
+them as delivered.
+
+#### And it lands on the device page
+
+`GET /devices/{id}/state` carries a `telemetry` block and the page renders it — windows held,
+**observed against spanned**, the intervals with no evidence, and the field-conformance figure or the
+sentence saying which of the two absences it is.
+
+Observed against spanned is the pair worth putting on a screen. They are the same number until §34.4
+drops something, and §34.4 drops this class *first*; the moment they diverge, the difference is
+exactly what nobody has evidence for. §15 divides by the first and an operator reading the second
+would think they had a day's data.
+
+§32.1 asked this page for four things and got three named as gaps. Guard trip rate is the fourth and
+it is no longer a gap — not because a way to derive it turned up, but because a rate is a count over
+a window and telemetry now has a route to arrive on.
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | Clean |
+| `npx vitest run lib/__tests__/skynet-*.test.ts` | **557 passed** (27 files; +13 telemetry) |
+| `npx next build` | `/api/skynet/v1/devices/[id]/telemetry` registers |
+| `node scripts/i18n-catalog.mjs audit` | All 35 catalogs OK |
+| `node tools/check-contract-mirrors.mjs` (OS repo) | **15** contracts match |
+| `node tools/check-mirrors.mjs` (OS repo) | The amended architecture document is synced to both trees |
+
+
+### Calibration, and the first gap on the device page to narrow
+
+`GET|POST /devices/{id}/calibration` — the eighth of §57's ten, and the one §32.1's device page has
+been naming as a gap since it was built this morning.
+
+§45.2's table is the deliverable of the whole section, and `guardsUnavailable` is how it is read: it
+converts *"we should calibrate the cameras sometime"* into *"an expired extrinsic disables the
+proximity guard"*, which is the sentence §32.1 asks for by name. `calibration` is now a mirrored
+contract, taking the set to sixteen.
+
+#### Absent is not valid
+
+§45's own warning, and the reading the page had to get right: *"treating never calibrated as no
+evidence of a problem is what puts a proximity guard on a robot whose camera transform is whatever
+the CAD model said."* So a parameter set that applies to the body and has no record is `absent`, its
+guards are down, and the page lists it — rather than an empty table reading as a clean bill.
+
+The panel gives **one row per (guard, set) pair** rather than per guard. `workspace` is fed by three
+sets, and two of them expired is two measurements somebody has to take; one line would hide the
+second until the first was done.
+
+#### This Hub can judge half of §45.4 and says which half
+
+`evaluate(record, now)` takes the conditions a record is judged against. Age and invalidating events
+are in the record. **Joint travel and temperature are not** — they are properties of the robot at the
+moment of asking, and only the robot has them.
+
+So the reporter sends the conditions it observed when it filed, they are stored beside the record,
+and every verdict on the page carries **the age of the reading it was judged against**. The clock is
+aged forward — a record judged against a two-hour-old `at_s` would report valid for two hours after
+it expired — and the temperature is not, because a temperature from an hour ago is not a temperature
+now.
+
+The answer also carries `unjudged`: the rules this Hub could not check at all, because the policy
+names a condition the reporter did not send. A `valid` from a party that could not check half a
+policy is exactly the green tick §32.2 is written against.
+
+#### The one route that takes either credential
+
+Every other device route takes a device token and only a device token. This one takes an operator's
+as well, because §45.3 records *who* took a calibration and the honest answer is that both parties
+do: a robot re-runs joint zeros after homing, and a technician with a fixture files camera
+extrinsics from a bench. A route that accepted only the first would push the second into a
+spreadsheet, which is the state §45.3 exists to end.
+
+The device path is checked first and explicitly, so a device token can never fall through to the
+operator path.
+
+#### The gap narrowed rather than closing
+
+§32.1 asks for *"active and unavailable guards with the missing input named"*. Calibration answers
+the unavailable-for-want-of-a-calibration half. A guard can also be unavailable for want of a
+sensor, a descriptor, or a driver that has not come up — none of which crosses — so the `guards`
+entry in the gaps panel was rewritten rather than removed. Two of §32.1's four asks are now answered,
+one is half answered, and one is still named.
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | Clean |
+| `npx vitest run lib/__tests__/skynet-*.test.ts` | **570 passed** (28 files; +12 calibration) |
+| `npx next build` | `/api/skynet/v1/devices/[id]/calibration` registers |
+| `node scripts/i18n-catalog.mjs audit` | All 35 catalogs OK, 5441 keys |
+| `node tools/check-contract-mirrors.mjs` (OS repo) | **16** contracts match |
+
+Nothing on a robot reports a calibration yet — `skynetd` holds records and serves them on its own
+console, and no queue class carries them. The bench path works today; the robot path is the next
+thing on that side.
+
+### ⚠ The migration is not applied
+
+Three of them, in order:
+
+* `20260902120000_skynet_os_fleet.sql` — the three fleet tables, plus five columns on
+  `skynet_devices`;
+* `20260902140000_skynet_os_releases.sql` — the release channel;
+* `20260902160000_skynet_certification.sql` — conformance evidence and the award;
+* `20260902180000_skynet_telemetry.sql` — §74's windows;
+* `20260902200000_skynet_calibration.sql` — §45's records.
+
+None has been run: applying DDL to the live project is the owner's call rather than a session's.
+Until they are:
+
+* `POST /devices/pairing-codes` and `POST /devices/pair` fail with a PostgREST "no such table";
+* `GET /devices/{id}/desired` and `POST .../checkin` do the same;
+* every test above still passes, because they exercise the decision layer and not the storage.
+
+Then: `node scripts/skynet-verify-migrations.mjs` to confirm, and
+`node scripts/skynet-verify-rls.mjs` to watch the three tables go from `skip (not created yet)` to
+`invisible to anon`.
+
+### Still not built
+
+Unchanged from the eighth session, plus the OS-specific gaps this session names rather than closes:
+
+| Item | Why not |
+|---|---|
+| The sealed black box itself | §17 calls the incident route an upload. It accepts a document. §13's seal produces hundreds of megabytes and needs the artifact path plus a size budget nobody has set. `skynet_incidents.artifact_id` exists and is always NULL so the gap is visible in the schema. |
+| `POST /robots/{slug}/attestations` | One of §57's ten. Untouched — §50's birth certificates, and it wants the `birth` contract mirrored. |
+| A robot that reports its own calibration | `skynetd` holds records and serves them on its own console; no queue class carries them. The bench path works today. |
+| A signed conformance result | §57 calls them signed and nothing on a robot produces a signature, so §12's gate reads evidence that is asserted rather than attested. |
+| A field-conformance figure that is not null | §74's route exists and the windows arrive; `cycles` is one of six counters nothing on the current OS edition measures, so the figure is honestly absent rather than absent for want of plumbing. |
+| Episodes | `Class::Episode` is now the only queue class with a route and no producer. |
+| `/skynet/os/editions` | §32.4 item 2, and its own reason for waiting: it is *"needed the moment there is more than one"*, and there is one. A page listing the other eight rows of §31.3's matrix would be listing editions that do not exist. |

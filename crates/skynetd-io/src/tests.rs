@@ -1293,6 +1293,9 @@ fn console_fixture() {
         "state",
         "skills",
         "ota",
+        "identity",
+        "checkin",
+        "intent",
     ] {
         let response = fixture.raw("GET", &format!("/{route}"), Some("observer-token"));
         std::fs::write(out.join(route), &response.body).unwrap();
@@ -5294,5 +5297,1263 @@ mod ota {
         fixture.provision();
         let (status, _) = fixture.request("GET", "/ota", None, "");
         assert_eq!(status, 401);
+    }
+}
+
+/// §10 on a real machine: the two files, the exchange, and the sentence.
+mod identity {
+    use super::*;
+    use crate::identity::{
+        attestation, pair, parse_enrolled, read, running_policy, unpair, CurlEnrolment, Enrol,
+        Enrolled, RecordingEnrolment, RunningPolicy,
+    };
+    use crate::trust::{birth_message, TrustStore};
+
+    fn vendor() -> skynet_ed25519::signing::SigningKey {
+        driver_key(9)
+    }
+
+    /// A birth certificate for `key`, signed by a vendor this robot trusts (§50.2).
+    fn write_certificate(fixture: &Fixture, device_key: &str) {
+        let layout = fixture.daemon.store.layout().clone();
+        write_trust(fixture, "vendor", &public_hex(&vendor()));
+
+        let mut document = Json::obj();
+        document.set("device_key", Json::from(device_key));
+        document.set("model", Json::from("bench-arm"));
+        document.set("serial", Json::from("SN-0001"));
+        document.set("descriptor_digest", Json::from("sha256:dddd"));
+        document.set("hardware_revision", Json::from("rev-a"));
+        document.set("manufactured", Json::from("2026-01-01"));
+
+        let canonical = document.to_canonical().unwrap();
+        // Through the module's own digest, which is domain-separated (§50.2). A fixture that hashed
+        // the canonical bytes directly would produce a certificate nothing verifies, and every test
+        // below it would quietly be a test about a robot with no certificate.
+        let digest = hex_of(&crate::birth::digest_of(&document).unwrap());
+        std::fs::create_dir_all(layout.identity()).unwrap();
+        std::fs::write(layout.birth_certificate(), canonical.as_bytes()).unwrap();
+
+        let signature = hex_of(&vendor().sign(&birth_message(&digest)));
+        std::fs::write(
+            layout.birth_signature(),
+            format!(
+                "{{\"key\":\"{}\",\"value\":\"{signature}\"}}",
+                public_hex(&vendor())
+            ),
+        )
+        .unwrap();
+    }
+
+    fn enrolled() -> Enrolled {
+        Enrolled {
+            device_id: "dev_7".to_string(),
+            namespace: "acme".to_string(),
+            credential: "skd_secretvalue".to_string(),
+            scopes: Some(vec!["device:checkin".to_string()]),
+        }
+    }
+
+    fn audit_of(fixture: &Fixture) -> crate::audit::Audit {
+        crate::audit::Audit::of(fixture.daemon.store.layout())
+    }
+
+    #[test]
+    fn a_robot_nobody_has_paired_reports_itself_unpaired() {
+        let fixture = Fixture::new("identity-unpaired");
+        let held = read(fixture.daemon.store.layout());
+        assert!(!held.identity.credential);
+        assert!(held.fault.is_none());
+        assert!(held.endpoint.is_none());
+    }
+
+    #[test]
+    fn pairing_writes_two_files_and_only_one_of_them_holds_the_credential() {
+        let mut fixture = Fixture::new("identity-pair");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        write_certificate(&fixture, "aa");
+
+        let hub = RecordingEnrolment::accepting(enrolled());
+        let paired = pair(
+            &layout,
+            &TrustStore::load(&layout),
+            "abcd-1234",
+            &hub,
+            &audit_of(&fixture),
+            "2026-09-02T00:00:00Z",
+            "suite",
+        )
+        .expect("the Hub accepted the code");
+
+        assert_eq!(paired.namespace, "acme");
+        assert_eq!(paired.device_id, "dev_7");
+
+        // The document is rendered by every surface, so it must not carry the credential — not
+        // truncated, not masked, absent.
+        let document = std::fs::read_to_string(layout.device()).unwrap();
+        assert!(document.contains("acme"));
+        assert!(
+            !document.contains("secretvalue"),
+            "the identity document carries the credential: {document}"
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(layout.credential()).unwrap().trim(),
+            "skd_secretvalue"
+        );
+    }
+
+    #[test]
+    fn the_code_is_normalized_before_it_is_presented() {
+        let mut fixture = Fixture::new("identity-normalize");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        let hub = RecordingEnrolment::accepting(enrolled());
+        pair(
+            &layout,
+            &TrustStore::load(&layout),
+            " abcd-1234 ",
+            &hub,
+            &audit_of(&fixture),
+            "2026-09-02T00:00:00Z",
+            "suite",
+        )
+        .unwrap();
+        assert_eq!(hub.presented.borrow()[0].0, "ABCD1234");
+    }
+
+    #[test]
+    fn a_mistyped_code_never_reaches_the_hub() {
+        let mut fixture = Fixture::new("identity-mistyped");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        let hub = RecordingEnrolment::accepting(enrolled());
+        let failure = pair(
+            &layout,
+            &TrustStore::load(&layout),
+            "ABCD-123",
+            &hub,
+            &audit_of(&fixture),
+            "2026-09-02T00:00:00Z",
+            "suite",
+        )
+        .expect_err("seven characters are not a code");
+        assert_eq!(failure.code, "too_short");
+        // The point of checking locally: nothing was sent, so nothing is in anybody's log.
+        assert!(hub.presented.borrow().is_empty());
+        assert!(!layout.credential().exists());
+    }
+
+    #[test]
+    fn a_credential_pasted_into_pair_never_reaches_the_hub_either() {
+        let mut fixture = Fixture::new("identity-pasted");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        let hub = RecordingEnrolment::accepting(enrolled());
+        let failure = pair(
+            &layout,
+            &TrustStore::load(&layout),
+            "skd_livecredential",
+            &hub,
+            &audit_of(&fixture),
+            "2026-09-02T00:00:00Z",
+            "suite",
+        )
+        .expect_err("a credential is not a code");
+        assert_eq!(failure.code, "looks_like_a_credential");
+        assert!(hub.presented.borrow().is_empty());
+        assert!(
+            !failure.detail.contains("livecredential"),
+            "the refusal echoed the credential: {}",
+            failure.detail
+        );
+    }
+
+    #[test]
+    fn a_paired_robot_does_not_quietly_re_pair() {
+        let mut fixture = Fixture::new("identity-repair");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        let hub = RecordingEnrolment::accepting(enrolled());
+        pair(
+            &layout,
+            &TrustStore::load(&layout),
+            "ABCD1234",
+            &hub,
+            &audit_of(&fixture),
+            "2026-09-02T00:00:00Z",
+            "suite",
+        )
+        .unwrap();
+
+        let failure = pair(
+            &layout,
+            &TrustStore::load(&layout),
+            "ABCD1234",
+            &hub,
+            &audit_of(&fixture),
+            "2026-09-02T00:01:00Z",
+            "suite",
+        )
+        .expect_err("this robot is already in a fleet");
+        assert_eq!(failure.code, "already_paired");
+        assert!(failure.detail.contains("acme"));
+        assert!(failure.detail.contains("unpair"));
+    }
+
+    #[test]
+    fn a_credential_of_the_wrong_class_is_not_stored() {
+        let mut fixture = Fixture::new("identity-wrong-class");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        let hub = RecordingEnrolment::accepting(Enrolled {
+            credential: "pat_userstoken".to_string(),
+            ..enrolled()
+        });
+        let failure = pair(
+            &layout,
+            &TrustStore::load(&layout),
+            "ABCD1234",
+            &hub,
+            &audit_of(&fixture),
+            "2026-09-02T00:00:00Z",
+            "suite",
+        )
+        .expect_err("§10 puts the narrowest credential in the system on the robot");
+        assert_eq!(failure.code, "credential_refused");
+        assert!(failure.detail.contains("revoke"));
+        // Refused *before* it was written, which is the whole point — storing it and complaining
+        // afterwards would leave the credential on the disk.
+        assert!(!layout.credential().exists());
+        assert!(!layout.device().exists());
+    }
+
+    #[test]
+    fn a_credential_carrying_a_scope_nobody_recognises_is_not_stored() {
+        let mut fixture = Fixture::new("identity-wide-scope");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        let hub = RecordingEnrolment::accepting(Enrolled {
+            scopes: Some(vec![
+                "device:checkin".to_string(),
+                "repositories:read".to_string(),
+            ]),
+            ..enrolled()
+        });
+        let failure = pair(
+            &layout,
+            &TrustStore::load(&layout),
+            "ABCD1234",
+            &hub,
+            &audit_of(&fixture),
+            "2026-09-02T00:00:00Z",
+            "suite",
+        )
+        .expect_err("§19's security.credential.scope");
+        assert_eq!(failure.code, "credential_refused");
+        assert!(!layout.credential().exists());
+    }
+
+    #[test]
+    fn a_board_swap_is_reported_and_does_not_refuse_the_pairing() {
+        // §50.4: replacing a mainboard produces a robot whose certificate no longer matches its
+        // hardware, and that is the correct behaviour rather than a bug. A pairing that refused it
+        // would leave a repaired fleet unpairable until somebody found the vendor.
+        let mut fixture = Fixture::new("identity-board-swap");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        write_certificate(&fixture, "aa");
+
+        let hub = RecordingEnrolment::accepting(enrolled());
+        // The robot presents the key the certificate names, so the two agree here; the mismatch
+        // this test is about is constructed by moving the certificate underneath afterwards.
+        pair(
+            &layout,
+            &TrustStore::load(&layout),
+            "ABCD1234",
+            &hub,
+            &audit_of(&fixture),
+            "2026-09-02T00:00:00Z",
+            "suite",
+        )
+        .unwrap();
+
+        write_certificate(&fixture, "bb");
+        let (_, verdict) = crate::identity::evaluate(&layout, &TrustStore::load(&layout));
+        let found = verdict
+            .findings
+            .iter()
+            .find(|finding| {
+                finding.code == skynet_contracts::identity::IdentityFinding::KeyNotAttested
+            })
+            .expect("the seam between §10 and §50");
+        assert!(found.message.contains("§50.4"));
+        assert!(!verdict.attested);
+        // Still paired: the credential is untouched by a board that changed underneath it.
+        assert!(verdict.paired);
+    }
+
+    #[test]
+    fn a_robot_with_no_certificate_pairs_with_no_key() {
+        let mut fixture = Fixture::new("identity-no-certificate");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        let hub = RecordingEnrolment::accepting(enrolled());
+        pair(
+            &layout,
+            &TrustStore::load(&layout),
+            "ABCD1234",
+            &hub,
+            &audit_of(&fixture),
+            "2026-09-02T00:00:00Z",
+            "suite",
+        )
+        .unwrap();
+        assert_eq!(hub.presented.borrow()[0].1.device_key, "");
+
+        let (_, verdict) = crate::identity::evaluate(&layout, &TrustStore::load(&layout));
+        assert!(verdict.paired);
+        assert!(!verdict.attested);
+        assert!(verdict
+            .findings
+            .iter()
+            .all(|finding| finding.severity == skynet_contracts::admission::Severity::Warning));
+    }
+
+    #[test]
+    fn an_unsigned_certificate_attests_nothing() {
+        // A certificate on a robot's disk that nobody trusted is a file anybody with the disk could
+        // have written. Reported exactly as an absent one is — §37.1's rule, applied to §50.
+        let mut fixture = Fixture::new("identity-unsigned-certificate");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        write_certificate(&fixture, "aa");
+        // Remove the key, leaving a well-formed certificate signed by a stranger.
+        std::fs::write(layout.trust(), "{\"keys\":[]}").unwrap();
+
+        let observed = crate::identity::read_observed(&layout, &TrustStore::load(&layout));
+        assert!(!observed.birth_certificate);
+        assert_eq!(observed.birth_key, "");
+    }
+
+    #[test]
+    fn a_pairing_is_audited_and_the_entry_does_not_carry_the_credential() {
+        let mut fixture = Fixture::new("identity-audit");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        let hub = RecordingEnrolment::accepting(enrolled());
+        pair(
+            &layout,
+            &TrustStore::load(&layout),
+            "ABCD1234",
+            &hub,
+            &audit_of(&fixture),
+            "2026-09-02T00:00:00Z",
+            "suite",
+        )
+        .unwrap();
+
+        let log = audit_of(&fixture).read();
+        let entry = log
+            .entries
+            .iter()
+            .find(|entry| entry.action == "identity.pair")
+            .expect("§19 audit-logs the change that decides who may command this robot");
+        assert_eq!(entry.subject, "acme");
+        assert_eq!(entry.actor, "suite");
+        let line = format!("{entry:?}");
+        assert!(!line.contains("secretvalue"), "{line}");
+        // Nor the code, which is a bearer secret for the length of the pairing.
+        assert!(!line.contains("ABCD1234"), "{line}");
+    }
+
+    #[test]
+    fn unpairing_removes_both_files_and_says_the_hub_was_not_told() {
+        let mut fixture = Fixture::new("identity-unpair");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        let hub = RecordingEnrolment::accepting(enrolled());
+        pair(
+            &layout,
+            &TrustStore::load(&layout),
+            "ABCD1234",
+            &hub,
+            &audit_of(&fixture),
+            "2026-09-02T00:00:00Z",
+            "suite",
+        )
+        .unwrap();
+
+        let namespace = unpair(
+            &layout,
+            &audit_of(&fixture),
+            "2026-09-02T00:05:00Z",
+            "suite",
+        )
+        .unwrap();
+        assert_eq!(namespace.as_deref(), Some("acme"));
+        assert!(!layout.credential().exists());
+        assert!(!layout.device().exists());
+
+        let log = audit_of(&fixture).read();
+        let entry = log
+            .entries
+            .iter()
+            .find(|entry| entry.action == "identity.unpair")
+            .expect("unpairing is a change too");
+        assert!(
+            entry.detail.contains("Revoke the credential on the Hub"),
+            "{}",
+            entry.detail
+        );
+    }
+
+    #[test]
+    fn unpairing_a_robot_that_was_never_paired_is_not_an_error() {
+        let fixture = Fixture::new("identity-unpair-twice");
+        let layout = fixture.daemon.store.layout().clone();
+        let answer = unpair(
+            &layout,
+            &audit_of(&fixture),
+            "2026-09-02T00:00:00Z",
+            "suite",
+        )
+        .unwrap();
+        assert_eq!(answer, None);
+    }
+
+    #[test]
+    fn a_document_that_does_not_parse_is_not_the_same_as_no_document() {
+        let fixture = Fixture::new("identity-broken-document");
+        let layout = fixture.daemon.store.layout().clone();
+        std::fs::create_dir_all(layout.identity()).unwrap();
+        std::fs::write(layout.device(), "{ this is not json").unwrap();
+
+        let held = read(&layout);
+        let fault = held.fault.expect("a broken file is a fact worth reporting");
+        assert!(fault.contains("does not parse"), "{fault}");
+        // And it still answers, because the robot whose identity somebody needs to look at is
+        // exactly this one.
+        assert!(!held.identity.credential);
+    }
+
+    #[test]
+    fn an_interrupted_pairing_leaves_a_robot_that_can_pair_again() {
+        // Whether a robot is paired is read off the credential, not off the document. This is that
+        // rule, from the direction it matters: a document with no credential beside it must not
+        // claim a fleet.
+        let mut fixture = Fixture::new("identity-half-written");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        let hub = RecordingEnrolment::accepting(enrolled());
+        pair(
+            &layout,
+            &TrustStore::load(&layout),
+            "ABCD1234",
+            &hub,
+            &audit_of(&fixture),
+            "2026-09-02T00:00:00Z",
+            "suite",
+        )
+        .unwrap();
+        std::fs::remove_file(layout.credential()).unwrap();
+
+        let held = read(&layout);
+        assert!(!held.identity.credential);
+        assert!(pair(
+            &layout,
+            &TrustStore::load(&layout),
+            "ABCD1234",
+            &hub,
+            &audit_of(&fixture),
+            "2026-09-02T00:02:00Z",
+            "suite",
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn a_hub_that_returns_no_credential_is_refused_by_name() {
+        let answer = parse_enrolled("{\"device_id\":\"dev_7\",\"namespace\":\"acme\"}")
+            .expect_err("there is nothing to pair with");
+        assert_eq!(answer.code, "no_credential");
+        assert!(answer.detail.contains("Nothing has been stored"));
+    }
+
+    #[test]
+    fn an_absent_scope_list_and_an_empty_one_are_different_facts() {
+        let opaque = parse_enrolled("{\"credential\":\"skd_a\"}").unwrap();
+        assert_eq!(opaque.scopes, None);
+        let empty = parse_enrolled("{\"credential\":\"skd_a\",\"scopes\":[]}").unwrap();
+        assert_eq!(empty.scopes, Some(Vec::new()));
+    }
+
+    #[test]
+    fn the_request_body_carries_the_code_and_the_url_does_not() {
+        let enrolment = CurlEnrolment {
+            endpoint: "https://hub.example/".to_string(),
+            scratch: std::path::PathBuf::from("/nonexistent"),
+        };
+        assert_eq!(enrolment.url(), "https://hub.example/devices/pair");
+        assert!(!enrolment.url().contains("ABCD"));
+
+        let request = Enrol {
+            device_key: "aa".to_string(),
+            model: "bench-arm".to_string(),
+            serial: "SN-0001".to_string(),
+            agent: "skynetd/test".to_string(),
+        };
+        let body = request.body("ABCD1234").to_canonical().unwrap();
+        assert!(body.contains("ABCD1234"));
+    }
+
+    #[test]
+    fn the_sentence_names_the_version_when_it_cannot_name_the_bytes() {
+        let fixture = Fixture::new("identity-attest-no-manifest");
+        let layout = fixture.daemon.store.layout().clone();
+        let (held, _) = crate::identity::evaluate(&layout, &TrustStore::load(&layout));
+        let attestation = attestation(
+            &layout,
+            &TrustStore::load(&layout),
+            &held,
+            "1.4.0",
+            &RunningPolicy::None,
+        );
+        let report = skynet_contracts::identity::attest(&attestation);
+        assert!(!report.complete);
+        assert_eq!(report.unmeasured, vec!["os_image"]);
+        assert!(
+            report.sentence.contains("1.4.0"),
+            "the sentence names the version it cannot turn into a digest: {}",
+            report.sentence
+        );
+        // And it is still a sentence. §13's rule: a report with a hole in it is still produced.
+        assert!(report.sentence.starts_with("This robot is running"));
+        assert!(report.sentence.contains("no policy"));
+    }
+
+    #[test]
+    fn a_robot_with_no_descriptor_has_no_body_rather_than_an_unmeasured_one() {
+        let fixture = Fixture::new("identity-attest-no-body");
+        let layout = fixture.daemon.store.layout().clone();
+        let (held, _) = crate::identity::evaluate(&layout, &TrustStore::load(&layout));
+        let attestation = attestation(
+            &layout,
+            &TrustStore::load(&layout),
+            &held,
+            "",
+            &RunningPolicy::Unknown("the runtime is not answering".to_string()),
+        );
+        assert_eq!(
+            attestation.embodiment.state,
+            skynet_contracts::identity::MeasureState::Nothing
+        );
+        let report = skynet_contracts::identity::attest(&attestation);
+        assert_eq!(report.unmeasured, vec!["os_image", "policy"]);
+        assert!(report.sentence.contains("no body"));
+        assert!(report.sentence.contains("the runtime is not answering"));
+    }
+
+    #[test]
+    fn nothing_running_is_not_the_same_as_nothing_observed() {
+        let fixture = Fixture::new("identity-policy-none");
+        let actual = fixture.daemon.observe(1_000);
+        assert_eq!(
+            running_policy(&fixture.daemon.store, &actual),
+            RunningPolicy::None
+        );
+    }
+
+    #[test]
+    fn the_identity_route_carries_no_credential_in_any_form() {
+        let mut fixture = Fixture::new("identity-route");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        let hub = RecordingEnrolment::accepting(enrolled());
+        pair(
+            &layout,
+            &TrustStore::load(&layout),
+            "ABCD1234",
+            &hub,
+            &audit_of(&fixture),
+            "2026-09-02T00:00:00Z",
+            "suite",
+        )
+        .unwrap();
+
+        let (status, document) = fixture.request("GET", "/identity", Some("observer-token"), "");
+        assert_eq!(status, 200);
+        let rendered = document.to_canonical().unwrap();
+        assert!(
+            !rendered.contains("secretvalue"),
+            "the identity route served the credential: {rendered}"
+        );
+        assert_eq!(
+            document.get("credential_prefix").and_then(Json::as_str),
+            Some("skd_")
+        );
+        assert_eq!(document.get("paired").and_then(Json::as_bool), Some(true));
+        assert!(document
+            .get("attestation")
+            .and_then(|node| node.get("sentence"))
+            .and_then(Json::as_str)
+            .is_some());
+    }
+
+    #[test]
+    fn reading_an_identity_needs_an_observer_and_pairing_needs_an_admin() {
+        let mut fixture = Fixture::new("identity-roles");
+        fixture.provision();
+        assert_eq!(
+            fixture.request("GET", "/identity", None, "").0,
+            401,
+            "§39.1 gives an unauthenticated caller stop and status"
+        );
+        assert_eq!(
+            fixture
+                .request("GET", "/identity", Some("observer-token"), "")
+                .0,
+            200
+        );
+
+        let body = "{\"code\":\"ABCD1234\",\"endpoint\":\"https://hub.example\"}";
+        assert_eq!(
+            fixture
+                .request("POST", "/identity/pair", Some("observer-token"), body)
+                .0,
+            403,
+            "§39.1: pair and unpair are Admin"
+        );
+    }
+
+    #[test]
+    fn pairing_over_the_api_needs_an_endpoint_because_there_is_no_default() {
+        let mut fixture = Fixture::new("identity-no-default-hub");
+        fixture.provision();
+        let (status, document) = fixture.request(
+            "POST",
+            "/identity/pair",
+            Some("admin-token"),
+            "{\"code\":\"ABCD1234\"}",
+        );
+        assert_eq!(status, 400);
+        let detail = document.get("detail").and_then(Json::as_str).unwrap_or("");
+        assert!(detail.contains("no default Hub"), "{detail}");
+    }
+
+    #[test]
+    fn a_robot_with_nowhere_to_send_names_the_command_that_fixes_it() {
+        use crate::connectivity::{Sink, Unpaired};
+        let obstacle = Unpaired.obstacle().unwrap();
+        assert!(obstacle.contains("skynet pair"));
+        assert!(obstacle.contains("§34.4"));
+    }
+
+    #[test]
+    fn a_paired_robot_gets_a_sink_that_actually_sends() {
+        // The state this replaced: for one session a paired robot had a sink whose whole content
+        // was that §34.2's transport did not exist. It does now, and the sink is chosen by whether
+        // all three of the things a report needs are on the disk.
+        let mut fixture = Fixture::new("sink-paired");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        assert_eq!(crate::identity::credential_for_sending(&layout), None);
+
+        let hub = RecordingEnrolment::accepting(enrolled());
+        pair(
+            &layout,
+            &TrustStore::load(&layout),
+            "ABCD1234",
+            &hub,
+            &audit_of(&fixture),
+            "2026-09-02T00:00:00Z",
+            "suite",
+        )
+        .unwrap();
+
+        let (endpoint, device_id, credential) =
+            crate::identity::credential_for_sending(&layout).expect("paired");
+        assert_eq!(endpoint, "https://hub.example");
+        assert_eq!(device_id, "dev_7");
+        assert_eq!(credential, "skd_secretvalue");
+
+        let sink = crate::connectivity::Hub {
+            endpoint,
+            device_id,
+            credential,
+            scratch: layout.state(),
+        };
+        assert!(crate::connectivity::Sink::obstacle(&sink).is_none());
+        assert!(crate::connectivity::Sink::delivers(&sink));
+        assert!(!crate::connectivity::Sink::describe(&sink).contains("secretvalue"));
+    }
+}
+
+/// §11 and §17's check-in on a real machine.
+mod checkin {
+    use super::*;
+    use crate::checkin::{build, enqueue, health, progress, stage_name, to_json, NotQueued};
+    use crate::identity::{pair, RecordingEnrolment};
+    use crate::outbound::Queue;
+    use crate::trust::TrustStore;
+    use skynet_contracts::checkin::Claim;
+
+    fn enrolled() -> crate::identity::Enrolled {
+        crate::identity::Enrolled {
+            device_id: "dev_7".to_string(),
+            namespace: "acme".to_string(),
+            credential: "skd_secretvalue".to_string(),
+            scopes: Some(vec!["device:checkin".to_string()]),
+        }
+    }
+
+    fn become_paired(fixture: &Fixture) {
+        let layout = fixture.daemon.store.layout().clone();
+        let hub = RecordingEnrolment::accepting(enrolled());
+        pair(
+            &layout,
+            &TrustStore::load(&layout),
+            "ABCD1234",
+            &hub,
+            &crate::audit::Audit::of(&layout),
+            "2026-09-02T00:00:00Z",
+            "suite",
+        )
+        .unwrap();
+    }
+
+    fn built_for(fixture: &mut Fixture) -> skynet_contracts::checkin::CheckIn {
+        let layout = fixture.daemon.store.layout().clone();
+        let trust = TrustStore::load(&layout);
+        let (identity, _) = crate::identity::evaluate(&layout, &trust);
+        let actual = fixture.daemon.observe(1_000);
+        let observed = fixture.daemon.health(&actual, 1_000);
+        let policy = crate::identity::running_policy(&fixture.daemon.store, &actual);
+        let attestation =
+            crate::identity::attestation(&layout, &trust, &identity, &actual.os.active, &policy);
+        let lag = fixture
+            .daemon
+            .desired
+            .generation
+            .checked_sub(actual.generation)
+            .filter(|_| fixture.daemon.desired.generation >= actual.generation);
+        build(
+            &identity,
+            attestation,
+            progress(&fixture.daemon.desired, &actual, fixture.daemon.safe_state),
+            health(&observed, 0, lag),
+            fixture.daemon.operating_state.as_str(),
+            &crate::intent::held_digest(&layout),
+        )
+    }
+
+    #[test]
+    fn the_six_stage_numbers_map_to_the_six_names() {
+        let names: Vec<String> = (1..=6).map(stage_name).collect();
+        assert_eq!(
+            names,
+            vec![
+                "os_image",
+                "rhal_driver",
+                "package",
+                "profile",
+                "policy",
+                "lease"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_stage_number_nobody_recognises_gets_a_column_of_its_own() {
+        // Rather than one of the six, and rather than a shared `unknown`. It cannot happen from
+        // this workspace; if it ever does, a fleet console should show it as the thing nobody
+        // recognises rather than silently as a lease.
+        assert_eq!(stage_name(0), "stage_0");
+        assert_eq!(stage_name(9), "stage_9");
+    }
+
+    #[test]
+    fn an_unpaired_robot_queues_nothing_and_says_why() {
+        let mut fixture = Fixture::new("checkin-unpaired");
+        let layout = fixture.daemon.store.layout().clone();
+        let built = built_for(&mut fixture);
+        let trust = TrustStore::load(&layout);
+        let (identity, _) = crate::identity::evaluate(&layout, &trust);
+
+        let queued = enqueue(&Queue::of(&layout), &identity, &built);
+        assert_eq!(queued, Err(NotQueued::Unpaired));
+
+        // And the queue stays empty rather than filling with documents addressed to nobody, which
+        // would eventually show up as this robot discarding its own state.
+        assert!(Queue::of(&layout).items().is_empty());
+
+        let rendered = to_json(&built, &queued);
+        assert_eq!(rendered.get("queued").and_then(Json::as_bool), Some(false));
+        assert!(rendered
+            .get("queued_note")
+            .and_then(Json::as_str)
+            .is_some_and(|note| note.contains("not paired")));
+    }
+
+    #[test]
+    fn a_paired_robot_queues_one_and_the_next_supersedes_it() {
+        // §34.4: check-ins are the class where only the newest matters. Queueing every pass is
+        // therefore correct rather than wasteful, and this is the property that makes it so.
+        let mut fixture = Fixture::new("checkin-collapses");
+        fixture.provision();
+        become_paired(&fixture);
+        let layout = fixture.daemon.store.layout().clone();
+        let trust = TrustStore::load(&layout);
+        let (identity, _) = crate::identity::evaluate(&layout, &trust);
+
+        let queue = Queue::of(&layout);
+        for _ in 0..3 {
+            let built = built_for(&mut fixture);
+            enqueue(&queue, &identity, &built)
+                .expect("a paired robot has somewhere to address one");
+        }
+
+        let held = queue.items();
+        assert_eq!(held.len(), 1, "three check-ins collapsed to one");
+        assert_eq!(held[0].class, crate::outbound::Class::CheckIn);
+
+        // Collapsing is not a drop, and is counted apart from one (§34.4).
+        let status = queue.status();
+        assert_eq!(status.dropped.iter().map(|(_, n)| *n).sum::<u64>(), 0);
+    }
+
+    #[test]
+    fn the_queued_body_is_the_document_and_carries_no_credential() {
+        let mut fixture = Fixture::new("checkin-body");
+        fixture.provision();
+        become_paired(&fixture);
+        let layout = fixture.daemon.store.layout().clone();
+        let trust = TrustStore::load(&layout);
+        let (identity, _) = crate::identity::evaluate(&layout, &trust);
+
+        let queue = Queue::of(&layout);
+        let built = built_for(&mut fixture);
+        enqueue(&queue, &identity, &built).unwrap();
+
+        let body = queue.items().remove(0).body;
+        assert!(!body.contains("secretvalue"), "{body}");
+        let document = Json::parse(&body).expect("a check-in is canonical JSON");
+        assert_eq!(
+            document.get("device_id").and_then(Json::as_str),
+            Some("dev_7")
+        );
+        // §10's sentence rides along, which is the whole point of the pair of them.
+        assert!(document
+            .get("attestation")
+            .and_then(|node| node.get("sentence"))
+            .and_then(Json::as_str)
+            .is_some());
+    }
+
+    #[test]
+    fn a_robot_told_nothing_reports_applied_and_a_robot_told_something_does_not() {
+        let mut fixture = Fixture::new("checkin-claim");
+        fixture.provision();
+        become_paired(&fixture);
+
+        // Nothing desired: generation zero against zero, empty plan.
+        assert_eq!(built_for(&mut fixture).claim.claim, Claim::Applied);
+
+        // A package the robot does not have. Now there is work, and the generation on the wire is
+        // still the one this robot has actually applied.
+        fixture.write_desired(
+            "{\"generation\":41,\"packages\":[{\"id\":\"acme/grasp\",\"kind\":\"policy\",\
+             \"version\":\"1.0.0\",\"digest\":\"sha256:aa\",\"state\":\"running\"}]}",
+        );
+        fixture.daemon.reload();
+
+        let built = built_for(&mut fixture);
+        assert_ne!(built.claim.claim, Claim::Applied);
+        assert!(!built.claim.applied);
+        assert_eq!(built.claim.generation, 0, "never the desired generation");
+        assert!(built.claim.blocking.contains(&"package".to_string()));
+    }
+
+    #[test]
+    fn the_pending_reasons_use_the_same_action_names_as_the_plan_route() {
+        // One vocabulary for one plan. A Hub reading `fetch_package` and a console reading
+        // something else would be two descriptions of the same action.
+        let mut fixture = Fixture::new("checkin-vocabulary");
+        fixture.provision();
+        become_paired(&fixture);
+        fixture.write_desired(
+            "{\"generation\":41,\"packages\":[{\"id\":\"acme/grasp\",\"kind\":\"policy\",\
+             \"version\":\"1.0.0\",\"digest\":\"sha256:aa\",\"state\":\"running\"}]}",
+        );
+        fixture.daemon.reload();
+
+        let built = built_for(&mut fixture);
+        assert!(
+            built
+                .pending
+                .iter()
+                .any(|entry| entry.reason.starts_with("fetch_package ")),
+            "{:?}",
+            built.pending
+        );
+    }
+
+    #[test]
+    fn four_of_the_five_aggregate_fields_are_absent_rather_than_zero() {
+        // §33.6: no measurement of guard trips and zero guard trips are opposite facts. Nothing on
+        // this robot measures four of them, and the check-in says so.
+        let mut fixture = Fixture::new("checkin-unmeasured");
+        fixture.provision();
+        become_paired(&fixture);
+        let built = built_for(&mut fixture);
+        assert_eq!(
+            built.health.unmeasured,
+            vec![
+                "battery",
+                "guard_trip_rate",
+                "storage_headroom",
+                "temperature_c"
+            ]
+        );
+        assert!(built.health.undated.is_empty());
+        // The one this daemon can compute, and it is dated.
+        assert_eq!(built.health.fields.len(), 1);
+        assert_eq!(built.health.fields[0].0, "generation_lag");
+    }
+
+    #[test]
+    fn the_route_answers_what_it_would_say_rather_than_nothing() {
+        let mut fixture = Fixture::new("checkin-route");
+        fixture.provision();
+        become_paired(&fixture);
+
+        let (status, document) = fixture.request("GET", "/checkin", Some("observer-token"), "");
+        assert_eq!(status, 200);
+        assert_eq!(
+            document.get("device_id").and_then(Json::as_str),
+            Some("dev_7")
+        );
+        assert!(document.get("summary").and_then(Json::as_str).is_some());
+        let rendered = document.to_canonical().unwrap();
+        assert!(!rendered.contains("secretvalue"), "{rendered}");
+    }
+
+    #[test]
+    fn reading_a_check_in_needs_an_observer() {
+        let mut fixture = Fixture::new("checkin-role");
+        fixture.provision();
+        assert_eq!(fixture.request("GET", "/checkin", None, "").0, 401);
+        assert_eq!(
+            fixture
+                .request("GET", "/checkin", Some("observer-token"), "")
+                .0,
+            200
+        );
+    }
+
+    #[test]
+    fn a_get_never_queues_one() {
+        // §33.7's routes are the Hub's shapes, and a `GET` that enqueued would be a state change
+        // behind a verb that promises not to be one. The reconcile loop is what queues.
+        let mut fixture = Fixture::new("checkin-get-is-read-only");
+        fixture.provision();
+        become_paired(&fixture);
+        let layout = fixture.daemon.store.layout().clone();
+
+        for _ in 0..3 {
+            assert_eq!(
+                fixture
+                    .request("GET", "/checkin", Some("observer-token"), "")
+                    .0,
+                200
+            );
+        }
+        assert!(Queue::of(&layout).items().is_empty());
+    }
+
+    #[test]
+    fn every_class_has_somewhere_to_go() {
+        // This test was `every_class_but_telemetry_has_somewhere_to_go` for three sessions, and its
+        // last assertion was the finding: §34.4 gave telemetry a priority, a drop policy and a
+        // counter, and neither §17's eight endpoints nor §57's revised nine gave it a route, so a
+        // robot that guessed one would have been inventing a Hub surface.
+        //
+        // §74 closes it. The assertion is kept in the same shape rather than deleted, because the
+        // thing worth pinning is unchanged — a class with no route must never be given a guessed
+        // one — and the day a fifth class is added this is where that decision will be made.
+        let hub = crate::connectivity::Hub {
+            endpoint: "https://hub.example/".to_string(),
+            device_id: "dev_7".to_string(),
+            credential: "skd_x".to_string(),
+            scratch: std::path::PathBuf::from("/nonexistent"),
+        };
+        assert_eq!(
+            hub.route(crate::outbound::Class::CheckIn).as_deref(),
+            Some("https://hub.example/devices/dev_7/checkin")
+        );
+        assert_eq!(
+            hub.route(crate::outbound::Class::Incident).as_deref(),
+            Some("https://hub.example/devices/dev_7/incidents")
+        );
+        assert_eq!(
+            hub.route(crate::outbound::Class::Episode).as_deref(),
+            Some("https://hub.example/episodes")
+        );
+        assert_eq!(
+            hub.route(crate::outbound::Class::Telemetry).as_deref(),
+            Some("https://hub.example/devices/dev_7/telemetry")
+        );
+        // And the general form: no class is silently unroutable.
+        for class in crate::outbound::CLASSES {
+            assert!(hub.route(class).is_some(), "{}", class.as_str());
+        }
+    }
+
+    #[test]
+    fn a_credential_that_could_break_the_config_is_refused_rather_than_escaped() {
+        // The credential travels in curl's own config on stdin, which is a quoted string. A
+        // credential containing a quote is a Hub doing something nobody designed, and escaping it
+        // would be this daemon guessing at a parser's escape set.
+        let scratch = TempRoot::new("post-quoting");
+        for bad in ["skd_a\"b", "skd_a\\b", "skd_a\nb"] {
+            let error = crate::connectivity::post_json(
+                "https://hub.example/x",
+                Some(bad),
+                "{}",
+                scratch.layout().state().as_path(),
+            )
+            .expect_err("a credential with a quote is not one this robot presents");
+            assert!(error.contains("will not put in a curl config"), "{error}");
+        }
+    }
+}
+
+/// §11's pull on a real machine.
+mod intent {
+    use super::*;
+    use crate::intent::{adopt, digest_of, held, pull};
+    use skynet_contracts::intent::OfferFaultCode;
+
+    const ONE: &str =
+        "{\"generation\":41,\"packages\":[{\"id\":\"acme/grasp\",\"kind\":\"policy\",\
+                       \"version\":\"1.0.0\",\"digest\":\"sha256:aa\",\"state\":\"running\"}]}";
+
+    #[test]
+    fn an_unpaired_robot_does_not_ask() {
+        // There is no `/devices/{id}/desired` to ask, which is §50.2's shipping state rather than a
+        // failure. `None` rather than a `Pulled` that failed, so the route can say which.
+        let fixture = Fixture::new("intent-unpaired");
+        assert_eq!(pull(fixture.daemon.store.layout(), 0), None);
+    }
+
+    #[test]
+    fn a_response_that_is_not_a_desired_state_never_reaches_the_disk() {
+        // The rule this module exists for. A version that wrote first and let §33.8's ladder sort it
+        // out would lose the intent the robot was reconciling against, silently.
+        let fixture = Fixture::new("intent-garbage");
+        let layout = fixture.daemon.store.layout().clone();
+        fixture.write_desired(ONE);
+        let before = std::fs::read_to_string(layout.desired()).unwrap();
+
+        for body in ["not json at all", "{}", "{\"packages\":[]}", ""] {
+            let pulled = adopt(&layout, body, 1);
+            assert!(pulled.reached);
+            assert!(!pulled.written, "{body:?} was written");
+            let verdict = pulled.verdict.expect("a decision was made");
+            assert!(!verdict.adopt);
+            assert_eq!(verdict.faults[0].code, OfferFaultCode::Undecodable);
+            // And the robot keeps reconciling towards what it had.
+            assert_eq!(verdict.generation, 41);
+        }
+        assert_eq!(std::fs::read_to_string(layout.desired()).unwrap(), before);
+    }
+
+    #[test]
+    fn a_new_generation_lands_and_is_stored_canonically() {
+        let fixture = Fixture::new("intent-adopt");
+        let layout = fixture.daemon.store.layout().clone();
+        fixture.write_desired(ONE);
+
+        // The same document at a higher generation, pretty-printed the way a Hub might serve it.
+        let offered = "{\n  \"generation\" : 42,\n  \"packages\" : []\n}";
+        let pulled = adopt(&layout, offered, 1);
+        let verdict = pulled.verdict.expect("a decision");
+        assert!(verdict.adopt);
+        assert!(verdict.changed);
+        assert!(pulled.written);
+
+        let stored = std::fs::read_to_string(layout.desired()).unwrap();
+        // Canonical, not as it arrived. Storing the Hub's own formatting would make the next poll
+        // report a change against a document that had not changed.
+        assert_eq!(stored, "{\"generation\":42,\"packages\":[]}");
+    }
+
+    #[test]
+    fn reformatting_alone_is_not_a_change() {
+        // The digest is over the canonical form, so a Hub that reflowed its JSON does not make every
+        // poll a write.
+        let fixture = Fixture::new("intent-reformat");
+        let layout = fixture.daemon.store.layout().clone();
+        fixture.write_desired("{\"generation\":41,\"packages\":[]}");
+
+        let pulled = adopt(&layout, "{\n \"packages\":[],\n \"generation\": 41\n}", 0);
+        let verdict = pulled.verdict.expect("a decision");
+        assert!(verdict.adopt);
+        assert!(!verdict.changed);
+        assert!(!pulled.written);
+    }
+
+    #[test]
+    fn the_ordinary_poll_writes_nothing() {
+        let fixture = Fixture::new("intent-ordinary");
+        let layout = fixture.daemon.store.layout().clone();
+        fixture.write_desired("{\"generation\":41,\"packages\":[]}");
+        let pulled = adopt(&layout, "{\"generation\":41,\"packages\":[]}", 0);
+        assert!(!pulled.written);
+        assert!(!pulled.verdict.unwrap().changed);
+    }
+
+    #[test]
+    fn a_reused_generation_is_refused_and_the_old_document_stays() {
+        let fixture = Fixture::new("intent-reuse");
+        let layout = fixture.daemon.store.layout().clone();
+        fixture.write_desired(ONE);
+        let before = std::fs::read_to_string(layout.desired()).unwrap();
+
+        // Generation 41 again, different content.
+        let pulled = adopt(&layout, "{\"generation\":41,\"packages\":[]}", 1);
+        let verdict = pulled.verdict.expect("a decision");
+        assert!(!verdict.adopt);
+        assert_eq!(verdict.faults[0].code, OfferFaultCode::GenerationReused);
+        assert!(!pulled.written);
+        assert_eq!(std::fs::read_to_string(layout.desired()).unwrap(), before);
+    }
+
+    #[test]
+    fn a_backup_restore_is_followed_and_reported() {
+        let fixture = Fixture::new("intent-backwards");
+        let layout = fixture.daemon.store.layout().clone();
+        fixture.write_desired(ONE);
+
+        let pulled = adopt(&layout, "{\"generation\":40,\"packages\":[]}", 1);
+        let verdict = pulled.verdict.expect("a decision");
+        assert!(verdict.adopt, "a fleet nobody could recover is worse");
+        assert!(pulled.written);
+        assert!(verdict
+            .faults
+            .iter()
+            .any(|fault| fault.code == OfferFaultCode::GenerationWentBackwards));
+    }
+
+    #[test]
+    fn emptying_a_running_robot_is_adopted_and_said_out_loud() {
+        let fixture = Fixture::new("intent-empties");
+        let layout = fixture.daemon.store.layout().clone();
+        fixture.write_desired(ONE);
+
+        let pulled = adopt(&layout, "{\"generation\":42,\"packages\":[]}", 3);
+        let verdict = pulled.verdict.expect("a decision");
+        assert!(verdict.adopt);
+        assert!(verdict
+            .faults
+            .iter()
+            .any(|fault| fault.code == OfferFaultCode::EmptiesTheRobot));
+    }
+
+    #[test]
+    fn the_held_digest_is_over_the_canonical_form() {
+        let fixture = Fixture::new("intent-digest");
+        let layout = fixture.daemon.store.layout().clone();
+        fixture.write_desired("{\"generation\":41,\"packages\":[]}");
+        let one = held(&layout, 0);
+
+        fixture.write_desired("{\n\"packages\" : [],\n\"generation\":41\n}");
+        let two = held(&layout, 0);
+        assert_eq!(one.digest, two.digest);
+        assert!(one.digest.starts_with("sha256:"));
+    }
+
+    #[test]
+    fn a_robot_with_no_desired_state_at_all_holds_nothing_and_takes_anything() {
+        let fixture = Fixture::new("intent-first-pull");
+        let layout = fixture.daemon.store.layout().clone();
+        let holding = held(&layout, 0);
+        assert_eq!(holding.generation, 0);
+        assert_eq!(holding.digest, "");
+
+        let pulled = adopt(&layout, "{\"generation\":1,\"packages\":[]}", 0);
+        let verdict = pulled.verdict.expect("a decision");
+        assert!(verdict.adopt);
+        assert!(verdict.changed);
+        // And no reuse reported against a robot that had nothing to reuse.
+        assert!(verdict.faults.is_empty());
+        assert!(pulled.written);
+    }
+
+    #[test]
+    fn the_route_reports_the_last_pull_and_never_makes_one() {
+        let mut fixture = Fixture::new("intent-route");
+        fixture.provision();
+        fixture.write_desired(ONE);
+
+        let (status, document) = fixture.request("GET", "/intent", Some("observer-token"), "");
+        assert_eq!(status, 200);
+        // §33.8's ladder, which is the half that is true whether or not a Hub was ever reached.
+        assert_eq!(
+            document.get("source").and_then(Json::as_str),
+            Some("current")
+        );
+        // Nothing has pulled, and an unpaired robot never will — reported apart from a pull that
+        // failed.
+        assert_eq!(document.get("pull"), Some(&Json::Null));
+        assert!(document
+            .get("note")
+            .and_then(Json::as_str)
+            .is_some_and(|note| note.contains("not paired")));
+    }
+
+    #[test]
+    fn the_route_shows_the_fallback_rung_when_the_desired_state_is_broken() {
+        // The state that is invisible from every other surface: a robot reconciling against a
+        // last-known-good copy looks exactly like one reconciling against a current desired state.
+        let mut fixture = Fixture::new("intent-fallback");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        fixture.write_desired(ONE);
+        // Promote it to last-known-good by reading once, then break the current copy.
+        let _ = crate::runtime::load_desired(&layout);
+        fixture.write_desired("{ broken");
+
+        let (status, document) = fixture.request("GET", "/intent", Some("observer-token"), "");
+        assert_eq!(status, 200);
+        assert_eq!(
+            document.get("source").and_then(Json::as_str),
+            Some("last_known_good")
+        );
+        assert!(document
+            .get("source_because")
+            .and_then(Json::as_str)
+            .is_some_and(|why| why.contains("does not parse")));
+    }
+
+    #[test]
+    fn reading_the_intent_needs_an_observer() {
+        let mut fixture = Fixture::new("intent-role");
+        fixture.provision();
+        assert_eq!(fixture.request("GET", "/intent", None, "").0, 401);
+        assert_eq!(
+            fixture
+                .request("GET", "/intent", Some("observer-token"), "")
+                .0,
+            200
+        );
+    }
+
+    #[test]
+    fn two_documents_that_mean_the_same_thing_have_one_digest() {
+        let a = Json::parse("{\"generation\":1,\"packages\":[]}").unwrap();
+        let b = Json::parse("{\n\"packages\":[],\n\"generation\":1}").unwrap();
+        assert_eq!(digest_of(&a), digest_of(&b));
     }
 }

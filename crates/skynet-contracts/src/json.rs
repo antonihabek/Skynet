@@ -1253,6 +1253,226 @@ pub fn watchdog_to_json(on_command_loss: Option<&str>, windows: &crate::watchdog
     out
 }
 
+// ── §10's identity, pairing and attestation ──────────────────────────────────
+
+/// Read the credential and key a robot holds.
+///
+/// `scopes` decodes through [`Json::get_present`] and stays `None` for both an absent key and an
+/// explicit `null`, because that is the ordinary shape of an opaque bearer token — and it is a
+/// different fact from an empty list, which is a credential that declares it may do nothing.
+pub fn identity_from_json(value: &Json) -> crate::identity::Identity {
+    crate::identity::Identity {
+        device_id: opt_string(value, "device_id").unwrap_or_default(),
+        namespace: opt_string(value, "namespace").unwrap_or_default(),
+        device_key: opt_string(value, "device_key").unwrap_or_default(),
+        binding: value
+            .get_present("binding")
+            .and_then(Json::as_str)
+            .and_then(crate::identity::KeyBinding::parse),
+        credential: flag(value, "credential"),
+        credential_prefix: opt_string(value, "credential_prefix").unwrap_or_default(),
+        scopes: value.get_present("scopes").map(|scopes| match scopes {
+            Json::Arr(_) => scopes
+                .as_arr()
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(Json::as_str)
+                        .map(ToString::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        }),
+    }
+}
+
+/// Read what the robot observes about itself.
+pub fn identity_observed_from_json(value: &Json) -> crate::identity::Observed {
+    crate::identity::Observed {
+        birth_key: opt_string(value, "birth_key").unwrap_or_default(),
+        birth_certificate: flag(value, "birth_certificate"),
+    }
+}
+
+/// Read one of §10's three digests.
+///
+/// An unreadable or unrecognised `state` decodes to [`MeasureState::Unmeasured`](crate::identity::MeasureState::Unmeasured)
+/// rather than to `Known`, for the reason every default in this file points the same way: a case
+/// that did not say has not established that anything was measured, and the state that claims a
+/// measurement is the one nobody should reach by omission.
+pub fn measure_from_json(value: Option<&Json>) -> crate::identity::Measure {
+    let state = value
+        .and_then(|v| v.get("state"))
+        .and_then(Json::as_str)
+        .and_then(crate::identity::MeasureState::parse)
+        .unwrap_or(crate::identity::MeasureState::Unmeasured);
+    crate::identity::Measure {
+        state,
+        digest: value
+            .and_then(|v| opt_string(v, "digest"))
+            .unwrap_or_default(),
+        why: value.and_then(|v| opt_string(v, "why")).unwrap_or_default(),
+    }
+}
+
+/// Read what a robot is running.
+pub fn attestation_from_json(value: &Json) -> crate::identity::Attestation {
+    crate::identity::Attestation {
+        device_id: opt_string(value, "device_id").unwrap_or_default(),
+        os_image: measure_from_json(value.get("os_image")),
+        policy: measure_from_json(value.get("policy")),
+        embodiment: measure_from_json(value.get("embodiment")),
+    }
+}
+
+// ── §11 and §17's check-in ───────────────────────────────────────────────────
+
+/// Read one aggregate health reading.
+///
+/// A field that is absent, `null`, or an object with neither key decodes to a [`Measured`] with
+/// nothing in it, which [`summarize`](crate::checkin::summarize) reports as unmeasured. There is no
+/// arm that produces a value without an age *by default*: §33.6 requires an age on every field, and
+/// a decoder that supplied one would be the exact hole the rule exists to close.
+pub fn measured_from_json(value: Option<&Json>) -> crate::checkin::Measured {
+    let Some(node) = value.filter(|node| **node != Json::Null) else {
+        return crate::checkin::Measured::none();
+    };
+    crate::checkin::Measured {
+        value: opt_f64(node, "value"),
+        // `as_f64` and then a range check, rather than `as_usize`, so that a negative age arrives
+        // as a number this edition refuses rather than as an absence. A clock that went backwards
+        // is a fact worth reporting as `undated`.
+        age_ms: node
+            .get_present("age_ms")
+            .and_then(Json::as_f64)
+            .filter(|age| age.is_finite() && *age >= 0.0)
+            .map(|age| age as u64),
+    }
+}
+
+/// Read what the reconciler has left to do.
+pub fn progress_from_json(value: &Json) -> crate::checkin::Progress {
+    let mut pending = Vec::new();
+    for entry in value.arr_or_empty("pending") {
+        pending.push(crate::checkin::Pending {
+            stage: opt_string(entry, "stage").unwrap_or_default(),
+            deferred: flag(entry, "deferred"),
+            reason: opt_string(entry, "reason").unwrap_or_default(),
+        });
+    }
+    crate::checkin::Progress {
+        observed_generation: opt_f64(value, "observed_generation").unwrap_or(0.0) as u64,
+        desired_generation: opt_f64(value, "desired_generation").unwrap_or(0.0) as u64,
+        pending,
+    }
+}
+
+/// Read what was observed about health.
+///
+/// An unrecognised readiness word decodes to [`Readiness::Unknown`](crate::checkin::Readiness::Unknown)
+/// rather than to `Ready`, for the reason every default in this file points the same way: a case
+/// that did not say has not established that a policy is producing, and `unknown` is the one of the
+/// four that claims nothing.
+pub fn health_input_from_json(value: &Json) -> crate::checkin::HealthInput {
+    let mut packages = Vec::new();
+    for entry in value.arr_or_empty("packages") {
+        packages.push(crate::checkin::PackageHealth {
+            id: opt_string(entry, "id").unwrap_or_default(),
+            live: flag(entry, "live"),
+            readiness: entry
+                .get("readiness")
+                .and_then(Json::as_str)
+                .and_then(crate::checkin::Readiness::parse)
+                .unwrap_or(crate::checkin::Readiness::Unknown),
+            age_ms: opt_f64(entry, "age_ms").unwrap_or(0.0) as u64,
+        });
+    }
+    crate::checkin::HealthInput {
+        packages,
+        generation_lag: measured_from_json(value.get("generation_lag")),
+        guard_trip_rate: measured_from_json(value.get("guard_trip_rate")),
+        storage_headroom: measured_from_json(value.get("storage_headroom")),
+        battery: measured_from_json(value.get("battery")),
+        temperature_c: measured_from_json(value.get("temperature_c")),
+    }
+}
+
+/// Read everything a check-in is built from.
+pub fn check_in_input_from_json(value: &Json) -> crate::checkin::CheckInInput {
+    crate::checkin::CheckInInput {
+        device_id: opt_string(value, "device_id").unwrap_or_default(),
+        agent: opt_string(value, "agent").unwrap_or_default(),
+        contracts: opt_string(value, "contracts").unwrap_or_default(),
+        state: opt_string(value, "state").unwrap_or_default(),
+        progress: value
+            .get("progress")
+            .map(progress_from_json)
+            .unwrap_or_default(),
+        health: value
+            .get("health")
+            .map(health_input_from_json)
+            .unwrap_or_default(),
+        attestation: attestation_from_json(value.get("attestation").unwrap_or(&Json::Null)),
+        desired_digest: opt_string(value, "desired_digest").unwrap_or_default(),
+    }
+}
+
+// ── §11's pull ───────────────────────────────────────────────────────────────
+
+/// Read a desired-state document the robot was handed.
+///
+/// `decoded` defaults to **false**, which is the direction every default in this file points: a
+/// case that did not say has not established that the response was a desired state, and the value
+/// that claims it did is the one nobody should reach by omission.
+pub fn offer_from_json(value: &Json) -> crate::intent::Offer {
+    crate::intent::Offer {
+        decoded: flag(value, "decoded"),
+        decode_error: opt_string(value, "decode_error").unwrap_or_default(),
+        generation: opt_f64(value, "generation").unwrap_or(0.0) as u64,
+        digest: opt_string(value, "digest").unwrap_or_default(),
+        packages: opt_f64(value, "packages").unwrap_or(0.0) as usize,
+    }
+}
+
+/// Read what the robot is reconciling against now.
+pub fn held_intent_from_json(value: &Json) -> crate::intent::Held {
+    crate::intent::Held {
+        generation: opt_f64(value, "generation").unwrap_or(0.0) as u64,
+        digest: opt_string(value, "digest").unwrap_or_default(),
+        running: opt_f64(value, "running").unwrap_or(0.0) as usize,
+    }
+}
+
+/// Read one §74 telemetry window.
+///
+/// A counter that is absent, `null` or not a number reads as **unmeasured**, which is the whole of
+/// §74.3 on the decoding side: a reader that defaulted a missing count to zero would erase the
+/// distinction the section is about before any function got to see it.
+pub fn telemetry_window_from_json(value: &Json) -> crate::telemetry::Window {
+    let mut window = crate::telemetry::Window {
+        from_ms: opt_f64(value, "from_ms"),
+        to_ms: opt_f64(value, "to_ms"),
+        elapsed_ms: opt_f64(value, "elapsed_ms"),
+        counters: alloc::vec::Vec::new(),
+    };
+    let counters = value.get("counters").cloned().unwrap_or_else(Json::obj);
+    for name in crate::telemetry::TELEMETRY_COUNTERS {
+        if let Some(count) = opt_f64(&counters, name) {
+            window = window.with(name, Some(count));
+        }
+    }
+    window
+}
+
+/// Read a set of windows.
+pub fn telemetry_windows_from_json(value: &Json) -> alloc::vec::Vec<crate::telemetry::Window> {
+    value
+        .arr_or_empty("windows")
+        .iter()
+        .map(telemetry_window_from_json)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

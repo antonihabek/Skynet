@@ -75,6 +75,9 @@ import {
   shapeStateProperties, shapeTransition, shapeWarningMatrix, shapeSkillTransition,
   shapeLiveContext,
   shapeBundleVerdict, shapeBootVerdict,
+  shapeAttestationReport, shapeCodeResult, shapeIdentityVerdict,
+  shapeCheckIn, shapeClaimVerdict, shapeHealthReport,
+  shapeCoverage, shapeOfferVerdict, shapeWindowReport,
 } from '../../reference/typescript/shape.ts'
 import {
   CELL_FAULTS, cellEnvironment, cellWorkspaceLayer, validateCell, type CellDescriptor,
@@ -84,6 +87,23 @@ import {
   admitBundle, BOOT_DECISIONS, BUNDLE_FAULTS, CERTIFICATION_GATED, confirmBoot, OS_COMPONENTS,
   type BootEvidence, type BundleManifest, type UpdateSubject,
 } from '../../reference/typescript/ota.ts'
+import {
+  attest, checkIdentity, CODE_FAULTS, DEVICE_SCOPES, IDENTITY_FINDINGS, KEY_BINDINGS,
+  MEASURE_STATES, normalizePairingCode,
+  type Attestation, type Identity, type Measure, type Observed,
+} from '../../reference/typescript/identity.ts'
+import {
+  checkIn, claimFor, CLAIMS, HEALTH_FIELDS, READINESS, STAGES, summarize,
+  type CheckInInput, type HealthInput, type Progress,
+} from '../../reference/typescript/checkin.ts'
+import {
+  TELEMETRY_COUNTERS, WINDOW_FAULTS, assessWindow, coverage,
+  type Window as TelemetryWindow,
+} from '../../reference/typescript/telemetry.ts'
+import {
+  assessOffer, OFFER_FAULTS,
+  type Held, type Offer,
+} from '../../reference/typescript/intent.ts'
 import {
   evaluate as evaluateState, HOMING_STATES, KERNEL_STATES, OPERATING_STATES, POLICY_STATES,
   POST_VERDICTS, RHAL_STATES, STATE_REASONS, STOP_CAUSES,
@@ -4727,6 +4747,847 @@ vocabulary('boot_decisions',
   'What a supervisor may tell a bootloader, weakest action first. `wait` is the default and the '
   + 'only one of the four that is safe to reach by accident.',
   BOOT_DECISIONS)
+
+// ── §10's three decisions ────────────────────────────────────────────────────
+//
+// The pairing cases are the ones worth reading twice. Every one of them is really asking the same
+// question: does a robot that has just been handed eight characters by a person do something
+// useful, and does it do it **without ever repeating them back**. A code is a bearer secret for
+// the length of a pairing, and the refusals frozen here are refusals that name a position and a
+// length and never a character — which is a property a reviewer can check by reading the
+// `expected` strings, and which is exactly what an edition would lose by writing the obvious
+// error message.
+
+function codeCase(id: string, note: string, input: string): void {
+  add('identity', 'pairing', {
+    id,
+    note,
+    input: { input },
+    expected: canonical(shapeCodeResult(normalizePairingCode(input))),
+  })
+}
+
+codeCase('the-specifications-own-example',
+  '§18 writes `skynet pair ABCD-1234`. If this case ever stops producing a code, either the '
+  + 'alphabet or the length has drifted away from the document’s own example — which is the one '
+  + 'string in the specification a user will actually type.',
+  'ABCD-1234')
+
+codeCase('the-same-code-without-its-hyphen',
+  'The hyphen is how a code is printed, not part of it. Two spellings of one code must not be two '
+  + 'codes.',
+  'ABCD1234')
+
+codeCase('lower-case',
+  'Nobody holds shift for eight characters, and a code that only worked in upper case would be a '
+  + 'support call per robot.',
+  'abcd-1234')
+
+codeCase('read-off-a-screen-and-typed-badly',
+  'Leading and trailing whitespace from a paste, an inner space where the hyphen was, and a '
+  + 'trailing newline. All cosmetic.',
+  '  abcd 1234\n')
+
+codeCase('hyphens-everywhere',
+  'Somebody grouping the characters their own way still gets their code. The rule is that hyphens '
+  + 'and spaces do not count, not that they appear in one place.',
+  'A-B-C-D-1-2-3-4')
+
+codeCase('the-letters-that-fold',
+  'Crockford’s folding, and the reason the alphabet excludes these letters rather than rejecting '
+  + 'them: an operator reading `01234567` off a screen types the letters they think they see, and '
+  + 'refusing that would be refusing a correct code because a font has a slashed zero.',
+  'OI234567')
+
+codeCase('a-lower-case-l-folds-too',
+  'The worst of the three, because a lower-case l and a 1 are the same glyph in most sans-serif '
+  + 'faces. Folded after upper-casing, so `l` and `L` reach the same digit.',
+  'llll2345')
+
+codeCase('a-credential-pasted-in',
+  'The check that exists because an operator holds two secrets at once and will eventually paste '
+  + 'the wrong one. Caught before anything is sent, and the refusal names the class rather than '
+  + 'the value — a credential echoed into a terminal is a credential in a shell history.',
+  'skd_abcdef0123456789')
+
+codeCase('a-credential-in-upper-case',
+  'Somebody’s terminal, or somebody retyping. The prefix match is case-insensitive for the same '
+  + 'reason the code is.',
+  'SKD_ABCDEF0123456789')
+
+codeCase('a-credential-too-short-to-be-a-code',
+  'Five characters, so a parser that stripped first would report it too short and send the '
+  + 'operator hunting for three missing characters in a string that is not a code at all. The '
+  + 'order of the checks is what this case pins.',
+  'skd_x')
+
+codeCase('nothing-at-all',
+  'The empty string reaches this function whenever somebody runs the command with no argument, and '
+  + 'the sentence has to say what a code looks like rather than that a string was empty.',
+  '')
+
+codeCase('only-hyphens',
+  'Not empty, and nothing left after the cosmetics are removed. Reported as empty, because that is '
+  + 'what the operator has.',
+  '----')
+
+codeCase('seven-characters',
+  'One short. Named as a length rather than as a missing character, because nobody can say which '
+  + 'one is missing.',
+  'ABCD123')
+
+codeCase('nine-characters',
+  'One long, and the other side of the same boundary.',
+  'ABCD12345')
+
+codeCase('a-u-in-the-middle',
+  'The letter Crockford drops. It cannot have been read off a screen, so it is a mistyped '
+  + 'something-else — and the refusal says which position rather than which character.',
+  'ABCDUFGH')
+
+codeCase('a-character-nobody-could-have-read',
+  'Punctuation, from a paste that took a neighbouring character.',
+  'ABCDEF@1')
+
+codeCase('the-first-character-is-the-bad-one',
+  'The boundary of the position count. 1-based, because it is read by a person counting '
+  + 'characters on a screen and not by a program indexing an array.',
+  '!BCD1234')
+
+codeCase('eight-characters-that-are-not-ascii',
+  'Eight code points, so it is not a length fault, and the first of them is not in the alphabet. '
+  + 'Counted in characters rather than bytes: telling somebody they typed twenty-four characters '
+  + 'would be a sentence about an encoding they did not choose.',
+  'αβγδεζηθ')
+
+// ── §19's device credential, and §10's key binding ───────────────────────────
+
+function identityCase(id: string, note: string, identity: Identity, observed: Observed): void {
+  add('identity', 'credential', {
+    id,
+    note,
+    input: { identity, observed },
+    expected: canonical(shapeIdentityVerdict(checkIdentity(identity, observed))),
+  })
+}
+
+const PAIRED: Identity = {
+  device_id: 'dev_7',
+  namespace: 'acme',
+  device_key: 'aa',
+  binding: 'hardware',
+  credential: true,
+  credential_prefix: 'skd_',
+  scopes: ['device:checkin', 'device:desired'],
+}
+
+const ATTESTED: Observed = { birth_key: 'aa', birth_certificate: true }
+
+identityCase('a-robot-in-its-box',
+  '§50.2: it ships with a certificate and no namespace, and belongs to nobody yet. Every finding '
+  + 'here is a warning and none of them is a failure — a robot at the correct point in its '
+  + 'lifecycle must not read as broken, or the first thing anybody learns about this surface is '
+  + 'to ignore it.',
+  {}, {})
+
+identityCase('paired-and-attested',
+  'The whole of §10 satisfied: a device credential, a namespace, a key inside a secure element, '
+  + 'and a vendor who signed that exact key. Nothing found. The case that has to hold or every '
+  + 'other one is measuring a function that complains about everything.',
+  PAIRED, ATTESTED)
+
+identityCase('paired-on-a-key-in-a-file',
+  'Guest tier’s ordinary state, and the ceiling §10 puts on `security.identity.attested`. A '
+  + 'warning, because refusing it would make the tier unreachable on every machine without a TPM '
+  + '— which is most of them, and all of the ones anybody develops on.',
+  { ...PAIRED, binding: 'software' }, ATTESTED)
+
+identityCase('nobody-measured-the-binding',
+  'Absent is not `software`. A robot nobody asked has not established it lacks a secure element, '
+  + 'and `security.identity.attested` is a measurement — so it is reported unmeasured rather than '
+  + 'counted as either answer.',
+  { ...PAIRED, binding: null }, ATTESTED)
+
+identityCase('a-credential-with-no-namespace',
+  '§10 pairs a robot **to a namespace**. Half a pairing is an error rather than a warning: every '
+  + 'report this robot sends afterwards is addressed to a fleet nobody can name.',
+  { ...PAIRED, namespace: '' }, ATTESTED)
+
+identityCase('a-credential-of-the-wrong-class',
+  'A user token on a robot. §10 puts the narrowest credential in the system in the field on '
+  + 'purpose, because that is the one everybody assumes is lost — and a wider one here is a wider '
+  + 'one lost.',
+  { ...PAIRED, credential_prefix: 'skp_' }, ATTESTED)
+
+identityCase('a-credential-with-no-prefix-at-all',
+  'The sentence has to work when there is nothing to quote back, which is the branch a naive '
+  + 'format string renders as a pair of empty backticks.',
+  { ...PAIRED, credential_prefix: '' }, ATTESTED)
+
+identityCase('an-opaque-bearer-token',
+  'The ordinary shape of a token: the scopes live on the Hub and the robot cannot see them. A '
+  + 'warning that says the check did not run here — which is a different sentence from saying it '
+  + 'passed, and the difference is the whole finding.',
+  { ...PAIRED, scopes: null }, ATTESTED)
+
+identityCase('every-scope-a-device-may-carry',
+  'The other direction of the allow-list, and it matters as much as the refusal: a list that '
+  + 'rejected its own members would make every correctly issued credential an error, which is the '
+  + 'shape of check somebody switches off.',
+  { ...PAIRED, scopes: [...DEVICE_SCOPES] }, ATTESTED)
+
+identityCase('a-scope-nobody-recognises',
+  '§19’s `security.credential.scope`, from the direction that survives a rename. A deny-list of '
+  + '§19’s three phrases would wave through a credential that spelled repository read any other '
+  + 'way; an allow-list refuses the spelling nobody anticipated, which is the only kind that '
+  + 'matters.',
+  { ...PAIRED, scopes: ['device:checkin', 'repositories:read'] }, ATTESTED)
+
+identityCase('unrecognised-scopes-are-sorted-and-said-once',
+  'Two of them, one repeated. The subjects list is what a console groups by, so a duplicate would '
+  + 'render as two problems and an unsorted list would render differently on two editions.',
+  {
+    ...PAIRED,
+    scopes: ['jobs:claim', 'device:checkin', 'repositories:read', 'jobs:claim'],
+  },
+  ATTESTED)
+
+identityCase('a-mainboard-was-replaced',
+  'The finding that only exists because §10 and §50 are both built: the key this robot was paired '
+  + 'on is not the key its vendor signed. §50.4 says this is the expected result of a board swap '
+  + 'and not a bug — so the message names the remedy, and the severity is still an error, because '
+  + 'the alternative reading is a robot paired on a key nobody attested.',
+  { ...PAIRED, device_key: 'cc' }, ATTESTED)
+
+identityCase('no-certificate-to-check-the-key-against',
+  '§50.3, stated as a finding: without one, what this machine is remains a claim it makes about '
+  + 'itself. A warning — a robot with no certificate is not a robot that failed a check, it is a '
+  + 'robot where the check could not be run.',
+  PAIRED, {})
+
+identityCase('a-certificate-that-names-no-key',
+  'A certificate that verified and carries no device key. Nothing to compare, so nothing is '
+  + 'claimed — and `attested` is false, because it takes a match and not the absence of a '
+  + 'mismatch.',
+  PAIRED, { birth_certificate: true })
+
+identityCase('everything-wrong-at-once',
+  'The ordering of the findings, frozen. An operator who drove to a warehouse gets one list rather '
+  + 'than one problem per attempt.',
+  {
+    credential: true,
+    credential_prefix: 'pat_',
+    namespace: '',
+    device_key: 'cc',
+    binding: 'software',
+    scopes: ['repositories:write'],
+  },
+  ATTESTED)
+
+// ── §10's image attestation ──────────────────────────────────────────────────
+
+function attestCase(id: string, note: string, attestation: Attestation): void {
+  add('identity', 'attestation', {
+    id,
+    note,
+    input: attestation as unknown as Record<string, unknown>,
+    expected: canonical(shapeAttestationReport(attest(attestation))),
+  })
+}
+
+const known = (digest: string): Measure => ({ state: 'known', digest })
+const nothing = (): Measure => ({ state: 'nothing' })
+const unmeasured = (why?: string): Measure => ({ state: 'unmeasured', why: why ?? null })
+
+attestCase('the-sentence-nobody-can-currently-produce',
+  '§10, quoted: the Hub records not "robot X is online" but "robot X is running image sha256:…, '
+  + 'policy sha256:…, against body sha256:…". This is that sentence, and it is frozen as bytes '
+  + 'because it is the one an incident investigation reads.',
+  {
+    device_id: 'dev_7',
+    os_image: known('sha256:aaaa'),
+    policy: known('sha256:bbbb'),
+    embodiment: known('sha256:cccc'),
+  })
+
+attestCase('a-robot-between-policies',
+  'Running nothing is a complete and true report, not a missing field. A fleet console that showed '
+  + 'this identically to a robot whose policy digest could not be read would be reporting unknown '
+  + 'software as none.',
+  {
+    device_id: 'dev_7',
+    os_image: known('sha256:aaaa'),
+    policy: nothing(),
+    embodiment: known('sha256:cccc'),
+  })
+
+attestCase('a-policy-whose-digest-could-not-be-read',
+  'The other half of the pair above. Same robot, same shape, and the two must not render the '
+  + 'same — which is the entire reason `nothing` and `unmeasured` are separate states.',
+  {
+    device_id: 'dev_7',
+    os_image: known('sha256:aaaa'),
+    policy: unmeasured('the runtime is not answering'),
+    embodiment: known('sha256:cccc'),
+  })
+
+attestCase('a-guest-tier-robot-has-no-os-image',
+  '§1: guest runs "a container beside the vendor stack". There is no Skynet OS image to measure '
+  + 'and reporting one would be inventing a digest — so `nothing` is the true answer and the '
+  + 'report is complete.',
+  {
+    device_id: 'dev_7',
+    os_image: nothing(),
+    policy: known('sha256:bbbb'),
+    embodiment: known('sha256:cccc'),
+  })
+
+attestCase('a-body-that-has-not-come-up',
+  '§27’s `kernel: down`. Reporting a body digest here would attest joint ratings nothing is '
+  + 'applying, which is the failure the whole descriptor chain exists to prevent.',
+  {
+    device_id: 'dev_7',
+    os_image: known('sha256:aaaa'),
+    policy: nothing(),
+    embodiment: nothing(),
+  })
+
+attestCase('an-unpaired-robot-still-reports',
+  'No device id, because nothing has issued one. The sentence names "This robot" rather than '
+  + 'inventing an identifier — and it is still produced, because a robot bringing itself up needs '
+  + 'to be able to say what it is running before anybody has paired it.',
+  {
+    os_image: known('sha256:aaaa'),
+    policy: nothing(),
+    embodiment: known('sha256:cccc'),
+  })
+
+attestCase('an-unmeasured-digest-with-no-reason-given',
+  'The branch a caller reaches by constructing the state without the sentence. Rendered as the '
+  + 'absence it is rather than as an empty pair of brackets.',
+  {
+    device_id: 'dev_7',
+    os_image: unmeasured(),
+    policy: known('sha256:bbbb'),
+    embodiment: known('sha256:cccc'),
+  })
+
+attestCase('three-holes-and-still-a-sentence',
+  '§13’s rule, applied to a report rather than to a recording: the one most likely to have a hole '
+  + 'in it is the one covering whatever made the hole. A check-in withheld for want of a digest is '
+  + 'a robot the fleet believes is offline, which turns a named gap into a silence nobody can tell '
+  + 'from a dead machine.',
+  {
+    device_id: 'dev_7',
+    os_image: unmeasured('the slot could not be read'),
+    policy: unmeasured(),
+    embodiment: unmeasured('no descriptor is loaded'),
+  })
+
+attestCase('a-known-measure-with-nothing-in-it',
+  'A caller bug, and the rendering is what stops it becoming a lie: an empty pair of backticks is '
+  + 'read as a digest, and this reads as the absence it is. The report is still complete, because '
+  + 'the caller said it measured — this file will not overrule a measurement it did not take.',
+  {
+    os_image: known(''),
+    policy: nothing(),
+    embodiment: nothing(),
+  })
+
+vocabulary('code_faults',
+  'Why eight characters are not a pairing code, in the order the checks run. The order is the '
+  + 'content: a credential is recognised before a length, which is what keeps `skd_x` from being '
+  + 'reported as three missing characters.',
+  CODE_FAULTS)
+vocabulary('device_scopes',
+  '§17’s and §57’s device-facing routes, one scope each. This edition’s reading and a default '
+  + 'rather than a derived constant — the Hub has declared no vocabulary. The **direction** is not '
+  + 'a default: it is an allow-list, and §19’s "assumed lost" is why.',
+  DEVICE_SCOPES)
+vocabulary('key_bindings', 'Where a device private key lives (§10).', KEY_BINDINGS)
+vocabulary('identity_findings',
+  'Everything §10 can find about a robot’s identity, in the order the checks run.',
+  IDENTITY_FINDINGS)
+vocabulary('measure_states',
+  'The three states one of §10’s three digests can be in. `nothing` and `unmeasured` are two '
+  + 'entries for §37.1’s reason: two facts with two different people at the end of them.',
+  MEASURE_STATES)
+
+// ── §11 and §17's check-in ───────────────────────────────────────────────────
+//
+// Three files, because a check-in has three separable ways to be wrong and an edition could agree
+// about any one of them while disagreeing about the others. `claim` is the field §17's rule lives
+// on — the platform never claims a robot is running something it has not heard from — `health` is
+// §33.6's age rule, and `document` is the bytes that actually cross to the Hub.
+
+function claimCase(id: string, note: string, progress: Progress): void {
+  add('checkin', 'claim', {
+    id,
+    note,
+    input: progress as unknown as Record<string, unknown>,
+    expected: canonical(shapeClaimVerdict(claimFor(progress))),
+  })
+}
+
+claimCase('applied',
+  'An empty plan on the generation the Hub asked for. The only state in which `applied` is true, '
+  + 'and the case that has to hold or §17’s rule has made the field useless rather than honest.',
+  { observed_generation: 41, desired_generation: 41, pending: [] })
+
+claimCase('converging',
+  'Work left and somebody doing it. The generation on the wire is 40 — what this robot is actually '
+  + 'running — and not the 41 it was asked for, which is the single field §17’s rule lives or dies '
+  + 'on.',
+  {
+    observed_generation: 40,
+    desired_generation: 41,
+    pending: [{ stage: 'policy', deferred: false, reason: 'the package is staged and not started' }],
+  })
+
+claimCase('deferred',
+  '§33.4’s barrier, and the reason this is a claim of its own rather than a flavour of converging: '
+  + 'nothing here happens until somebody puts the robot in a safe state. An operator reading '
+  + '"converging" would wait; an operator reading this one goes and does something.',
+  {
+    observed_generation: 40,
+    desired_generation: 41,
+    pending: [
+      { stage: 'os_image', deferred: true, reason: 'applying an image reboots' },
+      { stage: 'rhal_driver', deferred: true, reason: 'changing the driver changes the body' },
+    ],
+  })
+
+claimCase('one-action-still-moving-is-not-deferred',
+  'Two actions, one of them waiting and one of them not. `deferred` requires **every** pending '
+  + 'action to be waiting — otherwise a robot that is actively converging would report itself '
+  + 'stuck, and the one report that should send somebody to the robot would be the one they learn '
+  + 'to ignore.',
+  {
+    observed_generation: 40,
+    desired_generation: 41,
+    pending: [
+      { stage: 'os_image', deferred: true, reason: 'applying an image reboots' },
+      { stage: 'package', deferred: false, reason: 'fetching' },
+    ],
+  })
+
+claimCase('an-empty-plan-that-closes-nothing',
+  'The state worth having a name for. The reconciler emitted no actions and the generations still '
+  + 'disagree, which is a supervisor that cannot see the difference it exists to close. Reported '
+  + 'as `applied` it would be a green tick over a bug in the one place nobody looks.',
+  { observed_generation: 40, desired_generation: 41, pending: [] })
+
+claimCase('stages-are-sorted-and-said-once',
+  'Three pending actions across two stages, one repeated. `blocking` is what a fleet console groups '
+  + 'by, so a duplicate renders as two problems and an unsorted list renders differently on two '
+  + 'editions.',
+  {
+    observed_generation: 1,
+    desired_generation: 2,
+    pending: [
+      { stage: 'policy', deferred: false, reason: 'a' },
+      { stage: 'os_image', deferred: false, reason: 'b' },
+      { stage: 'policy', deferred: false, reason: 'c' },
+    ],
+  })
+
+claimCase('a-robot-nobody-has-told-anything',
+  'No generations and no plan, which is a robot that has never reached a Hub. Zero against zero is '
+  + '`applied`, and that is correct rather than a flattering default: this robot has applied '
+  + 'everything it was asked for, which was nothing.',
+  {})
+
+claimCase('deferred-on-a-generation-it-already-has',
+  'Waiting for a safe state while the generations agree — which happens when the desired state '
+  + 'changed and changed back, or when an action is deferred that the plan will drop next pass. '
+  + 'The plan is not empty, so it is not applied, and the pending list is what says why.',
+  {
+    observed_generation: 41,
+    desired_generation: 41,
+    pending: [{ stage: 'profile', deferred: true, reason: 'a widening waits for a restart' }],
+  })
+
+// ── §33.6's health, and the rule about ages ──────────────────────────────────
+
+function healthCase(id: string, note: string, health: HealthInput): void {
+  add('checkin', 'health', {
+    id,
+    note,
+    input: health as unknown as Record<string, unknown>,
+    expected: canonical(shapeHealthReport(summarize(health))),
+  })
+}
+
+healthCase('a-robot-nobody-has-measured',
+  'Every aggregate field absent, no packages, and **not degraded**. "We could not measure the '
+  + 'battery" is not "the battery is fine" and it is also not "the robot is unhealthy" — reporting '
+  + 'a gap as a fault is how an operator learns to ignore the health screen.',
+  {})
+
+healthCase('alive-and-producing-nothing',
+  'The finding §33.6 exists for, and the reason liveness and readiness are two signals: a dead '
+  + 'process is obvious and a live-but-stalled one looks fine on every dashboard while the robot '
+  + 'stands still.',
+  {
+    packages: [
+      { id: 'acme/grasp', live: true, readiness: 'stalled', age_ms: 40 },
+      { id: 'acme/nav', live: true, readiness: 'ready', age_ms: 12 },
+    ],
+  })
+
+healthCase('a-first-cycle-is-not-a-stall',
+  'A policy that has legitimately produced nothing yet. Reporting `unknown` as a stall would make '
+  + 'every start look like a fault, which is the same over-reporting the case above guards against '
+  + 'from the other side.',
+  { packages: [{ id: 'acme/grasp', live: true, readiness: 'unknown', age_ms: 5 }] })
+
+healthCase('a-reading-with-no-age',
+  '§33.6 in four words: "Every field carries its age." A battery reading nobody can date is one a '
+  + 'console renders as current, and a four-hour-old 12% is exactly the number somebody drives out '
+  + 'on. It is dropped, and named in `undated` rather than in `unmeasured`, because "nobody '
+  + 'measured this" and "somebody measured this and lost track of when" send different people to '
+  + 'different places.',
+  { battery: { value: 0.12 }, storage_headroom: { value: 0.4, age_ms: 900 } })
+
+healthCase('an-age-with-no-reading',
+  'The other half of the pair, and it is simply unmeasured: an age for a value nobody took is not '
+  + 'a measurement missing its date, it is a date missing its measurement.',
+  { battery: { age_ms: 900 } })
+
+healthCase('every-field-measured',
+  'All five of §33.6’s aggregate fields with a value and an age. The case that pins the order they '
+  + 'are emitted in, which is the document’s order and not alphabetical.',
+  {
+    generation_lag: { value: 0, age_ms: 1200 },
+    guard_trip_rate: { value: 0.5, age_ms: 60_000 },
+    storage_headroom: { value: 0.42, age_ms: 900 },
+    battery: { value: 0.88, age_ms: 2_000 },
+    temperature_c: { value: 51.5, age_ms: 3_000 },
+  })
+
+healthCase('a-negative-age-is-not-an-age',
+  'A clock that went backwards, or a subtraction done in the wrong order. Treated as undated '
+  + 'rather than passed through, because a reading dated in the future is worse than one that is '
+  + 'not dated at all — the second is visibly missing and the first looks fresh.',
+  { battery: { value: 0.5, age_ms: -1 } })
+
+healthCase('a-lag-of-zero-is-a-measurement',
+  'The case a naive falsy check breaks. Zero generation lag is a robot that is up to date, and it '
+  + 'must not read as a field nobody measured — which is the same distinction §33.6 draws between '
+  + 'zero guard trips and no measurement of guard trips.',
+  { generation_lag: { value: 0, age_ms: 500 } })
+
+// ── The document ─────────────────────────────────────────────────────────────
+
+function documentCase(id: string, note: string, input: CheckInInput): void {
+  add('checkin', 'document', {
+    id,
+    note,
+    input: input as unknown as Record<string, unknown>,
+    expected: canonical(shapeCheckIn(checkIn(input))),
+  })
+}
+
+const CONVERGED: CheckInInput = {
+  device_id: 'dev_7',
+  agent: 'skynetd/0.1.0',
+  contracts: '1.0.0',
+  state: 'running',
+  desired_digest: 'sha256:dddd',
+  progress: { observed_generation: 41, desired_generation: 41, pending: [] },
+  health: {
+    packages: [{ id: 'acme/grasp', live: true, readiness: 'ready', age_ms: 12 }],
+    storage_headroom: { value: 0.42, age_ms: 900 },
+  },
+  attestation: {
+    device_id: 'dev_7',
+    os_image: { state: 'known', digest: 'sha256:aaaa' },
+    policy: { state: 'known', digest: 'sha256:bbbb' },
+    embodiment: { state: 'known', digest: 'sha256:cccc' },
+  },
+}
+
+documentCase('a-healthy-robot-on-the-generation-it-was-given',
+  'The bytes that cross to the Hub when everything is right. Frozen whole, because two editions '
+  + 'producing different check-ins for the same robot would show a fleet console two robots that '
+  + 'differ only in who compiled their supervisor.',
+  CONVERGED)
+
+documentCase('waiting-for-a-safe-state',
+  'The same robot, mid-update, with §33.4’s barrier in the way. `applied` is false, the claim says '
+  + 'which kind of false, and the pending list names the stage and the reason — because "the update '
+  + 'did not take" and "the robot has not been put in a safe state" send an engineer to different '
+  + 'places.',
+  {
+    ...CONVERGED,
+    state: 'hold',
+    progress: {
+      observed_generation: 40,
+      desired_generation: 41,
+      pending: [{ stage: 'os_image', deferred: true, reason: 'applying an image reboots' }],
+    },
+  })
+
+documentCase('a-robot-that-can-measure-almost-nothing',
+  'An unpaired, freshly booted robot with no descriptor, no policy and nothing measured. The '
+  + 'check-in is still produced and every hole in it is named — §13’s rule applied to a report, '
+  + 'because the robot most in need of one is the robot that cannot measure everything.',
+  {
+    agent: 'skynetd/0.1.0',
+    contracts: '1.0.0',
+    state: 'post',
+    progress: {},
+    health: {},
+    attestation: {
+      os_image: { state: 'unmeasured', why: 'no Skynet OS image is reported' },
+      policy: { state: 'nothing' },
+      embodiment: { state: 'nothing' },
+    },
+  })
+
+documentCase('a-robot-that-holds-no-desired-state',
+  'Paired, converged on generation 0, and reconciling against nothing — a robot the Hub has minted '
+  + 'a credential for and never told what to be. The digest is empty rather than absent, because '
+  + '"this robot holds no document" is a fact a fleet page acts on and an absent key is one it has '
+  + 'to guess at.',
+  {
+    ...CONVERGED,
+    desired_digest: '',
+    progress: { observed_generation: 0, desired_generation: 0, pending: [] },
+  })
+
+documentCase('a-stalled-policy-on-a-converged-robot',
+  'Applied, and degraded. The two are independent and a document that collapsed them would hide '
+  + 'the case §33.6 spends a paragraph on: a robot that reconciled perfectly and is standing still.',
+  {
+    ...CONVERGED,
+    health: {
+      packages: [{ id: 'acme/grasp', live: true, readiness: 'stalled', age_ms: 4_000 }],
+      storage_headroom: { value: 0.42, age_ms: 900 },
+    },
+  })
+
+vocabulary('checkin_claims',
+  'What a robot may claim about the generation it was given. Four rather than §17’s boolean, '
+  + 'because "not applied" covers a robot that is working, one that is waiting for a person, and '
+  + 'one whose supervisor disagrees with itself.',
+  CLAIMS)
+vocabulary('reconcile_stages',
+  '§33.4’s six ordered stages, as a check-in names them. Frozen because a fleet console groups by '
+  + 'them, and six spellings of one stage is six columns.',
+  STAGES)
+vocabulary('readiness_states',
+  '§33.6’s four. `stalled` and `unknown` are the pair that carries the section: one is a policy '
+  + 'that has stopped producing and the other is one that has not started.',
+  READINESS)
+vocabulary('health_fields',
+  'The aggregate health fields, in the order §33.6 lists them. Every one is a key on every '
+  + 'check-in whether or not it was measured, so a console iterates the set rather than '
+  + 'discovering which of them a robot happened to have.',
+  HEALTH_FIELDS)
+
+// ── §11's pull ───────────────────────────────────────────────────────────────
+//
+// One file, because there is one function — and every case in it is really a case about a single
+// question: may a response from a network become the file that decides what software runs on a
+// machine that moves. Two of the answers are "no, and the robot carries on", which §34.1 makes the
+// ordinary state rather than a failure.
+
+function offerCase(id: string, note: string, offer: Offer, held: Held): void {
+  add('intent', 'offer', {
+    id,
+    note,
+    input: { offer, held },
+    expected: canonical(shapeOfferVerdict(assessOffer(offer, held))),
+  })
+}
+
+const HELD: Held = { generation: 41, digest: 'sha256:aaaa', running: 2 }
+
+const good = (generation: number, digest: string, packages: number): Offer =>
+  ({ decoded: true, generation, digest, packages })
+
+offerCase('the-ordinary-poll',
+  'Most polls. §11’s loop asks the same question every few seconds and the answer is usually the '
+  + 'document the robot already has — so `adopt` is true and `changed` is false, and a caller that '
+  + 'could not tell the two apart would rewrite the desired state on every tick.',
+  good(41, 'sha256:aaaa', 2), HELD)
+
+offerCase('a-new-generation',
+  'What the loop exists for. Adopted, and it changes something.',
+  good(42, 'sha256:bbbb', 3), HELD)
+
+offerCase('not-a-desired-state',
+  '§33.8 says a robot never invents a desired state; this is the step before that, where a response '
+  + 'is stopped from *becoming* one. The robot carries on against what it has, which is what it '
+  + 'does whenever it cannot reach the Hub at all — so a garbage response costs it nothing that '
+  + 'being offline does not.',
+  { decoded: false, decode_error: '`generation` is absent, and it is what makes a check-in idempotent' },
+  HELD)
+
+offerCase('a-response-that-decoded-and-said-nothing-about-why',
+  'The branch a caller reaches by reporting a failure without a reason. The sentence still works '
+  + 'rather than trailing off after a colon.',
+  { decoded: false }, HELD)
+
+offerCase('a-reused-generation',
+  'The case this file was written for. A Hub serving two documents under one generation has broken '
+  + 'the property §11 rests idempotence on, and the robot is the only party that can see it. '
+  + 'Refused, because adopting would have the robot running new software while reporting the old '
+  + 'generation applied — and a fleet console would show it converged, which is exactly the claim '
+  + '§17 forbids and is invisible because every robot looks right.',
+  good(41, 'sha256:bbbb', 2), HELD)
+
+offerCase('a-generation-that-went-backwards',
+  'The opposite call, deliberately. A Hub restored from a backup serves a lower counter, and a '
+  + 'robot that refused to follow one would be a fleet nobody could recover without visiting every '
+  + 'machine. Adopted, and reported once.',
+  good(40, 'sha256:bbbb', 2), HELD)
+
+offerCase('a-desired-state-that-empties-a-running-robot',
+  'An operator emptying a robot and a Hub serving a stub are indistinguishable from here. Adopted, '
+  + 'because stopping is never the dangerous direction (§33.4), and said out loud because the two '
+  + 'readings send different people to different places.',
+  good(42, 'sha256:bbbb', 0), HELD)
+
+offerCase('emptying-a-robot-that-is-running-nothing',
+  'The same document against a robot with nothing running. Not news, and not reported — a finding '
+  + 'that fired on every idle robot would be one nobody reads.',
+  good(42, 'sha256:bbbb', 0), { generation: 41, digest: 'sha256:aaaa', running: 0 })
+
+offerCase('the-first-pull-this-robot-has-ever-made',
+  'Nothing held, so there is no digest to compare and no generation to have gone backwards. It '
+  + 'must not report a reuse, which is what a naive comparison against an empty digest would do — '
+  + 'and it must report `changed`, because everything is a change to a robot that had nothing.',
+  good(0, 'sha256:aaaa', 1), {})
+
+offerCase('both-warnings-at-once',
+  'A backup restore that also emptied the robot. Both are reported and both are adopted; the '
+  + 'ordering of the list is frozen so an operator gets one list rather than one per poll.',
+  good(40, 'sha256:bbbb', 0), HELD)
+
+offerCase('a-generation-of-zero-against-a-robot-that-has-applied-one',
+  'The boundary, and the case a falsy check breaks. Zero is a generation, so this is intent going '
+  + 'backwards rather than a field nobody set.',
+  good(0, 'sha256:bbbb', 2), HELD)
+
+vocabulary('offer_faults',
+  'Everything §11’s pull can find wrong with a desired state it was handed, in the order the checks '
+  + 'run. Two refuse and two report, and which is which is the content of the set.',
+  OFFER_FAULTS)
+
+
+// ── §74's telemetry ──────────────────────────────────────────────────────────
+
+function windowCase(id: string, note: string, input: TelemetryWindow): void {
+  add('telemetry', 'window', {
+    id,
+    note,
+    input: input as unknown as Record<string, unknown>,
+    expected: canonical(shapeWindowReport(assessWindow(input))),
+  })
+}
+
+function coverageCase(id: string, note: string, windows: TelemetryWindow[]): void {
+  add('telemetry', 'coverage', {
+    id,
+    note,
+    input: { windows } as unknown as Record<string, unknown>,
+    expected: canonical(shapeCoverage(coverage(windows))),
+  })
+}
+
+/** Five minutes, wall time and monotonic agreeing. */
+const FIVE_MINUTES: TelemetryWindow = {
+  from_ms: 1_760_000_000_000,
+  to_ms: 1_760_000_300_000,
+  elapsed_ms: 300_000,
+  counters: { cycles: 30_000, guard_trips: 2, interventions: 1 },
+}
+
+windowCase('an-ordinary-five-minute-window',
+  'The bytes that cross when everything is right. Rates are per second and over the monotonic '
+  + 'duration, and the five counters nothing measured are named rather than reported as zero.',
+  FIVE_MINUTES)
+
+windowCase('a-window-that-measured-nothing',
+  'A robot with no kernel running: five minutes of being up, and nothing counted. It is a valid '
+  + 'window — "the robot was up for five minutes and counted nothing" is a fact — and it is what '
+  + 'every robot this edition runs will send.',
+  { ...FIVE_MINUTES, counters: {} })
+
+windowCase('a-window-that-counted-zero',
+  'The distinction §74.3 exists for, beside the case above. Zero guard trips and no measurement of '
+  + 'guard trips render identically as 0, and the second is the number an operator relaxes on.',
+  { ...FIVE_MINUTES, counters: { guard_trips: 0 } })
+
+windowCase('a-window-with-no-duration',
+  'Nothing to divide by, so no rate is anything. Refused rather than counted as zero — a rate of '
+  + 'zero over no time is the most confident wrong number a fleet page can render.',
+  { ...FIVE_MINUTES, elapsed_ms: 0 })
+
+windowCase('a-window-that-does-not-say-when-it-was',
+  'Unbounded. A Hub cannot place it beside another robot’s, and the gap between windows is how a '
+  + 'dropped one is noticed at all (§34.4, §47.4).',
+  { elapsed_ms: 300_000, counters: { cycles: 1_000 } })
+
+windowCase('a-window-whose-clock-stepped-backwards',
+  'Ends before it starts. A clock that moved under the robot rather than a counting error, and the '
+  + 'counts are over an interval nobody can name.',
+  { from_ms: 1_760_000_300_000, to_ms: 1_760_000_000_000, elapsed_ms: 300_000, counters: {} })
+
+windowCase('a-machine-that-was-suspended',
+  'Wall time ran an hour ahead of the monotonic clock. §74.2: the disagreement is reported and the '
+  + 'counts are kept, because a suspended machine and a corrected clock look the same from here and '
+  + 'neither is a reason to throw a measurement away.',
+  { ...FIVE_MINUTES, to_ms: 1_760_003_900_000 })
+
+coverageCase('two-windows-that-tile',
+  'Contiguous, so there is nothing missing and the span equals what was observed.',
+  [
+    FIVE_MINUTES,
+    { ...FIVE_MINUTES, from_ms: 1_760_000_300_000, to_ms: 1_760_000_600_000,
+      counters: { cycles: 30_000, guard_trips: 0, interventions: 0 } },
+  ])
+
+coverageCase('a-dropped-window-leaves-a-gap',
+  '§34.4 drops telemetry first and aggressively, and §47.4 requires the gap to be visible as a gap. '
+  + 'It is: the windows stop tiling, and the Hub knows exactly which ten minutes it does not have — '
+  + 'without anybody having remembered to annotate anything.',
+  [
+    FIVE_MINUTES,
+    { ...FIVE_MINUTES, from_ms: 1_760_000_900_000, to_ms: 1_760_001_200_000,
+      counters: { cycles: 30_000 } },
+  ])
+
+coverageCase('an-unusable-window-is-counted-apart',
+  'One window with no duration, beside a good one. The bad one is not counted and its absence is '
+  + 'reported as a count rather than being silently dropped into the same total.',
+  [FIVE_MINUTES, { ...FIVE_MINUTES, elapsed_ms: 0 }])
+
+coverageCase('overlapping-windows-are-merged-for-the-span-and-summed-for-the-counts',
+  'A robot that restarted and re-reported. The honest reading is that both sets of events happened, '
+  + 'and that the interval was observed once.',
+  [
+    FIVE_MINUTES,
+    { ...FIVE_MINUTES, from_ms: 1_760_000_150_000, to_ms: 1_760_000_450_000,
+      counters: { cycles: 15_000 } },
+  ])
+
+coverageCase('nothing-at-all',
+  'No windows. Zero observed, zero spanned, no gaps and every counter unmeasured — which is a '
+  + 'different answer from a robot that reported windows full of zeroes.',
+  [])
+
+vocabulary('telemetry_counters',
+  '§74’s closed set of counters. Frozen because a fleet console divides by these, and six spellings '
+  + 'of one counter is six columns that each look empty.',
+  TELEMETRY_COUNTERS)
+
+vocabulary('telemetry_window_faults',
+  'Everything §74 can find wrong with a window. Three refuse it and one reports — the clock skew is '
+  + 'a fact about the robot rather than a reason to discard a measurement.',
+  WINDOW_FAULTS)
 
 // ── Write ────────────────────────────────────────────────────────────────────
 

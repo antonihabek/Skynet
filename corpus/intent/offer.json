@@ -1,0 +1,195 @@
+{
+  "corpus": "intent",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "the-ordinary-poll",
+      "note": "Most polls. §11’s loop asks the same question every few seconds and the answer is usually the document the robot already has — so `adopt` is true and `changed` is false, and a caller that could not tell the two apart would rewrite the desired state on every tick.",
+      "input": {
+        "offer": {
+          "decoded": true,
+          "generation": 41,
+          "digest": "sha256:aaaa",
+          "packages": 2
+        },
+        "held": {
+          "generation": 41,
+          "digest": "sha256:aaaa",
+          "running": 2
+        }
+      },
+      "expected": "{\"adopt\":true,\"changed\":false,\"faults\":[],\"generation\":41}"
+    },
+    {
+      "id": "a-new-generation",
+      "note": "What the loop exists for. Adopted, and it changes something.",
+      "input": {
+        "offer": {
+          "decoded": true,
+          "generation": 42,
+          "digest": "sha256:bbbb",
+          "packages": 3
+        },
+        "held": {
+          "generation": 41,
+          "digest": "sha256:aaaa",
+          "running": 2
+        }
+      },
+      "expected": "{\"adopt\":true,\"changed\":true,\"faults\":[],\"generation\":42}"
+    },
+    {
+      "id": "not-a-desired-state",
+      "note": "§33.8 says a robot never invents a desired state; this is the step before that, where a response is stopped from *becoming* one. The robot carries on against what it has, which is what it does whenever it cannot reach the Hub at all — so a garbage response costs it nothing that being offline does not.",
+      "input": {
+        "offer": {
+          "decoded": false,
+          "decode_error": "`generation` is absent, and it is what makes a check-in idempotent"
+        },
+        "held": {
+          "generation": 41,
+          "digest": "sha256:aaaa",
+          "running": 2
+        }
+      },
+      "expected": "{\"adopt\":false,\"changed\":false,\"faults\":[{\"code\":\"undecodable\",\"message\":\"This response is not a desired state: `generation` is absent, and it is what makes a check-in idempotent. It has not been written to disk, and this robot carries on reconciling against what it already has — which is what it does whenever it cannot reach the Hub at all (§34.1), so nothing about the robot is worse for it.\",\"severity\":\"error\"}],\"generation\":41}"
+    },
+    {
+      "id": "a-response-that-decoded-and-said-nothing-about-why",
+      "note": "The branch a caller reaches by reporting a failure without a reason. The sentence still works rather than trailing off after a colon.",
+      "input": {
+        "offer": {
+          "decoded": false
+        },
+        "held": {
+          "generation": 41,
+          "digest": "sha256:aaaa",
+          "running": 2
+        }
+      },
+      "expected": "{\"adopt\":false,\"changed\":false,\"faults\":[{\"code\":\"undecodable\",\"message\":\"This response is not a desired state. It has not been written to disk, and this robot carries on reconciling against what it already has — which is what it does whenever it cannot reach the Hub at all (§34.1), so nothing about the robot is worse for it.\",\"severity\":\"error\"}],\"generation\":41}"
+    },
+    {
+      "id": "a-reused-generation",
+      "note": "The case this file was written for. A Hub serving two documents under one generation has broken the property §11 rests idempotence on, and the robot is the only party that can see it. Refused, because adopting would have the robot running new software while reporting the old generation applied — and a fleet console would show it converged, which is exactly the claim §17 forbids and is invisible because every robot looks right.",
+      "input": {
+        "offer": {
+          "decoded": true,
+          "generation": 41,
+          "digest": "sha256:bbbb",
+          "packages": 2
+        },
+        "held": {
+          "generation": 41,
+          "digest": "sha256:aaaa",
+          "running": 2
+        }
+      },
+      "expected": "{\"adopt\":false,\"changed\":false,\"faults\":[{\"code\":\"generation_reused\",\"message\":\"The Hub is serving a different document under generation 41, which this robot has already applied. §11 rests idempotence on that counter, so adopting this would have the robot running new software while reporting the old generation as applied — and a fleet console would show it converged. Bump the generation on the Hub and this robot will take it on the next poll.\",\"severity\":\"error\"}],\"generation\":41}"
+    },
+    {
+      "id": "a-generation-that-went-backwards",
+      "note": "The opposite call, deliberately. A Hub restored from a backup serves a lower counter, and a robot that refused to follow one would be a fleet nobody could recover without visiting every machine. Adopted, and reported once.",
+      "input": {
+        "offer": {
+          "decoded": true,
+          "generation": 40,
+          "digest": "sha256:bbbb",
+          "packages": 2
+        },
+        "held": {
+          "generation": 41,
+          "digest": "sha256:aaaa",
+          "running": 2
+        }
+      },
+      "expected": "{\"adopt\":true,\"changed\":true,\"faults\":[{\"code\":\"generation_went_backwards\",\"message\":\"This robot has applied generation 41 and the Hub is asking for 40. Intent has gone backwards, which is what a Hub restored from a backup looks like. It is adopted — a robot that refused to follow one would be a fleet nobody could recover — and it is reported, because it is worth somebody knowing once.\",\"severity\":\"warning\"}],\"generation\":40}"
+    },
+    {
+      "id": "a-desired-state-that-empties-a-running-robot",
+      "note": "An operator emptying a robot and a Hub serving a stub are indistinguishable from here. Adopted, because stopping is never the dangerous direction (§33.4), and said out loud because the two readings send different people to different places.",
+      "input": {
+        "offer": {
+          "decoded": true,
+          "generation": 42,
+          "digest": "sha256:bbbb",
+          "packages": 0
+        },
+        "held": {
+          "generation": 41,
+          "digest": "sha256:aaaa",
+          "running": 2
+        }
+      },
+      "expected": "{\"adopt\":true,\"changed\":true,\"faults\":[{\"code\":\"empties_the_robot\",\"message\":\"This desired state names no packages and this robot is running 2. That is what an operator emptying a robot looks like, and it is also what a Hub serving a stub looks like. It is adopted, because stopping is never the dangerous direction (§33.4) — and it is said out loud, because the two are indistinguishable from here.\",\"severity\":\"warning\"}],\"generation\":42}"
+    },
+    {
+      "id": "emptying-a-robot-that-is-running-nothing",
+      "note": "The same document against a robot with nothing running. Not news, and not reported — a finding that fired on every idle robot would be one nobody reads.",
+      "input": {
+        "offer": {
+          "decoded": true,
+          "generation": 42,
+          "digest": "sha256:bbbb",
+          "packages": 0
+        },
+        "held": {
+          "generation": 41,
+          "digest": "sha256:aaaa",
+          "running": 0
+        }
+      },
+      "expected": "{\"adopt\":true,\"changed\":true,\"faults\":[],\"generation\":42}"
+    },
+    {
+      "id": "the-first-pull-this-robot-has-ever-made",
+      "note": "Nothing held, so there is no digest to compare and no generation to have gone backwards. It must not report a reuse, which is what a naive comparison against an empty digest would do — and it must report `changed`, because everything is a change to a robot that had nothing.",
+      "input": {
+        "offer": {
+          "decoded": true,
+          "generation": 0,
+          "digest": "sha256:aaaa",
+          "packages": 1
+        },
+        "held": {}
+      },
+      "expected": "{\"adopt\":true,\"changed\":true,\"faults\":[],\"generation\":0}"
+    },
+    {
+      "id": "both-warnings-at-once",
+      "note": "A backup restore that also emptied the robot. Both are reported and both are adopted; the ordering of the list is frozen so an operator gets one list rather than one per poll.",
+      "input": {
+        "offer": {
+          "decoded": true,
+          "generation": 40,
+          "digest": "sha256:bbbb",
+          "packages": 0
+        },
+        "held": {
+          "generation": 41,
+          "digest": "sha256:aaaa",
+          "running": 2
+        }
+      },
+      "expected": "{\"adopt\":true,\"changed\":true,\"faults\":[{\"code\":\"generation_went_backwards\",\"message\":\"This robot has applied generation 41 and the Hub is asking for 40. Intent has gone backwards, which is what a Hub restored from a backup looks like. It is adopted — a robot that refused to follow one would be a fleet nobody could recover — and it is reported, because it is worth somebody knowing once.\",\"severity\":\"warning\"},{\"code\":\"empties_the_robot\",\"message\":\"This desired state names no packages and this robot is running 2. That is what an operator emptying a robot looks like, and it is also what a Hub serving a stub looks like. It is adopted, because stopping is never the dangerous direction (§33.4) — and it is said out loud, because the two are indistinguishable from here.\",\"severity\":\"warning\"}],\"generation\":40}"
+    },
+    {
+      "id": "a-generation-of-zero-against-a-robot-that-has-applied-one",
+      "note": "The boundary, and the case a falsy check breaks. Zero is a generation, so this is intent going backwards rather than a field nobody set.",
+      "input": {
+        "offer": {
+          "decoded": true,
+          "generation": 0,
+          "digest": "sha256:bbbb",
+          "packages": 2
+        },
+        "held": {
+          "generation": 41,
+          "digest": "sha256:aaaa",
+          "running": 2
+        }
+      },
+      "expected": "{\"adopt\":true,\"changed\":true,\"faults\":[{\"code\":\"generation_went_backwards\",\"message\":\"This robot has applied generation 41 and the Hub is asking for 0. Intent has gone backwards, which is what a Hub restored from a backup looks like. It is adopted — a robot that refused to follow one would be a fleet nobody could recover — and it is reported, because it is worth somebody knowing once.\",\"severity\":\"warning\"}],\"generation\":0}"
+    }
+  ]
+}

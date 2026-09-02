@@ -1,0 +1,150 @@
+{
+  "corpus": "identity",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "the-specifications-own-example",
+      "note": "§18 writes `skynet pair ABCD-1234`. If this case ever stops producing a code, either the alphabet or the length has drifted away from the document’s own example — which is the one string in the specification a user will actually type.",
+      "input": {
+        "input": "ABCD-1234"
+      },
+      "expected": "{\"code\":\"ABCD1234\",\"fault\":null}"
+    },
+    {
+      "id": "the-same-code-without-its-hyphen",
+      "note": "The hyphen is how a code is printed, not part of it. Two spellings of one code must not be two codes.",
+      "input": {
+        "input": "ABCD1234"
+      },
+      "expected": "{\"code\":\"ABCD1234\",\"fault\":null}"
+    },
+    {
+      "id": "lower-case",
+      "note": "Nobody holds shift for eight characters, and a code that only worked in upper case would be a support call per robot.",
+      "input": {
+        "input": "abcd-1234"
+      },
+      "expected": "{\"code\":\"ABCD1234\",\"fault\":null}"
+    },
+    {
+      "id": "read-off-a-screen-and-typed-badly",
+      "note": "Leading and trailing whitespace from a paste, an inner space where the hyphen was, and a trailing newline. All cosmetic.",
+      "input": {
+        "input": "  abcd 1234\n"
+      },
+      "expected": "{\"code\":\"ABCD1234\",\"fault\":null}"
+    },
+    {
+      "id": "hyphens-everywhere",
+      "note": "Somebody grouping the characters their own way still gets their code. The rule is that hyphens and spaces do not count, not that they appear in one place.",
+      "input": {
+        "input": "A-B-C-D-1-2-3-4"
+      },
+      "expected": "{\"code\":\"ABCD1234\",\"fault\":null}"
+    },
+    {
+      "id": "the-letters-that-fold",
+      "note": "Crockford’s folding, and the reason the alphabet excludes these letters rather than rejecting them: an operator reading `01234567` off a screen types the letters they think they see, and refusing that would be refusing a correct code because a font has a slashed zero.",
+      "input": {
+        "input": "OI234567"
+      },
+      "expected": "{\"code\":\"01234567\",\"fault\":null}"
+    },
+    {
+      "id": "a-lower-case-l-folds-too",
+      "note": "The worst of the three, because a lower-case l and a 1 are the same glyph in most sans-serif faces. Folded after upper-casing, so `l` and `L` reach the same digit.",
+      "input": {
+        "input": "llll2345"
+      },
+      "expected": "{\"code\":\"11112345\",\"fault\":null}"
+    },
+    {
+      "id": "a-credential-pasted-in",
+      "note": "The check that exists because an operator holds two secrets at once and will eventually paste the wrong one. Caught before anything is sent, and the refusal names the class rather than the value — a credential echoed into a terminal is a credential in a shell history.",
+      "input": {
+        "input": "skd_abcdef0123456789"
+      },
+      "expected": "{\"code\":null,\"fault\":{\"code\":\"looks_like_a_credential\",\"detail\":\"This is a device credential — it begins `skd_` — and pairing takes the short code the Hub showed you, not the credential it hands back afterwards. Nothing has been sent. Treat the credential as exposed if it has been on a screen somebody else could see.\",\"position\":null}}"
+    },
+    {
+      "id": "a-credential-in-upper-case",
+      "note": "Somebody’s terminal, or somebody retyping. The prefix match is case-insensitive for the same reason the code is.",
+      "input": {
+        "input": "SKD_ABCDEF0123456789"
+      },
+      "expected": "{\"code\":null,\"fault\":{\"code\":\"looks_like_a_credential\",\"detail\":\"This is a device credential — it begins `skd_` — and pairing takes the short code the Hub showed you, not the credential it hands back afterwards. Nothing has been sent. Treat the credential as exposed if it has been on a screen somebody else could see.\",\"position\":null}}"
+    },
+    {
+      "id": "a-credential-too-short-to-be-a-code",
+      "note": "Five characters, so a parser that stripped first would report it too short and send the operator hunting for three missing characters in a string that is not a code at all. The order of the checks is what this case pins.",
+      "input": {
+        "input": "skd_x"
+      },
+      "expected": "{\"code\":null,\"fault\":{\"code\":\"looks_like_a_credential\",\"detail\":\"This is a device credential — it begins `skd_` — and pairing takes the short code the Hub showed you, not the credential it hands back afterwards. Nothing has been sent. Treat the credential as exposed if it has been on a screen somebody else could see.\",\"position\":null}}"
+    },
+    {
+      "id": "nothing-at-all",
+      "note": "The empty string reaches this function whenever somebody runs the command with no argument, and the sentence has to say what a code looks like rather than that a string was empty.",
+      "input": {
+        "input": ""
+      },
+      "expected": "{\"code\":null,\"fault\":{\"code\":\"empty\",\"detail\":\"No code was given. `skynet pair` takes the eight-character code the Hub showed you, written as XXXX-XXXX.\",\"position\":null}}"
+    },
+    {
+      "id": "only-hyphens",
+      "note": "Not empty, and nothing left after the cosmetics are removed. Reported as empty, because that is what the operator has.",
+      "input": {
+        "input": "----"
+      },
+      "expected": "{\"code\":null,\"fault\":{\"code\":\"empty\",\"detail\":\"No code was given. `skynet pair` takes the eight-character code the Hub showed you, written as XXXX-XXXX.\",\"position\":null}}"
+    },
+    {
+      "id": "seven-characters",
+      "note": "One short. Named as a length rather than as a missing character, because nobody can say which one is missing.",
+      "input": {
+        "input": "ABCD123"
+      },
+      "expected": "{\"code\":null,\"fault\":{\"code\":\"too_short\",\"detail\":\"A pairing code is 8 characters and this is 7. Hyphens and spaces do not count towards it.\",\"position\":null}}"
+    },
+    {
+      "id": "nine-characters",
+      "note": "One long, and the other side of the same boundary.",
+      "input": {
+        "input": "ABCD12345"
+      },
+      "expected": "{\"code\":null,\"fault\":{\"code\":\"too_long\",\"detail\":\"A pairing code is 8 characters and this is 9. Hyphens and spaces do not count towards it.\",\"position\":null}}"
+    },
+    {
+      "id": "a-u-in-the-middle",
+      "note": "The letter Crockford drops. It cannot have been read off a screen, so it is a mistyped something-else — and the refusal says which position rather than which character.",
+      "input": {
+        "input": "ABCDUFGH"
+      },
+      "expected": "{\"code\":null,\"fault\":{\"code\":\"not_in_alphabet\",\"detail\":\"Character 5 of the 8 is not one a pairing code uses. Codes are digits and upper-case letters, without I, L, O or U — if you read one of those off the screen it was a 1 or a 0, and typing it that way works too.\",\"position\":5}}"
+    },
+    {
+      "id": "a-character-nobody-could-have-read",
+      "note": "Punctuation, from a paste that took a neighbouring character.",
+      "input": {
+        "input": "ABCDEF@1"
+      },
+      "expected": "{\"code\":null,\"fault\":{\"code\":\"not_in_alphabet\",\"detail\":\"Character 7 of the 8 is not one a pairing code uses. Codes are digits and upper-case letters, without I, L, O or U — if you read one of those off the screen it was a 1 or a 0, and typing it that way works too.\",\"position\":7}}"
+    },
+    {
+      "id": "the-first-character-is-the-bad-one",
+      "note": "The boundary of the position count. 1-based, because it is read by a person counting characters on a screen and not by a program indexing an array.",
+      "input": {
+        "input": "!BCD1234"
+      },
+      "expected": "{\"code\":null,\"fault\":{\"code\":\"not_in_alphabet\",\"detail\":\"Character 1 of the 8 is not one a pairing code uses. Codes are digits and upper-case letters, without I, L, O or U — if you read one of those off the screen it was a 1 or a 0, and typing it that way works too.\",\"position\":1}}"
+    },
+    {
+      "id": "eight-characters-that-are-not-ascii",
+      "note": "Eight code points, so it is not a length fault, and the first of them is not in the alphabet. Counted in characters rather than bytes: telling somebody they typed twenty-four characters would be a sentence about an encoding they did not choose.",
+      "input": {
+        "input": "αβγδεζηθ"
+      },
+      "expected": "{\"code\":null,\"fault\":{\"code\":\"not_in_alphabet\",\"detail\":\"Character 1 of the 8 is not one a pairing code uses. Codes are digits and upper-case letters, without I, L, O or U — if you read one of those off the screen it was a 1 or a 0, and typing it that way works too.\",\"position\":1}}"
+    }
+  ]
+}

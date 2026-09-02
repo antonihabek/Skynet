@@ -1,7 +1,7 @@
 # Skynet — Technical Architecture
 
-> Skynet is the physical-AI product inside the BotMarket ecosystem (BotMarket · BotNews ·
-> BotGuides · BotPapers · Robot Database · BotEdu · **Skynet**). It is the layer that connects
+> Skynet is the physical-AI product inside the Robot Overflow ecosystem (Robot Overflow · News ·
+> Guides · Papers · Robot Database · Education · **Skynet**). It is the layer that connects
 > AI policies to physical robots: models, datasets, skills, robots, environments, benchmarks,
 > evaluations and deployments — versioned, reproducible and API-first.
 
@@ -18,7 +18,7 @@
 | Large artifacts | Never in Postgres. `sha256` content addressing + direct-to-storage signed upload/download URLs | Weights and trajectory shards never pass through the web process; identical blobs dedupe across repos (git-LFS-like). |
 | Search | Postgres FTS (`tsvector` + GIN) over a denormalised `skynet_search_documents` table kept in sync by triggers, behind one `SearchDriver` interface | Real relevance ranking today, zero new infrastructure; the driver boundary is the migration path to OpenSearch/Typesense. |
 | Auth | **Reuse** Supabase Auth. Session (cookie/bearer) for the UI, hashed **API tokens** for CLI/SDK, hashed **worker tokens** for compute, hashed **device tokens** for robot agents | One identity, four credential classes with different blast radius. |
-| Authorization | Namespace role derived from BotMarket `org_members`, evaluated in `lib/skynet/permissions.ts`; RLS on every table for the anon client | App-layer checks for service-role paths, RLS as defence in depth. One roster, so leaving an organisation removes Skynet access. |
+| Authorization | Namespace role derived from Robot Overflow `org_members`, evaluated in `lib/skynet/permissions.ts`; RLS on every table for the anon client | App-layer checks for service-role paths, RLS as defence in depth. One roster, so leaving an organisation removes Skynet access. |
 | Jobs | Durable Postgres queue `skynet_jobs` with lease/heartbeat/retry semantics | No new broker. Correct semantics (at-least-once + idempotency keys) matter more than throughput at this stage. |
 | Compute | **External workers** claim jobs over `/api/skynet/v1/worker/*`. Vercel crons only reap leases and run lightweight in-process job kinds | GPU training and Isaac Sim cannot and must not run in a web request. |
 | Containers | Worker contract is a container image + entrypoint declared per job kind | Reproducibility and isolation; uploaded code is never executed on platform infrastructure. |
@@ -304,11 +304,11 @@ Robot deployment is treated as higher-risk than ordinary web software:
   behind it, mapped `owner → owner`, `admin → maintainer`, anything else → `writer`. Skynet had
   its own `skynet_members` table until 20260828210000 dropped it: two rosters could disagree, and
   the one that governed access was the copy nobody maintained, so removing somebody from a
-  BotMarket organisation left their access to its private repositories — and to the robots those
+  Robot Overflow organisation left their access to its private repositories — and to the robots those
   repositories deploy to — intact. The mapping lives in `skynet_private.member_role` (what RLS
   enforces) and `ORG_ROLE_TO_SKYNET` in `lib/skynet/namespaces.ts` (what the service-role routes
   enforce); a unit test reads the migration and holds the two to each other. There is deliberately
-  no way to edit membership from Skynet — that happens in BotMarket organisation settings, where
+  no way to edit membership from Skynet — that happens in Robot Overflow organisation settings, where
   seats are billed.
 * **Teams** add a second access axis: a group of namespace members granted a role on chosen
   repositories. Effective repository access is the **maximum** of a person's direct namespace
@@ -334,7 +334,7 @@ Robot deployment is treated as higher-risk than ordinary web software:
   `botindex`, skills, environments, benchmarks, evaluations (submission + results), compatibility
   engine, search, orgs/namespaces, stars/forks, discussions, activity + personalised feed,
   training orchestration, dataset schema/splits/statistics views, collected-episode summaries,
-  release signing, namespace secrets, teams, REST API, CLI, Python SDK, Skynet UI, BotMarket nav +
+  release signing, namespace secrets, teams, REST API, CLI, Python SDK, Skynet UI, Robot Overflow nav +
   Robot Database cross-links, SEO, sitemap.
 * **Architected, awaiting infrastructure:** GPU training *execution* (definition, queueing,
   provenance, cancellation and reporting are built), large-scale simulation,

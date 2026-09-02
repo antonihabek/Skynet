@@ -6716,3 +6716,1152 @@ and 15 from the twentieth.
     update to go through on a machine where the self-test does not run — which is every development
     machine. The CI invariant for this is written as a grep for the *defaults*, not for the behaviour,
     because the behaviour is what a hurried change would preserve while removing the reason.
+
+---
+
+## 2026-09-02 (twenty-second) — §10, and the two halves of "connected"
+
+Three sessions in a row have ended with the same sentence on the not-done list, in three different
+files: *§10's pairing is unwritten.* `connectivity.rs` said it in the sink that refuses every
+outbound item, `ota.rs` said it about the fetch, and the README said it about the fleet. It is the
+smallest unwritten thing with the most callers waiting on it, so it is this session's.
+
+### What §10 actually asks for, and why it is three functions rather than one
+
+§10 is four sentences and every one of them is answered by a different party:
+
+* **A pairing code**, typed by an operator off a Hub screen. Answered on the robot, before any
+  network exists.
+* **A device credential**, minted by the Hub and *"shown exactly once"*. Answered by the Hub, and
+  checked on the robot against what §19 says a device credential may be.
+* **Hardware binding** — a key in a TPM or secure element, which `security.identity.attested`
+  checks. Answered by the hardware.
+* **Image attestation** — *"the Hub records not 'robot X is online' but 'robot X is running image
+  `sha256:…`, policy `sha256:…`, against body `sha256:…`'"*, which §10 calls the sentence an
+  incident investigation needs and nobody can currently produce.
+
+So `crates/skynet-contracts/src/identity.rs` is three functions, not one, and the corpus is three
+files for the same reason: an edition could agree about the code and disagree about the credential,
+and nothing in the pairing file would see it.
+
+### The code, and the three decisions in eight characters
+
+§18 writes the command out in full — `skynet pair ABCD-1234` — which settles more than it looks.
+**Eight characters, two groups of four**, from the document's own example, and Crockford's base32
+because a code read off a screen and typed on a keyboard loses to `1`/`I`/`l` and `0`/`O` more than
+to anything else. Those letters are **folded** rather than refused: an operator who types the letter
+they saw gets the code they saw.
+
+**There is no check character, and that is a decision rather than an omission.** One would turn a
+mistyped code into a local refusal instead of a round trip, and it would make `ABCD-1234` invalid —
+which is this module overruling the specification for the convenience of a better error message. So
+the local check is the *shape*, and whether a well-shaped code exists is the Hub's question, because
+the Hub is the only party that can answer it.
+
+**No refusal ever echoes the code.** A pairing code is a bearer secret for the length of a pairing,
+and a refusal that quotes it puts it in a terminal scrollback, a shell history and the audit log of a
+robot the operator is standing in front of. The faults carry a **position** and never a character.
+That costs the operator a little — *"character five is not one a code uses"* is worse advice than
+naming the character — and it is the right trade for a secret whose whole lifetime is the minute
+somebody is typing it. There is a test that asserts it over every refusal, because this is the kind
+of property a single helpful commit removes.
+
+**The order of the checks is the content.** A credential pasted where a code belongs — which is what
+an operator holding two secrets at once will eventually do — is caught **before** anything is
+stripped, because `skd_` contains an underscore and would otherwise be reported as an unusable
+character at position four: true, useless, and a person hunting for a typo in a string that has none.
+`skd_x` is five characters, so a parser that stripped first would call it too short. Both have cases.
+
+### §19's `security.credential.scope`, and the direction that survives a rename
+
+§19: *"A device credential is assumed lost. It cannot read repositories, claim jobs, or write to
+another namespace."* The Hub has declared no scope vocabulary, so this edition freezes one — §17's
+and §57's device-facing routes, one scope each — and says in the doc comment that the *vocabulary* is
+a default in the sense `DEFAULT_BOOT_BUDGET_MS` is a default.
+
+What is **not** a default is the direction. It is an **allow-list**, and anything outside it is
+refused, for exactly the reason §12 gates an unrecognised OS component: a deny-list of §19's three
+phrases would be got past by a credential that spelled repository read any other way, and the one
+thing §19 says about this credential is that it is assumed lost. The corpus proves two editions agree
+about the vocabulary and says nothing about the direction of the test, so the direction got a CI
+invariant of its own — written as a grep for `FORBIDDEN_SCOPES`, because the change that removes it
+is somebody inverting the test to admit a scope the Hub added, which reads like a fix.
+
+A credential that declares **no** scopes is a warning rather than an error, and the sentence says the
+check did not run here rather than that it passed. That is the ordinary shape of an opaque bearer
+token, and refusing it would make this edition unpairable against a Hub that keeps scopes server-side
+— which is most of them.
+
+### The finding that only exists because §10 and §50 are both built
+
+§50.2: *"the birth certificate proves **what it is**; pairing (§10) binds it to **whose it is**."*
+With both built, the seam between them can come apart, and `key_not_attested` is what it looks like:
+the key this robot was paired on is not the key its vendor signed. §50.4 says that is the expected
+result of a mainboard swap and not a bug, so the message names the remedy — a vendor-signed re-issue
+— and the severity is still an error, because the other reading is a robot paired on a key nobody
+attested.
+
+It is also the one error `pair` does **not** refuse on, and the split is worth recording. Findings
+about the **credential** — no namespace, the wrong class, a scope nobody recognises — refuse, because
+the Hub has just handed this robot something §19 says it should not have and storing it first would
+leave it on the disk. Findings about the **machine** report and do not refuse, because whether to
+adopt a repaired robot is an operator's decision and a pairing that refused it would leave a repaired
+fleet unpairable until somebody found the vendor.
+
+`attested` takes **both** halves — a hardware key *and* the vendor's signature over it. Either alone
+is not the property: a hardware key nobody attested is one the robot generated for itself and can say
+nothing about what the machine is, and an attested key sitting in a file is an attestation that
+copies to any machine somebody puts the file on.
+
+### §10's sentence, and the rule it borrows from §13
+
+`attest` has **no failure mode**. No `Option`, no `Result`, no path that declines to produce a
+sentence. That is §13's rule for a recording with a hole in it — seal it, and say it is incomplete —
+applied to a report, because the reason is the same: the report most likely to have a hole in it is
+the one covering whatever made the hole. A check-in withheld because a digest could not be read is a
+robot the fleet believes is **offline**, at the exact moment somebody needs to know what it is
+running, and it converts a named gap into a silence nobody can tell from a dead machine.
+
+Each of the three digests has three states, and `nothing` is a real answer for all three. A
+guest-tier robot runs *"a container beside the vendor stack"* (§1) and has no Skynet OS image. A
+robot between policies is running none. A robot whose driver has not come up has no body — §27's
+`kernel: down` — and reporting a body digest for it would attest joint ratings nothing is applying.
+`nothing` and `unmeasured` are separate for §37.1's reason: *"there is no policy running"* and *"a
+policy is running and its digest could not be read"* are two facts with two different people at the
+end of them.
+
+### `crates/skynetd-io/src/identity.rs` — the half that opens files
+
+**Two files.** `identity/device.json` is rendered by the console, returned by `GET /identity` and
+quoted by anything that wants to know whose this robot is; `identity/credential` is read by one
+caller. A single document would have to be either unreadable by the console or a bearer secret on a
+LAN listener. It has a second consequence that decides what a half-finished pairing looks like:
+**whether a robot is paired is read off the credential, not off the document**, so an interrupted
+write leaves a robot that reports itself unpaired and can pair again, rather than one claiming a
+fleet it cannot talk to. There is a test that removes the credential and pairs again.
+
+**The code and the credential never cross a command line.** §34.2's transport is HTTPS, this
+workspace has no dependencies, and the precedent for that is already in the tree — `ota.rs` shells
+out to RAUC and `launch.rs` to systemd — so the one request pairing needs is made by `curl`. That
+buys a maintained TLS stack for nothing and costs one thing that has to be got right:
+`/proc/<pid>/cmdline` is world-readable on Linux. The body goes in on **stdin** (`--data-binary @-`)
+with the code inside it, and the credential comes back on **stdout**. A version that passed
+`--data '{"code":"…"}'` would work, pass every test here, and publish a bearer secret to every local
+user for the length of the request. That one has a CI invariant, because it is not a bug anybody
+would notice.
+
+**A paired robot does not re-pair.** Doing it silently moves a machine between fleets with nothing
+recording which one it left. `unpair` is the way, it is audited, and it does **not** tell the Hub — a
+robot that has been unpaired may have been unpaired precisely because it cannot reach one, and an
+unpair that needed a round trip would fail exactly when it is needed. The audit entry says to revoke
+the credential, because nothing here can.
+
+**Two things this edition cannot measure, and does not pretend to.** The key binding is reported
+unmeasured on every robot: `/dev/tpm0` says a TPM exists, not that this key is in it, and the absence
+of a private key file says only that this daemon cannot find one. Either probe would turn an
+unmeasured robot into an attested one on a bench, which is the twenty-first session's finding 17 —
+the most dangerous defaults are the ones that make a demo work. And nothing generates a device key,
+because `skynet-ed25519` verifies and signing is a test feature, so the key a robot presents is the
+one its vendor put in §50's certificate and a robot without one pairs without a key.
+
+### Two policies is not one policy
+
+§10's sentence names *"policy `sha256:…`"*, singular, and nothing in the design says a robot runs
+one — §43 leaves multi-robot on one compute open. So `running_policy` reads the units the supervisor
+reports and the manifests in the store, and **two** running policies produce `unmeasured` naming
+both rather than one of them chosen by iteration order. A check-in that silently picked the first
+would attest software while omitting software, which is worse than attesting nothing.
+
+It reads from the *actual* observation rather than from the desired state, for §33.3's reason: a
+robot running a policy the Hub never asked for is exactly the robot §10's attestation exists for.
+
+### The surfaces, and the sink that now gives two answers
+
+`GET /identity` (observer) carries the identity, the findings, §50's certificate and the attestation
+together, because §50.2 makes them one question asked of two parties. It carries **no credential** in
+any form — not truncated, not masked, absent — and the prefix is the only part of one any surface has
+a use for. `POST /identity/pair` and `/identity/unpair` are Admin, which is §39.1's table quoted.
+`skynet pair <code|-> --hub <url>`, `skynet unpair` and `skynet identity` are the CLI half; `-` reads
+the code from stdin, because §18's own spelling puts it on argv and this is the one thing an operator
+can do about that.
+
+There is **no default Hub**, and the refusal says why: §39.2 gives this robot no default password,
+and a robot that would report to a host nobody named is the same mistake in a different field.
+
+`connectivity::Unpaired` used to say *"§10's pairing and attestation are unwritten"*, which is no
+longer true, and replacing it with one updated sentence would have been the wrong fix. There are now
+**two** sinks: an unpaired robot is told to run `skynet pair`, and a paired one is told §34.2's
+sending half is missing and which Hub it would have used. Two problems, different people at the end
+of them, and the daemon picks between them by reading the identity off the disk rather than assuming.
+
+### The corpus caught a shape before a reviewer did, for the second session running
+
+`CodeResult` was first written flat — `{ code, fault, detail, position }` — and `tests/refusals.rs`
+went red. The rule it tripped is that a node carrying `code` and `detail` must have a `detail` that
+is a sentence, and on a *successful* parse `code` was the pairing code and `detail` was empty.
+
+The fix was not to weaken the check. `{ code, fault: null | { code, detail, position } }` is the
+shape frame validation and the cell descriptor already emit, and it is what puts these refusals
+**inside** §64's check rather than beside it. A flat shape would have made every refusal in this
+module invisible to a cross-cutting check while looking exactly as correct.
+
+### And opening the console caught the other one
+
+The identity panel rendered, and §10's sentence read *"This robot is running image an unmeasured OS
+image (…)"*. The template carried the label and the clause carried the noun, so the two collided on
+every branch except the one every test used. The bytes were canonical, the corpus reproduced them
+byte for byte, and the sentence was unreadable.
+
+The label now belongs to the clause: `known` carries it and the other two do not, which is how
+English works — *an unmeasured OS image* already says what it is. All nine attestation cases were
+regenerated and read correctly afterwards, which is the check that the fix was a fix rather than a
+different arrangement of the same collision.
+
+That is six sessions running in which looking at the console found something no assertion was
+watching for.
+
+### Where the numbers stand
+
+Rust: **1058** tests, up from 1014. `skynet-contracts` 356 → 374, `skynetd-io` 283 → 309.
+`cargo fmt --all --check` clean, `cargo clippy --workspace --all-targets` clean under `-D warnings`,
+the TypeScript oracle type-checks, `node --check` passes on the console, and the golden path still
+describes the repository.
+
+The corpus is **889 cases across 59 files**, up from 842 across 56:
+
+| File | Cases | What it pins |
+|---|---|---|
+| `identity/pairing.json` | 18 | Every way eight characters are and are not a code, and — readable in the `expected` strings — that no refusal contains what was typed |
+| `identity/credential.json` | 15 | §19's scope rule from both directions, §10's two key questions, and the finding that only exists because §50 is built |
+| `identity/attestation.json` | 9 | §10's sentence, and the three states each of its three digests can be in |
+
+Five closed vocabularies added — `code_faults`, `device_scopes`, `key_bindings`,
+`identity_findings`, `measure_states` — taking `vocabulary/closed-sets.json` from 45 sets to 50.
+
+Four CI invariants, each written from the direction the rule would be lost rather than asserting the
+behaviour:
+
+* **`attest` has no failure mode.** The change that removes it is somebody making it fallible in a
+  refactor and threading a `?` through the callers, which reads like tightening.
+* **The scope check is an allow-list.** The change that removes it is somebody inverting the test to
+  admit a scope the Hub added, which reads like a fix.
+* **The pairing code never reaches a command line.** `--data-binary @-` is asserted present and
+  `--data` asserted absent.
+* **The identity document holds no credential.** The change that breaks it is one field added to a
+  JSON object by somebody making a check-in easier to write.
+
+### Changed in the Hub
+
+Nothing. `identity` is not one of the ten mirrored contracts, and `node tools/check-contract-mirrors.mjs`
+passes with every pinned digest intact. §17's `POST /devices/pair` is a route the Hub does not have
+yet; `CurlEnrolment` names it and the suite drives `RecordingEnrolment`, which is what makes every
+refusal branch reachable and is not the same as having paired against a real Hub.
+
+### Not done, and what it waits on
+
+**The sending half.** §34.2's check-in, incident upload and episode push. A robot now knows whose it
+is and where it would report, and reports nothing — the queue holds and the surfaces say so. This is
+the largest single thing between here and a fleet, and it is now unblocked rather than blocked.
+
+**The fetch**, unchanged from the twenty-first session, and now unblocked by the same work: §12's
+`stage_image` still reports `Unimplemented` with the path it looked in, because nothing goes and gets
+a bundle.
+
+**A real Hub.** Nothing here has paired against one. `CurlEnrolment` shells out to a `curl` that has
+never been run against `POST /devices/pair`, because that route does not exist.
+
+**`security.identity.attested`.** No probe, deliberately, for the reasons above. Every robot reports
+the binding as unmeasured and no robot claims the property.
+
+**A real A/B device**, and **where a bench pass comes from**, both unchanged from the twenty-first
+session. **§54.2's `safety_notes` acknowledgement**, unchanged from the twentieth.
+
+### Findings, restated
+
+1–9 from the seventeenth session; 10 and 11 from the eighteenth; 12 and 13 from the nineteenth; 14
+and 15 from the twentieth; 16 and 17 from the twenty-first.
+
+18. **A shape can put a decision outside the check that was written to guard it.** New, and the
+    generalisation of what `tests/refusals.rs` caught. §64's check finds refusals by their *shape* —
+    a `code` beside a `detail`, a `fault` that is null or an object — which is the only way a
+    cross-cutting check can work over a corpus it does not know the contents of. A module that
+    invents its own arrangement of the same fields is not caught by it and does not fail it; it is
+    simply not seen, and looks identical in review. The corpus caught this one because a *successful*
+    parse happened to collide with the rule. It would not have caught a shape that collided with
+    nothing, which is the more likely accident.
+19. **The most careful thing in a design can be undone by the most ordinary line in it.** New. This
+    module refuses to echo a pairing code in an error, keeps the credential out of the document every
+    surface reads, and keeps it out of the audit entry — and all of that is worth nothing beside
+    `--data "$body"`, which is what somebody writes when they want to see whether the request works.
+    The properties that were argued for at length are the ones a reviewer checks; the one that
+    matters most here is a flag on a subprocess, and it needed a CI invariant rather than a comment.
+20. **Two facts that produce the same silence still need two sentences.** New, and the shape of
+    §37.1's rule found somewhere else. A robot that is not paired and a robot that is paired with
+    nowhere to send both have a queue that does not move, and the temptation is one honest sentence
+    covering both. One of them is fixed by an operator in a minute and the other is waiting on
+    software nobody has written, and an operator sent to pair a robot that already is has been told
+    something true and useless.
+
+---
+
+## 2026-09-02 (twenty-third) — §17's check-in, and the field the whole rule rests on
+
+The previous session ended with §34.2's sending half named as *"the largest single thing between here
+and a fleet, and it is now unblocked rather than blocked."* This is that. A robot that knew whose it
+was and reported nothing now reports.
+
+### §17 gives the check-in four fields and one rule
+
+> **The platform never claims a robot is running something it has not heard from.** A deployment is
+> `pending` until a check-in.
+
+The check-in is the *only* evidence the Hub has, so a check-in that overstates is a fleet console
+that lies and there is no second source to catch it. Everything in
+`crates/skynet-contracts/src/checkin.rs` exists to make that rule survive contact with a robot that
+is halfway through converging, or waiting for a safe state, or running software nobody asked for.
+
+### `applied` is derived, and it has four answers rather than two
+
+§33.3: *"Convergence is one plan being empty, not one pass succeeding. A supervisor that reported
+'converged' because every action it applied succeeded would stamp the generation on a robot that has
+not started the policy yet."* So the daemon does not set `applied`; `claim_for` derives it from what
+is left to do. Writing it out produced four states rather than the boolean §17 shows:
+
+* **`applied`** — the plan is empty and the generations agree. The only one where §17's field is true.
+* **`converging`** — there is work and somebody is doing it.
+* **`deferred`** — *everything* left is waiting on §33.4's barrier. A claim of its own rather than a
+  flavour of converging, because an operator reading "converging" waits and an operator reading this
+  one goes and does something. It requires **every** pending action to be waiting: one action still
+  moving means the robot is converging, and reporting a robot that is actively working as stuck is
+  how the report that should send somebody to the robot becomes the one they learn to ignore.
+* **`inconsistent`** — the plan is empty and the generations still disagree. This is a reconciler
+  that computed a plan closing nothing, which is a supervisor that cannot see the difference it
+  exists to close. Reported as `applied` it would be a green tick over a bug in the one place nobody
+  looks, so it gets a name.
+
+### The one field the rule lives or dies on
+
+**The generation on the wire is the one the robot applied, never the one it was asked for.** A
+check-in echoing the desired generation would mark every deployment applied the moment the robot
+heard about it, which is precisely the claim §17 forbids the platform from making. It has a test
+across all four claims and a CI invariant, and the invariant is written from the direction the field
+would be lost: a fleet console shows a robot as behind, somebody traces it to the check-in, and the
+obvious edit is to report the number the Hub sent.
+
+### A check-in carries no history, and that is what makes collapsing safe
+
+§34.4 puts check-ins in the class where *"only the newest matters, so older ones are collapsed rather
+than queued"*, so *"a week offline should produce one current check-in on reconnect, not ten thousand
+historical ones."*
+
+That collapsing is only safe because **every field is a statement about now**. No deltas, no counters
+since last time, no event list. A check-in carrying *"twelve guard trips since the last one"* would
+make collapsing lossy, and the queue would be discarding data while believing it was discarding
+duplicates. It is a property of a document rather than of a function, so it is the second thing this
+session gave a CI invariant — grepped for the shape, because the addition that breaks it is one field
+somebody adds to make a dashboard nicer.
+
+It is also what makes **enqueueing every reconcile pass** correct rather than wasteful. The queue
+holds exactly one and it is always current. The alternative — enqueue only when the document changed
+— is edge-triggered, which is §33.3's longest paragraph, and a robot whose check-in was dropped for
+want of disk would then never build another because nothing changed.
+
+### §33.6's last four words, which nothing was keeping
+
+> Aggregate health rolls up […] **Every field carries its age.**
+
+`skynetd::health::Health` keeps half of it: per-package readings carry an age and the five aggregate
+fields do not. Nothing had noticed because all five are `None` on every robot this edition runs. The
+check-in is the first consumer that would put one on a fleet console, so this is where it had to be
+closed.
+
+The rule as built: **a value with no age is not reported as a value.** It is dropped and named in
+`undated`, apart from `unmeasured`, because *"nobody measured this"* and *"somebody measured this and
+lost track of when"* send different people to different places. Passing the number through would be
+worse than dropping it — a console renders whatever it is given as current, and the battery reading
+from four hours ago is exactly the number somebody drives out on. A negative age is treated the same
+way: a reading dated in the future is worse than an undated one, because the second is visibly
+missing and the first looks fresh.
+
+`generation_lag` is the one field this daemon can both compute and date, and it is dated with the
+observation it came from rather than with the wall clock. The other four are absent, which is the
+fact §33.6 asks for and is not the same as zero.
+
+### `connectivity::post_json` — one function, one rule
+
+The previous session put a `curl` call in `identity.rs` for pairing, with the code on stdin because
+`/proc/<pid>/cmdline` is world-readable. This session needed a second one for the queue, and copying
+it would have been the mistake: **two callers with the same rule is two places for the rule to be
+lost, and the second one is always written by somebody copying the first — who copies the shape
+rather than the reason.**
+
+So there is one function now, and pairing was moved onto it. Two channels, each carrying what it
+must:
+
+* **The credential** goes into curl's own config on **stdin** (`--config -`), which is the only stdin
+  curl has. Nothing about it is ever an argument.
+* **The body** goes into a file, passed by path. A path is not a secret, and a body can be tens of
+  megabytes — a sealed black box — which rules out putting it in the config beside the credential.
+
+A credential containing a quote, a backslash or a control character is **refused rather than
+escaped**: the escape set curl's config parser accepts is small and version-dependent, and a
+credential with a quote in it is a Hub doing something nobody designed. The file is created with an
+owner-only mode *before* it is written, and removed whether or not the request worked.
+
+The CI invariant that guards this has four parts, and the fourth is the one that keeps the other
+three worth having: **only one function in this daemon spawns curl.**
+
+### The sink that lasted one session
+
+`connectivity::PairedNoTransport` was written last session for a robot that was paired and had
+nowhere to send. Its entire content was a missing implementation, and this session wrote the
+implementation, so it is deleted rather than reworded. That is the right lifetime for a type of that
+shape — the alternative is a sink that keeps saying something untrue because deleting it felt like
+losing work.
+
+What replaces it is `Hub`, chosen by `identity::credential_for_sending`, which is **the one function
+in this daemon that returns the credential** and is shaped so a caller cannot get it by accident: it
+returns the endpoint, the device id and the credential together or nothing at all, so there is no way
+to ask for the secret alone and no reason for any other path to hold one.
+
+### An unpaired robot queues nothing, deliberately
+
+§17's route is `POST /devices/{id}/checkin` and an unpaired robot has no `{id}`. Building one anyway
+would put a document addressed to nobody in the queue, where §34.4 would hold it, collapse it and
+eventually count it in the drop counters — and a console would then report a robot discarding its own
+state, for want of a Hub it was never given. The honest state is an empty queue and an identity panel
+saying why, and `GET /checkin` says it in the `queued_note` rather than leaving somebody to infer it.
+
+### Telemetry has nowhere to go, and that is a finding
+
+§34.4 gives telemetry a priority, a drop policy and a counter. Neither §17's eight endpoints nor
+§57's revised nine gives it a route. The `Hub` sink refuses it by name and holds the items, because a
+robot that guessed a route would be inventing a Hub surface. It is the first place the two documents
+have been held against each other closely enough for a gap to show.
+
+### Looking at the console found the fourth one
+
+The check-in panel rendered correctly and listed every health field **nobody had measured**, and
+never showed the one that was. A health report that can say what it does not know and never that a
+robot is well is one nobody reads twice — and §33.6's age is the half of a reading that decides
+whether to act on it, so a panel omitting the value omits the whole point of having required an age.
+Fixed on the console and in `skynet checkin`, which had the same shape for the same reason.
+
+That is seven sessions running in which opening the page found something no assertion was watching
+for.
+
+### Where the numbers stand
+
+Rust: **1084** tests, up from 1058. `skynet-contracts` 374 → 386, `skynetd-io` 309 → 323.
+`cargo fmt --all --check` clean, `cargo clippy --workspace --all-targets` clean under `-D warnings`,
+the TypeScript oracle type-checks, `node --check` passes on the console, and the golden path still
+describes the repository.
+
+The corpus is **913 cases across 62 files**, up from 889 across 59:
+
+| File | Cases | What it pins |
+|---|---|---|
+| `checkin/claim.json` | 8 | Every way §17's `applied` can be false, and that the generation is never the desired one |
+| `checkin/health.json` | 8 | §33.6's age rule from both sides, and the zero-lag case a falsy check breaks |
+| `checkin/document.json` | 4 | The bytes that cross to the Hub, whole |
+
+Four closed vocabularies added — `checkin_claims`, `reconcile_stages`, `readiness_states`,
+`health_fields` — taking `vocabulary/closed-sets.json` from 50 sets to 54. `reconcile_stages` is
+worth the entry on its own: a fleet console groups by them, and six spellings of one stage is six
+columns.
+
+Three CI invariants, each from the direction the rule would be lost:
+
+* **No secret reaches a command line**, in four parts, the last being that only one function spawns
+  curl.
+* **A check-in reports the generation the robot applied.**
+* **A check-in carries no history.**
+
+### Changed in the Hub
+
+Nothing. `checkin` is not one of the ten mirrored contracts and `node tools/check-contract-mirrors.mjs`
+passes with every pinned digest intact. §17's `POST /devices/{id}/checkin` is a route the Hub does
+not have yet, so nothing here has been received by one.
+
+### Not done, and what it waits on
+
+**A real Hub**, and it is now the only thing between this and a working fleet loop. Every piece on
+the robot exists: pair, build, queue, drain, present a credential. Nothing has been answered by a
+server, because `POST /devices/pair` and `POST /devices/{id}/checkin` do not exist on the Hub side.
+That is the next session's work and it is on the other repository.
+
+**The inbound half.** §11's `GET /devices/{id}/desired` — the robot still reads its desired state off
+the disk, so a fleet cannot change one. This is the other half of the loop and it is the smaller
+half, because the transport now exists.
+
+**The fetch**, unchanged: §12's `stage_image` still reports `Unimplemented`, and it is now one
+`GET` away rather than a transport away.
+
+**§56's evaluations and the episode push.** `Class::Episode` has a route and nothing produces one.
+
+**A real A/B device**, **where a bench pass comes from**, and
+**`security.identity.attested`**, all unchanged. **§54.2's `safety_notes` acknowledgement**, unchanged
+from the twentieth session.
+
+### Findings, restated
+
+1–9 from the seventeenth session; 10 and 11 from the eighteenth; 12 and 13 from the nineteenth; 14
+and 15 from the twentieth; 16 and 17 from the twenty-first; 18–20 from the twenty-second.
+
+21. **A boolean in a specification is often four states in an implementation, and the extra ones are
+    where the value is.** New. §17 writes `applied: true`. Writing the function that produces it
+    turned up three distinct falses — working, waiting for a person, and a supervisor whose plan
+    closes nothing — and the third only exists as a *name* because somebody wrote the branch out.
+    Implemented as the boolean it is written as, that state would have reported `applied: false`
+    beside a robot that was doing nothing about it, indistinguishable from one mid-fetch.
+22. **A rule that is only violated by code nobody has written yet is still worth building.** New.
+    §33.6's *"every field carries its age"* was half-kept for six sessions and nothing was wrong,
+    because all five aggregate fields were absent on every robot. The rule only becomes load-bearing
+    the day somebody adds a battery reading — and that is the day nobody is thinking about the rule,
+    because they are thinking about the battery. Closing it while the fields are empty cost an
+    afternoon; closing it afterwards would have meant finding the fleet console that had been
+    rendering a four-hour-old charge as current.
+23. **The second caller is where a security rule dies.** New, and the concrete form of finding 19.
+    The pairing exchange got the argv rule right and documented it at length. The check-in needed the
+    same request, and the natural way to write it was to copy the working one — which copies the
+    shape and not the reason, and would have been the version somebody later "simplified" back to
+    `-H`. The fix was not a better comment; it was one function and a CI check that there is only
+    one.
+
+---
+
+## 2026-09-02 (twenty-fourth) — §11's pull, and the two refusals that are not symmetric
+
+The loop closes here. A robot pairs (§10), pulls its desired state (§11), reconciles it (§33), and
+reports what it did (§17). Every piece of that now exists on the robot side, and the only thing
+between it and a working fleet is a Hub with the four routes on it.
+
+### The rule this module exists for is an order
+
+**Fetch, decode, assess, *then* write.**
+
+A version that wrote the response and let §33.8's ladder sort it out afterwards would work almost
+always. It would be wrong in the one case that matters: a Hub — or a captive portal, or a proxy, or
+a load balancer serving an error page as `200` — returning something that is not a desired state
+would overwrite a good one, and the robot would fall back to last-known-good on the next boot having
+silently lost the intent it was reconciling against.
+
+§33.8 is a **recovery ladder, not a licence to write first.** It is what a robot does with a file
+that got corrupted; it is not a reason to let a network response become that file unchecked.
+
+The invariant for it is written as a **line-order check** — the assessment happens before the write,
+and the write is guarded by its verdict — because that is literally what the rule is. Every test in
+the suite asserts the file's *contents* rather than when they were decided, so a refactor that moved
+the write earlier would pass all of them.
+
+### The two refusals, and why they point opposite ways
+
+`assess_offer` has four findings. Two refuse and two report, and the pair that refuses versus the
+pair that does not is the whole content of the module.
+
+**A reused generation is refused.** §11 rests one property on the counter: *"the `generation`
+counter makes it idempotent."* A Hub serving two different documents under one generation has broken
+that, and the robot is the only party who can see it — the Hub has no way to know this robot already
+applied a different 41. The two ways to handle it are not symmetric:
+
+* **Adopt**, and the robot runs the new content while reporting generation 41 as applied. A fleet
+  console then shows robots converged on 41 that are running different software — which is exactly
+  the claim §17 forbids the platform from making, and it is **invisible**, because every robot looks
+  right.
+* **Refuse**, and the robot keeps the old content and reports a fault naming the Hub's mistake. A
+  console shows a robot that is not adopting and says why; an operator bumps the generation.
+
+One produces a visible, actionable state and the other an invisible wrong one. So it refuses.
+
+**A generation that went backwards is followed.** The opposite call, deliberately. That is a Hub
+restored from a backup, and a robot that refused to follow one would be a fleet an operator could not
+recover — permanently, with no remedy short of visiting every machine. The replay it would otherwise
+guard against is already what the credential and TLS prevent. Adopted, and reported once, because
+*"intent went backwards"* is a sentence somebody wants to see.
+
+The other two report and adopt: a document that **empties a running robot** — an operator clearing a
+robot and a Hub serving a stub are indistinguishable from here, and stopping is never the dangerous
+direction (§33.4) — and nothing at all, for an ordinary poll.
+
+### `changed` is not derived from `adopt`, and that is the most common case
+
+Most polls adopt a document identical to the one on disk. §11's loop asks the same question every few
+seconds and the answer is usually the answer it already has. A caller that inferred *"adopted,
+therefore write"* would rewrite the desired state on every tick — churning a file whose mtime the
+black box and the audit log both care about — so `changed` is its own field, and the io half writes
+only when both are true.
+
+The digest it compares is over the **canonical** form rather than the bytes as they arrived, so a Hub
+that reflowed its JSON does not read as a changed document. And the file is stored canonically for
+the same reason: storing the Hub's own formatting would make the *next* poll report a change against
+a document that had not changed. Both have tests.
+
+### The route reports the pull; it does not make one
+
+`GET /intent` carries two things because there are exactly two answers to *"where did this robot's
+desired state come from"*: a pull, or §33.8's fallback ladder. A route showing one would leave the
+other invisible — and the fallback is the one that matters, because **a robot reconciling against a
+last-known-good copy looks identical, from every other surface, to one reconciling against a current
+desired state.** That is what the console panel was added for.
+
+It reads `daemon.last_pull` rather than fetching. A `GET` on the local API that reached out to a Hub
+would be a network round trip behind a verb that promises to read, and it would let anyone holding an
+observer credential make this robot talk to the internet. That one got an invariant too.
+
+### `get_json`, and the count that keeps the rule alive
+
+The pull needed a second curl call site. The previous session's finding 23 said the second caller is
+where a security rule dies, so this one was written beside `post_json` rather than inside it — two
+functions, eight lines apart, each with the credential going into curl's own config on stdin, so a
+reader looking for the argv rule finds it twice rather than once behind a branch.
+
+The invariant is a **count**: every `Command::new("curl")` in `connectivity.rs` must be matched by a
+`--config` channel. Two and two today. A third call site written without one fails the build rather
+than shipping a credential to every local user.
+
+### Where the numbers stand
+
+Rust: **1107** tests, up from 1084. `skynet-contracts` 386 → 395, `skynetd-io` 323 → 337.
+`cargo fmt --all --check` clean, `cargo clippy --workspace --all-targets` clean under `-D warnings`,
+the TypeScript oracle type-checks, `node --check` passes on the console, and the golden path still
+describes the repository.
+
+The corpus is **925 cases across 63 files**, up from 913 across 62. One new file,
+`intent/offer.json`, with 11 cases — every way a response can fail to become a desired state, and
+the two that adopt anyway. One new vocabulary, `offer_faults`, taking `vocabulary/closed-sets.json`
+from 54 sets to 55; which two of the four refuse is the content of the set.
+
+Three CI invariants:
+
+* **A pulled desired state is decoded before it is written**, checked by line order.
+* **Reading the intent does not pull.**
+* **Every curl gets its credential on stdin**, checked by counting call sites against config
+  channels.
+
+### Changed in the Hub
+
+Nothing. `intent` is not one of the ten mirrored contracts and `node tools/check-contract-mirrors.mjs`
+passes with every pinned digest intact.
+
+### Not done, and what it waits on
+
+**A Hub.** This is now the whole of it. `POST /devices/pair`, `GET /devices/{id}/desired`,
+`POST /devices/{id}/checkin` and `POST /devices/{id}/incidents` do not exist on the other side, so
+nothing here has completed a round trip. Every branch is driven by the suite and none of it has been
+answered by a server.
+
+**The bundle fetch.** §12's `stage_image` still reports `Unimplemented`. It is deliberately not a
+second call to `get_json`: an OS image is hundreds of megabytes and wants resume, progress and
+§34.3's metering, which is its own piece of work.
+
+**Episodes.** `Class::Episode` has a route and nothing produces one.
+
+**Telemetry has no route at all**, unchanged from the twenty-third session and still the one place
+§34.4 and §57 do not line up.
+
+**A real A/B device**, **where a bench pass comes from**, **`security.identity.attested`**, and
+**§54.2's `safety_notes` acknowledgement**, all unchanged.
+
+### Findings, restated
+
+1–9 from the seventeenth session; 10 and 11 from the eighteenth; 12 and 13 from the nineteenth; 14
+and 15 from the twentieth; 16 and 17 from the twenty-first; 18–20 from the twenty-second; 21–23 from
+the twenty-third.
+
+24. **When two failure modes are not symmetric, the asymmetry is the design — and it is usually
+    visibility.** New, and the shape of both of this session's refusal decisions. A reused generation
+    and a reversed one are the same *kind* of Hub mistake, and they get opposite treatment, because
+    adopting the first produces a fleet console that is confidently wrong and adopting the second
+    produces one that is visibly odd. The rule that fell out is worth stating generally: **prefer the
+    failure somebody can see.** A robot that refuses and says why is recoverable by anyone who reads
+    the message; a robot that complies and reports the wrong thing is recoverable only by somebody
+    who already suspected.
+25. **A recovery mechanism is not a licence to be careless upstream of it.** New. §33.8's ladder is
+    good, thorough and tested, and it made "just write the response and let the ladder handle it"
+    sound reasonable — it *would* have handled it, in the sense that the robot would keep running.
+    What it would not have recovered is the thing that was lost: the intent the robot was
+    reconciling against, gone, with a last-known-good copy that might be weeks old standing in for
+    it. A fallback restores service, not state, and the two are only the same thing in a system that
+    has none.
+
+---
+
+## 2026-09-02 (twenty-fifth) — the Hub answers, and the three digests the sentence had swallowed
+
+Twenty-four sessions built a robot that pairs, pulls, reconciles and reports, and the last four ended
+with the same sentence: **there is no Hub on the other side.** This session is the other side.
+
+It opens with a finding that had to be closed first, because everything the Hub stores about a robot
+comes through the one document the robot sends.
+
+### §10 asks for three digests and the wire carried a sentence
+
+> The Hub records not "robot X is online" but "robot X is running image `sha256:…`, policy
+> `sha256:…`, against body `sha256:…`" — which is the sentence an incident investigation needs and
+> nobody can currently produce.
+
+`attest` produces that sentence and has since the twenty-second session. `check_in_to_json` put
+`attestation_report_to_json(&attest(…))` on the wire — `complete`, `sentence`, `unmeasured` — and
+**dropped the three measures the sentence was rendered from.**
+
+Nothing was wrong on the robot. The sentence is correct, the console renders it, and every assertion
+about it passed. What was missing only becomes visible from the Hub end: §32.1 puts a **running
+digests** column on `/skynet/os/devices`, and *"which robots are running image `sha256:aa`"* is a
+query. The only way to answer it from a sentence is to parse English out of prose that is
+deliberately not machine-readable — `no policy`, `an unmeasured OS image (the slot could not be
+read)`, `an unnamed body`. Those renderings are right for a person and useless for an index, and a
+Hub that regex'd them would be re-deriving a fact the robot had measured and thrown away.
+
+**The shape already existed, in the wrong place.** `skynetd-io::identity::attestation_to_json` — the
+answer `GET /attestation` gives the LAN console — carried the report *and* the three measures, and
+had done since the session that wrote it. So for two sessions the console on the robot could see the
+digests and the Hub could not, and the document that is *"the only evidence the Hub has"* was the
+poorer of the two.
+
+That is the twenty-third session's finding 23 in its other form: two callers, one rule, and the one
+written second got the smaller half. The function moved into `skynet-contracts::identity`, the
+daemon's copy is now a one-line delegation, and the check-in carries:
+
+```
+"attestation": { "complete": …, "sentence": …, "unmeasured": [ … ],
+                 "os_image":   { "digest": "sha256:aaaa", "state": "known",      "why": null },
+                 "policy":     { "digest": null,          "state": "nothing",    "why": null },
+                 "embodiment": { "digest": null,          "state": "unmeasured", "why": "…" } }
+```
+
+`digest` and `why` are **present-and-null** rather than omitted, for the reason §33.6's five health
+fields are: a consumer that has to discover which keys this robot happened to fill in is a consumer
+that gets it wrong on the robot that filled in none.
+
+The regression test asserts on the digest **as a field** rather than on its presence anywhere in the
+document, because the sentence contains it too — a looser check would have passed against the exact
+version this test exists to prevent. The CI invariant greps both directions, because the edit that
+loses this is a revert to the shorter function name, and the shorter one compiles, passes every
+assertion about the sentence, and renders correctly on every console.
+
+**Where the numbers stand after part one.** Rust: 1120 tests. `cargo fmt --all --check` clean,
+`cargo clippy --workspace --all-targets` clean under `-D warnings`, the TypeScript oracle
+type-checks, and `node tools/corpus-gen/generate.ts` reproduces — the corpus's four `checkin/document`
+cases changed shape and both editions agree on the new bytes, which is the whole point of having two.
+
+### §11's counter says *which intent*; nothing said *which document*
+
+The second finding fell out of writing the Hub, and it is the same shape as the first.
+
+§11 rests idempotence on the generation, and `assess_offer` enforces it — a *different* document
+under a generation this robot has already applied is refused, loudly, naming the Hub's mistake. The
+twenty-fourth session spent a long paragraph on why that refusal is right, and the paragraph is
+still right. What it did not notice is that **the refusal is the robot's alone.**
+
+The Hub knows which generation a robot has applied. It has never had any way to ask *which
+document*. So the case §11 names by name — a Hub restored from a backup — plays out like this: the
+Hub serves generation 41 with different contents, every robot in the fleet refuses it, every robot
+reports generation 41 as applied, and the fleet console shows a hundred machines that have quietly
+stopped converging with no field anywhere that says why. The information exists. It is on each
+robot, one comparison away, and it never crossed.
+
+So the check-in carries `desired_digest` now: `sha256:…` over the canonical form of the document the
+robot is reconciling against, empty when it holds none.
+
+**The test it had to pass is §34.4's.** Check-ins are collapsed — *"only the newest matters"* — and
+that is safe only because every field in one is a statement about **now**. A field about the past
+would make the collapse lossy while still looking like a duplicate, which is the twenty-third
+session's CI invariant. A digest of the document currently on disk is exactly as present-tense as
+the `generation` sitting beside it, and the invariant's grep agrees.
+
+Empty rather than absent for a robot that holds nothing, for §33.6's reason applied one field over:
+*"reconciling against nothing"* is a state somebody acts on, and a consumer that has to discover
+which keys a robot happened to send is a consumer that gets it wrong on the robot that sent none.
+
+`held_digest` is its own function in `skynetd-io::intent` because two callers now need it for two
+reasons — `held` compares it against an offer, the check-in puts it on the wire — and a second
+spelling of *"what document is this robot running"* is a second answer to it.
+
+### The Hub, which is the other half of everything above
+
+On the other repository, and the whole of it is in that session log. In summary: three tables
+(`skynet_pairing_codes`, `skynet_device_state`, `skynet_incidents`), five routes, and the three
+contracts this repository owns mirrored into it — `identity`, `checkin` and `intent`, taking the
+mirror set from ten to thirteen.
+
+The reason those three and not others is the same test the mirror list has always applied: **both
+sides must be able to compute the answer from declared facts, and neither is authoritative.**
+
+* `identity`, because a pairing code that one side folds and the other does not is a code an
+  operator typed exactly as printed and got refused for.
+* `checkin`, because §17's rule is enforced by whichever side decides what `applied: false` means.
+* `intent`, because `assess_offer`'s own header asked for it two sessions ago: *"the same function
+  runs on the robot and on a Hub checking what it just served."* That sentence is now true.
+
+`opstate` (§27) was the name most likely to join, and it did not. The table it was waiting on exists
+now, which removes the *first* of its two reasons and leaves the second, which was always the real
+one: §27's machine answers from observations of a body, and the Hub has none. It would be running
+the evaluator over conditions a robot sent it, which is displaying a robot's answer rather than
+computing a second opinion — a renderer, not a mirrored contract.
+
+### One thing the Hub found in this repository's tooling
+
+`tools/check-contract-mirrors.mjs` looks for the Hub beside this checkout under four spellings of
+`BotMarket`. The Hub was renamed to Robot Overflow, so for however many sessions that has been true
+the tool has printed *"BotMarket not found"* and fallen back to checking its own pins — which is the
+degraded mode written for CI, doing its job silently on a machine that had both trees. Both names
+are in the list now. It is a two-line fix and it is worth the paragraph: the tool's own header
+spends four paragraphs on the danger of a check that cannot fail, and it had quietly become one
+again for a reason nobody would go looking for.
+
+
+### §12's manifest, which existed on neither side
+
+The third piece, and the one that made the session's shape obvious in retrospect.
+
+`admit_bundle` has answered §12's third rule — *"an update that changes the Safety Kernel or the
+envelope is refused without a fresh bench pass"*, the rule the document calls **the single most
+important test in the suite** — since the twenty-first session. It is pure, corpus-verified, and
+wired into `stage_image` at exactly the right point. In four sessions of running it has never
+returned anything but *"nothing on this robot describes release `1.4.0`"*, because `assess` reads a
+release manifest from `Layout::release` and nothing has ever put one there.
+
+The gate was built, tested, connected, and had no input. `skynetd-io::releases` is the input.
+
+**The fetch is split, and the split is the design.** §12's transfer is two transfers with nothing in
+common: a manifest is a few hundred bytes of JSON saying *what an image would change*, and a bundle
+is hundreds of megabytes wanting resume, progress and §34.3's metering. Fetching the small one first
+is not an ordering convenience — **the third rule is decided entirely from the manifest**, so a
+robot that holds one refuses an update it must not take *before* spending a hundred megabytes of
+somebody's metered link discovering the same thing. The expensive transfer belongs after the
+decision, and until now the decision had no input to be made from.
+
+So the bundle fetch stays unwritten and `stage_image` still reports the same honest
+`Unimplemented`, and that is not the same list item it was this morning: what was *"§12 cannot
+decide"* is now *"§12 decides, and cannot act"*.
+
+**A release manifest is immutable, and this refuses to pretend otherwise.** §12 binds a bench pass
+to a digest because *"evidence that is not bound to what it is evidence of is not evidence."* A
+manifest is the other half of that binding — it says which components those bytes change — so a Hub
+serving different content under one version has broken it exactly as a Hub serving a different
+document under one generation breaks §11. It gets the twenty-fourth session's treatment for the
+twenty-fourth session's reason: adopting produces a robot judging an update against a description of
+some other image, invisibly; refusing produces a robot that says the Hub changed a release under it.
+**Prefer the failure somebody can see.**
+
+**One manifest, not a catalogue.** The desired state names one version. Caching the rest would put
+statements about images this robot will never install on its disk, where an operator listing the
+directory has to work out which are real.
+
+**`arch` comes from `std::env::consts::ARCH`, not `uname`.** It is what this executable *is*, and a
+robot running an aarch64 supervisor under emulation on an x86 host would have `uname` answer the
+wrong question. The one `GET /os/releases?arch=` asks is which image boots the machine this code is
+already running on.
+
+### Opening the page found the eighth one
+
+The OTA panel renders `assessment.because`, and before this session that sentence had exactly one
+value on every robot in existence. It has four causes — nobody published this version for this
+architecture, the Hub was unreachable, the robot is not paired, the Hub changed a release under its
+own version — and they want four different people. The panel now carries the release pull under the
+verdict it feeds, and the last of the four gets the loudest treatment on the page, because it is the
+only one that is somebody else's mistake and the only one an operator cannot fix from the robot.
+
+That is eight sessions running in which opening the console found something no assertion was
+watching for.
+
+`skynet releases` joins the CLI as the forty-second command, and `GET /releases` joins the local
+API — reporting the last pull rather than making one, for `GET /intent`'s reason and one more: this
+request carries the device credential and goes out over whatever bearer is up, so a read on the LAN
+that triggered one would let an observer spend a fleet's metered allowance a request at a time. The
+existing invariant was widened to cover it.
+
+### §15's evidence, and the certificate that stops being a document
+
+The fourth piece, and the second one this session that found a contract with no consumer.
+
+`award_certification` and its thirty-six tests have existed in both editions for many sessions and
+have never been given a result to weigh, because §57's `POST /devices/{id}/conformance` did not
+exist and nothing stored one. It exists now, over two tables that are separated on purpose:
+`skynet_conformance_results` holds **what somebody measured** and `skynet_certifications` holds
+**what somebody awarded from it**, and every read of the second recomputes from the first.
+
+The reason is §15's own closing sentence — *"the third is the one nobody else does, and it is where
+certification stops being a document and becomes a live property"* — and it rules out the obvious
+schema. A tier stored on a robot is right on the day it is written: bench evidence lapses after a
+year, and field conformance below 0.999 **suspends** an award rather than downgrading it.
+
+Two things the Hub had to name rather than assume, and both are this session's pattern again:
+
+* **Nothing is signed.** §57 says *"signed SCTS results"*; no runner on any robot emits a signature,
+  so `verified` is false on every row. §12's gate — the single most important test in the suite — is
+  reading evidence that is asserted rather than attested, and that sentence is now in the route.
+* **Field conformance is `undefined`, not `1`.** §34.4 gives telemetry a priority, a drop policy and
+  a counter, and neither §17 nor §57 gives it a route, so nothing carries the cycle counts. Passing
+  1 would award on evidence nobody collected — which is the exact failure §15's third suite exists
+  to prevent, committed by the platform that defined it.
+
+Nothing changed on the robot for this. That is worth recording: it is the first piece all session
+where the OS side was already complete and correct, and the gap was entirely that no second party
+had ever been built.
+
+
+### §74 — the one place the two documents did not line up
+
+The fifth piece, and the only one this session that changed the specification.
+
+§34.4 gives telemetry a priority, a drop policy, a counter and a paragraph of its own. §17 lists
+eight endpoints and §57 lists nine, and **none of them is a route telemetry can be sent to.** Three
+sessions recorded that as a finding and left it open, which was right at the time: from the robot's
+side it looks like a queue that fills, and from the Hub's side it looked like nothing at all, because
+there was no Hub.
+
+Building the Hub made it a decision rather than an observation, because **two things upstream turned
+out to be waiting on the same absence**:
+
+* **§15's field conformance** — the suite §15 calls the one nobody else does, and the mechanism by
+  which certification *"stops being a document and becomes a live property."* Without a route it is
+  permanently unmeasured, and the fourth piece of this session had to pass `undefined` into
+  `award_certification` and write a paragraph explaining why.
+* **§32.1's guard trip rate.** A column on the fleet page, and one a check-in **structurally cannot
+  carry**: a rate is a count over a window, and §34.4 collapses check-ins precisely because every
+  field in one is a statement about now. A rate in a check-in would make the collapse lossy.
+
+So the architecture document has a Part X and a §74, and `POST /devices/{id}/telemetry` is the tenth
+endpoint. Amending a normative document is not a thing to do quietly, so the reasoning is in the
+section rather than here.
+
+### The shape came from three rules that already existed
+
+A telemetry item is a **window**: a half-open interval carrying counts over it. Each alternative
+breaks something:
+
+| Shape | Breaks |
+|---|---|
+| A series of samples | §34.4 — a week offline is ten thousand items, which is what collapsing check-ins exists to avoid |
+| A running total since boot | §47.4 — the next total absorbs a drop and the series stays tidy |
+| Counts since the last successful send | Makes delivery load-bearing for correctness; a retry that succeeded twice double-counts |
+
+What windows buy is §47.4's rule **from the shape of the data rather than from an annotation**: a
+dropped window loses that window and nothing else, and the loss is visible because the windows no
+longer tile. A Hub holding `[10:00, 10:05)` and `[10:15, 10:20)` knows exactly what it does not have,
+and nobody had to remember to say so.
+
+**Both clocks, and their disagreement reported.** §35.1 already assigns them — wall time for
+*"correlation with the Hub"*, monotonic for anything measured — and a window does both jobs, so it
+carries both. Wall time as a denominator would let an NTP step turn four hundred guard trips into a
+plausible rate with nothing looking wrong; monotonic bounds would make two robots' windows
+incomparable. `(to − from) − elapsed` is the skew, and it is a fact about the robot rather than a
+reason to discard a measurement.
+
+**Six of the eight counters are unmeasured on every robot this edition runs**, and they are absent
+rather than zero. §74.3 is §33.6's rule one field over, and it is not academic here: four need a
+kernel, one needs teleoperation, one needs the supervisor to count restarts. The two that are real
+are `queue_dropped` — §34.4's own counter, the one the section is written around — and
+`reconcile_passes`.
+
+### Two small decisions that are the whole design in miniature
+
+**There is no timer.** A window is closed by the pass that opens the next one, so a robot that stops
+reconciling stops producing windows — and the gap is then visible on the Hub as a gap, which is
+exactly what a heartbeat on a separate timer would have hidden.
+
+**The counters live in memory and a reboot ends a window.** A counter that survived a reboot would be
+a running total in disguise. The counts in the open window are lost and the *gap* is what the Hub
+sees, which is the honest report of a robot that restarted.
+
+### `assess_window` runs on both sides and refuses on both
+
+The robot will not enqueue an unusable window — the one place this differs from a check-in, which is
+enqueued whatever holes it has, and the reason is the drop policy: a check-in is level-triggered
+state a fleet needs even when incomplete, and a window with no duration can produce no rate and no
+coverage, so queueing it would spend the budget of the class §34.4 drops *first* on an item that can
+never be worth anything.
+
+The Hub refuses the same window with the same function, and **names it back** in the response. That
+matters more than it looks: a robot whose clock has moved under it is producing windows nothing will
+ever count, and its own queue accounting would show them as delivered.
+
+### The test that had been pinning the finding
+
+`every_class_but_telemetry_has_somewhere_to_go` is now `every_class_has_somewhere_to_go`, kept in the
+same shape rather than deleted, with a general assertion added: no class is silently unroutable. The
+day a fifth class arrives, that is where the decision will be made.
+
+`Episode` is now the only class with a route and no producer.
+
+### And the page it lands on
+
+`/skynet/os/devices/[id]` renders the windows: how many, **observed against spanned**, the intervals
+with no evidence, and either the field-conformance figure or the sentence saying which of the two
+absences it is.
+
+Observed against spanned is the pair worth having on a screen, and it is the one number a fleet page
+would otherwise get wrong. They are equal until §34.4 drops something, and §34.4 drops this class
+*first* — so the moment they diverge, the difference is exactly the time nobody has evidence for.
+§15 divides by the first; an operator reading the second would believe they had a day of data.
+
+§32.1 asks that page for four things. Three were named gaps this morning; the fourth, guard trip
+rate, came off the list when windows got somewhere to arrive.
+
+### §45, and the gap that narrowed rather than closing
+
+The sixth piece. `GET|POST /devices/{id}/calibration` is the eighth of §57's ten, `calibration` is
+the sixteenth mirrored contract, and §45.2's table is why: `guards_unavailable` converts *"we should
+calibrate the cameras sometime"* into *"an expired extrinsic disables the proximity guard"*, which
+is §32.1's ask in its own words.
+
+**Absent is not valid.** §45's own warning — *"treating never calibrated as no evidence of a problem
+is what puts a proximity guard on a robot whose camera transform is whatever the CAD model said"* —
+so a set that applies to the body and has no record is `absent`, its guards are down, and the page
+lists it rather than showing an empty table that reads as a clean bill.
+
+**The Hub can judge half of §45.4, and says which half.** Age and invalidating events are in the
+record; joint travel and temperature are properties of the robot at the moment of asking. So the
+reporter sends the conditions it observed, every verdict carries the age of the reading it was
+judged against, and the answer names the rules it could not check at all. The clock is aged forward
+and the temperature is not — a record judged against a two-hour-old `at_s` would report valid for two
+hours after it expired, and a temperature from an hour ago is not a temperature now.
+
+**The gap narrowed rather than closing**, and the entry was rewritten rather than deleted: a guard
+can also be unavailable for want of a sensor, a descriptor or a driver that has not come up, and
+none of those crosses. Two of §32.1's four asks are answered, one is half answered, one is named.
+
+Nothing on a robot reports a calibration yet. `skynetd` holds records and serves them on its own
+console, and no §34.4 class carries them — the bench path is what works today, which is the right
+half to have built first, because §45.3 records *who* took a calibration and a technician with a
+fixture is one of the two answers.
+
+### Where the numbers stand
+
+Rust: **1132** tests, up from 1119 at the session's start. `cargo fmt --all --check` clean,
+`cargo clippy --workspace --all-targets` clean under `-D warnings`, the TypeScript oracle
+type-checks, `node --check` passes on the console, and `node tools/check-golden-path.mjs` still
+describes the repository.
+
+The corpus is **940 cases across 65 files**, up from 925 across 63. Two new files —
+`telemetry/window` with 7 cases and `telemetry/coverage` with 5 — and one new case in an old one,
+`checkin/document.json → a-robot-that-holds-no-desired-state`, which pins the empty digest. The four
+existing cases in that file changed shape twice in one session, once for the attestation's measures
+and once for `desired_digest`; both editions reproduce the new bytes, which is what having two is
+for.
+
+Two new vocabularies, `telemetry_counters` and `telemetry_window_faults`, taking
+`vocabulary/closed-sets.json` from 55 sets to 57.
+
+The Rust port of `telemetry.ts` reproduced all twelve decision cases on the first run, which is
+worth one line: the two editions disagreed about nothing except the arithmetic nobody wrote down.
+`Math.round` is half toward positive infinity and this workspace's `round_half_away` is half away
+from zero, and they differ on exactly the negative halves a backwards clock produces — so the skew
+in the message is **truncated toward zero** in both, which is the one reading each edition can spell
+without a shared helper.
+
+Two new CI invariants and one widened:
+
+* **A check-in carries the three digests, not only the sentence**, grepped in both directions
+  because the edit that loses it is a revert to a shorter function name — and the shorter one
+  compiles, passes every assertion about the sentence, and renders correctly on every console.
+* **A release manifest is not rewritten under its own version**, checked for the *refusal*, because
+  the edit that loses it is somebody making the pull idempotent by writing unconditionally.
+* **Reading the intent does not pull** now covers `/releases` as well, with the second cost spelled
+  out: that request carries the device credential and goes out over whatever bearer is up.
+
+`skynet releases` is the forty-second CLI command and `node tools/check-golden-path.mjs` counts it.
+
+On the Hub: **570** tests (up from 485, after a pre-existing red suite was repaired),
+`npm run typecheck` clean, `npx next build` succeeds with every new route registered, and all 35
+locale catalogues audit clean.
+
+### Changed in the Hub
+
+Everything in `## Session — 2026-09-02 (ninth)` of `skynet-build-plan.md`. Three mirrored contracts
+are new there and `node tools/check-contract-mirrors.mjs` reports thirteen matching.
+
+§32.4's item 5 is also built — `/skynet/os/devices` and `/skynet/os/devices/[id]` — and the reason
+it was last in the order turned out to be the interesting part. The ordering constraint was never
+the tables; it was the same one the console faced in the ninth session: *"until then they would be
+showing invented state."*
+
+There is still no first real device, and both pages hold the line anyway. The one that took work is
+the fleet table's `silent` tone: a robot that has never checked in has `null` in every reported
+column, `applied: null` reads as *not applied*, and `generation - null` is 41 in JavaScript — which
+renders as *"41 generations behind"*, a specific and actionable and entirely invented number about a
+physical machine. It sorts first, its lag is null rather than a number, and both have tests, because
+both failures are one careless `?? 0` away and neither would look wrong.
+
+The device page is mostly a **panel of named gaps**, and that is the honest version rather than a
+reduced one. §32.1 asks it for guards, resolved limits and the transport plan; the robot computes
+all three every cycle and serves them on its own console, and nothing carries any of them to a Hub.
+Each could be approximated here from what a check-in does carry, and each approximation would be a
+confident statement about a machine nobody measured. They are listed, with the reason each is
+missing, which is the fourth thing this session has found by asking what the other end can actually
+see.
+
+### Not done, and what it waits on
+
+**Three migrations are written and not applied** — the fleet tables, the release channel, and
+conformance with certification. Applying DDL to a live project is the owner's call rather than a
+session's, and until they are run every route above answers with a PostgREST "no such table".
+Nothing else blocks the loop.
+
+**A round trip.** Every branch on both sides is driven by a suite and no robot has yet been answered
+by this Hub. That is the next session's work and it is a deployment step rather than a coding one.
+
+**The bundle bytes.** §12's `stage_image` still reports `Unimplemented`, and it is not the same
+entry it was this morning: the manifest now arrives, so what was *"§12 cannot decide"* is
+*"§12 decides, and cannot act"*. The transfer wants resume, progress and §34.3's metering, which is
+`skynet_contracts::bundle`'s subject — written, corpus-verified, and with nothing calling it.
+
+**The sealed black box.** §17 calls `POST /devices/{id}/incidents` an upload and both sides now treat
+it as a document. §13's seal produces hundreds of megabytes and wants resume, progress and §34.3's
+metering; `skynet_incidents.artifact_id` exists and is always NULL so the gap is visible in the
+schema rather than only here.
+
+**Telemetry** is closed. §74 gives it the tenth endpoint, both halves are built, and §15's field
+conformance is computed from real windows rather than from an `undefined` with a paragraph attached.
+What is left is that six of §74's eight counters have no source on this edition — which is a missing
+kernel rather than a missing route.
+
+**Where a bench pass comes from** has moved rather than closed. There is a route for one and a
+table under it; what is missing is a *runner* — nothing on a robot executes §15's thirty-six tests
+and nothing signs a result. §12's gate now reads real rows and cannot tell an attested one from an
+asserted one.
+
+**Field conformance** is wired and will read `null` for a while yet. The route exists, the windows
+arrive and the arithmetic is over what was observed rather than over what elapsed — and `cycles` is
+one of the six counters nothing on this edition measures, so the figure is honestly absent rather
+than absent for want of plumbing. That is a better absence than it was this morning and it is still
+an absence.
+
+**Episodes.** `Class::Episode` is now the only queue class with a route and no producer, which is a
+sharper statement of the same gap.
+
+**A real A/B device**, **`security.identity.attested`** and **§54.2's `safety_notes`
+acknowledgement**, all unchanged.
+
+### Findings, restated
+
+1–9 from the seventeenth session; 10 and 11 from the eighteenth; 12 and 13 from the nineteenth; 14
+and 15 from the twentieth; 16 and 17 from the twenty-first; 18–20 from the twenty-second; 21–23 from
+the twenty-third; 24 and 25 from the twenty-fourth.
+
+26. **A rendering is not a record, and the difference is invisible until somebody has to query it.**
+    New, and both of this session's findings are instances of it. `attest`'s sentence is correct,
+    tested, and reads beautifully on a console — and it is the *only* place the three digests went,
+    so §32.1's "which robots are running image `sha256:aa`" had no answer but a regular expression
+    over English. The generation is the same mistake in the other direction: a number that is a
+    perfect summary of an intent for the one party that also holds the document, and useless to the
+    party that does not.
+27. **A gap between two systems is invisible from either end.** New, and the reason both of these
+    survived twenty-four sessions of a repository that finds something every time somebody opens the
+    console. Nothing on the robot was wrong: it measured all three digests, kept them, served them
+    on its own API, and rendered them correctly. Nothing on the Hub was wrong either, because the
+    Hub did not exist. The defect lived in the space between a producer that had the fact and a
+    consumer nobody had written yet — which is exactly the space no test on either side can reach,
+    and it is why *"build the other half"* found two things that *"review this half"* had not.
+28. **A gap that everybody can see stays open until somebody needs it, and what closes it is a
+    consumer rather than more thought.** New, and it is the counterpart to 27 rather than a repeat.
+    Telemetry's missing route was *not* invisible: three sessions recorded it, by name, as the one
+    place §34.4 and §57 do not line up. It stayed open anyway, and the reason it stayed open is
+    exactly the reason it was right to leave it — there was no second party, so any route would have
+    been invented, and inventing a Hub surface is the failure the finding was guarding against.
+    What changed today was not insight. It was that **two things upstream turned out to be waiting
+    on the same absence** — §15's field conformance and §32.1's guard-trip column — and a gap with
+    two consumers is a decision. The practical rule: an open finding with no consumer is correctly
+    open, and the thing to do about it is to build whatever would consume it rather than to think
+    harder about the finding.

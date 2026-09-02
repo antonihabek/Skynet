@@ -50,8 +50,28 @@ const HERE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 /**
  * Modules the Hub keeps its own copy of.
  *
- * `calibration` (§45), `watchdog` (§46), `entitlement` (§51), `birth` (§50), `provenance` (§56) and
- * `skill` (§54) are deliberately **not** here yet.
+ * `ota` (§12) is here because `GET /os/releases` serves the manifests `admitBundle` judges, and the
+ * Hub is the party that can say *"this bundle will be gated on a bench pass"* **before** somebody
+ * publishes it rather than after a fleet has refused it. The vocabulary is the sharper half:
+ * `OS_COMPONENTS` is an allow-list that fails **closed** — an unrecognised component is treated as
+ * though it were the safety kernel, because a publisher shipping a kernel change past the gate
+ * would write `core` or `rt` rather than `safety_kernel`. A Hub validating `changes` against its
+ * own list would be a second, laxer copy of the one vocabulary in this system whose whole design is
+ * that it is strict.
+ *
+ * What the Hub does **not** get from mirroring it is the decision. §11 forbids a control decision
+ * requiring a network round trip, so whether a bundle may be applied is answered on the robot,
+ * every time, from resident facts. The Hub computes the same verdict for a person to read.
+ *
+ * `calibration` (§45) joined when the table it was named as waiting on landed, and its reason is
+ * §45.2's table read as a deliverable: `guardsUnavailable` converts *"we should calibrate the
+ * cameras sometime"* into *"an expired extrinsic disables the proximity guard"*, which is a sentence
+ * §32.1's device page asks for by name — *"active and unavailable guards with the missing input
+ * named"*. Both sides compute it from declared facts and neither is authoritative, which is the
+ * test this list applies.
+ *
+ * `watchdog` (§46), `entitlement` (§51), `birth` (§50), `provenance` (§56) and `skill` (§54) are
+ * deliberately **not** here yet.
  * All three are contracts the Hub will need for §32.1's `/skynet/os/devices/[id]` — "active and
  * unavailable guards with the missing input named" is precisely what calibration produces, and a
  * fleet page that cannot say which robots are running on a lapsed entitlement is a fleet page
@@ -100,24 +120,48 @@ const HERE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
  * That move is the reason to be careful with `semver`: it is one of the most-imported modules in
  * that repository, and a mirrored contract cannot be edited there in passing any more.
  *
- * `opstate` (§27) is the newest name that is not here, and it is a different kind of absence from
- * all of the above. It is not waiting on a page or a table so much as on a *consumer*: §27's machine
- * describes what a robot is doing right now, and the Hub has nowhere to put that — `skynet_device_state`
- * is one of the four tables §32.4 items 2 and 5 have been waiting on for three sessions. A fleet page
- * showing `hold` beside `degraded` is exactly what it is for, and that page does not exist.
+ * `opstate` (§27) is not here, and the table it was waiting on has now landed —
+ * `skynet_device_state` exists and a check-in writes §27's state into it. It stays out anyway, on
+ * the second of the two reasons it always had, which is the one that survives the table.
  *
- * There is a second reason, and it is the one that would still hold if the table landed tomorrow.
  * Every module in the list above answers a question **from declared facts**, which is why both sides
  * can compute it and neither is authoritative. §27's machine answers from *observations of a body*,
  * and the Hub has none: it would be running the evaluator over conditions a robot sent it, which is
  * displaying a robot's answer rather than computing a second opinion. That is a renderer, not a
  * mirrored contract, and mirroring it would suggest a disagreement between the two was possible.
  *
+ * `telemetry` (§74) is here because the Hub is the **only** consumer of `coverage`. A robot
+ * produces windows and never reads a set of them back; a Hub divides §15's field conformance by
+ * what the windows actually covered rather than by the time that elapsed, and that difference — one
+ * hour of windows out of a day is not a demonstration about the other twenty-three — is the
+ * difference between suspending a robot's certification and not. It is mirrored rather than written
+ * here because `assess_window` runs on both sides and a Hub that counted a window the robot would
+ * have refused would be holding evidence the robot never claimed to have produced.
+ *
+ * `identity`, `checkin` and `intent` are the three that joined before it, and each earns it from a
+ * different direction — which is worth writing down, because "the Hub touches this now" is not the test.
+ *
+ *   * `identity` because **both sides must agree on what a pairing code is**. The robot folds `O`
+ *     to `0` before it sends one (§18's alphabet has no `O`), and a Hub that minted codes from a
+ *     different alphabet, or compared without folding, would refuse codes an operator typed exactly
+ *     as printed. `DEVICE_SCOPES` is the same property from the other end: the robot refuses a
+ *     credential carrying a scope outside the list, so the Hub minting one outside it is a robot
+ *     that pairs and then reports itself broken.
+ *   * `checkin` because the Hub is the **only** consumer of `claimFor`'s four states, and §17's
+ *     rule — *the platform never claims a robot is running something it has not heard from* — is
+ *     enforced by whichever side decides what `applied: false` means. Two implementations of that
+ *     is two answers.
+ *   * `intent` because `assessOffer`'s own header asks for it: *"the same function runs on the robot
+ *     and on a Hub checking what it just served."* A Hub that can tell an operator "this robot will
+ *     refuse this document, and here is why" before serving it is the only place the
+ *     `generation_reused` refusal can be *prevented* rather than reported.
+ *
  * Add a name to this list and run `--sync`; nothing else is needed.
  */
 const MIRRORS = [
-  'canonical', 'conformance', 'digest', 'embodiment', 'kinematics', 'package', 'predicate',
-  'readiness', 'safety', 'semver',
+  'calibration', 'canonical', 'checkin', 'conformance', 'digest', 'embodiment', 'identity',
+  'intent', 'kinematics', 'ota', 'package', 'predicate', 'readiness', 'safety', 'semver',
+  'telemetry',
 ]
 
 const REFERENCE = 'reference/typescript'
@@ -127,7 +171,13 @@ const args = process.argv.slice(2)
 const sync = args.includes('--sync')
 const given = args.find(arg => !arg.startsWith('--'))
 
-const CANDIDATES = ['BotMarket', 'botmarket', 'Botmarket', 'botMarket']
+// The Hub was renamed from BotMarket to Robot Overflow, and both spellings are here because a
+// checkout made before the rename is still a valid checkout. A tool that could only find the old
+// name is a tool that prints "not found" forever and quietly stops comparing anything.
+const CANDIDATES = [
+  'Robot Overflow', 'robot-overflow', 'RobotOverflow', 'BotMarket', 'botmarket', 'Botmarket',
+  'botMarket',
+]
 
 function findHub() {
   for (const name of CANDIDATES) {

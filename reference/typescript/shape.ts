@@ -33,6 +33,14 @@ import {
 } from './opstate.ts'
 import type { LiveContext } from './live.ts'
 import type { BootVerdict, BundleVerdict } from './ota.ts'
+import type {
+  Attestation, AttestationReport, CodeResult, IdentityVerdict, Measure,
+} from './identity.ts'
+import type { CheckIn, ClaimVerdict, HealthReport } from './checkin.ts'
+import type { OfferVerdict } from './intent.ts'
+import type { Coverage, WindowReport } from './telemetry.ts'
+import { attest as attestOfMeasures } from './identity.ts'
+import { HEALTH_FIELDS } from './checkin.ts'
 import type { SkillTransition } from './skill.ts'
 import {
   CHAIN, WINDOWS, checkNesting, hostBlockedByCommandLoss, type Windows,
@@ -645,5 +653,239 @@ export function shapeSkillTransition(transition: SkillTransition): unknown {
     detail: transition.detail,
     release_leases: transition.release_leases,
     changed: transition.changed,
+  }
+}
+
+/**
+ * What a robot made of the characters somebody typed into `skynet pair`.
+ *
+ * `code` and `fault` are both present and both nullable, and a caller reads exactly one of them —
+ * so a shape where the other key came and went would make "which of the two happened" a question
+ * about key presence rather than about a value, and the corpus would be pinning a shape rather
+ * than a decision.
+ *
+ * The nesting is not cosmetic. `{ fault: null | { code, detail, … } }` is the shape frame
+ * validation and the cell descriptor already emit, which is what puts these refusals inside the
+ * §64 check rather than beside it.
+ */
+export function shapeCodeResult(result: CodeResult): unknown {
+  const fault = result.fault ?? null
+  return {
+    code: nullable(result.code),
+    fault: fault === null ? null : {
+      code: fault.code,
+      detail: fault.detail,
+      position: nullable(fault.position),
+    },
+  }
+}
+
+/** §10's answer about one robot's identity. */
+export function shapeIdentityVerdict(verdict: IdentityVerdict): unknown {
+  return {
+    attested: verdict.attested,
+    findings: verdict.findings.map(entry => ({
+      code: entry.code,
+      message: entry.message,
+      severity: entry.severity,
+      subjects: [...entry.subjects],
+    })),
+    paired: verdict.paired,
+  }
+}
+
+/** §10's sentence, and what is missing from it. */
+export function shapeAttestationReport(report: AttestationReport): unknown {
+  return {
+    complete: report.complete,
+    sentence: report.sentence,
+    unmeasured: [...report.unmeasured],
+  }
+}
+
+/**
+ * One measure, with the digest kept rather than rendered away.
+ *
+ * `digest` and `why` are present-and-null rather than omitted, for the reason
+ * `shapeHealthReport` keeps all five of §33.6's fields: a consumer that has to discover which keys
+ * this robot happened to fill in is a consumer that will get it wrong on the robot that filled in
+ * none.
+ */
+function shapeMeasure(measure: Measure): unknown {
+  return {
+    digest: measure.state === 'known' ? nullable(trimmedOrNull(measure.digest)) : null,
+    state: measure.state,
+    why: nullable(trimmedOrNull(measure.why)),
+  }
+}
+
+function trimmedOrNull(value: string | null | undefined): string | null {
+  const text = (value ?? '').trim()
+  return text === '' ? null : text
+}
+
+/**
+ * The attestation as §10 asks for it: the sentence **and** the three digests it is made of.
+ *
+ * # Why the sentence alone was not enough
+ *
+ * §10 asks the Hub to record *"robot X is running image `sha256:…`, policy `sha256:…`, against body
+ * `sha256:…`"*, and calls it the sentence an incident investigation needs and nobody can currently
+ * produce. `attest` produces it, and for two sessions it was the whole of what a check-in carried.
+ *
+ * A sentence is not a record. Ask the fleet *"which robots are running image `sha256:aa`"* — the
+ * question §32.1 puts a column on — and the only way to answer it from a sentence is to parse
+ * English back out of prose that deliberately is not machine-readable: `no policy`, `an unmeasured
+ * OS image (the slot could not be read)`, `an unnamed body`. Those renderings are right for a person
+ * and useless for an index, and a Hub that regex'd them would be re-deriving a fact the robot had
+ * and threw away.
+ *
+ * So both go on the wire. The sentence, because it is what somebody reads at 3 a.m.; the measures,
+ * because they are what somebody queries at 3 a.m. — and because a digest that survives only inside
+ * a rendering is a digest that a change to the rendering silently deletes.
+ */
+export function shapeAttestation(attestation: Attestation): unknown {
+  return {
+    ...(shapeAttestationReport(attestOfMeasures(attestation)) as Record<string, unknown>),
+    embodiment: shapeMeasure(attestation.embodiment),
+    os_image: shapeMeasure(attestation.os_image),
+    policy: shapeMeasure(attestation.policy),
+  }
+}
+
+/** What a robot may claim about the generation it was given (§17, §33.3). */
+export function shapeClaimVerdict(verdict: ClaimVerdict): unknown {
+  return {
+    applied: verdict.applied,
+    blocking: [...verdict.blocking],
+    claim: verdict.claim,
+    detail: verdict.detail,
+    generation: verdict.generation,
+  }
+}
+
+/**
+ * §33.6's health, rolled up.
+ *
+ * `fields` carries **every** name in `HEALTH_FIELDS`, present and null where there is no dated
+ * reading. That is this file's nullable rule, and it is load-bearing rather than tidy: a console
+ * iterating the five names §33.6 lists must not have to discover which of them a particular robot
+ * happened to measure, and a key that came and went would make "unmeasured" a question about
+ * key presence.
+ */
+export function shapeHealthReport(report: HealthReport): unknown {
+  const fields: Record<string, unknown> = {}
+  for (const name of HEALTH_FIELDS) {
+    const held = report.fields[name] ?? null
+    fields[name] = held === null ? null : { age_ms: held.age_ms, value: held.value }
+  }
+  return {
+    degraded: report.degraded,
+    fields,
+    packages: report.packages.map(entry => ({
+      age_ms: entry.age_ms,
+      id: entry.id,
+      live: entry.live,
+      readiness: entry.readiness,
+    })),
+    stalled: [...report.stalled],
+    undated: [...report.undated],
+    unmeasured: [...report.unmeasured],
+  }
+}
+
+/**
+ * The whole check-in, as it goes on the wire.
+ *
+ * Frozen as one document rather than as its parts, because this is the artifact §17 describes and
+ * the one two editions must not differ over. A corpus that pinned the claim and the health
+ * separately would let an edition agree about both and still send different bytes.
+ */
+export function shapeCheckIn(built: CheckIn): unknown {
+  return {
+    agent: built.agent,
+    applied: built.claim.applied,
+    attestation: shapeAttestation(built.attestation),
+    blocking: [...built.claim.blocking],
+    claim: built.claim.claim,
+    contracts: built.contracts,
+    desired_digest: built.desired_digest,
+    detail: built.claim.detail,
+    device_id: built.device_id,
+    generation: built.claim.generation,
+    health: shapeHealthReport(built.health),
+    pending: built.pending.map(entry => ({
+      deferred: entry.deferred,
+      reason: entry.reason,
+      stage: entry.stage,
+    })),
+    state: built.state,
+  }
+}
+
+/**
+ * §74's answer for one telemetry window.
+ *
+ * `rates` is an object rather than a list, and the counters that were *not* measured are absent from
+ * it rather than present as zero — which is the whole of §74.3 in one shape. A consumer iterating
+ * `TELEMETRY_COUNTERS` and reading `rates[name] ?? 0` would be committing the mistake the section
+ * exists to prevent; one that reads `unmeasured` first cannot.
+ */
+export function shapeWindowReport(report: WindowReport): unknown {
+  const rates: Record<string, number> = {}
+  for (const [name, rate] of Object.entries(report.rates)) rates[name] = rate
+  return {
+    elapsed_ms: report.elapsed_ms,
+    faults: report.faults.map(entry => ({
+      code: entry.code,
+      message: entry.message,
+      severity: entry.severity,
+    })),
+    rates,
+    skew_ms: report.skew_ms,
+    unmeasured: [...report.unmeasured],
+    usable: report.usable,
+  }
+}
+
+/**
+ * What a set of windows covers (§74.1).
+ *
+ * `gaps` is the field this shape exists for. §47.4's rule — a gap annotated as a gap is honest, a
+ * gap that looks like a quiet period is not — is obtained here from the data rather than from an
+ * annotation, and a shape that dropped the gaps would leave a fleet page unable to tell a robot
+ * that reported nothing from one whose telemetry was discarded under §34.4's drop policy.
+ */
+export function shapeCoverage(value: Coverage): unknown {
+  const totals: Record<string, number> = {}
+  for (const [name, total] of Object.entries(value.totals)) totals[name] = total
+  return {
+    gaps: value.gaps.map(gap => ({ from_ms: gap.from_ms, to_ms: gap.to_ms })),
+    observed_ms: value.observed_ms,
+    spanned_ms: value.spanned_ms,
+    totals,
+    unmeasured: [...value.unmeasured],
+    unusable: value.unusable,
+  }
+}
+
+/**
+ * §11's answer for one offered desired state.
+ *
+ * `changed` sits beside `adopt` rather than being derived from it by a reader, because the two
+ * differ on the most common case there is: an ordinary poll adopts a document identical to the one
+ * on disk, and a caller that inferred "adopted, therefore write it" would rewrite the desired state
+ * every few seconds.
+ */
+export function shapeOfferVerdict(verdict: OfferVerdict): unknown {
+  return {
+    adopt: verdict.adopt,
+    changed: verdict.changed,
+    faults: verdict.faults.map(entry => ({
+      code: entry.code,
+      message: entry.message,
+      severity: entry.severity,
+    })),
+    generation: verdict.generation,
   }
 }

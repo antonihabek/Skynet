@@ -361,6 +361,102 @@
         "set": "boot_decisions"
       },
       "expected": "[\"not_pending\",\"wait\",\"confirm\",\"roll_back\"]"
+    },
+    {
+      "id": "code_faults",
+      "note": "Why eight characters are not a pairing code, in the order the checks run. The order is the content: a credential is recognised before a length, which is what keeps `skd_x` from being reported as three missing characters.",
+      "input": {
+        "set": "code_faults"
+      },
+      "expected": "[\"empty\",\"looks_like_a_credential\",\"too_short\",\"too_long\",\"not_in_alphabet\"]"
+    },
+    {
+      "id": "device_scopes",
+      "note": "§17’s and §57’s device-facing routes, one scope each. This edition’s reading and a default rather than a derived constant — the Hub has declared no vocabulary. The **direction** is not a default: it is an allow-list, and §19’s \"assumed lost\" is why.",
+      "input": {
+        "set": "device_scopes"
+      },
+      "expected": "[\"device:calibration\",\"device:checkin\",\"device:conformance\",\"device:desired\",\"device:episodes\",\"device:evaluations\",\"device:incidents\",\"device:releases\"]"
+    },
+    {
+      "id": "key_bindings",
+      "note": "Where a device private key lives (§10).",
+      "input": {
+        "set": "key_bindings"
+      },
+      "expected": "[\"hardware\",\"software\"]"
+    },
+    {
+      "id": "identity_findings",
+      "note": "Everything §10 can find about a robot’s identity, in the order the checks run.",
+      "input": {
+        "set": "identity_findings"
+      },
+      "expected": "[\"not_paired\",\"namespace_missing\",\"not_a_device_credential\",\"scope_unrecognised\",\"scope_undeclared\",\"key_binding_unknown\",\"key_not_hardware_bound\",\"key_not_attested\",\"no_birth_certificate\"]"
+    },
+    {
+      "id": "measure_states",
+      "note": "The three states one of §10’s three digests can be in. `nothing` and `unmeasured` are two entries for §37.1’s reason: two facts with two different people at the end of them.",
+      "input": {
+        "set": "measure_states"
+      },
+      "expected": "[\"known\",\"nothing\",\"unmeasured\"]"
+    },
+    {
+      "id": "checkin_claims",
+      "note": "What a robot may claim about the generation it was given. Four rather than §17’s boolean, because \"not applied\" covers a robot that is working, one that is waiting for a person, and one whose supervisor disagrees with itself.",
+      "input": {
+        "set": "checkin_claims"
+      },
+      "expected": "[\"applied\",\"converging\",\"deferred\",\"inconsistent\"]"
+    },
+    {
+      "id": "reconcile_stages",
+      "note": "§33.4’s six ordered stages, as a check-in names them. Frozen because a fleet console groups by them, and six spellings of one stage is six columns.",
+      "input": {
+        "set": "reconcile_stages"
+      },
+      "expected": "[\"os_image\",\"rhal_driver\",\"package\",\"profile\",\"policy\",\"lease\"]"
+    },
+    {
+      "id": "readiness_states",
+      "note": "§33.6’s four. `stalled` and `unknown` are the pair that carries the section: one is a policy that has stopped producing and the other is one that has not started.",
+      "input": {
+        "set": "readiness_states"
+      },
+      "expected": "[\"ready\",\"stalled\",\"not_running\",\"unknown\"]"
+    },
+    {
+      "id": "health_fields",
+      "note": "The aggregate health fields, in the order §33.6 lists them. Every one is a key on every check-in whether or not it was measured, so a console iterates the set rather than discovering which of them a robot happened to have.",
+      "input": {
+        "set": "health_fields"
+      },
+      "expected": "[\"generation_lag\",\"guard_trip_rate\",\"storage_headroom\",\"battery\",\"temperature_c\"]"
+    },
+    {
+      "id": "offer_faults",
+      "note": "Everything §11’s pull can find wrong with a desired state it was handed, in the order the checks run. Two refuse and two report, and which is which is the content of the set.",
+      "input": {
+        "set": "offer_faults"
+      },
+      "expected": "[\"undecodable\",\"generation_reused\",\"generation_went_backwards\",\"empties_the_robot\"]"
+    },
+    {
+      "id": "telemetry_counters",
+      "note": "§74’s closed set of counters. Frozen because a fleet console divides by these, and six spellings of one counter is six columns that each look empty.",
+      "input": {
+        "set": "telemetry_counters"
+      },
+      "expected": "[\"cycles\",\"guard_trips\",\"clamps\",\"interventions\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"]"
+    },
+    {
+      "id": "telemetry_window_faults",
+      "note": "Everything §74 can find wrong with a window. Three refuse it and one reports — the clock skew is a fact about the robot rather than a reason to discard a measurement.",
+      "input": {
+        "set": "telemetry_window_faults"
+      },
+      "expected": "[\"unbounded\",\"inverted\",\"unmeasured_duration\",\"implausible_duration\"]"
     }
   ]
 }

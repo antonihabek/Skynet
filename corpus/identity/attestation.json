@@ -1,0 +1,177 @@
+{
+  "corpus": "identity",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "the-sentence-nobody-can-currently-produce",
+      "note": "§10, quoted: the Hub records not \"robot X is online\" but \"robot X is running image sha256:…, policy sha256:…, against body sha256:…\". This is that sentence, and it is frozen as bytes because it is the one an incident investigation reads.",
+      "input": {
+        "device_id": "dev_7",
+        "os_image": {
+          "state": "known",
+          "digest": "sha256:aaaa"
+        },
+        "policy": {
+          "state": "known",
+          "digest": "sha256:bbbb"
+        },
+        "embodiment": {
+          "state": "known",
+          "digest": "sha256:cccc"
+        }
+      },
+      "expected": "{\"complete\":true,\"sentence\":\"dev_7 is running image `sha256:aaaa`, policy `sha256:bbbb`, against body `sha256:cccc`.\",\"unmeasured\":[]}"
+    },
+    {
+      "id": "a-robot-between-policies",
+      "note": "Running nothing is a complete and true report, not a missing field. A fleet console that showed this identically to a robot whose policy digest could not be read would be reporting unknown software as none.",
+      "input": {
+        "device_id": "dev_7",
+        "os_image": {
+          "state": "known",
+          "digest": "sha256:aaaa"
+        },
+        "policy": {
+          "state": "nothing"
+        },
+        "embodiment": {
+          "state": "known",
+          "digest": "sha256:cccc"
+        }
+      },
+      "expected": "{\"complete\":true,\"sentence\":\"dev_7 is running image `sha256:aaaa`, no policy, against body `sha256:cccc`.\",\"unmeasured\":[]}"
+    },
+    {
+      "id": "a-policy-whose-digest-could-not-be-read",
+      "note": "The other half of the pair above. Same robot, same shape, and the two must not render the same — which is the entire reason `nothing` and `unmeasured` are separate states.",
+      "input": {
+        "device_id": "dev_7",
+        "os_image": {
+          "state": "known",
+          "digest": "sha256:aaaa"
+        },
+        "policy": {
+          "state": "unmeasured",
+          "why": "the runtime is not answering"
+        },
+        "embodiment": {
+          "state": "known",
+          "digest": "sha256:cccc"
+        }
+      },
+      "expected": "{\"complete\":false,\"sentence\":\"dev_7 is running image `sha256:aaaa`, an unmeasured policy (the runtime is not answering), against body `sha256:cccc`.\",\"unmeasured\":[\"policy\"]}"
+    },
+    {
+      "id": "a-guest-tier-robot-has-no-os-image",
+      "note": "§1: guest runs \"a container beside the vendor stack\". There is no Skynet OS image to measure and reporting one would be inventing a digest — so `nothing` is the true answer and the report is complete.",
+      "input": {
+        "device_id": "dev_7",
+        "os_image": {
+          "state": "nothing"
+        },
+        "policy": {
+          "state": "known",
+          "digest": "sha256:bbbb"
+        },
+        "embodiment": {
+          "state": "known",
+          "digest": "sha256:cccc"
+        }
+      },
+      "expected": "{\"complete\":true,\"sentence\":\"dev_7 is running no OS image, policy `sha256:bbbb`, against body `sha256:cccc`.\",\"unmeasured\":[]}"
+    },
+    {
+      "id": "a-body-that-has-not-come-up",
+      "note": "§27’s `kernel: down`. Reporting a body digest here would attest joint ratings nothing is applying, which is the failure the whole descriptor chain exists to prevent.",
+      "input": {
+        "device_id": "dev_7",
+        "os_image": {
+          "state": "known",
+          "digest": "sha256:aaaa"
+        },
+        "policy": {
+          "state": "nothing"
+        },
+        "embodiment": {
+          "state": "nothing"
+        }
+      },
+      "expected": "{\"complete\":true,\"sentence\":\"dev_7 is running image `sha256:aaaa`, no policy, against no body.\",\"unmeasured\":[]}"
+    },
+    {
+      "id": "an-unpaired-robot-still-reports",
+      "note": "No device id, because nothing has issued one. The sentence names \"This robot\" rather than inventing an identifier — and it is still produced, because a robot bringing itself up needs to be able to say what it is running before anybody has paired it.",
+      "input": {
+        "os_image": {
+          "state": "known",
+          "digest": "sha256:aaaa"
+        },
+        "policy": {
+          "state": "nothing"
+        },
+        "embodiment": {
+          "state": "known",
+          "digest": "sha256:cccc"
+        }
+      },
+      "expected": "{\"complete\":true,\"sentence\":\"This robot is running image `sha256:aaaa`, no policy, against body `sha256:cccc`.\",\"unmeasured\":[]}"
+    },
+    {
+      "id": "an-unmeasured-digest-with-no-reason-given",
+      "note": "The branch a caller reaches by constructing the state without the sentence. Rendered as the absence it is rather than as an empty pair of brackets.",
+      "input": {
+        "device_id": "dev_7",
+        "os_image": {
+          "state": "unmeasured",
+          "why": null
+        },
+        "policy": {
+          "state": "known",
+          "digest": "sha256:bbbb"
+        },
+        "embodiment": {
+          "state": "known",
+          "digest": "sha256:cccc"
+        }
+      },
+      "expected": "{\"complete\":false,\"sentence\":\"dev_7 is running an unmeasured OS image, policy `sha256:bbbb`, against body `sha256:cccc`.\",\"unmeasured\":[\"os_image\"]}"
+    },
+    {
+      "id": "three-holes-and-still-a-sentence",
+      "note": "§13’s rule, applied to a report rather than to a recording: the one most likely to have a hole in it is the one covering whatever made the hole. A check-in withheld for want of a digest is a robot the fleet believes is offline, which turns a named gap into a silence nobody can tell from a dead machine.",
+      "input": {
+        "device_id": "dev_7",
+        "os_image": {
+          "state": "unmeasured",
+          "why": "the slot could not be read"
+        },
+        "policy": {
+          "state": "unmeasured",
+          "why": null
+        },
+        "embodiment": {
+          "state": "unmeasured",
+          "why": "no descriptor is loaded"
+        }
+      },
+      "expected": "{\"complete\":false,\"sentence\":\"dev_7 is running an unmeasured OS image (the slot could not be read), an unmeasured policy, against an unmeasured body (no descriptor is loaded).\",\"unmeasured\":[\"embodiment\",\"os_image\",\"policy\"]}"
+    },
+    {
+      "id": "a-known-measure-with-nothing-in-it",
+      "note": "A caller bug, and the rendering is what stops it becoming a lie: an empty pair of backticks is read as a digest, and this reads as the absence it is. The report is still complete, because the caller said it measured — this file will not overrule a measurement it did not take.",
+      "input": {
+        "os_image": {
+          "state": "known",
+          "digest": ""
+        },
+        "policy": {
+          "state": "nothing"
+        },
+        "embodiment": {
+          "state": "nothing"
+        }
+      },
+      "expected": "{\"complete\":true,\"sentence\":\"This robot is running an unnamed OS image, no policy, against no body.\",\"unmeasured\":[]}"
+    }
+  ]
+}

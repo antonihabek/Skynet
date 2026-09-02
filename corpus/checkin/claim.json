@@ -1,0 +1,132 @@
+{
+  "corpus": "checkin",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "applied",
+      "note": "An empty plan on the generation the Hub asked for. The only state in which `applied` is true, and the case that has to hold or §17’s rule has made the field useless rather than honest.",
+      "input": {
+        "observed_generation": 41,
+        "desired_generation": 41,
+        "pending": []
+      },
+      "expected": "{\"applied\":true,\"blocking\":[],\"claim\":\"applied\",\"detail\":\"Generation 41 is applied and the plan is empty.\",\"generation\":41}"
+    },
+    {
+      "id": "converging",
+      "note": "Work left and somebody doing it. The generation on the wire is 40 — what this robot is actually running — and not the 41 it was asked for, which is the single field §17’s rule lives or dies on.",
+      "input": {
+        "observed_generation": 40,
+        "desired_generation": 41,
+        "pending": [
+          {
+            "stage": "policy",
+            "deferred": false,
+            "reason": "the package is staged and not started"
+          }
+        ]
+      },
+      "expected": "{\"applied\":false,\"blocking\":[\"policy\"],\"claim\":\"converging\",\"detail\":\"Still reconciling generation 41, with work left at policy. This robot is running generation 40.\",\"generation\":40}"
+    },
+    {
+      "id": "deferred",
+      "note": "§33.4’s barrier, and the reason this is a claim of its own rather than a flavour of converging: nothing here happens until somebody puts the robot in a safe state. An operator reading \"converging\" would wait; an operator reading this one goes and does something.",
+      "input": {
+        "observed_generation": 40,
+        "desired_generation": 41,
+        "pending": [
+          {
+            "stage": "os_image",
+            "deferred": true,
+            "reason": "applying an image reboots"
+          },
+          {
+            "stage": "rhal_driver",
+            "deferred": true,
+            "reason": "changing the driver changes the body"
+          }
+        ]
+      },
+      "expected": "{\"applied\":false,\"blocking\":[\"os_image\",\"rhal_driver\"],\"claim\":\"deferred\",\"detail\":\"Everything left to do is waiting for a safe state (§33.4): os_image, rhal_driver. Nothing here converges until the robot is put in one, which is an operator action rather than a matter of time.\",\"generation\":40}"
+    },
+    {
+      "id": "one-action-still-moving-is-not-deferred",
+      "note": "Two actions, one of them waiting and one of them not. `deferred` requires **every** pending action to be waiting — otherwise a robot that is actively converging would report itself stuck, and the one report that should send somebody to the robot would be the one they learn to ignore.",
+      "input": {
+        "observed_generation": 40,
+        "desired_generation": 41,
+        "pending": [
+          {
+            "stage": "os_image",
+            "deferred": true,
+            "reason": "applying an image reboots"
+          },
+          {
+            "stage": "package",
+            "deferred": false,
+            "reason": "fetching"
+          }
+        ]
+      },
+      "expected": "{\"applied\":false,\"blocking\":[\"os_image\",\"package\"],\"claim\":\"converging\",\"detail\":\"Still reconciling generation 41, with work left at os_image, package. This robot is running generation 40.\",\"generation\":40}"
+    },
+    {
+      "id": "an-empty-plan-that-closes-nothing",
+      "note": "The state worth having a name for. The reconciler emitted no actions and the generations still disagree, which is a supervisor that cannot see the difference it exists to close. Reported as `applied` it would be a green tick over a bug in the one place nobody looks.",
+      "input": {
+        "observed_generation": 40,
+        "desired_generation": 41,
+        "pending": []
+      },
+      "expected": "{\"applied\":false,\"blocking\":[],\"claim\":\"inconsistent\",\"detail\":\"The plan is empty and this robot has applied generation 40 against a desired 41. An empty plan that closes nothing is a supervisor that cannot see the difference it is meant to close, and reporting it as applied would put a green tick over it.\",\"generation\":40}"
+    },
+    {
+      "id": "stages-are-sorted-and-said-once",
+      "note": "Three pending actions across two stages, one repeated. `blocking` is what a fleet console groups by, so a duplicate renders as two problems and an unsorted list renders differently on two editions.",
+      "input": {
+        "observed_generation": 1,
+        "desired_generation": 2,
+        "pending": [
+          {
+            "stage": "policy",
+            "deferred": false,
+            "reason": "a"
+          },
+          {
+            "stage": "os_image",
+            "deferred": false,
+            "reason": "b"
+          },
+          {
+            "stage": "policy",
+            "deferred": false,
+            "reason": "c"
+          }
+        ]
+      },
+      "expected": "{\"applied\":false,\"blocking\":[\"os_image\",\"policy\"],\"claim\":\"converging\",\"detail\":\"Still reconciling generation 2, with work left at os_image, policy. This robot is running generation 1.\",\"generation\":1}"
+    },
+    {
+      "id": "a-robot-nobody-has-told-anything",
+      "note": "No generations and no plan, which is a robot that has never reached a Hub. Zero against zero is `applied`, and that is correct rather than a flattering default: this robot has applied everything it was asked for, which was nothing.",
+      "input": {},
+      "expected": "{\"applied\":true,\"blocking\":[],\"claim\":\"applied\",\"detail\":\"Generation 0 is applied and the plan is empty.\",\"generation\":0}"
+    },
+    {
+      "id": "deferred-on-a-generation-it-already-has",
+      "note": "Waiting for a safe state while the generations agree — which happens when the desired state changed and changed back, or when an action is deferred that the plan will drop next pass. The plan is not empty, so it is not applied, and the pending list is what says why.",
+      "input": {
+        "observed_generation": 41,
+        "desired_generation": 41,
+        "pending": [
+          {
+            "stage": "profile",
+            "deferred": true,
+            "reason": "a widening waits for a restart"
+          }
+        ]
+      },
+      "expected": "{\"applied\":false,\"blocking\":[\"profile\"],\"claim\":\"deferred\",\"detail\":\"Everything left to do is waiting for a safe state (§33.4): profile. Nothing here converges until the robot is put in one, which is an operator action rather than a matter of time.\",\"generation\":41}"
+    }
+  ]
+}

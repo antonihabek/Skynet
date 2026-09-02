@@ -260,6 +260,22 @@ pub struct Daemon<L: Launcher, S: Slots> {
     pub state_reason: StateReason,
     /// The last pass, for `GET /plan` and `skynet doctor`.
     pub last_pass: Option<Pass>,
+    /// What the last §11 pull did, for `GET /intent`.
+    ///
+    /// `None` until one has been attempted, which on an unpaired robot is for ever — and that is a
+    /// different fact from a pull that failed, which is why the route reports the two apart.
+    pub last_pull: Option<crate::intent::Pulled>,
+    /// §74's open telemetry window: what has been counted since the last one closed.
+    ///
+    /// In memory rather than on disk, deliberately. A counter that survived a reboot would be a
+    /// running total in disguise, and §74.1 rules those out — a drop becomes invisible because the
+    /// next total absorbs it. A reboot ends a window, and the *gap* is what the Hub sees.
+    pub counting: crate::telemetry::Counting,
+    /// The last release-catalogue pull (§12, §57).
+    ///
+    /// Kept here for `last_pull`'s reason: `GET /releases` reports what happened rather than making
+    /// a request of its own, so a read on the local API can never make this robot talk to a Hub.
+    pub last_release_pull: Option<crate::releases::Pulled>,
     /// Which rung the desired state came from.
     pub desired_source: DesiredSource,
     /// The desired state in force.
@@ -299,6 +315,9 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             operating_state: OperatingState::Post,
             state_reason: StateReason::PostIncomplete,
             last_pass: None,
+            last_pull: None,
+            counting: crate::telemetry::Counting::default(),
+            last_release_pull: None,
             desired_source,
             desired: nothing(),
             skills: crate::skill::Runtime::new(),
