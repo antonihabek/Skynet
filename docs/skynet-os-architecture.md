@@ -2145,6 +2145,24 @@ immobilise it or claim a headroom nobody measured. It is not a rung of the same 
 it is listed last rather than beneath `critical`: it grants leases, and a body reaching it is
 usually behaving correctly.
 
+**§36.1's `low` row is a rule, and §54.4's `acquiring` stage is where it is enforced.** A skill that
+reaches `acquiring` on a robot that is withholding is refused there — terminal, aborted,
+`power_withheld` — and §25.2's table is **not consulted**: a refusal that had taken two of three
+tokens first would be holding an arm for an invocation that is about to abort.
+
+It is refused rather than parked. An invocation waiting in `acquiring` for somebody to bring a
+charger burns §54.4's timeout and then aborts with the wrong reason on it, and "no new task leases
+granted" is a refusal in the row's own words.
+
+`power_withheld` is its own lifecycle reason rather than a second `lease_denied`, for the reason
+that enumeration has nineteen entries: only the reason tells an operator whether to call the
+publisher, find the package holding the arm, or **put the robot on a charger**. Three errands, and
+a shared word sends two of them to the wrong one.
+
+And the row's other half — *a running task may finish* — falls out of where the check sits. A skill
+already past `acquiring` holds its leases and is not disturbed when the battery falls, because a
+policy dropped mid-motion is the failure a controlled stop exists to avoid.
+
 **Two bodies reach `unmetered` and they are not the same robot.** One declares no pack. One declares
 a pack whose gauge has stopped answering. The distinction is a *fault* rather than a state —
 `gauge_silent` — because it is a fact about whether the number can be believed rather than about how
@@ -4646,7 +4664,7 @@ miniature, and currently trivial to fix.
 | IPC, observation assembly, arbitration | §25 | **Built** — the shared-memory ring and the command frame | — |
 | Boot, faults, POST, homing | §27, §48 | **Built** — §27's machine, POST's eight checks | Five of the eight are the kernel's, through a path §33.1 denies the daemon |
 | Networking and time | §34–35 | **Built** — bearers, metering, the outbound queue, backoff, two clocks kept apart | — |
-| Power and thermal | §36 | **Built** — the four states plus `unmetered`, the reserve, §36.3's ladder, §36.4's override; the gauge and the thermal zones read from `/sys`; `GET /power` and `skynet power` | §36.4's override has no input: the RHAL flag and its fault code reach this daemon through a path §33.1 denies it, so no robot can report a brownout. Nothing acts on the assessment yet — §25.2 does not consult it before granting a lease |
+| Power and thermal | §36 | **Built** — the four states plus `unmetered`, the reserve, §36.3's ladder, §36.4's override; the gauge and the thermal zones read from `/sys`; enforced at §54.4's `acquiring`; `GET /power` and `skynet power` | §36.4's override has no input: the RHAL flag and its fault code reach this daemon through a path §33.1 denies it, so no robot can report a brownout. §36.1's `reserve` and `critical` rows ask for a controlled stop, and nothing performs one — the stop path is the kernel's |
 | Configuration, calibration | §38, §45 | **Built on both sides** | — |
 | Resource enforcement | §40 | **Built** — cgroup limits, the RT core | — |
 | Frames | §44 | **Built** — the graph, forward kinematics, both pose guards | — |

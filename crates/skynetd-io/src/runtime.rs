@@ -1398,6 +1398,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         let inputs = self.live_inputs(wall_s);
         let running = crate::skill::running_set(actual);
         let grants = actual.grants.clone();
+        let power_withheld = self.power_refusal(now_ms);
 
         let mut runtime = core::mem::take(&mut self.skills);
         let reports = {
@@ -1417,6 +1418,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
                 running: &running,
                 leases: &mut self.leases,
                 grants: &grants,
+                power_withheld,
             };
             runtime.advance_all(&mut cycle)
         };
@@ -1514,6 +1516,43 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         let body = crate::embodiment::load(&layout);
         let (_, reading) = crate::power::observe(&mut self.power, &layout, &body, now_ms);
         reading
+    }
+
+    /// §36.1's `low` row as a sentence, or `None` when new task leases may be granted.
+    ///
+    /// The sentence names *which* of §36's two reasons is in force, because they send an operator
+    /// to different places: a body below its reserve wants a charger, and a body whose gauge
+    /// nothing can read wants a look at the machine. Both withhold, and a shared sentence would
+    /// send half the operators to the wrong one (§64).
+    ///
+    /// A robot with no power subsystem wired up is `unmetered`, grants leases, and returns `None`
+    /// here — so wiring this in changes nothing on a body that declares no pack, which is what
+    /// every test in this suite and every development host is.
+    pub fn power_refusal(&mut self, now_ms: u64) -> Option<String> {
+        let layout = self.store.layout().clone();
+        let body = crate::embodiment::load(&layout);
+        let profile = crate::power::profile_of(&body);
+        let reading = self.read_power(now_ms);
+        let assessment = skynet_contracts::power::assess(&profile, &reading.observation);
+        if assessment.grants_new_leases() {
+            return None;
+        }
+
+        let mut sentence = format!(
+            "§36.1 withholds new task leases: this robot's power state is `{}` ({})",
+            assessment.state.as_str(),
+            assessment.reason.as_str()
+        );
+        // The faults are what make the two cases distinguishable. A robot at `low` has none and the
+        // state is the whole story; a robot reporting `unmetered` has one, and it is the sentence
+        // that says whether to fetch a charger or a screwdriver.
+        for fault in &assessment.faults {
+            if fault.code.withholds_leases() {
+                sentence.push_str(". ");
+                sentence.push_str(&fault.detail);
+            }
+        }
+        Some(sentence)
     }
 
     /// Aggregate health (§33.6).

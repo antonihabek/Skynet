@@ -4393,6 +4393,34 @@ lifecycleCase('lease-denied',
     lease_holder: 'acme/pick-place',
   }))
 
+lifecycleCase('power-withheld',
+  '§36.1\'s `low` row, which was a sentence in the specification and a rule nothing obeyed until '
+  + '§36 was written. No new task leases are granted, so the invocation aborts rather than waiting: '
+  + 'an invocation parked in `acquiring` hoping for a charger burns §54.4\'s timeout and then '
+  + 'aborts with the wrong reason on it.',
+  'acquiring', progress({
+    power_withheld: "§36.1 withholds new task leases: this robot's power state is `reserve` "
+      + '(at_reserve)',
+  }))
+
+lifecycleCase('power-withheld-outranks-a-held-token',
+  'Both refusals true at once. Power answers first, and the order is not a preference: a refusal '
+  + 'for want of energy is a fact about the robot and a held token is a fact about another package, '
+  + 'so the robot-wide one is what an operator needs. It is also the only order that works — a '
+  + 'runtime that withholds does not ask §25.2\'s table, so `leases` would read `pending`.',
+  'acquiring', progress({
+    power_withheld: '§36.1 withholds new task leases: this robot\'s power state is `critical`',
+    leases: 'denied',
+    lease_token: 'manipulation.grasp',
+    lease_holder: 'acme/pick-place',
+  }))
+
+lifecycleCase('power-withheld-empty-is-not-a-refusal',
+  'An empty sentence is not a refusal. §64 makes a refusal name its fix, and a skill aborted with a '
+  + 'blank reason on it is the one shape that cannot — so a caller that sets the field to nothing '
+  + 'gets the acquiring rules exactly as they were.',
+  'acquiring', progress({ power_withheld: '   ', leases: 'held' }))
+
 lifecycleCase('lease-never-granted',
   'The other half of §25.2, and the one no case had. A token the operator never granted reports no '
   + 'holder — "nobody has the arm, this package may not ask for it" — and the refusal has to say '

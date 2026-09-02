@@ -865,6 +865,13 @@ pub enum LifecycleReason {
     LeasePending,
     /// §25.2 refused one. Denied if held.
     LeaseDenied,
+    /// §36.1 withholds new task leases: the robot has not the energy to be given more work.
+    ///
+    /// Its own reason rather than a second [`LifecycleReason::LeaseDenied`], for the reason this
+    /// enumeration has eighteen entries: only the reason tells an operator whether to call the
+    /// publisher, find the package holding the arm, or **put the robot on a charger**. Three
+    /// errands, and a shared word sends two of them to the wrong one.
+    PowerWithheld,
     /// Every required capability is leased.
     LeasesAcquired,
     /// §54.4's timeout. `skill.timeout.enforced`.
@@ -899,6 +906,7 @@ impl LifecycleReason {
             LifecycleReason::LeasesHeldByRoot => "leases_held_by_root",
             LifecycleReason::LeasePending => "lease_pending",
             LifecycleReason::LeaseDenied => "lease_denied",
+            LifecycleReason::PowerWithheld => "power_withheld",
             LifecycleReason::LeasesAcquired => "leases_acquired",
             LifecycleReason::Timeout => "timeout",
             LifecycleReason::HoldLost => "hold_lost",
@@ -914,7 +922,7 @@ impl LifecycleReason {
 }
 
 /// Every reason, in rule order.
-pub const LIFECYCLE_REASONS: [LifecycleReason; 18] = [
+pub const LIFECYCLE_REASONS: [LifecycleReason; 19] = [
     LifecycleReason::NotInvoked,
     LifecycleReason::Invoked,
     LifecycleReason::PreconditionsPending,
@@ -923,6 +931,7 @@ pub const LIFECYCLE_REASONS: [LifecycleReason; 18] = [
     LifecycleReason::LeasesHeldByRoot,
     LifecycleReason::LeasePending,
     LifecycleReason::LeaseDenied,
+    LifecycleReason::PowerWithheld,
     LifecycleReason::LeasesAcquired,
     LifecycleReason::Timeout,
     LifecycleReason::HoldLost,
@@ -954,6 +963,22 @@ pub struct Progress {
     pub lease_token: String,
     /// Who holds it.
     pub lease_holder: String,
+    /// §36.1's `low` row, when it is in force: the sentence, or `None`.
+    ///
+    /// One field rather than a boolean and a reason beside it, for the reason
+    /// [`crate::opstate::Conditions::stop`] is an `Option<StopCause>`: two fields that must agree
+    /// are two fields that eventually do not.
+    ///
+    /// The sentence is composed by the runtime rather than here, because the runtime is where §36's
+    /// assessment is in hand — a robot may withhold leases for being nearly flat *or* for having a
+    /// gauge nothing can read, and those are different sentences for the same rule.
+    ///
+    /// **`None` is the default and it is the permissive one**, which is unlike almost everything
+    /// else in this crate. It is not a guess: §36's answer for a body nobody has observed is
+    /// `unmetered`, which grants leases — so `None` is what the power contract itself computes for
+    /// an unobserved robot, not an assumption made in its absence. A default of "withholding" would
+    /// refuse every skill on every robot with no power subsystem wired up, silently.
+    pub power_withheld: Option<String>,
     /// Milliseconds since the skill entered `running`. `None` while it has not.
     pub elapsed_ms: Option<f64>,
     /// §54.4's deadline, from [`skill_deadline`].
@@ -987,6 +1012,7 @@ impl Default for Progress {
             leases: LeaseState::Pending,
             lease_token: String::new(),
             lease_holder: String::new(),
+            power_withheld: None,
             elapsed_ms: None,
             deadline: Deadline {
                 deadline_ms: None,
@@ -1203,6 +1229,25 @@ pub fn advance(phase: SkillPhase, progress: &Progress) -> SkillTransition {
             ),
         },
 
+        // §36.1's `low` row, before the table is consulted. Two reasons for the order: a refusal
+        // for want of energy is a fact about the *robot* and a refusal for a held token is a fact
+        // about another package, so when both are true the robot-wide one is what an operator needs
+        // first — and the runtime does not ask the table at all when this is set, so `leases` would
+        // read `Pending` and pin the invocation in `acquiring` until its deadline.
+        //
+        // Terminal rather than a wait. "No new task leases granted" is a refusal, and an invocation
+        // parked in `acquiring` hoping for a charger would burn §54.4's timeout and then abort with
+        // the wrong reason on it.
+        SkillPhase::Acquiring if progress.power_withheld.is_some() => done(
+            SkillPhase::Terminal,
+            LifecycleReason::PowerWithheld,
+            Some(SkillOutcome::Aborted),
+            progress
+                .power_withheld
+                .clone()
+                .unwrap_or_else(|| "§36.1 withholds new task leases".to_string()),
+        ),
+
         SkillPhase::Acquiring => match progress.leases {
             LeaseState::Denied => done(
                 SkillPhase::Terminal,
@@ -1375,6 +1420,15 @@ pub fn progress_from_json(input: &Json) -> Progress {
         },
         lease_token: word("lease_token"),
         lease_holder: word("lease_holder"),
+        // An empty string is not a refusal. A corpus case that wrote `""` here would otherwise
+        // abort a skill with a blank sentence on it, which is the one shape a refusal must never
+        // have (§64).
+        power_withheld: input
+            .get("power_withheld")
+            .and_then(Json::as_str)
+            .map(str::trim)
+            .filter(|sentence| !sentence.is_empty())
+            .map(str::to_string),
         elapsed_ms: input.get("elapsed_ms").and_then(Json::as_f64),
         deadline,
         hold_lost: flag("hold_lost"),
@@ -1806,6 +1860,81 @@ mod tests {
                 assert_ne!(transition.outcome, Some(SkillOutcome::Success));
             }
         }
+    }
+
+    /// §36.1's `low` row: no new task leases, and the refusal carries the sentence the runtime
+    /// composed rather than a generic one — because a flat battery and an unreadable gauge both
+    /// withhold, and they send an operator to different places.
+    #[test]
+    fn power_withholds_the_lease_and_the_refusal_carries_its_own_sentence() {
+        let progress = Progress {
+            power_withheld: Some(
+                "§36.1 withholds new task leases: this robot's power state is `reserve`"
+                    .to_string(),
+            ),
+            ..going_well()
+        };
+        let transition = advance(SkillPhase::Acquiring, &progress);
+        assert_eq!(transition.to, SkillPhase::Terminal);
+        assert_eq!(transition.reason, LifecycleReason::PowerWithheld);
+        assert_eq!(transition.outcome, Some(SkillOutcome::Aborted));
+        assert!(
+            transition.detail.contains("`reserve`"),
+            "{}",
+            transition.detail
+        );
+        assert!(
+            transition.release_leases,
+            "terminal releases, even from a phase that never took any — the effect is idempotent \
+             and the alternative is a rule with an exception in it"
+        );
+    }
+
+    /// The order matters and it is not arbitrary: both refusals can be true at once, and the one
+    /// about the *robot* is the one an operator needs first. It is also the only order that works —
+    /// the runtime does not ask §25.2's table when power withholds, so `leases` reads `Pending` and
+    /// the other order would pin the invocation in `acquiring` until its deadline.
+    #[test]
+    fn power_is_answered_before_the_lease_table() {
+        let progress = Progress {
+            power_withheld: Some("the battery is below its reserve".to_string()),
+            leases: LeaseState::Denied,
+            lease_token: "manipulation.grasp".to_string(),
+            lease_holder: "acme/pick-place".to_string(),
+            ..going_well()
+        };
+        let transition = advance(SkillPhase::Acquiring, &progress);
+        assert_eq!(transition.reason, LifecycleReason::PowerWithheld);
+    }
+
+    /// And a robot that is not withholding is not affected at all, which is every robot that
+    /// declares no pack.
+    #[test]
+    fn no_power_refusal_leaves_the_acquiring_rules_exactly_as_they_were() {
+        let progress = Progress {
+            leases: LeaseState::Held,
+            ..going_well()
+        };
+        let transition = advance(SkillPhase::Acquiring, &progress);
+        assert_eq!(transition.reason, LifecycleReason::LeasesAcquired);
+        assert_eq!(transition.to, SkillPhase::Running);
+    }
+
+    /// An empty sentence is not a refusal. §64 makes a refusal name its fix, and a skill aborted
+    /// with a blank reason on it is the one shape that cannot.
+    #[test]
+    fn an_empty_power_sentence_is_not_a_refusal() {
+        let progress = progress_from_json(
+            &Json::parse(
+                r#"{"invoked":true,"entry_permitted":true,"leases":"held","power_withheld":"  "}"#,
+            )
+            .expect("parses"),
+        );
+        assert_eq!(progress.power_withheld, None);
+        assert_eq!(
+            advance(SkillPhase::Acquiring, &progress).reason,
+            LifecycleReason::LeasesAcquired
+        );
     }
 
     #[test]
@@ -2261,7 +2390,7 @@ mod tests {
     /// appears, and the way that happens is a rule being reordered above the one that produced it.
     #[test]
     fn every_lifecycle_reason_is_produced_by_some_evidence() {
-        let cases: [(SkillPhase, Progress); 18] = [
+        let cases: [(SkillPhase, Progress); 19] = [
             (SkillPhase::Idle, Progress::default()),
             (
                 SkillPhase::Idle,
@@ -2352,6 +2481,13 @@ mod tests {
                 },
             ),
             (SkillPhase::Terminal, going_well()),
+            (
+                SkillPhase::Acquiring,
+                Progress {
+                    power_withheld: Some("the battery is below its reserve".to_string()),
+                    ..going_well()
+                },
+            ),
         ];
         let seen: Vec<LifecycleReason> = cases
             .iter()

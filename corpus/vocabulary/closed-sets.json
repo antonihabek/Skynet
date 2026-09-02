@@ -320,7 +320,7 @@
       "input": {
         "set": "lifecycle_reasons"
       },
-      "expected": "[\"not_invoked\",\"invoked\",\"preconditions_pending\",\"preconditions_refused\",\"preconditions_met\",\"leases_held_by_root\",\"lease_pending\",\"lease_denied\",\"leases_acquired\",\"timeout\",\"hold_lost\",\"guard_tripped\",\"robot_stopped\",\"running\",\"verifying\",\"verdict_pending\",\"judged\",\"terminal\"]"
+      "expected": "[\"not_invoked\",\"invoked\",\"preconditions_pending\",\"preconditions_refused\",\"preconditions_met\",\"leases_held_by_root\",\"lease_pending\",\"lease_denied\",\"power_withheld\",\"leases_acquired\",\"timeout\",\"hold_lost\",\"guard_tripped\",\"robot_stopped\",\"running\",\"verifying\",\"verdict_pending\",\"judged\",\"terminal\"]"
     },
     {
       "id": "lease_states",

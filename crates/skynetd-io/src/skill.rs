@@ -407,6 +407,16 @@ pub struct Cycle<'a> {
     pub running: &'a BTreeSet<String>,
     /// §25.2's table.
     pub leases: &'a mut LeaseTable,
+    /// §36.1's `low` row, when it is in force: the sentence, or `None`.
+    ///
+    /// Assembled by the caller from [`skynet_contracts::power::assess`], because the sentence
+    /// depends on *why* — a body nearly flat and a body whose gauge nothing can read both withhold
+    /// leases, and they send an operator to different places.
+    ///
+    /// It gates the **acquisition** and nothing else, which is §36.1's row read exactly: no new
+    /// task leases are granted, and a running task may finish. A skill already past `acquiring`
+    /// holds its leases and is not disturbed, and the release path is untouched.
+    pub power_withheld: Option<String>,
     /// `(package, token)` grants, as `observe::read_grants` returns them.
     pub grants: &'a [(String, String)],
 }
@@ -751,6 +761,10 @@ impl Runtime {
                     .unwrap_or_default();
                 invocation.entry_permitted = Some(report.permitted);
             }
+            // §36.1. Asked before §25.2's table rather than after, and the table is not consulted
+            // at all: a refusal that had already taken two of three tokens would be holding an arm
+            // for a skill that is about to abort.
+            SkillPhase::Acquiring if cycle.power_withheld.is_some() => {}
             SkillPhase::Acquiring => {
                 if self.invocations[index].root
                     && self.invocations[index].leases == LeaseState::Pending
@@ -827,6 +841,11 @@ impl Runtime {
             leases: invocation.leases,
             lease_token: invocation.lease_token.clone(),
             lease_holder: invocation.lease_holder.clone(),
+            // Read from the cycle rather than remembered on the invocation, because it is a fact
+            // about the robot in *this* pass and not about this skill. A robot that came off a
+            // charger between passes stops withholding, and the next invocation to reach
+            // `acquiring` is entitled to the arm.
+            power_withheld: cycle.power_withheld.clone(),
             elapsed_ms: invocation
                 .running_since_ms
                 .map(|started| cycle.now_ms.saturating_sub(started) as f64),
