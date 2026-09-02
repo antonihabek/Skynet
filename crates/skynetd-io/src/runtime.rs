@@ -308,6 +308,13 @@ pub struct Daemon<L: Launcher, S: Slots> {
     /// Boxed for `updater`'s reason and used the same way — a handful of calls in the life of an
     /// image, against a pair of type parameters read on every pass.
     pub fetcher: Box<dyn crate::bundle::Fetcher>,
+    /// §36's sensors, and the one instant they remember (§36.3's "sustained").
+    ///
+    /// Here for `counting`'s reason: a throttle window is a duration, a duration is not observable
+    /// in one reading, and the instant it opened has to live somewhere. In memory rather than on
+    /// disk, and by the same argument — a throttle window that survived a reboot would be a robot
+    /// reporting an hour of continuous throttling across a power cycle it spent switched off.
+    pub power: crate::power::Sensors,
     /// The fraction §34.4's backoff is jittered by, supplied rather than drawn (§35.2).
     ///
     /// A field rather than an argument threaded through `reconcile`, `apply` and six action arms to
@@ -343,6 +350,10 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             last_pass: None,
             last_pull: None,
             counting: crate::telemetry::Counting::default(),
+            // From the kernel's own interfaces, not through the layout — for `cpus`'s reason two
+            // fields above: the pack and the thermal zones are properties of the machine and live
+            // at `/sys` on every one of them, whatever `/data` a store was rooted at.
+            power: crate::power::Sensors::new(),
             last_release_pull: None,
             desired_source,
             desired: nothing(),
@@ -704,7 +715,11 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         // the Hub asked for".
         let remaining = skynetd::plan(&self.desired, &actual).actions.len();
 
-        let health = self.health(&actual, now_ms);
+        // §36's gauge, read in the pass whose health it goes into. A `Pass` is the record of one
+        // turn of the loop, so a battery figure in it that came from a different turn would be the
+        // one thing this struct exists not to be.
+        let reading = self.read_power(now_ms);
+        let health = self.health(&actual, now_ms, Some(&reading));
         let pass = Pass {
             at_ms: now_ms,
             plan,
@@ -1243,7 +1258,8 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         };
 
         let post = crate::post::run(&layout, wall_s);
-        let health = self.health(actual, now_ms);
+        let reading = self.read_power(now_ms);
+        let health = self.health(actual, now_ms, Some(&reading));
         let wanted_running = !health.packages.is_empty()
             && health
                 .packages
@@ -1487,6 +1503,19 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         let _ = self.write_leases();
     }
 
+    /// One §36 reading, against the descriptor as it is on disk right now (§36).
+    ///
+    /// The descriptor is loaded per call rather than held on the daemon, for the reason `actual` is
+    /// observed rather than remembered (§33.3): a profile cached at start-up would survive a
+    /// descriptor somebody replaced on a running robot, and the thresholds in it are what decide
+    /// when this robot stops.
+    pub fn read_power(&mut self, now_ms: u64) -> crate::power::Reading {
+        let layout = self.store.layout().clone();
+        let body = crate::embodiment::load(&layout);
+        let (_, reading) = crate::power::observe(&mut self.power, &layout, &body, now_ms);
+        reading
+    }
+
     /// Aggregate health (§33.6).
     ///
     /// Readiness is [`Readiness::Unknown`] for every running package, and that is the correct
@@ -1495,7 +1524,18 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     /// runtime posts into, and the policy runtime is not written. An `Unknown` on the console reads
     /// as "running, nobody has measured whether it is producing", which is true. A `Ready` would be
     /// the green tick §33.6 exists to prevent.
-    pub fn health(&self, actual: &Actual, now_ms: u64) -> Health {
+    ///
+    /// `power` is §36's reading, taken by the caller. **Passed in rather than taken here** for two
+    /// reasons that point the same way: this method is `&self` and the throttle window is the one
+    /// thing §36 remembers, and a health rollup that opened `/sys` would be doing I/O behind a name
+    /// that promises an aggregate. `None` is a caller that did not read one, which reports the two
+    /// fields absent — as they were on every check-in until §36 was written.
+    pub fn health(
+        &self,
+        actual: &Actual,
+        now_ms: u64,
+        power: Option<&crate::power::Reading>,
+    ) -> Health {
         let packages = actual
             .units
             .iter()
@@ -1519,8 +1559,11 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             generation_lag: None,
             storage_headroom: None,
             guard_trip_rate: None,
-            battery: None,
-            temperature_c: None,
+            // §36's two, and this is their only source. `GET /health` and the check-in both read
+            // this struct, so a robot cannot report one battery figure on its console and another
+            // to its Hub — which is what filling them in two places would eventually produce.
+            battery: power.and_then(|reading| reading.charge_fraction),
+            temperature_c: power.and_then(|reading| reading.observation.temperature_c),
         }
     }
 

@@ -73,6 +73,7 @@ pub mod observe;
 pub mod ota;
 pub mod outbound;
 pub mod post;
+pub mod power;
 pub mod releases;
 pub mod runtime;
 pub mod skill;

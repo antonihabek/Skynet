@@ -939,6 +939,15 @@ impl Fixture {
             present: [0, 1].into_iter().collect(),
             isolated: [1].into_iter().collect(),
         };
+        // §36's sensors, pointed at a tree that does not exist. A daemon left on the real `/sys`
+        // would read *this build machine's* battery, so a laptop and a container would produce
+        // different check-in documents from the same fixture — and the suite would pass on one and
+        // fail on the other for a reason nothing in it mentions. The tests that exercise a gauge
+        // build one, in `crate::power`'s own module.
+        daemon.power = crate::power::Sensors::rooted(
+            root.path().join("no-power-supply"),
+            root.path().join("no-thermal"),
+        );
         Self {
             root,
             daemon,
@@ -1477,6 +1486,198 @@ const NESTED_ARM: &str = r#"{
   "watchdog": { "soc_wdt_ms": 250, "drive_command_timeout_ms": 500 },
   "joints": [{"name": "shoulder", "type": "revolute", "control_modes": ["position"]}]
 }"#;
+
+const POWERED_ARM: &str = r#"{
+  "robot_slug": "bench-arm",
+  "base": "fixed",
+  "dof": 1,
+  "power": {
+    "time_to_safe_state_s": 2,
+    "safe_stop_energy_wh": 20,
+    "pack_capacity_wh": 500,
+    "thermal_throttle_c": 70,
+    "thermal_critical_c": 90,
+    "brownout_fault_codes": [4097]
+  },
+  "joints": [{"name": "shoulder", "type": "revolute", "control_modes": ["position"]}]
+}"#;
+
+/// A machine with a battery, under the fixture's own root.
+fn with_gauge(fixture: &mut Fixture, files: &[(&str, &str)], zones: &[&str]) {
+    let supplies = fixture.root.path().join("power_supply");
+    let thermal = fixture.root.path().join("thermal");
+    let bat = supplies.join("BAT0");
+    std::fs::create_dir_all(&bat).unwrap();
+    std::fs::write(bat.join("type"), "Battery").unwrap();
+    for (name, value) in files {
+        std::fs::write(bat.join(name), value).unwrap();
+    }
+    for (index, milli) in zones.iter().enumerate() {
+        let zone = thermal.join(format!("thermal_zone{index}"));
+        std::fs::create_dir_all(&zone).unwrap();
+        std::fs::write(zone.join("temp"), milli).unwrap();
+    }
+    fixture.daemon.power = crate::power::Sensors::rooted(supplies, thermal);
+}
+
+/// §36 end to end: a descriptor, a gauge in `/sys`, and the state the two produce.
+#[test]
+fn the_power_route_assesses_a_real_gauge_against_the_declared_reserve() {
+    let mut fixture = Fixture::new("power-route");
+    fixture.provision();
+    write_embodiment(&fixture, POWERED_ARM);
+    // 40 Wh against a 20 Wh reserve: inside the low band, where a running task may finish and no
+    // new one may start.
+    with_gauge(&mut fixture, &[("energy_now", "40000000")], &["55000"]);
+
+    let (status, body) = fixture.request("GET", "/power", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(body.get("state").and_then(Json::as_str), Some("low"));
+    assert_eq!(
+        body.get("reason").and_then(Json::as_str),
+        Some("approaching_reserve")
+    );
+    assert_eq!(body.get("remaining_wh").and_then(Json::as_f64), Some(40.0));
+    assert_eq!(
+        body.get("grants_new_leases").and_then(Json::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        body.get("requires_safe_state").and_then(Json::as_bool),
+        Some(false),
+        "§36.1's low row: the running task may finish"
+    );
+    assert_eq!(body.get("supply").and_then(Json::as_str), Some("BAT0"));
+    assert_eq!(body.get("zones").and_then(Json::as_f64), Some(1.0));
+    assert_eq!(body.get("thermal").and_then(Json::as_str), Some("nominal"));
+    assert!(body.arr_or_empty("shed").is_empty());
+    assert!(body.arr_or_empty("faults").is_empty());
+    assert!(body.arr_or_empty("notes").is_empty());
+    assert_eq!(body.get("declared").and_then(Json::as_bool), Some(true));
+
+    // The reserve is a floor, and the route says which terms are missing rather than presenting
+    // 20 Wh as though §36.2's three had all been accounted for.
+    let reserve = body.get("reserve").cloned().expect("a reserve");
+    assert_eq!(reserve.get("wh").and_then(Json::as_f64), Some(20.0));
+    assert_eq!(
+        reserve.str_arr("unaccounted"),
+        vec!["payload", "distance_to_safe_state"]
+    );
+    assert_eq!(reserve.get("complete").and_then(Json::as_bool), Some(false));
+}
+
+/// The reading is one thing and the assessment is another, and the route keeps them apart.
+#[test]
+fn a_body_that_declares_a_pack_and_has_no_gauge_reports_both_halves() {
+    let mut fixture = Fixture::new("power-route-silent");
+    fixture.provision();
+    write_embodiment(&fixture, POWERED_ARM);
+
+    let (_, body) = fixture.request("GET", "/power", Some("observer-token"), "");
+    assert_eq!(body.get("state").and_then(Json::as_str), Some("unmetered"));
+    assert_eq!(
+        body.get("reason").and_then(Json::as_str),
+        Some("no_reading")
+    );
+    assert_eq!(
+        body.get("grants_new_leases").and_then(Json::as_bool),
+        Some(false)
+    );
+    // The contract's half.
+    let codes: Vec<&str> = body
+        .arr_or_empty("faults")
+        .iter()
+        .filter_map(|fault| fault.get("code").and_then(Json::as_str))
+        .collect();
+    assert_eq!(codes, ["gauge_silent"]);
+    // The reader's half, which is the one that says *where* to go and look.
+    assert!(
+        !body.arr_or_empty("notes").is_empty(),
+        "a fault says §36 has a problem; a note says this daemon could not read a number"
+    );
+}
+
+/// §36.3, end to end. The ladder is cut three rungs deep and the kernel is not on it.
+#[test]
+fn a_throttling_body_sheds_three_rungs_and_never_the_kernel() {
+    let mut fixture = Fixture::new("power-route-hot");
+    fixture.provision();
+    write_embodiment(&fixture, POWERED_ARM);
+    with_gauge(
+        &mut fixture,
+        &[("energy_now", "400000000")],
+        &["42000", "78000"],
+    );
+
+    let (_, body) = fixture.request("GET", "/power", Some("observer-token"), "");
+    assert_eq!(body.get("state").and_then(Json::as_str), Some("normal"));
+    assert_eq!(
+        body.get("thermal").and_then(Json::as_str),
+        Some("throttling")
+    );
+    assert_eq!(
+        body.str_arr("shed"),
+        vec!["telemetry", "ota", "blackbox_compression"]
+    );
+    for never in ["rhal", "kernel", "control_loop"] {
+        assert!(
+            !body.str_arr("shed").contains(&never.to_string()),
+            "{never}"
+        );
+    }
+    assert_eq!(
+        body.get("degraded").and_then(Json::as_bool),
+        Some(false),
+        "the first reading above the threshold is not sustained throttling"
+    );
+}
+
+/// §33.1, on the one route where its absence changes an answer.
+#[test]
+fn the_power_route_says_it_cannot_see_the_bus() {
+    let mut fixture = Fixture::new("power-route-bus");
+    fixture.provision();
+    write_embodiment(&fixture, POWERED_ARM);
+    with_gauge(&mut fixture, &[("energy_now", "400000000")], &[]);
+
+    let (_, body) = fixture.request("GET", "/power", Some("observer-token"), "");
+    assert_eq!(body.get("state").and_then(Json::as_str), Some("normal"));
+    assert!(body
+        .get("brownout_note")
+        .and_then(Json::as_str)
+        .is_some_and(|note| note.contains("§33.1") && note.contains("§36.4")));
+}
+
+#[test]
+fn a_body_that_declares_no_power_block_is_unmetered_without_a_fault() {
+    let mut fixture = Fixture::new("power-route-bare");
+    fixture.provision();
+    write_embodiment(&fixture, NESTED_ARM);
+
+    let (_, body) = fixture.request("GET", "/power", Some("observer-token"), "");
+    assert_eq!(body.get("state").and_then(Json::as_str), Some("unmetered"));
+    assert_eq!(body.get("reason").and_then(Json::as_str), Some("no_pack"));
+    assert_eq!(body.get("declared").and_then(Json::as_bool), Some(false));
+    assert_eq!(
+        body.get("grants_new_leases").and_then(Json::as_bool),
+        Some(true),
+        "a body that declares no pack is a mains machine behaving correctly"
+    );
+    assert!(body.arr_or_empty("faults").is_empty());
+}
+
+#[test]
+fn reading_power_needs_an_observer() {
+    let mut fixture = Fixture::new("power-route-role");
+    fixture.provision();
+    assert_eq!(fixture.request("GET", "/power", None, "").0, 401);
+    assert_eq!(
+        fixture
+            .request("GET", "/power", Some("observer-token"), "")
+            .0,
+        200
+    );
+}
 
 #[test]
 fn the_watchdog_route_reports_the_chain_and_the_nesting() {
@@ -6647,11 +6848,21 @@ mod checkin {
     }
 
     fn built_for(fixture: &mut Fixture) -> skynet_contracts::checkin::CheckIn {
+        built_with_power(fixture, None)
+    }
+
+    /// The same, with a §36 reading supplied. Two functions rather than one with an `Option` at
+    /// every call site: nearly every check-in test is about something else, and threading a `None`
+    /// through forty of them to serve two would be forty places to read past.
+    fn built_with_power(
+        fixture: &mut Fixture,
+        power: Option<&crate::power::Reading>,
+    ) -> skynet_contracts::checkin::CheckIn {
         let layout = fixture.daemon.store.layout().clone();
         let trust = TrustStore::load(&layout);
         let (identity, _) = crate::identity::evaluate(&layout, &trust);
         let actual = fixture.daemon.observe(1_000);
-        let observed = fixture.daemon.health(&actual, 1_000);
+        let observed = fixture.daemon.health(&actual, 1_000, power);
         let policy = crate::identity::running_policy(&fixture.daemon.store, &actual);
         let attestation =
             crate::identity::attestation(&layout, &trust, &identity, &actual.os.active, &policy);
@@ -6669,6 +6880,79 @@ mod checkin {
             fixture.daemon.operating_state.as_str(),
             &crate::intent::held_digest(&layout),
         )
+    }
+
+    /// The two fields §33.6 has named and nothing has ever filled.
+    ///
+    /// Until §36 was written, `battery` and `temperature_c` were `Measured::none()` in the rollup
+    /// itself — a literal, not a reading that failed — so a check-in from a robot with a full
+    /// battery said the same thing as one from a robot with no battery at all. This is the first
+    /// test in the suite that puts a number in either.
+    #[test]
+    fn a_gauge_reading_reaches_the_check_in_dated() {
+        let mut fixture = Fixture::new("checkin-power");
+        become_paired(&fixture);
+
+        let reading = crate::power::Reading {
+            charge_fraction: Some(0.62),
+            observation: skynet_contracts::power::PowerObservation {
+                state_of_charge: Some(0.62),
+                temperature_c: Some(48.5),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let built = built_with_power(&mut fixture, Some(&reading));
+
+        let fields: Vec<(String, f64, u64)> = built.health.fields.clone();
+        let battery = fields
+            .iter()
+            .find(|(name, _, _)| name == "battery")
+            .expect("a battery field");
+        assert_eq!(battery.1, 0.62);
+        assert_eq!(battery.2, 0, "measured in this pass, so its age is nothing");
+
+        let temperature = fields
+            .iter()
+            .find(|(name, _, _)| name == "temperature_c")
+            .expect("a temperature field");
+        assert_eq!(temperature.1, 48.5);
+
+        assert!(
+            !built.health.unmeasured.contains(&"battery".to_string()),
+            "{:?}",
+            built.health.unmeasured
+        );
+        assert_eq!(
+            built.health.unmeasured,
+            vec![
+                "guard_trip_rate".to_string(),
+                "storage_headroom".to_string()
+            ],
+            "the two that are still nobody's"
+        );
+        assert!(
+            !built.health.degraded,
+            "a measured battery is not a fault, whatever it reads"
+        );
+    }
+
+    /// And the other direction, which is the state every robot in this suite is in: a daemon whose
+    /// sensors point at nothing reports both fields absent, exactly as it did before §36.
+    #[test]
+    fn a_robot_with_no_gauge_still_reports_both_fields_unmeasured() {
+        let mut fixture = Fixture::new("checkin-no-power");
+        become_paired(&fixture);
+        let built = built_for(&mut fixture);
+        assert_eq!(
+            built.health.unmeasured,
+            vec![
+                "battery".to_string(),
+                "guard_trip_rate".to_string(),
+                "storage_headroom".to_string(),
+                "temperature_c".to_string()
+            ]
+        );
     }
 
     #[test]
