@@ -5,8 +5,9 @@
 //! skynet ps                          installed packages, their state and their grants
 //! skynet logs <ns/name>              the package's journal — not the black box (§41.1)
 //! skynet plan                        the last reconcile pass, including anything deferred
+//! skynet cell                        the cell descriptor in force, and its faults (§55.2)
 //! skynet grants                      what is granted, and what is leased
-//! skynet grants add <ns/name> <token>
+//! skynet grants add <ns/name> <token> [--acknowledge <digest>]
 //! skynet grants remove <ns/name> <token>
 //! skynet estop                       stop every package, now
 //! skynet install <dir> --id … --kind … --version … --digest …
@@ -50,8 +51,10 @@ skynet — talking to a running robot (§33.7)
   ps                          Installed packages, their state, their grants
   logs <ns/name> [--lines N]  The package's journal
   plan                        The last reconcile pass, and anything deferred
+  cell                        The cell descriptor, its env.* facts and its faults
   grants                      What is granted, and what is leased
-  grants add <ns/name> <token>
+  grants add <ns/name> <token> [--acknowledge <digest>]
+                              A skill's safety notes are shown once and acknowledged (§54.2)
   grants remove <ns/name> <token>
   estop                       Stop every package; needs no credential (§39.1)
   rollback <ns/name>          Back to the previous version (§37.2)
@@ -151,6 +154,7 @@ pub fn run(command: &str, argv: &[String]) -> i32 {
         "checkin" => show(argv, "GET", "/checkin", None, print_checkin),
         "intent" => show(argv, "GET", "/intent", None, print_intent),
         "releases" => show(argv, "GET", "/releases", None, print_releases),
+        "cell" => show(argv, "GET", "/cell", None, print_cell),
         "pair" => pair(argv),
         "unpair" => show(
             argv,
@@ -780,6 +784,82 @@ fn print_ota(document: &Json) {
     if let Some(note) = assessment.get_present("bench_note").and_then(Json::as_str) {
         println!("  {}", term::dim(&format!("bench pass: {note}")));
     }
+    print_transfer(document);
+}
+
+/// §34.3's half of `skynet ota`: where the bytes are, and what they are waiting for.
+///
+/// Drawn even when the assessment refuses the release, because the two answer different questions
+/// and an operator watching a download needs the second one. It is deliberately explicit about
+/// *whose* number the total is: a manifest that declares a size is a publisher's signed statement,
+/// and a size from the server is the party serving the bytes describing its own file.
+fn print_transfer(document: &Json) {
+    let Some(transfer) = document
+        .get_present("transfer")
+        .filter(|value| **value != Json::Null)
+    else {
+        return;
+    };
+    let decision = transfer
+        .get("decision")
+        .and_then(Json::as_str)
+        .unwrap_or("—");
+    let received = transfer
+        .get("received")
+        .and_then(Json::as_f64)
+        .unwrap_or(0.0);
+    let total = transfer.get_present("total").and_then(Json::as_f64);
+    let source = transfer
+        .get_present("total_declared_by")
+        .and_then(Json::as_str)
+        .unwrap_or("");
+
+    let progress = match total {
+        Some(total) if total > 0.0 => format!(
+            "{} of {} ({:.0}%, as the {source} declares it)",
+            bytes(received),
+            bytes(total),
+            (received / total) * 100.0
+        ),
+        _ if received > 0.0 => format!("{} received, of an unstated total", bytes(received)),
+        _ => "nothing received yet".to_string(),
+    };
+
+    let line = format!("bundle {decision} — {progress}");
+    println!(
+        "{}",
+        match decision {
+            "have" => term::ok(&line),
+            "wait_for_unmetered" | "no_bearer" => term::warn(&line),
+            "refuse" => term::bad(&line),
+            _ => line,
+        }
+    );
+    if let Some(detail) = transfer.get_present("detail").and_then(Json::as_str) {
+        println!("{}", term::dim(&term::wrap(detail, 2)));
+    }
+    if let Some(error) = transfer.get_present("error").and_then(Json::as_str) {
+        println!("  {}", term::bad(&term::wrap(error, 2)));
+    }
+}
+
+/// A byte count a person reads.
+///
+/// Powers of two with the unit spelled the way the units are defined, because an operating system
+/// image is measured against a partition and a partition is measured in mebibytes.
+fn bytes(count: f64) -> String {
+    const UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
+    let mut value = count.max(0.0);
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{value:.0} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
 }
 
 /// §54.4's ladder, one line per invocation.
@@ -1112,11 +1192,17 @@ fn grants(argv: &[String]) -> i32 {
                 return term::fail(&format!("`{id}` is not a package id"));
             };
             let adding = args[0] == "add";
+            // §54.2's acknowledgement, carried when the operator supplies one. The digest is not
+            // typed from memory: the refusal below prints the notes and the exact command.
+            let acknowledge = flag(argv, "--acknowledge");
             let (method, path, body) = if adding {
                 let mut document = Json::obj();
                 document
                     .set("id", Json::from(id.as_str()))
                     .set("token", Json::from(token.as_str()));
+                if let Some(digest) = &acknowledge {
+                    document.set("acknowledge", Json::from(digest.as_str()));
+                }
                 (
                     "POST",
                     "/grants".to_string(),
@@ -1127,6 +1213,15 @@ fn grants(argv: &[String]) -> i32 {
             };
             match request(argv, method, &path, body) {
                 Ok((status, document)) => {
+                    // §54.2: the notes are *displayed*, here, at the moment the grant is refused
+                    // for want of them. A refusal that only named the rule would leave an operator
+                    // hunting for the text on a Hub they may not be able to reach.
+                    if status == 409
+                        && document.get("outcome").and_then(Json::as_str)
+                            == Some("safety_notes_unread")
+                    {
+                        return print_safety_notes(id, token, &document);
+                    }
                     if status >= 400 {
                         return report_error(status, &document);
                     }
@@ -1148,6 +1243,104 @@ fn grants(argv: &[String]) -> i32 {
             "`grants {other}` is not a subcommand. They are `add` and `remove`."
         )),
     }
+}
+
+/// §55.2's cell, and the faults that explain a refused precondition.
+///
+/// The environment is printed as the **context a precondition sees**, not as the facts as they were
+/// written, because those differ by exactly the faults below — and an operator whose skill was
+/// refused for `env.door closed` needs to see that the key never made it into the context.
+fn print_cell(document: &Json) {
+    if document.get("held") != Some(&Json::Bool(true)) {
+        println!(
+            "{}",
+            term::dim(
+                document
+                    .get_present("note")
+                    .and_then(Json::as_str)
+                    .unwrap_or("no cell")
+            )
+        );
+        return;
+    }
+
+    println!(
+        "cell {}   {} fixture(s)",
+        term::bold(document.get("name").and_then(Json::as_str).unwrap_or("—")),
+        document.get("fixtures").and_then(Json::as_f64).unwrap_or(0.0),
+    );
+
+    if let Some(environment) = document.get("environment").and_then(Json::as_obj) {
+        for (key, value) in environment {
+            println!(
+                "  env.{key} = {}",
+                value.to_canonical().unwrap_or_else(|_| String::from("?"))
+            );
+        }
+    }
+
+    let workspace = document.get_present("workspace");
+    let volumes = workspace
+        .map(|layer| layer.arr_or_empty("volumes").len())
+        .unwrap_or(0);
+    println!(
+        "  {}",
+        term::dim(&format!(
+            "{volumes} allowed volume(s) — computed, and not applied: the workspace guard is the              kernel's (§33.1)"
+        ))
+    );
+
+    let faults = document.arr_or_empty("faults");
+    if faults.is_empty() {
+        return;
+    }
+    println!();
+    for fault in faults {
+        println!(
+            "  {} {}",
+            term::bad(fault.get("code").and_then(Json::as_str).unwrap_or("?")),
+            term::dim(fault.get("message").and_then(Json::as_str).unwrap_or("")),
+        );
+    }
+    if let Some(note) = document.get_present("note").and_then(Json::as_str) {
+        println!();
+        println!("{}", term::dim(&term::wrap(note, 2)));
+    }
+}
+
+/// §54.2's notes, on the terminal, with the command that acknowledges them.
+///
+/// The digest is printed inside the command rather than beside it, because the one thing an
+/// operator must not have to do is retype a sha256 by hand — and a rule that is annoying to comply
+/// with is a rule somebody scripts their way around.
+fn print_safety_notes(id: &str, token: &str, document: &Json) -> i32 {
+    let notes = document
+        .get("safety_notes")
+        .and_then(Json::as_str)
+        .unwrap_or_default();
+    let digest = document.get("digest").and_then(Json::as_str).unwrap_or("");
+
+    println!("{}", term::warn(&format!("safety notes — {id}")));
+    println!();
+    for line in notes.lines() {
+        println!("  {}", term::bold(line));
+    }
+    println!();
+    println!(
+        "{}",
+        term::dim(&term::wrap(
+            document
+                .get("detail")
+                .and_then(Json::as_str)
+                .unwrap_or_default(),
+            2,
+        ))
+    );
+    println!();
+    println!("  skynet grants add {id} {token} --acknowledge {digest}");
+    // Non-zero: nothing was granted. A zero here would let a script treat an unread safety note as
+    // a completed grant, which is the failure the whole section is about.
+    1
 }
 
 fn print_grants(document: &Json) {
@@ -1317,6 +1510,19 @@ fn install(argv: &[String]) -> i32 {
                         "§19: a driver runs native, so skynetd refuses to activate this one until \
                          its signature verifies against a key this robot trusts",
                     )
+                );
+            }
+            // §54.5's declared graph, walked where the publisher is standing. The gate that holds
+            // is the activation (`runtime::composition_refusal`); this is the one they can act on.
+            if let Some(fault) =
+                skynetd_io::admit::composition_fault(&staged.id.as_str(), &staged.manifest)
+            {
+                println!(
+                    "  {}",
+                    term::bad(&skynetd_io::admit::composition_refusal(
+                        &staged.id.as_str(),
+                        &fault
+                    ))
                 );
             }
             println!(

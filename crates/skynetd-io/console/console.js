@@ -799,6 +799,71 @@ function renderReleases(feed) {
       : 'This robot already holds the manifest for ' + where + '.'))
 }
 
+/**
+ * §55.2's cell, and the faults that explain a refused precondition.
+ *
+ * The `env.*` block is the context **a precondition sees**, not the facts as they were written —
+ * and the difference between the two is exactly the fault list underneath. An operator whose skill
+ * was refused for `env.door closed` has no other way to learn that the key they typed never reached
+ * the context; `cell_environment` drops it silently, which is right for a context and useless for a
+ * diagnosis.
+ *
+ * The volumes are drawn with the reason they go no further. §55.2 sends them to the `workspace`
+ * guard, which is the kernel's, and §33.1 keeps this daemon off that path — so a panel that showed
+ * the facts and omitted the volumes would suggest there were none.
+ */
+function renderCell(feed) {
+  const body = clear($('cell-body'))
+  const v = feed.value
+  if (!v) {
+    body.appendChild(el('p', 'note', feed.detail || 'no answer yet'))
+    return
+  }
+
+  if (!v.held) {
+    body.appendChild(el('p', 'note', v.note || 'no cell'))
+    return
+  }
+
+  const head = el('p')
+  head.appendChild(el('strong', null, v.name || '(unnamed)'))
+  head.appendChild(el('span', 'dim', '  ' + (v.fixtures || 0) + ' fixture(s)'))
+  body.appendChild(head)
+
+  const environment = v.environment || {}
+  const keys = Object.keys(environment)
+  if (keys.length > 0) {
+    const fields = el('dl', 'fields')
+    for (const key of keys) {
+      fields.appendChild(el('dt', null, 'env.' + key))
+      fields.appendChild(el('dd', null, JSON.stringify(environment[key])))
+    }
+    body.appendChild(fields)
+  }
+
+  const volumes = (v.workspace && v.workspace.volumes) || []
+  body.appendChild(el('p', 'dim',
+    volumes.length + ' allowed volume(s) — ' + (v.workspace_note || '')))
+
+  const faults = v.faults || []
+  if (faults.length === 0) return
+
+  const table = el('table', 'subpanel')
+  const header = el('tr')
+  for (const label of ['Fault', 'What it means']) header.appendChild(el('th', null, label))
+  table.appendChild(header)
+  for (const fault of faults) {
+    const row = el('tr')
+    const code = el('td')
+    code.appendChild(pill(fault.code, 'bad'))
+    row.appendChild(code)
+    row.appendChild(el('td', 'dim', fault.message || ''))
+    table.appendChild(row)
+  }
+  body.appendChild(table)
+  if (v.note) body.appendChild(el('p', 'note', v.note))
+}
+
 function renderOta(feed) {
   const body = clear($('ota-body'))
 
@@ -876,9 +941,74 @@ function renderOta(feed) {
   if (assessment.bench_note) {
     body.appendChild(el('p', 'note', 'Bench pass: ' + assessment.bench_note))
   }
+  renderTransfer(body, feed.value.transfer)
   if (feed.value.note) {
     body.appendChild(el('p', 'note', feed.value.note))
   }
+}
+
+/**
+ * §34.3's wait, drawn (§12).
+ *
+ * *"Bulk classes wait for an unmetered bearer, and the wait is visible rather than silent."* This
+ * is where it is visible. The panel above says whether an image may be installed; this says whether
+ * its bytes are here, and those are different questions with different answers for most of a
+ * rollout — an admitted release whose transfer is waiting on a dock is the ordinary state of a
+ * robot on cellular.
+ *
+ * Two things it deliberately does not do:
+ *
+ * * **No progress bar without a total.** A manifest that declares no size gives a count of bytes
+ *   and no fraction. A bar drawn against a guessed denominator is a number a person plans around,
+ *   and it would be invented.
+ * * **It says whose number the total is.** A size in the manifest is a publisher's signed
+ *   statement; a size from the server is the party serving the bytes describing its own file.
+ */
+function renderTransfer(body, transfer) {
+  if (!transfer) return
+
+  const tone = {
+    have: 'ok',
+    wait_for_unmetered: 'warn',
+    no_bearer: 'warn',
+    refuse: 'bad',
+  }[transfer.decision] || 'note'
+
+  const line = el('p')
+  line.appendChild(el('strong', null, 'Bundle '))
+  line.appendChild(pill(transfer.decision, tone))
+  body.appendChild(line)
+
+  if (typeof transfer.total === 'number' && transfer.total > 0) {
+    const share = Math.min(100, (transfer.received / transfer.total) * 100)
+    body.appendChild(el('p', 'dim',
+      bytes(transfer.received) + ' of ' + bytes(transfer.total)
+      + ' (' + share.toFixed(0) + '%, as the ' + (transfer.total_declared_by || 'server')
+      + ' declares it)'))
+  } else if (transfer.received > 0) {
+    body.appendChild(el('p', 'dim',
+      bytes(transfer.received) + ' received. The manifest declares no size, so there is no '
+      + 'fraction to show — the digest is what says when it is complete.'))
+  }
+
+  if (transfer.detail) body.appendChild(el('p', 'note', transfer.detail))
+  if (transfer.error) body.appendChild(el('p', 'bad', transfer.error))
+}
+
+/**
+ * A byte count a person reads.
+ *
+ * Powers of two, because an operating system image is measured against a partition.
+ */
+function bytes(count) {
+  const units = ['B', 'KiB', 'MiB', 'GiB']
+  let value = Math.max(0, Number(count) || 0)
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  return unit === 0 ? value.toFixed(0) + ' B' : value.toFixed(1) + ' ' + units[unit]
 }
 
 /**
@@ -1815,6 +1945,7 @@ const feeds = [
   new Feed('watchdog', '/watchdog', renderWatchdog),
   new Feed('outbound', '/outbound', renderOutbound),
   new Feed('calibration', '/calibration', renderCalibration),
+  new Feed('cell', '/cell', renderCell),
   new Feed('trust', '/trust', renderTrust),
   new Feed('audit', '/audit', renderAudit),
 ]

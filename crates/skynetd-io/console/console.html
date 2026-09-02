@@ -224,6 +224,19 @@
     <div id="calibration-body"></div>
   </section>
 
+  <!-- ── Cell ───────────────────────────────────────────────────────────── -->
+  <!--
+    §55.2's cell descriptor: what the operator wrote down about the space this robot is standing in.
+    It is here rather than beside the profile because of who reads it and when — a skill refused for
+    an unresolvable `env.*` precondition sends somebody looking for the fact, and this panel is the
+    only place that says whether the fact exists, whether its key is addressable, and what was
+    dropped from the context.
+  -->
+  <section class="panel" id="panel-cell">
+    <h2>Cell <span class="age" data-age="cell"></span></h2>
+    <div id="cell-body"></div>
+  </section>
+
   <!-- ── Trust ──────────────────────────────────────────────────────────── -->
   <!--
     Beside the black box because the two answer the same question from opposite ends: what did this

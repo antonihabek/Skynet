@@ -849,7 +849,10 @@ mod tests {
         // FINDINGS is what a consumer enumerates, and a code that exists and is not in it is a
         // finding nobody can write a handler for.
         assert_eq!(FINDINGS.len(), 8);
-        assert_eq!(FINDINGS[0], "unattested", "the document outranks the machine");
+        assert_eq!(
+            FINDINGS[0], "unattested",
+            "the document outranks the machine"
+        );
         for code in FINDINGS {
             assert!(!code.is_empty());
         }

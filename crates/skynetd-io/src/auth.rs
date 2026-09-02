@@ -358,6 +358,12 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         // guard state, and it is the panel somebody reads when a robot is running with fewer of
         // them than it should be.
         ("GET", ["calibration"]) => Role::Observer,
+        // §55.2's cell. Observer for `/calibration`'s reason and one more: everything on it is what
+        // an *operator* wrote into a profile about their own building — a door, a bench, a volume —
+        // and the person who needs it is whoever is looking at a skill that was just refused for
+        // naming a fact. Putting the explanation behind a wider role than the refusal is how a
+        // diagnosis goes unread.
+        ("GET", ["cell"]) => Role::Observer,
         // What a robot is waiting to say, and what it has thrown away for want of a link. Both are
         // facts about this machine's health rather than about its contents — the bodies are not
         // served here — so they belong with health and the plan.

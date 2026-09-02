@@ -297,6 +297,108 @@ impl Recorder {
 /// The monotonic instant rather than a wall clock: §35.1 gives `CLOCK_REALTIME` one job and naming
 /// files is not it, and a robot whose clock was set between two incidents would otherwise produce
 /// two files whose names imply the wrong order.
+/// What a seal produced, as an incident names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Recording {
+    /// The file name under `<blackbox>/sealed/`.
+    pub name: String,
+    /// How many bytes it is.
+    pub size_bytes: u64,
+    /// `sha256:…` over those bytes — §56.4's black box segment hash.
+    pub digest: String,
+    /// How many records the window holds.
+    pub records: u64,
+    /// Records the ring could not read back, which are holes rather than absences.
+    pub damaged: u64,
+}
+
+impl Recording {
+    /// The shape an incident carries.
+    ///
+    /// **One shape, with a discriminant**, rather than an object when a seal worked and a sentence
+    /// when it did not. A union would make every consumer switch on a JSON type before it could
+    /// read a field, and the first one that forgot would render `[object Object]` or crash on a
+    /// robot with no ring — which is the ordinary case on this edition. See [`unsealed`].
+    pub fn to_json(&self) -> Json {
+        let mut out = Json::obj();
+        out.set("sealed", Json::Bool(true))
+            .set("name", Json::Str(self.name.clone()))
+            .set("size_bytes", Json::Num(self.size_bytes as f64))
+            .set("digest", Json::Str(self.digest.clone()))
+            .set("records", Json::Num(self.records as f64))
+            .set("damaged", Json::Num(self.damaged as f64))
+            // The one field a Hub needs and cannot infer. §13 calls this an upload and §17 takes a
+            // document; nothing carries the bytes, so the incident says where they are rather than
+            // leaving a reader to assume they are attached.
+            .set("uploaded", Json::Bool(false));
+        out
+    }
+}
+
+/// The same shape, for an incident whose window could not be sealed.
+///
+/// A reason rather than an omission, for §7.2's rule: a consumer that sees no `recording` key
+/// cannot tell a robot with no black box from an edition that never attached one, and those send an
+/// investigator to two different places.
+pub fn unsealed(why: impl Into<String>) -> Json {
+    let mut out = Json::obj();
+    out.set("sealed", Json::Bool(false))
+        .set("why", Json::Str(why.into()));
+    out
+}
+
+/// Seal whatever ring is on the disk, without opening one for writing (§13).
+///
+/// **It reads; it never creates.** [`Recorder::open`] deliberately replaces a ring whose shape no
+/// longer matches the body, which is right for the one process that owns the recording and
+/// catastrophic for anybody else — a second opener on a robot whose descriptor had changed would
+/// wipe the window somebody is about to seal. So this takes no `Recorder`, holds no handle, and can
+/// be called from anywhere that has just decided something worth keeping happened.
+///
+/// `Ok(None)` where there is no ring, which is not a failure: §28 preallocates one on a robot that
+/// has a recorder, and a robot without one — `skynetd once`, a bare development root — has nothing
+/// to seal. The incident then says so, which is a named absence rather than a missing field.
+pub fn seal_existing(
+    layout: &Layout,
+    reason: Reason,
+    mono_ns: u64,
+) -> std::io::Result<Option<Recording>> {
+    let dir = layout.blackbox();
+    let path = dir.join("ring");
+    let Ok(store) = fs::read(&path) else {
+        return Ok(None);
+    };
+    let Ok(ring) = Ring::open(&store) else {
+        // A ring whose header does not open is a damaged recording, not a missing one, and the
+        // difference matters to whoever reads the incident: there was a black box and it is not
+        // readable, which is itself a fact about the machine.
+        return Err(std::io::Error::other(format!(
+            "{} does not open as a ring: the window this incident would have carried is not \
+             readable",
+            path.display()
+        )));
+    };
+
+    let sealed_dir = dir.join("sealed");
+    fs::create_dir_all(&sealed_dir).map_err(|e| io_error("creating", &sealed_dir, e))?;
+    let sealed = seal(&ring, &store, reason, mono_ns);
+    let written = write_sealed(&sealed_dir, &sealed, mono_ns)?;
+
+    Ok(Some(Recording {
+        name: written
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        size_bytes: sealed.bytes.len() as u64,
+        digest: format!(
+            "sha256:{}",
+            String::from_utf8_lossy(&skynet_sha256::hex_of(&sealed.digest))
+        ),
+        records: sealed.continuity.records as u64,
+        damaged: sealed.continuity.damaged as u64,
+    }))
+}
+
 fn write_sealed(dir: &Path, sealed: &Sealed, mono_ns: u64) -> std::io::Result<PathBuf> {
     let name = format!("{:020}-{}.mcap", mono_ns, sealed.reason.as_str());
     let path = dir.join(name);

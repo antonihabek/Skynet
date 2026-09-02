@@ -439,6 +439,40 @@ impl Layout {
             .join(format!("{}.sig.json", flatten(image_digest)))
     }
 
+    /// Where a complete, checked bundle lives, keyed by the **digest** rather than the version.
+    ///
+    /// By digest for [`Self::bench_pass`]'s reason and one more. §12 binds every gate it applies to
+    /// the digest, so a file named for a version would let a rebuilt `1.4.0` be installed against a
+    /// bench pass taken on the first cut of it — the exact substitution the whole section exists to
+    /// refuse. It also means two channels naming the same bytes share one file rather than two.
+    pub fn bundle(&self, digest: &str) -> PathBuf {
+        self.os()
+            .join("bundles")
+            .join(format!("{}.raucb", flatten(digest)))
+    }
+
+    /// A transfer in progress, keyed to the digest it is a transfer **of** (§12, §34.3).
+    ///
+    /// The key is the rule rather than the naming convention: a partial keyed by version would let a
+    /// resume append one release's tail to another's head, and the mismatch would surface after the
+    /// whole transfer rather than before it. Separate from [`Self::bundle`] so that nothing can find
+    /// a half-downloaded image and treat it as one — a directory listing distinguishes them.
+    pub fn partial(&self, digest: &str) -> PathBuf {
+        self.os()
+            .join("partial")
+            .join(format!("{}.part", flatten(digest)))
+    }
+
+    /// What the last transfer attempt did (§12).
+    ///
+    /// Deliberately small, and it holds only what the disk cannot say: how the last attempt ended,
+    /// how many have failed in a row, and when the next may start. Progress is **not** here — the
+    /// partial file's own length is the progress, and a second record of it is one that disagrees
+    /// with the bytes exactly once, after the crash that matters.
+    pub fn transfer(&self) -> PathBuf {
+        self.os().join("transfer.json")
+    }
+
     /// The slot this robot applied and has not yet confirmed (§12's second rule).
     ///
     /// A file rather than memory, because the whole point is that it survives the reboot the apply

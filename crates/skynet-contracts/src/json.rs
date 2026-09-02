@@ -975,6 +975,18 @@ pub fn bundle_from_json(value: &Json) -> BundleManifest {
         version: opt_string(value, "version").unwrap_or_default(),
         channel: opt_string(value, "channel").unwrap_or_default(),
         digest: opt_string(value, "digest").unwrap_or_default(),
+        // Absent is not null and neither is zero: a manifest that declares no size has established
+        // nothing, and a negative or fractional one is not a byte count. All three read as absent
+        // rather than as a number no producer meant.
+        // `fract` and `trunc` are `std`, and this crate is `no_std`: the round trip through `u64` is
+        // the same question — is this a whole, non-negative, representable byte count — asked with
+        // arithmetic that exists here.
+        size: value
+            .get_present("size")
+            .and_then(Json::as_f64)
+            .filter(|value| *value >= 0.0 && *value <= u64::MAX as f64)
+            .filter(|value| (*value as u64) as f64 == *value)
+            .map(|value| value as u64),
         compatible: value.str_arr("compatible"),
         changes: value.str_arr("changes"),
     }
@@ -1316,8 +1328,14 @@ pub fn birth_certificate_from_json(value: &Json) -> crate::birth::BirthCertifica
 /// both `None` — §7.2's absent input, which makes a comparison unavailable rather than passed.
 pub fn birth_observed_from_json(value: &Json) -> crate::birth::Observed {
     crate::birth::Observed {
-        device_key: value.get_present("device_key").and_then(Json::as_str).map(ToString::to_string),
-        serial: value.get_present("serial").and_then(Json::as_str).map(ToString::to_string),
+        device_key: value
+            .get_present("device_key")
+            .and_then(Json::as_str)
+            .map(ToString::to_string),
+        serial: value
+            .get_present("serial")
+            .and_then(Json::as_str)
+            .map(ToString::to_string),
         descriptor_digest: value
             .get_present("descriptor_digest")
             .and_then(Json::as_str)

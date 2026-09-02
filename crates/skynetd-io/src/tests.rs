@@ -2332,6 +2332,18 @@ fn a_failed_profile_signature_raises_an_incident() {
         "{:?}",
         queued[0].body
     );
+    // §13's window, named. On this fixture there is no ring, so the incident says *that* rather
+    // than omitting the field — a consumer that sees no `recording` cannot tell a robot with no
+    // black box from an edition that never attached one, and those send an investigator to two
+    // different places.
+    let document = Json::parse(&queued[0].body).expect("the incident is JSON");
+    let recording = document.get("recording").expect("a recording block");
+    assert_eq!(recording.get("sealed"), Some(&Json::Bool(false)));
+    assert!(recording
+        .get("why")
+        .and_then(Json::as_str)
+        .is_some_and(|why| why.contains("no black box ring")));
+
     // The incident says the limits were not applied, because an operator reading it needs to know
     // whether the robot is currently running on ceilings somebody edited.
     assert!(
@@ -4116,6 +4128,9 @@ mod skills {
                 robot: self.robot,
                 guard_tripped: false,
                 guards_observable: false,
+                // A fixed wall clock, so `recorded_at` is a value the suite can assert on rather
+                // than whatever the machine running the tests thinks the date is.
+                wall_ms: Some(1_788_307_200_000 + self.now_ms),
                 running: &self.running,
                 leases: &mut self.leases,
                 grants: &self.grants,
@@ -4300,18 +4315,194 @@ mod skills {
         else {
             unreachable!()
         };
+        let metadata = body
+            .get("metadata")
+            .expect("the facts the route has no column for");
         assert_eq!(
-            body.get("reason").and_then(Json::as_str),
+            metadata.get("reason").and_then(Json::as_str),
             Some("preconditions_refused")
         );
         assert!(
-            body.get("duration_ms").is_none(),
+            body.get("duration_seconds").is_none(),
             "nothing ran, so there is no duration to report"
         );
         assert!(
-            body.get("intervention_count").is_none(),
+            body.get("interventions").is_none(),
             "and nothing counts interventions on this robot, so the count is absent, not zero"
         );
+        assert_eq!(
+            metadata.get("interventions_measured"),
+            Some(&Json::Bool(false)),
+            "said out loud, because an absent count and a Hub default read the same downstream"
+        );
+    }
+
+    /// §54.4's episode, frozen for the Hub's suite to read (`reference/wire/episode.json`).
+    ///
+    /// In this module rather than beside the other two fixtures, because the only honest way to
+    /// produce this document is to walk §54.4's ladder — and the helpers that do that are here.
+    #[test]
+    fn the_episode_a_skill_invocation_produces() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        let mut m = skill_manifest("acme/pick", Some(10.0), &[]);
+        // A real skill card declares what it does, and the frozen document should carry the case a
+        // Hub actually stores rather than the fallback.
+        m.set("task", Json::from("pick the cup off the table"));
+        invoke(&mut runtime, &m, &[]);
+
+        let mut body = None;
+        for pass in 0..8 {
+            if pass == 3 {
+                world.running.remove("acme/pick");
+            }
+            for report in world.step(&mut runtime, 1_000) {
+                for effect in &report.effects {
+                    if let Effect::Episode { body: document } = effect {
+                        body = Some(document.clone());
+                    }
+                }
+            }
+            if body.is_some() {
+                break;
+            }
+        }
+
+        super::frozen("episode", &body.expect("one episode per invocation"));
+    }
+
+    /// The document is the route's, not one of the robot's own.
+    ///
+    /// Written after the two halves were compared for the first time. The robot sent `skill`,
+    /// `duration_ms` and `intervention_count`; `POST /episodes` reads `task`, `duration_seconds`
+    /// and `interventions`, ignores what it does not know, and answers `201`. Every episode would
+    /// have stored a null task, a null duration and none of the skill — successfully, with nothing
+    /// on either side wrong in isolation and no suite able to see it.
+    ///
+    /// The field names in this test are copied from `lib/skynet/devices.ts`'s `validateEpisodeInput`
+    /// rather than from the producer, which is the only way a test like this can be worth anything.
+    #[test]
+    fn an_episode_is_written_in_the_shape_the_hub_route_reads() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        let m = skill_manifest("acme/wave", Some(10.0), &[]);
+        invoke(&mut runtime, &m, &[]);
+
+        // Through the ladder: preconditions, acquiring, running — then the unit exits and §54.3
+        // judges it.
+        let mut episode = None;
+        for pass in 0..8 {
+            if pass == 4 {
+                world.running.remove("acme/wave");
+            }
+            for report in world.step(&mut runtime, 1_000) {
+                for effect in &report.effects {
+                    if let Effect::Episode { body } = effect {
+                        episode = Some(body.clone());
+                    }
+                }
+            }
+            if episode.is_some() {
+                break;
+            }
+        }
+        let body = episode.expect("one episode per invocation");
+
+        assert_eq!(
+            body.get("task").and_then(Json::as_str),
+            Some("acme/wave"),
+            "the column the Hub stores, not a `skill` key it has never read"
+        );
+        assert!(
+            skynet_contracts::skill::SKILL_OUTCOMES
+                .iter()
+                .any(|outcome| {
+                    Some(outcome.as_str()) == body.get("outcome").and_then(Json::as_str)
+                }),
+            "the outcome is one of the four the Hub's CHECK constraint permits"
+        );
+        assert_eq!(body.get("source").and_then(Json::as_str), Some("robot"));
+        assert!(
+            body.get("recorded_at")
+                .and_then(Json::as_str)
+                .is_some_and(|stamp| stamp.starts_with("2026-") && stamp.ends_with('Z')),
+            "when it happened, not when the queue drained: {:?}",
+            body.get("recorded_at")
+        );
+        let metadata = body.get("metadata").expect("metadata");
+        assert_eq!(
+            metadata.get("skill").and_then(Json::as_str),
+            Some("acme/wave")
+        );
+        assert_eq!(
+            metadata.get("digest").and_then(Json::as_str),
+            Some("sha256:test"),
+            "an investigation needs the bytes that ran"
+        );
+        assert!(metadata.get("invocation").is_some());
+    }
+
+    /// §17's `task` column means *what the robot was doing*, and a skill card declares it.
+    ///
+    /// Found by reading the Hub's manifest schema against what this robot consumes — `task` was
+    /// validated, stored and shipped on every skill card, and no robot had ever read one. Every
+    /// episode carried the package id instead, which is an identifier rather than a description: a
+    /// dataset whose task column holds `acme/pick` on all forty thousand rows cannot be filtered by
+    /// what was being done, which is the one question a training set is asked.
+    #[test]
+    fn an_episode_carries_the_task_the_skill_declares() {
+        let declared = |task: Option<&str>| {
+            let mut runtime = Runtime::new();
+            let mut world = World::new();
+            let mut m = skill_manifest("acme/pick", Some(10.0), &[]);
+            if let Some(task) = task {
+                m.set("task", Json::from(task));
+            }
+            invoke(&mut runtime, &m, &[]);
+            let mut body = None;
+            for pass in 0..8 {
+                if pass == 3 {
+                    world.running.remove("acme/pick");
+                }
+                for report in world.step(&mut runtime, 1_000) {
+                    for effect in &report.effects {
+                        if let Effect::Episode { body: document } = effect {
+                            body = Some(document.clone());
+                        }
+                    }
+                }
+                if body.is_some() {
+                    break;
+                }
+            }
+            body.expect("an episode")
+        };
+
+        let with = declared(Some("  pick the cup off the table  "));
+        assert_eq!(
+            with.get("task").and_then(Json::as_str),
+            Some("pick the cup off the table"),
+            "trimmed, and it is the declaration rather than the id"
+        );
+        assert_eq!(
+            with.get("metadata")
+                .and_then(|m| m.get("skill"))
+                .and_then(Json::as_str),
+            Some("acme/pick"),
+            "and the id is still there, because grouping needs an identifier"
+        );
+
+        // No declaration, and the fallback is the id: a poor task label and a correct one, where
+        // the alternative is a null column on every row.
+        let without = declared(None);
+        assert_eq!(
+            without.get("task").and_then(Json::as_str),
+            Some("acme/pick")
+        );
+
+        // Whitespace is not a declaration.
+        let blank = declared(Some("   "));
+        assert_eq!(blank.get("task").and_then(Json::as_str), Some("acme/pick"));
     }
 
     /// A precondition naming a fact this robot does not have. §54.2's first rule, end to end.
@@ -4763,7 +4954,7 @@ mod skills {
         world.step(&mut runtime, 1);
         world.step(&mut runtime, 1);
 
-        let reports = runtime.stop_all(world.now_ms);
+        let reports = runtime.stop_all(world.now_ms, Some(1_788_307_200_000));
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].transition.outcome, Some(SkillOutcome::Aborted));
         assert_eq!(
@@ -4774,7 +4965,7 @@ mod skills {
                 .count(),
             1
         );
-        assert!(runtime.stop_all(world.now_ms).is_empty());
+        assert!(runtime.stop_all(world.now_ms, None).is_empty());
     }
 }
 
@@ -5237,6 +5428,411 @@ mod ota {
         assert!(
             read_pending(&layout).is_some(),
             "a slot the bootloader was never told about is still on probation"
+        );
+    }
+
+    // ── §12's bytes, through the reconciler ──────────────────────────────────
+    //
+    // The tests above drive `crate::bundle` directly. These drive the action: a robot told to run a
+    // version it does not have, reconciling until it does — and the case that had gone unchecked for
+    // twenty-five sessions, where the bytes on the disk are not the bytes the gate ran against.
+
+    const IMAGE: &[u8] = b"an operating system, for the purposes of this suite";
+
+    fn image_digest() -> String {
+        format!(
+            "sha256:{}",
+            String::from_utf8_lossy(&skynet_sha256::hex_bytes(IMAGE))
+        )
+    }
+
+    /// A release manifest naming the digest of [`IMAGE`], signed by a key this robot trusts.
+    fn with_real_release(label: &str) -> Fixture {
+        let mut fixture = Fixture::new(label);
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        write_trust(&fixture, "publisher", &public_hex(&driver_key(7)));
+        let mut document = release_document(&["userspace"]);
+        document.set("digest", Json::from(image_digest().as_str()));
+        write_signed(&fixture, &layout.release("1.4.0"), &document, 7);
+        fixture.write_desired(
+            r#"{"generation":1,"os":{"channel":"stable","version":"1.4.0"},"packages":[]}"#,
+        );
+        fixture.daemon.reload();
+        fixture
+    }
+
+    /// Pair the robot, so §34.2 has somewhere to ask.
+    fn pair_to(fixture: &Fixture, endpoint: &str) {
+        let layout = fixture.daemon.store.layout();
+        std::fs::create_dir_all(layout.identity()).unwrap();
+        std::fs::write(
+            layout.device(),
+            format!(
+                "{{\"device_id\":\"dev_7\",\"namespace\":\"acme\",\"endpoint\":\"{endpoint}\"}}"
+            ),
+        )
+        .unwrap();
+        std::fs::write(layout.credential(), "skd_secretvalue").unwrap();
+    }
+
+    fn on_ethernet(fixture: &Fixture) {
+        let path = fixture.daemon.store.layout().state().join("bearers.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "{\"bearers\":[{\"name\":\"eth0\",\"kind\":\"ethernet\",\"up\":true,\"metered\":false}]}",
+        )
+        .unwrap();
+    }
+
+    /// An updater the test can read back, since the daemon owns the box it is put in.
+    #[derive(Default)]
+    struct SharedUpdater(std::sync::Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>);
+
+    impl crate::ota::Updater for SharedUpdater {
+        fn install(&mut self, bundle: &std::path::Path) -> Result<(), crate::ota::UpdateError> {
+            self.0.lock().unwrap().push(bundle.to_path_buf());
+            Ok(())
+        }
+
+        fn mark_good(&mut self) -> Result<(), crate::ota::UpdateError> {
+            Ok(())
+        }
+
+        fn mark_bad(&mut self) -> Result<(), crate::ota::UpdateError> {
+            Ok(())
+        }
+    }
+
+    /// A fetcher that hands over one fixed body.
+    struct Serving(&'static [u8]);
+
+    impl crate::bundle::Fetcher for Serving {
+        fn slice(&mut self, ask: &crate::bundle::Ask) -> crate::bundle::Slice {
+            std::fs::create_dir_all(ask.into.parent().unwrap()).unwrap();
+            std::fs::write(&ask.into, self.0).unwrap();
+            crate::bundle::Slice {
+                status: 200,
+                before: 0,
+                after: self.0.len() as u64,
+                declared_total: Some(self.0.len() as u64),
+                complete: true,
+                error: None,
+            }
+        }
+    }
+
+    /// The whole loop: told to run a version, fetches it, checks it, installs it.
+    #[test]
+    fn a_robot_told_to_run_a_version_it_does_not_have_goes_and_gets_it() {
+        let mut fixture = with_real_release("ota-fetch-e2e");
+        pair_to(&fixture, "https://hub.example");
+        on_ethernet(&fixture);
+        let layout = fixture.daemon.store.layout().clone();
+        fixture.daemon.fetcher = Box::new(Serving(IMAGE));
+        let installs = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        fixture.daemon.updater = Box::new(SharedUpdater(installs.clone()));
+
+        let pass = fixture.daemon.reconcile(1_000);
+        let (_, outcome) = pass
+            .applied
+            .iter()
+            .find(|(action, _)| {
+                matches!(
+                    action.kind,
+                    skynetd::reconcile::ActionKind::StageOsImage { .. }
+                )
+            })
+            .expect("the plan stages the image");
+        assert_eq!(outcome, &Outcome::Applied, "{outcome:?}");
+        assert_eq!(
+            installs.lock().unwrap().as_slice(),
+            [layout.bundle(&image_digest())],
+            "RAUC is handed the file the digest names"
+        );
+        assert_eq!(
+            std::fs::read(layout.bundle(&image_digest())).unwrap(),
+            IMAGE
+        );
+    }
+
+    /// §34.3 through the action: a wait is not a failure, and the reason reaches the pass.
+    #[test]
+    fn a_robot_with_no_link_reports_waiting_rather_than_failing() {
+        let mut fixture = with_real_release("ota-fetch-offline");
+        pair_to(&fixture, "https://hub.example");
+        let path = fixture.daemon.store.layout().state().join("bearers.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{\"bearers\":[]}").unwrap();
+
+        let pass = fixture.daemon.reconcile(1_000);
+        let (_, outcome) = pass
+            .applied
+            .iter()
+            .find(|(action, _)| {
+                matches!(
+                    action.kind,
+                    skynetd::reconcile::ActionKind::StageOsImage { .. }
+                )
+            })
+            .expect("the plan stages the image");
+        match outcome {
+            Outcome::Waiting { reason } => assert!(reason.contains("ordinary state"), "{reason}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            !pass.converged(),
+            "and the robot does not report itself up to date"
+        );
+    }
+
+    /// An unpaired robot has nowhere to ask, which is a wait naming the command that fixes it.
+    #[test]
+    fn an_unpaired_robot_says_where_the_bytes_would_have_to_come_from() {
+        let mut fixture = with_real_release("ota-fetch-unpaired");
+        on_ethernet(&fixture);
+
+        let pass = fixture.daemon.reconcile(1_000);
+        let (_, outcome) = pass
+            .applied
+            .iter()
+            .find(|(action, _)| {
+                matches!(
+                    action.kind,
+                    skynetd::reconcile::ActionKind::StageOsImage { .. }
+                )
+            })
+            .expect("the plan stages the image");
+        match outcome {
+            Outcome::Waiting { reason } => {
+                assert!(reason.contains("skynet pair"), "{reason}");
+                assert!(reason.contains("by hand"), "{reason}");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// The hole this session found rather than filled.
+    ///
+    /// Every gate §12 applies is bound to the manifest's digest, and for twenty-five sessions
+    /// nothing compared that digest against the bytes RAUC was handed — so a bundle placed on the
+    /// disk by hand, which was the *only* way to update a robot, went in unchecked. The manifest is
+    /// signed, the release is admitted, and the file is somebody else's image.
+    #[test]
+    fn bytes_on_the_disk_are_held_to_the_digest_the_gate_ran_against() {
+        let mut fixture = with_real_release("ota-hand-placed");
+        let layout = fixture.daemon.store.layout().clone();
+        let bundle = layout.bundle(&image_digest());
+        std::fs::create_dir_all(bundle.parent().unwrap()).unwrap();
+        std::fs::write(&bundle, b"a different operating system entirely").unwrap();
+        let installs = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        fixture.daemon.updater = Box::new(SharedUpdater(installs.clone()));
+
+        let pass = fixture.daemon.reconcile(1_000);
+        let (_, outcome) = pass
+            .applied
+            .iter()
+            .find(|(action, _)| {
+                matches!(
+                    action.kind,
+                    skynetd::reconcile::ActionKind::StageOsImage { .. }
+                )
+            })
+            .expect("the plan stages the image");
+        match outcome {
+            Outcome::Failed { reason } => {
+                assert!(reason.contains("is not release `1.4.0`"), "{reason}");
+                assert!(reason.contains("do not hash"), "{reason}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            installs.lock().unwrap().is_empty(),
+            "nothing reached the bootloader"
+        );
+        assert!(
+            !bundle.exists(),
+            "and the bytes are gone: an unverified bundle left on the disk is an artifact some \
+             future code path finds"
+        );
+    }
+
+    /// The refusal comes before the transfer, so nobody pays for bytes to reach a `no`.
+    #[test]
+    fn a_gated_release_is_refused_without_anything_being_fetched() {
+        let mut fixture = Fixture::new("ota-gate-before-bytes");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        write_trust(&fixture, "publisher", &public_hex(&driver_key(7)));
+        let mut document = release_document(&["safety_kernel"]);
+        document.set("digest", Json::from(image_digest().as_str()));
+        write_signed(&fixture, &layout.release("1.4.0"), &document, 7);
+        fixture.write_desired(
+            r#"{"generation":1,"os":{"channel":"stable","version":"1.4.0"},"packages":[]}"#,
+        );
+        fixture.daemon.reload();
+        pair_to(&fixture, "https://hub.example");
+        on_ethernet(&fixture);
+
+        struct Never;
+        impl crate::bundle::Fetcher for Never {
+            fn slice(&mut self, _ask: &crate::bundle::Ask) -> crate::bundle::Slice {
+                panic!("§12's gate must run before a byte moves");
+            }
+        }
+        fixture.daemon.fetcher = Box::new(Never);
+
+        let pass = fixture.daemon.reconcile(1_000);
+        let (_, outcome) = pass
+            .applied
+            .iter()
+            .find(|(action, _)| {
+                matches!(
+                    action.kind,
+                    skynetd::reconcile::ActionKind::StageOsImage { .. }
+                )
+            })
+            .expect("the plan stages the image");
+        assert!(matches!(outcome, Outcome::Failed { .. }), "{outcome:?}");
+    }
+
+    /// The size the publisher signed, reaching the two places that want it (§75.5).
+    ///
+    /// This was the named gap when the fetcher was written: the contract has a branch for a
+    /// declared size and §57's manifest carried none, so the branch was unexercised and progress
+    /// was a count rather than a fraction. Both are closed by one field, and this is the assertion
+    /// that it travels — from the signed document, through `declared_size`, onto the route.
+    #[test]
+    fn a_manifest_that_declares_a_size_makes_progress_a_fraction() {
+        let mut fixture = Fixture::new("ota-size");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        write_trust(&fixture, "publisher", &public_hex(&driver_key(7)));
+        let mut document = release_document(&["userspace"]);
+        document.set("digest", Json::from(image_digest().as_str()));
+        document.set("size", Json::Num(IMAGE.len() as f64));
+        write_signed(&fixture, &layout.release("1.4.0"), &document, 7);
+        fixture.write_desired(
+            r#"{"generation":1,"os":{"channel":"stable","version":"1.4.0"},"packages":[]}"#,
+        );
+        fixture.daemon.reload();
+
+        std::fs::create_dir_all(layout.partial(&image_digest()).parent().unwrap()).unwrap();
+        std::fs::write(layout.partial(&image_digest()), &IMAGE[..10]).unwrap();
+
+        let (status, body) = fixture.request("GET", "/ota", Some("observer-token"), "");
+        assert_eq!(status, 200);
+        let transfer = body.get("transfer").expect("a transfer block");
+        assert_eq!(
+            transfer.get("total").and_then(Json::as_f64),
+            Some(IMAGE.len() as f64)
+        );
+        assert_eq!(
+            transfer.get("total_declared_by").and_then(Json::as_str),
+            Some("manifest"),
+            "whose number it is, because a publisher's signed size and a server's claim about its              own file are different kinds of statement"
+        );
+        assert_eq!(transfer.get("received").and_then(Json::as_f64), Some(10.0));
+    }
+
+    /// The branch the declared size exists for.
+    #[test]
+    fn a_partial_larger_than_the_declared_bundle_is_thrown_away_before_a_transfer() {
+        let mut fixture = Fixture::new("ota-size-oversized");
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        write_trust(&fixture, "publisher", &public_hex(&driver_key(7)));
+        let mut document = release_document(&["userspace"]);
+        document.set("digest", Json::from(image_digest().as_str()));
+        document.set("size", Json::Num(IMAGE.len() as f64));
+        write_signed(&fixture, &layout.release("1.4.0"), &document, 7);
+        fixture.write_desired(
+            r#"{"generation":1,"os":{"channel":"stable","version":"1.4.0"},"packages":[]}"#,
+        );
+        fixture.daemon.reload();
+        pair_to(&fixture, "https://hub.example");
+        on_ethernet(&fixture);
+
+        // Left over from something else, and larger than this bundle can be.
+        std::fs::create_dir_all(layout.partial(&image_digest()).parent().unwrap()).unwrap();
+        std::fs::write(
+            layout.partial(&image_digest()),
+            [IMAGE, b" and then some more"].concat(),
+        )
+        .unwrap();
+
+        // A fetcher that records where it was asked to start.
+        struct FromWhere(std::sync::Arc<std::sync::Mutex<Vec<u64>>>);
+        impl crate::bundle::Fetcher for FromWhere {
+            fn slice(&mut self, ask: &crate::bundle::Ask) -> crate::bundle::Slice {
+                self.0.lock().unwrap().push(ask.from);
+                std::fs::write(&ask.into, IMAGE).unwrap();
+                crate::bundle::Slice {
+                    status: 200,
+                    before: 0,
+                    after: IMAGE.len() as u64,
+                    declared_total: Some(IMAGE.len() as u64),
+                    complete: true,
+                    error: None,
+                }
+            }
+        }
+        let asks = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        fixture.daemon.fetcher = Box::new(FromWhere(asks.clone()));
+        let installs = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        fixture.daemon.updater = Box::new(SharedUpdater(installs.clone()));
+
+        let pass = fixture.daemon.reconcile(1_000);
+        let (_, outcome) = pass
+            .applied
+            .iter()
+            .find(|(action, _)| {
+                matches!(
+                    action.kind,
+                    skynetd::reconcile::ActionKind::StageOsImage { .. }
+                )
+            })
+            .expect("the plan stages the image");
+        assert_eq!(outcome, &Outcome::Applied, "{outcome:?}");
+        assert_eq!(installs.lock().unwrap().len(), 1);
+        assert_eq!(
+            asks.lock().unwrap().as_slice(),
+            [0],
+            "a partial cannot be larger than what it is part of, so the transfer starts again              rather than resuming into bytes from another image"
+        );
+    }
+
+    /// §34.3's wait, on the route an operator reads.
+    #[test]
+    fn the_ota_route_shows_where_the_bytes_are() {
+        let mut fixture = with_real_release("ota-route-transfer");
+        let layout = fixture.daemon.store.layout().clone();
+        let path = layout.state().join("bearers.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "{\"bearers\":[{\"name\":\"wwan0\",\"kind\":\"cellular\",\"up\":true}]}",
+        )
+        .unwrap();
+        // Half an image, from an earlier pass on a link that has since gone.
+        std::fs::create_dir_all(layout.partial(&image_digest()).parent().unwrap()).unwrap();
+        std::fs::write(layout.partial(&image_digest()), &IMAGE[..20]).unwrap();
+
+        let (status, body) = fixture.request("GET", "/ota", Some("observer-token"), "");
+        assert_eq!(status, 200);
+        let transfer = body.get("transfer").expect("a transfer block");
+        assert_eq!(
+            transfer.get("decision").and_then(Json::as_str),
+            Some("wait_for_unmetered"),
+            "a cellular bearer is assumed metered and an OS image waits for a link nobody pays by \
+             the megabyte for"
+        );
+        assert_eq!(transfer.get("received").and_then(Json::as_f64), Some(20.0));
+        assert_eq!(transfer.get("have"), Some(&Json::Bool(false)));
+        assert_eq!(
+            transfer.get("digest").and_then(Json::as_str),
+            Some(image_digest().as_str())
         );
     }
 
@@ -6570,5 +7166,1199 @@ mod intent {
         let a = Json::parse("{\"generation\":1,\"packages\":[]}").unwrap();
         let b = Json::parse("{\n\"packages\":[],\n\"generation\":1}").unwrap();
         assert_eq!(digest_of(&a), digest_of(&b));
+    }
+}
+
+// ── §12's bytes, on a machine ────────────────────────────────────────────────
+//
+// `skynet_contracts::bundle` proves the seven decisions and the four verdicts for given inputs.
+// These prove the half a pure function cannot: that a partial on the disk is what the decision is
+// made from, that a slice resumes where the last one stopped, that bytes which are not the release
+// are deleted rather than kept, that a metered link asks for nothing at all — and that a bundle
+// somebody put on the robot by hand is held to the same digest as one that was fetched.
+
+mod bundle {
+    use super::*;
+    use crate::bundle::{advance, hash_file, url_for, Ask, Attempts, Fetcher, Slice, Step};
+
+    /// What a scripted server does about one request.
+    enum Answer {
+        /// Append these bytes and say whether that was the whole body.
+        Send {
+            chunk: &'static [u8],
+            complete: bool,
+            total: Option<u64>,
+        },
+        /// Answer `200` to a resume, which is a server that ignored the range.
+        WholeAgain(&'static [u8]),
+        /// Fail without moving anything.
+        Fail(&'static str),
+    }
+
+    /// A server the suite writes the script for.
+    ///
+    /// A trait double rather than a local HTTP server, for [`crate::ota::RecordingUpdater`]'s
+    /// reason: the four interesting cases here are a link that drops halfway, a resume, a mirror
+    /// serving the wrong image and a proxy ignoring a range header, and none of them is reachable
+    /// through a network a test controls.
+    struct Scripted {
+        answers: std::collections::VecDeque<Answer>,
+        asks: Vec<(u64, String)>,
+    }
+
+    impl Scripted {
+        fn new(answers: Vec<Answer>) -> Scripted {
+            Scripted {
+                answers: answers.into_iter().collect(),
+                asks: Vec::new(),
+            }
+        }
+
+        fn silent() -> Scripted {
+            Scripted::new(Vec::new())
+        }
+    }
+
+    impl Fetcher for Scripted {
+        fn slice(&mut self, ask: &Ask) -> Slice {
+            use std::io::Write;
+            self.asks.push((ask.from, ask.url.clone()));
+            let before = crate::bundle::size_of(&ask.into);
+            let answer = self
+                .answers
+                .pop_front()
+                .unwrap_or(Answer::Fail("the script ran out of answers"));
+
+            let write = |bytes: &[u8], append: bool| {
+                std::fs::create_dir_all(ask.into.parent().unwrap()).unwrap();
+                let mut file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(append)
+                    .write(true)
+                    .truncate(!append)
+                    .open(&ask.into)
+                    .unwrap();
+                file.write_all(bytes).unwrap();
+            };
+
+            match answer {
+                Answer::Send {
+                    chunk,
+                    complete,
+                    total,
+                } => {
+                    write(chunk, ask.from > 0);
+                    Slice {
+                        status: if ask.from > 0 { 206 } else { 200 },
+                        before,
+                        after: crate::bundle::size_of(&ask.into),
+                        declared_total: total,
+                        complete,
+                        error: None,
+                    }
+                }
+                Answer::WholeAgain(bytes) => {
+                    write(bytes, true);
+                    Slice {
+                        status: 200,
+                        before,
+                        after: crate::bundle::size_of(&ask.into),
+                        declared_total: Some(bytes.len() as u64),
+                        complete: true,
+                        error: None,
+                    }
+                }
+                Answer::Fail(detail) => Slice {
+                    status: 0,
+                    before,
+                    after: before,
+                    declared_total: None,
+                    complete: false,
+                    error: Some(detail.to_string()),
+                },
+            }
+        }
+    }
+
+    const IMAGE: &[u8] = b"the whole operating system, in twenty-nine bytes";
+    const HEAD: &[u8] = b"the whole operating";
+    const TAIL: &[u8] = b" system, in twenty-nine bytes";
+
+    fn digest_of(bytes: &[u8]) -> String {
+        format!(
+            "sha256:{}",
+            String::from_utf8_lossy(&skynet_sha256::hex_bytes(bytes))
+        )
+    }
+
+    /// A bearer table with one link, up.
+    fn bearers(fixture: &Fixture, kind: &str, metered: bool) -> crate::connectivity::Table {
+        let layout = fixture.daemon.store.layout();
+        let path = layout.state().join("bearers.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            format!(
+                "{{\"bearers\":[{{\"name\":\"link0\",\"kind\":\"{kind}\",\"up\":true,\
+                 \"metered\":{metered}}}]}}"
+            ),
+        )
+        .unwrap();
+        crate::connectivity::Table::of(layout)
+    }
+
+    /// No bearers declared at all, which is a robot nobody has told about its own links.
+    fn nothing_up(fixture: &Fixture) -> crate::connectivity::Table {
+        let layout = fixture.daemon.store.layout();
+        let path = layout.state().join("bearers.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{\"bearers\":[]}").unwrap();
+        crate::connectivity::Table::of(layout)
+    }
+
+    #[test]
+    fn a_whole_image_arrives_and_becomes_the_bundle() {
+        let fixture = Fixture::new("bundle-whole");
+        let layout = fixture.daemon.store.layout().clone();
+        let table = bearers(&fixture, "ethernet", false);
+        let digest = digest_of(IMAGE);
+        let mut server = Scripted::new(vec![Answer::Send {
+            chunk: IMAGE,
+            complete: true,
+            total: Some(IMAGE.len() as u64),
+        }]);
+
+        let step = advance(
+            &layout,
+            &mut server,
+            &digest,
+            None,
+            &table,
+            "https://hub.example/os/releases/1.4.0/bundle",
+            Some("skd_x"),
+            1_000,
+            1.0,
+        );
+
+        match step {
+            Step::Have { path, .. } => {
+                assert_eq!(path, layout.bundle(&digest));
+                assert_eq!(std::fs::read(&path).unwrap(), IMAGE);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            !layout.partial(&digest).exists(),
+            "the partial becomes the bundle rather than being copied out of"
+        );
+        assert!(
+            !layout.transfer().exists(),
+            "a finished transfer leaves no attempt record behind"
+        );
+    }
+
+    /// The property the whole design rests on: a pass moves what it can and the next one continues.
+    #[test]
+    fn a_slice_that_runs_out_of_budget_resumes_where_it_stopped() {
+        let fixture = Fixture::new("bundle-resume");
+        let layout = fixture.daemon.store.layout().clone();
+        let table = bearers(&fixture, "ethernet", false);
+        let digest = digest_of(IMAGE);
+        let mut server = Scripted::new(vec![
+            Answer::Send {
+                chunk: HEAD,
+                complete: false,
+                total: Some(IMAGE.len() as u64),
+            },
+            Answer::Send {
+                chunk: TAIL,
+                complete: true,
+                total: Some(IMAGE.len() as u64),
+            },
+        ]);
+
+        let fetch = |server: &mut Scripted, now: u64| {
+            advance(
+                &layout,
+                server,
+                &digest,
+                None,
+                &table,
+                "https://hub.example/os/releases/1.4.0/bundle",
+                Some("skd_x"),
+                now,
+                1.0,
+            )
+        };
+
+        match fetch(&mut server, 1_000) {
+            Step::Moved {
+                received, total, ..
+            } => {
+                assert_eq!(received, HEAD.len() as u64);
+                assert_eq!(total, Some(IMAGE.len() as u64));
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            crate::bundle::size_of(&layout.partial(&digest)),
+            HEAD.len() as u64
+        );
+
+        match fetch(&mut server, 11_000) {
+            Step::Have { path, .. } => assert_eq!(std::fs::read(&path).unwrap(), IMAGE),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            server.asks,
+            vec![
+                (
+                    0,
+                    "https://hub.example/os/releases/1.4.0/bundle".to_string()
+                ),
+                (
+                    HEAD.len() as u64,
+                    "https://hub.example/os/releases/1.4.0/bundle".to_string()
+                ),
+            ],
+            "the second request resumes at the partial's length"
+        );
+    }
+
+    /// §34.3, and the assertion that matters is that nothing was *asked for*.
+    #[test]
+    fn a_metered_link_is_not_asked_for_an_operating_system() {
+        let fixture = Fixture::new("bundle-metered");
+        let layout = fixture.daemon.store.layout().clone();
+        let table = bearers(&fixture, "cellular", true);
+        let digest = digest_of(IMAGE);
+        let mut server = Scripted::silent();
+
+        let step = advance(
+            &layout,
+            &mut server,
+            &digest,
+            None,
+            &table,
+            "https://hub.example/os/releases/1.4.0/bundle",
+            Some("skd_x"),
+            1_000,
+            1.0,
+        );
+        match step {
+            Step::Waiting { detail } => assert!(detail.contains("metered"), "{detail}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            server.asks.is_empty(),
+            "a metered bearer is a link nothing is requested over, not one a request fails on"
+        );
+    }
+
+    #[test]
+    fn no_link_at_all_is_the_ordinary_state_rather_than_a_fault() {
+        let fixture = Fixture::new("bundle-offline");
+        let layout = fixture.daemon.store.layout().clone();
+        let table = nothing_up(&fixture);
+        let mut server = Scripted::silent();
+
+        let step = advance(
+            &layout,
+            &mut server,
+            &digest_of(IMAGE),
+            None,
+            &table,
+            "https://hub.example/os/releases/1.4.0/bundle",
+            Some("skd_x"),
+            1_000,
+            1.0,
+        );
+        match step {
+            Step::Waiting { detail } => assert!(detail.contains("ordinary state"), "{detail}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(server.asks.is_empty());
+    }
+
+    /// The rule the module header calls the one that keeps a resume honest.
+    #[test]
+    fn bytes_that_are_not_the_release_are_deleted_rather_than_resumed_from() {
+        let fixture = Fixture::new("bundle-wrong");
+        let layout = fixture.daemon.store.layout().clone();
+        let table = bearers(&fixture, "ethernet", false);
+        let digest = digest_of(IMAGE);
+        let mut server = Scripted::new(vec![Answer::Send {
+            chunk: b"a perfectly good image of something else entirely",
+            complete: true,
+            total: None,
+        }]);
+
+        let step = advance(
+            &layout,
+            &mut server,
+            &digest,
+            None,
+            &table,
+            "https://hub.example/os/releases/1.4.0/bundle",
+            Some("skd_x"),
+            1_000,
+            1.0,
+        );
+        match step {
+            Step::Failed { detail } => {
+                assert!(detail.contains("where they came from"), "{detail}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            !layout.partial(&digest).exists(),
+            "bytes that will never verify are bytes a resume would append to for ever"
+        );
+        assert!(!layout.bundle(&digest).exists());
+
+        let attempts = Attempts::read(&layout, &digest);
+        assert_eq!(attempts.failures, 1);
+        assert!(attempts.next_ms > 1_000, "and the next attempt is held off");
+    }
+
+    /// A proxy that ignores `Range` produces a file that is one image's head plus a whole other
+    /// copy. Caught at the response rather than after the transfer.
+    #[test]
+    fn a_server_that_ignores_the_range_has_its_partial_thrown_away() {
+        let fixture = Fixture::new("bundle-range");
+        let layout = fixture.daemon.store.layout().clone();
+        let table = bearers(&fixture, "ethernet", false);
+        let digest = digest_of(IMAGE);
+        let mut server = Scripted::new(vec![
+            Answer::Send {
+                chunk: HEAD,
+                complete: false,
+                total: Some(IMAGE.len() as u64),
+            },
+            Answer::WholeAgain(IMAGE),
+        ]);
+
+        let fetch = |server: &mut Scripted, now: u64| {
+            advance(
+                &layout,
+                server,
+                &digest,
+                None,
+                &table,
+                "https://hub.example/os/releases/1.4.0/bundle",
+                Some("skd_x"),
+                now,
+                1.0,
+            )
+        };
+        assert!(matches!(fetch(&mut server, 1_000), Step::Moved { .. }));
+        match fetch(&mut server, 2_000) {
+            Step::Failed { detail } => assert!(detail.contains("ignored the range"), "{detail}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(!layout.partial(&digest).exists());
+    }
+
+    /// §34.4's curve, applied to a transfer: a failure holds the next attempt off, and the hold is
+    /// reported rather than being a silent skipped pass.
+    #[test]
+    fn a_failed_attempt_backs_off_before_the_next_one() {
+        let fixture = Fixture::new("bundle-backoff");
+        let layout = fixture.daemon.store.layout().clone();
+        let table = bearers(&fixture, "ethernet", false);
+        let digest = digest_of(IMAGE);
+        let mut server = Scripted::new(vec![
+            Answer::Fail("the Hub answered HTTP 503"),
+            Answer::Send {
+                chunk: IMAGE,
+                complete: true,
+                total: Some(IMAGE.len() as u64),
+            },
+        ]);
+        let fetch = |server: &mut Scripted, now: u64| {
+            advance(
+                &layout,
+                server,
+                &digest,
+                None,
+                &table,
+                "https://hub.example/os/releases/1.4.0/bundle",
+                Some("skd_x"),
+                now,
+                1.0,
+            )
+        };
+
+        match fetch(&mut server, 1_000) {
+            Step::Failed { detail } => assert!(detail.contains("503"), "{detail}"),
+            other => panic!("{other:?}"),
+        }
+        // The very next pass, ten seconds later, must not ask again.
+        match fetch(&mut server, 11_000) {
+            Step::Waiting { detail } => assert!(detail.contains("held for another"), "{detail}"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(server.asks.len(), 1, "the second pass asked nothing");
+
+        // Past the delay, it asks — and the answer that works clears the record.
+        match fetch(&mut server, 100_000) {
+            Step::Have { .. } => {}
+            other => panic!("{other:?}"),
+        }
+        assert!(!layout.transfer().exists());
+    }
+
+    /// The jitter is supplied, so the curve is a thing a test can assert on (§35.2).
+    #[test]
+    fn the_backoff_curve_doubles_and_is_capped() {
+        use crate::bundle::{backoff_ms, FIRST_BACKOFF_MS, MAX_BACKOFF_MS};
+        assert_eq!(backoff_ms(0, 1.0), 0);
+        assert_eq!(backoff_ms(1, 1.0), FIRST_BACKOFF_MS);
+        assert_eq!(backoff_ms(2, 1.0), FIRST_BACKOFF_MS * 2);
+        assert_eq!(backoff_ms(40, 1.0), MAX_BACKOFF_MS);
+        // Full jitter: uniform over `[0, exponential]`, not a perturbation of it.
+        assert_eq!(backoff_ms(1, 0.0), 0);
+        assert_eq!(backoff_ms(1, 0.5), FIRST_BACKOFF_MS / 2);
+    }
+
+    /// An attempt record belongs to the bytes it is about.
+    #[test]
+    fn the_backoff_of_one_image_does_not_hold_up_another() {
+        let fixture = Fixture::new("bundle-other-record");
+        let layout = fixture.daemon.store.layout().clone();
+        Attempts {
+            digest: "sha256:something-else".to_string(),
+            failures: 9,
+            next_ms: 10_000_000,
+            error: Some("an older transfer".to_string()),
+            declared_total: Some(12),
+        }
+        .write(&layout)
+        .unwrap();
+
+        let held = Attempts::read(&layout, &digest_of(IMAGE));
+        assert_eq!(held.failures, 0);
+        assert_eq!(held.next_ms, 0);
+        assert_eq!(held.error, None);
+    }
+
+    /// A transfer that ends badly having moved bytes has not failed in the sense the curve is about.
+    #[test]
+    fn a_link_that_drops_mid_slice_does_not_count_as_a_failure() {
+        let fixture = Fixture::new("bundle-dropped");
+        let layout = fixture.daemon.store.layout().clone();
+        let table = bearers(&fixture, "ethernet", false);
+        let digest = digest_of(IMAGE);
+        // Bytes arrived *and* curl reported an error, which is what a link going down looks like.
+        struct Flaky;
+        impl Fetcher for Flaky {
+            fn slice(&mut self, ask: &Ask) -> Slice {
+                use std::io::Write;
+                std::fs::create_dir_all(ask.into.parent().unwrap()).unwrap();
+                let mut file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&ask.into)
+                    .unwrap();
+                file.write_all(HEAD).unwrap();
+                Slice {
+                    status: 200,
+                    before: 0,
+                    after: HEAD.len() as u64,
+                    declared_total: None,
+                    complete: false,
+                    error: Some("curl could not fetch: transfer closed".to_string()),
+                }
+            }
+        }
+
+        let step = advance(
+            &layout,
+            &mut Flaky,
+            &digest,
+            None,
+            &table,
+            "https://hub.example/os/releases/1.4.0/bundle",
+            Some("skd_x"),
+            1_000,
+            1.0,
+        );
+        match step {
+            Step::Moved { received, .. } => assert_eq!(received, HEAD.len() as u64),
+            other => panic!("{other:?}"),
+        }
+        let attempts = Attempts::read(&layout, &digest);
+        assert_eq!(attempts.failures, 0, "progress is not a failure");
+        assert_eq!(attempts.next_ms, 0, "so the next pass resumes immediately");
+        assert!(attempts.error.is_some(), "and the reason is still recorded");
+    }
+
+    #[test]
+    fn an_image_already_here_is_not_fetched_again() {
+        let fixture = Fixture::new("bundle-have");
+        let layout = fixture.daemon.store.layout().clone();
+        let table = bearers(&fixture, "ethernet", false);
+        let digest = digest_of(IMAGE);
+        std::fs::create_dir_all(layout.bundle(&digest).parent().unwrap()).unwrap();
+        std::fs::write(layout.bundle(&digest), IMAGE).unwrap();
+
+        let mut server = Scripted::silent();
+        match advance(
+            &layout,
+            &mut server,
+            &digest,
+            None,
+            &table,
+            "https://hub.example/os/releases/1.4.0/bundle",
+            Some("skd_x"),
+            1_000,
+            1.0,
+        ) {
+            Step::Have { .. } => {}
+            other => panic!("{other:?}"),
+        }
+        assert!(server.asks.is_empty());
+    }
+
+    #[test]
+    fn a_digest_is_taken_over_the_file_without_reading_it_into_memory() {
+        let fixture = Fixture::new("bundle-hash");
+        let layout = fixture.daemon.store.layout().clone();
+        let path = layout.state().join("big");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // Larger than the read buffer, so the streaming path is actually exercised.
+        let bytes = vec![7u8; 200_000];
+        std::fs::write(&path, &bytes).unwrap();
+
+        let (digest, size) = hash_file(&path).unwrap();
+        assert_eq!(size, 200_000);
+        assert_eq!(digest, digest_of(&bytes));
+    }
+
+    #[test]
+    fn the_url_is_beside_the_catalogue_and_encodes_the_version() {
+        assert_eq!(
+            url_for("https://hub.example/api/skynet/v1/", "1.4.0+rc 1"),
+            format!(
+                "https://hub.example/api/skynet/v1/os/releases/1.4.0%2Brc%201/bundle?arch={}",
+                crate::releases::arch()
+            )
+        );
+    }
+}
+
+// ── The wire fixtures ────────────────────────────────────────────────────────
+//
+// `reference/wire/` holds the exact canonical body this daemon puts on the wire for three of §17's
+// routes, produced here by the real producers. The Hub keeps its own copy and pushes each one
+// through the receiving route's validation.
+//
+// This exists because of what the twenty-seventh session found: both repositories had built the
+// episode path and had never put one document through the other, and they did not agree about a
+// single field name. Neither suite could see it — one asserted what the robot sends and the other
+// asserted what the Hub accepts, and a boundary needs a test that holds one side's *real output*
+// against the other side's *real contract*.
+//
+// A producer that changes fails here, with the command that re-freezes the file. A route that stops
+// reading a field fails in the Hub's suite. The two copies are pinned by digest, so neither
+// repository can move alone.
+
+/// Where the frozen documents live.
+fn wire_dir() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("reference")
+        .join("wire")
+}
+
+/// Compare one document against its frozen copy, or re-freeze it when asked.
+///
+/// The environment variable is the whole of the write path, deliberately: a fixture that rewrites
+/// itself whenever it disagrees is not a fixture, it is a log of the last run.
+fn frozen(name: &str, document: &Json) {
+    let canonical = document.to_canonical().expect("the document canonicalises");
+    let path = wire_dir().join(format!("{name}.json"));
+
+    if std::env::var("SKYNET_WRITE_WIRE").is_ok() {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            format!(
+                "{canonical}
+"
+            ),
+        )
+        .unwrap();
+        return;
+    }
+
+    let held = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+        panic!(
+            "{} could not be read ({error}). Freeze it with:
+                 SKYNET_WRITE_WIRE=1 cargo test -p skynetd-io",
+            path.display()
+        )
+    });
+
+    assert_eq!(
+        held.trim(),
+        canonical,
+        "
+{} no longer matches what this daemon produces.
+
+         This document crosses §17 and the Hub keeps its own copy of it. If the change is intended,          re-freeze and resync — and expect the Hub's suite to have something to say, which is the          point:
+             SKYNET_WRITE_WIRE=1 cargo test -p skynetd-io
+             node tools/check-contract-mirrors.mjs --sync ../BotMarket
+",
+        path.display()
+    );
+}
+
+mod wire {
+    use super::*;
+
+    /// §74's window, closed the way a reconcile pass closes one.
+    #[test]
+    fn the_telemetry_window_a_reconcile_pass_closes() {
+        let mut counting = crate::telemetry::Counting::opened(1_788_307_200_000.0, 60_000.0, 7);
+        counting.passes = 30;
+        // Five minutes of wall clock, five of monotonic, and two drops inside the window.
+        let window = counting.close(1_788_307_500_000.0, 360_000.0, 9);
+        frozen("telemetry", &crate::telemetry::window_to_json(&window));
+    }
+
+    /// §38.1's alarm, through the reconcile path that raises it.
+    ///
+    /// The robot has a **black box ring**, so the frozen document carries the case that matters:
+    /// §13 seals on a fault, and the incident names the window it sealed. A fixture taken on a
+    /// robot with no recorder would freeze the honest-but-uninteresting sentence and leave the
+    /// shape a Hub actually has to render untested.
+    #[test]
+    fn the_incident_a_failed_profile_signature_raises() {
+        let mut fixture = Fixture::new("wire-incident");
+        // Opened and dropped: this creates the ring §28 preallocates, which is what the daemon's
+        // sealer reads. Nothing here holds a writer while the incident is raised.
+        {
+            let layout = fixture.daemon.store.layout().clone();
+            let _recorder = crate::blackbox::Recorder::open(
+                &layout,
+                crate::blackbox::supervisor_meta(&layout),
+                skynet_blackbox::record::Shape {
+                    joints: 0,
+                    channels: 0,
+                },
+                64 * 1024,
+            )
+            .expect("a recorder");
+        }
+        let signer = driver_key(14);
+        write_trust(&fixture, "fleet-admin", &public_hex(&signer));
+        let over_other_bytes = signer.sign(&crate::trust::profile_message(
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        ));
+        desired_profile(
+            &fixture,
+            Some((&public_hex(&signer), &hex_of(&over_other_bytes))),
+        );
+        fixture.daemon.reload();
+
+        let queue = crate::outbound::Queue::of(fixture.daemon.store.layout());
+        let queued = queue.items();
+        assert_eq!(queued.len(), 1, "{queued:?}");
+        let document = Json::parse(&queued[0].body).expect("the incident is JSON");
+        // §13's window, sealed by the raise rather than by anything the test did.
+        let recording = document.get("recording").expect("a recording block");
+        assert_eq!(recording.get("sealed"), Some(&Json::Bool(true)));
+        assert_eq!(
+            recording.get("uploaded"),
+            Some(&Json::Bool(false)),
+            "the bytes do not cross §17 yet, and the document says so rather than implying they did"
+        );
+        frozen("incident", &document);
+    }
+}
+
+// ── §54.2's safety notes ─────────────────────────────────────────────────────
+//
+// > `safety_notes` stops being decorative too: it is displayed at grant time and acknowledged once
+// > per skill per robot, recorded in the audit log. A safety note nobody has read is a safety note
+// > that does not exist.
+//
+// The field has been in the Hub's skill manifest since skills were built and read by nothing. These
+// prove the half that gives it teeth: the grant is refused until the notes have been read, the
+// refusal *carries* them, the acknowledgement is bound to the text rather than to the name, and the
+// whole thing leaves a record somebody can find after an incident.
+
+mod safety_notes {
+    use super::*;
+
+    const NOTES: &str = "This skill moves the arm through the operator's working envelope.\nClear the cell before granting.";
+
+    /// A skill this robot holds and is meant to run, with notes.
+    ///
+    /// Staged and named by the desired state rather than activated: activation is a symlink swap
+    /// that §37.1 requires to be atomic, which is POSIX-only — and the rule under test is about the
+    /// manifest this robot holds, which is the same document either way. `mod posix` covers the
+    /// activation path itself.
+    fn install(fixture: &mut Fixture, version: &str, notes: Option<&str>) -> String {
+        let source = fixture.root.path().join(format!("skill-source-{version}"));
+        let mut m = manifest("acme/wave", version, "skill");
+        if let Some(notes) = notes {
+            m.set("safety_notes", Json::from(notes));
+        }
+        let digest = write_package(
+            &source,
+            &m,
+            &[(
+                "bin/run",
+                "#!/bin/sh
+exit 0
+",
+            )],
+        );
+        let id = PackageId::parse("acme/wave").unwrap();
+        fixture
+            .daemon
+            .store
+            .stage(&id, "skill", version, &digest, &source)
+            .unwrap();
+        fixture.write_desired(&format!(
+            "{{\"generation\":1,\"packages\":[{{\"id\":\"acme/wave\",\"version\":\"{version}\",\"digest\":\"{digest}\",\"kind\":\"skill\"}}]}}"
+        ));
+        fixture.daemon.reload();
+        digest
+    }
+
+    fn with_notes(label: &str, notes: Option<&str>) -> Fixture {
+        let mut fixture = Fixture::new(label);
+        fixture.provision();
+        install(&mut fixture, "1.0.0", notes);
+        fixture
+    }
+
+    fn grant(fixture: &mut Fixture, body: &str) -> (u16, Json) {
+        fixture.request("POST", "/grants", Some("admin-token"), body)
+    }
+
+    #[test]
+    fn a_grant_is_refused_until_the_notes_have_been_read_and_the_refusal_carries_them() {
+        let mut fixture = with_notes("notes-refused", Some(NOTES));
+        let (status, body) = grant(&mut fixture, r#"{"id":"acme/wave","token":"arm.left"}"#);
+
+        assert_eq!(status, 409, "{body:?}");
+        assert_eq!(
+            body.get("outcome").and_then(Json::as_str),
+            Some("safety_notes_unread")
+        );
+        // Displayed, which is the word §54.2 uses. A refusal that only named the rule would send an
+        // operator to a Hub they may not be able to reach.
+        assert_eq!(body.get("safety_notes").and_then(Json::as_str), Some(NOTES));
+        assert!(body
+            .get("detail")
+            .and_then(Json::as_str)
+            .is_some_and(|detail| detail.contains("does not exist")));
+
+        // And nothing was granted.
+        let held = crate::observe::read_grants(fixture.daemon.store.layout());
+        assert!(held.is_empty(), "{held:?}");
+    }
+
+    #[test]
+    fn acknowledging_them_grants_and_leaves_a_record() {
+        let mut fixture = with_notes("notes-acknowledged", Some(NOTES));
+        let (_, refusal) = grant(&mut fixture, r#"{"id":"acme/wave","token":"arm.left"}"#);
+        let digest = refusal
+            .get("digest")
+            .and_then(Json::as_str)
+            .expect("a digest to acknowledge")
+            .to_string();
+
+        let (status, body) = grant(
+            &mut fixture,
+            &format!(r#"{{"id":"acme/wave","token":"arm.left","acknowledge":"{digest}"}}"#),
+        );
+        assert_eq!(status, 201, "{body:?}");
+
+        // §38.3's log, because the file answers "may this proceed" and only the log answers "who
+        // read it, and when" — which is the question asked after an incident.
+        let entries = crate::audit::Audit::of(fixture.daemon.store.layout()).read();
+        let entry = entries
+            .entries
+            .iter()
+            .find(|entry| entry.action == "safety_notes_acknowledged")
+            .expect("an audit entry");
+        assert_eq!(entry.subject, "acme/wave");
+        assert!(entry.detail.contains(&digest));
+        assert!(
+            entry.detail.contains("moves the arm"),
+            "the log says what was agreed to, not only that something was: {}",
+            entry.detail
+        );
+        assert_eq!(entry.actor, "suite");
+    }
+
+    #[test]
+    fn a_second_grant_does_not_ask_again() {
+        // "Once per skill per robot." An operator who has read a note and is adding a second
+        // capability is not asked to read it twice.
+        let mut fixture = with_notes("notes-once", Some(NOTES));
+        let (_, refusal) = grant(&mut fixture, r#"{"id":"acme/wave","token":"arm.left"}"#);
+        let digest = refusal
+            .get("digest")
+            .and_then(Json::as_str)
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            grant(
+                &mut fixture,
+                &format!(r#"{{"id":"acme/wave","token":"arm.left","acknowledge":"{digest}"}}"#)
+            )
+            .0,
+            201
+        );
+
+        let (status, _) = grant(&mut fixture, r#"{"id":"acme/wave","token":"camera.front"}"#);
+        assert_eq!(status, 201);
+    }
+
+    #[test]
+    fn acknowledging_other_notes_is_not_acknowledging_these() {
+        // The digest is the point of binding to the text. A replayed command carrying last
+        // version's digest is an operator who has not read this version's warning.
+        let mut fixture = with_notes("notes-wrong-digest", Some(NOTES));
+        let (status, body) = grant(
+            &mut fixture,
+            r#"{"id":"acme/wave","token":"arm.left","acknowledge":"sha256:not-these-notes"}"#,
+        );
+        assert_eq!(status, 409, "{body:?}");
+        assert!(crate::observe::read_grants(fixture.daemon.store.layout()).is_empty());
+    }
+
+    #[test]
+    fn changed_notes_are_a_note_nobody_has_read() {
+        // A publisher who edits a warning has written a new warning. The alternative lets a package
+        // acquire its notes *after* the operator agreed to a blank one, which is the version of
+        // this rule that would be worth nothing.
+        let mut fixture = with_notes("notes-changed", Some(NOTES));
+        let (_, refusal) = grant(&mut fixture, r#"{"id":"acme/wave","token":"arm.left"}"#);
+        let digest = refusal
+            .get("digest")
+            .and_then(Json::as_str)
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            grant(
+                &mut fixture,
+                &format!(r#"{{"id":"acme/wave","token":"arm.left","acknowledge":"{digest}"}}"#)
+            )
+            .0,
+            201
+        );
+
+        // The same package, a new version, a different warning.
+        install(
+            &mut fixture,
+            "1.1.0",
+            Some("This version also releases the gripper on stop."),
+        );
+
+        let (status, body) = grant(&mut fixture, r#"{"id":"acme/wave","token":"gripper"}"#);
+        assert_eq!(status, 409, "{body:?}");
+        assert!(body
+            .get("safety_notes")
+            .and_then(Json::as_str)
+            .is_some_and(|text| text.contains("releases the gripper")));
+    }
+
+    #[test]
+    fn a_package_with_no_notes_is_granted_without_ceremony() {
+        // Requiring an acknowledgement of nothing is how an operator learns to acknowledge without
+        // reading, which is the failure §54.2's sentence is about.
+        let mut fixture = with_notes("notes-none", None);
+        assert_eq!(
+            grant(&mut fixture, r#"{"id":"acme/wave","token":"arm.left"}"#).0,
+            201
+        );
+    }
+
+    #[test]
+    fn a_package_this_robot_does_not_hold_is_granted_and_asked_later() {
+        // Grants and installs are both level-triggered and either order is legal, so a grant
+        // written before the package arrives must not fail for want of a manifest nobody fetched.
+        // The note is read at the next grant, which is the same rule applied when there is
+        // something to read.
+        let mut fixture = Fixture::new("notes-not-installed");
+        fixture.provision();
+        assert_eq!(
+            grant(&mut fixture, r#"{"id":"acme/wave","token":"arm.left"}"#).0,
+            201
+        );
+    }
+
+    #[test]
+    fn revoking_never_waits_on_a_note() {
+        // §39.1: the safe direction never waits. An unread note blocks a widening and nothing else.
+        let mut fixture = with_notes("notes-revoke", Some(NOTES));
+        let (_, refusal) = grant(&mut fixture, r#"{"id":"acme/wave","token":"arm.left"}"#);
+        let digest = refusal
+            .get("digest")
+            .and_then(Json::as_str)
+            .unwrap()
+            .to_string();
+        grant(
+            &mut fixture,
+            &format!(r#"{{"id":"acme/wave","token":"arm.left","acknowledge":"{digest}"}}"#),
+        );
+
+        let (status, body) = fixture.request(
+            "DELETE",
+            "/grants/acme:wave/arm.left",
+            Some("admin-token"),
+            "",
+        );
+        assert_eq!(status, 200, "{body:?}");
+        assert_eq!(body.get("outcome").and_then(Json::as_str), Some("revoked"));
+    }
+
+    #[test]
+    fn whitespace_is_not_a_warning() {
+        let mut blank = Json::obj();
+        blank.set("safety_notes", Json::from("   \n  "));
+        assert_eq!(crate::notes::of(&blank), None);
+
+        let mut real = Json::obj();
+        real.set("safety_notes", Json::from(NOTES));
+        let notes = crate::notes::of(&real).expect("notes");
+        assert!(notes.digest.starts_with("sha256:"));
+        assert_eq!(notes.text, NOTES);
+    }
+}
+
+// ── §54.5's declared call graph ──────────────────────────────────────────────
+//
+// > Depth-limited (default 4) and **acyclic** — a cycle is refused at install by walking the
+// > declared graph, **not discovered at runtime**.
+//
+// The runtime's own check walks the *live ancestry* and refuses the call that would close a cycle.
+// It is correct, and it is the thing this sentence forbids being the only check: it fires on a
+// robot, with leases held and a deadline running. The declared graph had never been read at all —
+// `read_calls` existed, was corpus-verified, and had no caller outside the corpus runner.
+
+mod composition {
+    use super::*;
+
+    fn composing(id: &str, calls: &[(&str, &str)]) -> Json {
+        let mut m = manifest(id, "1.0.0", "skill");
+        let mut composition = Json::obj();
+        composition.set(
+            "calls",
+            Json::Arr(
+                calls
+                    .iter()
+                    .map(|(from, to)| {
+                        let mut edge = Json::obj();
+                        edge.set("from", Json::from(*from))
+                            .set("to", Json::from(*to));
+                        edge
+                    })
+                    .collect(),
+            ),
+        );
+        m.set("composition", composition);
+        m
+    }
+
+    #[test]
+    fn a_graph_that_terminates_is_not_a_fault() {
+        let m = composing("acme/pick", &[("acme/pick", "acme/grasp")]);
+        assert!(crate::admit::composition_fault("acme/pick", &m).is_none());
+    }
+
+    #[test]
+    fn a_declared_cycle_is_a_fault_before_anything_invokes_it() {
+        let m = composing(
+            "acme/pick",
+            &[("acme/pick", "acme/grasp"), ("acme/grasp", "acme/pick")],
+        );
+        let fault = crate::admit::composition_fault("acme/pick", &m).expect("a fault");
+        assert_eq!(
+            fault.code,
+            skynet_contracts::skill::CompositionFaultCode::Cycle
+        );
+        // §64: the refusal names the path, because "this graph has a cycle" is not something a
+        // publisher can act on and `a -> b -> a` is.
+        let sentence = crate::admit::composition_refusal("acme/pick", &fault);
+        assert!(sentence.contains("acme/grasp"), "{sentence}");
+        assert!(sentence.contains("at runtime"), "{sentence}");
+    }
+
+    #[test]
+    fn a_graph_deeper_than_the_limit_is_a_fault() {
+        let m = composing(
+            "s/1",
+            &[
+                ("s/1", "s/2"),
+                ("s/2", "s/3"),
+                ("s/3", "s/4"),
+                ("s/4", "s/5"),
+            ],
+        );
+        let fault = crate::admit::composition_fault("s/1", &m).expect("a fault");
+        assert_eq!(
+            fault.code,
+            skynet_contracts::skill::CompositionFaultCode::TooDeep
+        );
+    }
+
+    #[test]
+    fn a_package_that_declares_no_graph_is_not_walked() {
+        // Which is nearly every package. A composition check with an opinion about a policy that
+        // has no `composition` key would be a check that refuses things for saying nothing.
+        let m = manifest("acme/pick", "1.0.0", "policy");
+        assert!(crate::admit::composition_fault("acme/pick", &m).is_none());
+        assert!(crate::admit::declared_calls(&m).is_empty());
+    }
+
+    #[test]
+    fn the_graph_is_read_under_either_spelling() {
+        // A manifest may carry the skill card flat or under `skill`, and every other reader here
+        // takes both. One that took only one would decline to walk half the manifests in the world.
+        let inner = composing("acme/pick", &[("acme/pick", "acme/pick")]);
+        let mut nested = manifest("acme/pick", "1.0.0", "skill");
+        let mut skill = Json::obj();
+        skill.set(
+            "composition",
+            inner.get("composition").cloned().unwrap_or_else(Json::obj),
+        );
+        nested.set("skill", skill);
+        assert!(crate::admit::composition_fault("acme/pick", &nested).is_some());
+    }
+}
+
+// ── §55.2's cell, and the diagnosis it makes possible ────────────────────────
+//
+// The cell has supplied `env.*` to every precondition since §54.2's context was built. What it
+// could not do was explain itself: `cell_environment` drops a fact key no dot path can address —
+// correct for a context, useless for a person whose skill was just refused for naming it — and
+// `validate_cell` had enumerated exactly those faults since the cell was designed, with no caller.
+
+mod cell {
+    use super::*;
+
+    /// A profile carrying a cell, applied the way the reconciler applies one.
+    fn with_cell(label: &str, cell: &str) -> Fixture {
+        let mut fixture = Fixture::new(label);
+        fixture.provision();
+        let layout = fixture.daemon.store.layout().clone();
+        let document = format!(
+            "{{\"name\":\"site-a\",\"digest\":\"sha256:aa\",\"limits\":{{}},\"cell\":{cell}}}"
+        );
+        std::fs::create_dir_all(layout.active_profile().parent().unwrap()).unwrap();
+        std::fs::write(layout.active_profile(), document).unwrap();
+        fixture
+    }
+
+    #[test]
+    fn a_robot_with_no_profile_says_so_rather_than_answering_nothing() {
+        let mut fixture = Fixture::new("cell-none");
+        fixture.provision();
+        let (status, body) = fixture.request("GET", "/cell", Some("observer-token"), "");
+        assert_eq!(status, 200);
+        assert_eq!(body.get("held"), Some(&Json::Bool(false)));
+        assert!(body
+            .get("note")
+            .and_then(Json::as_str)
+            .is_some_and(|note| note.contains("unresolvable")));
+    }
+
+    #[test]
+    fn the_environment_is_the_context_a_precondition_sees() {
+        let mut fixture = with_cell(
+            "cell-context",
+            r#"{"name":"bay-3","facts":{"door_closed":true,"door.closed":2},"fixtures":[{"name":"bench"}]}"#,
+        );
+        let (status, body) = fixture.request("GET", "/cell", Some("observer-token"), "");
+        assert_eq!(status, 200);
+        assert_eq!(body.get("held"), Some(&Json::Bool(true)));
+
+        let environment = body.get("environment").expect("an environment");
+        assert_eq!(environment.get("door_closed"), Some(&Json::Bool(true)));
+        assert!(
+            environment.get("door.closed").is_none(),
+            "a key with a dot in it is a key no dot path can address, and the context drops it"
+        );
+        // §55.2's derived facts, which a cell's own may not shadow.
+        assert_eq!(
+            environment.get("cell").and_then(Json::as_str),
+            Some("bay-3")
+        );
+    }
+
+    /// The whole reason this route exists.
+    #[test]
+    fn the_faults_say_what_was_dropped_and_why() {
+        let mut fixture = with_cell(
+            "cell-faults",
+            r#"{"name":"bay-3","facts":{"door.closed":2},"fixtures":[{"name":""}]}"#,
+        );
+        let (_, body) = fixture.request("GET", "/cell", Some("observer-token"), "");
+        let codes: Vec<&str> = body
+            .arr_or_empty("faults")
+            .iter()
+            .filter_map(|fault| fault.get("code").and_then(Json::as_str))
+            .collect();
+        assert!(codes.contains(&"fact_key_unusable"), "{codes:?}");
+        assert!(codes.contains(&"fixture_unnamed"), "{codes:?}");
+        assert!(body
+            .get("note")
+            .and_then(Json::as_str)
+            .is_some_and(|note| note.contains("only place that says why")));
+    }
+
+    /// §38.2's direction, which decides that this reports rather than refuses.
+    #[test]
+    fn a_faulty_cell_does_not_take_the_limits_with_it() {
+        let mut fixture = with_cell("cell-limits", r#"{"name":"","facts":{}}"#);
+        let (_, body) = fixture.request("GET", "/cell", Some("observer-token"), "");
+        eprintln!("BODY {}", body.to_canonical().unwrap_or_default());
+        assert!(!body.arr_or_empty("faults").is_empty(), "an unnamed cell");
+        // The profile is still the profile: refusing it for a malformed cell would drop the
+        // ceilings with it, which is the *widening* direction and the one that is never safe.
+        assert_eq!(
+            body.get("profile").and_then(Json::as_str),
+            Some("site-a"),
+            "the profile in force is unaffected"
+        );
+    }
+
+    #[test]
+    fn the_workspace_layer_is_computed_and_says_it_is_not_applied() {
+        let mut fixture = with_cell(
+            "cell-workspace",
+            r#"{"name":"bay-3","allowed":[{"frame":"base","shape":{"box":{"min":[0,0,0],"max":[2,2,2]}}}]}"#,
+        );
+        let (_, body) = fixture.request("GET", "/cell", Some("observer-token"), "");
+        let workspace = body.get("workspace").expect("a layer");
+        assert_eq!(workspace.arr_or_empty("volumes").len(), 1);
+        // §33.1: the guard is the kernel's and this daemon cannot reach it. Drawing the volumes
+        // without saying so would suggest they are in force.
+        assert!(body
+            .get("workspace_note")
+            .and_then(Json::as_str)
+            .is_some_and(|note| note.contains("§33.1")));
+    }
+
+    #[test]
+    fn reading_the_cell_needs_an_observer() {
+        let mut fixture = Fixture::new("cell-role");
+        fixture.provision();
+        assert_eq!(fixture.request("GET", "/cell", None, "").0, 401);
+        assert_eq!(
+            fixture
+                .request("GET", "/cell", Some("observer-token"), "")
+                .0,
+            200
+        );
     }
 }

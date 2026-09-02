@@ -270,10 +270,16 @@ pub fn adopt(layout: &Layout, body: &str, wanted: &str) -> Pulled {
     }
 }
 
-/// The five fields [`skynet_contracts::ota::BundleManifest`] is made of, and no others.
+/// The six fields [`skynet_contracts::ota::BundleManifest`] is made of, and no others.
 ///
 /// Taken from the row's own `manifest` when the Hub sent one — it does — and reassembled from the
 /// row otherwise, so a Hub that stops sending the narrow shape does not stop a fleet updating.
+///
+/// `size` is the sixth and it arrives under the row's own name, `size_bytes`, because the
+/// reassembly reads *the row* rather than the manifest. It is copied only when the row carries a
+/// whole non-negative number: absent is not zero, and a robot that fabricated a size would be
+/// putting an invented denominator behind a progress bar and an invented ceiling under the
+/// partial-larger-than-the-whole check.
 fn manifest_of(row: &Json) -> Json {
     if let Some(manifest) = row.get_present("manifest") {
         if manifest.get("version").and_then(Json::as_str).is_some() {
@@ -286,6 +292,13 @@ fn manifest_of(row: &Json) -> Json {
         .set("changes", copy_arr(row, "changes"))
         .set("digest", copy_str(row, "digest"))
         .set("version", copy_str(row, "version"));
+    if let Some(size) = row
+        .get_present("size_bytes")
+        .and_then(Json::as_f64)
+        .filter(|value| *value >= 0.0 && (*value as u64) as f64 == *value)
+    {
+        out.set("size", Json::Num(size));
+    }
     out
 }
 
@@ -423,6 +436,52 @@ mod tests {
         assert!(!pulled.matched && !pulled.written);
         assert!(pulled.fault.contains("1.5.0"));
         assert!(!layout.release("1.5.0").exists());
+    }
+
+    /// §75.5's gap, closed: the manifest declares a size and the fetch can use it.
+    ///
+    /// Both directions, because the row and the manifest spell it differently — `size_bytes` on the
+    /// Hub's row, `size` in the contract — and the reassembly reads the row.
+    #[test]
+    fn a_declared_size_reaches_the_manifest_by_either_route() {
+        let (_root, layout) = layout("releases-size");
+        // The narrow manifest the Hub sends, which carries it.
+        let body = r#"{"releases":[{"version":"1.4.0","channel":"stable","arch":"x86_64",
+            "digest":"sha256:aa","size_bytes":402653184,"compatible":["g1"],"changes":["rhal_driver"],
+            "manifest":{"version":"1.4.0","channel":"stable","digest":"sha256:aa","size":402653184,
+            "compatible":["g1"],"changes":["rhal_driver"]}}]}"#;
+        assert!(adopt(&layout, body, "1.4.0").written);
+        let held = std::fs::read_to_string(layout.release("1.4.0")).unwrap();
+        let manifest = skynet_contracts::json::bundle_from_json(&Json::parse(&held).unwrap());
+        assert_eq!(manifest.size, Some(402_653_184));
+    }
+
+    #[test]
+    fn a_size_is_reassembled_from_the_row_when_the_hub_sends_no_manifest() {
+        // The fallback path, which reads the row's own `size_bytes`.
+        let (_root, layout) = layout("releases-size-row");
+        let body = r#"{"releases":[{"version":"1.4.0","channel":"stable","arch":"x86_64",
+            "digest":"sha256:aa","size_bytes":402653184,"compatible":["g1"],
+            "changes":["rhal_driver"]}]}"#;
+        assert!(adopt(&layout, body, "1.4.0").written);
+        let held = std::fs::read_to_string(layout.release("1.4.0")).unwrap();
+        let manifest = skynet_contracts::json::bundle_from_json(&Json::parse(&held).unwrap());
+        assert_eq!(manifest.size, Some(402_653_184));
+    }
+
+    #[test]
+    fn a_row_with_no_size_produces_a_manifest_with_none() {
+        // Absent is not zero. A manifest declaring an empty image would have every robot on the
+        // channel discard its partial as "larger than the whole" on the first pass.
+        let (_root, layout) = layout("releases-no-size");
+        let body = r#"{"releases":[{"version":"1.4.0","channel":"stable","arch":"x86_64",
+            "digest":"sha256:aa","size_bytes":null,"compatible":["g1"],
+            "changes":["rhal_driver"]}]}"#;
+        assert!(adopt(&layout, body, "1.4.0").written);
+        let held = std::fs::read_to_string(layout.release("1.4.0")).unwrap();
+        assert!(!held.contains("size"), "{held}");
+        let manifest = skynet_contracts::json::bundle_from_json(&Json::parse(&held).unwrap());
+        assert_eq!(manifest.size, None);
     }
 
     #[test]

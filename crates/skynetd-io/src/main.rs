@@ -352,6 +352,11 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         loop {
             let now = monotonic(origin);
             if now >= next_reconcile {
+                // §34.4's jitter, supplied to the pass rather than drawn inside it (§35.2). The
+                // fetcher backs off on the same curve as the outbound queue and for a sharper
+                // reason: a staged rollout tells a whole canary ring to fetch one image at one
+                // moment, so a fleet arrives at the endpoint in lockstep by design.
+                daemon.jitter = jitter_for(now);
                 // §11's loop: pull, then reconcile, then report. Each is the input to the next.
                 pull_desired(&mut daemon, &layout, now);
                 observe_state(&mut daemon);
@@ -887,7 +892,27 @@ fn stage(argv: &[String]) -> i32 {
                     for line in skynetd_io::admit::to_lines(&report) {
                         println!("{line}");
                     }
-                    skynetd_io::admit::summary(&report)
+                    // §54.5, walked here rather than only at activation. The gate that *holds* is
+                    // the symlink swap (see `runtime::composition_refusal`); this is where the
+                    // person who can fix it is standing, and a publisher finding out at install
+                    // is the whole of what the rule asks for.
+                    let package_id = staged.id.as_str();
+                    let composition =
+                        skynetd_io::admit::composition_fault(&package_id, &staged.manifest);
+                    if let Some(fault) = &composition {
+                        println!(
+                            "composition: {}",
+                            skynetd_io::admit::composition_refusal(&package_id, fault)
+                        );
+                        println!(
+                            "  The blob is staged and will not activate until the graph terminates."
+                        );
+                    }
+                    let summary = skynetd_io::admit::summary(&report);
+                    match &composition {
+                        None => summary,
+                        Some(fault) => format!("{summary}; composition {}", fault.code.as_str()),
+                    }
                 }
                 Err(error) => {
                     // The store verified the digest over this manifest, so it is the manifest the
@@ -1370,6 +1395,13 @@ fn record_pass(
     use skynetd::reconcile::ActionKind as K;
 
     for (action, outcome) in &pass.applied {
+        // A wait is not recorded, for the same reason the boot gate's is not (see the caller): it
+        // is the ordinary state of a robot fetching an image over a warehouse link, and one event
+        // per pass would fill a bounded ring with a robot that decided nothing — displacing the
+        // records §26 keeps the ring for.
+        if matches!(outcome, skynetd_io::runtime::Outcome::Waiting { .. }) {
+            continue;
+        }
         let code = match action.kind {
             K::StartPackage { .. } => EventCode::PackageStarted,
             K::StopPackage { .. } => EventCode::PackageStopped,

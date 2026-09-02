@@ -39,6 +39,9 @@
 use skynet_contracts::admission::{
     admit_package, AdmissionParams, AdmissionResult, PackageFinding, Severity, SignatureState,
 };
+use skynet_contracts::skill::{
+    read_calls, validate_composition, CompositionFault, SkillCall, MAX_SKILL_DEPTH,
+};
 use skynet_json::Json;
 
 use crate::capacity::Capacity;
@@ -137,6 +140,53 @@ impl Report {
             Report::Ran { signature, .. } => signature.state == SignatureState::Verified,
         }
     }
+}
+
+/// The call graph a skill's manifest declares (§54.5).
+///
+/// `composition.calls`, flat or under `skill`, like every other field a manifest may carry either
+/// way. Absent on every package that is not a composing skill, which is nearly all of them.
+pub fn declared_calls(manifest: &Json) -> Vec<SkillCall> {
+    let composition = manifest.get_present("composition").or_else(|| {
+        manifest
+            .get("skill")
+            .and_then(|s| s.get_present("composition"))
+    });
+    read_calls(composition.and_then(|c| c.get_present("calls")))
+}
+
+/// §54.5's install-time refusal: *"a cycle is refused at install by walking the declared graph, not
+/// discovered at runtime."*
+///
+/// # This is not the same check the runtime makes
+///
+/// [`crate::skill::Runtime::execute`] validates the **live ancestry** — the chain of invocations
+/// that actually happened — and refuses a call that would close a cycle. That is the right check
+/// and it happens at exactly the moment §54.5 says it should not be the only one: at runtime, on a
+/// robot, with leases held and a deadline running.
+///
+/// This walks the graph the manifest **declares**, before anything can invoke it. A publisher whose
+/// skill calls itself four levels down finds out when they install it, rather than when a cell is
+/// waiting and a chain unwinds.
+///
+/// One function decides both, which is the reason `validate_composition` lives in the contract: two
+/// implementations of *acyclic and depth-limited* is two answers to one question, and only one of
+/// them has a corpus behind it.
+pub fn composition_fault(id: &str, manifest: &Json) -> Option<CompositionFault> {
+    let calls = declared_calls(manifest);
+    if calls.is_empty() {
+        return None;
+    }
+    validate_composition(id, &calls, MAX_SKILL_DEPTH)
+}
+
+/// The sentence a refusal carries, naming the path (§64).
+pub fn composition_refusal(id: &str, fault: &CompositionFault) -> String {
+    format!(
+        "`{id}` declares a call graph §54.5 refuses: {} — {}. A composition system without depth          and cycle limits is a way to exhaust a robot, and the graph is walked at install so that          nothing discovers it at runtime with leases held and a deadline running.",
+        fault.code.as_str(),
+        fault.path.join(" → "),
+    )
 }
 
 /// Run admission for one package on this robot.

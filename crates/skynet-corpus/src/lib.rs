@@ -842,12 +842,17 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
         "provenance" => {
             if let Some(scores) = input.get_present("scores") {
                 json::scores_to_json(
-                    scores.get("on_robot").and_then(Json::as_f64).unwrap_or(f64::NAN),
-                    scores.get("on_hub").and_then(Json::as_f64).unwrap_or(f64::NAN),
+                    scores
+                        .get("on_robot")
+                        .and_then(Json::as_f64)
+                        .unwrap_or(f64::NAN),
+                    scores
+                        .get("on_hub")
+                        .and_then(Json::as_f64)
+                        .unwrap_or(f64::NAN),
                 )
             } else {
-                let bundle =
-                    json::run_bundle_from_json(input.get("bundle").ok_or("no `bundle`")?);
+                let bundle = json::run_bundle_from_json(input.get("bundle").ok_or("no `bundle`")?);
                 let benchmark = input
                     .get("expected_benchmark")
                     .and_then(Json::as_str)

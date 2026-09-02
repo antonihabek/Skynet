@@ -61,14 +61,13 @@ skynet — Skynet OS workstation tools
 
   Talking to a robot (§33.7), over /run/skynetd.sock or --host:
 
-  status · ps · plan · logs · grants · estop · rollback
+  status · ps · plan · logs · grants · estop · rollback · cell
+  identity · pair · unpair · checkin · intent · releases · ota
+  skills · skill run <ns/name> · skill stop <inv-id>
   install <dir> --id <ns/name> --kind <k> --version <v> --digest <hex>
   blackbox [index] · blackbox seal · blackbox get <name>
 
-  --help after any command prints its options.
-
-  pair is not here: it needs the attestation path (§10), which is not written,
-  so it is absent rather than stubbed.";
+  --help after any command prints its options.";
 
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -111,7 +110,7 @@ fn dispatch(argv: &[String]) -> i32 {
         "role" => role(rest),
         "status" | "ps" | "plan" | "logs" | "grants" | "estop" | "rollback" | "install"
         | "blackbox" | "skills" | "skill" | "ota" | "identity" | "pair" | "unpair" | "checkin"
-        | "intent" | "releases" => robot_cmd::run(command, rest),
+        | "intent" | "releases" | "cell" => robot_cmd::run(command, rest),
         other => term::fail(&format!("`{other}` is not a skynet command.\n\n{USAGE}")),
     }
 }

@@ -226,11 +226,23 @@ pub fn read_release(
         .map_err(|error| format!("{}: {error}", path.display()))?;
     let signature = trust.check(&release_message(&digest), signed.as_ref());
 
-    let bundle_path = document
+    // Two ways bytes get here and one of them is new. A manifest may *name* a file, which is how an
+    // image was put on a robot before there was a fetcher and how an offline install still works;
+    // and the fetcher writes one named by the digest. The named file wins when it exists, because
+    // it is somebody's explicit instruction — and neither is trusted on sight: both are hashed
+    // against `manifest.digest` before RAUC is handed anything (§12).
+    let named = document
         .get_present("bundle")
         .and_then(Json::as_str)
         .filter(|name| !name.is_empty())
         .map(|name| layout.os().join("bundles").join(name));
+    let fetched = layout.bundle(&manifest.digest);
+    let bundle_path = match named {
+        Some(path) if path.is_file() => Some(path),
+        Some(path) if !fetched.is_file() => Some(path),
+        _ if fetched.is_file() => Some(fetched),
+        other => other,
+    };
 
     Ok(Some(Release {
         manifest,
@@ -343,8 +355,15 @@ pub struct Assessment {
     pub signature: Option<Verdict>,
     /// Why a bench pass on the disk was not used, when one was not.
     pub bench_note: Option<String>,
-    /// Where the bundle would be installed from.
+    /// Where the bundle would be installed from, when the manifest names a file.
     pub bundle_path: Option<PathBuf>,
+    /// `sha256:…` over the bundle, from the manifest.
+    ///
+    /// Carried out of the assessment rather than re-read, because it is the name of the thing every
+    /// gate above was applied to — the signature, the bench pass, the compatibility list. The fetch
+    /// and the check on what arrived use *this* digest, so the bytes that get installed are the
+    /// bytes the gate ran against and not merely bytes for the same version number.
+    pub digest: Option<String>,
 }
 
 impl Assessment {
@@ -394,6 +413,13 @@ impl Assessment {
                 None => Json::Null,
             },
         );
+        out.set(
+            "digest",
+            match &self.digest {
+                Some(digest) => Json::Str(digest.clone()),
+                None => Json::Null,
+            },
+        );
         out
     }
 }
@@ -417,6 +443,7 @@ pub fn assess(
         signature: None,
         bench_note: None,
         bundle_path: None,
+        digest: None,
     };
 
     let release = match read_release(layout, trust, version) {
@@ -449,6 +476,7 @@ pub fn assess(
     assessment.signature = Some(release.signature);
     assessment.bench_note = bench_note;
     assessment.bundle_path = release.bundle_path;
+    assessment.digest = Some(release.manifest.digest.clone());
     assessment
 }
 
