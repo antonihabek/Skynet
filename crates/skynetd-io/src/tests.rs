@@ -4315,6 +4315,9 @@ mod skills {
         inputs: LiveInputs,
         robot: OperatingState,
         now_ms: u64,
+        /// §36.1's `low` row, when the test puts the robot in it. `None` on a healthy robot, which
+        /// is what `World::new` builds and what every test that is about something else gets.
+        power_withheld: Option<String>,
     }
 
     impl World {
@@ -4330,6 +4333,7 @@ mod skills {
                 },
                 robot: OperatingState::Running,
                 now_ms: 0,
+                power_withheld: None,
             }
         }
 
@@ -4347,6 +4351,7 @@ mod skills {
                 running: &self.running,
                 leases: &mut self.leases,
                 grants: &self.grants,
+                power_withheld: self.power_withheld.clone(),
             };
             let reports = runtime.advance_all(&mut cycle);
             // The launcher, modelled: a `Start` makes the unit appear and a `Stop` removes it.
@@ -4892,6 +4897,91 @@ mod skills {
             runtime.get(&id).unwrap().outcome,
             Some(SkillOutcome::Aborted)
         );
+    }
+
+    /// §36.1's `low` row, through the runtime that had never obeyed it.
+    ///
+    /// The whole row in one test: the skill is refused, the sentence names the power state, and the
+    /// **lease table is not touched** — a refusal that had taken the token first would be holding an
+    /// arm for an invocation that is about to abort.
+    #[test]
+    fn a_robot_withholding_power_refuses_a_new_skill_without_touching_the_arm() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        world.power_withheld = Some(
+            "§36.1 withholds new task leases: this robot's power state is `reserve` (at_reserve)"
+                .to_string(),
+        );
+        let m = skill_manifest("acme/pick", Some(10.0), &["arm.left"]);
+        world
+            .grants
+            .push(("acme/pick".to_string(), "arm.left".to_string()));
+
+        let id = invoke(&mut runtime, &m, &[]);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        let reports = world.step(&mut runtime, 1);
+
+        assert_eq!(phases(&reports), ["terminal"]);
+        assert_eq!(reports[0].transition.reason.as_str(), "power_withheld");
+        assert!(
+            reports[0].transition.detail.contains("`reserve`"),
+            "the refusal names the state, so an operator knows to fetch a charger rather than to \
+             hunt for the package holding the arm: {}",
+            reports[0].transition.detail
+        );
+        assert_eq!(
+            world.leases.holder("arm.left"),
+            None,
+            "the token was never taken — a refusal that acquired first would hold an arm for an \
+             invocation that is aborting"
+        );
+        assert_eq!(
+            runtime.get(&id).unwrap().outcome,
+            Some(SkillOutcome::Aborted)
+        );
+    }
+
+    /// The other half of §36.1's row: *a running task may finish.*
+    ///
+    /// The one that would be missed by a check placed anywhere but the `acquiring` stage — a robot
+    /// that fell to `reserve` mid-skill must not have the arm taken out from under a policy that is
+    /// mid-motion, because a policy dropped mid-motion is the failure the controlled stop exists to
+    /// avoid.
+    #[test]
+    fn a_skill_already_holding_its_leases_is_not_stopped_when_power_falls() {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        let m = skill_manifest("acme/pick", Some(10.0), &["arm.left"]);
+        world
+            .grants
+            .push(("acme/pick".to_string(), "arm.left".to_string()));
+
+        let id = invoke(&mut runtime, &m, &[]);
+        world.step(&mut runtime, 1);
+        world.step(&mut runtime, 1);
+        let reports = world.step(&mut runtime, 1);
+        assert_eq!(
+            phases(&reports),
+            ["running"],
+            "it started on a full battery"
+        );
+        assert_eq!(world.leases.holder("arm.left"), Some("acme/pick"));
+
+        // And now the battery falls.
+        world.power_withheld = Some("§36.1 withholds new task leases".to_string());
+        let reports = world.step(&mut runtime, 1);
+        assert_eq!(
+            phases(&reports),
+            ["running"],
+            "§36.1: a running task may finish"
+        );
+        assert_eq!(
+            world.leases.holder("arm.left"),
+            Some("acme/pick"),
+            "and it keeps the arm it is using"
+        );
+        assert!(!runtime.get(&id).unwrap().terminal());
     }
 
     /// A token the operator never granted is refused before the arm is touched, and the two

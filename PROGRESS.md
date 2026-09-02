@@ -9106,3 +9106,120 @@ would pass on one and fail on the other for a reason nothing in it mentions.
     in the check whose only job is to reject a `skynet <x>` that does not exist. Nothing failed. The
     tell was a count that moved by three when one command was added — which is only visible if you
     read the number the tool prints, rather than the word `ok` beside it.
+
+---
+
+## 2026-09-02 (thirty-seventh) — the row that was a rule nothing obeyed
+
+§36.1's table has four rows and one of them contains an imperative:
+
+> `low` — Approaching reserve — **No new task leases granted**; running task may finish; operator
+> notified
+
+The last two sessions built the state that computes it and the sensors that feed it.
+`Assessment::grants_new_leases()` has been returning `false` on a robot below its reserve since
+yesterday, and **nothing called it.** §25.2's lease table granted whatever it was asked for, on any
+battery, and the row was a paragraph.
+
+This session is the call site.
+
+### Where the check goes decides whether the *other* half of the row works
+
+§54.4's `acquiring` stage, before §25.2's table is consulted. Three consequences, and two of them
+are the reason it is there rather than anywhere else:
+
+* **The table is not touched at all.** A refusal that had already taken two of three tokens would be
+  holding an arm for an invocation that is about to abort — the leaked-lease symptom
+  `release_all` exists to prevent, arriving through the front door.
+* **A running task finishes.** A skill past `acquiring` holds its leases and is not disturbed when
+  the battery falls. That is §36.1's row read exactly, and it is not a separate rule: it falls out of
+  gating the *acquisition* rather than the *holding*. A policy dropped mid-motion is the failure a
+  controlled stop exists to avoid.
+* **It outranks a held token.** Both refusals can be true at once, and the robot-wide one is what an
+  operator needs first. It is also the only order that works: the runtime does not ask the table when
+  power withholds, so `leases` reads `pending`, and the other order would pin the invocation in
+  `acquiring` until its deadline expired.
+
+Refused rather than parked, for the same reason. An invocation waiting for somebody to bring a
+charger burns §54.4's timeout and then aborts with `timeout` on it — the wrong reason, on the wrong
+screen, for the wrong person.
+
+### One field, not two, and its default is the permissive one
+
+`Progress.power_withheld: Option<String>` — the sentence, or nothing. A boolean and a reason beside
+it are two fields that must agree, which is two fields that eventually do not; §27's
+`Conditions::stop: Option<StopCause>` is the same shape for the same reason.
+
+The sentence is composed by the *runtime* rather than by the contract, because the runtime is where
+§36's assessment is in hand — and the two ways a robot withholds are different sentences:
+
+* below its reserve, which wants a charger;
+* a declared pack whose gauge answers nothing, which wants a look at the machine.
+
+Both withhold. A shared sentence sends half the operators to the wrong errand, which is the whole
+argument §64 makes.
+
+The default is `None` — permissive — and that is unlike almost everything else in this crate, so it
+is written down where the field is: **it is not a guess.** §36's own answer for a body nobody has
+observed is `unmetered`, which grants leases. `None` is what the power contract computes, not an
+assumption made in its absence. A default of "withholding" would have refused every skill on every
+robot with no power subsystem wired up, silently, which is every development host and every test in
+this suite.
+
+### `power_withheld` is its own lifecycle reason
+
+Not a second `lease_denied`. That enumeration now has nineteen entries and its own doc comment says
+why: *"only the reason tells an operator whether to call the publisher, look at the cell, find the
+package holding the arm, or read the black box."* Add **put the robot on a charger** to that list.
+Three errands behind one word is two operators sent to the wrong place.
+
+### The suite's own completeness test found it before I did
+
+`every_lifecycle_reason_is_produced_by_some_evidence` failed on the first build after the variant
+was added — *"no evidence produces `power_withheld`"* — because it walks `LIFECYCLE_REASONS` and
+asserts each is reachable from some `Progress`. A vocabulary entry no rule produces is a wire value
+nothing can ever send, and this repository has one test that makes that impossible to add by
+accident.
+
+It is worth naming the shape: the test is not about the new reason, it is about the *set*. Written
+once, it catches every future addition. That is a different and better thing from a test per
+variant.
+
+### Numbers
+
+Rust: **1285** tests, up from 1279. Six new — four in the contract, two through the runtime. The
+corpus is **1011 cases across 73 files**, up from 1008: three lifecycle vectors (the refusal, the
+order against a held token, and an empty sentence that is not a refusal) and the
+`lifecycle_reasons` vocabulary, which now has nineteen.
+
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets`, both mirrors, the corpus and
+the golden path all clean.
+
+### What §36 still does not have
+
+One thing, and it is the same shape as the other outstanding one:
+
+* **Nothing performs a controlled stop.** §36.1's `reserve` and `critical` rows ask for one — "a
+  controlled stop, then a safe state" — and `requires_safe_state` and `stops_immediately` are
+  computed, reported on `GET /power`, and read by nobody. The stop path is the kernel's (§33.1), and
+  this is the third entry in §73's last column waiting on the same channel as §36.4's override and
+  five of §48.2's eight POST checks.
+
+That is the honest boundary of what this edition can do about power: it can **refuse**, because a
+refusal is a decision not to start something, and this daemon is what starts things. It cannot
+**stop**, because stopping is the kernel's, and pretending otherwise is exactly the display §1 says
+the OS must refuse to show.
+
+### Findings, restated
+
+1–28 as before; 29–43 from the sessions above.
+
+44. **A computed boolean nobody reads is not enforcement, and it looks exactly like enforcement.**
+    `grants_new_leases()` was correct, tested, corpus-frozen and rendered on a route for a whole
+    session, and a robot at `reserve` would still have been handed a new task. The tell is a
+    predicate with no call site outside its own tests — the same shape `read_calls`, `bundle` and
+    `SkillManifest.task` had, which is four times in this repository now.
+45. **Where a check goes decides which half of a two-clause rule you get for free.** §36.1's row
+    says *no new leases* and *running task may finish*. Gating the acquisition gives both; gating
+    the holding gives the first and breaks the second; a check in the daemon loop would have given
+    neither cleanly. The second clause was never written as code, and it is tested.

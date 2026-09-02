@@ -497,6 +497,7 @@ export const LIFECYCLE_REASONS = [
   'leases_held_by_root',
   'lease_pending',
   'lease_denied',
+  'power_withheld',
   'leases_acquired',
   'timeout',
   'hold_lost',
@@ -539,6 +540,20 @@ export interface Progress {
   /** The token that was refused, and who holds it — §25.2 refuses rather than interleaves. */
   lease_token?: string
   lease_holder?: string
+  /**
+   * §36.1's `low` row, when it is in force: the sentence, or absent.
+   *
+   * One field rather than a boolean and a reason beside it: two fields that must agree are two
+   * fields that eventually do not. The sentence is composed by the runtime, because that is where
+   * §36's assessment is in hand — a robot may withhold leases for being nearly flat *or* for having
+   * a gauge nothing can read, and those are different sentences for the same rule.
+   *
+   * **Absent is the permissive default**, which is unlike almost everything else here, and it is
+   * not a guess: §36's answer for a body nobody has observed is `unmetered`, which grants leases.
+   * A default of "withholding" would refuse every skill on every robot with no power subsystem
+   * wired up, silently.
+   */
+  power_withheld?: string | null
   /** Milliseconds since the skill entered `running`. `null` while it has not. */
   elapsed_ms?: number | null
   /** §54.4's deadline, from `skillDeadline`. */
@@ -707,6 +722,19 @@ export function advance(phase: SkillPhase, progress: Progress = {}): SkillTransi
     }
 
     case 'acquiring': {
+      // §36.1's `low` row, before the table is consulted. Two reasons for the order: a refusal for
+      // want of energy is a fact about the *robot* and a refusal for a held token is a fact about
+      // another package, so when both are true the robot-wide one is what an operator needs first —
+      // and a runtime that does not ask the table when this is set would leave `leases` at
+      // `pending`, pinning the invocation in `acquiring` until its deadline.
+      //
+      // Terminal rather than a wait. "No new task leases granted" is a refusal, and an invocation
+      // parked hoping for a charger would burn §54.4's timeout and abort with the wrong reason.
+      //
+      // An empty sentence is not a refusal: §64 makes a refusal name its fix, and a skill aborted
+      // with a blank reason on it is the one shape that cannot.
+      const withheld = (progress.power_withheld ?? '').trim()
+      if (withheld) return done('terminal', 'power_withheld', 'aborted', withheld)
       const leases = progress.leases ?? 'pending'
       if (leases === 'denied') {
         return done('terminal', 'lease_denied', 'aborted', leaseDeniedDetail(progress))
