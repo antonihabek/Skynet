@@ -53,6 +53,11 @@ import type { SkillTransition } from './skill.ts'
 import {
   CHAIN, WINDOWS, checkNesting, hostBlockedByCommandLoss, type Windows,
 } from './watchdog.ts'
+import {
+  assess as assessPower, budgetMissed, degraded as powerDegraded,
+  grantsNewLeases, reserveComplete, stateRequiresSafeState, stateStopsImmediately,
+  type PowerObservation, type PowerProfile,
+} from './power.ts'
 import { toRecord, type Frame as ObservationFrame } from './observation.ts'
 import type { PredicateOutcome } from './predicate.ts'
 import type { ParsedVersion } from './semver.ts'
@@ -354,6 +359,50 @@ export function shapeWatchdog(onCommandLoss: string | null, windows: Windows): u
       ordered: report.ordered,
       complete: report.complete,
     },
+  }
+}
+
+/**
+ * §36's whole answer for one cycle: the state, the reserve, the thermal ladder, the faults, and
+ * whether the running policy is still inside its declared budget.
+ *
+ * One document rather than four, for the reason §46's is one: they are one question — *what is this
+ * robot's power situation right now* — and a console that had to join them would be the second
+ * place §36.1's table was written down. The budget is in here rather than beside it because the
+ * answer to "may this policy keep running" is exactly as much a power answer as the state is; §36.3
+ * puts them in the same paragraph.
+ *
+ * The four booleans are derived here rather than left to a consumer, and they are four rather than
+ * one because §36.1's rows differ in more than severity: `low` withholds leases and lets a running
+ * task finish, `reserve` asks for a safe state, `critical` asks for it immediately, and a robot with
+ * a dead gauge withholds leases while being in none of those rows.
+ *
+ * `unaccounted` is an **array in §36.2's own order**, not sorted: the terms are a sentence about
+ * which parts of a computation happened, and canonical JSON would alphabetise an object into
+ * nonsense.
+ */
+export function shapePower(
+  profile: PowerProfile, observation: PowerObservation,
+  declaredBudgetMs?: number, observedInferenceMs?: number,
+): unknown {
+  const assessment = assessPower(profile, observation)
+  return {
+    state: assessment.state,
+    reason: assessment.reason,
+    remaining_wh: nullable(assessment.remaining_wh),
+    reserve: {
+      wh: nullable(assessment.reserve.wh),
+      unaccounted: [...assessment.reserve.unaccounted],
+      complete: reserveComplete(assessment.reserve),
+    },
+    thermal: assessment.thermal,
+    shed: [...assessment.shed],
+    faults: assessment.faults.map(fault => ({ code: fault.code, detail: fault.detail })),
+    degraded: powerDegraded(assessment),
+    grants_new_leases: grantsNewLeases(assessment),
+    requires_safe_state: stateRequiresSafeState(assessment.state),
+    stops_immediately: stateStopsImmediately(assessment.state),
+    budget_missed: nullable(budgetMissed(declaredBudgetMs, observedInferenceMs)),
   }
 }
 

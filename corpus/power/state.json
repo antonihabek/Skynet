@@ -1,0 +1,207 @@
+{
+  "corpus": "power",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "normal",
+      "note": "Nine per cent of a 500 Wh pack is 45 Wh, which is above 2.25 × the 20 Wh reserve. Full operation, and nothing wrong.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "thermal_throttle_c": 70,
+          "thermal_critical_c": 90,
+          "brownout_fault_codes": [
+            4097
+          ]
+        },
+        "observation": {
+          "state_of_charge": 0.09
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"reason\":\"above_reserve\",\"remaining_wh\":45,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+    },
+    {
+      "id": "low",
+      "note": "Forty watt-hours: inside the low band. New task leases stop and the running one may finish, which is the only state where those two differ.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "thermal_throttle_c": 70,
+          "thermal_critical_c": 90,
+          "brownout_fault_codes": [
+            4097
+          ]
+        },
+        "observation": {
+          "state_of_charge": 0.08
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"reason\":\"approaching_reserve\",\"remaining_wh\":40,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"low\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+    },
+    {
+      "id": "at-reserve",
+      "note": "Inside the reserve band. A controlled stop, then a safe state — and not yet the immediate one, which is what the quarter-reserve band buys.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "thermal_throttle_c": 70,
+          "thermal_critical_c": 90,
+          "brownout_fault_codes": [
+            4097
+          ]
+        },
+        "observation": {
+          "state_of_charge": 0.045
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"reason\":\"at_reserve\",\"remaining_wh\":22.5,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"reserve\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+    },
+    {
+      "id": "critical",
+      "note": "Below the reserve. The stop is immediate and the drives are disabled once at rest.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "thermal_throttle_c": 70,
+          "thermal_critical_c": 90,
+          "brownout_fault_codes": [
+            4097
+          ]
+        },
+        "observation": {
+          "state_of_charge": 0.03
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"reason\":\"below_reserve\",\"remaining_wh\":15,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"critical\",\"stops_immediately\":true,\"thermal\":\"nominal\"}"
+    },
+    {
+      "id": "exactly-at-reserve",
+      "note": "Twenty watt-hours exactly. At reserve rather than below it: the other reading gives the harshest state to the body that computed its budget perfectly.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "thermal_throttle_c": 70,
+          "thermal_critical_c": 90,
+          "brownout_fault_codes": [
+            4097
+          ]
+        },
+        "observation": {
+          "energy_remaining_wh": 20
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"reason\":\"at_reserve\",\"remaining_wh\":20,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"reserve\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+    },
+    {
+      "id": "just-below-the-low-band",
+      "note": "A hair under 1.25 × the reserve: still at reserve, and the case that pins where that band ends.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "thermal_throttle_c": 70,
+          "thermal_critical_c": 90,
+          "brownout_fault_codes": [
+            4097
+          ]
+        },
+        "observation": {
+          "energy_remaining_wh": 24.999
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"reason\":\"at_reserve\",\"remaining_wh\":24.999,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"reserve\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+    },
+    {
+      "id": "at-the-low-band",
+      "note": "Exactly 1.25 × the reserve. Low, because the bands are inclusive at the bottom throughout — the same rule that puts a body exactly at its reserve at reserve rather than below it.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "thermal_throttle_c": 70,
+          "thermal_critical_c": 90,
+          "brownout_fault_codes": [
+            4097
+          ]
+        },
+        "observation": {
+          "energy_remaining_wh": 25
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"reason\":\"approaching_reserve\",\"remaining_wh\":25,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"low\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+    },
+    {
+      "id": "just-below-normal",
+      "note": "A hair under 2.25 × the reserve. Still low, and the case that pins where the low band ends.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "thermal_throttle_c": 70,
+          "thermal_critical_c": 90,
+          "brownout_fault_codes": [
+            4097
+          ]
+        },
+        "observation": {
+          "energy_remaining_wh": 44.999
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"reason\":\"approaching_reserve\",\"remaining_wh\":44.999,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"low\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+    },
+    {
+      "id": "at-normal",
+      "note": "Exactly 2.25 × the reserve: one whole further safe stop in hand above the reserve band, which is the width §36.1's `low` row needs to keep its promise.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "thermal_throttle_c": 70,
+          "thermal_critical_c": 90,
+          "brownout_fault_codes": [
+            4097
+          ]
+        },
+        "observation": {
+          "energy_remaining_wh": 45
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"reason\":\"above_reserve\",\"remaining_wh\":45,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+    },
+    {
+      "id": "energy-beats-fraction",
+      "note": "Both reported and they disagree. The gauge reporting watt-hours wins, because whatever told it the capacity is closer to the pack than a descriptor field is.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "thermal_throttle_c": 70,
+          "thermal_critical_c": 90,
+          "brownout_fault_codes": [
+            4097
+          ]
+        },
+        "observation": {
+          "state_of_charge": 0.9,
+          "energy_remaining_wh": 10
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"reason\":\"below_reserve\",\"remaining_wh\":10,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"critical\",\"stops_immediately\":true,\"thermal\":\"nominal\"}"
+    }
+  ]
+}

@@ -1,0 +1,112 @@
+{
+  "corpus": "power",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "nominal",
+      "note": "Warm and under the threshold. Nothing is given up.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "thermal_throttle_c": 70,
+          "thermal_critical_c": 90,
+          "brownout_fault_codes": [
+            4097
+          ]
+        },
+        "observation": {
+          "state_of_charge": 0.9,
+          "temperature_c": 60
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+    },
+    {
+      "id": "brief-throttle",
+      "note": "Above the throttle point for four seconds. The three housekeeping rungs go and DEGRADED does not: a thermal transient from one heavy motion is not a degraded robot.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "thermal_throttle_c": 70,
+          "thermal_critical_c": 90,
+          "brownout_fault_codes": [
+            4097
+          ]
+        },
+        "observation": {
+          "state_of_charge": 0.9,
+          "temperature_c": 75,
+          "throttled_for_ms": 4000
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[\"telemetry\",\"ota\",\"blackbox_compression\"],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"throttling\"}"
+    },
+    {
+      "id": "sustained-throttle",
+      "note": "Thirty seconds. §36.3 raises DEGRADED, which is the impaired *running* state — leases are still granted, because a robot that stops for being warm is a robot nobody deploys.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "thermal_throttle_c": 70,
+          "thermal_critical_c": 90,
+          "brownout_fault_codes": [
+            4097
+          ]
+        },
+        "observation": {
+          "state_of_charge": 0.9,
+          "temperature_c": 75,
+          "throttled_for_ms": 30000
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":true,\"faults\":[{\"code\":\"thermal_sustained\",\"detail\":\"this body has been throttling for 30 s. §36.3 raises DEGRADED on sustained throttling, and 3 of the five rungs are given up — never the RHAL, the kernel or the control loop.\"}],\"grants_new_leases\":true,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[\"telemetry\",\"ota\",\"blackbox_compression\"],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"throttling\"}"
+    },
+    {
+      "id": "critical",
+      "note": "Every rung of the ladder, inference included. Never the RHAL, the kernel or the control loop: there is no thermal situation in which giving up the safety envelope is the right trade.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "thermal_throttle_c": 70,
+          "thermal_critical_c": 90,
+          "brownout_fault_codes": [
+            4097
+          ]
+        },
+        "observation": {
+          "state_of_charge": 0.9,
+          "temperature_c": 95,
+          "throttled_for_ms": 120000
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":true,\"faults\":[{\"code\":\"thermal_critical\",\"detail\":\"this body is at or above its declared critical temperature. Every rung of §36.3's ladder is given up, inference included; the RHAL, the kernel and the control loop are not, because there is no thermal situation in which giving up the safety envelope is the right trade.\"}],\"grants_new_leases\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[\"telemetry\",\"ota\",\"blackbox_compression\",\"inference_rate\",\"non_essential_sensors\"],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"critical\"}"
+    },
+    {
+      "id": "undeclared-thresholds",
+      "note": "Something is reading 95 °C and nothing on this body says what hot is. Nothing is shed and the gap is named: 85 °C is right for a CPU package and fifty degrees wrong for a harmonic drive.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "brownout_fault_codes": [
+            4097
+          ]
+        },
+        "observation": {
+          "state_of_charge": 0.9,
+          "temperature_c": 95
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[{\"code\":\"thermal_undeclared\",\"detail\":\"something is reading a temperature and this body declares neither `thermal_throttle_c` nor `thermal_critical_c`, so nothing here knows what hot is on this machine. The reading is reported and nothing is shed: 85 °C is right for a CPU package and fifty degrees wrong for a harmonic drive (§36.3).\"}],\"grants_new_leases\":true,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+    }
+  ]
+}

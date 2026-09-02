@@ -8795,3 +8795,161 @@ and the golden path counts 45 commands.
     The tell was that the fault list — which the route was filling in correctly the whole time —
     already said `volume_shape_invalid`. When a test fails on a count, read what the code *did* say
     before assuming it said nothing.
+
+---
+
+## 2026-09-02 (thirty-fifth) — §36, the one row that said "Unwritten"
+
+§73's last column had one entry that was not a gap in something built. Every other row named a
+thing waiting on hardware, or a signature nobody can produce yet, or a panel nobody has drawn.
+§36's said:
+
+> **Unwritten.** `battery` and `temperature_c` are reported absent in every check-in, which is why
+> the health rollup has two permanently unmeasured fields.
+
+Eleven parts of a specification and four subsections of prose, and no code had ever read a word of
+it. `power.safe_state.reachable` has been in the conformance suite since Part II, measuring a
+declared figure against *"the `time_to_safe_state_s` it declares (§36.2)"* — and no descriptor on
+either edition had a `time_to_safe_state_s` to declare. A test with nothing to test, sitting in the
+required set for the host tier, for six parts of a document.
+
+Built as `crates/skynet-contracts/src/power.rs` and `reference/typescript/power.ts`, held together
+by 28 corpus cases and seven frozen vocabularies.
+
+### Five things §36 does not say, and code cannot avoid deciding
+
+This is the part worth recording, because the next person to read §36.1's table will find the
+numbers there and needs to know where they came from.
+
+**1. The band widths.** §36.1 says `low` is "approaching reserve" and `reserve` is "at the reserve
+budget" — a shape, not a number. They are now 2.25 × and 1.25 × the reserve, and both are multiples
+of the **reserve** rather than percentages of the pack, because the reserve is the only energy scale
+the body declares and a percentage means something different on every robot.
+
+The two widths have different arguments. The reserve band is a quarter of a reserve wide so a gauge
+that jitters near the boundary does not chatter between *begin a controlled stop* and *stop
+immediately*, on a robot already mid-ramp. The low band is **one whole reserve** wide because
+`low`'s only behaviour is *a running task may finish and no new one may start* — a warning arriving
+with less than one further safe stop in hand is a warning the robot cannot act on, and the row's
+promise would be one it cannot keep.
+
+**2. A fifth state.** §36.1's four all assume a battery. An arm bolted to a bench and run off mains
+has no state of charge, and forcing it into one of the four either immobilises it or claims a
+headroom nobody measured. `unmetered` grants leases and is listed last rather than under `critical`,
+because it is not a rung of the same ladder.
+
+**3. What a silent gauge is.** Two bodies reach `unmetered` and they are not the same robot: one
+declares no pack, one declares a pack whose gauge stopped answering. The difference is a **fault**
+rather than a state, because it is a fact about whether the number can be believed rather than about
+how much energy is left. And it is deliberately not `critical` — §36.4 overrides the gauge on a
+*positive* reading from the bus, missing evidence is never a positive finding anywhere else in this
+system, and a robot that stopped dead on a failed I²C read would be a robot that stops dead on a
+failed I²C read. It withholds new leases and leaves the running task alone, which is `low`'s
+behaviour reached from the other direction.
+
+**4. How the OS recognises a brownout, which as written it could not.** §36.4 says voltage sag
+arrives as `RHAL_DEGRADED` with a vendor fault code. §24 says a fault code is *"vendor-specific,
+surfaced verbatim to the black box"* — the OS is told never to interpret one. Both sentences cannot
+be honoured by an OS that guesses, and `RHAL_DEGRADED` also covers a dead encoder and a thermal
+fault, so guessing means either stopping a working machine or failing to stop a falling one.
+
+The resolution is `power.brownout_fault_codes`: the vendor who defined the codes names the ones that
+mean sag, and the OS **matches** a number against a list rather than interpreting anything. §24's
+rule survives intact. An empty list is not *this body cannot brown out* — it is *nobody has said*,
+reported as `brownout_undeclarable` at the one moment it matters, with the robot still running,
+because a hole in a vendor's declaration is a reason to say so and not a reason to stop a machine.
+
+**5. How deep §36.3's ladder is cut.** The section gives an order and no schedule. Throttling gives
+up the first three rungs — telemetry, OTA, black box compression — and critical gives up all five.
+The line between three and four is where housekeeping ends: the first three cost the robot nothing
+it was hired to do, and rungs four and five change what it can *do*. `NEVER_SHED` is data rather
+than a comment, so "never the RHAL, the kernel or the control loop" is something a test checks.
+
+"Sustained", for the DEGRADED that §36.3 raises, is thirty seconds — one cycle makes every heavy
+motion a degraded robot, ten minutes makes DEGRADED a state a thermally limited machine never
+reaches while spending its afternoon at the throttle point.
+
+### The reserve is a floor, and it says so
+
+§36.2 computes the reserve from three things: the declared figures, the current payload, and the
+distance to the nearest safe state. **One of the three exists on this platform.** There is no
+payload mass anywhere on the descriptor and no distance-to-safe-state anywhere in an observation.
+
+So the arithmetic is the identity — the reserve *is* `safe_stop_energy_wh` — and `unaccounted` names
+the two missing terms on every robot. A reserve with a non-empty `unaccounted` is reported as a
+**floor**: every missing term can only add energy, so the figure under-estimates, and
+under-estimating is the direction that runs a robot past the point where it can still sit down.
+
+Scaling by a plausible payload factor would have been one line and a number nobody could defend.
+This is the number that decides when a two-metre humanoid stops walking.
+
+### The corpus caught a constant nothing tested
+
+Halfway through, a tamper test: move `RESERVE_BAND` from 1.25 to 1.9 and confirm the corpus fails.
+**It passed.** Then 2.5 — passed. The runner was fine; every fixture sat comfortably inside its
+band, so a constant deciding where `low` becomes `reserve` was not discriminated by a single one of
+the twenty-four vectors. Two editions could have disagreed about it and both reproduced the corpus.
+
+Four boundary cases in watt-hours fixed it — 24.999, 25, 44.999, 45 against a 20 Wh reserve — and
+both constants now fail the corpus when moved. A matching unit test carries the same four readings
+and the reason they exist.
+
+The general form is worth keeping: **a corpus proves an edition reproduces the cases it has, and
+says nothing about the constants no case sits near.** Tampering with each constant and requiring a
+failure is the only check that the vectors discriminate what they appear to. It cost four cases.
+
+### And a mirror run the wrong way
+
+`node tools/check-mirrors.mjs --sync ../RobotOverflow` copies **from** the Hub **into** this
+repository — the script says so plainly — and running it after amending §36 here silently restored
+the unamended copy. Nothing was lost that was not reproducible, and the tell was `git diff` showing
+no change to a file that had just been edited six times.
+
+The rule the script enforces is right and the direction is not guessable from the flag name. The
+sequence that works is: edit here, copy the file across, then `--sync` to re-pin the digests from
+two copies that already agree.
+
+### Numbers
+
+Rust: **1252** tests, up from 1221. Thirty-one new, all in `power`. The corpus is **1008 cases
+across 73 files**, up from 997 across 73 — 28 in `corpus/power/` and seven vocabularies in
+`closed-sets.json`.
+
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets` clean; both mirror checks
+match; the golden path counts 45 commands.
+
+### What §36 still does not have
+
+Named in §73's last column rather than left to be inferred: **nothing on a robot reads a gauge or a
+thermal zone.** The contract decides what a reading means and nothing supplies one, so `battery` and
+`temperature_c` are still absent in every check-in. That is the next session's work and it is
+`skynetd-io`'s, not the contract's.
+
+Two smaller ones, recorded here because they are the kind that survive by not being written down:
+
+* **Readiness has no power check.** `ReadinessSubject` is a registry row with no power fields, and a
+  useful check — *this body declares a pack and no safe-stop energy* — needs to tell that from *this
+  body has no pack*, which the row cannot express today. Adding it means plumbing the profile
+  through the subject and the Hub's mirror.
+* **`power` is not in the Hub's mirror list**, and the reason is now written into
+  `check-contract-mirrors.mjs` beside the other three: nothing on the Hub reads a `power` block, so
+  a mirror would be a copy with no reader. The trigger for changing that is a robot page wanting to
+  say the reserve has no boundary — which is a readiness question, which is the bullet above.
+
+### Findings, restated
+
+1–28 as before; 29–37 from the sessions above.
+
+38. **A conformance test can outlive its subject by years without anybody noticing.**
+    `power.safe_state.reachable` measured a descriptor field that did not exist, in the required set
+    for the host tier, since Part II. Nothing could catch it: the test list is data, the field list
+    is a struct, and no check relates them. The mechanism that would — assert every quantitative
+    test names a field some edition reads — is worth building, and is a session of its own.
+39. **A corpus does not test the constants its cases do not sit near.** Tamper with each and require
+    a failure; the ones that pass are the ones two editions can disagree about while both being
+    green. Cheap to check, and it found one on the first try.
+40. **Two rules in one document can be individually right and jointly unimplementable.** §24 forbids
+    interpreting a vendor fault code; §36.4 requires acting on one meaning of one. Neither is wrong
+    and an implementation must do something. The way out was to move the interpretation to the party
+    that owns the vocabulary — the vendor declares which codes mean sag — which is a third option
+    that only appears once somebody tries to write the code.

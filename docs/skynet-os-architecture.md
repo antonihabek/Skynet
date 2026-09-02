@@ -2101,6 +2101,16 @@ exists, the observation assembler reports larger skew, which is the honest degra
 
 ## 36. Power and thermal
 
+> **Amended by the implementation.** This section was four subsections of prose for eleven parts of
+> this document, and §73 listed it as the one row that was *unwritten* rather than merely
+> unfinished. Writing it settled five things the prose left open, and each is recorded below beside
+> the sentence it interprets rather than in a changelog — because the next person to read §36.1's
+> table needs to know that "approaching reserve" is 2.25 × the reserve and why, not that a session
+> once decided it.
+>
+> Built as `crates/skynet-contracts/src/power.rs` and `reference/typescript/power.ts`, held to each
+> other by `corpus/power/` and `corpus/vocabulary/closed-sets.json`.
+
 ### 36.1 Low battery is a safety event
 
 A laptop at 3% shows a warning. A humanoid at 3% falls over. Power is therefore handled in the
@@ -2112,6 +2122,37 @@ same register as the safety envelope, not as a user-experience concern.
 | `low` | Approaching reserve | No new task leases granted; running task may finish; operator notified |
 | `reserve` | At the reserve budget | Controlled stop, then move to a safe state — park, sit, or dock |
 | `critical` | Below reserve | Immediate controlled stop. Drives disabled once at rest. |
+| `unmetered` | This body's energy is not metered | Full operation, and the report says why |
+
+**The bands, and why they are multiples of the reserve.** "Approaching" and "at" are a shape rather
+than a number, and the numbers are `reserve` up to **1.25 ×** the reserve and `low` up to **2.25 ×**.
+Both are multiples of the reserve rather than percentages of the pack, because the reserve is the
+only energy scale the body declares and a percentage would mean something different on every robot.
+
+The two widths are chosen for different reasons and neither is round-number convenience:
+
+* The `reserve` band is **a quarter of a reserve wide** so that a gauge reporting within a percent
+  of the boundary does not chatter between *begin a controlled stop* and *stop immediately*, on a
+  robot that is already mid-ramp.
+* The `low` band is **one whole reserve wide**, because `low`'s only behaviour is that a running
+  task may finish and no new one may start. A warning that arrives with less than one further safe
+  stop in hand is a warning the robot cannot act on, and the row's promise would be one it cannot
+  keep.
+
+**`unmetered` is the fifth state, and §36.1's original four assumed a battery.** An arm bolted to a
+bench and run off mains has no state of charge, and forcing it into one of the four would either
+immobilise it or claim a headroom nobody measured. It is not a rung of the same ladder, which is why
+it is listed last rather than beneath `critical`: it grants leases, and a body reaching it is
+usually behaving correctly.
+
+**Two bodies reach `unmetered` and they are not the same robot.** One declares no pack. One declares
+a pack whose gauge has stopped answering. The distinction is a *fault* rather than a state —
+`gauge_silent` — because it is a fact about whether the number can be believed rather than about how
+much energy is left, and an operator needs both. A silent gauge is deliberately **not** `critical`:
+§36.4 overrides the gauge on a *positive* observation from the bus, missing evidence is never a
+positive finding anywhere else in this system, and a robot that stopped dead on a failed I²C read
+would be a robot that stops dead on a failed I²C read. It withholds new leases and does not take
+away the work already running — which is `low`'s behaviour, arrived at from the other direction.
 
 ### 36.2 The reserve budget
 
@@ -2127,6 +2168,40 @@ in an incident report if nobody measures it first.
 
 The reserve is not a fixed percentage. It is computed from the declared figures, the current
 payload, and the distance to the nearest safe state where the robot knows one.
+
+**One of those three terms exists on this platform, and the report says so.** There is no payload
+mass anywhere on the descriptor and no distance-to-safe-state anywhere in the observation, so the
+reserve computed today is `safe_stop_energy_wh` and nothing else. Scaling it by a plausible payload
+factor would have been one line of arithmetic and a number nobody could defend — and this is the
+number that decides when a two-metre humanoid stops walking.
+
+So the reserve is reported with an `unaccounted` list naming §36.2's missing terms, and a reserve
+with a non-empty list is a **floor** rather than the reserve: every missing term can only add
+energy, so the figure is an under-estimate and every state derived from it is optimistic by an
+unknown amount. Under-estimating is the direction that runs a robot past the point where it can
+still sit down, which is why it is named rather than rounded up to something comfortable.
+
+### 36.2.1 The descriptor's `power` block
+
+```json
+"power": {
+  "time_to_safe_state_s": 2.0,
+  "safe_stop_energy_wh": 20.0,
+  "pack_capacity_wh": 500.0,
+  "thermal_throttle_c": 70.0,
+  "thermal_critical_c": 90.0,
+  "brownout_fault_codes": [4097]
+}
+```
+
+`pack_capacity_wh` is here so that a gauge reporting a *fraction* can be compared against a reserve
+in watt-hours. A gauge that reports `energy_remaining_wh` directly is preferred and needs no
+capacity — whatever told it the capacity is closer to the pack than a descriptor field is — and a
+body with neither has a state of charge and no way to turn it into energy, which is reported rather
+than approximated.
+
+Absent and all-null are the same body to every consumer. Unlike `frames`, this block carries no list
+whose emptiness is a claim, so there is nothing for the two spellings to disagree about.
 
 ### 36.3 Thermal, and the degradation order
 
@@ -2146,11 +2221,62 @@ Sustained thermal throttling raises `DEGRADED`, which is reported and which bloc
 whose declared `inference_budget_ms` can no longer be met. A policy quietly missing its own
 declared deadline is precisely what the budget exists to prevent.
 
+**How deep the ladder is cut, which the order alone does not say.** Two thresholds, both declared by
+the body as `thermal_throttle_c` and `thermal_critical_c`, and the depth is the meaningful part:
+
+| Pressure | Given up |
+|---|---|
+| `nominal` | Nothing |
+| `throttling` | The first **three** rungs — telemetry, OTA, black box compression |
+| `critical` | All five, inference and non-essential sensors included |
+
+The line between three and four is where housekeeping ends. Telemetry, OTA and black-box
+compression cost the robot nothing it was hired to do; rungs four and five change what it can *do*,
+and are held back for the temperature at which the alternative is damage. `RHAL`, `kernel` and
+`control_loop` appear in no row of that table, at any pressure, and are frozen as data so that
+"never" is something a test checks rather than a word in a paragraph.
+
+**"Sustained" is thirty seconds.** A threshold of one cycle makes every heavy motion a degraded
+robot; a threshold of ten minutes makes `DEGRADED` a state a thermally limited machine never reaches
+while spending its afternoon sitting at the throttle point.
+
+**A temperature with no declared threshold sheds nothing, and says so.** Nobody has stated what hot
+is on that body, and 85 °C is right for a CPU package and fifty degrees wrong for a harmonic drive.
+It is a named gap, not a silent pass and not a guess.
+
+**The budget is enforced against the measurement, not against the weather.** `inference_budget_ms`
+blocks a package when the *observed* loop time exceeds the declared one — thermal throttling being
+the usual cause and not the only one. A robot that refused a package for being warm while its loop
+sat comfortably inside budget would be enforcing a proxy instead of the thing itself. And a package
+is never blocked on an absence: no declaration or no measurement means the question cannot be asked,
+which is not the same as failing it.
+
 ### 36.4 Brownout
 
 Voltage sag is reported by the RHAL as `RHAL_DEGRADED` with a vendor fault code. `skynetd` treats
 it as `critical` regardless of what the fuel gauge claims, because a gauge that disagrees with the
 bus is a gauge that is wrong.
+
+**Which is a rule this OS could not follow as written.** §24 makes `fault_code` *"vendor-specific,
+surfaced verbatim to the black box"* — that is, the OS is told never to interpret one — and this
+paragraph asks it to act on exactly one meaning. An OS that guessed which codes meant sag would be
+interpreting a vendor's private vocabulary in the one place where being wrong stops a working
+machine, or fails to stop a falling one.
+
+So the vendor who defined the codes names the ones that mean sag, in the descriptor's `power` block:
+
+```json
+"brownout_fault_codes": [4097, 4098]
+```
+
+The OS then **matches** a number against a list rather than interpreting anything, and §24's rule is
+kept intact. `RHAL_DEGRADED` carrying a code that is not on the list is not a sag — it is the dead
+encoder or the thermal fault that flag also covers.
+
+**An empty list is not "this body cannot brown out".** It is *nobody has said*, and it is reported
+as `brownout_undeclarable` at the moment it matters — when the RHAL is actually degraded and
+nothing on the robot can say why. The robot keeps working: a hole in a vendor's declaration is a
+reason to say so, not a reason to stop a machine that is running.
 
 ---
 
@@ -3410,7 +3536,9 @@ schema change vendors must implement and the bench suite must measure:
 | `simulator` — the body is simulated (§35.3, §70) | Part IV | `embodiment.descriptor.valid` |
 | `on_command_loss` — hold / brake / fault / coast (§46.2) | Part V | `safety.command_loss.behaviour` |
 | `homing` — required, procedure token, restricted envelope (§48.3) | Part V | `safety.homing.envelope` |
-| `time_to_safe_state_s`, `safe_stop_energy_wh` (§36.2) | Part IV | `power.safe_state.reachable` |
+| `power.time_to_safe_state_s`, `power.safe_stop_energy_wh` (§36.2) | Part IV | `power.safe_state.reachable` |
+| `power.pack_capacity_wh`, `power.thermal_throttle_c`, `power.thermal_critical_c` (§36.2.1, §36.3) | Part IV | `power.safe_state.reachable` |
+| `power.brownout_fault_codes` — the vendor's own codes that mean sag (§36.4) | Part IV | *unmeasured* — see §36.4 |
 | Per-sensor `latency_ms` (§25.2, §47.2) | Parts II, V | `rhal.sensor.latency` |
 | `command_latency_ms` (§5.2) | Part I | `rhal.command.latency` |
 
@@ -4488,7 +4616,7 @@ miniature, and currently trivial to fix.
 | IPC, observation assembly, arbitration | §25 | **Built** — the shared-memory ring and the command frame | — |
 | Boot, faults, POST, homing | §27, §48 | **Built** — §27's machine, POST's eight checks | Five of the eight are the kernel's, through a path §33.1 denies the daemon |
 | Networking and time | §34–35 | **Built** — bearers, metering, the outbound queue, backoff, two clocks kept apart | — |
-| Power and thermal | §36 | Designed | **Unwritten.** `battery` and `temperature_c` are reported absent in every check-in, which is why the health rollup has two permanently unmeasured fields |
+| Power and thermal | §36 | **Built** — the four states plus `unmetered`, the reserve, §36.3's ladder, §36.4's override; 31 tests, 28 corpus cases and seven frozen vocabularies | Nothing on a robot reads a gauge or a thermal zone, so `battery` and `temperature_c` are still absent in every check-in |
 | Configuration, calibration | §38, §45 | **Built on both sides** | — |
 | Resource enforcement | §40 | **Built** — cgroup limits, the RT core | — |
 | Frames | §44 | **Built** — the graph, forward kinematics, both pose guards | — |
