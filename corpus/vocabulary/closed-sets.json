@@ -403,6 +403,46 @@
       "expected": "[\"known\",\"nothing\",\"unmeasured\"]"
     },
     {
+      "id": "birth_findings",
+      "note": "Everything §50 can find about a certificate, in the order of their cost. The first is about the document rather than the machine, which is the order a reader needs.",
+      "input": {
+        "set": "birth_findings"
+      },
+      "expected": "[\"unattested\",\"device_key_mismatch\",\"serial_mismatch\",\"descriptor_mismatch\",\"hardware_revision_mismatch\",\"ownership_asserted\",\"unobservable\",\"incomplete\"]"
+    },
+    {
+      "id": "birth_required_fields",
+      "note": "§50.2’s bindings, in the order that section lists them. Written down once so that a decoder and whatever eventually issues a certificate cannot disagree about which fields are required.",
+      "input": {
+        "set": "birth_required_fields"
+      },
+      "expected": "[\"device_key\",\"model\",\"serial\",\"descriptor_digest\",\"hardware_revision\",\"manufactured\"]"
+    },
+    {
+      "id": "birth_ownership_fields",
+      "note": "What a birth certificate must never carry. Ownership is established by pairing, by a different party (§50.2).",
+      "input": {
+        "set": "birth_ownership_fields"
+      },
+      "expected": "[\"namespace\",\"owner\",\"operator\",\"customer\"]"
+    },
+    {
+      "id": "provenance_classes",
+      "note": "§56.2’s three classes, strongest to weakest. The order is the ranking, and an edition that sorted these alphabetically would put `field` after `unattested`.",
+      "input": {
+        "set": "provenance_classes"
+      },
+      "expected": "[\"field\",\"simulated\",\"unattested\"]"
+    },
+    {
+      "id": "provenance_reason_codes",
+      "note": "Everything a classification can carry, in the order the checks run.",
+      "input": {
+        "set": "provenance_reason_codes"
+      },
+      "expected": "[\"device_signature\",\"device_unknown\",\"simulator_declared\",\"birth_unattested\",\"image_unattested\",\"seeds_not_supplied\",\"benchmark_mismatch\",\"not_replayable\"]"
+    },
+    {
       "id": "checkin_claims",
       "note": "What a robot may claim about the generation it was given. Four rather than §17’s boolean, because \"not applied\" covers a robot that is working, one that is waiting for a person, and one whose supervisor disagrees with itself.",
       "input": {

@@ -1,0 +1,390 @@
+{
+  "corpus": "provenance",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "a-field-result",
+      "note": "All four of §56.2’s conditions, the benchmark’s own seeds, and a black box segment behind it. The case that has to hold or every other one is measuring a function that refuses everything.",
+      "input": {
+        "bundle": {
+          "benchmark_digest": "sha256:bench",
+          "policy_digest": "sha256:policy",
+          "embodiment_digest": "sha256:body",
+          "os_image_digest": "sha256:image",
+          "seeds": [
+            "1",
+            "2",
+            "3"
+          ],
+          "blackbox_segment": "sha256:segment",
+          "tier": "certified",
+          "enforcement": "kernel",
+          "simulator": false,
+          "device_signature": "verified",
+          "device_known": true,
+          "birth_attested": true,
+          "image_attested": true
+        },
+        "expected_benchmark": "sha256:bench",
+        "expected_seeds": [
+          "1",
+          "2",
+          "3"
+        ]
+      },
+      "expected": "{\"class\":\"field\",\"rankable\":true,\"ranked_separately\":false,\"reasons\":[],\"replayable\":true}"
+    },
+    {
+      "id": "an-unsigned-bundle-is-unattested-before-anything-else-is-read",
+      "note": "§56.1: a number nobody can attribute is not evidence. Every other field in this bundle is perfect and none of them is consulted — which is the point, because they are all claims the bundle makes about itself.",
+      "input": {
+        "bundle": {
+          "benchmark_digest": "sha256:bench",
+          "policy_digest": "sha256:policy",
+          "embodiment_digest": "sha256:body",
+          "os_image_digest": "sha256:image",
+          "seeds": [
+            "1",
+            "2",
+            "3"
+          ],
+          "blackbox_segment": "sha256:segment",
+          "tier": "certified",
+          "enforcement": "kernel",
+          "simulator": false,
+          "device_signature": "absent",
+          "device_known": true,
+          "birth_attested": true,
+          "image_attested": true
+        },
+        "expected_benchmark": "sha256:bench",
+        "expected_seeds": [
+          "1",
+          "2",
+          "3"
+        ]
+      },
+      "expected": "{\"class\":\"unattested\",\"rankable\":false,\"ranked_separately\":false,\"reasons\":[{\"blocks_field\":true,\"code\":\"device_signature\",\"message\":\"The device's signature over this bundle is absent, so nothing in it is attributable to a machine. The result is recorded and is not ranked: a number nobody can attribute is not evidence, which is the whole of §56.1.\",\"subjects\":[\"absent\"]}],\"replayable\":true}"
+    },
+    {
+      "id": "a-signature-that-verifies-from-a-device-nobody-registered",
+      "note": "Nothing is wrong with the bytes; what is missing is a registered machine to attribute them to. A separate reason from an unsigned bundle because it is a separate thing to go and do.",
+      "input": {
+        "bundle": {
+          "benchmark_digest": "sha256:bench",
+          "policy_digest": "sha256:policy",
+          "embodiment_digest": "sha256:body",
+          "os_image_digest": "sha256:image",
+          "seeds": [
+            "1",
+            "2",
+            "3"
+          ],
+          "blackbox_segment": "sha256:segment",
+          "tier": "certified",
+          "enforcement": "kernel",
+          "simulator": false,
+          "device_signature": "verified",
+          "device_known": false,
+          "birth_attested": true,
+          "image_attested": true
+        },
+        "expected_benchmark": "sha256:bench",
+        "expected_seeds": [
+          "1",
+          "2",
+          "3"
+        ]
+      },
+      "expected": "{\"class\":\"unattested\",\"rankable\":false,\"ranked_separately\":false,\"reasons\":[{\"blocks_field\":true,\"code\":\"device_unknown\",\"message\":\"The signature verifies and this Hub does not know the device that made it. Nothing is wrong with the bytes; what is missing is a registered machine to attribute them to. Register the device, then re-submit.\",\"subjects\":[]}],\"replayable\":true}"
+    },
+    {
+      "id": "a-declared-simulator-is-simulated-however-perfect-it-is",
+      "note": "§35.3 puts the obligation to declare on the driver and this is where it pays. Everything else about this run is field-grade, and it is still not a field result — a simulator on the field leaderboard is the single outcome the whole scheme exists to prevent.",
+      "input": {
+        "bundle": {
+          "benchmark_digest": "sha256:bench",
+          "policy_digest": "sha256:policy",
+          "embodiment_digest": "sha256:body",
+          "os_image_digest": "sha256:image",
+          "seeds": [
+            "1",
+            "2",
+            "3"
+          ],
+          "blackbox_segment": "sha256:segment",
+          "tier": "certified",
+          "enforcement": "kernel",
+          "simulator": true,
+          "device_signature": "verified",
+          "device_known": true,
+          "birth_attested": true,
+          "image_attested": true
+        },
+        "expected_benchmark": "sha256:bench",
+        "expected_seeds": [
+          "1",
+          "2",
+          "3"
+        ]
+      },
+      "expected": "{\"class\":\"simulated\",\"rankable\":true,\"ranked_separately\":true,\"reasons\":[{\"blocks_field\":true,\"code\":\"simulator_declared\",\"message\":\"The RHAL driver declared itself a simulator (§35.3), so this is a simulated result and is ranked on the simulated table. This is the driver meeting its obligation rather than a fault — and a simulated run and a field run are not comparable numbers, which is why the tables are separate.\",\"subjects\":[]}],\"replayable\":true}"
+    },
+    {
+      "id": "an-unsigned-simulator-is-unattested-and-not-simulated",
+      "note": "The order that must not be rearranged for tidiness. The simulator flag is one of the bundle’s own claims, so a bundle nobody can attribute is `unattested` **before** the flag is read — and it is `unattested` rather than `simulated`, which is the stricter of the two.",
+      "input": {
+        "bundle": {
+          "benchmark_digest": "sha256:bench",
+          "policy_digest": "sha256:policy",
+          "embodiment_digest": "sha256:body",
+          "os_image_digest": "sha256:image",
+          "seeds": [
+            "1",
+            "2",
+            "3"
+          ],
+          "blackbox_segment": "sha256:segment",
+          "tier": "certified",
+          "enforcement": "kernel",
+          "simulator": true,
+          "device_signature": "failed",
+          "device_known": true,
+          "birth_attested": true,
+          "image_attested": true
+        },
+        "expected_benchmark": "sha256:bench",
+        "expected_seeds": [
+          "1",
+          "2",
+          "3"
+        ]
+      },
+      "expected": "{\"class\":\"unattested\",\"rankable\":false,\"ranked_separately\":false,\"reasons\":[{\"blocks_field\":true,\"code\":\"device_signature\",\"message\":\"The device's signature over this bundle is failed, so nothing in it is attributable to a machine. The result is recorded and is not ranked: a number nobody can attribute is not evidence, which is the whole of §56.1.\",\"subjects\":[\"failed\"]},{\"blocks_field\":true,\"code\":\"simulator_declared\",\"message\":\"The RHAL driver declared itself a simulator (§35.3), so this is a simulated result and is ranked on the simulated table. This is the driver meeting its obligation rather than a fault — and a simulated run and a field run are not comparable numbers, which is why the tables are separate.\",\"subjects\":[]}],\"replayable\":true}"
+    },
+    {
+      "id": "a-robot-whose-birth-certificate-attests-nothing",
+      "note": "§50 read from §56’s side: without it, “a real robot of this model with these joint ratings” is a claim the machine makes about itself, and a leaderboard built on that is measuring a story. Recorded, not ranked as field.",
+      "input": {
+        "bundle": {
+          "benchmark_digest": "sha256:bench",
+          "policy_digest": "sha256:policy",
+          "embodiment_digest": "sha256:body",
+          "os_image_digest": "sha256:image",
+          "seeds": [
+            "1",
+            "2",
+            "3"
+          ],
+          "blackbox_segment": "sha256:segment",
+          "tier": "certified",
+          "enforcement": "kernel",
+          "simulator": false,
+          "device_signature": "verified",
+          "device_known": true,
+          "birth_attested": false,
+          "image_attested": true
+        },
+        "expected_benchmark": "sha256:bench",
+        "expected_seeds": [
+          "1",
+          "2",
+          "3"
+        ]
+      },
+      "expected": "{\"class\":\"unattested\",\"rankable\":false,\"ranked_separately\":false,\"reasons\":[{\"blocks_field\":true,\"code\":\"birth_unattested\",\"message\":\"This robot's birth certificate does not attest it (§50), so \\\"a real robot of this model with these joint ratings\\\" is a claim the machine makes about itself. The result is recorded and not ranked as a field result.\",\"subjects\":[]}],\"replayable\":true}"
+    },
+    {
+      "id": "an-unattested-image",
+      "note": "What produced these numbers is not established. The fourth of §56.2’s conditions, and the one a publisher is most likely to think does not matter.",
+      "input": {
+        "bundle": {
+          "benchmark_digest": "sha256:bench",
+          "policy_digest": "sha256:policy",
+          "embodiment_digest": "sha256:body",
+          "os_image_digest": "sha256:image",
+          "seeds": [
+            "1",
+            "2",
+            "3"
+          ],
+          "blackbox_segment": "sha256:segment",
+          "tier": "certified",
+          "enforcement": "kernel",
+          "simulator": false,
+          "device_signature": "verified",
+          "device_known": true,
+          "birth_attested": true,
+          "image_attested": false
+        },
+        "expected_benchmark": "sha256:bench",
+        "expected_seeds": [
+          "1",
+          "2",
+          "3"
+        ]
+      },
+      "expected": "{\"class\":\"unattested\",\"rankable\":false,\"ranked_separately\":false,\"reasons\":[{\"blocks_field\":true,\"code\":\"image_unattested\",\"message\":\"The OS image running during this evaluation was not attested, so what produced these numbers is not established. Recorded, not ranked as a field result.\",\"subjects\":[]}],\"replayable\":true}"
+    },
+    {
+      "id": "three-of-the-four-conditions",
+      "note": "§56.2 has three classes and not four. A bundle that meets three conditions has not established that it is a field result, and `unattested` is exactly what that means — a fourth class would be a leaderboard tier for nearly-evidence.",
+      "input": {
+        "bundle": {
+          "benchmark_digest": "sha256:bench",
+          "policy_digest": "sha256:policy",
+          "embodiment_digest": "sha256:body",
+          "os_image_digest": "sha256:image",
+          "seeds": [
+            "1",
+            "2",
+            "3"
+          ],
+          "blackbox_segment": "sha256:segment",
+          "tier": "certified",
+          "enforcement": "kernel",
+          "simulator": false,
+          "device_signature": "verified",
+          "device_known": true,
+          "birth_attested": false,
+          "image_attested": false
+        },
+        "expected_benchmark": "sha256:bench",
+        "expected_seeds": [
+          "1",
+          "2",
+          "3"
+        ]
+      },
+      "expected": "{\"class\":\"unattested\",\"rankable\":false,\"ranked_separately\":false,\"reasons\":[{\"blocks_field\":true,\"code\":\"birth_unattested\",\"message\":\"This robot's birth certificate does not attest it (§50), so \\\"a real robot of this model with these joint ratings\\\" is a claim the machine makes about itself. The result is recorded and not ranked as a field result.\",\"subjects\":[]},{\"blocks_field\":true,\"code\":\"image_unattested\",\"message\":\"The OS image running during this evaluation was not attested, so what produced these numbers is not established. Recorded, not ranked as a field result.\",\"subjects\":[]}],\"replayable\":true}"
+    },
+    {
+      "id": "seeds-the-robot-chose-for-itself",
+      "note": "§56.3: seeds come from the benchmark and are never generated by the robot, because a robot that picks its own picks easy ones — and it need not do so dishonestly for the number to be worthless. This is not a run of that benchmark at all.",
+      "input": {
+        "bundle": {
+          "benchmark_digest": "sha256:bench",
+          "policy_digest": "sha256:policy",
+          "embodiment_digest": "sha256:body",
+          "os_image_digest": "sha256:image",
+          "seeds": [
+            "7",
+            "8",
+            "9"
+          ],
+          "blackbox_segment": "sha256:segment",
+          "tier": "certified",
+          "enforcement": "kernel",
+          "simulator": false,
+          "device_signature": "verified",
+          "device_known": true,
+          "birth_attested": true,
+          "image_attested": true
+        },
+        "expected_benchmark": "sha256:bench",
+        "expected_seeds": [
+          "1",
+          "2",
+          "3"
+        ]
+      },
+      "expected": "{\"class\":\"unattested\",\"rankable\":false,\"ranked_separately\":false,\"reasons\":[{\"blocks_field\":true,\"code\":\"seeds_not_supplied\",\"message\":\"This run used seeds the benchmark did not supply (3 given, 3 used). §56.3: seeds come from the benchmark and are never generated by the robot, because a robot that picks its own seeds picks easy ones — and it need not do so dishonestly for the number to be worthless. This is not a run of that benchmark.\",\"subjects\":[\"3\",\"3\"]}],\"replayable\":true}"
+    },
+    {
+      "id": "the-benchmarks-seeds-in-a-different-order",
+      "note": "Order as well as membership. Two runs over the same seeds in a different order are two different sequences of episodes, and a benchmark that fixes its seeds is fixing the sequence.",
+      "input": {
+        "bundle": {
+          "benchmark_digest": "sha256:bench",
+          "policy_digest": "sha256:policy",
+          "embodiment_digest": "sha256:body",
+          "os_image_digest": "sha256:image",
+          "seeds": [
+            "3",
+            "2",
+            "1"
+          ],
+          "blackbox_segment": "sha256:segment",
+          "tier": "certified",
+          "enforcement": "kernel",
+          "simulator": false,
+          "device_signature": "verified",
+          "device_known": true,
+          "birth_attested": true,
+          "image_attested": true
+        },
+        "expected_benchmark": "sha256:bench",
+        "expected_seeds": [
+          "1",
+          "2",
+          "3"
+        ]
+      },
+      "expected": "{\"class\":\"unattested\",\"rankable\":false,\"ranked_separately\":false,\"reasons\":[{\"blocks_field\":true,\"code\":\"seeds_not_supplied\",\"message\":\"This run used seeds the benchmark did not supply (3 given, 3 used). §56.3: seeds come from the benchmark and are never generated by the robot, because a robot that picks its own seeds picks easy ones — and it need not do so dishonestly for the number to be worthless. This is not a run of that benchmark.\",\"subjects\":[\"3\",\"3\"]}],\"replayable\":true}"
+    },
+    {
+      "id": "a-run-of-a-different-benchmark",
+      "note": "Two benchmarks are two questions, and a score against one says nothing about the other. Caught here rather than by a reviewer, because §56.1’s whole point is that a reviewer reading a number cannot see any of this.",
+      "input": {
+        "bundle": {
+          "benchmark_digest": "sha256:other",
+          "policy_digest": "sha256:policy",
+          "embodiment_digest": "sha256:body",
+          "os_image_digest": "sha256:image",
+          "seeds": [
+            "1",
+            "2",
+            "3"
+          ],
+          "blackbox_segment": "sha256:segment",
+          "tier": "certified",
+          "enforcement": "kernel",
+          "simulator": false,
+          "device_signature": "verified",
+          "device_known": true,
+          "birth_attested": true,
+          "image_attested": true
+        },
+        "expected_benchmark": "sha256:bench",
+        "expected_seeds": [
+          "1",
+          "2",
+          "3"
+        ]
+      },
+      "expected": "{\"class\":\"unattested\",\"rankable\":false,\"ranked_separately\":false,\"reasons\":[{\"blocks_field\":true,\"code\":\"benchmark_mismatch\",\"message\":\"This bundle is a run of benchmark sha256:other and is being ranked against sha256:bench. Two benchmarks are two questions, and a score against one says nothing about the other.\",\"subjects\":[\"sha256:bench\",\"sha256:other\"]}],\"replayable\":true}"
+    },
+    {
+      "id": "attested-and-unreplayable",
+      "note": "§56.4 is the one observation that never changes the class: a result can be perfectly attested and have no recording behind it. Still `field`, and still reported — because a number with a replayable recording is a different class of claim from a number in a table.",
+      "input": {
+        "bundle": {
+          "benchmark_digest": "sha256:bench",
+          "policy_digest": "sha256:policy",
+          "embodiment_digest": "sha256:body",
+          "os_image_digest": "sha256:image",
+          "seeds": [
+            "1",
+            "2",
+            "3"
+          ],
+          "blackbox_segment": null,
+          "tier": "certified",
+          "enforcement": "kernel",
+          "simulator": false,
+          "device_signature": "verified",
+          "device_known": true,
+          "birth_attested": true,
+          "image_attested": true
+        },
+        "expected_benchmark": "sha256:bench",
+        "expected_seeds": [
+          "1",
+          "2",
+          "3"
+        ]
+      },
+      "expected": "{\"class\":\"field\",\"rankable\":true,\"ranked_separately\":false,\"reasons\":[{\"blocks_field\":false,\"code\":\"not_replayable\",\"message\":\"No black box segment accompanies this run, so a disputed result cannot be replayed (§56.4). The class is unaffected — a result can be perfectly attested and unreplayable — but a number with a recording behind it is a different class of claim from a number in a table.\",\"subjects\":[]}],\"replayable\":false}"
+    }
+  ]
+}

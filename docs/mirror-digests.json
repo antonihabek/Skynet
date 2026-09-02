@@ -1,8 +1,8 @@
 {
   "note": "sha256 of each document shared with BotMarket, pinned so a divergence is caught with one checkout — which is what CI has. Written by tools/check-mirrors.mjs --sync. Never edit by hand: a digest somebody updated to match a local edit is a check that has been switched off.",
   "digests": {
-    "docs/skynet-os-architecture.md": "bd380628ee286776f94265c00762c63f3183538c70b7396b62049ca78d92f0fe",
+    "docs/skynet-os-architecture.md": "6b44ce72d0246dcdcd8db5a38cd8754dd84c17e410360b0a29f4f8c302d6c0be",
     "docs/skynet-architecture.md": "17b0fa4f48f5887563c97b49f69980fe7ff19aecf0c0dc790b535d3964adeaa3",
-    "docs/skynet-build-plan.md": "5951a24cb716e2f61654f62bdd9fd68f3730d1d40479c7781c874bea50c9e8e8"
+    "docs/skynet-build-plan.md": "bdba82a6a331d4b2926dcff9065a3397fa30d4defbd5c9127b6da5136f35d046"
   }
 }

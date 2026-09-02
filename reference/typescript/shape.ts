@@ -36,6 +36,14 @@ import type { BootVerdict, BundleVerdict } from './ota.ts'
 import type {
   Attestation, AttestationReport, CodeResult, IdentityVerdict, Measure,
 } from './identity.ts'
+import {
+  attests as birthAttests, explain as birthExplain, fullyConfirmed as birthFullyConfirmed,
+  unchecked as birthUnchecked, type Attested as BirthAttested,
+} from './birth.ts'
+import {
+  blocksField, explain as provenanceExplain, rankable, rankedSeparately, replayable,
+  scoresAgree, explainDisagreement, type Classified,
+} from './provenance.ts'
 import type { CheckIn, ClaimVerdict, HealthReport } from './checkin.ts'
 import type { OfferVerdict } from './intent.ts'
 import type { Coverage, WindowReport } from './telemetry.ts'
@@ -691,6 +699,65 @@ export function shapeIdentityVerdict(verdict: IdentityVerdict): unknown {
       subjects: [...entry.subjects],
     })),
     paired: verdict.paired,
+  }
+}
+
+/**
+ * §50's answer about one certificate and one machine.
+ *
+ * `attests`, `fully_confirmed` and `unchecked` are derived rather than stored, and all three are
+ * on the wire anyway. A consumer recomputing "does this attest anything" from a finding list is a
+ * consumer with its own copy of `voidsTheCertificate`, and the second copy is the one that will be
+ * wrong the day a finding is added.
+ */
+export function shapeAttested(result: BirthAttested): unknown {
+  return {
+    attests: birthAttests(result),
+    findings: result.findings.map(finding => ({
+      code: finding.code,
+      message: birthExplain(finding),
+      subjects: [...finding.subjects],
+    })),
+    fully_confirmed: birthFullyConfirmed(result),
+    unchecked: birthUnchecked(result),
+  }
+}
+
+/**
+ * §56.2's class for one run bundle.
+ *
+ * `rankable`, `ranked_separately` and `replayable` are derived and all three go on the wire: a
+ * leaderboard recomputing "may this be ranked" from a class string is a leaderboard with its own
+ * copy of §56.2, and the second copy is the one that will admit a simulator to the field table the
+ * day a class is added.
+ */
+export function shapeProvenance(classified: Classified): unknown {
+  return {
+    class: classified.class,
+    rankable: rankable(classified.class),
+    ranked_separately: rankedSeparately(classified.class),
+    reasons: classified.reasons.map(reason => ({
+      blocks_field: blocksField(reason),
+      code: reason.code,
+      message: provenanceExplain(reason),
+      subjects: [...reason.subjects],
+    })),
+    replayable: replayable(classified),
+  }
+}
+
+/**
+ * §56.5's roll-up comparison.
+ *
+ * The sentence travels beside the boolean rather than being left to the caller, because §56.5's
+ * whole point is that a disagreement is a defect to investigate — and a bare `false` is the shape
+ * of a thing somebody quietly widens a tolerance around.
+ */
+export function shapeScores(onRobot: number, onHub: number): unknown {
+  const agree = scoresAgree(onRobot, onHub)
+  return {
+    agree,
+    detail: agree ? null : explainDisagreement(onRobot, onHub),
   }
 }
 

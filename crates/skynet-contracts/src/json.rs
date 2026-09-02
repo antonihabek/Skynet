@@ -1286,6 +1286,182 @@ pub fn identity_from_json(value: &Json) -> crate::identity::Identity {
     }
 }
 
+// ── §50's birth certificate ──────────────────────────────────────────────────
+
+/// Read a certificate.
+///
+/// `signature` has no default, for the reason [`SignatureState`] has no `Default`: `Verified`
+/// would be a lie and `Absent` would be a document that looks constructed and attests nothing. A
+/// spelling this edition does not recognise decodes to `Unverifiable` — *this platform cannot
+/// check it* — which is the only one of the five that is true of a state nobody here can read.
+pub fn birth_certificate_from_json(value: &Json) -> crate::birth::BirthCertificate {
+    crate::birth::BirthCertificate {
+        device_key: opt_string(value, "device_key").unwrap_or_default(),
+        model: opt_string(value, "model").unwrap_or_default(),
+        serial: opt_string(value, "serial").unwrap_or_default(),
+        descriptor_digest: opt_string(value, "descriptor_digest").unwrap_or_default(),
+        hardware_revision: opt_string(value, "hardware_revision").unwrap_or_default(),
+        manufactured: opt_string(value, "manufactured").unwrap_or_default(),
+        calibration_digests: value.str_arr("calibration_digests"),
+        claims_ownership: value.str_arr("claims_ownership"),
+        signature: opt_string(value, "signature")
+            .and_then(|text| SignatureState::parse(&text))
+            .unwrap_or(SignatureState::Unverifiable),
+    }
+}
+
+/// Read what the machine reports about itself.
+///
+/// Every field decodes through [`Json::get_present`], so an absent key and an explicit `null` are
+/// both `None` — §7.2's absent input, which makes a comparison unavailable rather than passed.
+pub fn birth_observed_from_json(value: &Json) -> crate::birth::Observed {
+    crate::birth::Observed {
+        device_key: value.get_present("device_key").and_then(Json::as_str).map(ToString::to_string),
+        serial: value.get_present("serial").and_then(Json::as_str).map(ToString::to_string),
+        descriptor_digest: value
+            .get_present("descriptor_digest")
+            .and_then(Json::as_str)
+            .map(ToString::to_string),
+        hardware_revision: value
+            .get_present("hardware_revision")
+            .and_then(Json::as_str)
+            .map(ToString::to_string),
+    }
+}
+
+/// Serialise what checking one certificate against one machine concluded.
+///
+/// `attests`, `fully_confirmed` and `unchecked` are derived rather than stored, and all three go on
+/// the wire anyway: a consumer recomputing "does this attest anything" from a finding list is a
+/// consumer with its own copy of `voids_the_certificate`, and the second copy is the one that will
+/// be wrong the day a finding is added.
+pub fn birth_to_json(attested: &crate::birth::Attested) -> Json {
+    let mut out = Json::obj();
+    out.set("attests", Json::Bool(attested.attests()));
+    out.set(
+        "findings",
+        Json::Arr(
+            attested
+                .findings
+                .iter()
+                .map(|finding| {
+                    let mut item = Json::obj();
+                    item.set("code", Json::from(finding.code()));
+                    item.set("message", Json::Str(crate::birth::explain(finding)));
+                    item.set("subjects", str_list(&finding.subjects()));
+                    item
+                })
+                .collect(),
+        ),
+    );
+    out.set("fully_confirmed", Json::Bool(attested.fully_confirmed()));
+    out.set(
+        "unchecked",
+        Json::Arr(
+            attested
+                .unchecked()
+                .iter()
+                .map(|field| Json::from(*field))
+                .collect(),
+        ),
+    );
+    out
+}
+
+// -- §56's provenance classes ------------------------------------------------
+
+/// Read a run bundle.
+///
+/// `device_signature` has no default for [`birth_certificate_from_json`]'s reason, and an
+/// unrecognised spelling decodes to `Unverifiable` for the same one. `simulator`, `device_known`,
+/// `birth_attested` and `image_attested` all default to **false**, which is the direction every
+/// default in this file points: a bundle that did not say has not established anything, and the
+/// three booleans that would make a result `field` are exactly the ones nobody should reach by
+/// omission.
+///
+/// `simulator` defaulting false is the one exception in spirit, and §52 already settled it: the
+/// obligation to declare sits on the simulator driver, because a simulator presented as a robot is
+/// the failure and a robot presented as a robot is not. Here the asymmetry is safe in both
+/// directions — a bundle whose simulator flag is absent still needs the other three to reach
+/// `field`.
+pub fn run_bundle_from_json(value: &Json) -> crate::provenance::RunBundle {
+    crate::provenance::RunBundle {
+        benchmark_digest: opt_string(value, "benchmark_digest").unwrap_or_default(),
+        policy_digest: opt_string(value, "policy_digest").unwrap_or_default(),
+        embodiment_digest: opt_string(value, "embodiment_digest").unwrap_or_default(),
+        os_image_digest: opt_string(value, "os_image_digest").unwrap_or_default(),
+        seeds: value.str_arr("seeds"),
+        blackbox_segment: value
+            .get_present("blackbox_segment")
+            .and_then(Json::as_str)
+            .map(ToString::to_string),
+        tier: opt_string(value, "tier").unwrap_or_default(),
+        enforcement: opt_string(value, "enforcement").unwrap_or_default(),
+        simulator: flag(value, "simulator"),
+        device_signature: opt_string(value, "device_signature")
+            .and_then(|text| SignatureState::parse(&text))
+            .unwrap_or(SignatureState::Unverifiable),
+        device_known: flag(value, "device_known"),
+        birth_attested: flag(value, "birth_attested"),
+        image_attested: flag(value, "image_attested"),
+    }
+}
+
+/// Serialise a classification.
+///
+/// `rankable`, `ranked_separately` and `replayable` are derived and all three go on the wire, for
+/// [`birth_to_json`]'s reason: a leaderboard recomputing "may this be ranked" from a class string
+/// is a leaderboard with its own copy of §56.2, and the second copy is the one that will admit a
+/// simulator to the field table the day a class is added.
+pub fn provenance_to_json(classified: &crate::provenance::Classified) -> Json {
+    let mut out = Json::obj();
+    out.set("class", Json::from(classified.class.as_str()));
+    out.set("rankable", Json::Bool(classified.class.rankable()));
+    out.set(
+        "ranked_separately",
+        Json::Bool(classified.class.ranked_separately()),
+    );
+    out.set(
+        "reasons",
+        Json::Arr(
+            classified
+                .reasons
+                .iter()
+                .map(|reason| {
+                    let mut item = Json::obj();
+                    item.set("blocks_field", Json::Bool(reason.blocks_field()));
+                    item.set("code", Json::from(reason.code()));
+                    item.set("message", Json::Str(crate::provenance::explain(reason)));
+                    item.set("subjects", str_list(&reason.subjects()));
+                    item
+                })
+                .collect(),
+        ),
+    );
+    out.set("replayable", Json::Bool(classified.replayable()));
+    out
+}
+
+/// Serialise a §56.5 roll-up comparison.
+///
+/// The sentence travels beside the boolean rather than being left to the caller, because §56.5's
+/// whole point is that a disagreement is a defect to investigate — and a bare `false` is the shape
+/// of a thing somebody quietly widens a tolerance around.
+pub fn scores_to_json(on_robot: f64, on_hub: f64) -> Json {
+    let agree = crate::provenance::scores_agree(on_robot, on_hub);
+    let mut out = Json::obj();
+    out.set("agree", Json::Bool(agree));
+    out.set(
+        "detail",
+        if agree {
+            Json::Null
+        } else {
+            Json::Str(crate::provenance::explain_disagreement(on_robot, on_hub))
+        },
+    );
+    out
+}
+
 /// Read what the robot observes about itself.
 pub fn identity_observed_from_json(value: &Json) -> crate::identity::Observed {
     crate::identity::Observed {

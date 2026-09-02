@@ -70,23 +70,36 @@ const HERE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
  * named"*. Both sides compute it from declared facts and neither is authoritative, which is the
  * test this list applies.
  *
- * `watchdog` (§46), `entitlement` (§51), `birth` (§50), `provenance` (§56) and `skill` (§54) are
- * deliberately **not** here yet.
- * All three are contracts the Hub will need for §32.1's `/skynet/os/devices/[id]` — "active and
- * unavailable guards with the missing input named" is precisely what calibration produces, and a
- * fleet page that cannot say which robots are running on a lapsed entitlement is a fleet page
- * missing the one commercial fact §51 defines — and that page waits on a table that does not exist.
- * Mirroring them now would put five modules nothing imports into an application, and the honest
- * place to record that they are coming is here rather than in somebody's memory. `birth` waits on
- * §57's `POST /robots/{slug}/attestations`, which is unwritten.
+ * `watchdog` (§46), `entitlement` (§51) and `skill` (§54) are deliberately **not** here yet. Each is a contract the Hub will need — a fleet page that cannot
+ * say which robots are running on a lapsed entitlement is a fleet page missing the one commercial
+ * fact §51 defines — and each waits on a surface that does not exist. Mirroring them now would put
+ * four modules nothing imports into an application, and the honest place to record that they are
+ * coming is here rather than in somebody's memory.
  *
- * `provenance` is the one whose absence is least comfortable, because §56.2 says the **Hub**
- * assigns the class — so unlike the others, the Hub is the consumer rather than a second opinion.
- * What it waits on is a schema decision rather than an endpoint: `skynet_evaluations` already
- * carries `verified: boolean` and `source: platform | self_reported | imported`, which is a
- * different axis from §56.2's `field | simulated | unattested` — the first is about who submitted a
- * result, the second about what it is evidence of. Reconciling them is a migration on a live
- * project, and that is the owner's call rather than a tool's.
+ * `birth` (§50) was the fifth name in that paragraph until §57's `POST /robots/{slug}/attestations`
+ * was written, and it is the clearest case in this list of why the test is *both sides must agree*
+ * rather than *the Hub touches it*. A vendor signs a certificate at manufacture; the Hub reads that
+ * same document at pairing, months later and on another continent; an operator reads it again from
+ * a check-in. Nothing about the certificate changes in between — so the three readings are the same
+ * function over the same bytes, and a Hub with its own copy of `check` would be a fourth opinion
+ * about what a document proves. The asymmetry §50.2 insists on survives the mirroring: the Hub
+ * decides the **signature state**, because only it holds the vendor's registered key, and then runs
+ * the shared function over it. Deciding and checking are two jobs, and only the second is mirrored.
+ *
+ * `provenance` (§56) is the newest, and it is the one entry on this list where the Hub is the
+ * **consumer** rather than a second opinion: §56.2 says the Hub assigns the class, and the robot's
+ * edition computes it only so a robot can predict its own offline. That inverts the usual test and
+ * makes the case for mirroring stronger rather than weaker — two implementations of an anti-gaming
+ * rule that disagree is an anti-gaming rule with a hole, and a hole in this one always points the
+ * same way, towards admitting something.
+ *
+ * What it waited on was a schema decision rather than an endpoint, and the decision turned out to
+ * be that there was nothing to reconcile. `skynet_evaluations` carries `verified: boolean` and
+ * `source: platform | self_reported | imported`; §56.2 asks for `field | simulated | unattested`.
+ * Those are **two axes, not two spellings of one**: the first says who submitted a number, the
+ * second says what it is evidence of. So `provenance` is a new nullable column beside them rather
+ * than a replacement for either, and NULL means §56 has not classified this run — which is true of
+ * every row that arrived without a run bundle, and is not the same fact as `unattested`.
  *
  * `entitlement` has a second reason to wait, and it is the more interesting one. §57 makes the
  * token *"a field in the desired-state document, not an endpoint"*, so the Hub's job is to **issue**
@@ -159,9 +172,9 @@ const HERE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
  * Add a name to this list and run `--sync`; nothing else is needed.
  */
 const MIRRORS = [
-  'calibration', 'canonical', 'checkin', 'conformance', 'digest', 'embodiment', 'identity',
-  'intent', 'kinematics', 'ota', 'package', 'predicate', 'readiness', 'safety', 'semver',
-  'telemetry',
+  'birth', 'calibration', 'canonical', 'checkin', 'conformance', 'digest', 'embodiment',
+  'identity', 'intent', 'kinematics', 'ota', 'package', 'predicate', 'provenance', 'readiness',
+  'safety', 'semver', 'telemetry',
 ]
 
 const REFERENCE = 'reference/typescript'

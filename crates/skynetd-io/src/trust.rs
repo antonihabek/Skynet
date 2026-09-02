@@ -118,6 +118,26 @@ pub const RELEASE_DOMAIN: &str = "skynet.release.v1
 pub const BENCH_DOMAIN: &str = "skynet.bench.v1
 ";
 
+/// The eighth, and the one whose collision hazard is the broadest. A §56.2 run bundle binds a
+/// **policy digest, an embodiment digest and an OS image digest** — three hex strings that are each
+/// signed under one of the tags above — so a bundle is the one document on this platform that
+/// contains other documents' subjects wholesale. Without its own tag, a device signature over a
+/// descriptor could be presented as a device signature over the run bundle that names it, and §56.2
+/// would then class as `field` a result nobody attested.
+///
+/// §56.1 is why that matters more here than elsewhere: the class is what decides whether a number
+/// reaches a leaderboard, and the only class worth forging is `field`.
+pub const BUNDLE_DOMAIN: &str = "skynet.bundle.v1
+";
+
+/// The message a device's signature over a §56.2 run bundle is made over.
+pub fn bundle_message(digest: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(BUNDLE_DOMAIN.len() + digest.len());
+    out.extend_from_slice(BUNDLE_DOMAIN.as_bytes());
+    out.extend_from_slice(digest.as_bytes());
+    out
+}
+
 /// The message a publisher's signature over a release manifest is made over (§12).
 pub fn release_message(digest: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(RELEASE_DOMAIN.len() + digest.len());
@@ -1402,6 +1422,53 @@ mod tests {
             .remove(&Selector::Label("nobody".to_string()))
             .expect_err("absent");
         assert!(error.reason().contains("`nobody`"), "{error:?}");
+    }
+
+    // -- The eight domain tags -------------------------------------------------
+
+    #[test]
+    fn every_domain_tag_is_distinct_and_newline_terminated() {
+        // Eight signature schemes over one shape — a digest — and the tag is the only thing that
+        // makes a signature say what it is a signature *of*. Two tags that were equal, or one that
+        // was a prefix of another without its newline, would let a signature over one document
+        // verify over another. The comments above each constant say so; this is the check.
+        let tags = [
+            PACKAGE_DOMAIN,
+            PROFILE_DOMAIN,
+            EMBODIMENT_DOMAIN,
+            ENTITLEMENT_DOMAIN,
+            BIRTH_DOMAIN,
+            RELEASE_DOMAIN,
+            BENCH_DOMAIN,
+            BUNDLE_DOMAIN,
+        ];
+
+        for tag in tags {
+            assert!(
+                tag.ends_with('\n'),
+                "a tag without its separator can be a prefix of the digest that follows: {tag:?}"
+            );
+        }
+
+        for (i, a) in tags.iter().enumerate() {
+            for (j, b) in tags.iter().enumerate() {
+                if i != j {
+                    assert_ne!(a, b, "two schemes share a tag");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn one_digest_under_two_domains_is_two_messages() {
+        // The hazard the tags exist for, in its sharpest form: a §56.2 run bundle binds a policy
+        // digest, an embodiment digest and an OS image digest, so a bundle literally contains other
+        // documents' subjects. If these two messages were ever equal, a device signature over a
+        // descriptor would be presentable as a device signature over the run that names it.
+        let digest = "29fe4b8d49ec7c32b6936b2e25c3cbd7b7b96c8bb21ad8de5dce3e44f8d2e543";
+        assert_ne!(bundle_message(digest), embodiment_message(digest));
+        assert_ne!(bundle_message(digest), birth_message(digest));
+        assert_ne!(bundle_message(digest), package_message(digest));
     }
 
     #[test]

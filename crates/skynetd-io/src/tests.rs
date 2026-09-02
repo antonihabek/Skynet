@@ -2339,6 +2339,21 @@ fn a_failed_profile_signature_raises_an_incident() {
         "{:?}",
         queued[0].body
     );
+
+    // And it carries the context of the **fault**, not of whenever this reaches a Hub. §34.4
+    // delivers an incident whenever the link comes back, which can be after a reboot and two
+    // generations later — so a Hub filling these in at receipt would be attaching a statement about
+    // now to an event in the past.
+    assert!(
+        queued[0].body.contains("\"generation\""),
+        "an incident that does not say which generation it happened on can only be dated by          whenever it arrived: {:?}",
+        queued[0].body
+    );
+    assert!(
+        queued[0].body.contains("\"state\""),
+        "§27's state at the fault says whether the robot had already stopped or was still moving:          {:?}",
+        queued[0].body
+    );
 }
 
 /// The two states that are **not** incidents, and the reason is the same one §37.1 gives for

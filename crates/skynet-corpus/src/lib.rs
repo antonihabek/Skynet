@@ -28,6 +28,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use skynet_contracts::admission::{self, admit_package};
+use skynet_contracts::birth;
 use skynet_contracts::cell;
 use skynet_contracts::certification;
 use skynet_contracts::certification::award_certification;
@@ -40,6 +41,7 @@ use skynet_contracts::live;
 use skynet_contracts::opstate;
 use skynet_contracts::ota;
 use skynet_contracts::predicate;
+use skynet_contracts::provenance;
 use skynet_contracts::readiness::{evaluate_readiness, summarize_readiness, ReadinessReport};
 use skynet_contracts::roles;
 use skynet_contracts::roles::parse_role;
@@ -743,6 +745,14 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
                     .collect(),
                 "scts_suites" => certification::SCTS_SUITES.to_vec(),
                 "scts_areas" => certification::SCTS_AREAS.to_vec(),
+                "birth_findings" => birth::FINDINGS.to_vec(),
+                "provenance_classes" => provenance::PROVENANCE_CLASSES
+                    .iter()
+                    .map(|class| class.as_str())
+                    .collect(),
+                "provenance_reason_codes" => provenance::PROVENANCE_REASON_CODES.to_vec(),
+                "birth_required_fields" => birth::REQUIRED_FIELDS.to_vec(),
+                "birth_ownership_fields" => birth::OWNERSHIP_FIELDS.to_vec(),
                 // Not a skip. A set the corpus names and this edition does not is exactly the
                 // divergence this file exists to catch, and answering "unsupported" is how it gets
                 // reported rather than passed over.
@@ -808,6 +818,44 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             let cert_input =
                 json::certification_input_from_json(input).map_err(|e| e.to_string())?;
             json::certification_to_json(&award_certification(&cert_input))
+        }
+
+        // §50. One runner, and one corpus, because a birth certificate is only ever read as a
+        // whole: the document and the machine arrive together, and the answer is what one says
+        // about the other. A case that carried only a certificate would be measuring a decoder.
+        "birth" => {
+            let certificate = json::birth_certificate_from_json(
+                input.get("certificate").ok_or("no `certificate`")?,
+            );
+            let observed = match input.get_present("observed") {
+                Some(node) => json::birth_observed_from_json(node),
+                // A robot that has observed nothing about itself, which is the state early in
+                // boot — not an unreadable case. §7.2 makes every comparison unavailable.
+                None => skynet_contracts::birth::Observed::default(),
+            };
+            json::birth_to_json(&skynet_contracts::birth::check(&certificate, &observed))
+        }
+
+        // §56. Two runners under one corpus name, because a classification and a roll-up comparison
+        // are two halves of one section and an edition could agree about the classes while
+        // disagreeing about whether two numbers are the same number.
+        "provenance" => {
+            if let Some(scores) = input.get_present("scores") {
+                json::scores_to_json(
+                    scores.get("on_robot").and_then(Json::as_f64).unwrap_or(f64::NAN),
+                    scores.get("on_hub").and_then(Json::as_f64).unwrap_or(f64::NAN),
+                )
+            } else {
+                let bundle =
+                    json::run_bundle_from_json(input.get("bundle").ok_or("no `bundle`")?);
+                let benchmark = input
+                    .get("expected_benchmark")
+                    .and_then(Json::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let seeds = input.str_arr("expected_seeds");
+                json::provenance_to_json(&provenance::classify(&bundle, &benchmark, &seeds))
+            }
         }
 
         // §45.7's three conformance additions, in one runner because they are one question asked

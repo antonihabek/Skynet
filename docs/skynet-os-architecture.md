@@ -3633,6 +3633,74 @@ must agree, and a disagreement is a defect worth investigating rather than a rou
 paper over; it means the shared contract implementations diverged, which is precisely what the
 conformance corpus (§31.4) exists to catch.
 
+### 56.6 What the Hub does with the class, and the axis it did *not* replace
+
+§56.2 says the Hub assigns the class, and that makes `provenance` the one shared contract where the
+Hub is the **consumer** rather than a second opinion — the robot's edition exists so a robot can
+predict its own class offline. That inversion argues for sharing the code more strongly, not less:
+two implementations of an anti-gaming rule that disagree is an anti-gaming rule with a hole, and a
+hole in this one always points the same way, towards admitting something to a leaderboard.
+
+Building it produced one finding worth recording, because it looked like a reconciliation and was
+not. `skynet_evaluations` already carried two things that resemble a provenance class:
+
+```
+verified   boolean                                — a registered platform worker measured it
+source     platform | self_reported | imported    — who submitted it
+provenance field | simulated | unattested         — what it is evidence of          (new)
+```
+
+The first two are about the **submission**. §56.2's classes are about the **run**. A platform worker
+can measure a simulated run, and a robot can produce an embodied one nobody verified — so these are
+two axes, and collapsing them would have destroyed the distinction §56 exists to draw. `provenance`
+is therefore a third column beside them rather than a replacement for either.
+
+#### NULL is not `unattested`
+
+The sharpest line in the schema. `unattested` is a **verdict**: §56.2 reached it by looking at a run
+bundle and finding nothing to attribute. NULL is the absence of a verdict — no bundle was ever
+submitted, so §56 has not classified the run and cannot.
+
+Every result on the platform when this landed is in the second state, and backfilling them to
+`unattested` would have been the platform asserting a §56 verdict about runs it holds no bundle for.
+That is §15's *"absence is not a pass"* pointed the other way: absence is not a failure either.
+
+#### The class is part of the leaderboard key
+
+Not a badge on a row. `unattested` never reaches a board at all — *"accepted and never ranked,
+because it is not evidence"* — and `simulated` and `field` are keyed separately, so one policy on
+one robot can hold a record on each. Collapsing them would let a simulated number displace an
+embodied one, which is the single outcome §56 exists to prevent.
+
+#### An eighth domain tag, and the broadest collision surface on the platform
+
+A run bundle binds a **policy digest, an embodiment descriptor digest and an OS image digest** —
+three hex strings each already signed under one of the existing tags. A bundle is therefore the one
+document here that contains other documents' subjects wholesale, and without `skynet.bundle.v1` a
+device signature over a descriptor could be presented as a device signature over the run that names
+it. §56.2 would then class as `field` a result nobody attested.
+
+#### Every fact the class turns on comes from the Hub
+
+A bundle arrives carrying claims about itself, and four of the facts §56.2 decides on are ones the
+Hub already holds:
+
+| Fact | Where the Hub gets it |
+|---|---|
+| `device_signature` | Decided here, and only against **this device's own key** |
+| `device_known` | Whether the second credential resolved to a device row |
+| `birth_attested` | §50's certificate, recomputed against what the Hub observes of the machine |
+| `image_attested` | §10's check-in attestation |
+
+`simulator` is the one claim taken at face value, and §52 already settled why: the obligation to
+declare sits on the simulator driver. A robot that lies the other way demotes its own result.
+
+`birth_attested` is the input that did not exist until §50 was built. Before it, the Hub could not
+evaluate §56.2's second condition at all — and a `field` class would have been three conditions
+wearing the name of four.
+
+---
+
 ---
 
 ## 57. The Hub surface, revised
@@ -3654,7 +3722,7 @@ that already exists rather than extending it — which is the useful finding:
 | **Entitlement tokens** (§51) | **Existing** — a field in the desired-state document, not an endpoint |
 | **POST results** (§48.2) | **Existing** — part of the check-in payload |
 | **Skill invocation outcomes** (§54.4) | **Existing** — `POST /episodes`, unchanged |
-| **Attested evaluation results** (§56) | **Existing shape** — `POST /evaluations` with a device credential and a signature field |
+| **Attested evaluation results** (§56) | **Existing shape** — `POST /evaluations` with a device credential and a signature field. Built: the device credential arrives in `X-Skynet-Device` beside the submitter's own, because the two answer different questions (§56.6) |
 | **Telemetry** (§34.4) | New — `POST /devices/{id}/telemetry`. **Added by §74**; §34.4 gave the class a priority, a drop policy and a counter, and neither this table nor §17 gave it a route |
 
 Ten new endpoints in total, four things that need only a new field, and no breaking change to any
@@ -3664,6 +3732,36 @@ against the Hub's object model from the start rather than beside it.
 New tables follow the `skynet_*` convention: `skynet_embodiments`, `skynet_device_state`,
 `skynet_calibration_records`, `skynet_conformance_results`, `skynet_certifications`,
 `skynet_incidents`, `skynet_os_releases`, `skynet_os_editions`, `skynet_attestations`.
+
+### 57.1 All of them exist
+
+Eleven endpoints, not ten: the count above was written before §74 gave telemetry a route, and the
+table's own last row says so. Written across five sessions on the Hub side.
+
+Recorded here rather than only in a build log, because the useful fact about this table is no
+longer what it asks for — it is **which of the eleven carry evidence and which carry assertions**,
+and that distinction is invisible from a list of routes that all return 200.
+
+| Endpoint | Evidence, or assertion |
+|---|---|
+| `GET /repos/…/transport` | Computed from two signed documents. Evidence. |
+| `GET\|POST /robots/{slug}/embodiment` | Signature state decided against a registered key. Evidence when `verified`, and it says which. |
+| `GET /devices/{id}/desired` | The Hub's own intent. Not a claim about a robot at all. |
+| `POST /devices/{id}/checkin` | The robot's word, and §17 forbids the Hub restating it as its own. |
+| `POST /devices/{id}/incidents` | The robot's word. The sealed recording behind it does not cross (§13). |
+| `POST /devices/{id}/conformance` | **Assertion.** §57 calls these signed and no runner on any robot signs one. |
+| `GET /certifications/{slug}` | Recomputed from the above, so it inherits the above. |
+| `GET /os/releases` | Signed bundles, admitted by the mirrored contract. Evidence. |
+| `GET\|POST /devices/{id}/calibration` | Half. Age and events are in the record; joint travel and temperature are properties of the robot at the moment of asking, and the answer names which rules it could not check. |
+| `POST /devices/{id}/telemetry` | Counted windows, with the denominator being what was **observed**. Evidence about the interval it covers and nothing about the intervals it does not. |
+| `POST /robots/{slug}/attestations` | Evidence, and the only one on this list where a *vendor* is the attesting party. |
+
+Two rows are the ones to read together. Conformance is asserted and certification is
+computed from it, which means §12's gate — the one deciding whether an OS update may change the
+safety kernel — currently reads evidence nobody signed. A birth certificate is the first document
+on the platform that is signed by the party who actually knows, and it closes the smaller half of
+that gap: it establishes **what the machine is**, which is the input every other measurement is
+about. It does not establish that the measurements were taken.
 
 ---
 

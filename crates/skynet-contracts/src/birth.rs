@@ -180,6 +180,43 @@ impl Finding {
         )
     }
 
+    /// Whatever this finding is about, on the wire.
+    ///
+    /// Uniform across the eight, and the order within it is load-bearing: for a mismatch it is
+    /// **what the certificate says, then what the machine reports**, in that order and never the
+    /// reverse. A reader who has to work out which of two hex strings came from the document is a
+    /// reader who will get it wrong once.
+    ///
+    /// This lives on the finding rather than in the encoder because the TypeScript edition carries
+    /// no enum — a finding *is* a code and a subject list there — so a projection that disagreed
+    /// with this one would be the two editions disagreeing about what a finding is while both
+    /// reproducing every code.
+    pub fn subjects(&self) -> Vec<String> {
+        match self {
+            Finding::Unattested(state) => alloc::vec![state.as_str().to_string()],
+            Finding::DeviceKeyMismatch {
+                certificate,
+                observed,
+            }
+            | Finding::SerialMismatch {
+                certificate,
+                observed,
+            }
+            | Finding::DescriptorMismatch {
+                certificate,
+                observed,
+            }
+            | Finding::HardwareRevisionMismatch {
+                certificate,
+                observed,
+            } => alloc::vec![certificate.clone(), observed.clone()],
+            Finding::OwnershipAsserted(fields) => fields.clone(),
+            Finding::Unobservable(field) | Finding::Incomplete(field) => {
+                alloc::vec![field.to_string()]
+            }
+        }
+    }
+
     /// The wire spelling.
     pub fn code(&self) -> &'static str {
         match self {
@@ -398,6 +435,22 @@ impl BirthCertificate {
         }
     }
 }
+
+/// Every code [`check`] can produce, in the order of their cost.
+///
+/// A closed vocabulary rather than whatever the match arms happen to spell, because a consumer
+/// deciding what to do about a finding needs the list to be enumerable — and because the order is
+/// content: the first entry is about the document rather than the machine.
+pub const FINDINGS: [&str; 8] = [
+    "unattested",
+    "device_key_mismatch",
+    "serial_mismatch",
+    "descriptor_mismatch",
+    "hardware_revision_mismatch",
+    "ownership_asserted",
+    "unobservable",
+    "incomplete",
+];
 
 /// The fields §50.2 says a certificate binds, in the order it lists them.
 ///
@@ -787,5 +840,58 @@ mod tests {
         let before = codes.len();
         codes.dedup();
         assert_eq!(codes.len(), before, "two findings share a code");
+    }
+
+    // -- The wire, and the other edition ------------------------------------
+
+    #[test]
+    fn the_vocabulary_lists_every_code_in_the_order_the_checks_run() {
+        // FINDINGS is what a consumer enumerates, and a code that exists and is not in it is a
+        // finding nobody can write a handler for.
+        assert_eq!(FINDINGS.len(), 8);
+        assert_eq!(FINDINGS[0], "unattested", "the document outranks the machine");
+        for code in FINDINGS {
+            assert!(!code.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_mismatch_puts_the_certificate_first_and_the_machine_second() {
+        // The one property the TypeScript edition cannot get from the type system: it carries no
+        // enum, so a finding there *is* a code and this list. A projection that put the observed
+        // value first would leave every reader unable to tell which hex string came from the
+        // document -- while both editions still reproduced every code.
+        let finding = Finding::SerialMismatch {
+            certificate: "SN-0001".to_string(),
+            observed: "SN-0002".to_string(),
+        };
+        assert_eq!(finding.subjects(), vec!["SN-0001", "SN-0002"]);
+        let sentence = explain(&finding);
+        assert!(
+            sentence.find("SN-0001").unwrap() < sentence.find("SN-0002").unwrap(),
+            "the sentence reads in the same order as the subjects: {sentence}"
+        );
+    }
+
+    #[test]
+    fn every_finding_carries_what_it_is_about() {
+        // An empty subject list would render a sentence with a hole in it, and the holes are the
+        // values somebody has to act on.
+        for finding in [
+            Finding::Unattested(SignatureState::Untrusted),
+            Finding::DeviceKeyMismatch {
+                certificate: "a".to_string(),
+                observed: "b".to_string(),
+            },
+            Finding::OwnershipAsserted(vec!["namespace".to_string()]),
+            Finding::Unobservable("a serial number"),
+            Finding::Incomplete("a model"),
+        ] {
+            assert!(
+                !finding.subjects().is_empty(),
+                "{} carries nothing",
+                finding.code()
+            );
+        }
     }
 }
