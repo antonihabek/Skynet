@@ -58,6 +58,7 @@ pub mod calibration;
 pub mod capacity;
 pub mod cell;
 pub mod checkin;
+pub mod conformance;
 pub mod connectivity;
 pub mod console;
 pub mod embodiment;

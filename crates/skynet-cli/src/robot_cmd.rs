@@ -53,6 +53,7 @@ skynet — talking to a running robot (§33.7)
   plan                        The last reconcile pass, and anything deferred
   cell                        The cell descriptor, its env.* facts and its faults
   power                       §36: the state, the reserve, and what is being given up
+  conformance                 §15's eight runtime tests, run by this robot on itself
   grants                      What is granted, and what is leased
   grants add <ns/name> <token> [--acknowledge <digest>]
                               A skill's safety notes are shown once and acknowledged (§54.2)
@@ -157,6 +158,7 @@ pub fn run(command: &str, argv: &[String]) -> i32 {
         "releases" => show(argv, "GET", "/releases", None, print_releases),
         "cell" => show(argv, "GET", "/cell", None, print_cell),
         "power" => show(argv, "GET", "/power", None, print_power),
+        "conformance" => show(argv, "GET", "/conformance", None, print_conformance),
         "pair" => pair(argv),
         "unpair" => show(
             argv,
@@ -1252,6 +1254,51 @@ fn grants(argv: &[String]) -> i32 {
 /// The environment is printed as the **context a precondition sees**, not as the facts as they were
 /// written, because those differ by exactly the faults below — and an operator whose skill was
 /// refused for `env.door closed` needs to see that the key never made it into the context.
+/// `skynet conformance` (§15).
+///
+/// The outcomes first and the sentences under them, because the sentences are long and an operator
+/// scanning eight rows wants the shape before the argument. Every row has one: a skipped test with
+/// no reason is exactly the shape §15's first rule exists against, and printing the outcome alone
+/// would reproduce it on the terminal after the runner had avoided it in the data.
+fn print_conformance(document: &Json) {
+    println!(
+        "conformance {} of {} runtime tests executed — this robot's own evidence supports {}",
+        document
+            .get("executed")
+            .and_then(Json::as_f64)
+            .unwrap_or(0.0),
+        document.get("of").and_then(Json::as_f64).unwrap_or(0.0),
+        term::bold(
+            document
+                .get("attainable")
+                .and_then(Json::as_str)
+                .unwrap_or("—")
+        )
+    );
+
+    for result in document.arr_or_empty("results") {
+        let outcome = result.get("outcome").and_then(Json::as_str).unwrap_or("?");
+        let id = result.get("test_id").and_then(Json::as_str).unwrap_or("?");
+        // A failure is the row an operator has to see. A skip is a gap and reads as one.
+        let label = format!("  {id:<32} {outcome}");
+        println!(
+            "{}",
+            if outcome == "fail" {
+                term::bold(&label)
+            } else {
+                label
+            }
+        );
+        if let Some(detail) = result.get("detail").and_then(Json::as_str) {
+            println!("      {}", term::dim(detail));
+        }
+    }
+
+    if let Some(note) = document.get("note").and_then(Json::as_str) {
+        println!("\n{}", term::dim(note));
+    }
+}
+
 /// `skynet power` (§36).
 ///
 /// The state first, because it is the one word an operator came for, and the reserve underneath it
