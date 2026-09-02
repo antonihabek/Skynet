@@ -728,6 +728,39 @@ The measurements that matter most are the ones taken **at the joint rather than 
 driver**: `safety.estop.latency`, `safety.envelope.clamps`, `embodiment.limits.honest`. A driver
 returning success is not evidence.
 
+### 15.1 Who runs which half, and why nothing on a robot signs
+
+§15's three suites have three runners, and for a long time two of them existed.
+
+* **`sim`, driver-facing** — `skynet driver check`, against a built shared object, with no hardware.
+* **`sim`, runtime-facing** — eight tests that are properties of the *runtime* rather than of a
+  driver, which that command lists by name as **not covered** because a driver can neither pass nor
+  fail them. `GET /conformance` on the robot is the runner for those: it executes them against that
+  robot's own installed code — the same `admitPackage` its installer runs, the same `admitBundle`
+  its updater runs — and reports the rest as `skipped` with a sentence naming what is missing and
+  whose it is.
+* **`bench`** — a human, a physical robot and a day. There is no substitute and this does not
+  pretend to be one.
+
+**A robot does not sign its own results, and that is a rule rather than a gap.** §19 is explicit
+that a robot verifies and never signs; a certificate a machine issued about itself would be worth
+exactly what it cost to produce. So what `GET /conformance` serves is a *report*: unsigned, carrying
+no bench and no field evidence, and therefore always at or below what a real award would be. The
+Hub awards, from evidence a person witnessed.
+
+The runner's own first rule is §15's, applied to itself with more force than to anything it runs: a
+conformance runner that reported `pass` for a test it did not perform would be the most damaging
+component this platform could ship. So every entry is either a check that executed or a named
+absence, and there is no third state.
+
+**One consequence worth stating out loud.** The first robot to run this failed
+`package.signature.required` — a guest-tier test — because §37.1's `admit` stage *reports* rather
+than gates for every package kind but a driver, and an unsigned package installs. That is a known
+and deliberate position (nothing on a robot can produce a signature, and refusing every locally
+built package would refuse the golden path), and reporting it as `skipped` would have hidden a
+decision behind an absence. It is a `fail`, it caps the evidence below guest, and a platform whose
+own suite says so about it is a platform whose suite means something.
+
 ### Award rules
 
 * **Absence is not a pass.** A required test with no result is `missing`, never a silent success.
@@ -4691,7 +4724,7 @@ miniature, and currently trivial to fix.
 | Identity, pairing, attestation, factory provisioning | §10, §50 | **Built on both sides** | `security.identity.attested` needs a TPM; no key is generated on a robot |
 | Desired state, fleet, OTA | §11–12, §14, §33.3 | **Built on both sides** — including §75's bundle fetch | No robot has yet applied an image from this Hub |
 | Black box, telemetry, replay | §13, §26, §41 | **Built** — ring, MCAP, sealing, deterministic replay; §74's telemetry on both sides | The sealed bytes do not cross §17 (§77); five of eight counters have no source, and four of the five need the kernel |
-| Conformance and certification | §15, §31.4, §56 | **Built on both sides** | No runner executes the suite on a robot, and nothing signs a result |
+| Conformance and certification | §15, §31.4, §56 | **Built on both sides** — and a robot now runs §15's eight runtime tests on itself (`GET /conformance`) | Two of the eight execute; the other six name what they wait for. Nothing signs a result and nothing will on a robot — §19 makes that a rule rather than a gap (§15.1) |
 | LeRobot | §16, §67 | **Built** — the bridge and its self-test | — |
 | Hub contract | §17, §57 | **Built** — twelve endpoints, no breaking change | Two of them carry assertions rather than evidence (§57.1) |
 | Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 44 CLI commands, the golden path checked mechanically | — |

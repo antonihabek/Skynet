@@ -150,6 +150,7 @@ pub fn handle<L: Launcher, S: Slots>(
         ("GET", ["audit"]) => ok(audit(context)),
         ("GET", ["watchdog"]) => ok(watchdog(context)),
         ("GET", ["power"]) => ok(power(context)),
+        ("GET", ["conformance"]) => ok(conformance(context)),
         ("GET", ["post"]) => {
             // Wall time, because the calibration row is an age comparison (§45.4). Not a control
             // decision, so §35.1 permits it.
@@ -235,6 +236,7 @@ fn known_path(segments: &[&str]) -> bool {
             | ["outbound"]
             | ["watchdog"]
             | ["power"]
+            | ["conformance"]
             | ["post"]
             | ["cell"]
             | ["packages"]
@@ -598,6 +600,32 @@ fn power<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
         ),
     );
     out
+}
+
+/// §15's eight runtime tests, run by this robot on itself.
+///
+/// The half of §73's conformance row this daemon can close: `skynet driver check` runs the
+/// driver-facing sim tests and names eight it cannot cover, and those eight are properties of the
+/// runtime — which is what this is. The other half, *"nothing signs a result"*, stays open by
+/// design rather than by omission: §19 says a robot verifies and never signs, so what this route
+/// serves is a report and never a certificate, and it says so in its own body.
+///
+/// A `GET`, and it runs real checks — which is worth defending, because a read that does work
+/// invites a route that has a side effect. Neither check has one: `admit_package` and
+/// `admit_bundle` are pure functions over synthetic documents, nothing is written, nothing is
+/// staged, and running this route a thousand times leaves the robot exactly as it was.
+fn conformance<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
+    let layout = context.daemon.store.layout().clone();
+    let body = crate::embodiment::load(&layout);
+    let capacity = crate::capacity::read(&context.daemon.store, &body, VERSION);
+    // §35.1's correlation clock, for the one thing it is for here: a result is a record a Hub
+    // places against other robots' records. Nothing in the run decides anything with it.
+    let at = crate::audit::rfc3339(wall_ms());
+    let run = crate::conformance::run(&capacity, &body, &at);
+    crate::conformance::to_json(
+        &run,
+        body.known().is_some_and(|known| known.descriptor.simulator),
+    )
 }
 
 fn watchdog<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {

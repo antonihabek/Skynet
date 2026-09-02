@@ -374,6 +374,10 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         // carries the reserve, the declared thresholds and which of §36.2's terms nobody supplied.
         // How much energy a robot has left is a diagnosis, and on a fleet it is a movement pattern.
         ("GET", ["power"]) => Role::Observer,
+        // §15's runtime tests, run on this robot. An observer, with the watchdog and the power
+        // state, and for their reason: the body names which of this platform's own safety proofs
+        // have and have not been made on this machine, which is diagnosis rather than status.
+        ("GET", ["conformance"]) => Role::Observer,
         // §39.1 gives an unauthenticated caller "stop, and see status", and a self-test verdict is
         // not status — it names which of a robot's safety proofs have and have not been made, which
         // is the kind of thing an observer credential exists for.

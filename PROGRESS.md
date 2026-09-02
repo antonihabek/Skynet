@@ -9467,3 +9467,114 @@ five and why: four are the kernel's, one is teleoperation's.
     true of the wiring, and read for months as though it were true of the machine. The supervisor
     was three lines away. The tell is a doc comment that explains an absence by naming a component
     the repository already has.
+
+---
+
+## 2026-09-02 (fortieth) — the suite, run by the robot on itself
+
+§73's conformance row has said the same thing since it was written:
+
+> No runner executes the suite on a robot, and nothing signs a result.
+
+The second clause turns out not to be a gap at all — §19 says a robot verifies and never signs, so a
+robot signing a certificate about itself is a thing the design forbids rather than a thing it lacks.
+The first clause was real, and this session is it.
+
+### The eight sentences, and five that had gone stale
+
+`skynet driver check` runs the driver-facing sim tests and lists, by name, eight it cannot cover:
+tests that are properties of the **runtime** rather than of a driver. Each carries a sentence
+explaining the omission, and each sentence is of the form *"needs X"*.
+
+Five of them named an X the platform has since built:
+
+| Test | Said | Built since |
+|---|---|---|
+| `package.signature.required` | needs the package installer | §37.1's installer, five signature states |
+| `package.grants.gate` | needs the permission model | grants, admission, `effective_grants` |
+| `ota.safety_gate` | needs the updater | §12, and §75's bundle route |
+| `telemetry.replay.deterministic` | needs the black box | ring, MCAP, sealing, replay |
+| `security.credential.scope` | needs device tokens | `skd_` credentials and their scopes |
+
+This is finding 49 at scale, and it is the same mechanism: a sentence explaining an absence is a
+claim, it decays exactly as fast as the absence does, and nothing in a repository re-reads one.
+
+Re-asking the eight questions turned out to be worth as much as answering them:
+
+* **Two execute now.** `ota.safety_gate` and `package.signature.required`.
+* **One is answerable and is not this machine's to answer.** `security.credential.scope` asks
+  whether a credential lifted from a robot can read repositories or write to another namespace —
+  which is a question about whether *the Hub* enforces the scopes. A robot reporting a pass would be
+  reporting on somebody else's enforcement. The sentence now says so.
+* **One turns out to be half-built, and not the half the test measures.** `package.grants.gate` is
+  about a package that *commands* an ungranted capability and the `mode_gate` guard refusing it.
+  Admission refuses one that *requests* one, at install. Those are different moments and different
+  components, and the second is the kernel's.
+* **Two are waiting on something real.** `safety.policy.isolation` needs a sandbox; the black box's
+  replay needs `resolve_limits`, which exists in the kernel crate and has no caller on the daemon —
+  another orphan, and the next session's.
+
+### The result the runner exists to produce
+
+`package.signature.required` — *"An unsigned package, and one whose bytes do not match its digest,
+are both refused"* — runs against this robot's real capacity, through the same `admit_package` its
+installer runs, over two synthetic manifests. Both are refused by the decision.
+
+**And it reports `fail`,** because §37.1's `admit` stage *reports* on this edition rather than
+gating, for every package kind but a driver. An unsigned package installs. `crate::admit` has said
+so in its own header for sessions; nothing had ever turned it into a verdict.
+
+That is the whole argument for a runner. Reporting it as `skipped` would hide a deliberate decision
+behind an unmeasured absence, and the two look identical on a dashboard. It is a fail, it caps this
+robot's own evidence below guest, and a platform whose suite says that about it is a platform whose
+suite means something.
+
+`ota.safety_gate` passes, and the pass is real rather than a restatement: an image changing
+`safety_kernel` **and** `envelope`, with no bench pass, put through the same `admit_bundle` the
+updater runs, refused.
+
+### A `GET` that runs checks
+
+Worth defending, because a read that does work is how a route acquires a side effect nobody notices.
+Neither check has one: both are pure functions over synthetic documents, nothing is written and
+nothing is staged. There is a test that runs the suite twice and asserts `GET /status` is
+byte-identical either side of it.
+
+### Two rules the runner applies to itself
+
+* **Absence is not a pass**, harder here than anywhere: a conformance runner that reported `pass`
+  for a test it did not perform would be the most damaging thing this repository could ship. Every
+  entry is a check that executed or a named absence, and there is no third state. A test that
+  produced neither would be a row with no sentence, and there is a test for that too.
+* **A skipped test carries no date.** §15 decays an award from the age of the oldest result, so a
+  gap dated today would postpone the decay it should be causing.
+
+And the tier: `attainable` claims `certified` deliberately, because §15's rule is that the evidence
+caps the award rather than the claim — a low claim would produce a low award for a reason that has
+nothing to do with the machine. With six of eight skipped and one failed, it cannot come out
+anywhere but the floor, which is the correct answer for a robot that has run two sim tests.
+
+### Numbers
+
+Rust: **1303** tests, up from 1291. Twelve new — nine on the runner, three on the route. `cargo fmt
+--all --check` and `cargo clippy --workspace --all-targets` clean; both mirrors match; the golden
+path counts 47 commands, which is 46 plus `conformance`.
+
+§15 gains §15.1, which says which runner runs which half of the suite and why nothing on a robot
+signs. §73's row moves from "no runner" to "two of the eight execute; the other six name what they
+wait for".
+
+### Findings, restated
+
+1–28 as before; 29–49 from the sessions above.
+
+50. **A list of things you cannot do is a list that rots, and it rots silently in the direction that
+    matters.** Five of eight sentences named a component the repository had since built, so the list
+    understated the platform *and* pointed every reader away from the place the work should go. It
+    cannot be caught by a test, because there is nothing to compare a sentence against — the only
+    mechanism is to re-read the omissions when the components they name are built, which is a habit
+    rather than a check.
+51. **Running the suite on yourself is worth doing before it passes.** The valuable output of this
+    session is a `fail` on a guest-tier test, produced by the platform about itself, sitting on a
+    route an operator can read. A runner built only when it would come out green would be a runner
+    that never measured anything anybody did not already believe.

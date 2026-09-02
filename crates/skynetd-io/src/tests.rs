@@ -1666,6 +1666,82 @@ fn a_body_that_declares_no_power_block_is_unmetered_without_a_fault() {
     assert!(body.arr_or_empty("faults").is_empty());
 }
 
+/// §15's runtime tests, over the real router.
+#[test]
+fn the_conformance_route_runs_what_it_can_and_names_what_it_cannot() {
+    let mut fixture = Fixture::new("conformance-route");
+    fixture.provision();
+
+    let (status, body) = fixture.request("GET", "/conformance", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(body.arr_or_empty("results").len(), 8);
+
+    let by_id = |id: &str| -> String {
+        body.arr_or_empty("results")
+            .iter()
+            .find(|r| r.get("test_id").and_then(Json::as_str) == Some(id))
+            .and_then(|r| r.get("outcome").and_then(Json::as_str))
+            .unwrap_or("missing")
+            .to_string()
+    };
+
+    // The one this edition passes, by running the function its own updater runs.
+    assert_eq!(by_id("ota.safety_gate"), "pass");
+    // And the one it fails, which is the point of running the suite on yourself.
+    assert_eq!(by_id("package.signature.required"), "fail");
+    assert_eq!(by_id("safety.policy.isolation"), "skipped");
+
+    // Every row carries a sentence, including — especially — the skipped ones.
+    for result in body.arr_or_empty("results") {
+        assert!(
+            result
+                .get("detail")
+                .and_then(Json::as_str)
+                .is_some_and(|d| d.len() > 20),
+            "{:?}",
+            result.get("test_id")
+        );
+    }
+
+    assert!(body
+        .get("note")
+        .and_then(Json::as_str)
+        .is_some_and(|note| note.contains("never signs")));
+}
+
+/// A `GET` that runs checks must still be a `GET`: nothing it does may change the robot.
+#[test]
+fn running_the_conformance_suite_changes_nothing() {
+    let mut fixture = Fixture::new("conformance-pure");
+    fixture.provision();
+    let before = fixture
+        .request("GET", "/status", Some("observer-token"), "")
+        .1;
+    fixture.request("GET", "/conformance", Some("observer-token"), "");
+    fixture.request("GET", "/conformance", Some("observer-token"), "");
+    let after = fixture
+        .request("GET", "/status", Some("observer-token"), "")
+        .1;
+    assert_eq!(
+        before.to_canonical().ok(),
+        after.to_canonical().ok(),
+        "two runs of the suite left the robot in a different state"
+    );
+}
+
+#[test]
+fn reading_conformance_needs_an_observer() {
+    let mut fixture = Fixture::new("conformance-role");
+    fixture.provision();
+    assert_eq!(fixture.request("GET", "/conformance", None, "").0, 401);
+    assert_eq!(
+        fixture
+            .request("GET", "/conformance", Some("observer-token"), "")
+            .0,
+        200
+    );
+}
+
 #[test]
 fn reading_power_needs_an_observer() {
     let mut fixture = Fixture::new("power-route-role");
