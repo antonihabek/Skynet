@@ -39,6 +39,7 @@
 # it never has to: the files that are compared byte for byte across two repositories are stored the
 # same way in both.
 reference/typescript/*.ts eol=lf
+reference/wire/*.json     eol=lf
 corpus/**/*.json          eol=lf
 tools/**/*.mjs            eol=lf
 tools/**/*.ts             eol=lf

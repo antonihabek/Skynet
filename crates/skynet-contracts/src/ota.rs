@@ -100,6 +100,18 @@ pub struct BundleManifest {
     pub channel: String,
     /// `sha256:…` over the bundle. What a bench pass is bound to.
     pub digest: String,
+    /// How many bytes the bundle is, when the publisher declares it.
+    ///
+    /// **Absent, not zero, on a manifest that says nothing** — and the distinction is load-bearing
+    /// twice over. [`crate::bundle::plan_fetch`] refuses to resume from a partial *larger than the
+    /// whole*, which is how a leftover from another image is caught before a transfer rather than
+    /// after it; with no declared size there is nothing to compare and the digest catches it at the
+    /// end instead. And a progress line is a fraction only when the denominator came from the
+    /// signed document — a size the *server* claimed describes whatever the server is serving.
+    ///
+    /// A `0` here would be a publisher declaring an empty image, which is a different statement
+    /// from declining to say.
+    pub size: Option<u64>,
     /// Machine identifiers this image is built for. Empty means the bundle declares nothing, which
     /// is a warning rather than a match — see [`admit_bundle`].
     pub compatible: Vec<String>,
@@ -729,6 +741,7 @@ mod tests {
             version: "1.4.0".to_string(),
             channel: "stable".to_string(),
             digest: "sha256:aaaa".to_string(),
+            size: Some(402_653_184),
             compatible: vec!["bench-arm-v1".to_string()],
             changes: changes.iter().map(|c| (*c).to_string()).collect(),
         }

@@ -621,6 +621,9 @@ Three rules that are not standard practice:
 Rollout is staged through deployment rings (canary → ring 1 → fleet) with automatic halt on a
 rise in guard trip rates, which the black box already measures.
 
+Getting the bytes is §75, which was written after building both halves found that this section
+gates *applying* an image and nothing anywhere fetched one.
+
 ---
 
 ## 13. The black box
@@ -633,7 +636,9 @@ sequence · tick · monotonic ns · observation hash · policy digest · policy 
      · capability token · nearest-person distance
 ```
 
-Sealed and uploaded on any fault, estop, or operator request.
+Sealed and uploaded on any fault, estop, or operator request. **The seal is taken by the raise and
+the bytes do not cross yet** — see §77, which was written when the two halves were built and the
+incident turned out to be a document with no window attached to it.
 
 > **Amended by the implementation.** Three additions, each of which the first version of the record
 > made impossible rather than merely awkward.
@@ -794,6 +799,7 @@ POST /devices/{id}/checkin                              generation, health, atte
 POST /devices/{id}/incidents                            sealed black box upload
 POST /devices/{id}/conformance                          signed SCTS results
 GET  /os/releases?channel=&tier=&arch=                  OTA bundle manifest
+GET  /os/releases/{version}/bundle?arch=                the image itself (added by §75)
 GET  /certifications/{robot_slug}                       award, evidence, expiry, field conformance
 ```
 
@@ -1575,6 +1581,36 @@ An edition that has not passed the corpus is not an edition. It cannot carry the
 the matrix, or be installed by `skynetd` — which is the same mechanism SCTS applies to robots,
 pointed at implementations.
 
+### 31.6 The wire fixtures — the same mechanism, pointed at the boundary
+
+The corpus holds N editions to one specification. It cannot see the **boundary**: the Hub is a
+different repository with a different language and a different test runner, and §17's documents cross
+between them.
+
+That gap has a shape, and §76 is the instance that found it. Both sides of the episode path were
+built, both were tested, and neither had ever put one document through the other — they did not
+agree about a single field name. Each suite was correct and each was about half a boundary: one
+asserted what the robot sends, the other asserted what the Hub accepts.
+
+So a second frozen set, `reference/wire/`, built on the same idea and with three properties that
+make it worth having:
+
+1. **Produced by the code, never typed.** Each file is the exact canonical body the daemon puts on
+   the wire for one route, written by its own suite from the real producer. A fixture somebody wrote
+   beside the test that reads it is a record of what its author believed.
+2. **Read by the far side's real contract.** The Hub pushes each document through the receiving
+   route's validation and asserts the facts survive — not through a parser written for the test.
+3. **Pinned in both repositories**, so a fixture that moves without the other side being resynced
+   fails in CI with one checkout, which is what CI has.
+
+The result is that a change to a producer fails in the OS suite with the command that re-freezes it,
+and a change to a route that stops reading a field fails in the Hub's. The two then land together,
+which is the property neither side could have alone.
+
+It is deliberately **not** a second corpus. Nothing is frozen here that no producer emits — a fixture
+for a document nothing writes freezes somebody's guess, and hides exactly the gap this set exists to
+find.
+
 ### 31.5 The cost, stated plainly
 
 Because it should be visible rather than discovered:
@@ -1583,7 +1619,9 @@ Because it should be visible rather than discovered:
 * **N× security surface.** A memory-safety bug in the C or C++ kernel is a bug the Rust edition
   does not have, and adopters of that edition carry it.
 * **The corpus is permanent work.** It must grow with every feature, and a feature without corpus
-  coverage is a feature where editions may already disagree.
+  coverage is a feature where editions may already disagree. §31.6's wire fixtures are the same
+  standing cost pointed at the boundary, and the same rule applies: a document that crosses §17
+  without one is a document the two repositories may already disagree about.
 * **Certification is per edition, not per product.** A vendor certifying on the C++ edition has
   certified the C++ edition. The badge names it.
 
@@ -3482,6 +3520,21 @@ Three rules:
 skill per robot, recorded in the audit log. A safety note nobody has read is a safety note that
 does not exist.
 
+Two refinements from building it, both of which the plain reading permits and neither of which it
+implies:
+
+* **The acknowledgement is bound to the digest of the notes**, not to the package name. A publisher
+  who edits a warning has written a new warning, and the alternative lets a package acquire its
+  notes *after* an operator agreed to a blank one — which is the version of this rule that would be
+  worth nothing.
+* **The refusal carries the notes.** *Displayed* is the word the rule uses, and the only place the
+  robot can be sure a person sees them is in the answer to the request they just made. A refusal
+  that named the rule and not the text would send an operator to look them up on a Hub the robot may
+  not be able to reach.
+
+It gates a **widening** and nothing else. Revocation, stopping and every other narrowing path is
+untouched, for §39.1's reason: the safe direction never waits.
+
 ### 54.3 Success is judged by the OS, not by the skill
 
 `success_criteria` is evaluated the same way, over post-state, by the runtime rather than by the
@@ -3516,6 +3569,9 @@ Every transition is a black box event, and one episode is emitted per invocation
 skill reference, arguments, outcome, duration and intervention count. Skills therefore generate
 training data as a side effect of being used, which is the flywheel the Hub was built for.
 
+**The document is `POST /episodes`'s, not one of the robot's own** — see §76, which was written
+after the two halves were compared for the first time and did not agree about a single field name.
+
 ### 54.5 Composition
 
 `SkillManifest.composition` names a model, dataset, environment and benchmark. On the OS only the
@@ -3527,7 +3583,12 @@ Skill-to-skill calls are permitted with three limits, because a composition syst
 becomes a way to exhaust a robot:
 
 * **Depth-limited** (default 4) and **acyclic** — a cycle is refused at install by walking the
-  declared graph, not discovered at runtime.
+  declared graph, not discovered at runtime. Both halves of that sentence are load-bearing and the
+  second is the one that was missing for six sessions: the runtime validated the **live ancestry**
+  and refused the call that would close a cycle, which is correct and is exactly the discovery this
+  rule forbids being the only one — it fires on a robot, with leases held and a deadline running.
+  The declared graph is walked at install, reported to whoever ran the command, and enforced at the
+  symlink swap where a staged blob becomes usable (§37.1).
 * **Leases are held by the root invocation**, not re-acquired per call. Nested acquisition is how
   you get a skill deadlocking against its own child.
 * **The root's timeout bounds the whole tree.** A child cannot extend its parent's budget.
@@ -3724,8 +3785,9 @@ that already exists rather than extending it — which is the useful finding:
 | **Skill invocation outcomes** (§54.4) | **Existing** — `POST /episodes`, unchanged |
 | **Attested evaluation results** (§56) | **Existing shape** — `POST /evaluations` with a device credential and a signature field. Built: the device credential arrives in `X-Skynet-Device` beside the submitter's own, because the two answer different questions (§56.6) |
 | **Telemetry** (§34.4) | New — `POST /devices/{id}/telemetry`. **Added by §74**; §34.4 gave the class a priority, a drop policy and a counter, and neither this table nor §17 gave it a route |
+| **OS bundle bytes** (§12) | New — `GET /os/releases/{version}/bundle`. **Added by §75**; §12 gates applying an image and neither this table nor §17 gave a route to fetch one, so a robot could admit a release it had no way to obtain |
 
-Ten new endpoints in total, four things that need only a new field, and no breaking change to any
+Eleven new endpoints in total, four things that need only a new field, and no breaking change to any
 of the sixty routes that exist. The reason the delta is this small is that the OS was designed
 against the Hub's object model from the start rather than beside it.
 
@@ -3735,8 +3797,9 @@ New tables follow the `skynet_*` convention: `skynet_embodiments`, `skynet_devic
 
 ### 57.1 All of them exist
 
-Eleven endpoints, not ten: the count above was written before §74 gave telemetry a route, and the
-table's own last row says so. Written across five sessions on the Hub side.
+Twelve endpoints, not ten: the count above was written before §74 gave telemetry a route and §75
+gave the bundle one, and the table's own last rows say so. Written across six sessions on the Hub
+side.
 
 Recorded here rather than only in a build log, because the useful fact about this table is no
 longer what it asks for — it is **which of the eleven carry evidence and which carry assertions**,
@@ -3755,6 +3818,7 @@ and that distinction is invisible from a list of routes that all return 200.
 | `GET\|POST /devices/{id}/calibration` | Half. Age and events are in the record; joint travel and temperature are properties of the robot at the moment of asking, and the answer names which rules it could not check. |
 | `POST /devices/{id}/telemetry` | Counted windows, with the denominator being what was **observed**. Evidence about the interval it covers and nothing about the intervals it does not. |
 | `POST /robots/{slug}/attestations` | Evidence, and the only one on this list where a *vendor* is the attesting party. |
+| `GET /os/releases/{version}/bundle` | Bytes, and the only row on this list that is neither. What makes them evidence is the digest in the signed manifest they are checked against — which is why the route needs no signature of its own (§75.1). |
 
 Two rows are the ones to read together. Conformance is asserted and certification is
 computed from it, which means §12's gate — the one deciding whether an OS update may change the
@@ -4392,45 +4456,65 @@ miniature, and currently trivial to fix.
 
 ## 73. What version one covers
 
-| Area | Where | State |
-|---|---|---|
-| Thesis, tiers, the honest meaning of universal | §1–3 | Designed |
-| RHAL — ABI, structs, drivers | §4, §24, §66–71 | Designed; C and C++ headers written and compiling |
-| Embodiment descriptor and transport | §5–6, §44, §52 | Designed and implemented |
-| Safety Kernel — guards, limits, tiers | §7, §23.1, §25, §46 | Designed and implemented |
-| Packages, permissions, admission | §8, §37 | Designed and implemented |
-| skynetd — reconciliation, supervision, health | §9, §33 | Designed |
-| Identity, pairing, attestation, factory provisioning | §10, §50 | Designed |
-| Desired state, fleet, OTA | §11–12, §14, §33.3 | Designed |
-| Black box, telemetry, replay | §13, §26, §41 | Designed |
-| Conformance and certification | §15, §31.4, §56 | Designed and implemented |
-| LeRobot | §16, §67 | Designed |
-| Hub contract | §17, §57 | Designed — 9 new endpoints, no breaking change |
-| Developer experience, driver authoring, URDF import | §18, §63–65 | Designed |
-| Security, local access control | §19, §39 | Designed; signature verification and the trust store implemented |
-| Distribution and business model | §20, §72 | Designed |
-| Languages, editions, levels | §23, §31, §42 | Designed |
-| IPC, observation assembly, arbitration | §25 | Designed |
-| Boot, faults, POST, homing | §27, §48 | Designed |
-| Networking, time, power, thermal | §34–36 | Designed |
-| Configuration, calibration | §38, §45 | Designed |
-| Resource enforcement | §40 | Designed |
-| Frames | §44 | Designed |
-| Sensor and media pipeline | §47 | Designed |
-| Audio | §49 | Designed |
-| Entitlement | §51 | Designed |
-| Skills, environments, on-robot evaluation | §54–56 | Designed |
-| Interface — Hub-side and on-robot | §32 | Designed |
-| Limits, and what is not true | §59–61 | Stated |
+> **Amended, and the amendment is the point of the table.** This began as a list of what had been
+> *designed*, written when the implementation was 2,430 lines of TypeScript. It went stale in the
+> ordinary way — nobody updates a summary while they are building the thing it summarises — and a
+> state table that says "Designed" about a subsystem with 45 tests is worse than no table: it is the
+> first thing a vendor reads, and it was understating the platform by about eighty thousand lines.
+>
+> Three states, and the third is the one worth having. **Designed** is prose. **Built** is code with
+> a suite. **Built on both sides** means the robot half and the Hub half exist and a document has
+> been put through one into the other (§31.6). The last column says what is *not* true yet, per row,
+> because a table of green ticks is the failure this whole document is written against.
 
-Implemented means running, tested TypeScript in `lib/skynet/os/`: 2,430 lines across transport,
-admission, certification and readiness, with 80 unit tests inside a suite of 1,117.
+| Area | Where | State | What is still missing |
+|---|---|---|---|
+| Thesis, tiers, the honest meaning of universal | §1–3 | Designed | — |
+| RHAL — ABI, structs, drivers | §4, §24, §66–71 | **Built** — C, C++ and Python headers; mock, MuJoCo and LeRobot drivers | No vendor has written one |
+| Embodiment descriptor and transport | §5–6, §44, §52 | **Built on both sides** | — |
+| Safety Kernel — guards, limits, tiers | §7, §23.1, §25, §46 | **Built** — `no_std`, no allocator, 101 tests | Nothing has driven a physical joint |
+| Packages, permissions, admission | §8, §37 | **Built** | Nothing on a robot can *produce* a signature (§19) |
+| skynetd — reconciliation, supervision, health | §9, §33 | **Built** — level-triggered, six ordered stages | — |
+| Identity, pairing, attestation, factory provisioning | §10, §50 | **Built on both sides** | `security.identity.attested` needs a TPM; no key is generated on a robot |
+| Desired state, fleet, OTA | §11–12, §14, §33.3 | **Built on both sides** — including §75's bundle fetch | No robot has yet applied an image from this Hub |
+| Black box, telemetry, replay | §13, §26, §41 | **Built** — ring, MCAP, sealing, deterministic replay; §74's telemetry on both sides | The sealed bytes do not cross §17 (§77); six of eight counters have no source |
+| Conformance and certification | §15, §31.4, §56 | **Built on both sides** | No runner executes the suite on a robot, and nothing signs a result |
+| LeRobot | §16, §67 | **Built** — the bridge and its self-test | — |
+| Hub contract | §17, §57 | **Built** — twelve endpoints, no breaking change | Two of them carry assertions rather than evidence (§57.1) |
+| Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 44 CLI commands, the golden path checked mechanically | — |
+| Security, local access control | §19, §39 | **Built** — Ed25519, the trust store, five signature states, four roles | — |
+| Distribution and business model | §20, §72 | Designed | — |
+| Languages, editions, levels | §23, §31, §42 | **Built** — one edition, held to a corpus of 68 files and 973 cases | The second edition, which is what the corpus is for |
+| IPC, observation assembly, arbitration | §25 | **Built** — the shared-memory ring and the command frame | — |
+| Boot, faults, POST, homing | §27, §48 | **Built** — §27's machine, POST's eight checks | Five of the eight are the kernel's, through a path §33.1 denies the daemon |
+| Networking and time | §34–35 | **Built** — bearers, metering, the outbound queue, backoff, two clocks kept apart | — |
+| Power and thermal | §36 | Designed | **Unwritten.** `battery` and `temperature_c` are reported absent in every check-in, which is why the health rollup has two permanently unmeasured fields |
+| Configuration, calibration | §38, §45 | **Built on both sides** | — |
+| Resource enforcement | §40 | **Built** — cgroup limits, the RT core | — |
+| Frames | §44 | **Built** — the graph, forward kinematics, both pose guards | — |
+| Sensor and media pipeline | §47 | **Built** — capture, gaps annotated as gaps | — |
+| Audio | §49 | Designed | — |
+| Entitlement | §51 | **Built** — offline verification | — |
+| Skills, environments, on-robot evaluation | §54–56 | **Built** — §54.4's lifecycle, composition, safety notes | Nothing on this edition can run a policy, so no skill has ever executed |
+| Interface — Hub-side and on-robot | §32 | **Built on both sides** — the console, the fleet page, the device page | Three of §32.1's four panels are named gaps |
+| Limits, and what is not true | §59–61 | Stated | — |
+
+**Built** means running, tested code: **85,700 lines of Rust** across fifteen crates with 1,179
+tests, **12,600 lines** of the TypeScript reference edition that the corpus holds it to, **5,400
+lines** of drivers, and **8,100 lines** in the Hub's mirror of the shared contracts. The Hub's own
+suite is 1,478 tests.
+
+Numbers go stale; the shape does not. What the table is for is the **last column**, and the honest
+summary of it is that every subsystem that can be built without hardware has been, every subsystem
+that needs a physical machine is waiting for one, and the three things that are neither — a signing
+key on a robot, a conformance runner, and the bytes of a sealed recording — are named in it rather
+than absent from it.
 
 Open questions are collected in §43, §53, §58.3 and §61 rather than closed prematurely. The largest
 are not engineering: retargeting fidelity is a research result nobody has, joint-level access is a
 property of hardware other people already shipped, and the certified tier needs a notified body.
 
-Version one ends here.
+Version one ends here. Part X is what building the other half found.
 
 ---
 ---
@@ -4536,3 +4620,209 @@ a fleet that lost every telemetry window would be exactly as safe and exactly as
   the elapsed time and the Hub can say so rather than dividing by a period it did not observe.
 * **§32.1's guard trip rate column has a source**, and it is the only one it could have had.
 * **New table**, following the `skynet_*` convention: `skynet_telemetry_windows`.
+
+---
+
+## 75. Amendment to §12 and §57 — the bundle has a route
+
+§12 is four pages about *applying* an image: A/B slots, the safe-state barrier, health-gated
+rollback, and the gate it calls the single most important test in the suite. It says nothing about
+**getting** one, because getting one looks like an implementation detail.
+
+It is not, and the shape of the gap is exactly §74's. From the robot's side everything worked: the
+manifest arrived, the signature verified, the compatibility list matched, the bench pass gated the
+kernel change, and the action reported — correctly, for twenty-five sessions — that there was no
+bundle and no way to ask for one. From the Hub's side there was a catalogue of manifests that
+nobody had ever asked for bytes from. Neither end was wrong. There was no route.
+
+So there is an eleventh endpoint:
+
+```
+GET /os/releases/{version}/bundle?arch=        the bytes of one image; a redirect, and resumable
+```
+
+### 75.1 A location is not evidence
+
+The manifest names a digest and **not** a URL, and the robot derives the location from the endpoint
+§10 paired it to.
+
+This is worth stating because the opposite is the obvious design. A signed manifest carrying a
+download URL would let a publisher point at a mirror, and it reads as the more secure option because
+the URL is inside a signature. It is the weaker one. The bytes are checked against a digest that is
+already signed, so a hostile mirror serving the wrong image produces a mismatch and a deleted file —
+the location cannot lie about the content. What a signed URL *does* buy is a manifest that goes stale
+the day a hostname changes, and a signature over a fact that did not need one.
+
+It also keeps §57's narrow manifest narrow. The Hub's release row carries an artifact id; the robot
+copies the manifest's own fields out of it and deliberately not that one, so no edition can start
+depending on the Hub's storage layout.
+
+### 75.2 A slice, not a transfer
+
+An image is hundreds of megabytes and §33.2's loop is one thread: it reconciles, serves the local
+API and pings the watchdog, in that order, for ever. A pass that blocked for the twenty minutes a
+transfer takes over a warehouse link would be a supervisor that had stopped supervising — which is
+the rule §34.4's drain already follows, and it applies here with more force because the payload is
+two orders of magnitude larger.
+
+So each reconcile pass moves what it can inside a bounded budget and the next one resumes.
+**Resume is what makes a bounded slice free**, and resume is why the partial is keyed to the digest
+rather than to the version: a partial keyed by version would let a resume append one release's tail
+to another's head, and the failure would surface after the whole transfer rather than before it.
+
+Two consequences that are not obvious until the budget exists:
+
+* **A slice that runs out of budget is not a failure**, and must not back off. The distinction the
+  robot needs is *did the file grow*, not *did the process exit zero* — a link that moved forty
+  megabytes and then dropped has made progress, and doubling a delay for it makes a poor link
+  exponentially poorer.
+* **A server that ignores the range is caught at the response, not at the digest.** A `200` to a
+  resume means the whole file was appended to what was already there. The digest would catch it,
+  hours later; the status code catches it immediately and throws the partial away.
+
+### 75.3 The bytes are checked before they are installed, however they arrived
+
+Writing the fetcher found a hole that had been open since §12 was built, and it was not in the part
+that was missing. **Every gate §12 applies is bound to the manifest's digest — and nothing compared
+that digest against the bytes handed to the bootloader.** A bundle placed on a robot's disk by hand,
+which was the only way to update one before this route existed, was installed unchecked.
+
+The rule is therefore stated where it can be applied rather than assumed: an image is hashed against
+the manifest immediately before it is installed, whatever put it there, and a mismatch deletes it. An
+unverified bundle left on a disk is an artifact some future code path finds and treats as an image.
+
+### 75.4 §34.3 applies, and the wait is visible
+
+An OS image is the largest bulk transfer this system has, so it waits for an unmetered bearer. The
+wait is a **state a console shows**, not a silent skip: a robot on cellular that is admitted to
+update and is not updating is behaving correctly, and an operator who cannot see why will conclude
+the fleet is broken.
+
+That state is also not a failure, which turns out to need saying in the reconciler's own vocabulary:
+§34.1 assumes the robot is offline, so *no link* and *a metered link* are the ordinary condition of
+a fleet rather than faults in a machine. A supervisor that reported them as failures would put a red
+line on a console every ten seconds for a robot doing exactly what it was designed to do.
+
+### 75.5 Consequences elsewhere
+
+* **§57's count becomes eleven**, and no existing route changes.
+* **§12's `stage_image` becomes reachable**: it assesses, fetches, checks and installs, in that
+  order. The assessment stays first, so a refusal costs no bytes.
+* **A manifest published with no artifact is a state the Hub can now name.** It validates, it lists,
+  and every robot on the channel holds it, gates it, admits it and then waits for an image nobody
+  uploaded. The route answers that with its own refusal rather than a generic *not found*.
+* **The manifest declares a size**, added in the session after this one and recorded here rather
+  than in a build log because it is the field two of the rules above depend on. *A partial cannot be
+  larger than what it is part of* needs something to compare against, and a progress line is a
+  fraction only when the denominator came from the document a publisher signed — a size the server
+  claimed describes whatever that server is serving. It is **absent, not zero**, on a manifest that
+  says nothing: a zero would be a publisher declaring an empty image, which would have every robot
+  on the channel discard its partial on the first pass.
+
+  Its one cost is worth naming. The manifest's canonical bytes changed, so a robot holding the
+  five-field version of a release refuses the six-field one as *"the Hub is serving a different
+  manifest for release X"* — which is the immutability rule working exactly as §12 intends. Free
+  today, when no robot holds one; a new version number after a fleet exists.
+
+---
+
+## 76. Amendment to §54.4 — the episode is the route's document
+
+§54.4 says one episode is emitted per invocation, *"carrying the skill reference, arguments,
+outcome, duration and intervention count"*, and §57 routes it to `POST /episodes`. Both halves were
+built. Neither had ever put one document through the other.
+
+The robot sent `skill`, `duration_ms` and `intervention_count`. The route reads `task`,
+`duration_seconds` and `interventions`, ignores fields it does not know, and answers `201`. Every
+episode a robot produced would have been stored with **no task, no duration and none of the skill** —
+successfully, quietly, and with each side's own suite passing, because one asserted what the robot
+sends and the other asserted what the Hub accepts.
+
+Three rules follow, and none of them is about episodes specifically. §31.6 is the mechanism that
+enforces them, added in the same session: the documents that cross §17 are frozen from their real
+producers and read by the far side's real contract.
+
+### 76.1 The producer writes the consumer's field names
+
+A document that crosses §17 is the receiving route's shape, not a shape the producer chose and the
+receiver is expected to adapt to. The alternative — a translation layer on one side — is the same
+mistake wearing a coat: it is a second definition of the document, and §31.2 already gives the
+reason two definitions of one structure is a defect rather than a convenience.
+
+Where the two disagree, the route wins, because the route is the one with a table under it.
+
+### 76.2 What the schema has no column for goes in `metadata`, not into a column that nearly fits
+
+§54.4's list is longer than the episode table's columns: the invocation id, the digest of the bytes
+that ran, the arguments, the lifecycle reason, whether it was a root invocation. All of it matters to
+an incident investigation and none of it has a column.
+
+The temptation is to put the skill reference in `task` and let the rest go. Both halves of that are
+wrong: `task` is what the robot was doing, which for a skill invocation *is* the skill, so it belongs
+there — and the remaining facts belong in the `jsonb` column that exists for facts a schema does not
+model. Dropping them is the option that leaves an investigation with a row saying a skill failed and
+no way to find which bytes were running.
+
+### 76.3 Unmeasured has to survive the crossing
+
+The robot omits `intervention_count` when nothing on it counts interventions, and says why in the
+code that omits it. `POST /episodes` defaulted the absence to `0`, and the column was
+`integer not null default 0`.
+
+So the robot's careful absence became a zero at the boundary — and a zero here is not a neutral
+value. It is *"this run needed no human"*, which is the number a marketplace quotes. §74.3 states
+the rule for telemetry counters and it is general: **zero and unmeasured are opposite facts, and the
+one that gets misread is always the one that looks like good news.** A schema that cannot express the
+absence forces every producer to assert something false, and the producer that is most careful about
+it is the one that gets misread first.
+
+The column is nullable, the validation preserves the absence, and any aggregate over it carries the
+count of rows that actually measured — because a total over four hundred episodes of which twelve
+counted is a smaller number presented as a better one.
+
+---
+
+## 77. Amendment to §13 — the incident names its window, and does not carry it
+
+§13 says a recording is *"sealed and uploaded on any fault, estop, or operator request"*, and §17
+lists `POST /devices/{id}/incidents` as a **sealed black box upload**. Neither half was true.
+
+The sealing existed and nothing called it: a fault produced a document, the ring kept turning, and
+the window that described the fault was overwritten in the ordinary course of a robot running.
+`skynet_incidents.artifact_id` was NULL on every row the platform could hold, and an investigator
+reading one had no way to know a recording had ever existed.
+
+So the seal is now taken **by the raise**, not by the caller, and the incident carries the window's
+identity: name, size, digest, record count, damaged count, and `uploaded: false`.
+
+### 77.1 Sealing is not uploading, and the document says which
+
+A sealed window is tens to hundreds of megabytes. §34.3 puts it in the bulk class, which wants
+resume, progress and metering on an **upload** — the mirror of §75's fetch, and unwritten.
+
+Between "send it" and "say nothing" there is a third option that is honest and cheap: send the
+window's identity. A Hub can then say *"this incident has a 4 MB recording on the robot, digest
+`sha256:…`, that nothing has collected"*, which is a true statement somebody can act on. Saying
+nothing is what leaves an operator concluding no recording was taken — the worse of the two errors,
+because it closes an investigation rather than opening one.
+
+The digest is what makes it worth carrying. When the bytes do cross, they are checked against a
+digest that was recorded before the transfer existed, by the party that produced them.
+
+### 77.2 Three states, not a field that is sometimes there
+
+`recording` is always present and always the same shape, discriminated by `sealed`:
+
+* **sealed** — the window, named.
+* **not sealed**, with the reason: no ring, or a ring that would not open. A fact about the machine.
+* **absent** — an older edition, or a producer that says nothing. **Not** evidence of either above.
+
+A consumer that had to switch on a JSON type before reading a field would get it wrong on the robot
+where it matters, which on this edition is the common case: a development root has no ring at all.
+
+### 77.3 A seal that fails does not swallow the incident
+
+The failure is written **into** the document and the incident is queued anyway. §34.4 makes this the
+one class that is never dropped, and a robot that suppressed an alarm because its own recorder was
+broken would be losing the report and the recording together — which are precisely the two things
+that fail at the same moment.

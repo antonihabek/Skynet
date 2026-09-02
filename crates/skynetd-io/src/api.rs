@@ -18,6 +18,7 @@
 //! | `GET /packages` | observer | Installed, active digest, wanted state, grants |
 //! | `GET /packages/{ns}:{name}` | observer | One package, with its rollback target |
 //! | `GET /plan` | observer | The last reconcile pass, including everything deferred and why |
+//! | `GET /cell` | observer | §55.2's cell descriptor, its `env.*` context and its faults |
 //! | `GET /grants` | observer | Grants and leases |
 //! | `GET /logs/{ns}:{name}` | observer | The package's journal — not the black box (§41.1) |
 //! | `GET /blackbox` | observer | The recording's window, what is missing from it, and the sealed files |
@@ -176,6 +177,10 @@ pub fn handle<L: Launcher, S: Slots>(
                 .map(|elapsed| elapsed.as_secs() as f64);
             ok(crate::calibration::status(context.daemon.store.layout(), wall_s).to_json())
         }
+        // §55.2's cell, and the faults nothing else on this robot reports. An observer's read: it
+        // is what the operator wrote down about the space, which is exactly what somebody
+        // debugging a refused precondition needs to see.
+        ("GET", ["cell"]) => ok(crate::cell::to_json(context.daemon.store.layout())),
         ("GET", ["packages"]) => ok(packages(context)),
         ("GET", ["packages", id]) => package(context, id),
         ("GET", ["plan"]) => ok(plan(context)),
@@ -229,6 +234,7 @@ fn known_path(segments: &[&str]) -> bool {
             | ["outbound"]
             | ["watchdog"]
             | ["post"]
+            | ["cell"]
             | ["packages"]
             | ["packages", _]
             | ["packages", _, _]
@@ -316,7 +322,10 @@ fn act<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, raw: &str, verb: 
     let mut body = Json::obj();
     body.set("id", Json::from(id.as_str().as_str()))
         .set("outcome", Json::from(outcome.as_str()));
-    if let Outcome::Failed { reason } | Outcome::Unimplemented { reason } = &outcome {
+    if let Outcome::Failed { reason }
+    | Outcome::Unimplemented { reason }
+    | Outcome::Waiting { reason } = &outcome
+    {
         body.set("reason", Json::from(reason.as_str()));
     }
     let status = if outcome.converged() { 200 } else { 409 };
@@ -407,7 +416,11 @@ fn stop_all<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     // the one moment that record is worth most. Doing it after would mean stopping the units first
     // and letting the next pass discover the skills had "returned", which would judge them by
     // §54.3 and record a `failure` for a robot an operator stopped.
-    let ended = context.daemon.stop_skills(context.now_ms);
+    // The wall clock, for the episode's `recorded_at` and nothing else (§35.1). A stop is exactly
+    // the moment it matters: an operator pressing it produces the episodes an investigation reads.
+    let ended = context
+        .daemon
+        .stop_skills(context.now_ms, Some(wall_ms()).filter(|ms| *ms > 0));
     let outcomes = context.daemon.stop_all();
     let mut stopped = Json::arr();
     let mut failed = Json::arr();
@@ -416,7 +429,9 @@ fn stop_all<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
             Outcome::Applied | Outcome::AlreadyTrue => {
                 stopped.push(Json::from(id.as_str()));
             }
-            Outcome::Failed { reason } | Outcome::Unimplemented { reason } => {
+            Outcome::Failed { reason }
+            | Outcome::Unimplemented { reason }
+            | Outcome::Waiting { reason } => {
                 let mut item = Json::obj();
                 item.set("id", Json::from(id.as_str()))
                     .set("reason", Json::from(reason.as_str()));
@@ -808,7 +823,10 @@ fn plan<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     for (action, outcome) in &pass.applied {
         let mut item = describe(action);
         item.set("outcome", Json::from(outcome.as_str()));
-        if let Outcome::Failed { reason } | Outcome::Unimplemented { reason } = outcome {
+        if let Outcome::Failed { reason }
+        | Outcome::Unimplemented { reason }
+        | Outcome::Waiting { reason } = outcome
+        {
             item.set("reason", Json::from(reason.as_str()));
         }
         applied.push(item);
@@ -954,6 +972,50 @@ fn edit_grant<L: Launcher, S: Slots>(
     // granted a capability to a *running* process would hand it a permission its admission decision
     // did not cover — the exact case `Gate::PackageStopped` exists for.
     let layout = context.daemon.store.layout().clone();
+
+    // §54.2's safety notes, at the moment the section names: *"displayed at grant time and
+    // acknowledged once per skill per robot."* The refusal carries the notes themselves, so the
+    // display and the gate are one exchange rather than a rule an operator is expected to have
+    // followed somewhere else.
+    if let Some(notes) = notes_for(context, &id) {
+        let acknowledging = document
+            .get_present("acknowledge")
+            .and_then(Json::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+
+        if !crate::notes::acknowledged(&layout, &id.as_str(), &notes) {
+            if acknowledging != notes.digest {
+                // 409 rather than 400: the request is well formed and the robot is in a state that
+                // refuses it, which is a different thing for a client to handle. A digest that does
+                // not match lands here too — acknowledging *other* notes is not acknowledging
+                // these, and it is what an operator replaying an old command would send.
+                return Response::json(409, encode(&crate::notes::refusal(&id, &notes)));
+            }
+            let actor = context
+                .credentials
+                .label_of_header(request.header("authorization"))
+                .unwrap_or("unknown")
+                .to_string();
+            if let Err(failure) = crate::notes::acknowledge(
+                &layout,
+                &id,
+                &notes,
+                &crate::audit::Audit::of(&layout),
+                &crate::audit::rfc3339(wall_ms()),
+                &actor,
+            ) {
+                // Refused rather than granted-and-unrecorded. An acknowledgement that did not
+                // persist is one the next grant would ask for again, and one no incident review
+                // could find — which is the whole of what §54.2 asks for.
+                return error(
+                    500,
+                    &format!("the acknowledgement could not be recorded: {failure}"),
+                );
+            }
+        }
+    }
     let mut held = crate::observe::read_grants(&layout);
     let entry = (id.as_str(), token.to_string());
     if held.contains(&entry) {
@@ -965,6 +1027,36 @@ fn edit_grant<L: Launcher, S: Slots>(
         Ok(()) => Response::json(201, encode(&grant_body(&id, token, "granted"))),
         Err(err) => error(500, &err.to_string()),
     }
+}
+
+/// The safety notes of the package a grant names, when this robot holds a manifest for it.
+///
+/// **Two places, in this order**, and both are the same question asked of a different tense. The
+/// *active* digest is what the package is right now; the *desired state's* is what it is about to
+/// be, and a grant written during a rollout is a grant about the version arriving. Taking the
+/// active one first means an operator who is granting to what is running reads what is running.
+///
+/// `None` for a package this robot does not hold at all. A grant may legitimately be written
+/// **before** an install — grants and the desired state are both level-triggered and either order
+/// is valid — and refusing one for want of a manifest nobody has fetched would break the ordinary
+/// order of a deployment. The note is read at the next grant, which is this rule applied when there
+/// is something to read.
+fn notes_for<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    id: &PackageId,
+) -> Option<crate::notes::Notes> {
+    let wanted = id.as_str();
+    let digest = context.daemon.store.active_digest(id).or_else(|| {
+        context
+            .daemon
+            .desired
+            .packages
+            .iter()
+            .find(|package| package.id == wanted)
+            .map(|package| package.digest.clone())
+    })?;
+    let manifest = context.daemon.store.manifest(&digest).ok()?;
+    crate::notes::of(&manifest)
 }
 
 fn remove_grant<L: Launcher, S: Slots>(
@@ -1341,13 +1433,34 @@ fn ota<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
             None => Json::Null,
         },
     );
+    // §34.3: *"the wait is visible rather than silent"*. Every field is computed from the disk and
+    // the bearer table on this read — the partial file's own length is the progress — so this can
+    // never report a transfer whose figures the bytes disagree with.
+    out.set(
+        "transfer",
+        match context
+            .daemon
+            .assess_image_digest(&wanted)
+            .filter(|digest| !digest.trim().is_empty())
+        {
+            Some(digest) => crate::bundle::to_json(
+                context.daemon.store.layout(),
+                &digest,
+                context.daemon.declared_size(&wanted),
+                &crate::connectivity::Table::of(context.daemon.store.layout()),
+            ),
+            None => Json::Null,
+        },
+    );
     out.set(
         "note",
         Json::from(
             "§12's third rule is what `assessment` reports: an update that changes the Safety \
-             Kernel or the envelope is refused without a bench pass for these exact bytes. Nothing \
-             here fetches a bundle — §34's inbound half is not written — so an image has to be put \
-             on the robot before it can be staged.",
+             Kernel or the envelope is refused without a bench pass for these exact bytes — and \
+             it is applied before a byte moves, so a robot never pays for a transfer to reach a \
+             refusal it could have reached for nothing. `transfer` is §34.3's half: an OS image is \
+             the largest bulk transfer this system has, so it waits for an unmetered link and \
+             moves in bounded slices that resume.",
         ),
     );
     out

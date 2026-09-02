@@ -166,6 +166,14 @@ pub struct Invocation {
     pub id: String,
     /// The skill package.
     pub package: String,
+    /// What the skill says it does, when its manifest says (§54.1).
+    ///
+    /// `SkillManifest.task` — *"pick the cup off the table"* — and it is the field §17's episode
+    /// column means. The package id is what a robot addresses the thing by; the task is what a
+    /// person, or a training set, needs in order to know what it was doing. A dataset whose task
+    /// column holds `acme/pick` on every row is a dataset nobody can filter, and that is what this
+    /// carried until somebody read the Hub's manifest schema against what the robot consumes.
+    pub task: Option<String>,
     /// The digest that was active when it started, so the episode names the bytes that ran.
     pub digest: String,
     /// The arguments.
@@ -192,6 +200,18 @@ pub struct Invocation {
     pub invoked_ms: u64,
     running_since_ms: Option<u64>,
     ended_ms: Option<u64>,
+    /// Wall-clock milliseconds at the terminal transition, when this robot has a clock.
+    ///
+    /// §35.1 puts measurement on the monotonic clock and correlation on the wall clock, and an
+    /// episode needs both: `duration_ms` is measured and must not move when NTP steps, and
+    /// `recorded_at` is a point on a timeline the Hub shares with every other robot.
+    ///
+    /// It matters because of §34.4's queue. A robot offline for a week uploads that week's episodes
+    /// on reconnect, and a Hub that stamped arrival time would record them as a spike at the moment
+    /// the link returned — every one of them at the wrong hour, on a row whose whole purpose is to
+    /// say when something happened. `None` on a robot with no clock, which omits the field rather
+    /// than inventing a time.
+    ended_wall_ms: Option<u64>,
     started_unit: bool,
     leases: LeaseState,
     lease_token: String,
@@ -268,41 +288,95 @@ impl Invocation {
     /// §54.4's episode: *"the skill reference, arguments, outcome, duration and intervention
     /// count"*.
     ///
-    /// Two departures from that list, both recorded rather than quiet.
+    /// # It is written in the shape the route reads, not in a shape of its own
+    ///
+    /// This document is `POST /episodes`'s body, and for one session it was not. The robot sent
+    /// `skill`, `duration_ms` and `intervention_count`; the route reads `task`, `duration_seconds`
+    /// and `interventions`, ignores everything it does not know, and answers `201`. Every episode
+    /// this daemon produced would have been stored with no task, no duration, and every
+    /// skill-specific fact discarded — successfully, quietly, with nothing on either side wrong in
+    /// isolation. Neither suite could see it: the robot's asserted what the robot sends and the
+    /// Hub's asserted what the Hub accepts.
+    ///
+    /// So the field names here are the route's, and the facts the route has no column for go in
+    /// `metadata`, which is what a `jsonb` column is for.
+    ///
+    /// # Three things that are deliberately not the obvious value
     ///
     /// **`reason` is carried.** §54.4 says one episode per invocation and a refused invocation is
     /// an invocation, so a skill stopped at `preconditions` — nothing ran, no lease was taken, no
     /// duration exists — still produces one. That row is not training data, and a consumer has to
     /// be able to tell it apart from a skill that tried. The reason is what tells them.
     ///
-    /// **`intervention_count` is absent rather than zero** when nothing on this robot counts
-    /// interventions. §54.4 asks for the number; this edition has no kernel channel and therefore
-    /// no source for it, and a zero would be consumed by a marketplace as evidence of a clean run.
+    /// **`interventions` is absent rather than zero** when nothing on this robot counts them.
+    /// §54.4 asks for the number; this edition has no kernel channel and therefore no source for
+    /// it, and a zero would be consumed by a marketplace as evidence of a clean run. §74.3 states
+    /// the general rule: zero and unmeasured are opposite facts.
+    ///
+    /// **`recorded_at` is when it happened, not when it was sent.** §34.4's queue holds episodes
+    /// through an outage, so a Hub stamping arrival time would file a week of work at the minute
+    /// the link came back. Omitted on a robot with no clock, because a Hub's guess is better than
+    /// this robot's invention.
     fn episode(&self) -> Json {
         let mut out = Json::obj();
-        out.set("invocation", Json::Str(self.id.clone()))
+        // The route's fields. `task` is what the skill says it does, and falls back to the package
+        // id — a poor task label and a correct one, where the alternative is a null column on every
+        // row a fleet produces.
+        out.set(
+            "task",
+            Json::Str(self.task.clone().unwrap_or_else(|| self.package.clone())),
+        )
+        .set(
+            "outcome",
+            match self.outcome {
+                Some(outcome) => Json::Str(outcome.as_str().to_string()),
+                None => Json::Str(SkillOutcome::Aborted.as_str().to_string()),
+            },
+        )
+        // `robot` rather than `sim`, and it is a statement about *who acted* rather than about
+        // what was underneath: a skill invoked on this daemon ran through §54.4's ladder,
+        // whatever the driver beneath it was talking to.
+        .set("source", Json::Str("robot".to_string()));
+        if let Some(duration) = self.duration_ms() {
+            out.set("duration_seconds", Json::Num(duration as f64 / 1_000.0));
+        }
+        if let Some(count) = self.interventions {
+            out.set("interventions", Json::Num(f64::from(count)));
+        }
+        if let Some(wall_ms) = self.ended_wall_ms {
+            out.set("recorded_at", Json::Str(crate::audit::rfc3339(wall_ms)));
+        }
+
+        // Everything §54.4 asks for that the route has no column for. Not dropped, and not
+        // smuggled into `task` either — a jsonb column is the honest place for facts a schema does
+        // not model, and an incident investigation reading these rows needs the invocation id and
+        // the digest of the bytes that ran.
+        let mut metadata = Json::obj();
+        metadata
+            .set("invocation", Json::Str(self.id.clone()))
+            // The package id, which `task` no longer carries when the manifest declares one. A
+            // consumer grouping episodes by what produced them needs an identifier, not a sentence.
             .set("skill", Json::Str(self.package.clone()))
             .set("digest", Json::Str(self.digest.clone()))
             .set("arguments", self.arguments.clone())
-            .set(
-                "outcome",
-                match self.outcome {
-                    Some(outcome) => Json::Str(outcome.as_str().to_string()),
-                    None => Json::Str(SkillOutcome::Aborted.as_str().to_string()),
-                },
-            )
             .set("reason", Json::Str(self.reason.as_str().to_string()))
             .set("detail", Json::Str(self.detail.clone()))
             .set("root", Json::Bool(self.root));
         if let Some(parent) = &self.parent {
-            out.set("parent", Json::Str(parent.clone()));
+            metadata.set("parent", Json::Str(parent.clone()));
         }
         if let Some(duration) = self.duration_ms() {
-            out.set("duration_ms", Json::Num(duration as f64));
+            // Kept beside the seconds the column holds, because the column is `numeric(10,3)` and
+            // a duration measured in milliseconds should survive its own rounding.
+            metadata.set("duration_ms", Json::Num(duration as f64));
         }
-        if let Some(count) = self.interventions {
-            out.set("intervention_count", Json::Num(f64::from(count)));
+        // The absence, said out loud. A consumer reading `interventions` as null cannot tell a Hub
+        // default from a robot that cannot count, and the difference decides whether the row is
+        // training data.
+        if self.interventions.is_none() {
+            metadata.set("interventions_measured", Json::Bool(false));
         }
+        out.set("metadata", metadata);
         out
     }
 }
@@ -324,6 +398,11 @@ pub struct Cycle<'a> {
     /// `false` means `guard_tripped` is a default and not an observation, and it is what keeps
     /// `intervention_count` out of the episode rather than in it as a zero.
     pub guards_observable: bool,
+    /// Wall-clock milliseconds, when this robot has a clock (§35.1).
+    ///
+    /// The one thing §35.1 permits wall time for in this module: the timestamp on a record that a
+    /// Hub has to place against other robots' records. Nothing here decides anything with it.
+    pub wall_ms: Option<u64>,
     /// Which packages the launcher reports running.
     pub running: &'a BTreeSet<String>,
     /// §25.2's table.
@@ -510,6 +589,16 @@ impl Runtime {
             }),
             ClauseOrigin::Skill,
         );
+        // Both spellings, like every other field this reads: a manifest may carry the skill card
+        // flat or under `skill`. Trimmed, and empty is absent — a task nobody wrote is not a task.
+        let task = manifest
+            .get_present("task")
+            .or_else(|| manifest.get("skill").and_then(|s| s.get_present("task")))
+            .and_then(Json::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string);
+
         let capabilities = {
             let mut tokens = manifest.str_arr("required_capabilities");
             tokens.sort();
@@ -539,6 +628,7 @@ impl Runtime {
         self.invocations.push(Invocation {
             id: id.clone(),
             package: request.package.clone(),
+            task,
             digest: digest.to_string(),
             arguments: request.arguments.clone(),
             parent: request.parent.clone(),
@@ -554,6 +644,7 @@ impl Runtime {
             invoked_ms: now_ms,
             running_since_ms: None,
             ended_ms: None,
+            ended_wall_ms: None,
             started_unit: false,
             leases: LeaseState::Pending,
             lease_token: String::new(),
@@ -716,7 +807,13 @@ impl Runtime {
 
         let progress = self.progress_of(index, cycle);
         let transition = advance(phase, &progress);
-        self.apply(index, &transition, cycle.now_ms, &built.context)
+        self.apply(
+            index,
+            &transition,
+            cycle.now_ms,
+            cycle.wall_ms,
+            &built.context,
+        )
     }
 
     /// Assemble [`Progress`] from what has been gathered.
@@ -765,6 +862,7 @@ impl Runtime {
         index: usize,
         transition: &SkillTransition,
         now_ms: u64,
+        wall_ms: Option<u64>,
         post_state: &Json,
     ) -> Report {
         let mut effects = Vec::new();
@@ -803,6 +901,7 @@ impl Runtime {
         if transition.changed && transition.to == SkillPhase::Terminal {
             let invocation = &mut self.invocations[index];
             invocation.ended_ms = Some(now_ms);
+            invocation.ended_wall_ms = wall_ms;
             invocation.outcome = transition.outcome.or(invocation.outcome);
             if invocation.started_unit {
                 effects.push(Effect::Stop {
@@ -833,7 +932,7 @@ impl Runtime {
     /// stopped is a robot whose skills are over and §54.4 has a word for a skill that did not
     /// finish. The episodes are emitted here, so a stop does not lose the record of what was
     /// running when it happened.
-    pub fn stop_all(&mut self, now_ms: u64) -> Vec<Report> {
+    pub fn stop_all(&mut self, now_ms: u64, wall_ms: Option<u64>) -> Vec<Report> {
         let mut reports = Vec::new();
         for index in 0..self.invocations.len() {
             if self.invocations[index].terminal() {
@@ -851,7 +950,7 @@ impl Runtime {
                 release_leases: true,
                 changed: true,
             };
-            reports.push(self.apply(index, &transition, now_ms, &Json::obj()));
+            reports.push(self.apply(index, &transition, now_ms, wall_ms, &Json::obj()));
         }
         reports
     }

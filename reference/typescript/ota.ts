@@ -92,6 +92,15 @@ export interface BundleManifest {
   channel?: string
   /** `sha256:…` over the bundle. What a bench pass is bound to. */
   digest?: string
+  /**
+   * How many bytes the bundle is, when the publisher declares it.
+   *
+   * Absent, not zero, on a manifest that says nothing. The fetch refuses to resume from a partial
+   * larger than the whole, which needs a declared size to compare against; and a progress line is a
+   * fraction only when the denominator came from the signed document rather than from whichever
+   * server is serving the bytes.
+   */
+  size?: number
   /** Machine identifiers this image is built for. */
   compatible?: string[]
   /** Which of `OS_COMPONENTS` differ from the running image. */

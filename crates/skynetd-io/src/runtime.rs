@@ -164,6 +164,18 @@ pub enum Outcome {
         /// Why.
         reason: String,
     },
+    /// Nothing was done, nothing is wrong, and the next pass will try again.
+    ///
+    /// The fifth outcome, and it arrived with the bundle fetcher (§12, §34.3). §34.1 assumes the
+    /// robot is offline, so *"no link is up"* and *"the only link charges by the megabyte"* are the
+    /// ordinary state of a fleet rather than faults in a machine — and reporting them as
+    /// [`Outcome::Failed`] would put a red line on a console every ten seconds for a robot that is
+    /// behaving exactly as designed. It is not [`Outcome::Unimplemented`] either: nothing is
+    /// missing. Something is being waited for, and §34.3 requires that the wait be visible.
+    Waiting {
+        /// What is being waited for.
+        reason: String,
+    },
 }
 
 impl Outcome {
@@ -179,6 +191,7 @@ impl Outcome {
             Self::AlreadyTrue => "already_true",
             Self::Unimplemented { .. } => "unimplemented",
             Self::Failed { .. } => "failed",
+            Self::Waiting { .. } => "waiting",
         }
     }
 }
@@ -290,6 +303,19 @@ pub struct Daemon<L: Launcher, S: Slots> {
     /// the API, the suite and the binary to describe two calls would be a lot of signature for very
     /// little, and §33.1 already licenses this half to allocate.
     pub updater: Box<dyn crate::ota::Updater>,
+    /// What goes and gets an image (§12, §34.3).
+    ///
+    /// Boxed for `updater`'s reason and used the same way — a handful of calls in the life of an
+    /// image, against a pair of type parameters read on every pass.
+    pub fetcher: Box<dyn crate::bundle::Fetcher>,
+    /// The fraction §34.4's backoff is jittered by, supplied rather than drawn (§35.2).
+    ///
+    /// A field rather than an argument threaded through `reconcile`, `apply` and six action arms to
+    /// reach the one that fetches. The daemon loop sets it per pass from the monotonic clock; a test
+    /// sets it once and gets a curve it can assert on. The default is the top of the window, which
+    /// is the un-jittered delay: a single robot retrying on the full curve is correct, and it is a
+    /// *fleet* arriving in lockstep that the jitter exists to break up.
+    pub jitter: f64,
 }
 
 impl<L: Launcher, S: Slots> Daemon<L, S> {
@@ -322,6 +348,8 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             desired: nothing(),
             skills: crate::skill::Runtime::new(),
             updater: Box::new(crate::ota::RaucUpdater),
+            fetcher: Box::new(crate::bundle::CurlFetcher),
+            jitter: 1.0,
         }
     }
 
@@ -343,6 +371,26 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     /// Refused, not deferred. [`Outcome::Failed`] is a decision that will not change on its own,
     /// which is the truth here: the same bytes and the same trust store give the same answer every
     /// pass, and reporting it as "waiting" would suggest otherwise.
+    /// §54.5's declared call graph, refused at the moment a package becomes usable.
+    ///
+    /// Beside the driver signature and for the same structural reason: a staged blob is inert
+    /// (§37.1) and the symlink swap is the consequential moment, so that is where a refusal that
+    /// must hold belongs. The install path *reports* the same fault to whoever ran the command,
+    /// which is where they can act on it; this is what makes it stick when nobody is watching.
+    ///
+    /// Refused rather than deferred, for `driver_signature_refusal`'s reason: the same manifest
+    /// gives the same answer on every pass, and reporting it as waiting would suggest otherwise.
+    pub(crate) fn composition_refusal(&self, id: &str, digest: &str) -> Option<Outcome> {
+        let manifest = self.store.manifest(digest).ok()?;
+        let fault = crate::admit::composition_fault(id, &manifest)?;
+        Some(Outcome::Failed {
+            reason: format!(
+                "{} The blob stays staged and inert; publish a graph that terminates.",
+                crate::admit::composition_refusal(id, &fault)
+            ),
+        })
+    }
+
     pub(crate) fn driver_signature_refusal(&self, id: &str, digest: &str) -> Option<Outcome> {
         let package = self.desired.package(id)?;
         if package.kind != PackageKind::Driver {
@@ -535,9 +583,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     /// worse thing to be quiet about than the original event. Hence the log line: the alarm not
     /// being raised is itself the thing an operator needs to know.
     fn raise_profile_incident(&self, digest: &str, detail: &str) {
-        let queue = crate::outbound::Queue::of(self.store.layout());
-        let mut incident = self.incident_context();
-        incident.set("kind", Json::Str("profile_signature_failed".to_string()));
+        let mut incident = Json::obj();
         incident.set("digest", Json::Str(digest.to_string()));
         incident.set("detail", Json::Str(detail.to_string()));
         incident.set(
@@ -549,12 +595,78 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
                     .to_string(),
             ),
         );
+        self.raise_incident("profile_signature_failed", incident);
+    }
+
+    /// Seal the black box and queue one incident (§13, §34.4).
+    ///
+    /// **The seal happens here rather than at the call site**, so that every incident this daemon
+    /// ever raises carries a window and none of them has to remember to. §13 is unambiguous —
+    /// *"sealed and uploaded on any fault, estop, or operator request"* — and the half that was
+    /// missing was not the sealing, which has existed since the sixth session. It was that nothing
+    /// connected a fault to a recording: `skynet_incidents.artifact_id` has been NULL on every row
+    /// the platform can hold, and an investigator reading one had no way to know a window even
+    /// existed.
+    ///
+    /// # It names the recording; it does not send it
+    ///
+    /// §17 treats this route as a document and the document is what crosses. A sealed window is
+    /// tens to hundreds of megabytes and §34.3 puts it in the bulk class, which wants resume,
+    /// progress and metering on an **upload** — the mirror of §75's fetch, and not written. So the
+    /// incident carries the window's name, size, digest and record count with `uploaded: false`,
+    /// which is a true statement a Hub can render: *"this incident has a 4 MB recording on the
+    /// robot that nothing has collected."* The alternative — saying nothing — is what leaves an
+    /// operator assuming the recording was never taken.
+    ///
+    /// # Nothing here can prevent the incident
+    ///
+    /// A seal that fails is reported **inside** the document and the incident still goes. §34.4
+    /// makes this the one class that is never dropped, and a robot that swallowed an alarm because
+    /// its own recorder was broken would be losing the report and the recording together — which is
+    /// exactly the pair of failures that arrive at the same time.
+    fn raise_incident(&self, kind: &str, extra: Json) {
+        let layout = self.store.layout();
+        let queue = crate::outbound::Queue::of(layout);
+        let mut incident = self.incident_context();
+        incident.set("kind", Json::Str(kind.to_string()));
+        if let Some(fields) = extra.as_obj() {
+            for (key, value) in fields {
+                incident.set(key, value.clone());
+            }
+        }
+
+        // The monotonic clock is not reachable from here — `reload` takes no time — and §35.2's
+        // rule is that a function which reaches for one cannot be tested. Zero is the sealer's
+        // documented "no instant given", and it lands in the file name, where it reads as an
+        // unknown rather than as a plausible timestamp.
+        match crate::blackbox::seal_existing(layout, skynet_blackbox::seal::Reason::Fault, 0) {
+            Ok(Some(recording)) => {
+                incident.set("recording", recording.to_json());
+            }
+            Ok(None) => {
+                incident.set(
+                    "recording",
+                    crate::blackbox::unsealed(
+                        "this robot has no black box ring, so there was no window to seal",
+                    ),
+                );
+            }
+            Err(error) => {
+                // Reported in the document rather than only in a log, because the party who needs
+                // it is the one reading the incident months later.
+                incident.set("recording", crate::blackbox::unsealed(error.to_string()));
+                eprintln!(
+                    "skynetd: an incident was raised and the black box would not seal: {error}"
+                );
+            }
+        }
+
         let Ok(text) = incident.to_canonical() else {
             return;
         };
         if let Err(error) = queue.enqueue(crate::outbound::Class::Incident, &text) {
             eprintln!(
-                "skynetd: a profile signature FAILED and the incident could not be queued: {}",
+                "skynetd: `{kind}` was raised and the incident could not be queued: {}",
                 error.reason()
             );
         }
@@ -656,7 +768,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     /// Apply one action.
     fn apply(&mut self, action: &Action, now_ms: u64) -> Outcome {
         match &action.kind {
-            ActionKind::StageOsImage { version } => self.stage_image(version),
+            ActionKind::StageOsImage { version } => self.stage_image(version, now_ms),
             ActionKind::ApplyOsImage { version } => self.apply_image(version),
             #[allow(unreachable_patterns)]
             ActionKind::StageOsImage { .. } | ActionKind::ApplyOsImage { .. } => {
@@ -690,6 +802,12 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
                     return refuse_id(id);
                 };
                 if let Some(refusal) = self.driver_signature_refusal(id, digest) {
+                    return refusal;
+                }
+                // §54.5, before anything can invoke it. The runtime's own check walks the *live*
+                // ancestry and is the one that would otherwise catch this — at runtime, on a robot,
+                // with leases held, which is the sentence the rule is written against.
+                if let Some(refusal) = self.composition_refusal(id, digest) {
                     return refusal;
                 }
                 match self.store.activate(&parsed, digest) {
@@ -916,6 +1034,18 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             .map(|known| known.descriptor.robot_slug.clone())
     }
 
+    /// The digest the manifest for one version names, when this robot holds that manifest.
+    ///
+    /// Through the assessment rather than by reading the file, so that one place decides what
+    /// document answers for a version — including the refusal of a manifest filed under a name it
+    /// disagrees with, which is exactly the case where a second reader would return a digest.
+    pub fn assess_image_digest(&self, version: &str) -> Option<String> {
+        if version.trim().is_empty() {
+            return None;
+        }
+        self.assess_image(version).digest
+    }
+
     /// §12's third rule, run against the documents this robot holds.
     pub fn assess_image(&self, version: &str) -> crate::ota::Assessment {
         let layout = self.store.layout();
@@ -929,45 +1059,139 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         )
     }
 
-    /// Stage an image: assess it, then install it into the inactive slot.
+    /// Stage an image: assess it, fetch it, check the bytes, then install it into the inactive slot.
     ///
     /// **Assessed before it is fetched, not after.** §12's third rule refuses an update that
     /// changes the Safety Kernel without a bench pass, and refusing it *after* the bytes are in the
     /// other slot would leave a robot one `mark-good` away from running something nobody certified.
-    /// Staging is also where the refusal is cheapest: nothing has rebooted, and the operator reads
-    /// one report rather than discovering it at the safe-state barrier.
-    fn stage_image(&mut self, version: &str) -> Outcome {
+    /// Staging is also where the refusal is cheapest: nothing has rebooted, the operator reads one
+    /// report rather than discovering it at the safe-state barrier, and — now that this fetches —
+    /// nobody has paid for a hundred megabytes to arrive at a refusal that needed no bytes at all.
+    ///
+    /// **And checked before it is installed, however it arrived.** Every gate above is bound to the
+    /// manifest's digest, and until [`crate::bundle::verify_file`] existed nothing compared that
+    /// digest against the bytes RAUC was handed. A hand-placed bundle — which was the only way to
+    /// update a robot before the fetcher — went in unchecked. See the module header.
+    fn stage_image(&mut self, version: &str, now_ms: u64) -> Outcome {
         let assessment = self.assess_image(version);
         if !assessment.admitted() {
             return Outcome::Failed {
                 reason: refusal_text(&assessment),
             };
         }
-        let Some(bundle) = assessment.bundle_path.clone() else {
-            return Outcome::Unimplemented {
-                reason: format!(
-                    "release `{version}` is admitted and this robot has no bundle to install. \
-                     §34's inbound fetcher is not written, so an image has to be put at {} by \
-                     hand",
-                    self.store.layout().os().join("bundles").display()
-                ),
-            };
+        let layout = self.store.layout().clone();
+        let digest = assessment.digest.clone().unwrap_or_default();
+
+        // A bundle the manifest names by filename, put here by hand or by an earlier edition. Kept
+        // ahead of the fetch so an offline install still works, and no longer trusted on sight.
+        let bundle = match assessment.bundle_path.clone().filter(|path| path.is_file()) {
+            Some(path) => path,
+            None => {
+                if digest.trim().is_empty() {
+                    // `admit_bundle` refuses an undigested manifest, so this is unreachable through
+                    // an admitted release. Checked anyway: the alternative is fetching bytes with
+                    // nothing to check them against.
+                    return Outcome::Failed {
+                        reason: format!(
+                            "release `{version}` is admitted and names no digest, so there is \
+                             nothing to fetch and nothing to check what arrived against"
+                        ),
+                    };
+                }
+                match self.fetch_bundle(&layout, &digest, now_ms) {
+                    Ok(path) => path,
+                    Err(outcome) => return outcome,
+                }
+            }
         };
-        if !bundle.exists() {
-            return Outcome::Unimplemented {
-                reason: format!(
-                    "release `{version}` names {} and no such file is on this robot. §34's \
-                     inbound fetcher is not written; nothing here can go and get it",
-                    bundle.display()
-                ),
-            };
+
+        // §12 binds every gate it applies to the digest. This is where the bytes are held to it.
+        match crate::bundle::verify_file(&bundle, &digest, self.declared_size(version)) {
+            Err(error) => return Outcome::Failed { reason: error },
+            Ok(check) if !check.ok => {
+                if check.discard {
+                    let _ = std::fs::remove_file(&bundle);
+                }
+                return Outcome::Failed {
+                    reason: format!(
+                        "{} is not release `{version}`. {}",
+                        bundle.display(),
+                        check.detail
+                    ),
+                };
+            }
+            Ok(_) => {}
         }
+
         match self.updater.install(&bundle) {
             Ok(()) => Outcome::Applied,
             Err(error) => Outcome::Failed {
                 reason: error.to_string(),
             },
         }
+    }
+
+    /// Move what can be moved of one image's bytes this pass (§12, §34.3).
+    ///
+    /// `Ok` only when the whole checked bundle is on the disk. Everything else is an outcome for the
+    /// pass, and the three of them are deliberately different sentences: waiting for an unmetered
+    /// link is not a failure, a fetch on an unpaired robot is not one either, and a digest mismatch
+    /// very much is.
+    fn fetch_bundle(
+        &mut self,
+        layout: &crate::layout::Layout,
+        digest: &str,
+        now_ms: u64,
+    ) -> Result<std::path::PathBuf, Outcome> {
+        let Some((endpoint, _device, credential)) = crate::identity::credential_for_sending(layout)
+        else {
+            return Err(Outcome::Waiting {
+                reason: format!(
+                    "this robot holds the manifest for these bytes and has nowhere to ask for \
+                     them: it is not paired (§10), so there is no endpoint. `skynet pair` fixes \
+                     it, or put the bundle at {} by hand.",
+                    layout.bundle(digest).display()
+                ),
+            });
+        };
+        let version = self.desired.os_version.clone();
+        let url = crate::bundle::url_for(&endpoint, &version);
+        let table = crate::connectivity::Table::of(layout);
+
+        let size = self.declared_size(&version);
+        let jitter = self.jitter;
+        let step = crate::bundle::advance(
+            layout,
+            self.fetcher.as_mut(),
+            digest,
+            size,
+            &table,
+            &url,
+            Some(&credential),
+            now_ms,
+            jitter,
+        );
+        match step {
+            crate::bundle::Step::Have { path, .. } => Ok(path),
+            crate::bundle::Step::Waiting { detail } => Err(Outcome::Waiting { reason: detail }),
+            crate::bundle::Step::Moved { detail, .. } => Err(Outcome::Waiting { reason: detail }),
+            crate::bundle::Step::Failed { detail } => Err(Outcome::Failed { reason: detail }),
+        }
+    }
+
+    /// The size the signed manifest declares for one release's bundle, when it declares one.
+    ///
+    /// `None` for every manifest a Hub serves today: §12's five-field manifest carries a digest and
+    /// no size. It is read through one function rather than passed as `None` at three call sites so
+    /// that the day the field exists, the checks that want it — *"a partial cannot be larger than
+    /// what it is part of"*, and a progress line that is a fraction rather than a count — become
+    /// true everywhere at once.
+    pub fn declared_size(&self, version: &str) -> Option<u64> {
+        crate::observe::read_json(&self.store.layout().release(version))?
+            .get_present("size")
+            .and_then(Json::as_f64)
+            .filter(|value| *value >= 0.0)
+            .map(|value| value as u64)
     }
 
     /// Apply a staged image: assess it again, mark the next boot as the one that must prove itself,
@@ -1178,6 +1402,11 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
                 // the false from being counted as an observation of nothing having tripped.
                 guard_tripped: false,
                 guards_observable: false,
+                // §35.1's correlation clock, for the one field that needs it: the episode's
+                // `recorded_at`. Zero means the platform could not answer, which is not a time.
+                wall_ms: wall_s
+                    .filter(|seconds| *seconds > 0.0)
+                    .map(|seconds| (seconds * 1_000.0) as u64),
                 running: &running,
                 leases: &mut self.leases,
                 grants: &grants,
@@ -1202,9 +1431,9 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     /// had "returned", and §54.3 would judge them over a post-state nothing had changed —
     /// recording a `failure` for a robot an operator stopped, which is a defensible-looking number
     /// and a lie a marketplace would consume.
-    pub fn stop_skills(&mut self, now_ms: u64) -> Vec<crate::skill::Report> {
+    pub fn stop_skills(&mut self, now_ms: u64, wall_ms: Option<u64>) -> Vec<crate::skill::Report> {
         let mut runtime = core::mem::take(&mut self.skills);
-        let reports = runtime.stop_all(now_ms);
+        let reports = runtime.stop_all(now_ms, wall_ms);
         self.skills = runtime;
         for report in &reports {
             self.perform(&report.effects, now_ms);

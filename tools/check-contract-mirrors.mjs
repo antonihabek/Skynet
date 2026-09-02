@@ -41,7 +41,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -180,6 +180,27 @@ const MIRRORS = [
 const REFERENCE = 'reference/typescript'
 const HUB = 'lib/skynet/os'
 
+/**
+ * The wire fixtures, which are mirrored for a different reason from the contracts above.
+ *
+ * A contract is mirrored so two implementations of one rule cannot drift. A **fixture** is mirrored
+ * so a producer and a consumer that live in different repositories can be tested against each
+ * other: each file is the exact canonical body `skynetd` puts on the wire for one §17 route,
+ * produced by the real producer and frozen by `skynetd-io`'s suite.
+ *
+ * The twenty-seventh session is the argument for it. Both repositories had built the episode path —
+ * a producer, a queue, a route, a table — and had never put one document through the other. They
+ * did not agree about a single field name, `POST /episodes` ignores what it does not know, and both
+ * suites passed the whole time, because one asserted what the robot sends and the other asserted
+ * what the Hub accepts.
+ *
+ * See `reference/wire/README.md`, including what is deliberately *not* frozen here.
+ */
+const WIRE = ['episode', 'incident', 'telemetry']
+
+const WIRE_REFERENCE = 'reference/wire'
+const WIRE_HUB = 'lib/skynet/os/wire'
+
 const args = process.argv.slice(2)
 const sync = args.includes('--sync')
 const given = args.find(arg => !arg.startsWith('--'))
@@ -235,6 +256,33 @@ function digestOf(name) {
 }
 
 /**
+ * The digest of one wire fixture.
+ *
+ * No rewriting: a fixture crosses as the bytes it is, because the bytes *are* the subject. The only
+ * normalisation is the line ending, for the reason `lf` gives.
+ */
+function wireDigestOf(name) {
+  const path = join(HERE, WIRE_REFERENCE, `${name}.json`)
+  if (!existsSync(path)) return null
+  return createHash('sha256').update(lf(readFileSync(path, 'utf8'))).digest('hex')
+}
+
+/** Both sets, keyed the way the pin file holds them. */
+function allDigests() {
+  const digests = {}
+  for (const name of MIRRORS) {
+    const digest = digestOf(name)
+    if (digest !== null) digests[name] = digest
+  }
+  for (const name of WIRE) {
+    const digest = wireDigestOf(name)
+    // Namespaced, so a contract and a fixture with the same stem cannot collide in one flat map.
+    if (digest !== null) digests[`wire/${name}`] = digest
+  }
+  return digests
+}
+
+/**
  * The pinned digests, kept in **both** repositories.
  *
  * The comparison further down only runs where both are checked out, and CI has one. So the job that
@@ -264,20 +312,19 @@ function checkPins() {
   }
   const pinned = JSON.parse(readFileSync(PINS, 'utf8')).digests ?? {}
   let wrong = 0
-  for (const name of MIRRORS) {
-    const digest = digestOf(name)
-    if (digest === null) continue
+  for (const [name, digest] of Object.entries(allDigests())) {
     if (pinned[name] === digest) continue
+    const what = name.startsWith('wire/') ? 'fixture' : 'contract'
     console.error(
       pinned[name]
-        ? `CHANGED  ${name} — this contract no longer matches its pinned digest.`
-        : `UNPINNED ${name} — this contract has no pinned digest.`,
+        ? `CHANGED  ${name} — this ${what} no longer matches its pinned digest.`
+        : `UNPINNED ${name} — this ${what} has no pinned digest.`,
     )
     wrong += 1
   }
   if (wrong > 0) {
     console.error(
-      `\n${wrong} mirrored contract(s) changed without the Hub being resynced.\n`
+      `\n${wrong} mirrored file(s) changed without the Hub being resynced.\n`
         + 'The reference is the oracle the corpus holds the Rust edition to, and the Hub keeps its\n'
         + 'own copy so a Next.js application can import it. A change here is a change the Hub owes,\n'
         + 'and the two have to land together:\n\n'
@@ -290,13 +337,10 @@ function checkPins() {
 
 /** Write the pins into this repository, and into the Hub when it is there, from one computation. */
 function writePins(hubPath) {
-  const digests = {}
-  for (const name of MIRRORS) {
-    const digest = digestOf(name)
-    if (digest !== null) digests[name] = digest
-  }
+  const digests = allDigests()
   const body = `${JSON.stringify({
-    note: 'sha256 of each reference contract, with its imports rewritten for the Hub. Written by '
+    note: 'sha256 of each reference contract, with its imports rewritten for the Hub, and of each '
+      + 'wire fixture as-is under a `wire/` prefix. Written by '
       + 'tools/check-contract-mirrors.mjs --sync in the Skynet OS repository; checked there against '
       + 'reference/typescript/, and in BotMarket by lib/__tests__/skynet-os-mirrors.test.ts. Never '
       + 'edit by hand — a digest somebody updated to match a local edit is a check that has been '
@@ -382,6 +426,47 @@ for (const name of MIRRORS) {
   for (const [line, n] of mine) differing += Math.max(0, n - (yours.get(line) ?? 0))
   for (const [line, n] of yours) differing += Math.max(0, n - (mine.get(line) ?? 0))
   console.log(`DIVERGED ${name} — ${differing} line(s) differ`)
+  diverged += 1
+}
+
+for (const name of WIRE) {
+  const ours = join(HERE, WIRE_REFERENCE, `${name}.json`)
+  const theirs = join(hub, WIRE_HUB, `${name}.json`)
+
+  if (!existsSync(ours)) {
+    console.log(`SKIP     wire/${name} — no reference copy`)
+    continue
+  }
+  const expected = lf(readFileSync(ours, 'utf8'))
+
+  if (!existsSync(theirs)) {
+    if (sync) {
+      mkdirSync(dirname(theirs), { recursive: true })
+      writeFileSync(theirs, expected, 'utf8')
+      console.log(`created  ${WIRE_HUB}/${name}.json`)
+      synced += 1
+    } else {
+      console.log(`MISSING  ${WIRE_HUB}/${name}.json — the Hub has no copy of this fixture`)
+      missing += 1
+    }
+    continue
+  }
+
+  if (lf(readFileSync(theirs, 'utf8')) === expected) {
+    console.log(`match    wire/${name}`)
+    continue
+  }
+
+  if (sync) {
+    writeFileSync(theirs, expected, 'utf8')
+    console.log(`synced   ${WIRE_HUB}/${name}.json  <- ${WIRE_REFERENCE}/${name}.json`)
+    synced += 1
+    continue
+  }
+
+  // No line count for a fixture: it is one line of canonical JSON, and the useful output is that
+  // the document the robot sends is not the document the Hub is testing against.
+  console.log(`DIVERGED wire/${name} — the Hub is holding a different document`)
   diverged += 1
 }
 

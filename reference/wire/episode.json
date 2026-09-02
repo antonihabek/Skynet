@@ -1,0 +1,1 @@
+{"duration_seconds":2,"metadata":{"arguments":{},"detail":"§54.3 judged this unlabeled","digest":"sha256:test","duration_ms":2000,"interventions_measured":false,"invocation":"inv-1","reason":"judged","root":true,"skill":"acme/pick"},"outcome":"unlabeled","recorded_at":"2026-09-02T00:00:05Z","source":"robot","task":"pick the cup off the table"}

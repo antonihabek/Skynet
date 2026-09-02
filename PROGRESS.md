@@ -7865,3 +7865,836 @@ the twenty-third; 24 and 25 from the twenty-fourth.
     two consumers is a decision. The practical rule: an open finding with no consumer is correctly
     open, and the thing to do about it is to build whatever would consume it rather than to think
     harder about the finding.
+
+---
+
+## 2026-09-02 (twenty-sixth) — §12's bytes, and the gate that was never applied to the thing it names
+
+Every session since the twenty-first has ended with the same entry under *not done*: **the bundle
+bytes.** `stage_image` assessed a release, admitted it, and then reported `Unimplemented` with a
+sentence that was exactly true — *"§34's inbound fetcher is not written; nothing here can go and get
+it."* An image had to be put on a robot by hand.
+
+This session wrote the fetcher, and it turned out that the interesting part was not the half that
+was missing.
+
+### The gap, and why neither end could see it
+
+§12 is four pages about **applying** an image: A/B slots, the safe-state barrier, health-gated
+rollback, and the rule it calls the single most important test in the suite. It says nothing about
+**getting** one, because getting one looks like an implementation detail.
+
+From the robot's side everything worked. The manifest arrived (§57's catalogue, twenty-fourth
+session), the signature verified against the trust store, the compatibility list matched, the bench
+pass gated the kernel change — and the action reported, correctly, that there was nothing to install.
+From the Hub's side there was a catalogue of manifests and a `skynet_os_releases.artifact_id` column
+that nothing had ever asked for. Neither end was wrong. There was no route.
+
+That is finding 27 again, and it is the second time in two sessions that building the other half
+found the thing reading either half could not. The specification gained **§75** for it, in Part X
+beside §74, because a route that arrives after the fact should say when it arrived and why rather
+than being retconned into §12.
+
+### `crates/skynetd-io/src/bundle.rs` — the transfer
+
+`skynet_contracts::bundle` has decided since the sixteenth session: seven fetch decisions, four
+verdicts on what arrived, no network and no clock, corpus-verified against the TypeScript oracle —
+and nothing called it. This is the caller.
+
+Four rules, and none of them is about HTTP:
+
+**A slice, not a transfer.** §33.2's loop is one thread: reconcile, serve the local API, ping the
+watchdog, for ever. A pass that blocked for the twenty minutes a hundred-megabyte image takes over a
+warehouse link would be a supervisor that had stopped supervising — which is precisely why
+`report_drain` is bounded per pass, and the payload here is two orders of magnitude larger. So each
+pass moves what it can inside twenty seconds and the next resumes. **Resume is what makes a bounded
+slice free**, and it is why the partial is keyed to the digest: a partial keyed by version would let
+a resume append one release's tail to another's head.
+
+**The partial's length is the progress.** No counter, no percentage, nothing written anywhere.
+§34.4's queue keeps no index for the same reason — a second record of what the directory already says
+is a record that disagrees exactly once, after the crash that matters. `os/transfer.json` holds only
+what the disk cannot say: how the last attempt ended, how many have failed in a row, when the next
+may start.
+
+**The bytes are checked before they are installed, however they arrived.** See below.
+
+**Nothing here decides whether the image may be applied.** `assess` runs first, before a byte moves,
+so a robot never pays for a hundred megabytes to arrive at a refusal it could have reached for
+nothing. There is a test whose fetcher panics if it is ever called, and the release it is given
+changes the safety kernel.
+
+Two smaller decisions that only exist because the budget does:
+
+* **A slice that runs out of budget must not back off.** The distinction the caller needs is *did the
+  file grow*, not *did the process exit zero* — `curl` exits 28 on a timeout having moved forty
+  megabytes, and doubling a delay for that makes a poor link exponentially poorer. Progress resets
+  the failure count and keeps the reason.
+* **A server that ignores the range is caught at the status code, not at the digest.** A `200` to a
+  resume means the whole file was appended to what was already there. The digest would catch it
+  hours later; the status catches it immediately and throws the partial away.
+
+The credential rule from `connectivity` is carried across unchanged and for the same reason:
+`/proc/<pid>/cmdline` is world-readable, so it goes into curl's own config on stdin and never into
+an argument. `--location` is used and `--location-trusted` deliberately is not, so the device
+credential is dropped at the cross-host redirect to storage rather than handed to a CDN. `--fail` is
+there because without it an HTTP error page is a body, and a body is written into the partial —
+which is how a 404 becomes forty bytes of HTML appended to an operating system.
+
+### The hole: a gate bound to a digest, and nothing checking the digest
+
+Writing the fetcher found something that had been open since §12 was built, and it was not in the
+part that was missing.
+
+**Every gate §12 applies is bound to the manifest's digest — and nothing compared that digest against
+the bytes handed to RAUC.** `stage_image` took `assessment.bundle_path` and called
+`updater.install(&bundle)`. The signature was checked. The bench pass was bound to the digest and
+refused if it named other bytes. The compatibility list was matched. And the file itself was
+installed on the strength of its *filename*.
+
+The reachable path was not exotic: putting a bundle on the disk by hand was the **only** way to
+update a robot before this session, and it is what the refusal sentence told operators to do. A file
+at the right path with the wrong contents went in with every gate reporting a pass.
+
+`bundle::verify_file` is now called immediately before `install`, whatever put the file there, and a
+mismatch deletes it — because an unverified bundle left on a disk is an artifact some future code
+path finds and treats as an image. The test writes somebody else's image to the exact path the
+manifest names and asserts that nothing reached the bootloader and the file is gone.
+
+This is the sharper half of the session and it is the one worth generalising: the gate was complete,
+every test about the gate passed, and the gate was applied to a **name**.
+
+### `Outcome::Waiting` — the reconciler had no word for it
+
+Four outcomes: `Applied`, `AlreadyTrue`, `Unimplemented`, `Failed`. A robot on cellular that is
+admitted to update and is waiting for an unmetered bearer is none of them.
+
+Each of the three available answers is a lie in a different direction. `Failed` puts a red line on a
+console every ten seconds for a robot doing exactly what §34.3 designed it to do. `Unimplemented`
+says nobody built this, and somebody did. `AlreadyTrue` is worse than either. §34.1 *assumes the
+robot is offline* — no link and a metered link are the ordinary condition of a fleet, not faults in a
+machine — so the vocabulary needed a fifth word, and the absence of it would have forced the fetcher
+to misreport its most common state.
+
+It also earns a rule in the black box. `record_pass` skips a `Waiting`, quoting the precedent the
+boot gate set three sessions ago: *"a `wait` is not recorded: it is the ordinary state for most of a
+boot budget, and a record every pass would fill the ring with a robot deciding nothing."* A transfer
+over a slow link produces one wait per pass for hours, and §26's ring is bounded.
+
+### Where it shows
+
+`GET /ota` gains a `transfer` block, and every field in it is computed from the disk and the bearer
+table on the read — the decision, the sentence, whether the bundle is here, how many bytes are, the
+total *and whose claim the total is*, the consecutive failures, the reason, and when the next attempt
+may start. §34.3 asks for the wait to be visible rather than silent; this is where it is visible.
+
+`skynet ota` renders it, and the console draws it under the assessment panel. Both refuse to draw a
+percentage without a total, and both say whether the total came from the manifest or from the server:
+a size in a manifest is a publisher's signed statement and a size from a server is the party serving
+the bytes describing its own file. Those are different kinds of claim and a progress bar that hid the
+difference would be inventing the more convincing one.
+
+### The other half, in the Hub
+
+`GET /api/skynet/v1/os/releases/{version}/bundle?arch=` — the eleventh endpoint, and the first that
+serves bytes rather than documents. A 302 to a short-lived signed storage URL rather than a stream,
+because an OS image is hundreds of megabytes and the platform's own artifact route settled this
+argument already; object storage serves the `Range` requests the slice design rests on, which
+`readHead` in `lib/skynet/storage/store.ts` has been relying on since the scanner was written.
+
+Public and rate-limited, like the catalogue beside it, and the argument is stronger here rather than
+weaker: the party fetching holds a device credential, which `requireActor` deliberately refuses
+because a device token is not a user, and the bytes are checked against a digest inside a signed
+document. Authentication would protect nothing the signature does not.
+
+**A location is not evidence**, which is why the URL is not in the manifest. The obvious design —
+a signed manifest carrying a download URL — reads as the more secure one and is the weaker: the
+digest already makes the content unfalsifiable, so signing the location buys a manifest that goes
+stale the day a hostname changes. It also keeps `releases::adopt`'s decision intact, which copies
+five fields out of the Hub's row and deliberately not the artifact id.
+
+`bundleSource` is a decision function rather than four lines in the route, and it exists to keep two
+answers apart. *No such release* and *a release published as a manifest with no artifact* send an
+operator to two different places, and the second is a state nothing else on the Hub can name: it
+validates, it lists, and every robot on the channel holds it, gates it, admits it and then waits for
+an image nobody uploaded.
+
+### Numbers
+
+Rust: **1160** tests, up from 1140. `skynetd-io` 352 → 372 — thirteen against `crate::bundle`
+directly and seven through the reconciler, including the hand-placed bundle and the fetcher that
+panics if the gate lets anything through it. `cargo fmt --all --check` clean, `cargo clippy
+--workspace --all-targets` clean under `-D warnings`, `node tools/check-golden-path.mjs` and
+`node tools/check-contract-mirrors.mjs` both clean.
+
+`cargo fmt --all --check` was **not** clean at the start of the session, and not because of anything
+here: three files in `skynet-contracts` and `skynet-corpus` had been committed unformatted, which
+means CI's first step has been failing on `main`. Formatted, in the same run, because a red check
+that everybody has learned to ignore is worse than no check.
+
+On the Hub: **1457** tests, `npx tsc --noEmit` clean, three new tests for `bundleSource`, two new
+i18n keys synced across all 35 catalogues, and the endpoint added to §18's documented surface — which
+`skynet-api-docs.test.ts` holds to the routes that actually exist.
+
+### Not done, and what it waits on
+
+**Three migrations are written and not applied**, unchanged: the fleet tables, the release channel,
+and conformance with certification. Applying DDL to a live project is the owner's call.
+
+**A round trip.** Both halves of the fetch are driven by suites and no robot has yet fetched an image
+from this Hub. That is now a two-sided deployment step rather than a coding one, and it is the same
+entry the check-in loop has carried since the twenty-fifth session.
+
+**The manifest declares no size.** The fetch contract has a branch for one — *a partial cannot be
+larger than what it is part of* — and it is unexercised, because §57's five-field manifest carries a
+digest and no size while the Hub holds `size_bytes` on the row. Closing it is a mirrored contract
+change: `BundleManifest` in Rust, in `reference/typescript`, and in the Hub's copy, plus regenerated
+corpus vectors. It was left open deliberately rather than closed with the server's own number, which
+would put an untrusted value into a decision that deletes a file. `declared_size` is a single
+function on the daemon so the day the field exists, both consumers become true at once.
+
+**The sealed black box.** §17 treats `POST /devices/{id}/incidents` as a document and §13's seal
+produces hundreds of megabytes. It wants exactly what this session built, pointed the other way:
+resume, progress and §34.3's metering on an **upload**. `skynet_incidents.artifact_id` exists and is
+always NULL, so the gap is visible in the schema. This is now the closest thing to a shovel-ready
+piece of work in the repository — the transfer discipline is written, tested and has a shape.
+
+**A bench pass runner.** Nothing on a robot executes §15's thirty-six tests and nothing signs a
+result, so §12's gate reads rows it cannot tell attested from asserted. Unchanged, and it is the
+oldest open item that nothing else is waiting on.
+
+**Six of §74's eight telemetry counters have no source**, which is a missing kernel rather than a
+missing route. **Field conformance** reads null for want of `cycles`, which is one of the six.
+**Episodes** remain the only queue class with a route and no producer. **A real A/B device**,
+**`security.identity.attested`** and **§54.2's `safety_notes` acknowledgement**, all unchanged.
+
+### Findings, restated
+
+1–9 from the seventeenth session; 10 and 11 from the eighteenth; 12 and 13 from the nineteenth; 14
+and 15 from the twentieth; 16 and 17 from the twenty-first; 18–20 from the twenty-second; 21–23 from
+the twenty-third; 24 and 25 from the twenty-fourth; 26–28 from the twenty-fifth.
+
+29. **Evidence bound to an identifier proves nothing until somebody checks the identifier names the
+    object in hand.** §12 binds the signature, the bench pass and the compatibility list to a digest,
+    and for twenty-five sessions the bytes that went to the bootloader were selected by filename. The
+    reason it survived is that *every test about the gate passed*, and they were all correct: the
+    gate was complete and it was being applied to a name. The general form is worth carrying into the
+    incident upload and the conformance runner, both of which are about to produce documents bound to
+    digests: **check the binding at the point of use, not at the point of issue.**
+30. **A vocabulary with no word for "nothing is wrong and nothing happened" forces every implementer
+    to lie.** The reconciler had four outcomes and the honest answer for a robot waiting on an
+    unmetered link was none of them, so the first version of this fetcher reported `Failed` — which
+    is what the type system pushed it towards, and which would have put an alarm on a console for the
+    ordinary state of a fleet. §34.1 assumes the robot is offline; a supervisor whose vocabulary
+    cannot say *offline and fine* will say *broken* instead. Worth checking the other enumerations
+    for the same missing word before they are consumed by something that has to render them.
+
+---
+
+## 2026-09-02 (twenty-seventh) — the episode neither side had ever put through the other
+
+The twenty-sixth session's finding 27 says a gap between two systems is invisible from either end.
+This one is the same finding with the parts swapped: not a producer with no consumer, but a producer
+and a consumer that had **both** been built, both tested, and never once introduced.
+
+### The two documents did not agree about a single field name
+
+Five sessions of log entries record *"`Class::Episode` has a route and no producer"*. That entry was
+wrong, and re-reading the code rather than the log is what found it: `Effect::Episode` has existed
+since §54.4's lifecycle landed, `perform` enqueues it, `Hub::route` maps the class to `/episodes`,
+and the whole path works. What nobody had done was compare the document it sends against the
+document the route reads.
+
+| The robot sent | The route reads |
+|---|---|
+| `skill` | `task` |
+| `duration_ms` | `duration_seconds` |
+| `intervention_count` | `interventions` |
+| `invocation`, `digest`, `arguments`, `reason`, `detail`, `root`, `parent` | — |
+| `outcome` | `outcome` ✓ |
+
+Every episode this daemon produced would have been stored with a null task, a null duration, and
+none of the skill — and the Hub would have answered `201`, because `POST /episodes` ignores fields it
+does not know, which is the right behaviour for an ingest route taking documents from agents in the
+field.
+
+Neither suite could see it. The robot's asserted what the robot sends; the Hub's asserted what the
+Hub accepts. Both were correct and both were about half a boundary.
+
+The episode is now written in the route's field names, with the facts §54.4 asks for that the schema
+has no column for going into `metadata` — the invocation id, the digest of the bytes that ran, the
+arguments, the lifecycle reason. Dropping those would leave an investigation with a row saying a
+skill failed and no way to find what was running.
+
+**§76** records the general rule, because it is not about episodes: a document crossing §17 is the
+receiving route's shape, and the receiver is the one with a table under it.
+
+### The absence that a default destroyed
+
+`Invocation::episode` omits the intervention count when nothing on the robot counts interventions,
+with a comment saying exactly why: *"a zero would be consumed by a marketplace as evidence of a clean
+run."* That is finding 30 from this morning, written down before this session found where it
+actually bites.
+
+`validateEpisodeInput` did `optionalNumber(params.interventions) ?? 0`, and the column is
+`integer not null default 0`. So the careful absence became a zero on arrival — twice, once in
+validation and once in the schema, either of which would have been enough.
+
+Both are fixed. The validation preserves the absence, a migration makes the column nullable with the
+same `CHECK` §74's telemetry windows already carry, and `summarizeEpisodes` now reports
+`interventions_measured` beside the total — because a total over four hundred episodes of which
+twelve counted is a smaller number presented as a better one. The repository view says *"not
+measured"* rather than `0`, and *"3 across 12 of 400 episodes that counted"* when only some did.
+
+The general form is §74.3's rule, which the telemetry table was built to and the older episode table
+was not: **zero and unmeasured are opposite facts, and the one that gets misread is always the one
+that looks like good news.**
+
+### `recorded_at`, and the week that would have landed in one minute
+
+A third defect in the same document, found by reading the route rather than the schema.
+`normalizeRecordedAt` stamps `new Date()` when the field is absent, and the robot was not sending it.
+
+§34.4's queue exists precisely so a robot offline for a week keeps its episodes. Every one of them
+would have been filed at the minute the link came back — on the column whose entire purpose is to
+say when something happened, in a dataset whose value depends on that.
+
+The invocation now records the wall clock at its terminal transition and the episode carries
+`recorded_at`. §35.1 permits exactly this and nothing more: the monotonic clock measures the
+duration, so an NTP step cannot move it, and the wall clock places the record on a timeline the Hub
+shares with other robots. A robot with no clock omits the field, because a Hub's guess is better than
+a robot's invention.
+
+### The mechanism, because a finding without one is a note
+
+Finding 31 says a boundary needs a test that holds one side's real output against the other side's
+real contract. That is a practice, and practices are not mechanisms — so the session did not stop at
+writing it down.
+
+**`reference/wire/`** now holds the exact canonical body this daemon puts on the wire for three §17
+routes, produced by the real producers and frozen by this suite:
+
+| File | Route | Producer |
+|---|---|---|
+| `episode.json` | `POST /episodes` | §54.4's lifecycle, at the terminal transition |
+| `telemetry.json` | `POST /devices/{id}/telemetry` | §74's window, closed by a reconcile pass |
+| `incident.json` | `POST /devices/{id}/incidents` | §38.1's profile-signature alarm |
+
+Three properties, and each closes a way this could have been theatre:
+
+* **Produced by the code, never typed.** A fixture written beside the test that reads it is a record
+  of what its author believed. `SKYNET_WRITE_WIRE=1 cargo test -p skynetd-io` re-freezes; the
+  environment variable is the whole of the write path, because a fixture that rewrites itself
+  whenever it disagrees is a log of the last run.
+* **Read by the far side's real contract.** The Hub's `skynet-wire.test.ts` pushes each document
+  through the receiving route's own validation — `validateEpisodeInput`, `assessWindow`,
+  `incidentContext` — rather than through a parser written for the test.
+* **Pinned in both repositories.** `check-contract-mirrors.mjs` gained a second set and the pins are
+  namespaced `wire/…`, so a fixture that moves here without the Hub being resynced fails in CI with
+  one checkout, which is what CI has.
+
+The result is the property neither side could have alone: a producer that changes fails here, with
+the command that re-freezes it; a route that stops reading a field fails there; and the two land
+together. **§31.6** records it in the specification beside the corpus, as the same mechanism pointed
+at a boundary the corpus structurally cannot see.
+
+The check-in is deliberately **not** in the set. It already has this treatment in the other
+direction — the Hub's fleet suite carries the document verbatim from the corpus, under a header
+explaining that a Hub tested against a document a Hub author invented is a Hub tested against its own
+assumptions — and a second frozen check-in would be a second source of truth for one document, which
+is the failure §31.2 names.
+
+### Numbers
+
+Rust: **1164** tests, `skynetd-io` 372 → 376, `cargo fmt --all --check` and `cargo clippy
+--workspace --all-targets` clean. The first new test is the one that would have caught this: its
+field names are copied from `lib/skynet/devices.ts` rather than from the producer, which is the only
+way a test like it is worth anything. The other three are the frozen documents.
+
+Hub: **1475** tests, `npx tsc --noEmit` clean, `npx next build` clean. Two tests for the absence —
+one that it survives validation, one that the aggregate carries its denominator — and ten in the new
+`skynet-wire.test.ts`, none of whose fixtures were typed by hand.
+
+### Not done
+
+**The migration is written and not applied**, and it now joins the three from earlier sessions.
+`20260902320000_skynet_episode_interventions.sql` is the smallest of the four and the only one that
+alters an existing column rather than creating tables; until it runs, an episode carrying no
+intervention count is refused by the `not null` constraint rather than stored as an absence.
+
+Everything else from the twenty-sixth session's list is unchanged.
+
+### Findings, restated
+
+1–28 as before; 29 and 30 from the twenty-sixth session.
+
+31. **Two halves that were built separately have never been introduced, and their suites cannot
+    introduce them.** The episode path was complete on both sides for five sessions: a producer that
+    enqueued, a queue that sent, a route that accepted, and a table that stored. Every test passed
+    because each side tested itself. What was missing was a test that takes *the producer's actual
+    output* and holds it against *the consumer's actual contract* — and the only way to write one is
+    to copy the field names from the far side's source rather than from your own. The fleet suite on
+    the Hub already does this in the other direction: its check-in fixture is copied verbatim from
+    the OS corpus, with a header explaining that a Hub tested against a document a Hub author
+    invented is a Hub tested against its own assumptions. That practice now runs both ways and is a
+    mechanism rather than a habit — see §31.6 and the section above.
+32. **A stale log entry is worse than no log entry, because it stops people looking.** *"Episodes
+    have a route and no producer"* was recorded five times, carried forward each session, and was
+    false the whole time — the producer had been written before the sentence was first typed. It
+    survived because each session copied the previous session's "not done" list rather than
+    re-checking it, and because the claim was plausible: nothing on this edition can actually *run*
+    a skill, so no episode has ever been produced in anger. The correct entry was *"nothing has ever
+    exercised this path end to end"*, which is a different sentence that would have sent somebody to
+    look at the two documents.
+
+---
+
+## 2026-09-02 (twenty-eighth) — one field, and the two rules that were waiting on it
+
+Short, and it is the entry the twenty-sixth session wrote in advance: *"the manifest declares no
+size, and the fetch contract has a branch for one."*
+
+`BundleManifest` now has six fields. `size` is `Option<u64>` in the Rust contract, `size?: number`
+in the TypeScript oracle, and the Hub's `manifestOf` copies it from the release row's `size_bytes`
+when the row has one.
+
+### What was waiting on it
+
+**§12's partial check.** `plan_fetch` refuses to resume from a partial *larger than the whole
+bundle* — which is how a leftover from another image is caught before a transfer rather than after
+one. With nothing to compare against, the branch was unreachable on every robot and the digest
+caught the mismatch at the end of a transfer instead, which on a warehouse link is hours.
+
+**A progress line that is a fraction.** `GET /ota` reported a count of bytes, because the only total
+available came from whichever server answered — a number the publisher's signature does not cover.
+It now reports `total_declared_by: "manifest"` when the size is signed and `"server"` when it is
+not, and the console and CLI say which. Those are different kinds of claim and a bar that hid the
+difference would be presenting the more convincing one.
+
+### Absent, not zero
+
+Said in four places because it is the whole of the field's design: a `0` would be a publisher
+declaring an **empty image**, and every robot on the channel would discard its partial as
+larger-than-the-whole on the first pass. The contract's reader takes a size only when it is a whole,
+non-negative, representable byte count; the Hub omits the key rather than sending `null`; and the
+robot's fallback reassembly — the path that reads the Hub's *row* rather than its manifest — applies
+the same rule to `size_bytes`.
+
+### The cost, which is real and is cheap exactly now
+
+The manifest's canonical bytes changed. A robot holding the five-field version of a release will
+refuse the six-field one with *"the Hub is serving a different manifest for release `1.4.0`"* —
+which is §12's immutability rule working as designed, not a regression. It costs nothing today
+because no robot holds one, and it would cost a version number after a fleet exists. Recorded in
+§75.5 rather than only here.
+
+### Numbers
+
+Rust: **1169** tests, up from 1164. Five new: three in `releases` for the field arriving by either
+route and being absent when the row says nothing, and two in `ota` — one that the signed size
+reaches `GET /ota` and is labelled as the publisher's, and one that drives the branch this field
+exists for, asserting the fetcher is asked to start from **zero** rather than resuming into bytes
+from another image.
+
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets` clean.
+`node tools/corpus-gen/generate.ts` reproduces all 68 files and 973 cases byte for byte — the
+`ota/bundle` vectors feed `admit_bundle`, which does not read the size, so an optional field added
+to the manifest changes no expected output. That is the corpus doing its job in the quiet direction:
+a change that should not move anything, and did not.
+
+Hub: **1476** tests, `npx tsc --noEmit` clean. One test updated (the manifest is six fields now) and
+one added, for the omission.
+
+---
+
+## 2026-09-02 (twenty-ninth) — the incident that never named its window
+
+§13 is one sentence about this: *"sealed and uploaded on any fault, estop, or operator request."*
+§17 lists the incident route as a **sealed black box upload**.
+
+Neither half was true. The sealing has existed since the sixth session and nothing called it, so a
+fault produced a document while the ring kept turning and the window describing the fault was
+overwritten in the ordinary course of a robot running. On the Hub, `skynet_incidents.artifact_id`
+was NULL on every row the platform could hold, and an investigator reading an incident had no way to
+know a recording had ever existed.
+
+### The seal belongs to the raise
+
+`raise_incident` now seals and attaches, so every incident this daemon ever raises carries a window
+and no future producer has to remember to. §38.1's profile alarm is the only producer today and it
+went from being the caller that formats a document to being one line.
+
+**`blackbox::seal_existing` reads and never creates**, which is the whole reason it is a new function
+rather than a second `Recorder`. `Recorder::open` deliberately *replaces* a ring whose shape no
+longer matches the body — correct for the one process that owns the recording, catastrophic for
+anybody else, because a second opener on a robot whose descriptor had changed would wipe the window
+somebody was about to seal. So the sealer holds no handle: it reads `<blackbox>/ring`, walks it,
+writes the file, and returns the identity.
+
+### Naming a thing you cannot send
+
+A sealed window is tens to hundreds of megabytes; §34.3 puts it in the bulk class, and the upload —
+resume, progress, metering, the mirror of §75's fetch — is not written. Between *send it* and *say
+nothing* there is a third option that is honest and costs a few hundred bytes: **send the window's
+identity.** Name, size, digest, records, damaged, `uploaded: false`.
+
+A Hub can render that: *"this incident has a 4 MB recording on the robot, digest `sha256:…`, that
+nothing has collected."* Saying nothing is the worse error of the two, because it closes an
+investigation rather than opening one — an operator reading a blank cell concludes no recording was
+taken.
+
+The digest is what makes it worth carrying now rather than later. When the bytes do cross, they will
+be checked against a digest recorded before the transfer existed, by the party that produced them —
+which is §12's rule about evidence, applied to the other direction.
+
+### One shape, discriminated
+
+`recording` is always present and always an object: `sealed: true` with the window, or
+`sealed: false` with the reason — no ring, or a ring that would not open. The absence of the field
+altogether is a third state and means an older edition said nothing, which is **not** evidence that
+a robot has no black box.
+
+The first version of this used an object for a seal and a sentence for a failure. That is a union a
+consumer has to type-check before it can read a field, and the case it would get wrong is the common
+one on this edition: a development root has no ring at all. Changed before it left the repository.
+
+### A seal that fails does not swallow the incident
+
+The failure goes **into** the document and the incident is queued anyway. §34.4 makes this the one
+class that is never dropped, and a robot that suppressed an alarm because its own recorder was
+broken would be losing the report and the recording together — which are exactly the two things that
+fail at the same moment.
+
+### The mechanism caught its first change, one session after being built
+
+The wire fixture did what §31.6 says it is for, on the first document to change after it existed:
+
+```
+reference/wire/incident.json no longer matches what this daemon produces.
+This document crosses §17 and the Hub keeps its own copy of it. If the change is intended,
+re-freeze and resync — and expect the Hub's suite to have something to say, which is the point.
+```
+
+Re-frozen, resynced, and the Hub's suite did have something to say — not a failure, because the
+incident route stores what it does not recognise verbatim, but the fixture is what turned *"we
+changed a document"* into *"here is the document the other side is now holding"*. The fixture also
+got better under it: the incident's robot now has a ring, so the frozen document carries a **sealed**
+recording rather than the honest-but-uninteresting sentence a fixture with no recorder produces.
+
+### On the Hub
+
+`incidentRecording` reads the three states, and the device page renders the size with the digest on
+hover. It lives in `components/skynet/fleet-types.ts` rather than beside the rest of the fleet code,
+because that page is a client component and `lib/skynet/fleet.ts` reaches for `node:crypto` and the
+service-role database client — the same reason `formatBytes` is spelled twice, which is the cheaper
+side of that trade by four lines.
+
+### Numbers
+
+Rust: **1169** tests, unchanged in count and not in content — the incident tests now assert the
+window on both paths, and the wire fixture carries a real seal. `cargo fmt --all --check` and
+`cargo clippy --workspace --all-targets` clean.
+
+Hub: **1478** tests, up from 1476: the recording read out of the frozen document, and the three
+states told apart. `npx tsc --noEmit` clean, three new i18n keys synced across 35 catalogues.
+
+### Not done
+
+**The bytes.** Unchanged, and now with a consumer: `skynet_incidents.artifact_id` is still NULL and
+the page says so per incident rather than leaving it blank. §34.3's upload wants resume, progress
+and metering, and the honest blocker is on the Hub's side rather than the robot's — object storage
+takes a single-shot signed PUT, and a two-hundred-megabyte PUT over a warehouse link is exactly what
+§75.2 spends its length on not doing. Resumable upload (TUS), chunk-and-assemble through a job, or
+a signed session are three designs with different costs, and that is an owner's decision rather than
+a session's.
+
+---
+
+## 2026-09-02 (thirtieth) — the safety note that nobody had ever been asked to read
+
+Open since §54 was written, carried in every *not done* list since the seventeenth session, and one
+of the last two items on it that nothing else was waiting on.
+
+> `safety_notes` stops being decorative too: it is displayed at grant time and acknowledged once per
+> skill per robot, recorded in the audit log. **A safety note nobody has read is a safety note that
+> does not exist.**
+
+The field has been in the Hub's skill manifest since skills were built — a string, four thousand
+characters — and **nothing on either side read it**. A publisher could write *"clear the cell before
+granting"* and every robot in the fleet would grant the capability without showing it to anybody.
+
+### The grant is the right moment, and it is the only one
+
+§54.2 names it and building it confirmed the choice. A grant is the one point in a skill's life
+where a person is present, deciding, and able to stop; an invocation is a robot doing what it was
+told, often by a reconcile loop at three in the morning, and a prompt there is a prompt nobody
+reads.
+
+`POST /grants` now refuses with `409` when a skill declares notes this robot has no acknowledgement
+for, and **the refusal carries the notes**. *Displayed* is the word the rule uses, and the only
+place a robot can be sure a person sees them is in the answer to the request they just made. The
+CLI prints them, then prints the command that acknowledges them with the digest already filled in —
+because a rule that is annoying to comply with is a rule somebody scripts their way around.
+
+### Bound to the text
+
+The acknowledgement records the **digest of the notes**, so a publisher who edits a warning has
+written a new warning. §54.2 says "once per skill per robot" and the reading that makes the sentence
+worth anything is the one where a changed note is a note nobody has read yet — the alternative lets
+a package acquire its warning *after* the operator agreed to a blank one. There is a test that
+installs a second version with different notes and asserts the next grant asks again.
+
+Acknowledging *other* notes is not acknowledging these, either: a digest that does not match is
+refused the same way, because that is what a replayed command from last version looks like.
+
+### Two files, two questions
+
+`<state>/acknowledgements.json` answers *may this grant proceed* — decidable offline and instantly,
+which is the only kind of answer §11 permits in a path a person is waiting on. The **audit log**
+answers *who read it and when*, carrying the digest and the note's first line, which is what
+somebody asks after an incident and is the one of the two that cannot be reconstructed.
+
+An acknowledgement that could not be written **refuses the grant**. Granted-and-unrecorded is the
+worst of the three outcomes: the next grant asks again, and no incident review can find that anybody
+ever read it.
+
+### Where the notes are read from, and the tense it is in
+
+Two places, in order: the **active** digest, then the digest the desired state names. They are the
+same question in a different tense — what the package is now, and what it is about to be — and a
+grant written during a rollout is a grant about the version arriving.
+
+A package this robot does not hold at all yields no notes and the grant proceeds. Grants and the
+desired state are both level-triggered and either order is valid, so refusing a grant for want of a
+manifest nobody has fetched would break the ordinary order of a deployment. The note is read at the
+next grant.
+
+### It gates a widening and nothing else
+
+§39.1: the safe direction never waits. Revocation is untouched, and there is a test for it. The
+on-robot console needed no change at all, which is worth recording as a small confirmation of the
+design — it can revoke a grant and has never been able to add one, so the surface that cannot show
+a person a paragraph is also the surface that cannot need to.
+
+### Numbers
+
+Rust: **1178** tests, up from 1169. Nine new, and the two that matter most are the ones about
+*absence*: whitespace-only notes are not a warning (requiring an acknowledgement of nothing is how
+an operator learns to acknowledge without reading), and a package with no notes is granted without
+ceremony.
+
+The suite runs on Windows, which took one decision: the fixture stages the package and names it in
+the desired state rather than activating it, because activation is §37.1's atomic symlink swap and
+that is POSIX-only. `mod posix` still covers the activation path; this covers the rule, which is
+about the manifest this robot holds and is the same document either way.
+
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets` clean.
+
+### Findings, restated
+
+1–28 as before; 29 and 30 from the twenty-sixth session; 31 and 32 from the twenty-seventh.
+
+33. **A field that only one side reads is decorative, and it stays decorative silently.**
+    `safety_notes` was validated, stored, rendered in a manifest schema and shipped for however long
+    skills have existed — and no robot had ever displayed one. Nothing was broken: the Hub's job was
+    to carry it, and it carried it. The failure is that a *consumer* was specified in one sentence
+    of §54.2 and never written, which is finding 27's shape with the halves swapped and is now the
+    third instance in five sessions. The generalisation worth acting on: **a schema field whose
+    consumer is one sentence in a specification is a field to go and check**, and this repository
+    has a list of them — every "measured by" column in §52 that points at something, every manifest
+    key the Hub validates. The next session could usefully spend an hour reading the Hub's manifest
+    schema against what the robot reads.
+
+---
+
+## 2026-09-02 (thirty-first) — the sweep finding 33 asked for, and the one field it caught
+
+Finding 33 ended with an instruction rather than an observation: *"a schema field whose consumer is
+one sentence in a specification is a field to go and check, and this repository has a list of them."*
+This is that hour, spent immediately rather than recorded as future work.
+
+### The method
+
+Every field in the Hub's five card schemas (`lib/skynet/manifests.ts`), read against what the robot
+consumes. Not against what the specification says the robot consumes — against `grep`.
+
+### What it found
+
+| Card field | On the robot |
+|---|---|
+| `source_embodiment` (model) | Read — §6's transport planning |
+| `required_capabilities` | Read — admission, and §25.2's leases |
+| `runtime` | Read — the entry point |
+| `preconditions`, `success_criteria` (skill) | Read — §54.2, §54.3 |
+| `expected_duration_seconds` | Read — §54.4's deadline |
+| `composition` | Read — §54.5, at invocation, through `validate_composition` |
+| `safety_notes` | Read **since yesterday** (§54.2) |
+| **`task`** (skill) | **Read by nothing** |
+| `required_extensions` | See below |
+| `architecture`, `parameters`, `precision`, `modalities`, `action_space`, `observation_space`, `training`, `intended_use`, `limitations`, `hardware_requirements` | Correctly Hub-only |
+| every dataset, environment and benchmark field | Correctly Hub-only — none of them is installed on a robot |
+
+Two results, and the shape of the second is the reason the sweep was worth doing.
+
+### `task`, which every episode had been getting wrong
+
+`SkillManifest.task` — *"pick the cup off the table"* — has been validated, stored and rendered on
+every skill card since skills existed. No robot had ever read one.
+
+§54.4's episode carried the **package id** in `task` instead, and §17's column means *what the robot
+was doing*. So every episode a fleet produced would have arrived with `acme/pick` in the one column
+a training set is filtered by — forty thousand rows saying which *thing* ran and none saying what it
+was doing. Not a null, not an error, and nothing on either side would have flagged it.
+
+Fixed: the declared task when there is one, trimmed, with the package id as the fallback — a poor
+label and a correct one, against a null column on every row. The id stays in `metadata.skill`,
+because grouping needs an identifier and a sentence is not one.
+
+**The wire fixture caught it twice in one change**, which is the second time in three sessions:
+re-freezing the episode failed the OS suite, and the resync then failed *the Hub's* assertion that
+`task` is `acme/pick`. That assertion was correct when it was written and wrong the moment the robot
+started reading the card. Neither suite could have found this alone; the pair found it in two
+commands.
+
+### `required_extensions`, which is not a gap and is a divergence risk
+
+Both sides read extensions and they read them from **different documents**. The Hub's compatibility
+engine consumes the *card's* `required_extensions`; the robot's admission consumes the *package
+manifest's* `embodiment.extensions`, checked against the body's declared extensions.
+
+Neither is wrong and nothing checks they agree. A publisher who fills in one and leaves the other
+empty gets a pass from whichever side reads the empty one — the Hub says compatible because the card
+requires nothing, or the robot admits because the manifest requires nothing. Both documents come
+from the same publisher and nothing on the platform compares them.
+
+Left open deliberately: the check belongs on the Hub at publish time, where both documents are in
+hand — the card is a column and the package manifest is a file in the version — and it is a piece of
+work rather than a line.
+
+### Numbers
+
+Rust: **1179** tests, up from 1178. One new, covering the declared task, the fallback, and the
+whitespace-only case that is not a declaration.
+
+Hub: **1478**, with the wire expectation corrected to the document the robot now sends.
+
+### Findings, restated
+
+1–28 as before; 29 and 30 from the twenty-sixth; 31 and 32 from the twenty-seventh; 33 from the
+thirtieth.
+
+34. **A sweep prompted by a finding is worth more than the finding.** Finding 33 was written to be
+    acted on later and was acted on within the hour, which is why `task` is fixed rather than being
+    a line in a list somebody reads next month. The method transfers: take the *other* side's schema,
+    grep this side for every key in it, and read the ones that return nothing. It took an hour and
+    found a defect that would have degraded every episode the platform ever collected — silently,
+    because a wrong string in a text column is not an error anywhere.
+
+---
+
+## 2026-09-02 (thirty-second) — the table that said "Designed" about eighty thousand lines
+
+§73 is the specification's own summary of what exists. A vendor reads it first, and it was wrong in
+the direction that matters: it listed the Safety Kernel, `skynetd`, OTA, the black box, identity and
+the Hub contract as **Designed**, and closed with
+
+> Implemented means running, tested TypeScript in `lib/skynet/os/`: 2,430 lines across transport,
+> admission, certification and readiness, with 80 unit tests inside a suite of 1,117.
+
+That paragraph was true when the Rust workspace did not exist. It has been false for thirty
+sessions, and nobody updated it for the ordinary reason: **nobody updates a summary while they are
+building the thing it summarises.** The result understated the platform by roughly eighty thousand
+lines and, worse, understated it *unevenly* — a reader could not tell which rows were prose and
+which had a suite behind them.
+
+### Three states, and a fourth column
+
+Rewritten with the states the work actually has:
+
+* **Designed** — prose. Two rows are still this, and one of them (§36, power and thermal) is now
+  named as unwritten rather than left to be inferred from a word.
+* **Built** — code with a suite.
+* **Built on both sides** — the robot half and the Hub half exist, and a document has been put
+  through one into the other (§31.6). Seven rows.
+
+And a fourth column: **what is still missing, per row.** That is the half the table was missing more
+than it was missing accuracy. A state table of green ticks is exactly the artifact this document is
+written against — the useful sentence is not *"the kernel is built"* but *"the kernel is built and
+nothing has driven a physical joint."*
+
+The rows that carry the sharpest entries are the ones this month's sessions produced:
+
+* OTA — built on both sides, and **no robot has yet applied an image from this Hub**.
+* Black box — built, and **the sealed bytes do not cross §17** (§77).
+* Conformance — built on both sides, and **nothing on a robot runs the suite or signs a result**.
+* Skills — built, and **nothing on this edition can run a policy, so no skill has ever executed**.
+* §32's interface — built on both sides, and **three of §32.1's four panels are named gaps**.
+
+### The numbers, measured rather than remembered
+
+85,700 lines of Rust across fifteen crates with 1,179 tests; 12,600 lines of the TypeScript
+reference edition the corpus holds it to; 5,400 lines of drivers; 8,100 lines in the Hub's mirror;
+1,478 tests on the Hub. Counted with `wc`, not recalled — the previous paragraph's numbers were
+recalled, which is how they survived being wrong.
+
+The replacement says so: *"numbers go stale; the shape does not"*, and points a reader at the last
+column rather than at the totals.
+
+### Findings, restated
+
+1–28 as before; 29–34 from the sessions above.
+
+35. **A state table is a claim, and it decays faster than the code it describes.** Nothing in this
+    repository could have caught it: no test asserts a paragraph, the mirror checks only that both
+    copies agree — and they did, both being equally out of date. The mechanism that would catch it
+    does not exist and is probably not worth building; what is worth doing is what this session did,
+    which is to **read the summary last** after a stretch of building, on the assumption that it is
+    wrong. The tell is a table whose rows all say the same word.
+
+---
+
+## 2026-09-02 (thirty-third) — the graph that was only ever discovered at runtime
+
+§54.5 is one sentence with two halves, and this repository had built the first:
+
+> Depth-limited (default 4) and **acyclic** — a cycle is refused at install by walking the declared
+> graph, **not discovered at runtime**.
+
+`Runtime::execute` validates the **live ancestry** on every nested call: it takes the chain of
+invocations that actually happened, appends the edge about to be created, and refuses the one that
+would close a cycle. That is correct, it has tests, and it is precisely the discovery the second
+half forbids being the only one — it fires *on a robot*, with leases held and a deadline running,
+which is the worst moment to learn that a skill calls itself.
+
+The declared graph had never been read. `read_calls` was written, corpus-verified, and had no caller
+outside the corpus runner — the same shape `skynet_contracts::bundle` had before the twenty-sixth
+session, and the third instance this month of a contract function waiting for a consumer.
+
+### Walked in two places, for two different reasons
+
+* **At install**, reported. `skynetd install` and `skynet install` both print the fault with the
+  path — `acme/pick → acme/grasp → acme/pick` — because §64 makes a refusal name the fix, and the
+  person who can fix a call graph is the one running the command.
+* **At activation**, enforced. Beside the driver-signature gate and for the same structural reason
+  §19 gives: a staged blob is inert and the symlink swap is the consequential moment. Reporting
+  alone would leave the rule to whoever reads terminal output.
+
+One function decides both, and it is the contract's `validate_composition` — the same one the
+runtime uses. Two implementations of *acyclic and depth-limited* would be two answers to one
+question, and only one of them has a corpus behind it.
+
+### Numbers
+
+Rust: **1184** tests, up from 1179. Five new: a graph that terminates, a declared cycle, a graph
+past the depth limit, a package that declares no graph (which is nearly all of them, and a check
+with an opinion about those would be a check that refuses things for saying nothing), and the
+either-spelling reader.
+
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets` clean; the golden path still
+counts 44 commands.
+
+### The spec says both halves now
+
+§54.5 gained the sentence that says where each check lives and why there are two, because the
+version that only said "refused at install" is the version that let this sit for six sessions
+looking done.
