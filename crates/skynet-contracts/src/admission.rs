@@ -137,6 +137,19 @@ pub struct PackageManifest {
     pub depends_on: Vec<Dependency>,
     /// Minimum OS version.
     pub min_os_version: Option<String>,
+    /// The body this policy was trained on, and what it emits (§6).
+    ///
+    /// §37.1's install pipeline has a `transport` stage — *"`resolveTransport()` against this body;
+    /// a `refused` verdict fails the install"* — and until this field existed the stage had no
+    /// input. [`AdmissionParams::transport_verdict`] has been an `Option` since admission was
+    /// written, and on a robot it was always `None`: there was a consumer and no producer.
+    ///
+    /// `None` means the publisher declared no action space. It is **not** a pass and it is not a
+    /// refusal: [`crate::transport::resolve_transport`] over an empty source raises
+    /// `no_source_embodiment` and warns that *nothing about its fit to this body can be checked*,
+    /// which is the honest answer and the one an operator can act on. A package kind that has no
+    /// action space at all — a driver, an environment, a dataset — correctly declares none.
+    pub source_embodiment: Option<crate::embodiment::SourceEmbodiment>,
 }
 
 /// Why a package was refused, or warned about.
@@ -827,6 +840,7 @@ mod tests {
             runtime: None,
             depends_on: Vec::new(),
             min_os_version: None,
+            source_embodiment: None,
         }
     }
 

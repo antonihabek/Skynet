@@ -658,6 +658,7 @@ fn a_refused_plan_refuses_the_install() {
             runtime: None,
             depends_on: Vec::new(),
             min_os_version: None,
+            source_embodiment: None,
         },
         capacity: DeviceCapacity {
             ram_mb: 8192.0,
@@ -898,6 +899,7 @@ mod the_warning_channel {
                 runtime: None,
                 depends_on: Vec::new(),
                 min_os_version: None,
+                source_embodiment: None,
             },
             capacity: DeviceCapacity {
                 ram_mb: 8192.0,
