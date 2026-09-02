@@ -61,7 +61,15 @@ const given = args.find(arg => !arg.startsWith('--'))
  * found, nothing to compare" when the checkout is right there under a different capital — a check
  * that cannot run is not a check, which is the sentence this file already says about CI.
  */
-const CANDIDATES = ['BotMarket', 'botmarket', 'Botmarket', 'botMarket']
+// The Hub was renamed from BotMarket to Robot Overflow. Both spellings are here because a checkout
+// made before the rename is still a valid checkout — and because a tool that can only find the old
+// name prints "not found", falls back to checking its own pins, and goes on passing on a machine
+// that has both trees. That is the degraded mode written for CI doing its job silently where the
+// real comparison was available.
+const CANDIDATES = [
+  'Robot Overflow', 'robot-overflow', 'RobotOverflow', 'BotMarket', 'botmarket', 'Botmarket',
+  'botMarket',
+]
 
 function findHub() {
   for (const name of CANDIDATES) {

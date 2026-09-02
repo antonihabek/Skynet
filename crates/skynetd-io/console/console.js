@@ -588,6 +588,217 @@ function renderPlan(feed) {
  * the update is refused. "This image touches the safety kernel" is what somebody needs before they
  * go and book bench time; the refusal is only what happens if they have not.
  */
+/**
+ * §10, on one panel: whose this robot is, what it is, and what it is running.
+ *
+ * The panel never renders a credential, because the route never carries one — `credential_prefix`
+ * is the whole of what any surface has a use for, and a masked credential is a credential whose
+ * length is on a LAN listener.
+ */
+function renderIdentity(feed) {
+  const body = clear($('identity-body'))
+
+  if (!feed.value) {
+    body.appendChild(el('p', 'note', feed.detail || 'no answer yet'))
+    return
+  }
+  const v = feed.value
+
+  const fields = el('dl', 'fields')
+  const row = (label, value) => {
+    fields.appendChild(el('dt', null, label))
+    const dd = el('dd')
+    dd.appendChild(value instanceof Node ? value : document.createTextNode(String(value)))
+    fields.appendChild(dd)
+  }
+
+  // Paired is a fact and attested is a measurement, and they are two pills rather than one status
+  // for that reason. A robot can be perfectly paired and attest nothing about what it is (§50.3),
+  // and a single word covering both would have to pick which of those to hide.
+  row('Paired', pill(v.paired ? 'yes' : 'no', v.paired ? 'ok' : 'warn'))
+  row('Attested', pill(v.attested ? 'yes' : 'no', v.attested ? 'ok' : 'warn'))
+  row('Namespace', v.namespace || absent('nobody — this robot is unpaired'))
+  row('Device', v.device_id || absent('not issued'))
+  row('Reports to', v.endpoint || absent('no Hub'))
+  row('Credential', v.credential_prefix ? v.credential_prefix + '\u2026' : absent('none held'))
+  body.appendChild(fields)
+
+  if (v.fault) body.appendChild(el('p', 'bad', v.fault))
+
+  if (v.attestation && v.attestation.sentence) {
+    const line = el('p', v.attestation.complete ? null : 'note', v.attestation.sentence)
+    body.appendChild(line)
+  }
+
+  for (const finding of v.findings || []) {
+    body.appendChild(el('p', finding.severity === 'error' ? 'bad' : 'note', finding.message))
+  }
+}
+
+/** §11 and §33.8: where the desired state came from, and what the last pull made of it. */
+function renderIntent(feed) {
+  const body = clear($('intent-body'))
+
+  if (!feed.value) {
+    body.appendChild(el('p', 'note', feed.detail || 'no answer yet'))
+    return
+  }
+  const v = feed.value
+
+  const fields = el('dl', 'fields')
+  const row = (label, value) => {
+    fields.appendChild(el('dt', null, label))
+    const dd = el('dd')
+    dd.appendChild(value instanceof Node ? value : document.createTextNode(String(value)))
+    fields.appendChild(dd)
+  }
+  // §33.8's rung, coloured by what it means rather than by whether it is the happy one: a robot on
+  // `last_known_good` is running the right software for the wrong reason, and `run_nothing` is the
+  // safe default rather than a healthy state.
+  const rung = v.source || 'unreported'
+  row('Source', pill(rung, rung === 'current' ? 'ok' : rung === 'last_known_good' ? 'warn' : 'bad'))
+  body.appendChild(fields)
+
+  if (v.source_because) body.appendChild(el('p', 'note', v.source_because))
+  if (v.note) { body.appendChild(el('p', 'dim', v.note)); return }
+
+  const pull = v.pull
+  if (!pull) {
+    body.appendChild(el('p', 'dim', 'No pull has been attempted.'))
+    return
+  }
+  if (!pull.reached) {
+    body.appendChild(el('p', 'note', 'The Hub was not reached: ' + (pull.detail || 'no detail')))
+    body.appendChild(el('p', 'dim',
+      'Nothing changed. No control decision requires a network round trip (\u00a711), so this robot '
+      + 'reconciles against what it has.'))
+    return
+  }
+
+  const verdict = pull.verdict
+  if (!verdict) return
+  const line = !verdict.adopt
+    ? 'Refused; still on generation ' + verdict.generation
+    : verdict.changed
+      ? 'Adopted generation ' + verdict.generation
+      : 'Generation ' + verdict.generation + ', unchanged'
+  body.appendChild(el('p', !verdict.adopt ? 'bad' : verdict.changed ? null : 'dim', line))
+
+  for (const fault of verdict.faults || []) {
+    body.appendChild(el('p', fault.severity === 'error' ? 'bad' : 'note', fault.message))
+  }
+}
+
+/** §11 and §17's check-in: what this robot would say, and whether anybody hears it. */
+function renderCheckin(feed) {
+  const body = clear($('checkin-body'))
+
+  if (!feed.value) {
+    body.appendChild(el('p', 'note', feed.detail || 'no answer yet'))
+    return
+  }
+  const v = feed.value
+
+  const fields = el('dl', 'fields')
+  const row = (label, value) => {
+    fields.appendChild(el('dt', null, label))
+    const dd = el('dd')
+    dd.appendChild(value instanceof Node ? value : document.createTextNode(String(value)))
+    fields.appendChild(dd)
+  }
+  // The claim rather than the boolean, because three of the four values of `applied: false` are
+  // different problems: working, waiting for a person, and a supervisor disagreeing with itself.
+  row('Claim', pill(v.claim || 'unreported', v.applied ? 'ok' : 'warn'))
+  row('Generation', v.generation ?? absent('not reported'))
+  row('State', v.state || absent('not reported'))
+  row('Heard', pill(v.queued ? 'queued' : 'no', v.queued ? 'ok' : 'warn'))
+  body.appendChild(fields)
+
+  if (v.detail) body.appendChild(el('p', 'dim', v.detail))
+  if (v.attestation && v.attestation.sentence) {
+    body.appendChild(el('p', null, v.attestation.sentence))
+  }
+
+  const health = v.health || {}
+
+  // The fields that *were* measured, with their ages. This panel listed the missing ones and not
+  // the present ones for exactly as long as it took to open it: a health panel that only ever says
+  // what it does not know is one nobody reads twice, and §33.6's age is the half of a reading that
+  // decides whether to act on it.
+  const measured = Object.entries(health.fields || {}).filter(([, held]) => held !== null)
+  if (measured.length > 0) {
+    const dl = el('dl', 'fields')
+    for (const [name, held] of measured) {
+      dl.appendChild(el('dt', null, name))
+      dl.appendChild(el('dd', null, held.value + ' · ' + (duration(held.age_ms) || '0s') + ' old'))
+    }
+    body.appendChild(dl)
+  }
+
+  if (health.degraded) {
+    body.appendChild(el('p', 'bad',
+      'Degraded — alive and producing nothing: ' + (health.stalled || []).join(', ')))
+  }
+  // The two ways a field goes missing, kept apart on the page as §33.6 keeps them apart in the
+  // document. A console that showed one list would be reporting a clock problem as an absent sensor.
+  if ((health.undated || []).length > 0) {
+    body.appendChild(el('p', 'note',
+      'Measured and undateable, so not reported: ' + health.undated.join(', ')
+      + ' — §33.6 requires an age on every field, and a number nobody can date renders as current.'))
+  }
+  if ((health.unmeasured || []).length > 0) {
+    body.appendChild(el('p', 'dim', 'Nobody measured: ' + health.unmeasured.join(', ')))
+  }
+
+  for (const entry of v.pending || []) {
+    body.appendChild(el('p', entry.deferred ? 'note' : 'dim',
+      entry.stage + ': ' + (entry.reason || '')))
+  }
+
+  if (v.queued_note) body.appendChild(el('p', v.queued ? 'dim' : 'note', v.queued_note))
+}
+
+/**
+ * Where the release manifest came from, or why there is none (§12, §57).
+ *
+ * The panel above answers "may this image be installed" and needs a manifest to answer it. Before
+ * the pull existed, every reason there was no manifest rendered as one sentence — and the four
+ * causes want four different people: nobody published this version for this architecture, the Hub
+ * was unreachable, the robot is not paired, or the Hub changed a release under its own version.
+ *
+ * That last one gets the loudest treatment on the page, because it is the only one that is somebody
+ * else's mistake and the only one an operator cannot fix from the robot.
+ */
+function renderReleases(feed) {
+  const body = clear($('releases-body'))
+  const v = feed.value
+  if (!v) return
+
+  if (!v.asked) {
+    if (v.note) body.appendChild(el('p', 'dim', v.note))
+    return
+  }
+
+  const where = (v.version || '') + ' on ' + (v.channel || 'no channel') + ', ' + (v.arch || '?')
+  if (!v.reached) {
+    body.appendChild(el('p', 'note',
+      'The release catalogue was not reached (' + where + '): ' + (v.detail || 'no detail')
+      + ' — this robot goes on with the manifests it holds, which is what it does whenever it '
+      + 'cannot reach the Hub at all (§34.1).'))
+    return
+  }
+
+  if (v.fault) {
+    body.appendChild(el('p', 'bad', v.fault))
+    return
+  }
+
+  body.appendChild(el('p', 'dim',
+    v.written
+      ? 'The manifest for ' + where + ' was fetched and is now held.'
+      : 'This robot already holds the manifest for ' + where + '.'))
+}
+
 function renderOta(feed) {
   const body = clear($('ota-body'))
 
@@ -1592,7 +1803,11 @@ const feeds = [
   bodyFeed,
   new Feed('plan', '/plan', renderPlan),
   new Feed('packages', '/packages', renderPackages),
+  new Feed('identity', '/identity', renderIdentity),
+  new Feed('intent', '/intent', renderIntent),
+  new Feed('checkin', '/checkin', renderCheckin),
   new Feed('ota', '/ota', renderOta),
+  new Feed('releases', '/releases', renderReleases),
   new Feed('skills', '/skills', renderSkills),
   new Feed('health', '/health', renderHealth),
   new Feed('blackbox', '/blackbox', renderBlackbox),

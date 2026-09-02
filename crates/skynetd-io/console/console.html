@@ -106,6 +106,44 @@
     <div id="packages-body"></div>
   </section>
 
+  <!-- ── Identity ───────────────────────────────────────────────────────── -->
+  <!--
+    Above the OS image, because §50.2's two questions — what this machine is, and whose it is — are
+    the ones somebody asks before they ask what it is running. The sentence §10 wants at check-in is
+    rendered whole rather than as three digest rows: it is the sentence an incident investigation
+    reads, and a table would be this page deciding it knows better than the section that asked for
+    a sentence.
+  -->
+  <section class="panel" id="panel-identity">
+    <h2>Identity <span class="age" data-age="identity"></span></h2>
+    <div id="identity-body"></div>
+  </section>
+
+  <!-- ── Intent ─────────────────────────────────────────────────────────── -->
+  <!--
+    Above the check-in, because it is the *input* to everything below it: where the desired state
+    came from decides what the plan is, and a robot reconciling against a last-known-good copy looks
+    identical on every other panel to one reconciling against a current desired state. This is the
+    only place that difference is visible.
+  -->
+  <section class="panel" id="panel-intent">
+    <h2>Desired state <span class="age" data-age="intent"></span></h2>
+    <div id="intent-body"></div>
+  </section>
+
+  <!-- ── Check-in ───────────────────────────────────────────────────────── -->
+  <!--
+    Below Identity and above the OS image, because it is the sentence that identity assembles and
+    the one an operator reads next: who this robot is, then what it is telling anybody about itself.
+    The panel answers two questions apart — what the check-in says, and whether it is being heard —
+    because a perfect check-in nobody receives is indistinguishable from a healthy robot on a fleet
+    console, and is the state most robots running this edition are in.
+  -->
+  <section class="panel" id="panel-checkin">
+    <h2>Check-in <span class="age" data-age="checkin"></span></h2>
+    <div id="checkin-body"></div>
+  </section>
+
   <!-- ── OTA ────────────────────────────────────────────────────────────── -->
   <!--
     Above Skills and below Packages, because §12 is about what the robot *is* rather than what it is
@@ -114,6 +152,13 @@
   <section class="panel" id="panel-ota">
     <h2>OS image <span class="age" data-age="ota"></span></h2>
     <div id="ota-body"></div>
+    <!--
+      The release pull, in this panel rather than one of its own. §12's verdict above is computed
+      from a manifest, and until the twenty-fifth session the only thing the panel could say when
+      there was none was "nothing on this robot describes release 1.4.0" — which is the symptom of
+      four different causes. This div is which one.
+    -->
+    <div id="releases-body"></div>
   </section>
 
   <!-- ── Skills ─────────────────────────────────────────────────────────── -->

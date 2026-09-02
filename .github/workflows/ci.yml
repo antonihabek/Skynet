@@ -406,6 +406,243 @@ jobs:
             exit 1
           fi
 
+      # §10 and §13, the same rule twice. An attestation with a hole in it is still produced, for
+      # the reason an incomplete recording is still sealed: the report most likely to have a hole in
+      # it is the one covering whatever made the hole. A check-in withheld because a digest could
+      # not be read is a robot the fleet believes is *offline*, which converts a named gap into a
+      # silence nobody can tell from a dead machine.
+      #
+      # Written as "this function has no failure mode" rather than as a behaviour, because the
+      # change that would take it away is somebody making `attest` fallible in a refactor and
+      # threading a `?` through the callers — which reads like tightening and is the whole loss.
+      - name: An attestation with a hole in it is still reported
+        run: |
+          grep -q 'pub fn attest' crates/skynet-contracts/src/identity.rs
+          if grep -nE 'pub fn attest\(.*\) -> (Option|Result)' \
+              crates/skynet-contracts/src/identity.rs; then
+            echo "::error::attest() grew a failure mode."
+            echo "§10 asks for a sentence saying what a robot is running, and the robot that most"
+            echo "needs one is the robot that cannot measure all three digests. An unmeasured field"
+            echo "is rendered as the hole it is; it is not a reason to withhold the report."
+            exit 1
+          fi
+
+      # §19's `security.credential.scope`, from the direction it would be lost rather than by
+      # asserting the behaviour. The rule is an **allow-list**: a device credential may carry the
+      # capabilities §17 gives a device and nothing else, and anything unrecognised is refused.
+      #
+      # A deny-list is the reasonable-looking change that removes it. Somebody adds a Hub scope, the
+      # allow-list refuses it, and the obvious fix is to invert the test and refuse only §19's three
+      # named phrases — at which point a credential that spells repository read any other way walks
+      # through, on the one credential §19 says is *assumed lost*. The corpus proves two editions
+      # agree about the vocabulary and says nothing about the direction of the test, so the
+      # direction is checked here.
+      - name: A device credential's scopes are an allow-list
+        run: |
+          grep -q 'pub const DEVICE_SCOPES' crates/skynet-contracts/src/identity.rs
+          grep -q '!DEVICE_SCOPES.contains(&scope.as_str())' \
+            crates/skynet-contracts/src/identity.rs
+          if grep -nE 'FORBIDDEN_SCOPES|DENIED_SCOPES|BLOCKED_SCOPES' \
+              crates/skynet-contracts/src/identity.rs; then
+            echo "::error::the scope check acquired a deny-list."
+            echo "§19: a device credential is assumed lost. A deny-list is got past by a credential"
+            echo "that spells the capability any other way, which is every attacker and no honest"
+            echo "publisher. The allow-list refuses the spelling nobody anticipated."
+            exit 1
+          fi
+
+      # §10 and §34.2, and the one thing this work had to get right rather than merely write down.
+      # The pairing code and the device credential are both bearer secrets, and
+      # `/proc/<pid>/cmdline` is world-readable on Linux — so neither may ever be an argument to the
+      # `curl` that carries an exchange. The credential goes into curl's own config on **stdin**
+      # (`--config -`) and the request body goes into a file passed by path, which is not a secret.
+      #
+      # The failure this guards is not a bug somebody would notice. `-H "Authorization: Bearer $t"`
+      # works, passes every test in the suite, and publishes the credential to every local user for
+      # the length of one request.
+      #
+      # The last check is the one that keeps the other three worth having: **only one function in
+      # this daemon spawns curl.** Two callers with the same rule is two places for the rule to be
+      # lost, and the second one is always written by somebody copying the first.
+      - name: No secret reaches a command line
+        run: |
+          grep -q 'pub fn post_json' crates/skynetd-io/src/connectivity.rs
+          grep -q '"--config"' crates/skynetd-io/src/connectivity.rs
+
+          if grep -nE '"-H"|"--header"' crates/skynetd-io/src/connectivity.rs \
+              | grep -i authorization; then
+            echo "::error::a credential is passed to curl as an argument."
+            echo "/proc/<pid>/cmdline is world-readable. The credential belongs in curl's own"
+            echo "config on stdin: --config -, with a `header =` line."
+            exit 1
+          fi
+
+          if grep -nE '"--data"|"--data-raw"|"--data-ascii"' \
+              crates/skynetd-io/src/connectivity.rs; then
+            echo "::error::a request body is passed to curl as an argument."
+            echo "A body can be a sealed black box, and a pairing body contains the code. It goes"
+            echo "in a file: --data-binary @<path>."
+            exit 1
+          fi
+
+          if grep -rn 'Command::new("curl")' crates/skynetd-io/src/ \
+              | grep -v 'connectivity\.rs'; then
+            echo "::error::something other than connectivity::post_json spawns curl."
+            echo "One caller, so the rule above lives in one place. A second one is written by"
+            echo "somebody copying the first, and copies the shape rather than the reason."
+            exit 1
+          fi
+
+      # §11, and the rule the pull module exists for: **decode before you write.** A version that
+      # wrote the response and let §33.8's ladder sort it out afterwards would work almost always and
+      # would be wrong in the one case that matters — a Hub, a captive portal or a proxy returning
+      # something that is not a desired state would overwrite a good one, and the robot would fall
+      # back to last-known-good on the next boot having silently lost the intent it was reconciling
+      # against.
+      #
+      # Checked by line order, because that is what the rule is: the assessment happens before the
+      # write, and the write is guarded by it. A refactor that moved the write earlier would pass
+      # every test in the suite, because every test asserts the file's *contents* rather than when
+      # they were decided.
+      - name: A pulled desired state is decoded before it is written
+        run: |
+          file=crates/skynetd-io/src/intent.rs
+          grep -q 'if verdict.adopt && verdict.changed' "$file"
+          assess=$(grep -n 'let verdict = assess_offer' "$file" | head -1 | cut -d: -f1)
+          write=$(grep -n 'write_atomic(&layout.desired()' "$file" | head -1 | cut -d: -f1)
+          if [ -z "$assess" ] || [ -z "$write" ] || [ "$assess" -ge "$write" ]; then
+            echo "::error::the desired state is written before §11 has assessed it."
+            echo "§33.8 is a recovery ladder, not a licence to write first. A response that is not a"
+            echo "desired state must never become the file the robot reconciles against."
+            exit 1
+          fi
+
+      # §11: "no control decision may require a network round trip." A `GET` on the local API that
+      # reached out to a Hub would be one — and would let anyone holding an observer credential make
+      # this robot talk to the internet. The reconcile loop pulls; the route reports what it did.
+      - name: Reading the intent does not pull
+        run: |
+          if grep -nE '(intent|releases)::pull' crates/skynetd-io/src/api.rs; then
+            echo "::error::a local API route pulls from the Hub."
+            echo "§11 keeps the network out of the control path, and §33.7's routes are read by"
+            echo "anyone on the LAN with an observer credential. The reconcile loop is what pulls."
+            echo "For /releases there is a second cost: the request carries the device credential"
+            echo "and the catalogue is fetched over whatever bearer is up, so a GET that pulled"
+            echo "would let an observer spend a fleet's metered allowance a request at a time."
+            exit 1
+          fi
+
+      # §12's third rule binds a bench pass to the digest of the bytes it was taken against —
+      # "evidence that is not bound to what it is evidence of is not evidence". A release manifest
+      # is the other half of that binding: it says what those bytes change. So a manifest already on
+      # disk is never replaced under its own version, and the check is for the *refusal*, because
+      # the edit that loses it is somebody making the pull idempotent by writing unconditionally.
+      - name: A release manifest is not rewritten under its own version
+        run: |
+          grep -q 'different manifest for release' crates/skynetd-io/src/releases.rs || {
+            echo "::error::the release pull no longer refuses a changed manifest."
+            echo "§12 binds a bench pass to the bytes it was taken against. A release that changes"
+            echo "under one version has the robot judging an update against a description of some"
+            echo "other image — and it looks right from every surface."
+            exit 1
+          }
+          grep -q 'fn a_release_that_changed_under_its_version_is_refused'             crates/skynetd-io/src/releases.rs
+
+      # Every curl this daemon spawns has a config channel on stdin, which is where the credential
+      # goes. Counted rather than asserted once, because the failure is a *second* call site written
+      # without one — which is what happened to the pairing exchange before it was moved into
+      # `post_json`, and would have happened again to the pull.
+      - name: Every curl gets its credential on stdin
+        run: |
+          file=crates/skynetd-io/src/connectivity.rs
+          spawns=$(grep -c 'Command::new("curl")' "$file")
+          configs=$(grep -c '"--config"' "$file")
+          if [ "$spawns" != "$configs" ]; then
+            echo "::error::$spawns curl call(s) and $configs config channel(s) in $file."
+            echo "A curl without --config - has nowhere to put the credential except an argument,"
+            echo "and /proc/<pid>/cmdline is world-readable."
+            exit 1
+          fi
+
+      # §17's rule, on the one field it lives on: "the platform never claims a robot is running
+      # something it has not heard from." A check-in reports the generation the robot has **applied**
+      # and never the one it was asked for — a check-in echoing the desired generation would mark
+      # every deployment applied the moment the robot heard about it.
+      #
+      # The change that breaks it looks like a fix: a fleet console shows a robot as behind, somebody
+      # traces it to the check-in, and the obvious edit is to report the number the Hub sent.
+      - name: A check-in reports the generation the robot applied
+        run: |
+          grep -q 'pub fn claim_for' crates/skynet-contracts/src/checkin.rs
+          if grep -nE 'generation: desired' crates/skynet-contracts/src/checkin.rs; then
+            echo "::error::a check-in reports the desired generation."
+            echo "§17: a deployment is pending until a check-in, and the check-in is the only"
+            echo "evidence the Hub has. Reporting the number it sent makes the field a mirror."
+            exit 1
+          fi
+
+      # §34.4 collapses check-ins — "only the newest matters" — and that is safe only because every
+      # field in one is a statement about **now**. A counter since the last check-in would make
+      # collapsing lossy, and the queue would be discarding data while believing it was discarding
+      # duplicates. Grepped for the shape rather than asserted, because the addition that breaks it
+      # is one field somebody adds to make a dashboard nicer.
+      - name: A check-in carries no history
+        run: |
+          # `-H` so a single-file grep still prints the name, which is what the comment filter
+          # anchors on. Without it the filter silently matches nothing and the module's own header —
+          # which contains the word this looks for — trips the check.
+          if grep -nHEi 'since_last|_since_|delta_|history|events:' \
+              crates/skynet-contracts/src/checkin.rs \
+              | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|///|/\*|[*])'; then
+            echo "::error::a check-in grew a field about the past."
+            echo "§34.4 collapses check-ins because every field is a statement about now. A delta"
+            echo "makes the collapse lossy, silently, and the queue reports it as a duplicate."
+            exit 1
+          fi
+
+      # §10: "the Hub records not 'robot X is online' but 'robot X is running image `sha256:…`,
+      # policy `sha256:…`, against body `sha256:…`' — which is the sentence an incident investigation
+      # needs". The sentence is a rendering, and for two sessions it was the whole of what crossed:
+      # `check_in_to_json` serialised `attest`'s report and dropped the three measures it was made
+      # of, so the only route from the wire to a digest was a regular expression over prose that is
+      # deliberately not machine-readable (`no policy`, `an unnamed body`).
+      #
+      # Grepped in both directions, because the edit that loses this is a revert to the shorter
+      # function name and the shorter one still compiles, still passes every assertion about the
+      # sentence, and still renders correctly on every console.
+      - name: A check-in carries the three digests, not only the sentence
+        run: |
+          grep -q 'attestation_to_json(&built.attestation)' crates/skynet-contracts/src/checkin.rs
+          for measure in os_image policy embodiment; do
+            grep -q "\"$measure\"" crates/skynet-contracts/src/identity.rs || {
+              echo "::error::attestation_to_json no longer carries $measure."
+              exit 1
+            }
+          done
+          if grep -n 'attestation_report_to_json(&attest(&built' crates/skynet-contracts/src/checkin.rs; then
+            echo "::error::a check-in carries the sentence and not the digests."
+            echo "§10 asks the Hub to record what a robot is running. A fleet console cannot index"
+            echo "prose, and a digest that survives only inside a rendering is deleted by the next"
+            echo "change to the rendering."
+            exit 1
+          fi
+
+      # §10 again, from the other end of the same secret. The identity document is rendered by the
+      # console, served by `GET /identity` and read by anything that wants to know whose this robot
+      # is; the credential lives in a file of its own that one caller reads. A document that carried
+      # the credential would be a bearer secret on a LAN listener, and the change that does it is
+      # one field added to a JSON object by somebody making a check-in easier to write.
+      - name: The identity document holds no credential
+        run: |
+          grep -q 'pub fn credential' crates/skynetd-io/src/layout.rs
+          grep -q 'pub fn device' crates/skynetd-io/src/layout.rs
+          if grep -nE 'set\("credential",' crates/skynetd-io/src/identity.rs; then
+            echo "::error::the identity document grew a credential field."
+            echo "§10: device.json is public to every surface this daemon has and the credential is"
+            echo "not. They are two files on purpose."
+            exit 1
+          fi
+
       # §41.1's other half, from the direction it would actually be lost. The event vocabulary is a
       # closed enum so that ordinary logging cannot reach the black box; an open one — a free string
       # subject, a formatted message as a code — is how a recorder becomes a log file and the

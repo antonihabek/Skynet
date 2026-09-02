@@ -1,0 +1,126 @@
+{
+  "corpus": "telemetry",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "two-windows-that-tile",
+      "note": "Contiguous, so there is nothing missing and the span equals what was observed.",
+      "input": {
+        "windows": [
+          {
+            "from_ms": 1760000000000,
+            "to_ms": 1760000300000,
+            "elapsed_ms": 300000,
+            "counters": {
+              "cycles": 30000,
+              "guard_trips": 2,
+              "interventions": 1
+            }
+          },
+          {
+            "from_ms": 1760000300000,
+            "to_ms": 1760000600000,
+            "elapsed_ms": 300000,
+            "counters": {
+              "cycles": 30000,
+              "guard_trips": 0,
+              "interventions": 0
+            }
+          }
+        ]
+      },
+      "expected": "{\"gaps\":[],\"observed_ms\":600000,\"spanned_ms\":600000,\"totals\":{\"cycles\":60000,\"guard_trips\":2,\"interventions\":1},\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
+    },
+    {
+      "id": "a-dropped-window-leaves-a-gap",
+      "note": "§34.4 drops telemetry first and aggressively, and §47.4 requires the gap to be visible as a gap. It is: the windows stop tiling, and the Hub knows exactly which ten minutes it does not have — without anybody having remembered to annotate anything.",
+      "input": {
+        "windows": [
+          {
+            "from_ms": 1760000000000,
+            "to_ms": 1760000300000,
+            "elapsed_ms": 300000,
+            "counters": {
+              "cycles": 30000,
+              "guard_trips": 2,
+              "interventions": 1
+            }
+          },
+          {
+            "from_ms": 1760000900000,
+            "to_ms": 1760001200000,
+            "elapsed_ms": 300000,
+            "counters": {
+              "cycles": 30000
+            }
+          }
+        ]
+      },
+      "expected": "{\"gaps\":[{\"from_ms\":1760000300000,\"to_ms\":1760000900000}],\"observed_ms\":600000,\"spanned_ms\":1200000,\"totals\":{\"cycles\":60000,\"guard_trips\":2,\"interventions\":1},\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
+    },
+    {
+      "id": "an-unusable-window-is-counted-apart",
+      "note": "One window with no duration, beside a good one. The bad one is not counted and its absence is reported as a count rather than being silently dropped into the same total.",
+      "input": {
+        "windows": [
+          {
+            "from_ms": 1760000000000,
+            "to_ms": 1760000300000,
+            "elapsed_ms": 300000,
+            "counters": {
+              "cycles": 30000,
+              "guard_trips": 2,
+              "interventions": 1
+            }
+          },
+          {
+            "from_ms": 1760000000000,
+            "to_ms": 1760000300000,
+            "elapsed_ms": 0,
+            "counters": {
+              "cycles": 30000,
+              "guard_trips": 2,
+              "interventions": 1
+            }
+          }
+        ]
+      },
+      "expected": "{\"gaps\":[],\"observed_ms\":300000,\"spanned_ms\":300000,\"totals\":{\"cycles\":30000,\"guard_trips\":2,\"interventions\":1},\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":1}"
+    },
+    {
+      "id": "overlapping-windows-are-merged-for-the-span-and-summed-for-the-counts",
+      "note": "A robot that restarted and re-reported. The honest reading is that both sets of events happened, and that the interval was observed once.",
+      "input": {
+        "windows": [
+          {
+            "from_ms": 1760000000000,
+            "to_ms": 1760000300000,
+            "elapsed_ms": 300000,
+            "counters": {
+              "cycles": 30000,
+              "guard_trips": 2,
+              "interventions": 1
+            }
+          },
+          {
+            "from_ms": 1760000150000,
+            "to_ms": 1760000450000,
+            "elapsed_ms": 300000,
+            "counters": {
+              "cycles": 15000
+            }
+          }
+        ]
+      },
+      "expected": "{\"gaps\":[],\"observed_ms\":600000,\"spanned_ms\":450000,\"totals\":{\"cycles\":45000,\"guard_trips\":2,\"interventions\":1},\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
+    },
+    {
+      "id": "nothing-at-all",
+      "note": "No windows. Zero observed, zero spanned, no gaps and every counter unmeasured — which is a different answer from a robot that reported windows full of zeroes.",
+      "input": {
+        "windows": []
+      },
+      "expected": "{\"gaps\":[],\"observed_ms\":0,\"spanned_ms\":0,\"totals\":{},\"unmeasured\":[\"clamps\",\"cycles\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
+    }
+  ]
+}

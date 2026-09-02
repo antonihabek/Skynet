@@ -181,6 +181,23 @@ impl Credentials {
         role
     }
 
+    /// The operator's own label for whatever presented this header.
+    ///
+    /// `None` when nothing was presented or nothing matched. Here because §38.3 asks a change to
+    /// carry its provenance and the audit log's `actor` field wants *"a credential label, a person,
+    /// a provisioning run"* — and a log that recorded every pairing as `admin` would tell an
+    /// investigator which role did it and never which person.
+    pub fn label_of_header(&self, header: Option<&str>) -> Option<&str> {
+        let token = header?.strip_prefix("Bearer ")?.trim();
+        if token.is_empty() {
+            return None;
+        }
+        self.entries()
+            .iter()
+            .find(|credential| credential.matches(token))
+            .map(|credential| credential.label.as_str())
+    }
+
     /// The role a request carries, from its `Authorization` header.
     ///
     /// Anything that is not a well-formed bearer token is [`Role::Anonymous`] — which still gets
@@ -316,6 +333,26 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         // admin credential to answer that would send the one diagnosis this store exists to
         // support through a role most people watching a robot do not have.
         ("GET", ["trust"]) => Role::Observer,
+        // §10's identity, and the same argument as the line above it. Everything on this route is
+        // a public key, a namespace, a device identifier the Hub already knows, and a list of
+        // findings — the credential is not on it and never will be. The person who needs it most
+        // is the one looking at a robot that is reporting to nobody, and putting that behind an
+        // admin credential would gate the diagnosis behind the thing that is broken.
+        ("GET", ["identity"]) => Role::Observer,
+        // Everything on the check-in route is already on `/health`, `/plan`, `/state` and
+        // `/identity`, which are all observer. Putting the assembled version behind a wider role
+        // would mean the one view that shows what the Hub is being told is the one an operator
+        // watching a robot cannot see.
+        ("GET", ["checkin"]) => Role::Observer,
+        // §39.1 gives observer "read health, guards, plan". Where the plan's *input* came from is
+        // the same class of fact, and it is the one that explains a plan that looks wrong.
+        ("GET", ["intent"]) => Role::Observer,
+        // §39.1's table, quoted: "Admin — pair and unpair with the Hub". Both, and unpair as much
+        // as pair: an operator role that could unpair could take a robot out of a fleet without
+        // being able to put it back, which is the destructive half of an admin action handed to
+        // somebody the table did not give it to.
+        ("POST", ["identity", "pair"]) => Role::Admin,
+        ("POST", ["identity", "unpair"]) => Role::Admin,
         ("GET", ["audit"]) => Role::Observer,
         // §39.1 gives observer "read health, guards, plan". Which guards have lost their input is
         // guard state, and it is the panel somebody reads when a robot is running with fewer of

@@ -1,0 +1,121 @@
+{
+  "corpus": "checkin",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "a-robot-nobody-has-measured",
+      "note": "Every aggregate field absent, no packages, and **not degraded**. \"We could not measure the battery\" is not \"the battery is fine\" and it is also not \"the robot is unhealthy\" — reporting a gap as a fault is how an operator learns to ignore the health screen.",
+      "input": {},
+      "expected": "{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":null,\"temperature_c\":null},\"packages\":[],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"storage_headroom\",\"temperature_c\"]}"
+    },
+    {
+      "id": "alive-and-producing-nothing",
+      "note": "The finding §33.6 exists for, and the reason liveness and readiness are two signals: a dead process is obvious and a live-but-stalled one looks fine on every dashboard while the robot stands still.",
+      "input": {
+        "packages": [
+          {
+            "id": "acme/grasp",
+            "live": true,
+            "readiness": "stalled",
+            "age_ms": 40
+          },
+          {
+            "id": "acme/nav",
+            "live": true,
+            "readiness": "ready",
+            "age_ms": 12
+          }
+        ]
+      },
+      "expected": "{\"degraded\":true,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":null,\"temperature_c\":null},\"packages\":[{\"age_ms\":40,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"stalled\"},{\"age_ms\":12,\"id\":\"acme/nav\",\"live\":true,\"readiness\":\"ready\"}],\"stalled\":[\"acme/grasp\"],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"storage_headroom\",\"temperature_c\"]}"
+    },
+    {
+      "id": "a-first-cycle-is-not-a-stall",
+      "note": "A policy that has legitimately produced nothing yet. Reporting `unknown` as a stall would make every start look like a fault, which is the same over-reporting the case above guards against from the other side.",
+      "input": {
+        "packages": [
+          {
+            "id": "acme/grasp",
+            "live": true,
+            "readiness": "unknown",
+            "age_ms": 5
+          }
+        ]
+      },
+      "expected": "{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":null,\"temperature_c\":null},\"packages\":[{\"age_ms\":5,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"unknown\"}],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"storage_headroom\",\"temperature_c\"]}"
+    },
+    {
+      "id": "a-reading-with-no-age",
+      "note": "§33.6 in four words: \"Every field carries its age.\" A battery reading nobody can date is one a console renders as current, and a four-hour-old 12% is exactly the number somebody drives out on. It is dropped, and named in `undated` rather than in `unmeasured`, because \"nobody measured this\" and \"somebody measured this and lost track of when\" send different people to different places.",
+      "input": {
+        "battery": {
+          "value": 0.12
+        },
+        "storage_headroom": {
+          "value": 0.4,
+          "age_ms": 900
+        }
+      },
+      "expected": "{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":{\"age_ms\":900,\"value\":0.4},\"temperature_c\":null},\"packages\":[],\"stalled\":[],\"undated\":[\"battery\"],\"unmeasured\":[\"generation_lag\",\"guard_trip_rate\",\"temperature_c\"]}"
+    },
+    {
+      "id": "an-age-with-no-reading",
+      "note": "The other half of the pair, and it is simply unmeasured: an age for a value nobody took is not a measurement missing its date, it is a date missing its measurement.",
+      "input": {
+        "battery": {
+          "age_ms": 900
+        }
+      },
+      "expected": "{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":null,\"temperature_c\":null},\"packages\":[],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"storage_headroom\",\"temperature_c\"]}"
+    },
+    {
+      "id": "every-field-measured",
+      "note": "All five of §33.6’s aggregate fields with a value and an age. The case that pins the order they are emitted in, which is the document’s order and not alphabetical.",
+      "input": {
+        "generation_lag": {
+          "value": 0,
+          "age_ms": 1200
+        },
+        "guard_trip_rate": {
+          "value": 0.5,
+          "age_ms": 60000
+        },
+        "storage_headroom": {
+          "value": 0.42,
+          "age_ms": 900
+        },
+        "battery": {
+          "value": 0.88,
+          "age_ms": 2000
+        },
+        "temperature_c": {
+          "value": 51.5,
+          "age_ms": 3000
+        }
+      },
+      "expected": "{\"degraded\":false,\"fields\":{\"battery\":{\"age_ms\":2000,\"value\":0.88},\"generation_lag\":{\"age_ms\":1200,\"value\":0},\"guard_trip_rate\":{\"age_ms\":60000,\"value\":0.5},\"storage_headroom\":{\"age_ms\":900,\"value\":0.42},\"temperature_c\":{\"age_ms\":3000,\"value\":51.5}},\"packages\":[],\"stalled\":[],\"undated\":[],\"unmeasured\":[]}"
+    },
+    {
+      "id": "a-negative-age-is-not-an-age",
+      "note": "A clock that went backwards, or a subtraction done in the wrong order. Treated as undated rather than passed through, because a reading dated in the future is worse than one that is not dated at all — the second is visibly missing and the first looks fresh.",
+      "input": {
+        "battery": {
+          "value": 0.5,
+          "age_ms": -1
+        }
+      },
+      "expected": "{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":null,\"temperature_c\":null},\"packages\":[],\"stalled\":[],\"undated\":[\"battery\"],\"unmeasured\":[\"generation_lag\",\"guard_trip_rate\",\"storage_headroom\",\"temperature_c\"]}"
+    },
+    {
+      "id": "a-lag-of-zero-is-a-measurement",
+      "note": "The case a naive falsy check breaks. Zero generation lag is a robot that is up to date, and it must not read as a field nobody measured — which is the same distinction §33.6 draws between zero guard trips and no measurement of guard trips.",
+      "input": {
+        "generation_lag": {
+          "value": 0,
+          "age_ms": 500
+        }
+      },
+      "expected": "{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":{\"age_ms\":500,\"value\":0},\"guard_trip_rate\":null,\"storage_headroom\":null,\"temperature_c\":null},\"packages\":[],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"guard_trip_rate\",\"storage_headroom\",\"temperature_c\"]}"
+    }
+  ]
+}

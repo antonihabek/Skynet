@@ -42,12 +42,16 @@ extern crate alloc;
 
 pub mod admission;
 pub mod birth;
+pub mod bundle;
 pub mod calibration;
 pub mod cell;
 pub mod certification;
+pub mod checkin;
 pub mod digest;
 pub mod embodiment;
 pub mod entitlement;
+pub mod identity;
+pub mod intent;
 pub mod json;
 pub mod kinematics;
 pub mod live;
@@ -61,6 +65,7 @@ pub mod roles;
 pub mod safety;
 pub mod semver;
 pub mod skill;
+pub mod telemetry;
 pub mod transport;
 pub mod watchdog;
 

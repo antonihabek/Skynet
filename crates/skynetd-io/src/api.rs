@@ -190,6 +190,13 @@ pub fn handle<L: Launcher, S: Slots>(
         ("POST", ["grants"]) => edit_grant(context, request, true),
         ("DELETE", ["grants", id, token]) => remove_grant(context, id, token),
         ("GET", ["ota"]) => ok(ota(context)),
+        ("GET", ["identity"]) => ok(identity(context)),
+        ("GET", ["checkin"]) => ok(checkin(context)),
+        ("GET", ["intent"]) => ok(intent(context)),
+        ("GET", ["releases"]) => ok(releases(context)),
+        ("GET", ["telemetry"]) => ok(telemetry(context)),
+        ("POST", ["identity", "pair"]) => pair(context, request),
+        ("POST", ["identity", "unpair"]) => unpair(context, request),
         ("GET", ["skills"]) => ok(context.daemon.skills.to_json()),
         ("GET", ["skills", id]) => match context.daemon.skills.get(id) {
             Some(invocation) => ok(invocation.to_json()),
@@ -230,6 +237,12 @@ fn known_path(segments: &[&str]) -> bool {
             | ["grants"]
             | ["grants", _, _]
             | ["ota"]
+            | ["identity"]
+            | ["identity", _]
+            | ["checkin"]
+            | ["intent"]
+            | ["releases"]
+            | ["telemetry"]
             | ["skills"]
             | ["skills", _]
             | ["skills", _, _]
@@ -998,6 +1011,280 @@ fn grant_body(id: &PackageId, token: &str, outcome: &str) -> Json {
 /// the last move is still on probation. A console showing the slots without the verdict would
 /// render a robot that appears able to update and is refused every pass, which is the §32.2 failure
 /// this file exists not to commit.
+/// Where this robot's desired state came from (§11, §33.8).
+///
+/// Two answers on one route because there are exactly two: a pull, or §33.8's fallback ladder. A
+/// route showing one of them would leave the other invisible — and the fallback is the one that
+/// matters, because a robot reconciling against a last-known-good copy looks identical from every
+/// other surface to one reconciling against a current desired state.
+///
+/// **It does not pull.** A `GET` that reached out to a Hub would be a network round trip behind a
+/// verb that promises to read, and it would let anyone with an observer credential make this robot
+/// talk to the internet. The reconcile loop pulls; this reports what the last one did.
+fn intent<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
+    let layout = context.daemon.store.layout().clone();
+    let (_, source) = crate::runtime::load_desired(&layout);
+    crate::intent::to_json(&context.daemon.last_pull, &source)
+}
+
+/// §74's open telemetry window, and what the contract makes of it.
+///
+/// The window **being counted** rather than the last one sent, for [`checkin`]'s reason: on a robot
+/// this edition runs the second is very often nothing, and a route answering `null` would leave an
+/// operator unable to see whether their robot is counting at all.
+///
+/// Reading it does not close it. A `GET` that closed a window would make every reader of this route
+/// a producer of telemetry — and two people with the console open would tile the fleet's windows
+/// differently from each other.
+fn telemetry<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
+    let layout = context.daemon.store.layout().clone();
+    let queue = crate::outbound::Queue::of(&layout);
+    let dropped: u64 = queue.status().dropped.iter().map(|(_, count)| *count).sum();
+    crate::telemetry::to_json(
+        &context.daemon.counting,
+        wall_ms() as f64,
+        context.now_ms as f64,
+        dropped,
+    )
+}
+
+/// What happened the last time this robot asked for the release catalogue (§12, §57).
+///
+/// **It does not pull**, for [`intent`]'s reason and one more: this request goes out with the
+/// device credential, so a `GET` on the LAN that triggered one would let anybody holding an
+/// observer credential spend a fleet's metered allowance a request at a time.
+///
+/// The channel and version are echoed from the desired state, because a pull that found nothing and
+/// a robot that asked for nothing are different states and only one of them is a problem.
+fn releases<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
+    let mut out = crate::releases::to_json(&context.daemon.last_release_pull);
+    out.set(
+        "channel",
+        Json::Str(context.daemon.desired.os_channel.clone()),
+    )
+    .set(
+        "version",
+        Json::Str(context.daemon.desired.os_version.clone()),
+    )
+    .set("arch", Json::Str(crate::releases::arch().to_string()));
+    out
+}
+
+/// What this robot would tell the Hub right now (§11, §17).
+///
+/// The **document that would be sent**, not the last one that was — because on a robot this edition
+/// runs, the second is very often nothing, and a route that answered `null` would leave an operator
+/// unable to see what their robot is about to claim about itself. Whether one is queued is a
+/// separate field beside it, so the two questions an operator actually has — *what does it say* and
+/// *is anybody hearing it* — are answered separately.
+fn checkin<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
+    let layout = context.daemon.store.layout().clone();
+    let trust = crate::trust::TrustStore::load(&layout);
+    let (identity, _) = crate::identity::evaluate(&layout, &trust);
+
+    let actual = context.daemon.observe(context.now_ms);
+    let health = context.daemon.health(&actual, context.now_ms);
+    let policy = crate::identity::running_policy(&context.daemon.store, &actual);
+    let attestation =
+        crate::identity::attestation(&layout, &trust, &identity, &actual.os.active, &policy);
+    let progress =
+        crate::checkin::progress(&context.daemon.desired, &actual, context.daemon.safe_state);
+    let lag = context
+        .daemon
+        .desired
+        .generation
+        .checked_sub(actual.generation)
+        .filter(|_| context.daemon.desired.generation >= actual.generation);
+    let rolled = crate::checkin::health(&health, 0, lag);
+
+    let built = crate::checkin::build(
+        &identity,
+        attestation,
+        progress,
+        rolled,
+        context.daemon.operating_state.as_str(),
+        &crate::intent::held_digest(&layout),
+    );
+
+    // Read, never written. This route reports what a check-in *would* say; the reconcile loop is
+    // what queues one, and a `GET` that enqueued would be a state change behind a verb that
+    // promises not to be one.
+    let queued = if identity.identity.credential {
+        Ok(None)
+    } else {
+        Err(crate::checkin::NotQueued::Unpaired)
+    };
+    crate::checkin::to_json(&built, &queued)
+}
+
+/// Wall time, for the two things §35.1 allows it (§35.1).
+///
+/// Never a deadline, a backoff or a watchdog. §35.1 gives `CLOCK_REALTIME` two jobs — logging and
+/// *"correlation with the Hub"* — and this daemon has exactly one caller of each: an audit entry's
+/// timestamp, and §74's telemetry window bounds. Every rate those windows produce is divided by the
+/// **monotonic** duration beside them, for the reason §74.2 spells out.
+///
+/// One function rather than two, because the second caller is where a rule dies (finding 23) and
+/// the rule here is which clock this is allowed to be.
+pub fn wall_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// §10's one-time operator action, over the local API.
+///
+/// The code arrives in a **body** rather than in a path or a query string, for the reason it never
+/// reaches curl's argument list either: a URL is in an access log and a request body is not. The
+/// endpoint arrives with it because §39.2 gives this robot no default of any kind — there is no
+/// default password and there is no default Hub, and a robot that would talk to a host somebody
+/// else chose is the same mistake in a different field.
+fn pair<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, request: &Request) -> Response {
+    let Ok(text) = std::str::from_utf8(&request.body) else {
+        return error(400, "the body is not UTF-8");
+    };
+    let Ok(document) = Json::parse(text) else {
+        return error(400, "the body is not JSON");
+    };
+    let (Some(code), Some(endpoint)) = (
+        document.get_present("code").and_then(Json::as_str),
+        document.get_present("endpoint").and_then(Json::as_str),
+    ) else {
+        return error(
+            400,
+            "expected `code` and `endpoint`. There is no default Hub, for §39.2's reason: a robot \
+             that would report to a host nobody named is a robot somebody else can adopt",
+        );
+    };
+
+    let layout = context.daemon.store.layout().clone();
+    let trust = crate::trust::TrustStore::load(&layout);
+    let enrolment = crate::identity::CurlEnrolment {
+        endpoint: endpoint.to_string(),
+        scratch: layout.state(),
+    };
+    let actor = context
+        .credentials
+        .label_of_header(request.header("authorization"))
+        .unwrap_or("unknown")
+        .to_string();
+
+    match crate::identity::pair(
+        &layout,
+        &trust,
+        code,
+        &enrolment,
+        &crate::audit::Audit::of(&layout),
+        &crate::audit::rfc3339(wall_ms()),
+        &actor,
+    ) {
+        Ok(paired) => {
+            let mut out = Json::obj();
+            out.set("device_id", Json::from(paired.device_id.as_str()))
+                .set("namespace", Json::from(paired.namespace.as_str()))
+                .set("endpoint", Json::from(paired.endpoint.as_str()))
+                .set("attested", Json::Bool(paired.verdict.attested));
+            let verdict = skynet_contracts::identity::identity_verdict_to_json(&paired.verdict);
+            out.set(
+                "findings",
+                verdict.get("findings").cloned().unwrap_or_else(Json::arr),
+            );
+            Response::json(201, encode(&out))
+        }
+        // 409 rather than 400 for an already-paired robot: the request was well formed and the
+        // robot is in a state that refuses it, which is a different thing for a client to handle.
+        Err(failure) if failure.code == "already_paired" => error(409, &failure.detail),
+        Err(failure) => error(400, &failure.detail),
+    }
+}
+
+/// Undo a pairing (§39.1 gives it to Admin, beside pair).
+fn unpair<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, request: &Request) -> Response {
+    let layout = context.daemon.store.layout().clone();
+    let actor = context
+        .credentials
+        .label_of_header(request.header("authorization"))
+        .unwrap_or("unknown")
+        .to_string();
+    match crate::identity::unpair(
+        &layout,
+        &crate::audit::Audit::of(&layout),
+        &crate::audit::rfc3339(wall_ms()),
+        &actor,
+    ) {
+        Ok(Some(namespace)) => {
+            let mut out = Json::obj();
+            out.set("unpaired", Json::Bool(true))
+                .set(
+                    "namespace",
+                    if namespace.is_empty() {
+                        Json::Null
+                    } else {
+                        Json::from(namespace.as_str())
+                    },
+                )
+                .set(
+                    "note",
+                    Json::from(
+                        "the credential and the identity document were removed. Revoke the \
+                         credential on the Hub — nothing here can.",
+                    ),
+                );
+            ok(out)
+        }
+        Ok(None) => {
+            let mut out = Json::obj();
+            out.set("unpaired", Json::Bool(false))
+                .set("namespace", Json::Null)
+                .set(
+                    "note",
+                    Json::from("this robot was not paired, so nothing was removed."),
+                );
+            ok(out)
+        }
+        Err(failure) => error(500, &failure.detail),
+    }
+}
+
+/// Who this robot is, what it is, and what it is running (§10).
+///
+/// Three facts on one route because §50.2 makes them one question asked of two parties: the birth
+/// certificate is what the vendor attested at manufacture, the identity is what an operator bound
+/// it to at pairing, and the attestation is what it is executing right now. A console that showed
+/// the first two without the third would render a robot's identity without the sentence §10 says an
+/// incident investigation needs.
+///
+/// **No credential is on this route**, in any form. See `identity::to_json`.
+fn identity<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
+    let layout = context.daemon.store.layout().clone();
+    let trust = crate::trust::TrustStore::load(&layout);
+    let (held, verdict) = crate::identity::evaluate(&layout, &trust);
+
+    let mut out = crate::identity::to_json(&held, &verdict);
+
+    let actual = context.daemon.observe(context.now_ms);
+    let policy = crate::identity::running_policy(&context.daemon.store, &actual);
+    let attestation =
+        crate::identity::attestation(&layout, &trust, &held, &actual.os.active, &policy);
+    out.set(
+        "attestation",
+        crate::identity::attestation_to_json(&attestation),
+    );
+
+    // The certificate, beside the identity rather than on a route of its own, for §50.2's reason:
+    // "what it is" and "whose it is" are two answers to one question and an operator reads them
+    // together. `null` when there is none, which is a robot whose model is its own claim (§50.3).
+    out.set(
+        "birth",
+        match crate::birth::evaluate(&layout, &trust) {
+            Ok(Some((held, attested))) => crate::birth::to_json(&held, &attested),
+            _ => Json::Null,
+        },
+    );
+    out
+}
+
 fn ota<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let slots = context.daemon.slots.read();
     let wanted = context.daemon.desired.os_version.clone();

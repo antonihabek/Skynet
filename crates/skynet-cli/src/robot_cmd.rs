@@ -64,6 +64,12 @@ skynet — talking to a running robot (§33.7)
                               Invoke a skill; needs operator
   skill stop <inv-id>         Make a running skill return; needs operator
   ota                         A/B slots, and §12's verdict on the wanted image
+  identity                    Who this robot is, what it is, and what it is running (§10)
+  checkin                     What this robot would tell the Hub, and whether it is heard
+  intent                      Where the desired state came from, and what the last pull did
+  releases                    Whether the wanted OS image has a manifest this robot can judge
+  pair <code|-> --hub <url>   Bind this robot to a namespace; needs admin (§10)
+  unpair                      Remove the credential and the identity; needs admin
 
   --socket <path>   Default /run/skynetd.sock
   --host <addr:port>  The LAN console instead of the socket
@@ -141,6 +147,18 @@ pub fn run(command: &str, argv: &[String]) -> i32 {
         "install" => install(argv),
         "blackbox" => blackbox(argv),
         "ota" => show(argv, "GET", "/ota", None, print_ota),
+        "identity" => show(argv, "GET", "/identity", None, print_identity),
+        "checkin" => show(argv, "GET", "/checkin", None, print_checkin),
+        "intent" => show(argv, "GET", "/intent", None, print_intent),
+        "releases" => show(argv, "GET", "/releases", None, print_releases),
+        "pair" => pair(argv),
+        "unpair" => show(
+            argv,
+            "POST",
+            "/identity/unpair",
+            Some(String::new()),
+            print_note,
+        ),
         "skills" => show(argv, "GET", "/skills", None, print_skills),
         "skill" => skill(argv),
         other => term::fail(&format!("`{other}` is not a robot command.\n\n{USAGE}")),
@@ -211,6 +229,460 @@ fn skill_run(argv: &[String]) -> i32 {
 }
 
 /// The `note` a robot sent back with an acceptance, or the whole document when there is none.
+/// `skynet pair <code|-> --hub <url>` (§10, §18).
+///
+/// # The code may be read from stdin, and there is a reason to
+///
+/// §18 writes the command as `skynet pair ABCD-1234`, so the code is an argument, so it is in the
+/// shell history and in `/proc/<pid>/cmdline` for the length of the call. That is the
+/// specification's own interface and this is not the place to overrule it — but `-` reads the code
+/// from stdin instead, which is one pipe away from a code that never touches either. The daemon
+/// side is careful about this whichever way the code arrives (see `identity.rs`); this is the half
+/// an operator controls.
+fn pair(argv: &[String]) -> i32 {
+    let Some(raw) = argv.first().filter(|value| !value.starts_with('-')) else {
+        return term::fail(
+            "skynet pair <code> --hub <url>   — the code the Hub showed you, or `-` to read it \
+             from stdin",
+        );
+    };
+    let rest = &argv[1..];
+
+    let Some(hub) = flag(rest, "--hub") else {
+        return term::fail(
+            "skynet pair needs --hub <url>. There is no default: §39.2 gives this robot no default \
+             password and no default Hub either, and a robot that would report to a host nobody \
+             named is a robot somebody else can adopt.",
+        );
+    };
+
+    let code = if raw == "-" {
+        let mut typed = String::new();
+        if let Err(error) = std::io::Read::read_to_string(&mut std::io::stdin(), &mut typed) {
+            return term::fail(&format!("the code could not be read from stdin: {error}"));
+        }
+        typed
+    } else {
+        raw.clone()
+    };
+
+    // Refused here as well as on the robot, and the duplication is deliberate: this is the one
+    // place that can refuse a mistyped code without it having crossed a socket, and §10's whole
+    // argument for a local check is that a code is a bearer secret with a short life.
+    let checked = skynet_contracts::identity::normalize_pairing_code(&code);
+    let Some(normalized) = checked.code else {
+        let detail = checked
+            .fault
+            .map(|fault| fault.detail)
+            .unwrap_or_else(|| "that is not a pairing code".to_string());
+        return term::fail(&detail);
+    };
+
+    let mut body = Json::obj();
+    body.set("code", Json::from(normalized.as_str()));
+    body.set("endpoint", Json::from(hub.as_str()));
+    let Ok(encoded) = body.to_canonical() else {
+        return term::fail("the request could not be serialised");
+    };
+
+    show(rest, "POST", "/identity/pair", Some(encoded), print_paired)
+}
+
+fn print_paired(document: &Json) {
+    let text = |key: &str| {
+        document
+            .get_present(key)
+            .and_then(Json::as_str)
+            .unwrap_or("—")
+            .to_string()
+    };
+    println!(
+        "paired as {} in `{}`, reporting to {}",
+        text("device_id"),
+        text("namespace"),
+        text("endpoint"),
+    );
+    print_identity_findings(document);
+}
+
+/// §11 and §33.8: where the desired state came from, and what the last pull made of it.
+///
+/// The rung comes first, because it is the half that is true whether or not a Hub was ever reached
+/// — and a robot reconciling against a last-known-good copy looks identical from every other
+/// surface to one reconciling against a current desired state.
+/// `skynet releases` — what happened the last time this robot asked for the release catalogue.
+///
+/// Three states, and the middle one is why this command exists: **asked and got nothing back for
+/// this version**. A robot whose desired state names an OS image nobody has published for its
+/// architecture is indistinguishable, from every other surface, from one that is simply up to date
+/// — it reconciles, it converges, and the OS stage never closes because there is nothing to close
+/// it with.
+fn print_releases(document: &Json) {
+    let version = document
+        .get("version")
+        .and_then(Json::as_str)
+        .unwrap_or_default();
+    let channel = document
+        .get("channel")
+        .and_then(Json::as_str)
+        .unwrap_or_default();
+    let arch = document
+        .get("arch")
+        .and_then(Json::as_str)
+        .unwrap_or_default();
+
+    if version.is_empty() {
+        println!(
+            "{}",
+            term::dim("this robot's desired state names no OS version, so there is no release to                        ask about.")
+        );
+        return;
+    }
+    println!("{}", term::dim(&format!("{version} on {channel}, {arch}")));
+
+    if !document
+        .get("asked")
+        .and_then(Json::as_bool)
+        .unwrap_or(false)
+    {
+        println!();
+        println!(
+            "{}",
+            term::dim(
+                document
+                    .get_present("note")
+                    .and_then(Json::as_str)
+                    .unwrap_or("no pull has been attempted.")
+            )
+        );
+        return;
+    }
+
+    println!();
+    if !document
+        .get("reached")
+        .and_then(Json::as_bool)
+        .unwrap_or(false)
+    {
+        println!(
+            "{}",
+            term::warn(&format!(
+                "the Hub was not reached: {}",
+                document
+                    .get_present("detail")
+                    .and_then(Json::as_str)
+                    .unwrap_or("no detail")
+            ))
+        );
+        return;
+    }
+
+    let fault = document
+        .get_present("fault")
+        .and_then(Json::as_str)
+        .unwrap_or_default();
+    if !fault.is_empty() {
+        println!("{}", term::bad(fault));
+        return;
+    }
+
+    if document
+        .get("written")
+        .and_then(Json::as_bool)
+        .unwrap_or(false)
+    {
+        println!("{}", term::ok("the manifest for this release is now held."));
+    } else {
+        println!(
+            "{}",
+            term::ok("this robot already holds the manifest for this release.")
+        );
+    }
+}
+
+fn print_intent(document: &Json) {
+    let source = document
+        .get("source")
+        .and_then(Json::as_str)
+        .unwrap_or("unreported");
+    let line = format!("desired state: {source}");
+    match source {
+        "current" => println!("{}", term::ok(&line)),
+        "last_known_good" => println!("{}", term::warn(&line)),
+        _ => println!("{}", term::bad(&line)),
+    }
+    if let Some(why) = document
+        .get_present("source_because")
+        .and_then(Json::as_str)
+    {
+        println!("{}", term::dim(why));
+    }
+
+    if let Some(note) = document.get_present("note").and_then(Json::as_str) {
+        println!();
+        println!("{}", term::dim(note));
+        return;
+    }
+
+    let Some(pull) = document
+        .get_present("pull")
+        .filter(|node| **node != Json::Null)
+    else {
+        println!();
+        println!("{}", term::dim("no pull has been attempted."));
+        return;
+    };
+
+    println!();
+    if !pull.get("reached").and_then(Json::as_bool).unwrap_or(false) {
+        println!(
+            "{}",
+            term::warn(&format!(
+                "the Hub was not reached: {}",
+                pull.get_present("detail")
+                    .and_then(Json::as_str)
+                    .unwrap_or("no detail")
+            ))
+        );
+        // §11's point, said rather than left to be inferred: this costs the robot nothing it is not
+        // already paying for most of its life.
+        println!(
+            "{}",
+            term::dim(
+                "Nothing changed. No control decision requires a network round trip (§11), so this \
+                 robot reconciles against what it has."
+            )
+        );
+        return;
+    }
+
+    let Some(verdict) = pull
+        .get_present("verdict")
+        .filter(|node| **node != Json::Null)
+    else {
+        return;
+    };
+    let adopt = verdict
+        .get("adopt")
+        .and_then(Json::as_bool)
+        .unwrap_or(false);
+    let changed = verdict
+        .get("changed")
+        .and_then(Json::as_bool)
+        .unwrap_or(false);
+    let generation = verdict
+        .get("generation")
+        .and_then(Json::as_f64)
+        .unwrap_or(0.0);
+    let headline = if !adopt {
+        term::bad(&format!("refused; still on generation {generation}"))
+    } else if changed {
+        term::ok(&format!("adopted generation {generation}"))
+    } else {
+        term::dim(&format!("generation {generation}, unchanged"))
+    };
+    println!("{headline}");
+
+    for fault in verdict.arr_or_empty("faults") {
+        let message = fault.get("message").and_then(Json::as_str).unwrap_or("");
+        match fault.get("severity").and_then(Json::as_str) {
+            Some("error") => println!("{}", term::bad(message)),
+            _ => println!("{}", term::warn(message)),
+        }
+    }
+}
+
+/// §11 and §17's check-in: what this robot would say, and whether anybody is hearing it.
+///
+/// Two questions rather than one, printed apart. A check-in that says exactly the right thing to a
+/// Hub that never receives it is the state a fleet console cannot distinguish from a healthy robot,
+/// and it is the state most robots running this edition are in.
+fn print_checkin(document: &Json) {
+    let text = |key: &str| {
+        document
+            .get_present(key)
+            .and_then(Json::as_str)
+            .unwrap_or("—")
+            .to_string()
+    };
+    let applied = document
+        .get("applied")
+        .and_then(Json::as_bool)
+        .unwrap_or(false);
+
+    println!(
+        "generation {}   {}   state {}",
+        document
+            .get("generation")
+            .and_then(Json::as_f64)
+            .unwrap_or(0.0),
+        if applied {
+            term::ok(&text("claim"))
+        } else {
+            term::warn(&text("claim"))
+        },
+        text("state"),
+    );
+    println!("{}", term::dim(&text("detail")));
+
+    if let Some(sentence) = document
+        .get("attestation")
+        .and_then(|node| node.get("sentence"))
+        .and_then(Json::as_str)
+    {
+        println!();
+        println!("{sentence}");
+    }
+
+    // Health, and the two ways a field can be missing. §33.6 keeps them apart because "nobody
+    // measured this" and "somebody measured this and lost track of when" send different people to
+    // different places.
+    if let Some(health) = document.get("health") {
+        println!();
+        let degraded = health
+            .get("degraded")
+            .and_then(Json::as_bool)
+            .unwrap_or(false);
+        let stalled = health.arr_or_empty("stalled");
+        if degraded {
+            println!(
+                "{}",
+                term::bad(&format!(
+                    "degraded — alive and producing nothing: {}",
+                    stalled
+                        .iter()
+                        .filter_map(Json::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+            );
+        }
+        // What was measured, before what was not. The first version of this printed only the
+        // absences, which is a health report that can never say a robot is well.
+        if let Some(fields) = health.get("fields").and_then(Json::as_obj) {
+            for (name, held) in fields {
+                let (Some(value), Some(age)) = (
+                    held.get("value").and_then(Json::as_f64),
+                    held.get("age_ms").and_then(Json::as_f64),
+                ) else {
+                    continue;
+                };
+                println!("{name} {value} ({age} ms old)");
+            }
+        }
+
+        let names = |key: &str| {
+            health
+                .arr_or_empty(key)
+                .iter()
+                .filter_map(Json::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let unmeasured = names("unmeasured");
+        if !unmeasured.is_empty() {
+            println!("{}", term::dim(&format!("nobody measured: {unmeasured}")));
+        }
+        let undated = names("undated");
+        if !undated.is_empty() {
+            println!(
+                "{}",
+                term::warn(&format!(
+                    "measured and undateable, so not reported: {undated} (§33.6)"
+                ))
+            );
+        }
+    }
+
+    let blocking = document.arr_or_empty("blocking");
+    if !blocking.is_empty() {
+        println!();
+        for entry in document.arr_or_empty("pending") {
+            let stage = entry.get("stage").and_then(Json::as_str).unwrap_or("?");
+            let reason = entry.get("reason").and_then(Json::as_str).unwrap_or("");
+            let deferred = entry
+                .get("deferred")
+                .and_then(Json::as_bool)
+                .unwrap_or(false);
+            let line = format!("{stage}: {reason}");
+            if deferred {
+                println!("{}", term::warn(&line));
+            } else {
+                println!("{}", term::dim(&line));
+            }
+        }
+    }
+
+    println!();
+    let queued = document
+        .get("queued")
+        .and_then(Json::as_bool)
+        .unwrap_or(false);
+    let note = text("queued_note");
+    if queued {
+        println!("{}", term::dim(&note));
+    } else {
+        println!("{}", term::warn(&note));
+    }
+}
+
+/// §10, on one screen: whose this robot is, what it is, and what it is running.
+fn print_identity(document: &Json) {
+    let text = |key: &str| {
+        document
+            .get_present(key)
+            .and_then(Json::as_str)
+            .unwrap_or("—")
+            .to_string()
+    };
+    let flag_of = |key: &str| document.get(key).and_then(Json::as_bool).unwrap_or(false);
+
+    println!(
+        "paired {}   attested {}   namespace {}   device {}",
+        if flag_of("paired") { "yes" } else { "no" },
+        if flag_of("attested") { "yes" } else { "no" },
+        text("namespace"),
+        text("device_id"),
+    );
+    println!("{}", term::dim(&format!("reports to {}", text("endpoint"))));
+
+    if let Some(fault) = document.get_present("fault").and_then(Json::as_str) {
+        println!("{}", term::warn(fault));
+    }
+
+    // §10's sentence, printed whole. It is the one an incident investigation reads, and printing
+    // the three digests as a table instead would be this command deciding it knows better than the
+    // section that asked for a sentence.
+    if let Some(attestation) = document.get_present("attestation") {
+        if let Some(sentence) = attestation.get("sentence").and_then(Json::as_str) {
+            println!();
+            println!("{sentence}");
+        }
+    }
+
+    print_identity_findings(document);
+}
+
+fn print_identity_findings(document: &Json) {
+    let findings = document.arr_or_empty("findings");
+    if findings.is_empty() {
+        return;
+    }
+    println!();
+    for finding in findings {
+        let message = finding
+            .get("message")
+            .and_then(Json::as_str)
+            .unwrap_or_default();
+        let code = finding.get("code").and_then(Json::as_str).unwrap_or("?");
+        let line = format!("{code}: {message}");
+        match finding.get("severity").and_then(Json::as_str) {
+            Some("error") => println!("{}", term::bad(&line)),
+            _ => println!("{}", term::warn(&line)),
+        }
+    }
+}
+
 fn print_note(document: &Json) {
     if let Some(invocation) = document.get_present("invocation").and_then(Json::as_str) {
         println!("{invocation}");

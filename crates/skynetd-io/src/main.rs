@@ -208,9 +208,10 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         );
     }
 
-    // Where outbound items go (§34). `Unpaired` is the truth on a robot: §34.2's outbound path and
-    // §10's pairing are unwritten, so there is no endpoint and no identity to present at one, and
-    // this sink says exactly that on every surface rather than leaving a queue that only grows.
+    // Where outbound items go (§34), and which of the two honest refusals this robot is entitled
+    // to. Read from the identity on disk rather than assumed: an unpaired robot is fixed by an
+    // operator in a minute and a paired one is waiting on §34.2's sending half, and a surface that
+    // showed one sentence for both would send somebody to pair a robot that already is.
     //
     // `--outbox <dir>` swaps in a directory on this machine. It is not a transport and is never
     // presented as one; it exists so the drain path is exercised by something, and so that somebody
@@ -219,7 +220,17 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         Some(path) => Box::new(skynetd_io::connectivity::Directory {
             path: PathBuf::from(path),
         }),
-        None => Box::new(skynetd_io::connectivity::Unpaired),
+        None => match skynetd_io::identity::credential_for_sending(&layout) {
+            Some((endpoint, device_id, credential)) => Box::new(skynetd_io::connectivity::Hub {
+                endpoint,
+                device_id,
+                credential,
+                scratch: layout.state(),
+            }),
+            // No credential, no device id, or no endpoint. Any of the three means there is nothing
+            // to address a report to, and §34.4's queue holds rather than growing quietly.
+            None => Box::new(skynetd_io::connectivity::Unpaired),
+        },
     };
     let sink_description = sink.describe();
     let sink_obstacle = sink.obstacle();
@@ -249,6 +260,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         // where there is no /proc it means the fallback reports zero elapsed, which holds the boot
         // gate at `wait`. That is the safe direction: a `skynet reconcile` run should not be able
         // to roll a robot back on the strength of a clock that measured one command.
+        pull_desired(&mut daemon, &layout, now);
         let passes = converge_and_record(&mut daemon, recorder.as_mut(), &layout, now, now);
         for pass in &passes {
             print_pass(pass);
@@ -258,6 +270,11 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         // at the top of the window because a one-shot pass has nobody to be decorrelated from — the
         // thundering herd §34.4 guards against is a *fleet retrying in lockstep*, and a person
         // running one command is not one.
+        report_checkin(&mut daemon, &layout, now);
+        // Opens §74's window and closes nothing, which is the honest output of a single pass: a
+        // window needs two passes to have an interval, and a zero-length one would be a row that
+        // could produce no rate and no coverage.
+        report_telemetry(&mut daemon, &layout, now);
         let mut sender =
             skynetd_io::connectivity::Sender::new(skynetd_io::outbound::Queue::of(&layout));
         report_drain(&mut sender, &layout, sink.as_ref(), now, 1.0);
@@ -335,6 +352,8 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         loop {
             let now = monotonic(origin);
             if now >= next_reconcile {
+                // §11's loop: pull, then reconcile, then report. Each is the input to the next.
+                pull_desired(&mut daemon, &layout, now);
                 observe_state(&mut daemon);
                 let passes =
                     converge_and_record(&mut daemon, recorder.as_mut(), &layout, now, started_ms);
@@ -349,6 +368,14 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                         action.subject()
                     );
                 }
+                // The report, then the queue. In that order, so the item the drain picks up
+                // describes the pass that just ran rather than the one before it.
+                report_checkin(&mut daemon, &layout, now);
+                // §74's window, closed by the same pass that opens the next one. There is no timer:
+                // a robot that stops reconciling stops producing windows, and the gap is then
+                // visible on the Hub as a gap — which is what §47.4 asks for and what a heartbeat
+                // on a separate timer would hide.
+                report_telemetry(&mut daemon, &layout, now);
                 // §34.4's queue, drained. Bounded per pass rather than to exhaustion: a reconcile
                 // loop that spent ten minutes uploading episodes would be a supervisor that stopped
                 // supervising, and §33.2's watchdog would notice — correctly — that the loop had
@@ -986,6 +1013,201 @@ fn jitter_for(now_ms: u64) -> f64 {
 /// per idle pass is a supervisor whose log nobody reads. Loud about a **block**, because §34.3 is
 /// explicit that the wait is visible rather than silent, and about failures, because a queue that is
 /// filling while every send is refused is the shape of an outage.
+/// Pull this robot's desired state from the Hub (§11).
+///
+/// **First in the pass**, before the observation and the plan, so a desired state that lands is
+/// reconciled in the same pass rather than one later — which on a long reconcile interval is the
+/// difference between an operator seeing their change take and seeing nothing happen for a minute.
+///
+/// Failing changes nothing. §11: *"no control decision may require a network round trip"*, and a
+/// robot that cannot reach its Hub reconciles against what it has — which is what it does for most
+/// of its life (§34.1).
+fn pull_desired<L, S>(daemon: &mut skynetd_io::runtime::Daemon<L, S>, layout: &Layout, now_ms: u64)
+where
+    L: skynetd_io::launch::Launcher,
+    S: skynetd_io::observe::Slots,
+{
+    // How many packages are running, which is what §11's "this empties the robot" finding is about.
+    // Observed rather than counted from the desired state, for §33.3's reason: the finding is about
+    // what would stop, and what would stop is what is running.
+    let running = daemon
+        .observe(now_ms)
+        .units
+        .iter()
+        .filter(|unit| unit.state == skynetd::actual::UnitState::Running)
+        .count();
+
+    let Some(pulled) = skynetd_io::intent::pull(layout, running) else {
+        return;
+    };
+    // Kept on the daemon so `GET /intent` reports the last pull rather than making one of its own —
+    // a `GET` that reached out to a Hub would let anyone with an observer credential make this robot
+    // talk to the internet.
+    daemon.last_pull = Some(pulled.clone());
+    if !pulled.reached {
+        eprintln!(
+            "skynetd: the desired state could not be pulled: {}",
+            pulled.detail
+        );
+        return;
+    }
+    let Some(verdict) = &pulled.verdict else {
+        return;
+    };
+    for fault in &verdict.faults {
+        eprintln!("skynetd: desired state: {}", fault.message);
+    }
+    if pulled.written {
+        // Reloaded here rather than left for the next pass, which is the point of pulling first.
+        daemon.reload();
+        eprintln!(
+            "skynetd: adopted generation {} from the Hub",
+            verdict.generation
+        );
+    }
+
+    // The release manifest for whatever OS version the desired state now names (§12, §57).
+    //
+    // After the reload rather than before it, because the version to ask about is the one the
+    // robot has just adopted — asking first would fetch a manifest for the previous generation's
+    // image every time an operator changed one, which is the one moment it matters.
+    //
+    // A few hundred bytes, and deliberately not the bundle: §12's third rule is decided entirely
+    // from the manifest, so the refusal that must happen before a hundred megabytes cross a
+    // metered link happens here.
+    pull_release(daemon, layout);
+}
+
+/// Close §74's telemetry window and open the next one.
+///
+/// Quiet on every path that is not a fault, which here means quiet almost always: an unpaired robot
+/// counts nothing, and a window that cannot be counted is a window the queue is better off without.
+///
+/// The window is opened on the **first** call rather than at start-up, so its first bound is a real
+/// pass and not a robot that had not begun.
+fn report_telemetry<L, S>(
+    daemon: &mut skynetd_io::runtime::Daemon<L, S>,
+    layout: &Layout,
+    now_ms: u64,
+) where
+    L: skynetd_io::launch::Launcher,
+    S: skynetd_io::observe::Slots,
+{
+    let queue = skynetd_io::outbound::Queue::of(layout);
+    let dropped: u64 = queue.status().dropped.iter().map(|(_, count)| *count).sum();
+    let wall = skynetd_io::api::wall_ms() as f64;
+    let monotonic = now_ms as f64;
+
+    // Nothing open yet: this pass is the first bound, not a window from the epoch.
+    if daemon.counting.opened_monotonic_ms == 0.0 && daemon.counting.opened_wall_ms == 0.0 {
+        daemon.counting = skynetd_io::telemetry::Counting::opened(wall, monotonic, dropped);
+        return;
+    }
+
+    daemon.counting.passes = daemon.counting.passes.saturating_add(1);
+    let window = daemon.counting.close(wall, monotonic, dropped);
+
+    match skynetd_io::telemetry::enqueue(&queue, layout, &window) {
+        Ok(_) => {}
+        // An unpaired robot has nowhere to send one, which is §50.2's shipping state rather than a
+        // failure. An unusable window is a clock that moved; both are quiet.
+        Err(skynetd_io::telemetry::NotQueued::Unpaired) => {}
+        Err(skynetd_io::telemetry::NotQueued::Unusable(_)) => {}
+        Err(skynetd_io::telemetry::NotQueued::Refused(detail)) => {
+            eprintln!("skynetd: a telemetry window could not be queued: {detail}");
+        }
+    }
+
+    daemon.counting = skynetd_io::telemetry::Counting::opened(wall, monotonic, dropped);
+}
+
+/// Cache the release manifest for the desired OS version (§12, §57).
+///
+/// Quiet on every path that is not a fault, and that list is longer than it looks: an unpaired
+/// robot, a desired state naming no OS version, and a Hub answering with a manifest this robot
+/// already holds are all ordinary. §34.1 assumes the robot is offline most of the time.
+fn pull_release<L, S>(daemon: &mut skynetd_io::runtime::Daemon<L, S>, layout: &Layout)
+where
+    L: skynetd_io::launch::Launcher,
+    S: skynetd_io::observe::Slots,
+{
+    let channel = daemon.desired.os_channel.clone();
+    let version = daemon.desired.os_version.clone();
+    let Some(pulled) = skynetd_io::releases::pull(layout, &channel, &version) else {
+        return;
+    };
+    if !pulled.reached {
+        eprintln!(
+            "skynetd: the release catalogue could not be pulled: {}",
+            pulled.detail
+        );
+    } else if !pulled.fault.is_empty() {
+        eprintln!("skynetd: release `{version}`: {}", pulled.fault);
+    } else if pulled.written {
+        eprintln!("skynetd: cached the manifest for release `{version}`");
+    }
+    daemon.last_release_pull = Some(pulled);
+}
+
+/// Build a check-in and put it in §34.4's queue (§11, §17, §33.3).
+///
+/// Called on every pass, immediately before the drain, so the item the drain picks up is the one
+/// describing the pass that just ran. §34.4 collapses check-ins, so this holds the queue at exactly
+/// one and always the current one — which is what makes calling it every pass correct rather than
+/// wasteful, and is the level-triggered rule from §33.3 applied to the report.
+///
+/// Says nothing on an unpaired robot. That is not a failure to report: §50.2 ships a robot
+/// belonging to nobody, and a loop that logged one every few seconds would train an operator to
+/// ignore the line that matters.
+fn report_checkin<L, S>(
+    daemon: &mut skynetd_io::runtime::Daemon<L, S>,
+    layout: &Layout,
+    now_ms: u64,
+) where
+    L: skynetd_io::launch::Launcher,
+    S: skynetd_io::observe::Slots,
+{
+    let trust = skynetd_io::trust::TrustStore::load(layout);
+    let (identity, _) = skynetd_io::identity::evaluate(layout, &trust);
+    if !identity.identity.credential {
+        return;
+    }
+
+    let actual = daemon.observe(now_ms);
+    let health = daemon.health(&actual, now_ms);
+    let policy = skynetd_io::identity::running_policy(&daemon.store, &actual);
+    let attestation =
+        skynetd_io::identity::attestation(layout, &trust, &identity, &actual.os.active, &policy);
+
+    let progress = skynetd_io::checkin::progress(&daemon.desired, &actual, daemon.safe_state);
+    // The lag is the one aggregate field this daemon can both compute and date, and it is dated
+    // with the observation it came from rather than with the wall clock — §33.6 wants an age and
+    // §35.1 does not want a control-path reading of `CLOCK_REALTIME`.
+    let lag = daemon
+        .desired
+        .generation
+        .checked_sub(actual.generation)
+        .filter(|_| daemon.desired.generation >= actual.generation);
+    let rolled = skynetd_io::checkin::health(&health, 0, lag);
+
+    let built = skynetd_io::checkin::build(
+        &identity,
+        attestation,
+        progress,
+        rolled,
+        daemon.operating_state.as_str(),
+        &skynetd_io::intent::held_digest(layout),
+    );
+    let queue = skynetd_io::outbound::Queue::of(layout);
+    match skynetd_io::checkin::enqueue(&queue, &identity, &built) {
+        Ok(_) => {}
+        Err(skynetd_io::checkin::NotQueued::Unpaired) => {}
+        Err(skynetd_io::checkin::NotQueued::Refused(detail)) => {
+            eprintln!("skynetd: the check-in could not be queued: {detail}");
+        }
+    }
+}
+
 fn report_drain(
     sender: &mut skynetd_io::connectivity::Sender,
     layout: &Layout,

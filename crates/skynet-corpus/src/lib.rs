@@ -31,7 +31,10 @@ use skynet_contracts::admission::{self, admit_package};
 use skynet_contracts::cell;
 use skynet_contracts::certification;
 use skynet_contracts::certification::award_certification;
+use skynet_contracts::checkin;
 use skynet_contracts::embodiment as contracts_embodiment;
+use skynet_contracts::identity;
+use skynet_contracts::intent;
 use skynet_contracts::json;
 use skynet_contracts::live;
 use skynet_contracts::opstate;
@@ -42,6 +45,7 @@ use skynet_contracts::roles;
 use skynet_contracts::roles::parse_role;
 use skynet_contracts::semver;
 use skynet_contracts::skill;
+use skynet_contracts::telemetry;
 use skynet_contracts::transport;
 use skynet_contracts::transport::resolve_transport;
 use skynet_json::Json;
@@ -460,6 +464,68 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             ota::boot_verdict_to_json(&ota::confirm_boot(&evidence))
         }
 
+        // §10's three decisions, in three files because they are answered by three parties: an
+        // operator at a keyboard, a Hub that issued a credential, and the robot measuring itself.
+        // An edition could agree about any one of them and disagree about the others, and nothing
+        // in the other two files would see it.
+        "identity" if label.contains("pairing") => {
+            let typed = input.get("input").and_then(Json::as_str).unwrap_or("");
+            identity::code_result_to_json(&identity::normalize_pairing_code(typed))
+        }
+
+        "identity" if label.contains("credential") => {
+            let held = json::identity_from_json(input.get("identity").ok_or("no `identity`")?);
+            let observed =
+                json::identity_observed_from_json(input.get("observed").ok_or("no `observed`")?);
+            identity::identity_verdict_to_json(&identity::check_identity(&held, &observed))
+        }
+
+        "identity" if label.contains("attestation") => {
+            let attestation = json::attestation_from_json(input);
+            identity::attestation_report_to_json(&identity::attest(&attestation))
+        }
+
+        // §11 and §17's check-in, in three files because it has three separable ways to be wrong.
+        // `claim` is the field §17's rule lives on, `health` is §33.6's age rule, and `document` is
+        // the bytes that actually cross to the Hub — an edition could reproduce the first two and
+        // still assemble them differently.
+        "checkin" if label.contains("claim") => {
+            let progress = json::progress_from_json(input);
+            checkin::claim_verdict_to_json(&checkin::claim_for(&progress))
+        }
+
+        "checkin" if label.contains("health") => {
+            let health = json::health_input_from_json(input);
+            checkin::health_report_to_json(&checkin::summarize(&health))
+        }
+
+        "checkin" if label.contains("document") => {
+            let built = json::check_in_input_from_json(input);
+            checkin::check_in_to_json(&checkin::check_in(&built))
+        }
+
+        // §11's pull. One file, because there is one function — and every case in it is about the
+        // same question: may a response from a network become the file that decides what software
+        // runs on a machine that moves.
+        "intent" if label.contains("offer") => {
+            let offer = json::offer_from_json(input.get("offer").ok_or("no `offer`")?);
+            let held = json::held_intent_from_json(input.get("held").ok_or("no `held`")?);
+            intent::offer_verdict_to_json(&intent::assess_offer(&offer, &held))
+        }
+
+        // §74's telemetry. Two files, because a window and a set of windows are two questions and
+        // an edition could agree about the first while disagreeing about the second — the second is
+        // the one §15's field conformance divides by, and it is where a gap becomes visible.
+        "telemetry" if label.contains("window") => {
+            let window = json::telemetry_window_from_json(input);
+            telemetry::window_report_to_json(&telemetry::assess_window(&window))
+        }
+
+        "telemetry" if label.contains("coverage") => {
+            let windows = json::telemetry_windows_from_json(input);
+            telemetry::coverage_to_json(&telemetry::coverage(&windows))
+        }
+
         // §54.2's live context. The half of the precondition machinery that had no builder until
         // the runtime needed one: `evaluate_preconditions` has always taken a context, and nothing
         // said what a robot puts in it. One file, because there is one function — and every case
@@ -592,6 +658,39 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
                 "boot_decisions" => ota::BOOT_DECISIONS
                     .iter()
                     .map(|decision| decision.as_str())
+                    .collect(),
+                "code_faults" => identity::CODE_FAULTS
+                    .iter()
+                    .map(|fault| fault.as_str())
+                    .collect(),
+                "device_scopes" => identity::DEVICE_SCOPES.to_vec(),
+                "key_bindings" => identity::KEY_BINDINGS
+                    .iter()
+                    .map(|binding| binding.as_str())
+                    .collect(),
+                "identity_findings" => identity::IDENTITY_FINDINGS
+                    .iter()
+                    .map(|finding| finding.as_str())
+                    .collect(),
+                "measure_states" => identity::MEASURE_STATES
+                    .iter()
+                    .map(|state| state.as_str())
+                    .collect(),
+                "checkin_claims" => checkin::CLAIMS.iter().map(|claim| claim.as_str()).collect(),
+                "reconcile_stages" => checkin::STAGES.to_vec(),
+                "readiness_states" => checkin::READINESS
+                    .iter()
+                    .map(|state| state.as_str())
+                    .collect(),
+                "health_fields" => checkin::HEALTH_FIELDS.to_vec(),
+                "offer_faults" => intent::OFFER_FAULTS
+                    .iter()
+                    .map(|fault| fault.as_str())
+                    .collect(),
+                "telemetry_counters" => telemetry::TELEMETRY_COUNTERS.to_vec(),
+                "telemetry_window_faults" => telemetry::WINDOW_FAULTS
+                    .iter()
+                    .map(|fault| fault.as_str())
                     .collect(),
                 "operating_states" => opstate::state_names(),
                 "state_reasons" => opstate::STATE_REASONS

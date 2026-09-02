@@ -1993,9 +1993,13 @@ nothing, for the same reason §37.1 keeps them apart from `failed`: both are adm
 both are visible on every surface, and an incident for either trains an operator to close incidents
 without reading them.
 
-Nothing sends from the queue yet — §34.2's outbound path and §10's pairing are unwritten — so items
-accumulate under the drop policy and the surfaces say so rather than presenting a queue that only
-grows.
+Incidents and check-ins send. §34.2's outbound path and §10's pairing are written, and each of those
+two classes addresses a route in §17.
+
+Telemetry had none until §74 added one, which is why the drop policy above was for a long time the
+whole of what happened to it: items accumulated under it and the surfaces said so rather than
+presenting a queue that only grows. Episodes are still in that state — `Class::Episode` has a route
+in §17 and nothing on a robot produces one.
 
 ---
 
@@ -3651,8 +3655,9 @@ that already exists rather than extending it — which is the useful finding:
 | **POST results** (§48.2) | **Existing** — part of the check-in payload |
 | **Skill invocation outcomes** (§54.4) | **Existing** — `POST /episodes`, unchanged |
 | **Attested evaluation results** (§56) | **Existing shape** — `POST /evaluations` with a device credential and a signature field |
+| **Telemetry** (§34.4) | New — `POST /devices/{id}/telemetry`. **Added by §74**; §34.4 gave the class a priority, a drop policy and a counter, and neither this table nor §17 gave it a route |
 
-Nine new endpoints in total, four things that need only a new field, and no breaking change to any
+Ten new endpoints in total, four things that need only a new field, and no breaking change to any
 of the sixty routes that exist. The reason the delta is this small is that the OS was designed
 against the Hub's object model from the start rather than beside it.
 
@@ -4328,3 +4333,108 @@ are not engineering: retargeting fidelity is a research result nobody has, joint
 property of hardware other people already shipped, and the certified tier needs a notified body.
 
 Version one ends here.
+
+---
+---
+
+# Part X — Amendments from the Hub
+
+Part IX ended version one. This part exists because building the **other side** of the Hub contract
+found things that reading either side alone could not: a producer that had a fact and no consumer,
+and a consumer specified with no producer. Both are invisible from either end, which is why they
+survived twenty-four sessions of a repository that finds something every time somebody opens a page.
+
+---
+
+## 74. Amendment to §57 — telemetry has a route
+
+§34.4 gives telemetry a priority, a drop policy, a counter and a paragraph of its own. §17 lists
+eight endpoints and §57 lists nine, and **none of them is a route telemetry can be sent to.** Three
+sessions recorded that as the one place the two documents do not line up, and it stayed open because
+from the robot's side it looks like a queue that fills, and from the Hub's side it looks like
+nothing at all.
+
+Two things upstream of it turn out to depend on it, which is what settles the question:
+
+* **§15's third suite.** Field conformance is *"continuous telemetry, forever"*, and it is the suite
+  §15 calls the one nobody else does — the mechanism by which certification *"stops being a document
+  and becomes a live property."* Without a route it is permanently unmeasured, and a Hub that
+  defaulted it to 1.0 would be awarding on evidence nobody collected.
+* **§32.1's fleet page.** Guard trip rate is a column on it. §33.6 lists `guard_trip_rate` as an
+  aggregate health field, and a check-in *cannot* carry it: a rate is a count over a window, and
+  §34.4 collapses check-ins precisely because every field in one is a statement about **now**. A
+  rate in a check-in would make the collapse lossy.
+
+So there is a tenth endpoint, and its shape follows from the second bullet rather than from
+convenience.
+
+```
+POST /devices/{id}/telemetry     windowed counters; the class §34.4 drops first
+```
+
+### 74.1 Telemetry is windows, not samples
+
+A telemetry item covers a **half-open interval** and carries counts over it. It is not a time series
+of readings, and it is not a running total.
+
+Each of the three alternatives fails against a rule that already exists:
+
+| Shape | Why not |
+|---|---|
+| A series of samples | A week offline produces ten thousand items, which is the state §34.4 collapses check-ins to avoid. |
+| A running total since boot | A drop becomes invisible: the next total absorbs it and the series stays tidy, which is exactly what §47.4 forbids. |
+| Counts since the last successful send | Makes delivery load-bearing for correctness. A retry that succeeded twice would double-count, and a robot cannot know which. |
+
+Counts over a self-describing window have none of those properties. Dropping one loses that window
+and nothing else, and the loss is **visible**, because the windows no longer tile: a Hub that
+receives `[10:00, 10:05)` and `[10:15, 10:20)` knows precisely what it does not have. That is
+§47.4's rule — *a gap annotated as a gap is honest; a gap that looks like a quiet period is not* —
+obtained from the shape of the data rather than from anybody remembering to annotate it.
+
+### 74.2 Two clocks, and both of them
+
+A window carries wall-clock bounds **and** a monotonic duration.
+
+§35.1 already assigns the two: `CLOCK_REALTIME` is for *"correlation with the Hub"* and
+`CLOCK_MONOTONIC_RAW` is for anything measured. A window needs both, because it does both jobs — it
+has to be placed on a timeline a Hub shares with other robots, and it has to be divided into to
+produce a rate.
+
+Using wall time for the duration would let an NTP step change a rate: a clock that jumps forward
+five minutes mid-window turns four hundred guard trips into a plausible number instead of an alarming
+one, and nothing anywhere would look wrong. Using monotonic time for the bounds would make the
+windows of two robots incomparable.
+
+**Their disagreement is reported rather than reconciled.** `(to − from) − monotonic` is the clock
+skew over the window, and a large one is a fact about the robot — an NTP correction, a clock nobody
+set, a suspended machine — that is worth one line on a fleet page and is not a reason to discard the
+counts.
+
+### 74.3 Every counter says whether it was measured
+
+The rule §33.6 applies to health, applied here for the same reason and with the same failure in
+mind: **zero and unmeasured are opposite facts.** No measurement of guard trips and no guard trips
+render identically as `0`, and the second is the number an operator relaxes on.
+
+So a counter is present-and-null when nothing measured it, and a window with no measured counters is
+still a valid window — it says the robot was up for five minutes and counted nothing, which is a
+fact, and it is the fact every robot this edition runs will report until a kernel is running.
+
+### 74.4 What it does not carry
+
+**No time series, no per-cycle data, and no observations.** Those are §13's black box, which is
+sealed and uploaded on a fault (§17's incident route) rather than streamed. Telemetry is the class
+§34.4 drops *aggressively and first*, and anything a robot would mind losing does not belong in the
+class designed to be lost.
+
+**No control-relevant state.** §11's rule is unaffected: nothing here is read back by the robot, and
+a fleet that lost every telemetry window would be exactly as safe and exactly as capable.
+
+### 74.5 Consequences elsewhere
+
+* **§57's count becomes ten.** No breaking change to any existing route.
+* **§15's `field` suite becomes measurable.** Field conformance is `interventions / cycles` over the
+  union of the windows a Hub holds — and where the windows do not tile, the union is smaller than
+  the elapsed time and the Hub can say so rather than dividing by a period it did not observe.
+* **§32.1's guard trip rate column has a source**, and it is the only one it could have had.
+* **New table**, following the `skynet_*` convention: `skynet_telemetry_windows`.

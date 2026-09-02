@@ -459,11 +459,21 @@ pub trait Sink {
     }
 }
 
-/// The default: there is nowhere to send.
+/// The default: this robot has not been paired, so there is nowhere to send.
 ///
-/// §34.2's outbound path is HTTPS to an endpoint this robot was paired with in §10, and §10 is
-/// unwritten. This sink refuses everything with that sentence, which is the difference between a
+/// §34.2's outbound path is HTTPS to an endpoint this robot was paired with in §10, and this robot
+/// has not been. The refusal names the command that fixes it, which is the difference between a
 /// queue that is held for a stated reason and a queue that only grows.
+///
+/// It covers one more case than its name suggests, and the sentence says so: a robot holding a
+/// credential whose identity document names **no endpoint** cannot say where it would report even
+/// in principle, which is not a paired robot for any outbound purpose. `GET /identity` reports the
+/// broken document; this reports what it costs.
+///
+/// There was briefly a second sink here, for a robot that was paired and had nowhere to send
+/// because §34.2's transport was unwritten. It lasted one session. That is the right lifetime for a
+/// type whose whole content is a missing implementation — the alternative is a sink that keeps
+/// saying something untrue because deleting it felt like losing work.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Unpaired;
 
@@ -471,9 +481,10 @@ impl Sink for Unpaired {
     fn send(&self, _item: &Item) -> Result<(), SendError> {
         Err(SendError {
             code: "unpaired",
-            detail: "this robot has no Hub to send to. §10's pairing and attestation are unwritten, \
-                     so there is no endpoint and no identity to present at one. The queue holds and \
-                     §34.4's drop policy applies to it."
+            detail: "this robot has no Hub to send to: it is not paired (§10), so there is no \
+                     endpoint and no credential to present at one. Run `skynet pair` with the code \
+                     the Hub showed you. Until then the queue holds and §34.4's drop policy applies \
+                     to it."
                 .to_string(),
         })
     }
@@ -494,9 +505,9 @@ impl Sink for Unpaired {
 
     fn obstacle(&self) -> Option<String> {
         Some(
-            "nothing will be sent whatever the link is doing: this robot has no Hub to send to. \
-             §10's pairing and attestation are unwritten. Items are held under §34.4's drop policy \
-             and the counters on this panel are what that costs."
+            "nothing will be sent whatever the link is doing: this robot is not paired with a Hub \
+             (§10), so there is no endpoint and no credential. Run `skynet pair`. Items are held \
+             under §34.4's drop policy and the counters on this panel are what that costs."
                 .to_string(),
         )
     }
@@ -653,6 +664,339 @@ impl Sender {
             }
         }
         drained
+    }
+}
+
+// ── §34.2's transport ────────────────────────────────────────────────────────
+
+/// What one HTTPS request came back with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Posted {
+    /// The status line's code.
+    pub status: u16,
+    /// The response body.
+    pub body: String,
+}
+
+/// The one place in this daemon that makes an outbound HTTPS request.
+///
+/// One function rather than one per caller, and the reason is a rule rather than tidiness: **no
+/// secret may reach a command line.** `/proc/<pid>/cmdline` is world-readable on Linux, so a
+/// credential passed as `-H "Authorization: Bearer …"` is published to every local user for the
+/// length of the request — and it works perfectly, passes every test, and is what somebody writes
+/// when they are trying to see whether the endpoint answers.
+///
+/// So there are exactly two channels here and each carries what it must:
+///
+/// * **The credential** goes into curl's own config on **stdin** (`--config -`), which is the only
+///   stdin curl has. Nothing about it is ever an argument.
+/// * **The body** goes into a file, passed by path. A path is not a secret, and a body can be tens
+///   of megabytes — a sealed black box — which rules out putting it in the config beside the
+///   credential.
+///
+/// The file is created before it is written and with an owner-only mode where the platform has one,
+/// because a file created world-readable and chmod-ed afterwards is world-readable for exactly as
+/// long as a local process reading in a loop needs.
+///
+/// # Why `curl` at all
+///
+/// §34.2's transport is HTTPS, this workspace has no third-party dependencies, and a hand-rolled
+/// TLS stack for a security boundary would be the worst option on the table. Shelling out to the
+/// tool that already does the job is what [`crate::ota`] does with RAUC and [`crate::launch`] does
+/// with systemd, and it buys a maintained TLS implementation for nothing.
+pub fn post_json(
+    url: &str,
+    credential: Option<&str>,
+    body: &str,
+    scratch: &Path,
+) -> Result<Posted, String> {
+    use std::io::Write;
+
+    // A credential that could break out of the config's quoting is not one this robot will present.
+    // Refused rather than escaped: the escape set curl's parser accepts is small and version-
+    // dependent, and a credential containing a quote is a Hub doing something nobody designed.
+    if let Some(credential) = credential {
+        if credential
+            .chars()
+            .any(|c| c == '"' || c == '\\' || c.is_control())
+        {
+            return Err(
+                "this robot holds a credential containing a character it will not put in a curl \
+                 config — a quote, a backslash or a control character. Nothing has been sent."
+                    .to_string(),
+            );
+        }
+    }
+
+    std::fs::create_dir_all(scratch)
+        .map_err(|error| format!("{} could not be created: {error}", scratch.display()))?;
+    let path = scratch.join(format!(".post-{}", std::process::id()));
+
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    {
+        let mut file = options
+            .open(&path)
+            .map_err(|error| format!("{} could not be written: {error}", path.display()))?;
+        file.write_all(body.as_bytes())
+            .map_err(|error| format!("{} could not be written: {error}", path.display()))?;
+    }
+
+    let outcome = run_curl(url, credential, &path);
+    // Removed whether or not the request worked. A body left behind is a copy of whatever was being
+    // sent sitting in the state directory until somebody notices.
+    let _ = std::fs::remove_file(&path);
+    outcome
+}
+
+fn run_curl(url: &str, credential: Option<&str>, body: &Path) -> Result<Posted, String> {
+    use std::io::Write;
+
+    let mut command = std::process::Command::new("curl");
+    command.args([
+        "--silent",
+        "--show-error",
+        "--request",
+        "POST",
+        "--header",
+        "content-type: application/json",
+        "--max-time",
+        "60",
+        // The status on a line of its own after the body, so one stream carries both and no
+        // temporary file holds the response.
+        "--write-out",
+        "\n%{http_code}",
+        "--data-binary",
+    ]);
+    command.arg(format!("@{}", body.display()));
+    if credential.is_some() {
+        command.args(["--config", "-"]);
+    }
+    command.arg(url);
+
+    let mut child = command
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|error| {
+            format!(
+                "`curl` could not be started ({error}). §34.2's outbound path is HTTPS and this \
+                 edition has no TLS stack of its own, so the image needs curl."
+            )
+        })?;
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        if let Some(credential) = credential {
+            // The one line that carries the secret, on the one channel that is not world-readable.
+            let _ = stdin
+                .write_all(format!("header = \"Authorization: Bearer {credential}\"\n").as_bytes());
+        }
+    }
+    // Dropped before waiting, so curl sees the end of its config rather than blocking on a pipe
+    // nobody closed.
+    drop(child.stdin.take());
+
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("curl did not finish: {error}"))?;
+
+    let combined = String::from_utf8_lossy(&output.stdout).to_string();
+    let (payload, status) = match combined.rsplit_once('\n') {
+        Some((payload, status)) => (payload.to_string(), status.trim().to_string()),
+        None => (String::new(), combined.trim().to_string()),
+    };
+
+    if !output.status.success() {
+        return Err(format!(
+            "curl could not reach {url}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    Ok(Posted {
+        status: status.parse().unwrap_or(0),
+        body: payload,
+    })
+}
+
+/// The one place in this daemon that makes an outbound HTTPS **read**.
+///
+/// The sibling of [`post_json`] and it carries the credential the same way and for the same reason:
+/// `/proc/<pid>/cmdline` is world-readable, so the credential goes into curl's own config on stdin
+/// and nothing about it is ever an argument.
+///
+/// There is no body, so there is no file. That is the whole of the difference between the two, and
+/// it is why they are two functions rather than one with an `Option<&str>` body — a reader looking
+/// for the argv rule should find it twice in eight lines rather than once behind a branch.
+pub fn get_json(url: &str, credential: Option<&str>) -> Result<Posted, String> {
+    use std::io::Write;
+
+    if let Some(credential) = credential {
+        if credential
+            .chars()
+            .any(|c| c == '"' || c == '\\' || c.is_control())
+        {
+            return Err(
+                "this robot holds a credential containing a character it will not put in a curl \
+                 config — a quote, a backslash or a control character. Nothing has been sent."
+                    .to_string(),
+            );
+        }
+    }
+
+    let mut command = std::process::Command::new("curl");
+    command.args([
+        "--silent",
+        "--show-error",
+        "--request",
+        "GET",
+        "--header",
+        "accept: application/json",
+        "--max-time",
+        "30",
+        "--write-out",
+        "\n%{http_code}",
+    ]);
+    if credential.is_some() {
+        command.args(["--config", "-"]);
+    }
+    command.arg(url);
+
+    let mut child = command
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|error| {
+            format!(
+                "`curl` could not be started ({error}). §34.2's outbound path is HTTPS and this \
+                 edition has no TLS stack of its own, so the image needs curl."
+            )
+        })?;
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        if let Some(credential) = credential {
+            let _ = stdin
+                .write_all(format!("header = \"Authorization: Bearer {credential}\"\n").as_bytes());
+        }
+    }
+    drop(child.stdin.take());
+
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("curl did not finish: {error}"))?;
+
+    let combined = String::from_utf8_lossy(&output.stdout).to_string();
+    let (payload, status) = match combined.rsplit_once('\n') {
+        Some((payload, status)) => (payload.to_string(), status.trim().to_string()),
+        None => (String::new(), combined.trim().to_string()),
+    };
+
+    if !output.status.success() {
+        return Err(format!(
+            "curl could not reach {url}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    Ok(Posted {
+        status: status.parse().unwrap_or(0),
+        body: payload,
+    })
+}
+
+/// §34.2's outbound path: the queue, drained to the Hub this robot was paired with.
+///
+/// Routes by class, because §17 gives each one a different endpoint — and one of them it does not
+/// give at all. See [`Hub::route`].
+#[derive(Debug, Clone)]
+pub struct Hub {
+    /// The Hub's base URL, from §10's identity document.
+    pub endpoint: String,
+    /// The Hub's identifier for this device.
+    pub device_id: String,
+    /// The credential. Held to be presented, never rendered.
+    pub credential: String,
+    /// Where a request body may be staged.
+    pub scratch: PathBuf,
+}
+
+impl Hub {
+    /// Where an item of this class goes (§17, §57, §74).
+    ///
+    /// [`Class::Telemetry`] returned `None` for three sessions and it was a finding rather than an
+    /// omission: §34.4 gave the class a priority, a drop policy and a counter, and neither §17's
+    /// eight endpoints nor §57's revised nine had anywhere to put it, so a robot that guessed a
+    /// route would have been inventing a Hub surface. §74 closes it — and closing it took two other
+    /// things with it, because §15's field conformance and §32.1's guard-trip column were both
+    /// waiting on the same missing route.
+    ///
+    /// Every class has one now. `Episode` is the last with no producer.
+    pub fn route(&self, class: Class) -> Option<String> {
+        let base = self.endpoint.trim_end_matches('/');
+        match class {
+            Class::CheckIn => Some(format!("{base}/devices/{}/checkin", self.device_id)),
+            Class::Incident => Some(format!("{base}/devices/{}/incidents", self.device_id)),
+            Class::Episode => Some(format!("{base}/episodes")),
+            Class::Telemetry => Some(format!("{base}/devices/{}/telemetry", self.device_id)),
+        }
+    }
+}
+
+impl Sink for Hub {
+    fn send(&self, item: &Item) -> Result<(), SendError> {
+        let Some(url) = self.route(item.class) else {
+            return Err(SendError {
+                code: "no_route",
+                detail: format!(
+                    "§34.4 gives `{}` a priority and a drop policy, and neither §17 nor §57 gives \
+                     it an endpoint. Nothing here will guess one. The items are held.",
+                    item.class.as_str()
+                ),
+            });
+        };
+
+        match post_json(&url, Some(&self.credential), &item.body, &self.scratch) {
+            Err(detail) => Err(SendError {
+                code: "unreachable",
+                detail,
+            }),
+            Ok(posted) if (200..300).contains(&posted.status) => Ok(()),
+            Ok(posted) => Err(SendError {
+                code: "refused",
+                detail: format!(
+                    "the Hub answered HTTP {} to {url}{}",
+                    posted.status,
+                    match Json::parse(&posted.body).ok().and_then(|document| document
+                        .get("error")
+                        .and_then(Json::as_str)
+                        .map(str::to_string))
+                    {
+                        Some(said) if !said.is_empty() => format!(": {said}"),
+                        _ => String::new(),
+                    }
+                ),
+            }),
+        }
+    }
+
+    /// True. This one actually sends.
+    fn delivers(&self) -> bool {
+        true
+    }
+
+    fn describe(&self) -> String {
+        format!("{} as {}", self.endpoint, self.device_id)
+    }
+
+    fn obstacle(&self) -> Option<String> {
+        None
     }
 }
 

@@ -457,6 +457,32 @@ impl Layout {
         self.data().join("identity")
     }
 
+    /// What pairing bound this robot to (§10).
+    ///
+    /// Under `identity/` beside the birth certificate, and the pair is the whole of §50.2's
+    /// distinction on one directory listing: `birth.json` is what the machine **is**, signed by a
+    /// vendor before it had an owner, and `device.json` is whose it **is**, written by an operator
+    /// who had one. A robot that lost the first cannot obtain another; a robot that lost the second
+    /// pairs again in a minute.
+    ///
+    /// The credential is deliberately **not** in it — see [`Layout::credential`].
+    pub fn device(&self) -> PathBuf {
+        self.identity().join("device.json")
+    }
+
+    /// The device credential itself (§10), and nothing else.
+    ///
+    /// A separate file from [`Layout::device`] for one reason: `device.json` is read by every
+    /// surface this daemon has — the console renders it, `GET /identity` returns it, the check-in
+    /// quotes it — and a document with a bearer credential inside it is a document none of those
+    /// may show. Splitting them is what lets the identity be public and the secret be read by the
+    /// one caller that presents it.
+    ///
+    /// No extension, because it is not a document. One line, the credential, and nothing around it.
+    pub fn credential(&self) -> PathBuf {
+        self.identity().join("credential")
+    }
+
     /// The vendor's birth certificate (§50.2).
     ///
     /// Under `identity/` rather than under `state/`, and the directory is the argument: everything

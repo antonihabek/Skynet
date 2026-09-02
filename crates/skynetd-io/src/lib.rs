@@ -54,21 +54,26 @@ pub mod birth;
 pub mod blackbox;
 pub mod calibration;
 pub mod capacity;
+pub mod checkin;
 pub mod connectivity;
 pub mod console;
 pub mod embodiment;
 pub mod embodiment_vector;
 pub mod entitlement;
 pub mod http;
+pub mod identity;
+pub mod intent;
 pub mod launch;
 pub mod layout;
 pub mod observe;
 pub mod ota;
 pub mod outbound;
 pub mod post;
+pub mod releases;
 pub mod runtime;
 pub mod skill;
 pub mod store;
+pub mod telemetry;
 pub mod trust;
 
 #[cfg(unix)]

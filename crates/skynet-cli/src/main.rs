@@ -110,7 +110,8 @@ fn dispatch(argv: &[String]) -> i32 {
         "frames" => run_or_help(rest, frames_cmd::USAGE, frames_cmd::run),
         "role" => role(rest),
         "status" | "ps" | "plan" | "logs" | "grants" | "estop" | "rollback" | "install"
-        | "blackbox" | "skills" | "skill" | "ota" => robot_cmd::run(command, rest),
+        | "blackbox" | "skills" | "skill" | "ota" | "identity" | "pair" | "unpair" | "checkin"
+        | "intent" | "releases" => robot_cmd::run(command, rest),
         other => term::fail(&format!("`{other}` is not a skynet command.\n\n{USAGE}")),
     }
 }
