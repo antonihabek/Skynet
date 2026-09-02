@@ -102,6 +102,7 @@ fn body() -> EmbodimentDescriptor {
         simulator: false,
         on_command_loss: Some("hold".to_string()),
         watchdog: None,
+        power: None,
         frames: None,
     }
 }
