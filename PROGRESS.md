@@ -10971,3 +10971,104 @@ the forty-ninth.
     emitted by the reconciler, and was therefore a record of what the *Hub* did — so the ring was
     complete about remote changes and silent about local ones, which is exactly backwards for a
     device an operator stands next to.
+
+## 2026-09-03 (fifty-first) — a function whose doc comment names a consumer that does not exist
+
+Two sessions running have found the same shape — a fact a contract produces and nothing on the robot
+reads — so this one went looking for it deliberately. The sweep is worth describing because the
+obvious version of it is useless: *"which public functions in `skynet-contracts` have no caller in
+the robot crates"* returns 49, and almost all of them are helpers called from inside the contracts
+crate itself. Excluding intra-crate calls and test modules narrows it to **thirteen**, and of those
+most are wire helpers reached through a method reference the regex could not see.
+
+One was real, and it announced itself:
+
+> `explain_omissions` — **What a console shows** about a context it could not fully build.
+
+No console showed it. `advance_one` built §54.2's live context, read `built.context` for the
+preconditions, and dropped `unaddressable` and `unreadable` on the floor.
+
+### Why that is not cosmetic
+
+§54.2's rule is that a precondition which cannot be evaluated **refuses the skill, naming the path
+that was unresolvable** — never "assume true". The path is the *question*. These two lists are the
+answer:
+
+* a joint that reported NaN is **absent** from the context rather than false, and the refusal that
+  names it looks identical to one about a value that is genuinely out of range;
+* a fact whose own name carries a dot cannot be addressed by any precondition at all, because a dot
+  path would read the name as two keys — and nothing can be done about that on the robot, because
+  the *body* chose the name.
+
+An operator reading *"refused by: `robot.tool_temperature` > 40"* and nothing else will go and look
+at a temperature. The sentence they needed says the sensor is not reporting a finite number.
+
+### Where it goes, and where it deliberately does not
+
+On the **runtime**, refreshed every pass, and on `GET /skills` beside the invocations — not on each
+invocation. `live_context` is built per package because `skill.grants` differs between two skills on
+one robot; `unaddressable` and `unreadable` come from the robot's own facts and are identical for all
+of them, so a copy per invocation would be one list rendered *n* times.
+
+Refreshed rather than accumulated, for the same reason §36's throttle window lives in memory: both
+entries are facts about the robot **now**. A sensor that resumes reporting a finite number stops
+being unreadable, and a list that persisted would send somebody after a fault that has since cleared.
+
+The key is always present and empty where there is nothing to say. A key that appeared only when
+something was wrong would make its absence mean two things — *this edition does not report them* and
+*there are none* — which is §7.2's rule about a shape rather than about a value.
+
+The console draws it **above** the invocation list and whether or not anything has been invoked: a
+robot whose sensors are not reporting is exactly the robot on which nothing will start, and a panel
+that hid the reason behind an empty list would answer *"nothing has been invoked"* to the question
+*"why"*.
+
+### One more from the same sweep, smaller and worth the two lines
+
+`admit_package` decided §37.1's transport stage by comparing a string to the literal `"refused"`. The
+value genuinely arrives as text — `AdmissionParams` is decoded from a wire document — so it cannot be
+an enum on that side. But the thing it is compared *to* can be, and now is:
+`TransportVerdict::Refused.as_str()`.
+
+The reference edition was already safe here and by a different mechanism: TypeScript types the field
+as the union `'direct' | 'retargeted' | 'degraded' | 'refused'`, so a typo in the comparison is a
+compile error. The Rust was the weaker of the two, which is the kind of asymmetry a corpus cannot
+catch — both editions produce identical bytes today and one of them would keep producing them after
+a rename.
+
+`is_installable` remains uncalled on the robot and is **not** dead code to delete: it is the typed
+spelling of the same rule, it exists in all three editions, and the Hub is entitled to it. What was
+worth fixing was that the robot's spelling was a literal.
+
+### What it does not do
+
+No robot produces an omission today, for a familiar reason: §33.1 leaves the joint readings
+unobserved, so `LiveInputs::joints` is empty on every pass and both lists are empty. The path is
+built, tested against the real producer, and gated on what the inputs contain rather than on a
+constant.
+
+### Numbers
+
+Rust: **1,384** tests, 4 new, **1,354** run here. `cargo fmt --all --check` and
+`cargo clippy --workspace --all-targets` clean; corpus unchanged at 77 files and 1,055 cases; golden
+path 48 commands; mirrors match.
+
+### Findings, restated
+
+1–28 as before; 29–51 from the sessions above; 52–56 from the forty-first; 57–58 from the
+forty-second; 59–61 from the forty-third; 62–63 from the forty-fourth; 64–67 from the forty-fifth;
+68–71 from the forty-sixth; 72–73 from the forty-seventh; 74–76 from the forty-eighth; 77–82 from
+the forty-ninth; 83–86 from the fiftieth.
+
+87. **A doc comment that names a consumer is a testable claim.** *"What a console shows"* was
+    written about a function no console called, and it stayed true-looking for as long as nobody
+    grepped for the caller. It is the cheapest kind of dead code to find and the most misleading to
+    leave, because the sentence reads as a description of the system.
+88. **"No caller" is three different questions.** No caller in the robot crates, no caller outside
+    the module, and no caller anywhere-but-tests give 49, 13 and 1 answers on this tree. Only the
+    third is a finding; running the first and stopping there would have produced a list nobody could
+    act on.
+89. **Two editions can be equally correct and unequally safe.** The TypeScript's union type made a
+    comparison unbreakable; the Rust's literal made the same comparison a rename away from silence.
+    A corpus compares *output*, so it cannot see this — which is an argument for reading the two
+    implementations side by side rather than trusting that identical bytes mean identical strength.
