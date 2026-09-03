@@ -4782,7 +4782,7 @@ miniature, and currently trivial to fix.
 | RHAL — ABI, structs, drivers | §4, §24, §66–71 | **Built** — C, C++ and Python headers; mock, MuJoCo and LeRobot drivers | No vendor has written one |
 | Embodiment descriptor and transport | §5–6, §44, §52 | **Built on both sides** — and, since §37.1's `transport` stage, resolved at install on the robot; §6.3's hand-off performed at `GET /limits?package=` | The ceilings reach `resolveLimits()` and stop there: no policy runtime exists to carry a command as far as a guard, so a robot running nothing has no plan in force and `envelope` is active with nothing to clamp (§7.6) |
 | Safety Kernel — guards, limits, tiers | §7, §23.1, §25, §46 | **Built on both sides** — `no_std`, no allocator, 101 tests; §7.6's resolution runs on the robot at `GET /limits` and crosses §17 to the device page | Nothing has driven a physical joint, and the tier it resolves at is assumed rather than awarded (§7.6) |
-| Packages, permissions, admission | §8, §37 | **Built** | Nothing on a robot can *produce* a signature (§19) |
+| Packages, permissions, admission | §8, §37 | **Built on both sides** — and §78 closed the case where the gate ran and checked nothing: the Hub refuses the manifest at publish, a robot refuses it at install with `embodiment_undeclared`, and three corpus cases hold both editions to it | Nothing on a robot can *produce* a signature (§19). The two spellings of a package's requirements still both exist; §78.2 is why neither could simply be deleted |
 | skynetd — reconciliation, supervision, health | §9, §33 | **Built** — level-triggered, six ordered stages | — |
 | Identity, pairing, attestation, factory provisioning | §10, §50 | **Built on both sides** | `security.identity.attested` needs a TPM; no key is generated on a robot |
 | Desired state, fleet, OTA | §11–12, §14, §33.3 | **Built on both sides** — including §75's bundle fetch | No robot has yet applied an image from this Hub |
@@ -4808,10 +4808,10 @@ miniature, and currently trivial to fix.
 | Interface — Hub-side and on-robot | §32 | **Built on both sides** — the console, the fleet page, the device page; §7.6's guards and limits cross §17 and are rendered on both, relayed rather than recomputed, and §32.2's four console panels all draw something measured | The transport plan does not cross §17, and should not until a policy runtime exists to be running one — the robot serves it per package at `GET /limits?package=`, for staged packages as well as active ones (§6.2). §32.1's guard-trip column now has its source and is frozen against a document a robot produces (§74.6); what it does not yet have is a robot that trips a guard |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **93,100 lines of Rust** across fifteen crates with 1,336
-tests, **13,300 lines** of the TypeScript reference edition that the corpus holds it to, **5,400
-lines** of drivers, and **8,200 lines** in the Hub's mirror of the shared contracts. The Hub's own
-suite is 1,490 tests.
+**Built** means running, tested code: **93,200 lines of Rust** across fifteen crates with 1,336
+tests over a corpus of 73 files and 1,020 cases, **13,300 lines** of the TypeScript reference edition
+that the corpus holds it to, **5,400 lines** of drivers, and **8,200 lines** in the Hub's mirror of
+the shared contracts. The Hub's own suite is 1,498 tests.
 
 Numbers go stale; the shape does not. What the table is for is the **last column**, and the honest
 summary of it is that every subsystem that can be built without hardware has been, every subsystem
@@ -5205,3 +5205,85 @@ The failure is written **into** the document and the incident is queued anyway. 
 one class that is never dropped, and a robot that suppressed an alarm because its own recorder was
 broken would be losing the report and the recording together — which are precisely the two things
 that fail at the same moment.
+
+---
+
+## 78. Amendment to §8 — one document, two spellings, and an admission gate that checked nothing
+
+§8.2 is unambiguous about which field a robot's admission gate is computed from:
+
+> `requests` must be a subset of **`embodiment.capabilities`**, or the install fails with
+> `over_request`.
+
+Everything in `admitPackage` reads that block: the unmet-capability check, the reserved-token check,
+the over-request rule. It is the field.
+
+The Hub's card schema does not have it. It validates **`required_capabilities`** and
+**`required_extensions`** at the top level of the same document, because its compatibility engine —
+*"can this policy run on that robot"*, answered before anything is installed — wanted a flat list to
+match against a robot's declared capabilities.
+
+And it is the *same document*. §37.1's store pins the on-disk shape: `manifest.json` at a staged
+package's root **is** the Hub's `manifest` column, and `computeVersionDigest` depends on it, hashing
+the manifest as a value and the files as a list so that the two are never counted twice.
+
+So one JSON object has two places a publisher can declare what a package needs, each with exactly one
+consumer, and nothing had ever compared them.
+
+### 78.1 The direction that matters, and what it actually produces
+
+A publisher who fills in the Hub's fields — the ones its schema validates, its forms present and its
+documentation describes — and leaves `embodiment` empty publishes a package that a robot admits with
+**every check passing and nothing checked**:
+
+* no unmet capability, because the required set is empty;
+* no over-request, because `requests` is a subset of nothing only if it is also empty — and a
+  publisher using the card fields has no reason to have written `requests` either;
+* an operator reading a clean admission report.
+
+That is not a stricter reading of a grey area. It is §8's entire admission gate silently doing
+nothing, on a document whose publisher believed they had declared their requirements, and reporting
+success.
+
+The other direction is milder and still wrong: a publisher who fills in only `embodiment` gets a
+compatibility answer computed from an empty requirement list — *"runs on anything"* — for a package
+every robot would refuse at install. Nobody can act on that answer.
+
+### 78.2 The fix is not to pick a winner
+
+The obvious repair is to make one field authoritative and delete the other. Both halves of that are
+wrong today. `embodiment.capabilities` is normative and cannot move; `required_capabilities` is on
+every card this Hub has ever stored and in every compatibility rule it evaluates. A migration that
+rewrote published manifests would rewrite documents whose digests are cited by benchmark results.
+
+So the rule is stated in terms of the two consumers instead:
+
+* **Reading is a union.** The Hub resolves a version's requirements from `embodiment` *and* the card
+  field, deduplicated. The failure to avoid on this side is **under**-reporting — saying compatible
+  where a robot refuses — and a union cannot under-report.
+* **Publishing refuses a disagreement in one direction.** A card that declares what its own
+  `embodiment` block does not is refused at publish, because that is the manifest whose gate does
+  nothing. A card that declares *less* is not refused: that package is enforced correctly and only
+  described incompletely, which the union above already fixes.
+* **Admission refuses the same shape**, with `embodiment_undeclared` — the seventeenth rejection
+  code. This is not redundant with the publish check. The publish check protects versions published
+  from now on; every version already published carries whatever it carries, and the robot is the
+  party that has to decline to install one it cannot check. An error rather than a warning, because
+  a warning here is a package that installs having been checked against nothing.
+
+`required_capabilities` and `required_extensions` are therefore fields on the package manifest **that
+nothing enforces from**. They are read on the robot for one purpose: to notice that they disagree
+with the block that is enforced. Reading them as a second source of requirements would make the
+duplicate spelling load-bearing on both sides, which is how a duplication becomes permanent.
+
+### 78.3 Consequences elsewhere
+
+* **`PACKAGE_REJECTION_CODES` becomes seventeen**, in both editions and in
+  `corpus/vocabulary/closed-sets.json`.
+* **Three corpus cases**, and the first is the one worth reading: a manifest that used to admit
+  `true` with an empty findings list now refuses. That diff is the defect, stated as data.
+* **§55.1's environments are read at last.** *"Its `required_capabilities` are still checked at
+  admission, since an environment that needs a gripper is not runnable by a robot without one in sim
+  either"* — the Hub's schema has accepted the field for environments all along and its resolver
+  discarded it, because the resolver was written for models and skills and the sentence was in a
+  different section.

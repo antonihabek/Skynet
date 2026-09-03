@@ -597,6 +597,8 @@ mod tests {
             depends_on: Vec::new(),
             min_os_version: None,
             source_embodiment: None,
+            required_capabilities: Vec::new(),
+            required_extensions: Vec::new(),
         }
     }
 

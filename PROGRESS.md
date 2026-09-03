@@ -10263,3 +10263,117 @@ forty-second; 59–61 from the forty-third; 62–63 from the forty-fourth.
     been 30 higher than `cargo test` on this machine for as long as the machine has been Windows.
     Nobody had subtracted the POSIX-gated tests from it, so every session either copied the figure
     forward or quietly disagreed with it.
+
+## 2026-09-03 (forty-sixth) — the admission gate that ran and checked nothing
+
+The Hub's build plan has carried an item since its nineteenth session, phrased as a mismatch between
+two documents: *"`required_extensions` is consumed here by the compatibility engine; the robot
+consumes the package manifest's `embodiment.extensions` … nothing compares them."* It was filed as
+tidy-up. Going to look at it found something worse than the description.
+
+### They are not two documents
+
+§37.1's store pins the on-disk shape of a staged package, and the sentence has been in `store.rs`
+since it was written:
+
+> `manifest.json` at the package root is the `.sky` manifest — **the Hub's `manifest` column**.
+
+`compute_version_digest` depends on it: the manifest is hashed as a value and the files as a list,
+so a manifest that also appeared in the file list would be hashed twice and nothing the Hub
+published would verify. One document.
+
+So this is one JSON object with **two places a publisher can declare what a package needs**, each
+with exactly one consumer: `embodiment.capabilities` — which §8.2 makes the field the entire
+admission gate is computed from — and top-level `required_capabilities`, which is the Hub's own flat
+spelling for its compatibility engine. Neither side had ever looked at the other's.
+
+### What that produces, which is not a mismatch but a silence
+
+A publisher who fills in the Hub's fields — the ones its schema validates and its forms present —
+and leaves `embodiment` empty publishes a package that `admit_package` accepts with **every check
+passing and nothing checked**:
+
+* no unmet capability, because the required set is empty;
+* no over-request, because `requests` is a subset of nothing only when it is also empty, and a
+  publisher using the card fields has no reason to have written `requests` either;
+* a clean report, to an operator who reads it as one.
+
+The corpus case says it better than a paragraph: `requirements-the-embodiment-block-does-not-carry`
+used to produce `{"admitted":true,"findings":[]}`. It now refuses. That diff is the defect, as data.
+
+`manifest_from_json` is where the silence is manufactured — `value.get("embodiment").cloned()
+.unwrap_or_else(Json::obj)` — and the field immediately below it is the counter-example. A
+`source_embodiment` block that does not decode is an **error**, with a comment saying why: *"an
+action space nobody could parse and an action space nobody declared are opposite facts."* The same
+care one field up would have caught this.
+
+### Not fixed by picking a winner
+
+The obvious repair is to make one field authoritative and delete the other, and both halves are
+unavailable. `embodiment.capabilities` is normative and cannot move. `required_capabilities` is on
+every card the Hub has stored and in every compatibility rule it evaluates, and rewriting published
+manifests would rewrite documents whose digests are cited by benchmark results.
+
+So §78 states the rule in terms of the two consumers instead, and the asymmetry is the content:
+
+* **Reading is a union.** The Hub resolves requirements from both. The failure on that side is
+  *under*-reporting — saying compatible where a robot refuses — and a union cannot under-report.
+* **Publishing refuses one direction.** A card declaring what its own `embodiment` block does not.
+* **Admission refuses the same shape**, with `embodiment_undeclared`, the seventeenth rejection
+  code. Not redundant with the publish check: that one protects versions published from now on, and
+  every version already published carries what it carries. The robot is the party that has to
+  decline to install something it cannot check.
+
+A card declaring *less* than `embodiment` is refused by nothing. That package is enforced correctly
+and only described incompletely, and refusing it would refuse the manifest whose enforced
+declaration is the stricter one.
+
+### The fields exist on the robot to be disagreed with
+
+`PackageManifest` gained `required_capabilities` and `required_extensions`, and **nothing enforces
+from them**. They are read for one purpose: so the check can notice they disagree with the block that
+is enforced. Reading them as a second source of requirements would have been the shorter fix and the
+wrong one — it would make the duplicate spelling load-bearing on both sides, which is how a
+duplication stops being removable.
+
+### Verification, including the part that came out wrong first
+
+`cargo test --workspace` — **1,306** passing here, 1,336 counting the 4 ignored and 26 POSIX-only.
+The corpus grew to **1,020 cases** across 73 files, three of them new, and the Rust edition
+reproduces all of them.
+
+Two things went wrong on the way and are worth recording:
+
+* The first corpus run diverged on **whitespace**. A Rust line-continuation inside a string
+  literal, after `cargo fmt` had reflowed it, kept the padding; the reference produced the sentence
+  and this edition produced the sentence with twenty spaces in it. That is the corpus doing exactly
+  its job on the smallest possible divergence, and it is a good argument for `concat!` over
+  continuations in any string two editions have to agree on.
+* Regenerating the corpus after adding only the vocabulary entry produced a **one-line diff**, which
+  was the signal that no case exercised the new code at all. A closed set that grows without a case
+  is a vocabulary entry, not a behaviour.
+
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets` clean; the golden path counts
+48 commands; the mirrors match.
+
+### Findings, restated
+
+1–28 as before; 29–51 from the sessions above; 52–56 from the forty-first; 57–58 from the
+forty-second; 59–61 from the forty-third; 62–63 from the forty-fourth; 64–67 from the forty-fifth.
+
+68. **"Two documents disagree" is a much better bug when it turns out to be one document.** The item
+    was filed as a consistency check between a card and a package manifest. They are the same JSON
+    object, which upgrades the finding from *a publisher could confuse two files* to *the admission
+    gate can run and check nothing*, and changes where the fix goes.
+69. **A defaulting parse is a decision, and it should be made once per field rather than once per
+    parser.** `embodiment` defaults to empty; `source_embodiment` below it refuses to. The second
+    has a comment explaining why absence and unparseability are different facts. Nobody applied that
+    reasoning upward.
+70. **A check that costs a publisher an error message and a check that costs a fleet an unchecked
+    install are both worth having.** The publish gate cannot reach what is already published, and
+    the install gate cannot tell a publisher before they ship. Neither replaces the other, and
+    "we already check that at publish" is how the second one gets argued away.
+71. **A rule stated in one section is not read by code written for another.** §55.1 says an
+    environment's `required_capabilities` are checked at admission. The Hub's resolver returned an
+    empty list for environments, because it was written for models and skills and the sentence
+    lived in the section about simulated worlds.

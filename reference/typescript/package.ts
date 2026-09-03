@@ -129,6 +129,22 @@ export interface PackageManifest {
    * checked.
    */
   source_embodiment?: SourceEmbodiment
+  /**
+   * The Hub's spelling of what this package requires, carried **only** to be cross-checked.
+   *
+   * `manifest.json` on a robot is the Hub's `manifest` column, and the Hub's card schema validates
+   * `required_capabilities` and `required_extensions` at the top level while §8.2 computes the whole
+   * admission gate from `embodiment.capabilities`. Two spellings of one fact, on one document, with
+   * a consumer each.
+   *
+   * Nothing is *enforced* from these. They are read so `embodiment_undeclared` can notice when the
+   * two disagree — which, in the direction that matters, is a package whose requirements admission
+   * never checked. Reading them as a second source of requirements would be the wrong fix: it would
+   * make the duplicate spelling load-bearing here too, and §8.2's field is the one a robot enforces.
+   */
+  required_capabilities?: string[]
+  /** See `required_capabilities`. */
+  required_extensions?: string[]
 }
 
 /**
@@ -158,6 +174,7 @@ export const PACKAGE_REJECTION_CODES = [
   'transport_refused',
   'executes_on_load_untrusted',
   'environment_inert',
+  'embodiment_undeclared',
 ] as const
 
 export type PackageRejectionCode = (typeof PACKAGE_REJECTION_CODES)[number]
@@ -374,6 +391,34 @@ export function admitPackage(params: AdmissionParams): AdmissionResult {
       severity: 'error',
       message: 'The package requests permissions it never declared a need for.',
       subjects: overRequested,
+    })
+  }
+
+  // Two spellings of one fact, and admission enforces one of them (§8.2). A manifest carrying the
+  // Hub's `required_capabilities`/`required_extensions` that `embodiment` does not cover is a
+  // manifest whose requirements were never checked — and in the common case, one that installs
+  // clean having checked nothing at all.
+  //
+  // A subset test in one direction only. A publisher who declares *more* in `embodiment` than on the
+  // card has a package a robot enforces correctly and a Hub that under-reports its needs; that is
+  // the Hub's to catch at publish, and refusing here would refuse a package whose enforced
+  // declaration is the stricter one.
+  const unenforced = [
+    ...(manifest.required_capabilities ?? []).filter(
+      token => !manifest.embodiment.capabilities.includes(token),
+    ),
+    ...(manifest.required_extensions ?? []).filter(
+      token => !(manifest.embodiment.extensions ?? []).includes(token),
+    ),
+  ]
+  if (unenforced.length > 0) {
+    findings.push({
+      code: 'embodiment_undeclared',
+      severity: 'error',
+      message:
+        'This package declares requirements its embodiment block does not, so admission checked '
+        + 'nothing for them. §8.2 enforces `embodiment.capabilities` and `embodiment.extensions`.',
+      subjects: unenforced,
     })
   }
 

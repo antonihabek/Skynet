@@ -150,6 +150,21 @@ pub struct PackageManifest {
     /// which is the honest answer and the one an operator can act on. A package kind that has no
     /// action space at all — a driver, an environment, a dataset — correctly declares none.
     pub source_embodiment: Option<crate::embodiment::SourceEmbodiment>,
+    /// The Hub's spelling of what this package requires, carried **only** to be cross-checked.
+    ///
+    /// `manifest.json` on a robot is the Hub's `manifest` column, and the Hub's card schema
+    /// validates `required_capabilities` and `required_extensions` at the top level while §8.2
+    /// computes the whole admission gate from `embodiment.capabilities`. Two spellings of one fact,
+    /// on one document, with a consumer each.
+    ///
+    /// Nothing is *enforced* from these. They are read so that
+    /// [`PackageRejectionCode::EmbodimentUndeclared`] can notice when the two disagree — which, in
+    /// the direction that matters, is a package whose requirements admission never checked. Reading
+    /// them as a second source of requirements would be the wrong fix: it would make the duplicate
+    /// spelling load-bearing on this side too, and §8.2's field is the one the robot enforces.
+    pub required_capabilities: Vec<String>,
+    /// See [`PackageManifest::required_capabilities`].
+    pub required_extensions: Vec<String>,
 }
 
 /// Why a package was refused, or warned about.
@@ -204,6 +219,24 @@ pub enum PackageRejectionCode {
     /// go looking for the setting that grants it and there is none. Reporting the two the same way
     /// would send somebody hunting for a permission the system does not have.
     CapabilityReserved,
+    /// The manifest declares requirements the `embodiment` block does not, so nothing enforced them.
+    ///
+    /// §8.2 makes `embodiment.capabilities` the field this whole gate is computed from: `requests`
+    /// must be a subset of it, and the unmet check reads it. A manifest that *also* carries
+    /// top-level `required_capabilities` or `required_extensions` — the Hub's own spelling, on the
+    /// same document, because `manifest.json` on a robot **is** the Hub's `manifest` column — is a
+    /// manifest with two declarations of one fact, and admission enforces only one of them.
+    ///
+    /// The direction that matters is this one. A publisher who fills in the Hub's fields and leaves
+    /// `embodiment` empty gets a package that admission passes **cleanly**, having checked nothing:
+    /// no unmet capability, no over-request, and an operator reading the report sees a green
+    /// install. That is not a stricter reading of a grey area — it is §8's entire admission gate
+    /// silently doing nothing, on a document whose publisher believed they had declared their
+    /// requirements.
+    ///
+    /// An error rather than a warning, because a warning here is a package that installs having
+    /// been checked against nothing.
+    EmbodimentUndeclared,
 }
 
 impl PackageRejectionCode {
@@ -226,6 +259,7 @@ impl PackageRejectionCode {
             PackageRejectionCode::ExecutesOnLoadUntrusted => "executes_on_load_untrusted",
             PackageRejectionCode::EnvironmentInert => "environment_inert",
             PackageRejectionCode::CapabilityReserved => "capability_reserved",
+            PackageRejectionCode::EmbodimentUndeclared => "embodiment_undeclared",
         }
     }
 }
@@ -269,7 +303,7 @@ pub fn is_reserved(token: &str) -> bool {
 /// Reproduced into `corpus/vocabulary/closed-sets.json`, so an edition that gained a variant the
 /// reference does not have — or lost one it does — fails on the first run rather than on the first
 /// case somebody happens to write for it.
-pub const PACKAGE_REJECTION_CODES: [PackageRejectionCode; 16] = [
+pub const PACKAGE_REJECTION_CODES: [PackageRejectionCode; 17] = [
     PackageRejectionCode::Unsigned,
     PackageRejectionCode::SignatureFailed,
     PackageRejectionCode::SignatureUntrusted,
@@ -286,6 +320,7 @@ pub const PACKAGE_REJECTION_CODES: [PackageRejectionCode; 16] = [
     PackageRejectionCode::TransportRefused,
     PackageRejectionCode::ExecutesOnLoadUntrusted,
     PackageRejectionCode::EnvironmentInert,
+    PackageRejectionCode::EmbodimentUndeclared,
 ];
 
 /// Every signature state.
@@ -557,6 +592,41 @@ pub fn admit_package(params: &AdmissionParams) -> AdmissionResult {
             severity: Severity::Error,
             message: "The package requests permissions it never declared a need for.".to_string(),
             subjects: Some(over_requested),
+        });
+    }
+
+    // Two spellings of one fact, and admission enforces one of them (§8.2). A manifest carrying
+    // the Hub's `required_capabilities`/`required_extensions` that `embodiment` does not cover is a
+    // manifest whose requirements were never checked — and in the common case, one that installs
+    // clean having checked nothing at all.
+    //
+    // A subset test in one direction only. A publisher who declares *more* in `embodiment` than on
+    // the card has a package this robot enforces correctly and a Hub that under-reports its needs;
+    // that is the Hub's to catch at publish, and refusing here would refuse a package whose
+    // enforced declaration is the stricter one.
+    let unenforced: Vec<String> = manifest
+        .required_capabilities
+        .iter()
+        .filter(|token| !manifest.embodiment.capabilities.contains(token))
+        .chain(
+            manifest
+                .required_extensions
+                .iter()
+                .filter(|token| !manifest.embodiment.extensions.contains(token)),
+        )
+        .cloned()
+        .collect();
+    if !unenforced.is_empty() {
+        findings.push(PackageFinding {
+            code: PackageRejectionCode::EmbodimentUndeclared,
+            severity: Severity::Error,
+            message: concat!(
+                "This package declares requirements its embodiment block does not, so ",
+                "admission checked nothing for them. §8.2 enforces ",
+                "`embodiment.capabilities` and `embodiment.extensions`.",
+            )
+            .to_string(),
+            subjects: Some(unenforced),
         });
     }
 
@@ -841,6 +911,8 @@ mod tests {
             depends_on: Vec::new(),
             min_os_version: None,
             source_embodiment: None,
+            required_capabilities: Vec::new(),
+            required_extensions: Vec::new(),
         }
     }
 

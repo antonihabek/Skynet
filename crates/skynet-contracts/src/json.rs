@@ -737,6 +737,11 @@ pub fn manifest_from_json(value: &Json) -> Result<PackageManifest, DecodeError> 
             None => None,
         },
         min_os_version: opt_string(value, "min_os_version"),
+        // Read from the top level, where the Hub's card schema puts them, and never merged into
+        // `embodiment` above. Merging would silently repair a manifest whose two declarations
+        // disagree, which is the one thing admission has to be able to see.
+        required_capabilities: value.str_arr("required_capabilities"),
+        required_extensions: value.str_arr("required_extensions"),
     })
 }
 
