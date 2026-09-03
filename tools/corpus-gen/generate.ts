@@ -1023,6 +1023,36 @@ admissionCase('budget-absent-capacity', 'An undeclared capacity is zero, not unl
   { capacity: capacity({ vram_mb: undefined, cpu_cores: undefined, disk_mb: undefined }) })
 admissionCase('over-request', 'A package cannot request what it never declared a need for.',
   { manifest: manifest({ requests: ['manipulation.grasp', 'locomotion.walk'] }) })
+// The Hub's spelling of a package's requirements, arriving on a document whose embodiment block
+// does not carry them. `manifest.json` on a robot *is* the Hub's `manifest` column, and §8.2
+// computes admission from `embodiment.capabilities` — so the first of these is a package that would
+// otherwise install with a completely clean report, having been checked against nothing.
+admissionCase('requirements-the-embodiment-block-does-not-carry',
+  'The card fields declare what the package needs and the embodiment block is empty, so '
+  + 'nothing enforced them. The worst shape this can take: a green install of an unchecked package.',
+  {
+    manifest: manifest({
+      embodiment: { capabilities: [], control_mode: 'torque' },
+      requests: [],
+      required_capabilities: ['manipulation.grasp'],
+      required_extensions: ['unitree.raw_lowlevel'],
+    }),
+  })
+admissionCase('requirements-declared-in-both-places-agree',
+  'The two spellings carry the same tokens, which is the shape a publisher who filled in both '
+  + 'should get, and it is not a finding.',
+  {
+    manifest: manifest({
+      required_capabilities: ['manipulation.grasp', 'sensing.rgb'],
+    }),
+  })
+admissionCase('an-embodiment-block-stricter-than-the-card-is-not-a-finding',
+  'Declaring more in `embodiment` than on the card is a Hub that under-reports what the '
+  + 'package needs, not a robot that under-enforces them. The subset test runs one way for that '
+  + 'reason: refusing here would refuse the package whose enforced declaration is the stricter one.',
+  {
+    manifest: manifest({ required_capabilities: ['manipulation.grasp'] }),
+  })
 admissionCase('capability-denied', 'The operator profile withholds it outright.',
   { capacity: capacity({ denied: ['manipulation.grasp'] }) })
 admissionCase('capability-unprovided', 'The robot does not have it at all.',

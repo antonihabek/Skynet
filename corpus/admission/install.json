@@ -788,6 +788,161 @@
       "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"over_request\",\"message\":\"The package requests permissions it never declared a need for.\",\"severity\":\"error\",\"subjects\":[\"locomotion.walk\"]}]}"
     },
     {
+      "id": "requirements-the-embodiment-block-does-not-carry",
+      "note": "The card fields declare what the package needs and the embodiment block is empty, so nothing enforced them. The worst shape this can take: a green install of an unchecked package.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [],
+            "control_mode": "torque"
+          },
+          "requests": [],
+          "required_capabilities": [
+            "manipulation.grasp"
+          ],
+          "required_extensions": [
+            "unitree.raw_lowlevel"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"embodiment_undeclared\",\"message\":\"This package declares requirements its embodiment block does not, so admission checked nothing for them. §8.2 enforces `embodiment.capabilities` and `embodiment.extensions`.\",\"severity\":\"error\",\"subjects\":[\"manipulation.grasp\",\"unitree.raw_lowlevel\"]}]}"
+    },
+    {
+      "id": "requirements-declared-in-both-places-agree",
+      "note": "The two spellings carry the same tokens, which is the shape a publisher who filled in both should get, and it is not a finding.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "required_capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[]}"
+    },
+    {
+      "id": "an-embodiment-block-stricter-than-the-card-is-not-a-finding",
+      "note": "Declaring more in `embodiment` than on the card is a Hub that under-reports what the package needs, not a robot that under-enforces them. The subset test runs one way for that reason: refusing here would refuse the package whose enforced declaration is the stricter one.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "required_capabilities": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[]}"
+    },
+    {
       "id": "capability-denied",
       "note": "The operator profile withholds it outright.",
       "input": {
