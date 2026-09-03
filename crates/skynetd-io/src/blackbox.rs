@@ -427,13 +427,81 @@ pub fn seal_existing(
 
 fn write_sealed(dir: &Path, sealed: &Sealed, mono_ns: u64) -> std::io::Result<PathBuf> {
     let name = format!("{:020}-{}.mcap", mono_ns, sealed.reason.as_str());
-    let path = dir.join(name);
+    let path = dir.join(&name);
     let mut file = File::create(&path).map_err(|e| io_error("creating", &path, e))?;
     file.write_all(&sealed.bytes)
         .map_err(|e| io_error("writing", &path, e))?;
     file.sync_all()
         .map_err(|e| io_error("flushing", &path, e))?;
+    // The digest, written by the party that computed it, at the moment it computed it. Best effort:
+    // a window whose manifest could not be written is still a window, and §79's upload hashes one
+    // that has none. Failing the seal for it would lose the recording to save a cache.
+    let _ = write_manifest(dir, &name, sealed);
     Ok(path)
+}
+
+/// Where a sealed window's manifest lives.
+///
+/// Beside the recording and suffixed rather than substituted, so it is never mistaken for one:
+/// `…-fault.mcap.window.json`. [`Recorder::sealed`] and §79's collector both filter on `.mcap`, so
+/// the sidecar is invisible to everything that lists windows.
+pub fn manifest_path(dir: &Path, name: &str) -> PathBuf {
+    dir.join(format!("{name}.window.json"))
+}
+
+/// What a seal produced, written down at the seal (§77.1, §79).
+///
+/// **The digest is recorded by the producer, before any transfer exists** — which is §77.1's whole
+/// argument for carrying it, applied one step earlier. The practical consequence is the one that
+/// made this file necessary: §79's collector has to know which sealed windows are which, every
+/// pass, and the only other way to answer that is to hash the directory. On a robot holding fifty
+/// sealed windows that is gigabytes of reading per reconcile pass, to re-derive a number this
+/// process already had in a variable.
+///
+/// It is a cache in the sense that it can be rebuilt, and it is **not** a second source of truth:
+/// a manifest whose digest is not the file's digest is wrong, and §79's collector hashes rather
+/// than believes one whenever it is about to act on it.
+fn write_manifest(dir: &Path, name: &str, sealed: &Sealed) -> std::io::Result<()> {
+    let mut document = Json::obj();
+    document.set(
+        "digest",
+        Json::Str(format!(
+            "sha256:{}",
+            String::from_utf8_lossy(&skynet_sha256::hex_of(&sealed.digest))
+        )),
+    );
+    document.set("size_bytes", Json::Num(sealed.bytes.len() as f64));
+    document.set("records", Json::Num(sealed.continuity.records as f64));
+    document.set("damaged", Json::Num(sealed.continuity.damaged as f64));
+    document.set("reason", Json::Str(sealed.reason.as_str().to_string()));
+    let text = document
+        .to_canonical()
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    crate::observe::write_atomic(&manifest_path(dir, name), text.as_bytes())
+}
+
+/// Read one back, when it is there and describes a file of this length.
+///
+/// The length is checked because a sealed window's *name* can repeat: §13 names it for a monotonic
+/// instant, and a reboot restarts that clock. A manifest left beside a name that has since been
+/// rewritten describes bytes that are gone, and returning its digest would be reporting a window
+/// as collected because a previous one with the same name was.
+///
+/// The length is a cheap disqualifier and not a proof — two windows sealed off one ring are
+/// frequently the same size — so §79's collector treats a surviving manifest as a hint and hashes
+/// before it writes anything down. What the check buys is that the hint is almost never wrong,
+/// which is what keeps the hash off the reconcile path.
+pub fn read_manifest(dir: &Path, name: &str, size: u64) -> Option<String> {
+    let document = crate::observe::read_json(&manifest_path(dir, name))?;
+    let declared = document.get("size_bytes").and_then(Json::as_f64)?;
+    if declared != size as f64 {
+        return None;
+    }
+    document
+        .get("digest")
+        .and_then(Json::as_str)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
 }
 
 /// The metadata a supervisor can honestly fill in today.

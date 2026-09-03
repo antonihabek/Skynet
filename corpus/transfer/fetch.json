@@ -1,0 +1,163 @@
+{
+  "corpus": "transfer",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "an-ordinary-fetch",
+      "note": "Nothing here, a link that costs nothing, a digest to check against. The case that has to hold or every refusal below is measuring a function that refuses everything.",
+      "input": {
+        "subject": {
+          "digest": "sha256:aaaa",
+          "size": 100000,
+          "have": false,
+          "partial": 0,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"fetch\",\"detail\":\"Fetching 100000 bytes over `eth0`.\",\"from\":0}"
+    },
+    {
+      "id": "an-image-already-here",
+      "note": "Order of cost, and the case that catches getting it wrong. A robot holding the verified bundle must not report itself as waiting for an unmetered link to fetch it — which is what a version that checked metering first would say.",
+      "input": {
+        "subject": {
+          "digest": "sha256:aaaa",
+          "size": 100000,
+          "have": true,
+          "partial": 0,
+          "bearer": {
+            "name": "wwan0",
+            "metered": true,
+            "metering_declared": false
+          }
+        }
+      },
+      "expected": "{\"decision\":\"have\",\"detail\":\"This bundle is already on the disk and has been checked against the manifest. Nothing to fetch.\",\"from\":0}"
+    },
+    {
+      "id": "a-release-naming-no-digest",
+      "note": "§12 binds every gate it applies to the digest, so bytes with no name cannot be bound to. Refused before a bearer is even considered.",
+      "input": {
+        "subject": {
+          "digest": "",
+          "size": 100000,
+          "have": false,
+          "partial": 0,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"refuse\",\"detail\":\"This release names no bundle digest, so there is nothing to check the bytes against. §12 binds a bench pass to the exact bytes it was taken against, and bytes with no name cannot be bound to — so they are not fetched either.\",\"from\":0}"
+    },
+    {
+      "id": "no-bearer-at-all",
+      "note": "§34.1: offline is the ordinary state, not a fault. Nothing is lost — the manifest is already here and the transfer resumes when a link returns.",
+      "input": {
+        "subject": {
+          "digest": "sha256:aaaa",
+          "size": 100000,
+          "have": false,
+          "partial": 0,
+          "bearer": null
+        }
+      },
+      "expected": "{\"decision\":\"no_bearer\",\"detail\":\"No bearer is up, so there is nothing to fetch over. That is the ordinary state for most of a robot's life (§34.1) and nothing about the update is lost by it — the release manifest is already here and the transfer resumes when a link returns.\",\"from\":0}"
+    },
+    {
+      "id": "a-declared-metered-link",
+      "note": "§34.3. Hundreds of megabytes per robot over cellular is a bill a fleet discovers at the end of the month, so a bulk class waits and the wait is visible.",
+      "input": {
+        "subject": {
+          "digest": "sha256:aaaa",
+          "size": 100000,
+          "have": false,
+          "partial": 0,
+          "bearer": {
+            "name": "wwan0",
+            "metered": true,
+            "metering_declared": false
+          }
+        }
+      },
+      "expected": "{\"decision\":\"wait_for_unmetered\",\"detail\":\"An OS image is the largest bulk transfer this system has, and `wwan0` is assumed metered. It waits for an unmetered link (§34.3). Nothing is lost by waiting, and a fleet that downloaded hundreds of megabytes per robot over cellular would find out at the end of the month.\",\"from\":0}"
+    },
+    {
+      "id": "an-assumed-metered-link",
+      "note": "The same refusal, and the sentence says `assumed` rather than `declared`. A vendor who thinks their Wi-Fi is free needs to know the robot does not, and that it is one line of configuration away.",
+      "input": {
+        "subject": {
+          "digest": "sha256:aaaa",
+          "size": 100000,
+          "have": false,
+          "partial": 0,
+          "bearer": {
+            "name": "wlan0",
+            "metered": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"wait_for_unmetered\",\"detail\":\"An OS image is the largest bulk transfer this system has, and `wlan0` is assumed metered. It waits for an unmetered link (§34.3). Nothing is lost by waiting, and a fleet that downloaded hundreds of megabytes per robot over cellular would find out at the end of the month.\",\"from\":0}"
+    },
+    {
+      "id": "a-resume",
+      "note": "The partial is keyed to the digest, so it cannot be another image’s tail. The offset is on the plan rather than left for a caller to work out.",
+      "input": {
+        "subject": {
+          "digest": "sha256:aaaa",
+          "size": 100000,
+          "have": false,
+          "partial": 40000,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"resume\",\"detail\":\"Resuming at 40000 bytes of 100000. The partial is keyed to this bundle's digest, so it cannot be a different image's tail.\",\"from\":40000}"
+    },
+    {
+      "id": "a-partial-larger-than-the-image",
+      "note": "Not a partial of this bundle at all. Resuming would append this image’s tail to something else’s and the mismatch would surface after the whole transfer, which on a poor link is hours.",
+      "input": {
+        "subject": {
+          "digest": "sha256:aaaa",
+          "size": 100000,
+          "have": false,
+          "partial": 140000,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"discard_and_fetch\",\"detail\":\"There are 140000 bytes here for a bundle the manifest says is 100000. A partial cannot be larger than what it is part of, so this is left over from something else. It is discarded and the transfer starts again.\",\"from\":0}"
+    },
+    {
+      "id": "a-partial-of-a-manifest-that-declares-no-size",
+      "note": "Every manifest a Hub serves today. The \"cannot be larger than what it is part of\" branch is unreachable without a declared size, so a resume is the only honest answer and the sentence says how far it got without claiming a total.",
+      "input": {
+        "subject": {
+          "digest": "sha256:aaaa",
+          "size": null,
+          "have": false,
+          "partial": 40000,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"resume\",\"detail\":\"Resuming at 40000 bytes. The partial is keyed to this bundle's digest, so it cannot be a different image's tail.\",\"from\":40000}"
+    }
+  ]
+}

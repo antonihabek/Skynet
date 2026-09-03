@@ -64,7 +64,8 @@ skynet — talking to a running robot (§33.7)
   estop                       Stop every package; needs no credential (§39.1)
   rollback <ns/name>          Back to the previous version (§37.2)
   install <dir> --id <ns/name> --kind <k> --version <v> --digest <hex>
-  blackbox                    The recording's window, and what is missing from it
+  blackbox                    The recording's window, what is missing from it, and which
+                              sealed windows the Hub has (§79)
   blackbox seal               Seal the window now (§13); needs operator
   blackbox get <name>         Download one sealed recording, as MCAP
   skills                      Every invocation, and where §54.4 says it is
@@ -2022,11 +2023,70 @@ fn print_blackbox(document: &Json) {
         println!("{note}");
     }
 
-    let sealed = document.arr_or_empty("sealed");
-    if !sealed.is_empty() {
+    // §79's collection. Printed from `collection.windows` rather than from `sealed`, because the
+    // two lists are the same set and only one of them says whether the Hub has a copy — and a
+    // sealed list that did not would leave an operator to assume either answer.
+    let collection = document.get_present("collection");
+    let listed = collection
+        .map(|report| report.arr_or_empty("windows"))
+        .unwrap_or_default();
+
+    if !listed.is_empty() {
         println!();
         println!("sealed:");
-        for entry in sealed {
+        for entry in listed {
+            let name = entry
+                .get_present("name")
+                .and_then(Json::as_str)
+                .unwrap_or("—");
+            let bytes = entry
+                .get_present("size_bytes")
+                .and_then(Json::as_f64)
+                .unwrap_or_default() as u64;
+            let collected = entry
+                .get_present("collected")
+                .and_then(Json::as_bool)
+                .unwrap_or(false);
+            println!(
+                "  {name:40} {bytes:>12} bytes  {}",
+                if collected { "on the Hub" } else { "here only" }
+            );
+        }
+
+        if let Some(report) = collection {
+            let count = |key: &str| {
+                report
+                    .get_present(key)
+                    .and_then(Json::as_f64)
+                    .unwrap_or_default() as u64
+            };
+            let pending = count("pending");
+            println!();
+            if pending == 0 {
+                println!("Every sealed window has been collected (§79).");
+            } else {
+                // Named as a state rather than as a warning. A window that has not crossed is the
+                // ordinary case on a metered link, and it is the *bytes* that are worth a number:
+                // §34.3's wait is about the size of them.
+                println!(
+                    "{pending} window(s), {} bytes, are on this robot and nowhere else.                      `skynet blackbox get <name>` reads one here; the daemon sends them when an                      unmetered link is up (§34.3, §79.3).",
+                    count("pending_bytes")
+                );
+            }
+            if let Some(attempt) = report
+                .get_present("last_attempt")
+                .and_then(|last| last.get_present("error"))
+                .and_then(Json::as_str)
+            {
+                println!("last attempt: {attempt}");
+            }
+        }
+    } else if !document.arr_or_empty("sealed").is_empty() {
+        // An older daemon, whose index has no `collection`. Better than showing nothing, and it
+        // does not invent a collection state it has no way to know.
+        println!();
+        println!("sealed:");
+        for entry in document.arr_or_empty("sealed") {
             println!(
                 "  {:40} {} bytes",
                 entry

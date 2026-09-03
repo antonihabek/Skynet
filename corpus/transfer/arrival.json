@@ -1,0 +1,81 @@
+{
+  "corpus": "transfer",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "the-image",
+      "note": "The bytes are the release the signed manifest describes.",
+      "input": {
+        "arrived": {
+          "digest": "sha256:aaaa",
+          "size": 100000
+        },
+        "expected": {
+          "digest": "sha256:aaaa",
+          "size": 100000
+        }
+      },
+      "expected": "{\"code\":\"match\",\"detail\":\"These bytes are the release the manifest describes.\",\"discard\":false,\"ok\":true}"
+    },
+    {
+      "id": "a-transfer-that-stopped",
+      "note": "Short, and the one failure that keeps the file — which is exactly what a resume is for. Reporting this as a digest mismatch would send an engineer looking for tampering every time a link dropped.",
+      "input": {
+        "arrived": {
+          "digest": "sha256:whatever",
+          "size": 60000
+        },
+        "expected": {
+          "digest": "sha256:aaaa",
+          "size": 100000
+        }
+      },
+      "expected": "{\"code\":\"short\",\"detail\":\"60000 of 100000 bytes arrived. The transfer stopped early, which is what a link dropping looks like. The partial is kept and the next attempt resumes from it.\",\"discard\":false,\"ok\":false}"
+    },
+    {
+      "id": "more-bytes-than-were-declared",
+      "note": "Not a transfer that stopped. Discarded.",
+      "input": {
+        "arrived": {
+          "digest": "sha256:aaaa",
+          "size": 140000
+        },
+        "expected": {
+          "digest": "sha256:aaaa",
+          "size": 100000
+        }
+      },
+      "expected": "{\"code\":\"long\",\"detail\":\"140000 bytes arrived for a bundle the manifest says is 100000. More than was declared is not a transfer that stopped — it is a different artifact, or a proxy that served something else. Discarded.\",\"discard\":true,\"ok\":false}"
+    },
+    {
+      "id": "the-right-number-of-different-bytes",
+      "note": "The case the digest exists for: a build somebody re-cut, or a mirror serving something else. Discarded, because bytes that will never verify are bytes a resume would append to for ever.",
+      "input": {
+        "arrived": {
+          "digest": "sha256:bbbb",
+          "size": 100000
+        },
+        "expected": {
+          "digest": "sha256:aaaa",
+          "size": 100000
+        }
+      },
+      "expected": "{\"code\":\"digest_mismatch\",\"detail\":\"These bytes do not hash to what the signed release manifest says this bundle is. §12 binds every gate it applies to that digest, so bytes that are not it are not this release — do not install them, and find out where they came from. Discarded, because bytes that will never verify are bytes a resume would append to for ever.\",\"discard\":true,\"ok\":false}"
+    },
+    {
+      "id": "a-manifest-with-no-size-and-the-right-digest",
+      "note": "Size is checked before the digest and skipped when there is none to check against. The digest is what the gate is bound to, so it is sufficient on its own.",
+      "input": {
+        "arrived": {
+          "digest": "sha256:aaaa",
+          "size": 100000
+        },
+        "expected": {
+          "digest": "sha256:aaaa",
+          "size": null
+        }
+      },
+      "expected": "{\"code\":\"match\",\"detail\":\"These bytes are the release the manifest describes.\",\"discard\":false,\"ok\":true}"
+    }
+  ]
+}

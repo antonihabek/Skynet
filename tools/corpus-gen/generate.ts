@@ -90,6 +90,14 @@ import {
 } from '../../reference/typescript/cell.ts'
 import { liveContext, type LiveInputs } from '../../reference/typescript/live.ts'
 import {
+  BUNDLE_CHECKS, checkBundle, FETCH_DECISIONS, planFetch,
+  type Arrived, type Bearer as FetchBearer, type Expected, type FetchSubject,
+} from '../../reference/typescript/bundle.ts'
+import {
+  checkUpload, planUpload, UPLOAD_CHECKS, UPLOAD_DECISIONS,
+  type Reported, type UploadSubject, type Window as UploadWindow,
+} from '../../reference/typescript/upload.ts'
+import {
   admitBundle, BOOT_DECISIONS, BUNDLE_FAULTS, CERTIFICATION_GATED, confirmBoot, OS_COMPONENTS,
   type BootEvidence, type BundleManifest, type UpdateSubject,
 } from '../../reference/typescript/ota.ts'
@@ -6205,6 +6213,275 @@ vocabulary('telemetry_window_faults',
   'Everything §74 can find wrong with a window. Three refuse it and one reports — the clock skew is '
   + 'a fact about the robot rather than a reason to discard a measurement.',
   WINDOW_FAULTS)
+
+// ── Transfer: §12's fetch and §79's upload ───────────────────────────────────
+//
+// One corpus for two directions, because the point of the pair is that they mirror. A reader
+// comparing `fetch` with `upload` should be looking at the same seven-branch decision written
+// twice, and the four places they differ should be the only places they differ.
+//
+// **`bundle.ts` had no corpus cases at all** until this file added them, across the sessions
+// between §75 building the fetch and §79 building its mirror. Two editions implemented an
+// eleven-branch decision about deleting operating system images from a robot's disk, one of them
+// vendored into this repository as the oracle, and nothing held them to each other. §31.4 is
+// unambiguous — *"an edition that has not passed the corpus is not an edition"* — and a decision
+// with no cases is one the corpus does not cover, whatever the rest of the file says.
+//
+// The four differences worth reading the two files side by side for:
+//
+// 1. **`upload` has a `probe` decision and `fetch` does not.** §79.2: the partial is on the other
+//    machine, so an offset has to be asked for.
+// 2. **`fetch`'s `size` is optional and `upload`'s is not.** A manifest may decline to declare a
+//    size; a file this robot sealed has a length.
+// 3. **`fetch` discards and `upload` restarts.** The robot owns the bytes in one direction and
+//    owns nothing in the other.
+// 4. **`upload` has a completion the receiver can assert.** `done` off a probe is the state a
+//    robot reaches when an acknowledgement was lost, and it exists because a re-send of tens of
+//    megabytes is expensive enough to be worth one small request to avoid.
+
+function fetchCase(id: string, note: string, subject: FetchSubject): void {
+  add('transfer', 'fetch', {
+    id,
+    note,
+    input: { subject },
+    expected: canonical(planFetch(subject)),
+  })
+}
+
+const UNMETERED: FetchBearer = { name: 'eth0', metered: false, metering_declared: true }
+const METERED: FetchBearer = { name: 'wwan0', metered: true, metering_declared: false }
+const ASSUMED_METERED: FetchBearer = { name: 'wlan0', metered: true }
+
+const IMAGE: FetchSubject = {
+  digest: 'sha256:aaaa',
+  size: 100000,
+  have: false,
+  partial: 0,
+  bearer: UNMETERED,
+}
+
+fetchCase('an-ordinary-fetch',
+  'Nothing here, a link that costs nothing, a digest to check against. The case that has to hold '
+  + 'or every refusal below is measuring a function that refuses everything.',
+  IMAGE)
+
+fetchCase('an-image-already-here',
+  'Order of cost, and the case that catches getting it wrong. A robot holding the verified bundle '
+  + 'must not report itself as waiting for an unmetered link to fetch it — which is what a version '
+  + 'that checked metering first would say.',
+  { ...IMAGE, have: true, bearer: METERED })
+
+fetchCase('a-release-naming-no-digest',
+  '§12 binds every gate it applies to the digest, so bytes with no name cannot be bound to. '
+  + 'Refused before a bearer is even considered.',
+  { ...IMAGE, digest: '' })
+
+fetchCase('no-bearer-at-all',
+  '§34.1: offline is the ordinary state, not a fault. Nothing is lost — the manifest is already '
+  + 'here and the transfer resumes when a link returns.',
+  { ...IMAGE, bearer: null })
+
+fetchCase('a-declared-metered-link',
+  '§34.3. Hundreds of megabytes per robot over cellular is a bill a fleet discovers at the end of '
+  + 'the month, so a bulk class waits and the wait is visible.',
+  { ...IMAGE, bearer: METERED })
+
+fetchCase('an-assumed-metered-link',
+  'The same refusal, and the sentence says `assumed` rather than `declared`. A vendor who thinks '
+  + 'their Wi-Fi is free needs to know the robot does not, and that it is one line of '
+  + 'configuration away.',
+  { ...IMAGE, bearer: ASSUMED_METERED })
+
+fetchCase('a-resume',
+  'The partial is keyed to the digest, so it cannot be another image’s tail. The offset is on the '
+  + 'plan rather than left for a caller to work out.',
+  { ...IMAGE, partial: 40000 })
+
+fetchCase('a-partial-larger-than-the-image',
+  'Not a partial of this bundle at all. Resuming would append this image’s tail to something '
+  + 'else’s and the mismatch would surface after the whole transfer, which on a poor link is hours.',
+  { ...IMAGE, partial: 140000 })
+
+fetchCase('a-partial-of-a-manifest-that-declares-no-size',
+  'Every manifest a Hub serves today. The "cannot be larger than what it is part of" branch is '
+  + 'unreachable without a declared size, so a resume is the only honest answer and the sentence '
+  + 'says how far it got without claiming a total.',
+  { ...IMAGE, size: null, partial: 40000 })
+
+function arrivalCase(id: string, note: string, arrived: Arrived, expected: Expected): void {
+  add('transfer', 'arrival', {
+    id,
+    note,
+    input: { arrived, expected },
+    expected: canonical(checkBundle(arrived, expected)),
+  })
+}
+
+arrivalCase('the-image',
+  'The bytes are the release the signed manifest describes.',
+  { digest: 'sha256:aaaa', size: 100000 },
+  { digest: 'sha256:aaaa', size: 100000 })
+
+arrivalCase('a-transfer-that-stopped',
+  'Short, and the one failure that keeps the file — which is exactly what a resume is for. '
+  + 'Reporting this as a digest mismatch would send an engineer looking for tampering every time a '
+  + 'link dropped.',
+  { digest: 'sha256:whatever', size: 60000 },
+  { digest: 'sha256:aaaa', size: 100000 })
+
+arrivalCase('more-bytes-than-were-declared',
+  'Not a transfer that stopped. Discarded.',
+  { digest: 'sha256:aaaa', size: 140000 },
+  { digest: 'sha256:aaaa', size: 100000 })
+
+arrivalCase('the-right-number-of-different-bytes',
+  'The case the digest exists for: a build somebody re-cut, or a mirror serving something else. '
+  + 'Discarded, because bytes that will never verify are bytes a resume would append to for ever.',
+  { digest: 'sha256:bbbb', size: 100000 },
+  { digest: 'sha256:aaaa', size: 100000 })
+
+arrivalCase('a-manifest-with-no-size-and-the-right-digest',
+  'Size is checked before the digest and skipped when there is none to check against. The digest '
+  + 'is what the gate is bound to, so it is sufficient on its own.',
+  { digest: 'sha256:aaaa', size: 100000 },
+  { digest: 'sha256:aaaa', size: null })
+
+function uploadCase(id: string, note: string, subject: UploadSubject): void {
+  add('transfer', 'upload', {
+    id,
+    note,
+    input: { subject },
+    expected: canonical(planUpload(subject)),
+  })
+}
+
+const WINDOW: UploadSubject = {
+  digest: 'sha256:cccc',
+  size: 4000000,
+  held: null,
+  receipt: false,
+  bearer: UNMETERED,
+}
+
+uploadCase('nothing-asked-yet',
+  '§79.2, and the decision a download does not have. The receiver holds the partial, so the first '
+  + 'thing an upload does on a link that costs nothing is ask — and an edition that folded this '
+  + 'into `start` would re-send four megabytes every pass.',
+  WINDOW)
+
+uploadCase('a-window-with-a-receipt',
+  'Order of cost, mirroring `an-image-already-here`. A robot holding an acknowledgement does not '
+  + 'report itself as waiting for a link, and does not ask again.',
+  { ...WINDOW, receipt: true, bearer: METERED })
+
+uploadCase('a-window-with-no-digest',
+  '§79.1 makes the digest the route. Bytes with no name have nowhere to go and nothing to check '
+  + 'the far side’s answer against.',
+  { ...WINDOW, digest: '' })
+
+uploadCase('an-empty-window',
+  'A seal that produced nothing is a fact about the recorder (§77.2), not an artifact. A '
+  + 'zero-length object under a digest is something an investigator can open and mistake for the '
+  + 'window.',
+  { ...WINDOW, size: 0 })
+
+uploadCase('no-bearer-at-all',
+  'Nothing is lost by it: the window is on the disk and the incident naming it is already queued. '
+  + 'That second clause is §79.3 — the alarm did not wait for this link.',
+  { ...WINDOW, bearer: null })
+
+uploadCase('a-metered-link',
+  '§34.3 against §34.4, resolved. A sealed window is bulk and waits; the incident that names it '
+  + 'went over this same cellular bearer the moment it was raised.',
+  { ...WINDOW, bearer: METERED })
+
+uploadCase('a-receiver-holding-nothing',
+  'Probed, and the answer was zero. This is `start`, and it is a different state from `probe` — '
+  + 'one of them has asked.',
+  { ...WINDOW, held: { bytes: 0 } })
+
+uploadCase('a-receiver-holding-half',
+  'The offset places the next byte. It is the receiver’s claim and it never concludes the window '
+  + 'arrived — that is the digest’s job.',
+  { ...WINDOW, held: { bytes: 1800000 } })
+
+uploadCase('a-receiver-claiming-more-than-the-window',
+  '`plan_fetch`’s discard, in the direction where nothing can be discarded. What is over there is '
+  + 'not part of this window, so the next attempt starts at zero rather than appending to it.',
+  { ...WINDOW, held: { bytes: 5000000 } })
+
+uploadCase('a-receiver-that-already-has-it',
+  'The state a robot reaches when an acknowledgement was lost. The re-send this avoids is four '
+  + 'megabytes, which is what makes one small request worth making.',
+  { ...WINDOW, held: { bytes: 4000000, digest: 'sha256:cccc' } })
+
+uploadCase('a-complete-object-nobody-will-name',
+  'The right number of bytes and no digest. Restarted, because writing a receipt here would record '
+  + 'an upload that may never have happened — and a receipt is the document that says this robot’s '
+  + 'copy is no longer the only one.',
+  { ...WINDOW, held: { bytes: 4000000 } })
+
+uploadCase('a-complete-object-under-the-wrong-digest',
+  'Something else is stored at this address. Restarted, and the robot does not attempt to delete '
+  + 'it: it has no authority over the receiver’s disk and the contract does not pretend it has.',
+  { ...WINDOW, held: { bytes: 4000000, digest: 'sha256:dddd' } })
+
+function receiptCase(id: string, note: string, reported: Reported, window: UploadWindow): void {
+  add('transfer', 'receipt', {
+    id,
+    note,
+    input: { reported, window },
+    expected: canonical(checkUpload(reported, window)),
+  })
+}
+
+const SEALED: UploadWindow = { digest: 'sha256:cccc', size: 4000000 }
+
+receiptCase('the-window-arrived',
+  'The whole of it, hashing to what was sealed. The only case that writes a receipt.',
+  { bytes: 4000000, digest: 'sha256:cccc' }, SEALED)
+
+receiptCase('a-transfer-that-stopped',
+  'Short, and the one outcome that does not restart — `checkBundle`’s rule in the other direction.',
+  { bytes: 2500000 }, SEALED)
+
+receiptCase('more-than-was-sent',
+  'Another object under this digest, or a proxy answering for one. The next attempt begins at zero '
+  + 'and nothing over there is deleted, because nothing here can delete it.',
+  { bytes: 4400000, digest: 'sha256:cccc' }, SEALED)
+
+receiptCase('the-right-number-of-different-bytes',
+  'The digest was recorded at the seal, before any transfer existed, so it is the half of this '
+  + 'comparison that is evidence.',
+  { bytes: 4000000, digest: 'sha256:dddd' }, SEALED)
+
+receiptCase('a-receiver-that-said-nothing',
+  'A `200` with an empty body. This must never produce a receipt: the receipt is the record saying '
+  + 'the bytes are somewhere else, and a robot that wrote one off silence would be recording an '
+  + 'upload on the strength of a status code.',
+  { bytes: 4000000 }, SEALED)
+
+vocabulary('upload_decisions',
+  '§79’s eight, in the order the tests run — which is the order of cost, as `planFetch`’s seven '
+  + 'are. The two sets are deliberately not the same: `probe` exists because the partial is on the '
+  + 'other machine, and `restart` is `discard_and_fetch` for bytes this robot cannot delete.',
+  UPLOAD_DECISIONS)
+
+vocabulary('upload_checks',
+  'What the receiver can turn out to hold. The same four names as a bundle’s check and one '
+  + 'different remedy — `restart` says what this robot does next, never what the receiver should '
+  + 'do with what it has.',
+  UPLOAD_CHECKS)
+
+vocabulary('fetch_decisions',
+  '§12’s seven, in the order of cost. Frozen alongside §79’s so an edition that agreed about one '
+  + 'direction and not the other is a failure rather than a footnote.',
+  FETCH_DECISIONS)
+
+vocabulary('bundle_checks',
+  'What arrived, in the order the checks run. Size before digest, because a short file is a link '
+  + 'that dropped and a wrong file is a question about where it came from.',
+  BUNDLE_CHECKS)
 
 // ── Write ────────────────────────────────────────────────────────────────────
 

@@ -9717,3 +9717,533 @@ mod cell {
         );
     }
 }
+
+// ── §79's upload: the sealed window's bytes ──────────────────────────────────
+//
+// `skynet_contracts::upload` proves the eight decisions and the four verdicts for given inputs.
+// These prove the half a pure function cannot: that the probe happens before any bytes and its
+// answer places them, that a slice resumes where the receiver says it stopped, that a receipt is
+// written only against the digest recorded at the seal, that nothing is deleted when an answer is
+// wrong, and that a window with a manifest is skipped without being hashed.
+
+mod upload {
+    use super::*;
+    use crate::upload::{
+        advance, next_pending, report, sealed, url_for, Answer, Probe, Push, Receipt, Step,
+        Uploader,
+    };
+
+    /// What a scripted receiver does about one request.
+    #[derive(Clone)]
+    enum Reply {
+        /// "I hold this many bytes", with or without saying what they hash to.
+        Holds(u64, Option<&'static str>),
+        /// Answer nothing useful: a status and no number.
+        Silent(u16),
+        /// Fail without answering.
+        Fail(&'static str),
+    }
+
+    impl Reply {
+        fn answer(&self) -> Answer {
+            match self {
+                Reply::Holds(bytes, digest) => Answer {
+                    status: 200,
+                    bytes: Some(*bytes),
+                    digest: digest.map(str::to_string),
+                    error: None,
+                },
+                Reply::Silent(status) => Answer {
+                    status: *status,
+                    ..Answer::default()
+                },
+                Reply::Fail(why) => Answer {
+                    error: Some((*why).to_string()),
+                    ..Answer::default()
+                },
+            }
+        }
+    }
+
+    /// A receiver the suite writes the script for.
+    ///
+    /// A trait double rather than a local HTTPS server, for [`crate::ota::RecordingUpdater`]'s
+    /// reason: the interesting cases here are a receiver that will not say what it holds, one that
+    /// claims more than exists, one that stores the wrong bytes and one that cannot be reached, and
+    /// none of them is reachable through a network a test controls.
+    struct Scripted {
+        probes: std::collections::VecDeque<Reply>,
+        pushes: std::collections::VecDeque<Reply>,
+        probed: Vec<String>,
+        pushed: Vec<(u64, String)>,
+    }
+
+    impl Scripted {
+        fn new(probes: Vec<Reply>, pushes: Vec<Reply>) -> Scripted {
+            Scripted {
+                probes: probes.into_iter().collect(),
+                pushes: pushes.into_iter().collect(),
+                probed: Vec::new(),
+                pushed: Vec::new(),
+            }
+        }
+    }
+
+    impl Uploader for Scripted {
+        fn probe(&mut self, ask: &Probe) -> Answer {
+            self.probed.push(ask.url.clone());
+            self.probes
+                .pop_front()
+                .unwrap_or(Reply::Fail("the script ran out of probes"))
+                .answer()
+        }
+
+        fn push(&mut self, ask: &Push) -> Answer {
+            self.pushed.push((ask.from, ask.url.clone()));
+            self.pushes
+                .pop_front()
+                .unwrap_or(Reply::Fail("the script ran out of pushes"))
+                .answer()
+        }
+    }
+
+    const WINDOW: &[u8] = b"an mcap file, as far as this test is concerned, is these bytes.";
+
+    fn digest_of(bytes: &[u8]) -> String {
+        format!(
+            "sha256:{}",
+            String::from_utf8_lossy(&skynet_sha256::hex_bytes(bytes))
+        )
+    }
+
+    /// Put one sealed window on the disk, with no manifest — an older edition's recording.
+    fn seal_bare(layout: &Layout, name: &str, bytes: &[u8]) {
+        let dir = layout.blackbox().join("sealed");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(name), bytes).unwrap();
+    }
+
+    fn bearers(layout: &Layout, metered: bool) -> crate::connectivity::Table {
+        let path = layout.state().join("bearers.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            format!(
+                "{{\"bearers\":[{{\"name\":\"link0\",\"kind\":\"ethernet\",\"up\":true,\
+                 \"metered\":{metered}}}]}}"
+            ),
+        )
+        .unwrap();
+        crate::connectivity::Table::of(layout)
+    }
+
+    fn send(
+        layout: &Layout,
+        server: &mut Scripted,
+        table: &crate::connectivity::Table,
+        now: u64,
+    ) -> Step {
+        advance(
+            layout,
+            server,
+            table,
+            "https://hub.example/api/skynet/v1",
+            "dev_1",
+            Some("skd_x"),
+            now,
+            1.0,
+        )
+    }
+
+    #[test]
+    fn the_route_is_the_digest_and_the_device() {
+        // §79.1. The digest is the object's name, so it is a path segment rather than a query, and
+        // the `:` in `sha256:…` is encoded rather than left to a router to interpret.
+        let url = url_for("https://hub.example/api/skynet/v1/", "dev_1", "sha256:abc");
+        assert_eq!(
+            url,
+            "https://hub.example/api/skynet/v1/devices/dev_1/recordings/sha256%3Aabc"
+        );
+    }
+
+    #[test]
+    fn a_robot_with_nothing_sealed_is_idle_rather_than_failing() {
+        let root = TempRoot::new("upload-idle");
+        let layout = root.layout();
+        let table = bearers(&layout, false);
+        let mut server = Scripted::new(vec![], vec![]);
+        match send(&layout, &mut server, &table, 1_000) {
+            Step::Idle { .. } => {}
+            other => panic!("{other:?}"),
+        }
+        assert!(server.probed.is_empty(), "nothing to ask about");
+    }
+
+    #[test]
+    fn a_metered_link_is_not_even_asked() {
+        // §79.3's half that costs money. The incident naming this window went over this same
+        // bearer when it was raised; the megabytes wait.
+        let root = TempRoot::new("upload-metered");
+        let layout = root.layout();
+        seal_bare(&layout, "00000000000000000001-fault.mcap", WINDOW);
+        let table = bearers(&layout, true);
+        let mut server = Scripted::new(vec![], vec![]);
+        match send(&layout, &mut server, &table, 1_000) {
+            Step::Waiting { detail } => assert!(detail.contains("unmetered"), "{detail}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            server.probed.is_empty(),
+            "a probe is a request, and §34.3's wait is a wait"
+        );
+    }
+
+    #[test]
+    fn the_probe_comes_first_and_a_whole_window_goes_in_one_slice() {
+        let root = TempRoot::new("upload-whole");
+        let layout = root.layout();
+        let name = "00000000000000000001-fault.mcap";
+        seal_bare(&layout, name, WINDOW);
+        let table = bearers(&layout, false);
+        let digest = digest_of(WINDOW);
+
+        let mut server = Scripted::new(
+            vec![Reply::Silent(404)],
+            vec![Reply::Holds(
+                WINDOW.len() as u64,
+                Some(Box::leak(digest.clone().into_boxed_str())),
+            )],
+        );
+
+        match send(&layout, &mut server, &table, 1_000) {
+            Step::Collected { name: got, .. } => assert_eq!(got, name),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(server.probed.len(), 1);
+        assert_eq!(server.pushed, vec![(0, server.probed[0].clone())]);
+
+        // The receipt is on the disk and names these bytes.
+        let receipt = Receipt::read(&layout, name, &digest).expect("receipt");
+        assert_eq!(receipt.bytes, WINDOW.len() as u64);
+        assert_eq!(receipt.at_ms, 1_000);
+
+        // And the window itself is still here. §79.4: the operator standing next to the robot is
+        // frequently the one who cannot reach the Hub.
+        assert!(layout.blackbox().join("sealed").join(name).is_file());
+    }
+
+    #[test]
+    fn a_collected_window_is_not_offered_twice() {
+        let root = TempRoot::new("upload-twice");
+        let layout = root.layout();
+        let name = "00000000000000000001-fault.mcap";
+        seal_bare(&layout, name, WINDOW);
+        let table = bearers(&layout, false);
+        let digest = digest_of(WINDOW);
+        Receipt {
+            digest: digest.clone(),
+            bytes: WINDOW.len() as u64,
+            at_ms: 5,
+        }
+        .write(&layout, name)
+        .unwrap();
+
+        let mut server = Scripted::new(vec![], vec![]);
+        match send(&layout, &mut server, &table, 1_000) {
+            Step::Idle { .. } => {}
+            other => panic!("{other:?}"),
+        }
+        assert!(server.probed.is_empty());
+        assert!(next_pending(&layout).is_none());
+    }
+
+    #[test]
+    fn a_receipt_for_other_bytes_is_not_this_window_s() {
+        // §13 names a window for a monotonic instant and a reboot restarts that clock, so a name
+        // is reused and a file at that name is overwritten. A receipt believed on its filename
+        // alone would report the *new* window as collected.
+        let root = TempRoot::new("upload-stale-receipt");
+        let layout = root.layout();
+        let name = "00000000000000000001-fault.mcap";
+        seal_bare(&layout, name, WINDOW);
+        Receipt {
+            digest: digest_of(b"a different window entirely"),
+            bytes: 27,
+            at_ms: 5,
+        }
+        .write(&layout, name)
+        .unwrap();
+
+        assert!(Receipt::read(&layout, name, &digest_of(WINDOW)).is_none());
+        let pending = next_pending(&layout).expect("this window has not been collected");
+        assert_eq!(pending.digest, digest_of(WINDOW));
+    }
+
+    #[test]
+    fn a_resume_starts_where_the_receiver_says_it_stopped() {
+        let root = TempRoot::new("upload-resume");
+        let layout = root.layout();
+        let name = "00000000000000000001-fault.mcap";
+        seal_bare(&layout, name, WINDOW);
+        let table = bearers(&layout, false);
+        let digest = digest_of(WINDOW);
+        let half = (WINDOW.len() / 2) as u64;
+
+        let mut server = Scripted::new(
+            vec![Reply::Silent(404), Reply::Holds(half, None)],
+            vec![
+                Reply::Holds(half, None),
+                Reply::Holds(
+                    WINDOW.len() as u64,
+                    Some(Box::leak(digest.clone().into_boxed_str())),
+                ),
+            ],
+        );
+
+        match send(&layout, &mut server, &table, 1_000) {
+            Step::Moved { held, .. } => assert_eq!(held, Some(half)),
+            other => panic!("{other:?}"),
+        }
+        match send(&layout, &mut server, &table, 2_000) {
+            Step::Collected { .. } => {}
+            other => panic!("{other:?}"),
+        }
+        // Zero, then the offset the receiver reported. Never a second zero: re-sending from the
+        // beginning is what §79.2's probe exists to avoid.
+        assert_eq!(
+            server
+                .pushed
+                .iter()
+                .map(|(from, _)| *from)
+                .collect::<Vec<_>>(),
+            vec![0, half]
+        );
+    }
+
+    #[test]
+    fn a_probe_that_says_nothing_moves_no_bytes_and_backs_off() {
+        // §79.2's second refusal. Pushing from zero whenever a probe failed would re-send the whole
+        // window every pass for as long as the failure lasted.
+        let root = TempRoot::new("upload-blind");
+        let layout = root.layout();
+        seal_bare(&layout, "00000000000000000001-fault.mcap", WINDOW);
+        let table = bearers(&layout, false);
+
+        let mut server = Scripted::new(vec![Reply::Silent(500)], vec![]);
+        match send(&layout, &mut server, &table, 1_000) {
+            Step::Failed { detail } => {
+                assert!(detail.contains("without saying how much"), "{detail}")
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(server.pushed.is_empty(), "no bytes on a blind offset");
+
+        // And the next pass is held on §34.4's curve rather than retried immediately.
+        let mut again = Scripted::new(vec![Reply::Silent(404)], vec![]);
+        match send(&layout, &mut again, &table, 1_100) {
+            Step::Waiting { detail } => assert!(detail.contains("curve"), "{detail}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(again.probed.is_empty());
+    }
+
+    #[test]
+    fn a_receiver_claiming_more_than_the_window_holds_gets_it_from_the_beginning() {
+        let root = TempRoot::new("upload-overlong");
+        let layout = root.layout();
+        seal_bare(&layout, "00000000000000000001-fault.mcap", WINDOW);
+        let table = bearers(&layout, false);
+
+        let mut server = Scripted::new(vec![Reply::Holds(WINDOW.len() as u64 + 500, None)], vec![]);
+        match send(&layout, &mut server, &table, 1_000) {
+            // `restart` from a *probe* is not a push from zero this pass: the plan says restart,
+            // and the push that follows carries `from: 0`.
+            Step::Moved { .. } | Step::Failed { .. } => {}
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            server.pushed.iter().all(|(from, _)| *from == 0),
+            "never resume from an impossible offset"
+        );
+    }
+
+    #[test]
+    fn the_wrong_bytes_over_there_write_no_receipt_and_delete_nothing() {
+        let root = TempRoot::new("upload-wrong");
+        let layout = root.layout();
+        let name = "00000000000000000001-fault.mcap";
+        seal_bare(&layout, name, WINDOW);
+        let table = bearers(&layout, false);
+
+        let mut server = Scripted::new(
+            vec![Reply::Silent(404)],
+            vec![Reply::Holds(WINDOW.len() as u64, Some("sha256:nope"))],
+        );
+        match send(&layout, &mut server, &table, 1_000) {
+            Step::Failed { detail } => assert!(detail.contains("not this window"), "{detail}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(Receipt::read(&layout, name, &digest_of(WINDOW)).is_none());
+        // Nothing here can delete what is over there, and it does not delete what is here either.
+        assert_eq!(
+            std::fs::read(layout.blackbox().join("sealed").join(name)).unwrap(),
+            WINDOW
+        );
+    }
+
+    #[test]
+    fn a_receiver_that_already_has_it_writes_a_receipt_without_sending_anything() {
+        // The acknowledgement that was lost. The re-send this avoids is the whole window.
+        let root = TempRoot::new("upload-already");
+        let layout = root.layout();
+        let name = "00000000000000000001-fault.mcap";
+        seal_bare(&layout, name, WINDOW);
+        let table = bearers(&layout, false);
+        let digest = digest_of(WINDOW);
+
+        let mut server = Scripted::new(
+            vec![Reply::Holds(
+                WINDOW.len() as u64,
+                Some(Box::leak(digest.clone().into_boxed_str())),
+            )],
+            vec![],
+        );
+        match send(&layout, &mut server, &table, 1_000) {
+            Step::Collected { .. } => {}
+            other => panic!("{other:?}"),
+        }
+        assert!(server.pushed.is_empty(), "not one byte");
+        assert!(Receipt::read(&layout, name, &digest).is_some());
+    }
+
+    #[test]
+    fn the_oldest_uncollected_window_goes_first_and_alone() {
+        let root = TempRoot::new("upload-order");
+        let layout = root.layout();
+        seal_bare(&layout, "00000000000000000009-operator.mcap", b"newer");
+        seal_bare(&layout, "00000000000000000002-fault.mcap", b"older");
+        let table = bearers(&layout, false);
+
+        let mut server = Scripted::new(
+            vec![Reply::Silent(404)],
+            vec![Reply::Holds(
+                5,
+                Some(Box::leak(digest_of(b"older").into_boxed_str())),
+            )],
+        );
+        match send(&layout, &mut server, &table, 1_000) {
+            Step::Collected { name, .. } => assert_eq!(name, "00000000000000000002-fault.mcap"),
+            other => panic!("{other:?}"),
+        }
+        // One window per pass. The newer one is still pending.
+        let pending = next_pending(&layout).expect("the newer window");
+        assert_eq!(pending.name, "00000000000000000009-operator.mcap");
+    }
+
+    #[test]
+    fn the_report_says_what_is_here_and_what_has_been_collected() {
+        let root = TempRoot::new("upload-report");
+        let layout = root.layout();
+        seal_bare(&layout, "00000000000000000001-fault.mcap", WINDOW);
+        seal_bare(&layout, "00000000000000000002-operator.mcap", b"short");
+        Receipt {
+            digest: digest_of(WINDOW),
+            bytes: WINDOW.len() as u64,
+            at_ms: 5,
+        }
+        .write(&layout, "00000000000000000001-fault.mcap")
+        .unwrap();
+
+        let document = report(&layout);
+        assert_eq!(document.get("sealed").and_then(Json::as_f64), Some(2.0));
+        assert_eq!(document.get("collected").and_then(Json::as_f64), Some(1.0));
+        assert_eq!(document.get("pending").and_then(Json::as_f64), Some(1.0));
+        assert_eq!(
+            document.get("pending_bytes").and_then(Json::as_f64),
+            Some(5.0)
+        );
+
+        // Every window is listed whether or not it has been collected — one shape, discriminated
+        // by a field, for §77.2's reason.
+        let listed = document.arr_or_empty("windows");
+        assert_eq!(listed.len(), 2);
+        assert_eq!(
+            listed
+                .iter()
+                .filter(|entry| entry
+                    .get("collected")
+                    .and_then(Json::as_bool)
+                    .unwrap_or(false))
+                .count(),
+            1
+        );
+
+        // And `sealed()` agrees with it, which is the pair the console reads.
+        assert_eq!(sealed(&layout).iter().filter(|w| w.collected).count(), 1);
+    }
+
+    #[test]
+    fn a_manifest_left_beside_a_reused_name_is_not_believed() {
+        // The window manifest is a cache and the length is its key. A robot that rebooted, sealed
+        // a different window at the same monotonic instant and overwrote the file must not inherit
+        // the old digest — which would upload these bytes under the previous window's name.
+        let root = TempRoot::new("upload-stale-manifest");
+        let layout = root.layout();
+        let dir = layout.blackbox().join("sealed");
+        let name = "00000000000000000001-fault.mcap";
+        seal_bare(&layout, name, WINDOW);
+        std::fs::write(
+            crate::blackbox::manifest_path(&dir, name),
+            format!(
+                "{{\"digest\":\"sha256:stale\",\"size_bytes\":{}}}",
+                WINDOW.len() + 1
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(
+            crate::blackbox::read_manifest(&dir, name, WINDOW.len() as u64),
+            None,
+            "a manifest describing a file of another length is about other bytes"
+        );
+        let pending = next_pending(&layout).expect("pending");
+        assert_eq!(pending.digest, digest_of(WINDOW));
+    }
+
+    #[test]
+    fn a_seal_writes_the_manifest_the_collector_reads() {
+        // The producer records the digest, which is what keeps the hash off the reconcile path —
+        // and it has to be the *same* digest the collector would compute, or the cache is a bug
+        // that only appears on a robot with recordings.
+        let root = TempRoot::new("upload-manifest-roundtrip");
+        let layout = root.layout();
+        let mut recorder = crate::blackbox::Recorder::open(
+            &layout,
+            crate::blackbox::supervisor_meta(&layout),
+            skynet_blackbox::record::Shape {
+                joints: 0,
+                channels: 0,
+            },
+            64 * 1024,
+        )
+        .expect("recorder");
+        recorder
+            .event(
+                1,
+                skynet_blackbox::record::EventCode::Sealed,
+                "test",
+                "a window worth keeping",
+            )
+            .unwrap();
+        let (written, path) = recorder
+            .seal(skynet_blackbox::seal::Reason::Operator, 7)
+            .unwrap();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let dir = layout.blackbox().join("sealed");
+
+        let declared = crate::blackbox::read_manifest(&dir, &name, written.bytes.len() as u64)
+            .expect("the seal wrote a manifest");
+        let (computed, _) = crate::bundle::hash_file(&dir.join(&name)).unwrap();
+        assert_eq!(declared, computed);
+    }
+}

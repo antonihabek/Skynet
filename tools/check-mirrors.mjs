@@ -12,6 +12,7 @@
  *   node tools/check-mirrors.mjs                 # looks for BotMarket beside this checkout
  *   node tools/check-mirrors.mjs ../BotMarket    # or say where it is
  *   node tools/check-mirrors.mjs --sync ../BotMarket   # copy BotMarket's copies over ours
+ *   node tools/check-mirrors.mjs --pin  ../BotMarket   # copy nothing; pin what already agrees
  *
  * Exits non-zero on divergence, so it can be a pre-commit hook or a CI step in whichever repository
  * has both checked out.
@@ -50,6 +51,22 @@ const MIRRORS = [
 
 const args = process.argv.slice(2)
 const sync = args.includes('--sync')
+/**
+ * Record agreement without moving a byte.
+ *
+ * `--sync` conflates two operations that are not the same one: *take BotMarket's copies*, and
+ * *record that these bytes are agreed*. The workflow this file documents below — "an edit made
+ * here first should be copied there by hand, deliberately" — needs the second without the first,
+ * and until `--pin` existed the only way to reach it was to run `--sync`, which overwrites **every
+ * other** shared document from the other tree. So the documented way to finish an edit made here
+ * ended in a command that could silently undo one.
+ *
+ * The failure is not hypothetical and it is not symmetric: the other tree may hold a shared
+ * document mid-edit and uncommitted, which is an ordinary state for a repository somebody is
+ * working in. Copying that across as the price of pinning an unrelated file mirrors bytes nobody
+ * has committed.
+ */
+const pinOnly = args.includes('--pin')
 const given = args.find(arg => !arg.startsWith('--'))
 
 /**
@@ -123,27 +140,55 @@ function checkPins() {
       `\n${wrong} shared document(s) changed here without the pin being updated.\n`
         + 'A shared document is edited in both repositories or in neither. Make the same edit in\n'
         + 'BotMarket, then re-pin from the two agreeing copies:\n\n'
-        + '    node tools/check-mirrors.mjs --sync ../BotMarket\n\n'
-        + 'Editing the pins by hand switches this check off.',
+        + '    node tools/check-mirrors.mjs --pin ../BotMarket\n\n'
+        + '--pin moves nothing. Use --sync only when the other tree holds the newer copy and you\n'
+        + 'want it here. Editing the pins by hand switches this check off.',
     )
   }
   return wrong
 }
 
-/** Pin whatever the two repositories currently agree on. */
-function writePins() {
+/**
+ * Pin whatever the two repositories currently agree on — document by document.
+ *
+ * `agreed` is the set that matched this run. A document the two trees disagree about keeps
+ * **whatever pin it already had**, which is the conservative answer: the pin's job on a single
+ * checkout is to catch a document edited here and not there, and carrying the old value forward
+ * leaves that catch armed. Overwriting it would record a disagreement as the agreed state, and
+ * dropping it would switch the check off for that file.
+ *
+ * This used to be all-or-nothing — `if (sync && diverged === 0) writePins()` — and the shape of
+ * the bug is worth keeping written down, because it only appears with three mirrors and two
+ * repositories in flight. A specification edited here and mirrored across correctly could not be
+ * re-pinned, for as long as an *unrelated* shared document was mid-edit in the other tree. The
+ * options that leaves are all bad: hand-edit a pin, which this file's own note calls switching the
+ * check off; pull the other tree's unfinished work across to make the count zero; or ship with a
+ * stale pin and a red CI job. None of them is what the rule is for.
+ */
+function writePins(agreed) {
+  const existing = existsSync(PINS)
+    ? (JSON.parse(readFileSync(PINS, 'utf8')).digests ?? {})
+    : {}
   const digests = {}
   for (const [ours] of MIRRORS) {
     const path = join(HERE, ours)
-    if (existsSync(path)) digests[ours] = digest(path)
+    if (!existsSync(path)) continue
+    if (agreed.has(ours)) {
+      digests[ours] = digest(path)
+    } else if (existing[ours]) {
+      digests[ours] = existing[ours]
+      console.log(`kept     ${ours} — pinned at the last agreed bytes; the two copies differ now`)
+    }
   }
   writeFileSync(
     PINS,
     `${JSON.stringify({
       note: 'sha256 of each document shared with BotMarket, pinned so a divergence is caught with '
-        + 'one checkout — which is what CI has. Written by tools/check-mirrors.mjs --sync. Never '
-        + 'edit by hand: a digest somebody updated to match a local edit is a check that has been '
-        + 'switched off.',
+        + 'one checkout — which is what CI has. Written by tools/check-mirrors.mjs --sync (take '
+        + 'their copies, then pin) or --pin (move nothing, pin what already agrees). A document '
+        + 'the two trees differ on keeps its last agreed digest rather than being re-pinned or '
+        + 'dropped. Never edit by hand: a digest somebody updated to match a local edit is a '
+        + 'check that has been switched off.',
       digests,
     }, null, 2)}\n`,
     'utf8',
@@ -161,6 +206,8 @@ if (!existsSync(hub)) {
 
 let diverged = 0
 let synced = 0
+/** The documents the two trees hold identically, after any sync this run performed. */
+const agreed = new Set()
 
 for (const [ours, theirs] of MIRRORS) {
   const a = join(HERE, ours)
@@ -179,15 +226,18 @@ for (const [ours, theirs] of MIRRORS) {
 
   if (digest(a) === digest(b)) {
     console.log(`match    ${ours}`)
+    agreed.add(ours)
     continue
   }
 
-  if (sync) {
+  if (sync && !pinOnly) {
     // BotMarket is the origin of all three, so it wins a sync. An edit made here first should be
-    // copied there by hand, deliberately, rather than by a flag that could silently overwrite it.
+    // copied there by hand, deliberately, rather than by a flag that could silently overwrite it
+    // — and then pinned with `--pin`, which is the half of this that moves nothing.
     copyFileSync(b, a)
     console.log(`synced   ${ours}  <- BotMarket`)
     synced += 1
+    agreed.add(ours)
     continue
   }
 
@@ -201,21 +251,31 @@ if (synced > 0) {
   console.log(`\n${synced} file(s) synced from BotMarket.`)
 }
 
-// Re-pinned only when the two copies agree, which after a sync they do. Pinning a divergence
-// would record a disagreement as the agreed state, which is the one thing a pin must never do.
-if (sync && diverged === 0) writePins()
+// Re-pinned per document rather than per run. Pinning a divergence would record a disagreement as
+// the agreed state, which is the one thing a pin must never do — so a diverged document keeps its
+// last agreed digest and every other document is re-pinned around it.
+if (sync || pinOnly) writePins(agreed)
 
 // Verified even with both trees present: a pin left stale by an edit made in both repositories
 // would otherwise survive until the next single-checkout run and fail in CI instead of here.
-if (!sync && diverged === 0 && checkPins() > 0) process.exit(1)
+if (!sync && !pinOnly && checkPins() > 0) process.exit(1)
 
-if (diverged > 0) {
+if (diverged > 0 && !pinOnly) {
   console.error(
     `\n${diverged} shared document(s) have diverged.\n` +
       'A shared document is edited in both repositories or in neither. Either copy the newer\n' +
       'version across by hand, or run with --sync to take BotMarket\'s copies.',
   )
   process.exit(1)
+}
+
+if (diverged > 0) {
+  // `--pin` left them alone on purpose, and says so rather than reporting a clean run.
+  console.log(
+    `\n${diverged} shared document(s) still differ and kept their last agreed pin. `
+      + 'Nothing was copied.',
+  )
+  process.exit(0)
 }
 
 console.log('\nAll shared documents match.')

@@ -4111,8 +4111,9 @@ that already exists rather than extending it — which is the useful finding:
 | **Attested evaluation results** (§56) | **Existing shape** — `POST /evaluations` with a device credential and a signature field. Built: the device credential arrives in `X-Skynet-Device` beside the submitter's own, because the two answer different questions (§56.6) |
 | **Telemetry** (§34.4) | New — `POST /devices/{id}/telemetry`. **Added by §74**; §34.4 gave the class a priority, a drop policy and a counter, and neither this table nor §17 gave it a route |
 | **OS bundle bytes** (§12) | New — `GET /os/releases/{version}/bundle`. **Added by §75**; §12 gates applying an image and neither this table nor §17 gave a route to fetch one, so a robot could admit a release it had no way to obtain |
+| **Sealed recording bytes** (§13) | New — `GET\|PUT /devices/{id}/recordings/{sha256}`. **Added by §79**; §13 calls a recording *uploaded* and §17's incident route takes a document, so the window itself had nowhere to go. Content-addressed rather than nested under an incident, for §79.1's reason |
 
-Eleven new endpoints in total, four things that need only a new field, and no breaking change to any
+Twelve new endpoints in total, four things that need only a new field, and no breaking change to any
 of the sixty routes that exist. The reason the delta is this small is that the OS was designed
 against the Hub's object model from the start rather than beside it.
 
@@ -4120,11 +4121,17 @@ New tables follow the `skynet_*` convention: `skynet_embodiments`, `skynet_devic
 `skynet_calibration_records`, `skynet_conformance_results`, `skynet_certifications`,
 `skynet_incidents`, `skynet_os_releases`, `skynet_os_editions`, `skynet_attestations`.
 
-### 57.1 All of them exist
+### 57.1 All of them exist, except the last
 
-Twelve endpoints, not ten: the count above was written before §74 gave telemetry a route and §75
-gave the bundle one, and the table's own last rows say so. Written across six sessions on the Hub
-side.
+Thirteen endpoints, not ten: the count above was written before §74 gave telemetry a route, §75 gave
+the bundle one and §79 gave the sealed window one. Twelve are written across seven sessions on the
+Hub side.
+
+**The thirteenth is the exception and it is named rather than counted in.** §79's recordings route
+is built on the robot and not on the Hub, so a robot that has a window to send finds nothing at the
+address. That is a worse-looking state than it is: the probe answers, the transfer backs off on
+§34.4's curve, no bytes move, and the window and the incident naming it are exactly where they were.
+The failure mode of half a route is a robot that keeps its evidence.
 
 Recorded here rather than only in a build log, because the useful fact about this table is no
 longer what it asks for — it is **which of the eleven carry evidence and which carry assertions**,
@@ -4144,6 +4151,7 @@ and that distinction is invisible from a list of routes that all return 200.
 | `POST /devices/{id}/telemetry` | Counted windows, with the denominator being what was **observed**. Evidence about the interval it covers and nothing about the intervals it does not. |
 | `POST /robots/{slug}/attestations` | Evidence, and the only one on this list where a *vendor* is the attesting party. |
 | `GET /os/releases/{version}/bundle` | Bytes, and the only row on this list that is neither. What makes them evidence is the digest in the signed manifest they are checked against — which is why the route needs no signature of its own (§75.1). |
+| `GET\|PUT /devices/{id}/recordings/{sha256}` | Bytes, in the other direction, and evidence for the same reason: the digest was recorded at the seal by the party that produced them (§77.1), so what arrives is checked against a name that existed before the transfer did. The `GET` is the exception — an offset is the receiver's claim and is never treated as more (§79.2). **Not built on the Hub.** |
 
 Two rows are the ones to read together. Conformance is asserted and certification is
 computed from it, which means §12's gate — the one deciding whether an OS update may change the
@@ -4802,14 +4810,14 @@ miniature, and currently trivial to fix.
 | skynetd — reconciliation, supervision, health | §9, §33 | **Built** — level-triggered, six ordered stages | — |
 | Identity, pairing, attestation, factory provisioning | §10, §50 | **Built on both sides** | `security.identity.attested` needs a TPM; no key is generated on a robot |
 | Desired state, fleet, OTA | §11–12, §14, §33.3 | **Built on both sides** — including §75's bundle fetch | No robot has yet applied an image from this Hub |
-| Black box, telemetry, replay | §13, §26, §41 | **Built** — ring, MCAP, sealing, deterministic replay, and a robot now replays a window against its own resolved limits (`telemetry.replay.deterministic`); §74's telemetry on both sides, with all eight counters sourced — the five that looked like they needed a kernel are counted off this ring (§74.6) | The sealed bytes do not cross §17 (§77). No recording of a *policy* has ever been replayed, because none has run — and the same absence is why the five counters report unmeasured on a shipping robot rather than zero: a ring with no action channels has no cycles to count, which the window says rather than implies |
+| Black box, telemetry, replay | §13, §26, §41 | **Built** — ring, MCAP, sealing, deterministic replay, and a robot now replays a window against its own resolved limits (`telemetry.replay.deterministic`); §74's telemetry on both sides, with all eight counters sourced — the five that looked like they needed a kernel are counted off this ring (§74.6); §79's upload, so a sealed window's *bytes* now have a route and a receipt, and every one on the disk says whether the Hub has it | No recording of a *policy* has ever been replayed, because none has run — and the same absence is why the five counters report unmeasured on a shipping robot rather than zero: a ring with no action channels has no cycles to count, which the window says rather than implies |
 | Conformance and certification | §15, §31.4, §56 | **Built on both sides** — and a robot now runs §15's eight runtime tests on itself (`GET /conformance`); §15's third suite has its numerator and denominator, counted off §13's ring (§74.6) | Three of the eight execute; the other five name what they wait for. Nothing signs a result and nothing will on a robot — §19 makes that a rule rather than a gap (§15.1). The `field` figure is measurable rather than measured: it needs a robot that runs cycles |
 | LeRobot | §16, §67 | **Built** — the bridge and its self-test | — |
 | Hub contract | §17, §57 | **Built** — twelve endpoints, no breaking change; four of them frozen as wire fixtures produced by the real producer (§31.6) | Two of them carry assertions rather than evidence (§57.1) |
 | Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 48 CLI commands, the golden path checked mechanically | — |
 | Security, local access control | §19, §39 | **Built** — Ed25519, the trust store, five signature states, four roles | — |
 | Distribution and business model | §20, §72 | Designed | — |
-| Languages, editions, levels | §23, §31, §42 | **Built** — one edition, held to a corpus of 68 files and 973 cases | The second edition, which is what the corpus is for |
+| Languages, editions, levels | §23, §31, §42 | **Built** — one edition, held to a corpus of 77 files and 1,055 cases | The second edition, which is what the corpus is for |
 | IPC, observation assembly, arbitration | §25 | **Built** — the shared-memory ring and the command frame | — |
 | Boot, faults, POST, homing | §27, §48 | **Built** — §27's machine, POST's eight checks | Five of the eight are the kernel's, through a path §33.1 denies the daemon |
 | Networking and time | §34–35 | **Built** — bearers, metering, the outbound queue, backoff, two clocks kept apart | — |
@@ -4824,8 +4832,8 @@ miniature, and currently trivial to fix.
 | Interface — Hub-side and on-robot | §32 | **Built on both sides** — the console, the fleet page, the device page; §7.6's guards and limits cross §17 and are rendered on both, relayed rather than recomputed, and §32.2's four console panels all draw something measured | The transport plan does not cross §17, and should not until a policy runtime exists to be running one — the robot serves it per package at `GET /limits?package=`, for staged packages as well as active ones (§6.2). §32.1's guard-trip column now has its source and is frozen against a document a robot produces (§74.6); what it does not yet have is a robot that trips a guard |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **93,500 lines of Rust** across fifteen crates with 1,346
-tests over a corpus of 73 files and 1,020 cases, **13,300 lines** of the TypeScript reference edition
+**Built** means running, tested code: **97,000 lines of Rust** across fifteen crates with 1,369
+tests over a corpus of 77 files and 1,055 cases, **13,300 lines** of the TypeScript reference edition
 that the corpus holds it to, **5,400 lines** of drivers, and **8,200 lines** in the Hub's mirror of
 the shared contracts. The Hub's own suite is 1,499 tests.
 
@@ -4839,7 +4847,8 @@ Open questions are collected in §43, §53, §58.3 and §61 rather than closed p
 are not engineering: retargeting fidelity is a research result nobody has, joint-level access is a
 property of hardware other people already shipped, and the certified tier needs a notified body.
 
-Version one ends here. Part X is what building the other half found.
+Version one ends here. Part X is what building the other half found — and §79, which is what
+finishing one of Part X's own sentences found.
 
 ---
 ---
@@ -5307,3 +5316,145 @@ duplicate spelling load-bearing on both sides, which is how a duplication become
   either"* — the Hub's schema has accepted the field for environments all along and its resolver
   discarded it, because the resolver was written for models and skills and the sentence was in a
   different section.
+
+---
+
+## 79. Amendment to §77.1 — the window has a route, and the alarm stops paying for it
+
+§77.1 stopped one step short on purpose and said so:
+
+> A sealed window is tens to hundreds of megabytes. §34.3 puts it in the bulk class, which wants
+> resume, progress and metering on an **upload** — the mirror of §75's fetch, and unwritten.
+
+The interim it chose was right — carry the window's *identity* so a Hub can say *"this incident has
+a 4 MB recording on the robot that nothing has collected"* — and it is not an end state. An
+investigator reading that sentence has been told precisely enough to know what they are missing.
+
+This is the mirror, written.
+
+### 79.1 The route is content-addressed, and that is not a stylistic choice
+
+```
+GET  /devices/{id}/recordings/{sha256}   → how much of it the receiver holds
+PUT  /devices/{id}/recordings/{sha256}   → bytes, resumable
+```
+
+Not `…/incidents/{incident}/recording`, and the reason is a property of §34.4 rather than a
+preference. **The robot never learns the Hub's incident id.** The queue is level-triggered and
+fire-and-forget: an item is enqueued, drained when a bearer is up, and removed. Nothing carries a
+server-assigned identifier back, and building a path for one would mean the bytes could not move
+until the document had been accepted — so a robot that sealed a window during a week offline would
+have to deliver the alarm, wait for a reply, and only then begin, in that order.
+
+The digest is the identifier both sides already hold. §77.1 gives the reason it is worth carrying:
+it was *"recorded before the transfer existed, by the party that produced them"*. Three things fall
+out of using it as the address, and each is worth more than the tidiness of a nested path:
+
+* **A retry is idempotent by construction.** The same window offered twice is the same object.
+* **A window and an incident are separable, which they are in fact.** §13 seals on a fault, an estop
+  **or an operator request** — the third produces a window with no incident at all. And an incident
+  can name a window that has not arrived yet, which is the ordinary case for as long as the robot is
+  on a metered link.
+* **The join is the Hub's, and it is a join on evidence.** The incident row carries the digest; the
+  object arrives under it. Nothing has to match on time, on order, or on a robot's word about which
+  file went with which fault.
+
+### 79.2 The offset belongs to the receiver, which is the whole of the asymmetry
+
+§75's fetch has a rule that makes progress free: *"The partial's length is the progress. No counter,
+no percentage written anywhere."* The bytes are on the robot's own disk and the disk is the record.
+
+An upload cannot have that rule, because **the partial is on the other machine.** So the mirror
+needs one thing the original does not: a probe. The robot asks how much the receiver holds, and
+starts from there.
+
+What the answer is *not* is evidence. It is a claim by the party being uploaded to, it is used for
+one thing — placing the next byte — and it is never used to conclude that a transfer succeeded.
+That conclusion comes from the digest: the receiver says what it computed over what it holds, and
+the robot compares it against the digest it recorded at the seal, before any of this existed.
+
+Two answers are refused rather than followed:
+
+* **An offset larger than the window.** `plan_fetch`'s reason exactly, in the other direction: a
+  partial cannot be larger than what it is part of, so the thing on the far side is not a partial of
+  this window. It restarts from zero rather than appending this window's tail to something else's.
+* **An offset the probe could not obtain.** No bytes move that pass. Pushing from zero whenever a
+  probe failed would re-send the whole window on every pass for as long as the failure lasted, which
+  is the one behaviour a bulk transfer must not have.
+
+### 79.3 The alarm goes now; the bytes wait for a link nobody is billed for
+
+§34.3 and §34.4 have carried a tension since they were written, and it is only resolvable now.
+
+> §34.3: *"Bulk transfer respects metering. A sealed black box is tens of megabytes […] Bulk classes
+> wait for an unmetered bearer."*
+>
+> §34.4: *"There is nothing in this queue worth less than an incident."* Cellular carries
+> *"check-ins and incidents only"*.
+
+Both sentences are correct and they are about different objects. While sealing and uploading were
+one act they could not both be obeyed, and the implementation traded them the way §34.4 asks —
+carrying `Class::Incident` over the most expensive link a robot has, with a comment conceding that
+this meant tens of megabytes over cellular.
+
+It never did. `Class::Incident` has only ever carried a **document of a few hundred bytes**. §77
+made the split real by giving the document the window's identity instead of its contents, and this
+amendment states the rule the split allows:
+
+> **The alarm goes over anything that is up. The window waits for a link nobody is billed for.**
+
+An operator learns within seconds of a fault that one happened, on cellular, in a field, with the
+digest of the recording that describes it — and the fleet is not billed by the megabyte for the
+evidence. Neither half of that was available before, and the earlier reading gave up the second to
+buy a first it was not actually getting.
+
+### 79.4 What a completed upload changes on the robot, and what it deliberately does not
+
+A **receipt** beside the sealed file: what the receiver said it held, what digest it computed, and
+when. §75's rule 2 forbids a second record of what the disk already says, and this is not one — the
+disk cannot say whether *another machine* holds the bytes. The only local record possible is what
+the far side reported, and the receipt is written as exactly that rather than as a fact about the
+window.
+
+It is not believed on its own either. A receipt whose digest is not the window's digest is not a
+receipt for this window, and the next pass treats it as absent.
+
+**The sealed file is not deleted.** `GET /blackbox/{name}` is an operator's local route (§39.1) and
+it does not stop mattering because a Hub has a copy — the operator standing next to the robot is
+frequently the one who cannot reach the Hub. Retention of sealed windows is a real question and this
+amendment does not answer it; it is listed in §80 rather than settled in passing.
+
+### 79.5 `uploaded` on the incident stays false, for ever, and that is correct
+
+The obvious next move is to flip §77.2's `uploaded` to `true` when the bytes land. It is wrong.
+
+The incident document is queued **at the raise**. The upload happens later — minutes later on
+ethernet, a week later on a robot that only sees a dock on Fridays — and by then the document has
+usually been delivered and has always been sealed into the queue. A robot that went back and rewrote
+a queued alarm to flip a flag would be **editing evidence after the fact**, which is the one thing an
+incident report may not do.
+
+So the field keeps saying what was true at the raise, like every other field on that document, and
+the Hub answers *"do we have the bytes?"* the way it should: by looking for the object at the digest
+the incident named. That is what content addressing was for.
+
+### 79.6 What this does not do
+
+The Hub half is not built here. No robot has run this against a real receiver, and until one has,
+the honest summary is that §12's fetch and §13's upload are now the same shape with the same failure
+modes, tested against the same kind of recording implementation — which is what made §75's rollback
+testable and is not the same as having watched one.
+
+Nor does it produce more windows. A window still comes from a raise or an operator's seal, and a
+robot with no ring has nothing to send, which the upload path reports as the named absence §77.2
+already gives it.
+
+---
+
+## 80. What Part X leaves open
+
+| Open | Why |
+|---|---|
+| **Retention of sealed windows** | §79.4 keeps every one. A robot that seals daily for a year holds a year of windows, and §28's disk floor does not survive that. Deleting one the Hub has acknowledged is the obvious rule, and it is a decision about evidence rather than about disk: the acknowledgement is another party's word, and §13 exists precisely for the day that party is the one being asked questions. |
+| **`people_detection` in §5's vocabulary** | The seventh of `resolveLimits()`'s inputs, and the only one with no path. It is not a missing delivery — §11's profile delivers six — it is that no body can *declare* a person detector, so `proximity` resolves to a ceiling whose guard is permanently unavailable. Adding it means extending the sensor vocabulary, which §30 says needs a governance process first. |
+| **A signature on a conformance result** | §57.1's asserted row. §19 forbids a robot holding a signing key, so a runner cannot sign its own result, and §12's kernel gate therefore reads evidence nobody signed. The shape that would close it — the Hub countersigning what a device credential delivered — is a different claim from the one §15 asks for and should not be built as though it were the same. |

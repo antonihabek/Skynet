@@ -29,6 +29,7 @@ use std::path::{Path, PathBuf};
 
 use skynet_contracts::admission::{self, admit_package};
 use skynet_contracts::birth;
+use skynet_contracts::bundle;
 use skynet_contracts::cell;
 use skynet_contracts::certification;
 use skynet_contracts::certification::award_certification;
@@ -51,6 +52,7 @@ use skynet_contracts::skill;
 use skynet_contracts::telemetry;
 use skynet_contracts::transport;
 use skynet_contracts::transport::resolve_transport;
+use skynet_contracts::upload;
 use skynet_json::Json;
 
 mod blackbox;
@@ -452,6 +454,40 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             skill::deadline_to_json(&skill::bounded_deadline(&child, remaining))
         }
 
+        // §12's fetch and §79's upload, in one corpus and four files, because the point of the
+        // pair is that they mirror. A reader comparing `fetch` with `upload` is looking at the
+        // same order-of-cost decision written twice, and the four places they differ — the probe,
+        // the optional size, discard against restart, and a completion the receiver can assert —
+        // are the four sentences §79 is about.
+        //
+        // `fetch` and `arrival` are older than this corpus by twenty-odd sessions. They had no
+        // cases at all: two editions implementing an eleven-branch decision about deleting
+        // operating system images from a robot's disk, one of them vendored here as the oracle,
+        // and nothing holding them to each other.
+        "transfer" if label.contains("fetch") => {
+            let subject =
+                json::fetch_subject_from_json(input.get("subject").ok_or("no `subject`")?);
+            bundle::fetch_plan_to_json(&bundle::plan_fetch(&subject))
+        }
+
+        "transfer" if label.contains("arrival") => {
+            let arrived = json::arrived_from_json(input.get("arrived").ok_or("no `arrived`")?);
+            let expected = json::expected_from_json(input.get("expected").ok_or("no `expected`")?);
+            bundle::bundle_check_to_json(&bundle::check_bundle(&arrived, &expected))
+        }
+
+        "transfer" if label.contains("upload") => {
+            let subject =
+                json::upload_subject_from_json(input.get("subject").ok_or("no `subject`")?);
+            upload::upload_plan_to_json(&upload::plan_upload(&subject))
+        }
+
+        "transfer" if label.contains("receipt") => {
+            let reported = json::reported_from_json(input.get("reported").ok_or("no `reported`")?);
+            let window = json::upload_window_from_json(input.get("window").ok_or("no `window`")?);
+            upload::upload_check_to_json(&upload::check_upload(&reported, &window))
+        }
+
         // §12's two decisions. Two files, because they are two questions with two inputs and
         // nothing in common but a section number: one is about a bundle nobody has installed yet,
         // the other about a slot the robot is already running.
@@ -689,6 +725,22 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
                 "offer_faults" => intent::OFFER_FAULTS
                     .iter()
                     .map(|fault| fault.as_str())
+                    .collect(),
+                "fetch_decisions" => bundle::FETCH_DECISIONS
+                    .iter()
+                    .map(|decision| decision.as_str())
+                    .collect(),
+                "bundle_checks" => bundle::BUNDLE_CHECKS
+                    .iter()
+                    .map(|code| code.as_str())
+                    .collect(),
+                "upload_decisions" => upload::UPLOAD_DECISIONS
+                    .iter()
+                    .map(|decision| decision.as_str())
+                    .collect(),
+                "upload_checks" => upload::UPLOAD_CHECKS
+                    .iter()
+                    .map(|code| code.as_str())
                     .collect(),
                 "telemetry_counters" => telemetry::TELEMETRY_COUNTERS.to_vec(),
                 "telemetry_window_faults" => telemetry::WINDOW_FAULTS

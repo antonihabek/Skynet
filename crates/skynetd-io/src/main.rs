@@ -232,6 +232,12 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
             None => Box::new(skynetd_io::connectivity::Unpaired),
         },
     };
+    // §79's uploader. `curl` for the same reason every other outbound path uses it, and a
+    // refusing one where there is nothing to send to — which is not a degraded mode: an unpaired
+    // robot has no endpoint, and a window offered to nobody is a transfer with no address.
+    let mut uploader: Box<dyn skynetd_io::upload::Uploader> =
+        Box::new(skynetd_io::upload::CurlUploader);
+
     let sink_description = sink.describe();
     let sink_obstacle = sink.obstacle();
     eprintln!("skynetd: outbound goes to {sink_description}");
@@ -278,6 +284,10 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         let mut sender =
             skynetd_io::connectivity::Sender::new(skynetd_io::outbound::Queue::of(&layout));
         report_drain(&mut sender, &layout, sink.as_ref(), now, 1.0);
+        // §79's window, for the reason `once` drains: a robot operated entirely through single
+        // passes should not be one whose sealed recordings are never collected. One slice, and
+        // a large window therefore needs several runs — which is what resume is for.
+        report_upload(&mut uploader, &layout, now, 1.0);
         return i32::from(!passes.last().is_some_and(|pass| pass.converged()));
     }
 
@@ -386,6 +396,12 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                 // supervising, and §33.2's watchdog would notice — correctly — that the loop had
                 // hung.
                 report_drain(&mut sender, &layout, sink.as_ref(), now, jitter_for(now));
+                // §79's bytes, last in the pass and bounded like everything before it. Last
+                // because it is the only stage that can spend twenty seconds on purpose, and
+                // because the incident that names the window went out in the drain above — an
+                // operator learns a fault happened before the robot starts paying to describe it
+                // (§79.3).
+                report_upload(&mut uploader, &layout, now, jitter_for(now));
 
                 next_reconcile = now.saturating_add(interval);
                 // Inside the loop body, on purpose. See the module documentation.
@@ -1264,6 +1280,58 @@ fn report_checkin<L, S>(
         Err(skynetd_io::checkin::NotQueued::Refused(detail)) => {
             eprintln!("skynetd: the check-in could not be queued: {detail}");
         }
+    }
+}
+
+/// Move what can be moved of the oldest uncollected sealed window (§79).
+///
+/// Says nothing on an unpaired robot, for `report_checkin`'s reason: §50.2 ships a robot belonging
+/// to nobody, and a loop that logged one every few seconds would train an operator to ignore the
+/// line that matters. It is also not a *failure* — there is no endpoint, so there is no address for
+/// the bytes, and the window is on the disk where `skynet blackbox` can still hand it to whoever is
+/// standing next to the robot.
+///
+/// Quiet on `Idle` and on `Waiting` too. A robot with nothing sealed, or one waiting for an
+/// unmetered link, is in the ordinary state for most of its life (§34.1), and both are visible on
+/// `GET /blackbox` for anybody who asks.
+fn report_upload(
+    uploader: &mut Box<dyn skynetd_io::upload::Uploader>,
+    layout: &Layout,
+    now_ms: u64,
+    jitter: f64,
+) {
+    let Some((endpoint, device, credential)) = skynetd_io::identity::credential_for_sending(layout)
+    else {
+        return;
+    };
+    let table = skynetd_io::connectivity::Table::of(layout);
+    let step = skynetd_io::upload::advance(
+        layout,
+        uploader.as_mut(),
+        &table,
+        &endpoint,
+        &device,
+        Some(&credential),
+        now_ms,
+        jitter,
+    );
+    match step {
+        skynetd_io::upload::Step::Collected { name, .. } => {
+            eprintln!("skynetd: black box — {name} is on the Hub, and the receipt is on the disk");
+        }
+        skynetd_io::upload::Step::Moved { name, held, .. } => {
+            eprintln!(
+                "skynetd: black box — {name}, the receiver holds {}",
+                match held {
+                    Some(bytes) => format!("{bytes} bytes"),
+                    None => "an amount it did not report; the next pass asks".to_string(),
+                }
+            );
+        }
+        skynetd_io::upload::Step::Failed { detail } => {
+            eprintln!("skynetd: black box — the window could not be sent: {detail}");
+        }
+        skynetd_io::upload::Step::Idle { .. } | skynetd_io::upload::Step::Waiting { .. } => {}
     }
 }
 

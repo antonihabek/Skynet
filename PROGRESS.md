@@ -10612,3 +10612,211 @@ forty-second; 59–61 from the forty-third; 62–63 from the forty-fourth; 64–
     here came from assuming an invocation could accumulate interventions across passes. §54.4 ends
     at the first one, which is a property worth knowing and was not written down anywhere near the
     counter.
+
+## 2026-09-03 (forty-ninth) — the sentence §77.1 left unfinished, and the corpus that was never asked about the other half
+
+§73's table has carried one row in the last column for as long as it has existed: *"the sealed bytes
+do not cross §17 (§77)."* §77.1 wrote the reason down honestly and stopped there:
+
+> A sealed window is tens to hundreds of megabytes. §34.3 puts it in the bulk class, which wants
+> resume, progress and metering on an **upload** — the mirror of §75's fetch, and unwritten.
+
+That interim was right, and it is the kind of right that expires. A Hub could say *"this incident has
+a 4 MB recording on the robot, digest `sha256:…`, that nothing has collected"* — a true sentence,
+and one that tells an investigator exactly enough to know what they cannot read. This session wrote
+the mirror.
+
+### §79, and the one thing that is not symmetric
+
+The two directions share four rules and they are all properties of §33.2's single thread rather than
+of a direction: a slice rather than a transfer, one subject per pass, the bytes checked however they
+arrived, and nothing here deciding whether the subject should exist. §75's fetch has a fifth that is
+what makes progress free:
+
+> The partial's length is the progress. No counter, no percentage written anywhere.
+
+**An upload cannot have that rule, because the partial is on the other machine.** Everything §79 adds
+falls out of that one sentence:
+
+* **There is a probe**, and it is a *decision* in the vocabulary rather than a step hidden in a
+  caller. `plan_upload` has eight where `plan_fetch` has seven.
+* **The offset is a claim.** It places the next byte and never concludes a transfer; that conclusion
+  is the receiver's digest against the one recorded at the seal, before the transfer existed.
+* **A failure discards nothing.** `check_bundle` deletes a partial that will never verify.
+  `check_upload` can only stop believing an offset and start again at zero — this robot has no
+  authority over the receiver's disk, and a contract whose remedy nothing could carry out would be
+  a worse contract than one that says so.
+
+Two answers are refused rather than followed, and both refusals cost something to get right. A
+receiver claiming **more bytes than the window has** is `plan_fetch`'s discard in the direction where
+nothing can be discarded. A probe that **answers without a number** moves nothing at all: pushing
+from zero whenever a probe failed would re-send the whole window every pass for as long as the
+failure lasted, which is the one behaviour a bulk transfer must not have.
+
+### The tension §34.3 and §34.4 have carried since they were written
+
+> §34.3: *"Bulk transfer respects metering. A sealed black box is tens of megabytes […] Bulk classes
+> wait for an unmetered bearer."*
+>
+> §34.4: *"There is nothing in this queue worth less than an incident."* Cellular carries
+> *"check-ins and incidents only"*.
+
+`connectivity.rs` had a section titled **"The uncomfortable part of that rule, which is correct"**,
+conceding that an incident meant tens of megabytes over the most expensive link a robot has and
+arguing — well — that this was the right trade.
+
+It never was tens of megabytes. `Class::Incident` has only ever carried a **document of a few
+hundred bytes**. The two sentences were in tension only while sealing and uploading were one act, and
+§77 ended that a session ago without anybody noticing what it had freed. §79.3 states the rule the
+split allows:
+
+> **The alarm goes over anything that is up. The window waits for a link nobody is billed for.**
+
+An operator learns within seconds, on cellular, in a field, with the digest of the recording — and
+the fleet is not billed by the megabyte for the evidence. The earlier reading gave up the second to
+buy a first it was already getting.
+
+### `uploaded` stays false, which is the part worth arguing about
+
+The obvious next move is to flip §77.2's `uploaded` to `true` when the bytes land, and it is wrong.
+The incident is queued **at the raise**; the upload happens minutes or a week later, by which time
+the document has usually been delivered and has always been sealed into the queue. A robot that went
+back and rewrote a queued alarm to flip a flag would be **editing evidence after the fact**.
+
+So the field keeps saying what was true at the raise, like every other field on that document, and
+the Hub answers *"do we have the bytes?"* by looking for the object at the digest the incident named.
+That is what content addressing was for, and it is why the route is
+`PUT /devices/{id}/recordings/{sha256}` rather than something nested under an incident id the robot
+never learns — §34.4's queue is fire-and-forget, so a nested route would mean the bytes could not
+move until the document had been accepted.
+
+### The corpus had never been asked about `bundle.ts`
+
+Writing the mirror meant writing corpus cases for it, and writing those meant looking at the ones for
+the original. There were none.
+
+`reference/typescript/bundle.ts` is 242 lines implementing an eleven-branch decision about **deleting
+operating system images from a robot's disk**. It is vendored here as the oracle. `tools/corpus-gen/generate.ts`
+had never imported it. Two editions, one of them normative, and nothing holding them to each other —
+across twenty-odd sessions, including the one that built the fetch.
+
+The corpus found a divergence in the first run: three sentences where the TypeScript spelled an
+apostrophe `’` and the Rust spelled it `'`. Every other `expected` string in 1,020 cases is ASCII;
+the 78 typographic apostrophes in the corpus are all in `note` fields, which are prose for a human
+and are not compared. So the convention was already unanimous and three shipped strings were outside
+it, in the one module nothing was checking.
+
+It is a small defect and it is exactly the kind the corpus exists for: an edition that reproduced
+those three sentences byte for byte would have had to reproduce the wrong ones.
+
+`corpus/transfer/` now holds four files — `fetch`, `arrival`, `upload`, `receipt` — and the reason
+they are one corpus rather than two is that the point of the pair is that they mirror. A reader
+comparing them is looking at the same order-of-cost decision written twice, and the four places they
+differ are the four sentences §79 is about.
+
+### Two findings in tooling, and one of them was blocking the work
+
+**`check-mirrors.mjs` could not record what it had just verified.** The specification is mirrored
+into the Hub repository and pinned by digest, and the workflow the file itself documents is *"an edit
+made here first should be copied there by hand, deliberately."* There was no way to finish that
+workflow. Pins were written only by `--sync`, which **copies the other tree's copies over ours** —
+so the documented way to complete an edit made here ended in a command that could silently undo one.
+It is not hypothetical: the Hub held an unrelated shared document mid-edit and uncommitted, and
+`--sync` mirrored 836 uncommitted lines into this repository as the price of pinning a file it had
+already reported as matching.
+
+Two changes. `--pin` records agreement and moves nothing. And pinning is now **per document**: a
+document the two trees differ on keeps its last agreed digest rather than being re-pinned or
+dropped, so the single-checkout check CI runs stays armed for it. The all-or-nothing guard was the
+reason the two operations had to be one.
+
+**The console printed the status line's reason phrase where the daemon had written a paragraph.**
+`api::error` writes both — `error` is *"Service Unavailable"* and `detail` is the sentence naming the
+cause and the remedy — and `Feed.poll` read the first. Every failing panel in this console has said
+two words for eight sessions. Same family as the guards panel and the attestation sentence, found
+the same way, by looking at what a page actually renders.
+
+### What the window manifest is for, and why it is a cache rather than a record
+
+The collector has to answer *"which sealed window has not been collected"* every reconcile pass, and
+the only sound key is the digest — §13 names a window for a monotonic instant, a reboot restarts that
+clock, and `File::create` truncates, so a **name is reused and a file at that name is overwritten**.
+A receipt believed on its filename alone reports a new window as collected because a previous one
+with the same name was.
+
+Hashing to find out is the obvious answer and it is unaffordable: fifty sealed windows is gigabytes
+of reading per pass, to re-derive a number the sealing process had in a variable.
+
+So the seal writes it down — which is §77.1's own argument, one step earlier: *the digest is recorded
+by the party that produced the bytes, before any transfer exists*. `…-fault.mcap.window.json` sits
+beside the recording, is invisible to everything that filters on `.mcap`, and is keyed by the file's
+length so a manifest left beside a rewritten name is not believed.
+
+It is still only a hint, and the distinction is where the care went: the manifest picks the
+**candidate** and the hash confirms the **one window that is about to move**. Believing a sidecar
+about bytes this robot is about to send would upload a window under another window's digest, which
+the receiver would store, acknowledge and file against the wrong incident. One hash per pass at the
+very most, and none once everything has a receipt.
+
+### One rule that was in the wrong module
+
+`404` from the probe means *the receiver holds nothing under this digest*, which is a **measured
+zero** — it was asked and it answered — rather than an absence. That interpretation was written
+inside `CurlUploader`, where it is invisible to any other uploader, and the scripted double in the
+suite went straight past it: four tests failed on the first run because a receiver answering `404`
+looked like a receiver that had said nothing at all.
+
+The tests were right and the code was wrong. It is a property of the **route**, not of the transport,
+so it moved into `advance`. An uploader written against a different client would otherwise have had
+to rediscover it, and the one that did not would back off for ever on the first upload of every
+window.
+
+### What it does not do
+
+**The Hub half is not built.** Nothing serves `/devices/{id}/recordings/{sha256}`, so a robot with a
+window to send probes, finds nothing, and backs off on §34.4's curve — which leaves the window and
+the incident naming it exactly where they were. §57.1's table now carries thirteen endpoints with the
+thirteenth marked as the exception rather than counted in, because a table of routes that all return
+200 is the failure that section was written against.
+
+**No robot has run this against a real receiver.** What exists is §12's fetch and §13's upload as the
+same shape with the same failure modes, tested against the same kind of recording implementation —
+which is what made §75's rollback testable and is not the same as having watched one.
+
+**Retention is not answered.** §79.4 keeps every window, including ones the Hub has acknowledged. A
+robot sealing daily for a year does not fit inside §28's disk floor, and deleting on somebody else's
+acknowledgement is a decision about evidence rather than about disk — §13 exists precisely for the
+day that somebody is the party being asked questions. It is in §80 with two other things Part X
+leaves open rather than settled in passing.
+
+### Numbers
+
+Rust: **1,369** tests, 23 new, **1,339** run here. Corpus: **77** files, **1,055** cases, 35 of them
+new and 14 of those about code that was written twenty sessions ago. `cargo fmt --all --check` and
+`cargo clippy --workspace --all-targets` clean; golden path 48 commands; contract mirrors match; the
+specification is mirrored to the Hub and re-pinned.
+
+### Findings, restated
+
+1–28 as before; 29–51 from the sessions above; 52–56 from the forty-first; 57–58 from the
+forty-second; 59–61 from the forty-third; 62–63 from the forty-fourth; 64–67 from the forty-fifth;
+68–71 from the forty-sixth; 72–73 from the forty-seventh; 74–76 from the forty-eighth.
+
+77. **A module with no corpus cases is not covered, whatever the file says about itself.**
+    `bundle.ts` is documented as carefully as anything in this repository and had never been
+    compared against the edition that ships. The absence is invisible from either file: nothing in
+    a module says how many cases test it, and the generator's import list is the only place the gap
+    is legible.
+78. **Building a mirror is the cheapest audit of the original.** Every property §79 needed made a
+    claim about §75, and one of them was false. The pair is now the artifact — four corpus files in
+    one directory — rather than two modules that happen to rhyme.
+79. **A rule two sections state differently is a rule waiting for the thing that separates them.**
+    §34.3 and §34.4 were both right and could not both be obeyed while sealing and uploading were
+    one act. The code split the difference and wrote a comment defending the compromise. §77 removed
+    the reason for it a session before anybody noticed.
+80. **A tool that cannot express the workflow it documents will be used the other way.** `--sync`
+    was the only path to a pin, so pinning meant overwriting — and the safe operation was reachable
+    only through the destructive one.
+81. **An interpretation that lives in a transport is not part of the protocol.** `404` meaning zero
+    was a property of the route sitting inside the curl client. The suite's double found it in one
+    run, which is the argument for the double.

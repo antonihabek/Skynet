@@ -553,6 +553,38 @@
         "set": "telemetry_window_faults"
       },
       "expected": "[\"unbounded\",\"inverted\",\"unmeasured_duration\",\"implausible_duration\"]"
+    },
+    {
+      "id": "upload_decisions",
+      "note": "§79’s eight, in the order the tests run — which is the order of cost, as `planFetch`’s seven are. The two sets are deliberately not the same: `probe` exists because the partial is on the other machine, and `restart` is `discard_and_fetch` for bytes this robot cannot delete.",
+      "input": {
+        "set": "upload_decisions"
+      },
+      "expected": "[\"done\",\"probe\",\"start\",\"resume\",\"restart\",\"wait_for_unmetered\",\"no_bearer\",\"refuse\"]"
+    },
+    {
+      "id": "upload_checks",
+      "note": "What the receiver can turn out to hold. The same four names as a bundle’s check and one different remedy — `restart` says what this robot does next, never what the receiver should do with what it has.",
+      "input": {
+        "set": "upload_checks"
+      },
+      "expected": "[\"complete\",\"short\",\"long\",\"digest_mismatch\"]"
+    },
+    {
+      "id": "fetch_decisions",
+      "note": "§12’s seven, in the order of cost. Frozen alongside §79’s so an edition that agreed about one direction and not the other is a failure rather than a footnote.",
+      "input": {
+        "set": "fetch_decisions"
+      },
+      "expected": "[\"have\",\"fetch\",\"resume\",\"discard_and_fetch\",\"wait_for_unmetered\",\"no_bearer\",\"refuse\"]"
+    },
+    {
+      "id": "bundle_checks",
+      "note": "What arrived, in the order the checks run. Size before digest, because a short file is a link that dropped and a wrong file is a question about where it came from.",
+      "input": {
+        "set": "bundle_checks"
+      },
+      "expected": "[\"match\",\"short\",\"long\",\"digest_mismatch\"]"
     }
   ]
 }
