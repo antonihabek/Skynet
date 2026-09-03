@@ -90,6 +90,14 @@ pub fn limits_to_json(limits: &ResolvedLimits<'_>, profile_name: Option<&str>) -
     );
     out.set("min_control_hz", nullable(limits.min_control_hz));
     out.set("max_delta_per_cycle", nullable(limits.max_delta_per_cycle));
+    // §7.1's fifth guard holds at this distance, and until §11 could deliver it the field was
+    // always absent and not worth a column. It is deliverable now, so it is reported — for the
+    // reason every other number here is: an operator who cannot see the margin in force cannot
+    // tell a robot holding 5 cm from one holding at contact.
+    out.set(
+        "self_collision_margin_m",
+        nullable(limits.self_collision_margin_m),
+    );
 
     let mut per_channel = Json::obj();
     for (name, limit) in limits.per_channel {

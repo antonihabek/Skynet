@@ -18,7 +18,9 @@
 use skynet_json::Json;
 
 use crate::actual::{Actual, InstalledPackage, OsSlots, UnitState, UnitStatus};
-use crate::desired::{DesiredPackage, DesiredState, PackageKind, ProfileLimits, RunState};
+use crate::desired::{
+    DesiredPackage, DesiredState, PackageKind, ProfileLimits, ProfileProximity, RunState,
+};
 use crate::health::{
     readiness, Health, PackageHealth, Production, Readiness, DEFAULT_TOLERANCE_PERIODS,
 };
@@ -881,6 +883,96 @@ fn dropping_a_ceiling_is_a_widening() {
         "dropping a ceiling is not narrowing"
     );
     assert!(with.narrows(&without), "adding one is");
+}
+
+/// A margin is a **floor**, and classifying it as a ceiling inverts §33.4's asymmetry.
+///
+/// The trap in adding this field. `narrower` says smaller-is-stricter, which is right for every
+/// ceiling in this struct and wrong for a separation: halving a collision margin lets two bodies get
+/// twice as close. Had it gone through `narrower`, that edit would have been classified as a
+/// *narrowing* and applied under a running policy — the exact failure the classifier exists to
+/// prevent, arriving through the classifier.
+#[test]
+fn shrinking_a_collision_margin_is_a_widening() {
+    let far = ProfileLimits {
+        self_collision_margin_m: Some(0.05),
+        ..ProfileLimits::default()
+    };
+    let near = ProfileLimits {
+        self_collision_margin_m: Some(0.01),
+        ..ProfileLimits::default()
+    };
+    assert!(
+        !near.narrows(&far),
+        "letting bodies come twice as close is not a narrowing"
+    );
+    assert!(far.narrows(&near), "keeping them further apart is");
+    // And dropping it is a widening for the same reason dropping a ceiling is.
+    assert!(!ProfileLimits::default().narrows(&far));
+    assert!(far.narrows(&ProfileLimits::default()));
+}
+
+/// Two of the three separation thresholds are floors and the third is a ceiling.
+#[test]
+fn a_separation_distance_is_a_floor_and_the_slow_factor_is_a_ceiling() {
+    let profile = |stop: f64, factor: f64| ProfileLimits {
+        proximity: Some(ProfileProximity {
+            stop_distance_m: Some(stop),
+            slow_distance_m: Some(2.0),
+            slow_factor: Some(factor),
+        }),
+        ..ProfileLimits::default()
+    };
+
+    // Stopping further away is stricter.
+    assert!(profile(1.5, 0.3).narrows(&profile(1.0, 0.3)));
+    assert!(!profile(0.5, 0.3).narrows(&profile(1.0, 0.3)));
+
+    // A smaller multiplier slows the robot more, so it is stricter.
+    assert!(profile(1.0, 0.1).narrows(&profile(1.0, 0.3)));
+    assert!(!profile(1.0, 0.6).narrows(&profile(1.0, 0.3)));
+
+    // Dropping the whole block removes a limit.
+    assert!(!ProfileLimits::default().narrows(&profile(1.0, 0.3)));
+    assert!(profile(1.0, 0.3).narrows(&ProfileLimits::default()));
+}
+
+/// §11 carries them, which is the delivery path §7.6 recorded as missing.
+#[test]
+fn the_profile_carries_a_margin_and_a_separation_block() {
+    let json = Json::parse(
+        r#"{"generation":4,"packages":[],"profile":{"name":"cell-a","digest":"sha256:aa",
+           "limits":{"joint_torque_max_nm":40,"self_collision_margin_m":0.05,
+           "proximity":{"stop_distance_m":1.2,"slow_distance_m":2.5,"slow_factor":0.25}}}}"#,
+    )
+    .unwrap();
+    let desired = DesiredState::from_json(&json).unwrap();
+    let profile = desired.profile.expect("a profile");
+    assert_eq!(profile.limits.self_collision_margin_m, Some(0.05));
+    let prox = profile.limits.proximity.expect("a proximity block");
+    assert_eq!(prox.stop_distance_m, Some(1.2));
+    assert_eq!(prox.slow_distance_m, Some(2.5));
+    assert_eq!(prox.slow_factor, Some(0.25));
+}
+
+/// A partial separation block stays partial rather than acquiring a default.
+///
+/// The promotion to `skynet_kernel::Proximity` happens in `skynetd-io` and needs all three. Here the
+/// only thing that matters is that the decoder does not invent the missing one: a profile declaring
+/// two of three is a document an operator has not finished, and §7.2 has the guard report the input
+/// it lacks rather than run on a number nobody chose.
+#[test]
+fn a_partial_separation_block_is_carried_as_partial() {
+    let json = Json::parse(
+        r#"{"generation":4,"packages":[],"profile":{"name":"cell-a","digest":"sha256:aa",
+           "limits":{"proximity":{"stop_distance_m":1.2}}}}"#,
+    )
+    .unwrap();
+    let profile = DesiredState::from_json(&json).unwrap().profile.unwrap();
+    let prox = profile.limits.proximity.expect("a proximity block");
+    assert_eq!(prox.stop_distance_m, Some(1.2));
+    assert_eq!(prox.slow_distance_m, None);
+    assert_eq!(prox.slow_factor, None);
 }
 
 // ── Supervision ──────────────────────────────────────────────────────────────

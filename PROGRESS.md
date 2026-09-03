@@ -10377,3 +10377,98 @@ forty-second; 59–61 from the forty-third; 62–63 from the forty-fourth; 64–
     environment's `required_capabilities` are checked at admission. The Hub's resolver returned an
     empty list for environments, because it was written for models and skills and the sentence
     lived in the section about simulated worlds.
+
+## 2026-09-03 (forty-seventh) — two fields the kernel accepted and nothing could deliver, and the classifier that would have inverted one
+
+§7.6 recorded three of `resolve_limits`' seven profile inputs as having no delivery path. Two of them
+were gaps in §11 rather than in the body, which makes them buildable, and this closes both.
+
+`self_collision_margin_m` and `proximity` are on the profile now, beside its four ceilings and
+§55.2's cell — so they arrive under the profile's own signature (§38.1) rather than through a second
+path, which is the same argument §55.2 makes for the cell travelling with the profile instead of
+getting a delivery mechanism of its own.
+
+### The two land differently, and the report says which
+
+`self_collision_margin_m` changes what the machine does. §7.1's fifth guard reads it directly —
+`limits.self_collision_margin_m.unwrap_or(0.0)` — so a robot with a margin holds its collision bodies
+apart instead of at the moment they touch, and `no_collision_margin` stops being emitted on every
+robot alive.
+
+`proximity` changes what the machine *says*. It also needs `available.people_detection`, which is
+`false` on every body because §5 declares nine sensing modalities and none of them is a person
+detector. So the guard is still unavailable — and it now names **the sensor it has not got** rather
+than a profile field that could not be delivered. That is the difference between *"this platform
+cannot do it"* and *"this robot has not got one"*, and only the second is a fact about a body.
+
+Both halves are asserted rather than described: one test reads the margin off `GET /limits` and
+checks the notice is gone, the other reads the `proximity` row and checks the missing input is no
+longer `profile.proximity`.
+
+### The classifier that would have inverted the margin
+
+This is the part worth the session.
+
+§33.4's asymmetry — *anything that reduces what the robot may do applies immediately, anything that
+increases it waits* — is computed by `ProfileLimits::narrows`, and every limit it had ever seen was a
+**ceiling**, where smaller is stricter. `narrower()` says so in one line.
+
+A collision margin is a **floor**. So is a stop distance, and so is a slow distance. Halving a
+collision margin lets two bodies get twice as close, and run through `narrower()` that edit is
+classified as a *narrowing* — which means it is **applied under a running policy**, which is the
+precise failure §33.4's asymmetry exists to prevent, arriving through the function written to
+prevent it.
+
+There is now a `wider()` beside `narrower()`, identical in every case but the comparison, and the
+three separation thresholds are classified individually: two floors and one ceiling, because
+`slow_factor` is a multiplier where smaller means slower. `shrinking_a_collision_margin_is_a_widening`
+was **confirmed to fail** with the classifier swapped back, which is the only way to know a test of
+this shape is doing anything.
+
+### All three or none
+
+`skynet_kernel::Proximity` requires all three numbers and a profile may carry fewer. The promotion is
+a `?` chain, so a block with two of three stays absent and the guard goes on naming
+`profile.proximity` as its missing input. Defaulting the third would have been shorter and would have
+been this layer choosing a safety parameter — §7.2's rule is that a guard with a partial input
+reports unavailable rather than running on a number nobody chose.
+
+### It crosses §17, and the reason is one sentence
+
+The margin is on the check-in's `GuardReport` and rendered on the device page, in the same table as
+the four ceilings. It is the same question an operator is asking — *what is in force* — and a page
+showing four numbers while a fifth applied silently would be a page that reads as complete.
+
+The type says the floor thing beside the field, on both sides, because a page that sorted or
+coloured these by magnitude would get exactly one of them backwards.
+
+The frozen `wire/checkin` fixture carries it as **present and null**, with `no_collision_margin`
+beside it, and that is the right freeze rather than a missed opportunity: it is the shape every robot
+sends until somebody writes a margin into a profile, and it exercises the three-state distinction —
+absent, null-with-a-reason, a number — which is the thing a consumer gets wrong. The number itself is
+exercised cross-edition by the corpus case, which both editions reproduce.
+
+### Numbers
+
+Rust: **1,342** tests, 6 new — 3 on the classifier in `skynetd`, 2 on the delivery in `skynetd-io`,
+1 on the decode. **1,312** run on this machine. The corpus is unchanged in size at 1,020 cases and
+20 of them changed shape, which is `shape_limits` gaining a field.
+
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets` clean; the golden path counts
+48 commands; the mirrors match. Hub: **1,499** tests, typecheck clean.
+
+### Findings, restated
+
+1–28 as before; 29–51 from the sessions above; 52–56 from the forty-first; 57–58 from the
+forty-second; 59–61 from the forty-third; 62–63 from the forty-fourth; 64–67 from the forty-fifth;
+68–71 from the forty-sixth.
+
+72. **A classifier written for one kind of number acquires a second kind silently.** `narrows` had
+    handled ceilings correctly for twenty sessions. Nothing about adding a floor to the struct it
+    reads makes it complain; the compiler is satisfied, the tests pass, and the only symptom is that
+    the wrong direction of one specific edit becomes immediate. Adding a field to a struct that
+    something classifies is a change to the classifier whether or not it is edited.
+73. **The interesting half of "give it a delivery path" is what it does not change.** One of these
+    two fields makes a guard hold at a distance; the other makes a guard report a better sentence
+    and nothing else. Shipping both and saying which is which is more useful than shipping the first
+    and being quiet about the second.

@@ -45,9 +45,9 @@
 //! | `profile.*` ceilings | `/data/state/profiles/active.json` (§38.1) |
 //! | `profile.workspace` | §55.2's cell, out of the same profile |
 //! | `transport` | §37.1's plan, for a named installed package |
+//! | `profile.proximity` | the same profile's `limits.proximity` (§11) |
+//! | `profile.self_collision_margin_m` | the same profile's `limits` (§11) |
 //! | `available.people_detection` | **nothing** — see below |
-//! | `profile.proximity` | **nothing** — desired state carries no such field |
-//! | `profile.self_collision_margin_m` | **nothing** — the same |
 //!
 //! `people_detection` is `false` on every body, and that is a measured absence rather than a
 //! default: §5's sensor vocabulary has nine modalities and none of them is a person detector. A
@@ -56,11 +56,18 @@
 //! fields removed for. The consequence is visible and correct: the `proximity` guard reports
 //! unavailable naming a sensor that detects people, on a robot that has not got one.
 //!
-//! The other two are gaps in the **delivery path** rather than in the body. `DesiredProfile` (§11)
-//! carries four ceilings and a cell, so `proximity` and `self_collision_margin_m` — both of which
-//! `skynet_kernel::OperatorProfile` accepts and two guards read — have nowhere to arrive from. They
-//! are absent here, they are reported as unmeasured on the route, and the effect on the machine is
-//! that `proximity` can never be an active guard on this edition however the robot is described.
+//! The other two were gaps in the **delivery path** rather than in the body, and they are closed:
+//! §11's profile carries `self_collision_margin_m` and a `proximity` block beside its four
+//! ceilings, so both now arrive under the profile's own signature rather than through a second
+//! path (§38.1).
+//!
+//! One of them changes what the machine does. `self_collision_margin_m` is read by §7.1's fifth
+//! guard, so a profile that sets it is a robot whose collision bodies stop short of touching
+//! instead of at the moment they meet — and `NoCollisionMargin` stops being emitted on every robot.
+//! The other does not, yet: `proximity` also needs `available.people_detection`, which is `false` on
+//! every body for the reason above. What changes is the **report** — the guard now names the sensor
+//! it has not got rather than a profile field that could not be delivered, which is the difference
+//! between "this platform cannot do it" and "this robot has not got one".
 //!
 //! # The cell's volumes stop being reported and start being applied
 //!
@@ -86,8 +93,8 @@ use skynet_json::Json;
 // the same names out of the same place.
 use skynet_contracts::safety::kinematics::{Frame, FrameSet, Volume, WorkspaceLayer};
 use skynet_contracts::safety::{
-    limits_to_json, resolve_limits, Available, Envelope, OperatorProfile, ResolveLimitsParams,
-    ResolvedLimits, Tier, TransportClamp,
+    limits_to_json, resolve_limits, Available, Envelope, OperatorProfile,
+    Proximity as KernelProximity, ResolveLimitsParams, ResolvedLimits, Tier, TransportClamp,
 };
 
 use crate::embodiment::Body;
@@ -134,6 +141,14 @@ struct ProfileOwned {
     joint_torque_max_nm: Option<f64>,
     base_velocity_max_m_s: Option<f64>,
     max_delta_per_cycle: Option<f64>,
+    self_collision_margin_m: Option<f64>,
+    /// §7.1's separation thresholds, promoted to the kernel's triple only when complete.
+    ///
+    /// `skynet_kernel::Proximity` requires all three and a profile may declare fewer, so the
+    /// promotion happens here and an incomplete set stays `None`. That leaves the guard reporting
+    /// `profile.proximity` as its missing input, which is §7.2's rule — a guard with a partial
+    /// input reports unavailable and never runs on a default somebody invented for the rest.
+    proximity: Option<KernelProximity>,
 }
 
 /// Compose the limits this robot would run under.
@@ -208,6 +223,17 @@ fn read_profile(layout: &Layout) -> Option<ProfileOwned> {
         joint_torque_max_nm: limits.joint_torque_max_nm,
         base_velocity_max_m_s: limits.base_velocity_max_m_s,
         max_delta_per_cycle: limits.max_delta_per_cycle,
+        self_collision_margin_m: limits.self_collision_margin_m,
+        proximity: limits.proximity.and_then(|prox| {
+            // All three or none. Two thresholds and no factor is not a proximity guard with a
+            // default multiplier — it is a guard nobody finished configuring, and inventing the
+            // third number here would be this layer deciding a safety parameter.
+            Some(KernelProximity {
+                stop_distance_m: prox.stop_distance_m?,
+                slow_distance_m: prox.slow_distance_m?,
+                slow_factor: prox.slow_factor?,
+            })
+        }),
     })
 }
 
@@ -300,10 +326,9 @@ impl Owned {
                 joint_torque_max_nm: profile.joint_torque_max_nm,
                 base_velocity_max_m_s: profile.base_velocity_max_m_s,
                 max_delta_per_cycle: profile.max_delta_per_cycle,
-                // See the module docs: no delivery path, so absent rather than defaulted.
-                proximity: None,
+                proximity: profile.proximity,
                 workspace: &layers,
-                self_collision_margin_m: None,
+                self_collision_margin_m: profile.self_collision_margin_m,
             }),
             available: self.available,
             frames: frame_refs
@@ -342,6 +367,7 @@ pub fn report(owned: &Owned) -> GuardReport {
         base_velocity_max_m_s: limits.base_velocity_max_m_s,
         min_control_hz: limits.min_control_hz,
         max_delta_per_cycle: limits.max_delta_per_cycle,
+        self_collision_margin_m: limits.self_collision_margin_m,
         source: limits.source.map(str::to_string),
         active: limits
             .active_guards
