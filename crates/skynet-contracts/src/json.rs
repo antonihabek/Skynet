@@ -998,6 +998,105 @@ pub fn guard_unavailable_to_json(entry: &GuardUnavailable) -> Json {
     out
 }
 
+// ── Transfer: §12's fetch and §79's upload ───────────────────────────────────
+//
+// Two directions of one problem, and the decoders are deliberately not shared. `FetchSubject::size`
+// is an `Option` because a release manifest may decline to declare one; `UploadSubject::size` is a
+// `u64` because the window is a file this robot sealed. A single decoder would have to pick one,
+// and picking either would put a shape on the other side that the contract does not have.
+
+/// A bearer as either planner takes it (§34.3).
+///
+/// `metered` defaults to **true** and `metering_declared` to false, which is §34.3's cellular row
+/// applied to silence: a case — or a robot — that has not said whether a link charges by the
+/// megabyte has not established that it does not, and the expensive assumption is the safe one.
+pub fn bearer_from_json(value: &Json) -> crate::bundle::Bearer {
+    crate::bundle::Bearer {
+        name: opt_string(value, "name").unwrap_or_default(),
+        metered: value.get("metered").and_then(Json::as_bool).unwrap_or(true),
+        metering_declared: flag(value, "metering_declared"),
+    }
+}
+
+/// Read §12's fetch subject.
+pub fn fetch_subject_from_json(value: &Json) -> crate::bundle::FetchSubject {
+    crate::bundle::FetchSubject {
+        digest: opt_string(value, "digest").unwrap_or_default(),
+        size: byte_count(value, "size"),
+        have: flag(value, "have"),
+        partial: byte_count(value, "partial").unwrap_or(0),
+        bearer: value.get_present("bearer").map(bearer_from_json),
+    }
+}
+
+/// Read the bytes that are on the disk (§12).
+pub fn arrived_from_json(value: &Json) -> crate::bundle::Arrived {
+    crate::bundle::Arrived {
+        digest: opt_string(value, "digest").unwrap_or_default(),
+        size: byte_count(value, "size").unwrap_or(0),
+    }
+}
+
+/// Read what a signed manifest says the bytes should be (§12).
+pub fn expected_from_json(value: &Json) -> crate::bundle::Expected {
+    crate::bundle::Expected {
+        digest: opt_string(value, "digest").unwrap_or_default(),
+        size: byte_count(value, "size"),
+    }
+}
+
+/// Read §79's upload subject.
+pub fn upload_subject_from_json(value: &Json) -> crate::upload::UploadSubject {
+    crate::upload::UploadSubject {
+        digest: opt_string(value, "digest").unwrap_or_default(),
+        size: byte_count(value, "size").unwrap_or(0),
+        // Absent and null are the same thing here and both mean *not asked this pass*, which is
+        // the input that produces `probe`. An edition that read a missing `held` as zero would
+        // report a receiver holding nothing, and send the window without asking.
+        held: value.get_present("held").map(held_from_json),
+        receipt: flag(value, "receipt"),
+        bearer: value.get_present("bearer").map(bearer_from_json),
+    }
+}
+
+/// Read what the receiver claims it holds (§79.2).
+pub fn held_from_json(value: &Json) -> crate::upload::Held {
+    crate::upload::Held {
+        bytes: byte_count(value, "bytes").unwrap_or(0),
+        digest: opt_string(value, "digest"),
+    }
+}
+
+/// Read what the receiver reported after the last byte (§79.4).
+pub fn reported_from_json(value: &Json) -> crate::upload::Reported {
+    crate::upload::Reported {
+        bytes: byte_count(value, "bytes").unwrap_or(0),
+        digest: opt_string(value, "digest"),
+    }
+}
+
+/// Read the window this robot sealed and measured (§79.4).
+pub fn upload_window_from_json(value: &Json) -> crate::upload::Window {
+    crate::upload::Window {
+        digest: opt_string(value, "digest").unwrap_or_default(),
+        size: byte_count(value, "size").unwrap_or(0),
+    }
+}
+
+/// A whole, non-negative, representable byte count, or nothing.
+///
+/// The filter [`bundle_from_json`] spells inline, extracted because five decoders now need it and
+/// four of them are about deleting or re-sending megabytes. A fractional or negative byte count is
+/// not a smaller number — it is a producer that meant something else.
+fn byte_count(value: &Json, key: &str) -> Option<u64> {
+    value
+        .get_present(key)
+        .and_then(Json::as_f64)
+        .filter(|value| *value >= 0.0 && *value <= u64::MAX as f64)
+        .filter(|value| (*value as u64) as f64 == *value)
+        .map(|value| value as u64)
+}
+
 // ── OTA (§12) ────────────────────────────────────────────────────────────────
 
 /// Read a bundle manifest from a corpus case or a cached release document.
@@ -1008,16 +1107,8 @@ pub fn bundle_from_json(value: &Json) -> BundleManifest {
         digest: opt_string(value, "digest").unwrap_or_default(),
         // Absent is not null and neither is zero: a manifest that declares no size has established
         // nothing, and a negative or fractional one is not a byte count. All three read as absent
-        // rather than as a number no producer meant.
-        // `fract` and `trunc` are `std`, and this crate is `no_std`: the round trip through `u64` is
-        // the same question — is this a whole, non-negative, representable byte count — asked with
-        // arithmetic that exists here.
-        size: value
-            .get_present("size")
-            .and_then(Json::as_f64)
-            .filter(|value| *value >= 0.0 && *value <= u64::MAX as f64)
-            .filter(|value| (*value as u64) as f64 == *value)
-            .map(|value| value as u64),
+        // rather than as a number no producer meant. See [`byte_count`].
+        size: byte_count(value, "size"),
         compatible: value.str_arr("compatible"),
         changes: value.str_arr("changes"),
     }

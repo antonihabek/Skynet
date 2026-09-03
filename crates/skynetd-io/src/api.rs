@@ -21,7 +21,7 @@
 //! | `GET /cell` | observer | §55.2's cell descriptor, its `env.*` context and its faults |
 //! | `GET /grants` | observer | Grants and leases |
 //! | `GET /logs/{ns}:{name}` | observer | The package's journal — not the black box (§41.1) |
-//! | `GET /blackbox` | observer | The recording's window, what is missing from it, and the sealed files |
+//! | `GET /blackbox` | observer | The recording's window, what is missing from it, the sealed files, and which of them the Hub has (§79) |
 //! | `POST /blackbox/seal` | operator | Seal the window now (§13) |
 //! | `GET /blackbox/{name}` | operator | Download one sealed recording, as MCAP |
 //! | `POST /packages/{id}/start` | operator | |
@@ -1852,12 +1852,28 @@ fn stop_skill<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, id: &str) 
 }
 
 fn blackbox_index<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Response {
+    // §79's collection, read before the recorder is borrowed and reported *whether or not* there is
+    // a ring. A robot whose ring will not open still has sealed windows on its disk from before it
+    // stopped opening, and those are exactly the ones somebody is looking for — so a 503 that
+    // withheld the collection state would hide the recordings of the fault that broke the recorder.
+    let collection = crate::upload::report(context.daemon.store.layout());
+
     let Some(recorder) = context.blackbox.as_ref() else {
-        return error(503, UNAVAILABLE);
+        // The ordinary 503, with one field added rather than a different shape: `error` and
+        // `detail` stay exactly where every other refusal puts them, so nothing that reads a
+        // failure has to learn a second layout to find out this one carries data.
+        let mut refusal = error(503, UNAVAILABLE);
+        if let Ok(mut body) = Json::parse(&String::from_utf8_lossy(&refusal.body)) {
+            body.set("collection", collection);
+            refusal.body = encode(&body);
+        }
+        return refusal;
     };
     // The rate the window is reported against. There is no control loop on this robot, so the
     // honest denominator is the reconcile period rather than a joint rate nothing is producing.
-    ok(recorder.index(1.0))
+    let mut document = recorder.index(1.0);
+    document.set("collection", collection);
+    ok(document)
 }
 
 /// `POST /blackbox/seal` — seal the window now (§39.1: operator).

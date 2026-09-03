@@ -1,0 +1,232 @@
+{
+  "corpus": "transfer",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "nothing-asked-yet",
+      "note": "§79.2, and the decision a download does not have. The receiver holds the partial, so the first thing an upload does on a link that costs nothing is ask — and an edition that folded this into `start` would re-send four megabytes every pass.",
+      "input": {
+        "subject": {
+          "digest": "sha256:cccc",
+          "size": 4000000,
+          "held": null,
+          "receipt": false,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"probe\",\"detail\":\"The receiver has not been asked how much of this window it holds. §79.2: the partial is on the other machine, so an upload has a step a download does not — and a robot that skipped it would re-send the whole window every pass.\",\"from\":0}"
+    },
+    {
+      "id": "a-window-with-a-receipt",
+      "note": "Order of cost, mirroring `an-image-already-here`. A robot holding an acknowledgement does not report itself as waiting for a link, and does not ask again.",
+      "input": {
+        "subject": {
+          "digest": "sha256:cccc",
+          "size": 4000000,
+          "held": null,
+          "receipt": true,
+          "bearer": {
+            "name": "wwan0",
+            "metered": true,
+            "metering_declared": false
+          }
+        }
+      },
+      "expected": "{\"decision\":\"done\",\"detail\":\"The receiver has acknowledged this window by digest and the receipt is on the disk. Nothing to send.\",\"from\":0}"
+    },
+    {
+      "id": "a-window-with-no-digest",
+      "note": "§79.1 makes the digest the route. Bytes with no name have nowhere to go and nothing to check the far side’s answer against.",
+      "input": {
+        "subject": {
+          "digest": "",
+          "size": 4000000,
+          "held": null,
+          "receipt": false,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"refuse\",\"detail\":\"This window carries no digest, so there is no address to send it to and nothing to check the far side's answer against. §79.1 makes the digest the route, and bytes with no name have nowhere to go.\",\"from\":0}"
+    },
+    {
+      "id": "an-empty-window",
+      "note": "A seal that produced nothing is a fact about the recorder (§77.2), not an artifact. A zero-length object under a digest is something an investigator can open and mistake for the window.",
+      "input": {
+        "subject": {
+          "digest": "sha256:cccc",
+          "size": 0,
+          "held": null,
+          "receipt": false,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"refuse\",\"detail\":\"This window is empty. A seal that produced no bytes is a fact about the recorder worth reporting (§77.2) and is not something to upload — a zero-length object under a digest would be an artifact an investigator could open and mistake for the window.\",\"from\":0}"
+    },
+    {
+      "id": "no-bearer-at-all",
+      "note": "Nothing is lost by it: the window is on the disk and the incident naming it is already queued. That second clause is §79.3 — the alarm did not wait for this link.",
+      "input": {
+        "subject": {
+          "digest": "sha256:cccc",
+          "size": 4000000,
+          "held": null,
+          "receipt": false,
+          "bearer": null
+        }
+      },
+      "expected": "{\"decision\":\"no_bearer\",\"detail\":\"No bearer is up, so there is nothing to send over. That is the ordinary state for most of a robot's life (§34.1) and nothing is lost by it — the window is sealed on the disk and the incident naming it is already queued.\",\"from\":0}"
+    },
+    {
+      "id": "a-metered-link",
+      "note": "§34.3 against §34.4, resolved. A sealed window is bulk and waits; the incident that names it went over this same cellular bearer the moment it was raised.",
+      "input": {
+        "subject": {
+          "digest": "sha256:cccc",
+          "size": 4000000,
+          "held": null,
+          "receipt": false,
+          "bearer": {
+            "name": "wwan0",
+            "metered": true,
+            "metering_declared": false
+          }
+        }
+      },
+      "expected": "{\"decision\":\"wait_for_unmetered\",\"detail\":\"A sealed window is tens of megabytes and `wwan0` is assumed metered, so it waits for an unmetered link (§34.3). The alarm does not wait: §79.3 puts the incident on any bearer that is up, so an operator already knows this recording exists and what it hashes to.\",\"from\":0}"
+    },
+    {
+      "id": "a-receiver-holding-nothing",
+      "note": "Probed, and the answer was zero. This is `start`, and it is a different state from `probe` — one of them has asked.",
+      "input": {
+        "subject": {
+          "digest": "sha256:cccc",
+          "size": 4000000,
+          "held": {
+            "bytes": 0
+          },
+          "receipt": false,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"start\",\"detail\":\"Sending 4000000 bytes over `eth0`.\",\"from\":0}"
+    },
+    {
+      "id": "a-receiver-holding-half",
+      "note": "The offset places the next byte. It is the receiver’s claim and it never concludes the window arrived — that is the digest’s job.",
+      "input": {
+        "subject": {
+          "digest": "sha256:cccc",
+          "size": 4000000,
+          "held": {
+            "bytes": 1800000
+          },
+          "receipt": false,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"resume\",\"detail\":\"Resuming at 1800000 of 4000000 bytes. The offset is the receiver's claim and is used to place the next byte, never to conclude the window arrived — that is the digest's job (§79.2).\",\"from\":1800000}"
+    },
+    {
+      "id": "a-receiver-claiming-more-than-the-window",
+      "note": "`plan_fetch`’s discard, in the direction where nothing can be discarded. What is over there is not part of this window, so the next attempt starts at zero rather than appending to it.",
+      "input": {
+        "subject": {
+          "digest": "sha256:cccc",
+          "size": 4000000,
+          "held": {
+            "bytes": 5000000
+          },
+          "receipt": false,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"restart\",\"detail\":\"The receiver claims 5000000 bytes for a window of 4000000. A partial cannot be larger than what it is part of, so what is over there is not part of this window. It is sent again from the beginning.\",\"from\":0}"
+    },
+    {
+      "id": "a-receiver-that-already-has-it",
+      "note": "The state a robot reaches when an acknowledgement was lost. The re-send this avoids is four megabytes, which is what makes one small request worth making.",
+      "input": {
+        "subject": {
+          "digest": "sha256:cccc",
+          "size": 4000000,
+          "held": {
+            "bytes": 4000000,
+            "digest": "sha256:cccc"
+          },
+          "receipt": false,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"done\",\"detail\":\"The receiver holds all 4000000 bytes and says they hash to this window's digest. Nothing is sent and a receipt is written — which is the state a robot reaches after an upload whose acknowledgement was lost.\",\"from\":0}"
+    },
+    {
+      "id": "a-complete-object-nobody-will-name",
+      "note": "The right number of bytes and no digest. Restarted, because writing a receipt here would record an upload that may never have happened — and a receipt is the document that says this robot’s copy is no longer the only one.",
+      "input": {
+        "subject": {
+          "digest": "sha256:cccc",
+          "size": 4000000,
+          "held": {
+            "bytes": 4000000
+          },
+          "receipt": false,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"restart\",\"detail\":\"The receiver claims 4000000 bytes for a window of 4000000, and does not say what they hash to. A complete object nobody will name is not evidence this window arrived, and writing a receipt for it would record an upload that may never have happened. It is sent again from the beginning.\",\"from\":0}"
+    },
+    {
+      "id": "a-complete-object-under-the-wrong-digest",
+      "note": "Something else is stored at this address. Restarted, and the robot does not attempt to delete it: it has no authority over the receiver’s disk and the contract does not pretend it has.",
+      "input": {
+        "subject": {
+          "digest": "sha256:cccc",
+          "size": 4000000,
+          "held": {
+            "bytes": 4000000,
+            "digest": "sha256:dddd"
+          },
+          "receipt": false,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"restart\",\"detail\":\"The receiver claims 4000000 bytes for a window of 4000000, and does not say what they hash to. A complete object nobody will name is not evidence this window arrived, and writing a receipt for it would record an upload that may never have happened. It is sent again from the beginning.\",\"from\":0}"
+    }
+  ]
+}

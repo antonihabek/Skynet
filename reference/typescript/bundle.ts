@@ -108,7 +108,7 @@ export function planFetch(subject: FetchSubject): FetchPlan {
       decision: 'no_bearer',
       from: 0,
       detail: 'No bearer is up, so there is nothing to fetch over. That is the ordinary state for '
-        + 'most of a robot’s life (§34.1) and nothing about the update is lost by it — '
+        + 'most of a robot\'s life (§34.1) and nothing about the update is lost by it — '
         + 'the release manifest is already here and the transfer resumes when a link returns.',
     }
   }
@@ -142,7 +142,7 @@ export function planFetch(subject: FetchSubject): FetchPlan {
       decision: 'resume',
       from: partial,
       detail: `Resuming at ${partial} bytes${size === null ? '' : ` of ${size}`}. The partial is `
-        + 'keyed to this bundle’s digest, so it cannot be a different image’s tail.',
+        + 'keyed to this bundle\'s digest, so it cannot be a different image\'s tail.',
     }
   }
 

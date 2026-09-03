@@ -495,6 +495,28 @@ impl Layout {
         self.data().join("blackbox")
     }
 
+    /// What the last upload attempt did (§79).
+    ///
+    /// The same shape as [`Layout::transfer`] and beside the black box rather than beside the OS,
+    /// because the subject is a recording. It holds what the disk cannot say about an *attempt*;
+    /// what the far side holds is not written here at all, because that is not a fact about this
+    /// machine — it is asked for every pass (§79.2).
+    pub fn upload(&self) -> PathBuf {
+        self.blackbox().join("upload.json")
+    }
+
+    /// The receipt for one sealed window, beside the window (§79.4).
+    ///
+    /// Named from the recording rather than from the digest, so that `ls` in the sealed directory
+    /// answers "which of these has been collected" without anything having to hash a file. The
+    /// digest is *inside* it, and it is what makes the receipt believable: a receipt naming other
+    /// bytes is not this window's.
+    pub fn receipt(&self, recording: &str) -> PathBuf {
+        self.blackbox()
+            .join("sealed")
+            .join(format!("{recording}.receipt.json"))
+    }
+
     /// `/data/identity` (§10).
     pub fn identity(&self) -> PathBuf {
         self.data().join("identity")

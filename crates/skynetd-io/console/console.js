@@ -163,6 +163,11 @@ class Feed {
     this.path = path
     this.render = render
     this.value = null
+    // The last answer, whatever its status. `value` is only ever a *successful* one, because a
+    // panel that rendered a refusal as data would draw a robot's state out of an error page — but
+    // a refusal from this daemon is a document with fields in it, and throwing it away is how a
+    // panel ends up printing two words where the daemon wrote a paragraph.
+    this.body = null
     this.at = 0
     this.status = 'pending'
     this.detail = ''
@@ -171,6 +176,7 @@ class Feed {
   async poll() {
     try {
       const result = await call('GET', this.path)
+      this.body = result.body
       if (result.ok) {
         this.value = result.body
         this.at = Date.now()
@@ -178,12 +184,13 @@ class Feed {
         this.detail = ''
       } else if (result.status === 401 || result.status === 403) {
         this.status = 'denied'
-        this.detail = (result.body && result.body.error) || 'this needs a token'
+        this.detail = reasonOf(result, 'this needs a token')
       } else {
         this.status = 'error'
-        this.detail = (result.body && result.body.error) || ('HTTP ' + result.status)
+        this.detail = reasonOf(result, 'HTTP ' + result.status)
       }
     } catch (error) {
+      this.body = null
       this.status = 'unreachable'
       this.detail = String(error && error.message ? error.message : error)
     }
@@ -192,6 +199,19 @@ class Feed {
   ageMs() {
     return this.at ? Date.now() - this.at : null
   }
+}
+
+/**
+ * The sentence a refusal carries, not the status line's reason phrase.
+ *
+ * `api::error` writes both: `error` is "Service Unavailable" and `detail` is why. This console read
+ * the first for eight sessions, so every failing panel said two words where the daemon had written
+ * a paragraph naming the cause and the remedy — the same class of defect as the guards panel and
+ * the attestation sentence, and found the same way, by looking at the page.
+ */
+function reasonOf(result, fallback) {
+  const body = result.body || {}
+  return body.detail || body.error || fallback
 }
 
 // The threshold past which a panel is stale. Three poll periods: one missed answer is a lost
@@ -1460,6 +1480,15 @@ function renderBlackbox(feed) {
         'A daemon whose black box could not be opened still serves stop and status, which is why ' +
         'this panel can be the only one missing.'))
     }
+    // A robot whose ring will not open still has the windows it sealed before it stopped opening,
+    // and those are the ones somebody is looking for. The refusal carries them (\u00a779), so they
+    // are drawn under it rather than lost with it.
+    const held = (feed.body && feed.body.collection) || null
+    if (held && (held.windows || []).length > 0) {
+      body.appendChild(el('p', 'note',
+        'Sealed windows are still on the disk and can still be downloaded:'))
+      body.appendChild(sealedTable(held))
+    }
     return
   }
   const b = feed.value
@@ -1496,27 +1525,58 @@ function renderBlackbox(feed) {
   seal.addEventListener('click', sealNow)
   body.appendChild(seal)
 
-  const sealed = b.sealed || []
+  // §79's collection, off `collection.windows` rather than `sealed`. The two are the same set and
+  // only one of them says whether the Hub has a copy — and this panel's whole job is to answer
+  // questions an investigator would otherwise have to assume the answer to.
+  const collection = b.collection || {}
+  const sealed = collection.windows || (b.sealed || []).map(
+    file => ({ name: file.name, size_bytes: file.bytes, collected: null }))
+
   if (sealed.length === 0) {
     body.appendChild(el('p', 'note', 'No sealed recording on this robot yet.'))
   } else {
-    const table = el('table')
-    const head = el('tr')
-    for (const label of ['Sealed file', 'Size', '']) head.appendChild(el('th', null, label))
-    table.appendChild(head)
-    for (const file of sealed) {
-      const row = el('tr')
-      row.appendChild(el('td', null, file.name))
-      row.appendChild(el('td', 'num', bytes(file.bytes)))
-      const cell = el('td')
-      const download = el('button', 'act', 'download')
-      download.addEventListener('click', () => downloadSealed(file.name))
-      cell.appendChild(download)
-      row.appendChild(cell)
-      table.appendChild(row)
+    body.appendChild(sealedTable({ ...collection, windows: sealed }))
+
+    if (collection.pending > 0) {
+      body.appendChild(el('p', 'note',
+        collection.pending + ' window(s), ' + bytes(collection.pending_bytes) +
+        ', are on this robot and nowhere else. A sealed window is bulk and waits for an unmetered ' +
+        'link (\u00a734.3); the incident naming it went out on whatever bearer was up (\u00a779.3).'))
     }
-    body.appendChild(table)
+    const attempt = collection.last_attempt || {}
+    if (attempt.error) {
+      body.appendChild(el('p', 'note', 'Last upload attempt: ' + attempt.error))
+    }
   }
+}
+
+/** The sealed windows, and which of them the Hub has (\u00a779). */
+function sealedTable(collection) {
+  const table = el('table')
+  const head = el('tr')
+  for (const label of ['Sealed file', 'Size', 'On the Hub', '']) {
+    head.appendChild(el('th', null, label))
+  }
+  table.appendChild(head)
+  for (const file of collection.windows || []) {
+    const row = el('tr')
+    row.appendChild(el('td', null, file.name))
+    row.appendChild(el('td', 'num', bytes(file.size_bytes)))
+    const where = el('td')
+    // Three states, not two. `null` is an older daemon whose index carries no collection — and
+    // rendering that as "here only" would be this console asserting something it was not told.
+    where.appendChild(file.collected === null || file.collected === undefined
+      ? absent('not reported by this daemon')
+      : pill(file.collected ? 'collected' : 'here only', file.collected ? 'ok' : 'warn'))
+    row.appendChild(where)
+    const cell = el('td')
+    const download = el('button', 'act', 'download')
+    download.addEventListener('click', () => downloadSealed(file.name))
+    cell.appendChild(download)
+    row.appendChild(cell)
+    table.appendChild(row)
+  }
+  return table
 }
 
 // ── Actions ──────────────────────────────────────────────────────────────────

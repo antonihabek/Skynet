@@ -68,6 +68,7 @@ pub mod semver;
 pub mod skill;
 pub mod telemetry;
 pub mod transport;
+pub mod upload;
 pub mod watchdog;
 
 /// The version of the contract surface this crate implements.

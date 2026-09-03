@@ -82,6 +82,7 @@ pub mod skill;
 pub mod store;
 pub mod telemetry;
 pub mod trust;
+pub mod upload;
 
 #[cfg(unix)]
 pub mod serve;

@@ -416,7 +416,28 @@ impl Attempts {
     /// A record naming other bytes is discarded rather than adapted: it is the backoff of a
     /// different transfer, and inheriting it would make a fresh image wait out a failed one's curve.
     pub fn read(layout: &Layout, digest: &str) -> Attempts {
-        let Some(document) = crate::observe::read_json(&layout.transfer()) else {
+        Attempts::read_at(&layout.transfer(), digest)
+    }
+
+    /// Write it.
+    pub fn write(&self, layout: &Layout) -> std::io::Result<()> {
+        self.write_at(&layout.transfer())
+    }
+
+    /// Forget everything about this transfer.
+    pub fn clear(layout: &Layout) {
+        Attempts::clear_at(&layout.transfer());
+    }
+
+    /// The same three, against any record.
+    ///
+    /// §79's upload keeps its own, at [`Layout::upload`], and the curve, the reset rule and the
+    /// "a record for other bytes is not this transfer's" rule are identical in both directions —
+    /// so they are one implementation. What is *not* shared is the file: an image's backoff and a
+    /// recording's backoff are two independent transfers, and one record would make a failed
+    /// upload delay an OS update.
+    pub fn read_at(path: &Path, digest: &str) -> Attempts {
+        let Some(document) = crate::observe::read_json(path) else {
             return Attempts::default();
         };
         let held = document.get("digest").and_then(Json::as_str).unwrap_or("");
@@ -448,8 +469,8 @@ impl Attempts {
         }
     }
 
-    /// Write it.
-    pub fn write(&self, layout: &Layout) -> std::io::Result<()> {
+    /// Write it, against any record.
+    pub fn write_at(&self, path: &Path) -> std::io::Result<()> {
         let mut document = Json::obj();
         document.set("digest", Json::Str(self.digest.clone()));
         document.set("failures", Json::Num(self.failures as f64));
@@ -465,12 +486,15 @@ impl Attempts {
         let text = document
             .to_canonical()
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-        crate::observe::write_atomic(&layout.transfer(), text.as_bytes())
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        crate::observe::write_atomic(path, text.as_bytes())
     }
 
-    /// Forget everything about this transfer.
-    pub fn clear(layout: &Layout) {
-        let _ = std::fs::remove_file(layout.transfer());
+    /// Forget everything about it, against any record.
+    pub fn clear_at(path: &Path) {
+        let _ = std::fs::remove_file(path);
     }
 }
 

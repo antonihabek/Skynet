@@ -1,0 +1,79 @@
+{
+  "corpus": "transfer",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "the-window-arrived",
+      "note": "The whole of it, hashing to what was sealed. The only case that writes a receipt.",
+      "input": {
+        "reported": {
+          "bytes": 4000000,
+          "digest": "sha256:cccc"
+        },
+        "window": {
+          "digest": "sha256:cccc",
+          "size": 4000000
+        }
+      },
+      "expected": "{\"code\":\"complete\",\"detail\":\"The receiver holds the whole window and it hashes to what was sealed. A receipt is written beside the recording; the recording itself is kept, because §39.1's local route is for the operator standing next to the robot (§79.4).\",\"ok\":true,\"restart\":false}"
+    },
+    {
+      "id": "a-transfer-that-stopped",
+      "note": "Short, and the one outcome that does not restart — `checkBundle`’s rule in the other direction.",
+      "input": {
+        "reported": {
+          "bytes": 2500000
+        },
+        "window": {
+          "digest": "sha256:cccc",
+          "size": 4000000
+        }
+      },
+      "expected": "{\"code\":\"short\",\"detail\":\"The receiver holds 2500000 of 4000000 bytes. The transfer stopped early, which is what a link dropping looks like, and the next pass resumes from what is there.\",\"ok\":false,\"restart\":false}"
+    },
+    {
+      "id": "more-than-was-sent",
+      "note": "Another object under this digest, or a proxy answering for one. The next attempt begins at zero and nothing over there is deleted, because nothing here can delete it.",
+      "input": {
+        "reported": {
+          "bytes": 4400000,
+          "digest": "sha256:cccc"
+        },
+        "window": {
+          "digest": "sha256:cccc",
+          "size": 4000000
+        }
+      },
+      "expected": "{\"code\":\"long\",\"detail\":\"The receiver holds 4400000 bytes for a window of 4000000. More than was sent is not a transfer that stopped — it is another object under this digest, or a proxy answering for one. The next attempt begins at zero; this robot cannot delete what is over there and does not pretend to.\",\"ok\":false,\"restart\":true}"
+    },
+    {
+      "id": "the-right-number-of-different-bytes",
+      "note": "The digest was recorded at the seal, before any transfer existed, so it is the half of this comparison that is evidence.",
+      "input": {
+        "reported": {
+          "bytes": 4000000,
+          "digest": "sha256:dddd"
+        },
+        "window": {
+          "digest": "sha256:cccc",
+          "size": 4000000
+        }
+      },
+      "expected": "{\"code\":\"digest_mismatch\",\"detail\":\"The receiver holds the right number of bytes and they are not this window's. The digest was recorded at the seal, before any transfer existed (§77.1), so it is the half of this comparison that is evidence. No receipt is written and the next attempt begins at zero.\",\"ok\":false,\"restart\":true}"
+    },
+    {
+      "id": "a-receiver-that-said-nothing",
+      "note": "A `200` with an empty body. This must never produce a receipt: the receipt is the record saying the bytes are somewhere else, and a robot that wrote one off silence would be recording an upload on the strength of a status code.",
+      "input": {
+        "reported": {
+          "bytes": 4000000
+        },
+        "window": {
+          "digest": "sha256:cccc",
+          "size": 4000000
+        }
+      },
+      "expected": "{\"code\":\"digest_mismatch\",\"detail\":\"The receiver holds the right number of bytes and they are not this window's. The digest was recorded at the seal, before any transfer existed (§77.1), so it is the half of this comparison that is evidence. No receipt is written and the next attempt begins at zero.\",\"ok\":false,\"restart\":true}"
+    }
+  ]
+}
