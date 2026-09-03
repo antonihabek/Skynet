@@ -4786,8 +4786,8 @@ miniature, and currently trivial to fix.
 | skynetd — reconciliation, supervision, health | §9, §33 | **Built** — level-triggered, six ordered stages | — |
 | Identity, pairing, attestation, factory provisioning | §10, §50 | **Built on both sides** | `security.identity.attested` needs a TPM; no key is generated on a robot |
 | Desired state, fleet, OTA | §11–12, §14, §33.3 | **Built on both sides** — including §75's bundle fetch | No robot has yet applied an image from this Hub |
-| Black box, telemetry, replay | §13, §26, §41 | **Built** — ring, MCAP, sealing, deterministic replay, and a robot now replays a window against its own resolved limits (`telemetry.replay.deterministic`); §74's telemetry on both sides | The sealed bytes do not cross §17 (§77); five of eight counters have no source, and four of the five need the kernel. No recording of a *policy* has ever been replayed, because none has run |
-| Conformance and certification | §15, §31.4, §56 | **Built on both sides** — and a robot now runs §15's eight runtime tests on itself (`GET /conformance`) | Three of the eight execute; the other five name what they wait for. Nothing signs a result and nothing will on a robot — §19 makes that a rule rather than a gap (§15.1) |
+| Black box, telemetry, replay | §13, §26, §41 | **Built** — ring, MCAP, sealing, deterministic replay, and a robot now replays a window against its own resolved limits (`telemetry.replay.deterministic`); §74's telemetry on both sides, with all eight counters sourced — the five that looked like they needed a kernel are counted off this ring (§74.6) | The sealed bytes do not cross §17 (§77). No recording of a *policy* has ever been replayed, because none has run — and the same absence is why the five counters report unmeasured on a shipping robot rather than zero: a ring with no action channels has no cycles to count, which the window says rather than implies |
+| Conformance and certification | §15, §31.4, §56 | **Built on both sides** — and a robot now runs §15's eight runtime tests on itself (`GET /conformance`); §15's third suite has its numerator and denominator, counted off §13's ring (§74.6) | Three of the eight execute; the other five name what they wait for. Nothing signs a result and nothing will on a robot — §19 makes that a rule rather than a gap (§15.1). The `field` figure is measurable rather than measured: it needs a robot that runs cycles |
 | LeRobot | §16, §67 | **Built** — the bridge and its self-test | — |
 | Hub contract | §17, §57 | **Built** — twelve endpoints, no breaking change; four of them frozen as wire fixtures produced by the real producer (§31.6) | Two of them carry assertions rather than evidence (§57.1) |
 | Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 48 CLI commands, the golden path checked mechanically | — |
@@ -4805,13 +4805,13 @@ miniature, and currently trivial to fix.
 | Audio | §49 | Designed | — |
 | Entitlement | §51 | **Built** — offline verification | — |
 | Skills, environments, on-robot evaluation | §54–56 | **Built** — §54.4's lifecycle, composition, safety notes | Nothing on this edition can run a policy, so no skill has ever executed |
-| Interface — Hub-side and on-robot | §32 | **Built on both sides** — the console, the fleet page, the device page; §7.6's guards and limits cross §17 and are rendered on both, relayed rather than recomputed, and §32.2's four console panels all draw something measured | The transport plan does not cross §17, and should not until a policy runtime exists to be running one — the robot serves it per package at `GET /limits?package=`, for staged packages as well as active ones (§6.2). Guard trip rates come from §74's telemetry, and nothing counts a trip |
+| Interface — Hub-side and on-robot | §32 | **Built on both sides** — the console, the fleet page, the device page; §7.6's guards and limits cross §17 and are rendered on both, relayed rather than recomputed, and §32.2's four console panels all draw something measured | The transport plan does not cross §17, and should not until a policy runtime exists to be running one — the robot serves it per package at `GET /limits?package=`, for staged packages as well as active ones (§6.2). §32.1's guard-trip column now has its source and is frozen against a document a robot produces (§74.6); what it does not yet have is a robot that trips a guard |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **92,900 lines of Rust** across fifteen crates with 1,322
+**Built** means running, tested code: **93,100 lines of Rust** across fifteen crates with 1,336
 tests, **13,300 lines** of the TypeScript reference edition that the corpus holds it to, **5,400
 lines** of drivers, and **8,200 lines** in the Hub's mirror of the shared contracts. The Hub's own
-suite is 1,485 tests.
+suite is 1,490 tests.
 
 Numbers go stale; the shape does not. What the table is for is the **last column**, and the honest
 summary of it is that every subsystem that can be built without hardware has been, every subsystem
@@ -4929,6 +4929,76 @@ a fleet that lost every telemetry window would be exactly as safe and exactly as
   the elapsed time and the Hub can say so rather than dividing by a period it did not observe.
 * **§32.1's guard trip rate column has a source**, and it is the only one it could have had.
 * **New table**, following the `skynet_*` convention: `skynet_telemetry_windows`.
+
+---
+
+### 74.6 Where the counters come from, and why five of them were not missing
+
+§74 named eight counters and this document, and the code under it, recorded five as having *"no
+source"* — `cycles`, `interventions`, `guard_trips`, `clamps` and `estops`, on the grounds that four
+of them **need a kernel** and the fifth needs teleoperation. The first half of that is true and the
+conclusion does not follow.
+
+> They need a kernel to **happen**. They do not need one to be **counted**.
+
+§13's ring is the record of what the kernel did, cycle by cycle: `Cycle` carries the guards that
+tripped and the channels that were clamped, `Cycle::intervened` has computed the numerator §15
+divides by since the ring was written, and §26 puts an estop on the event channel beside them. And
+`skynetd` **holds that ring** — it opens it before the first reconcile pass, writes §26's events into
+it, seals it on a fault and serves it over §33.7. The producer and the consumer were in one process
+for twenty sessions and nothing had walked from one to the other.
+
+The fifth was wrong for a different reason and it is worth naming, because it is the failure §76.1
+is about wearing a different hat. `interventions` was recorded as needing teleoperation. §15 defines
+field conformance as *"the ratio of cycles the kernel did not have to intervene in"* — a **kernel**
+intervention. A human taking over is §54.4's `intervention_count` on an **episode**, which is a
+different number, measured by a different thing, on a different route. One word, two facts, and the
+one written down was the one that made the counter look impossible.
+
+#### A window of the ring, and the two ways it can say nothing
+
+A telemetry window is the interval between two reconcile passes; the ring holds minutes or years. So
+the window is taken **from a sequence number** — the ring's next sequence at the instant the window
+opened — and covers every record at or after it. Nothing new is stored: the boundary is one integer
+and the counting is a walk.
+
+Two conditions make the five unreportable, and they are separate facts that must not be collapsed:
+
+* **The ring has no action channels.** That is a robot with no command path — the policy runtime and
+  observation assembly (§25) are unwritten — so §26's four cycle channels have no producer and
+  neither has the safety path that asserts a stop. Zero here is the absence of a writer, not a
+  measurement, and rendering it would put a green guard column over a robot that has never commanded
+  a joint. This is a property of the **ring**, not of the edition: the day a control loop opens a
+  ring with channels in it, the counters begin reporting and nothing else changes.
+* **The window is no longer whole in the ring** — it wrapped, or it holds a gap, or a slot is torn.
+  The counts still exist and are a **floor**, and a floor presented as a count is exactly §47.4's
+  *"gap that looks like a quiet period"*, in the one place §74.1 chose its whole shape to avoid it. A
+  robot logging at 1 kHz into a ring that holds seventy seconds overwrites a five-minute window four
+  times over. The window is reported with the five absent, and because §74.1 made the windows tile,
+  the Hub sees a hole it can name rather than a small number it believes.
+
+They arrive **all five or none**: they come from one walk of one recording, so a window carrying some
+of them would describe a ring that was partly readable, which is not a state a ring has — and would
+leave a consumer dividing a measured numerator by an absent denominator.
+
+#### Two fixtures, because one of them freezes the wrong case
+
+§31.6 freezes the exact document a robot puts on the wire. There are now **two** for this route.
+`telemetry` is what every robot alive sends: no command path, so the five are absent. `telemetry-
+counted` is what a robot that commands a body sends, produced through a real ring at a real shape by
+the real counting — the cycles are the only synthetic ingredient, which is the same and only one
+`telemetry.replay.deterministic` has.
+
+Freezing only the first would leave the Hub's guard-trip column and §15's field figure exercised
+against nulls for as long as no robot commands anything, which is a column nobody has seen work.
+Freezing only the second would freeze a document no robot can currently produce.
+
+#### `guard_trips` and `interventions` are not the same number
+
+A cycle in which three guards fire is **one** intervention and **three** trips, and `clamps` counts
+**channels** whose command was altered. Each counter is at the granularity of the thing its name
+names. Collapsing the first two would put one line on a console twice and would compute §15's ratio
+from the wrong numerator.
 
 ---
 

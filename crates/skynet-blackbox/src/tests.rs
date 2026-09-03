@@ -978,3 +978,220 @@ fn a_window_with_no_cycles_is_not_deterministic() {
     assert_eq!(result.cycles, 0);
     assert!(!result.deterministic());
 }
+
+// ── §74's counters, off the ring ─────────────────────────────────────────────
+
+/// A cycle in which `tripped` guards fired and `clamped` channels were clamped.
+fn eventful_cycle(tick: u64, tripped: Vec<Guard>, clamped: Vec<bool>) -> OwnedCycle {
+    OwnedCycle {
+        tripped,
+        clamped,
+        ..plain_cycle(tick)
+    }
+}
+
+#[test]
+fn a_tally_counts_guards_per_trip_and_interventions_per_cycle() {
+    // The distinction the two counters exist for. One cycle in which three guards fire is *one*
+    // intervention and *three* trips, and a console dividing by both draws two different lines
+    // rather than one line twice.
+    let (mut ring, mut store) = ring_of(16);
+    for cycle in [
+        plain_cycle(1),
+        eventful_cycle(
+            2,
+            vec![Guard::Envelope, Guard::RateLimit, Guard::Watchdog],
+            vec![true, true, false],
+        ),
+        eventful_cycle(3, vec![Guard::Envelope], vec![false, false, true]),
+        plain_cycle(4),
+    ] {
+        let view = cycle.view();
+        ring.append(&mut store, cycle.tick * 1_000, Entry::Cycle(&view))
+            .unwrap();
+    }
+
+    let tally = crate::tally::tally(&ring, &store, 0);
+    assert_eq!(tally.cycles, 4);
+    assert_eq!(tally.interventions, 2, "two cycles had a guard trip");
+    assert_eq!(
+        tally.guard_trips, 4,
+        "three guards in one cycle and one in another"
+    );
+    assert_eq!(tally.clamps, 3, "two channels clamped, then one");
+    assert!(tally.measured(), "{tally:?}");
+}
+
+#[test]
+fn a_tally_covers_the_window_and_not_the_recording() {
+    // §74's window is the interval between two reconcile passes; the ring is minutes or years.
+    // A tally that counted the whole ring would report a robot's entire life every five minutes.
+    let (mut ring, mut store) = ring_of(16);
+    for tick in 1..=3 {
+        let cycle = eventful_cycle(tick, vec![Guard::Envelope], vec![true, false, false]);
+        let view = cycle.view();
+        ring.append(&mut store, tick * 1_000, Entry::Cycle(&view))
+            .unwrap();
+    }
+
+    // The window opens here.
+    let opened = ring.next_sequence();
+
+    for tick in 4..=5 {
+        let cycle = eventful_cycle(tick, vec![Guard::Envelope], vec![true, false, false]);
+        let view = cycle.view();
+        ring.append(&mut store, tick * 1_000, Entry::Cycle(&view))
+            .unwrap();
+    }
+
+    let tally = crate::tally::tally(&ring, &store, opened);
+    assert_eq!(tally.cycles, 2, "the three before the window are not in it");
+    assert_eq!(tally.interventions, 2);
+    assert_eq!(tally.guard_trips, 2);
+    assert!(tally.measured());
+}
+
+#[test]
+fn a_window_the_ring_wrapped_over_is_truncated_rather_than_small() {
+    // The failure this whole type exists to make impossible. A ring that overwrote the window's own
+    // records still yields a number, and that number is a floor presented as a count — §47.4's
+    // "gap that looks like a quiet period", in the one place §74.1 chose its shape to avoid it.
+    let (mut ring, mut store) = ring_of(4);
+    let opened = ring.next_sequence();
+    for tick in 1..=10 {
+        let cycle = eventful_cycle(tick, vec![Guard::Envelope], vec![true, false, false]);
+        let view = cycle.view();
+        ring.append(&mut store, tick * 1_000, Entry::Cycle(&view))
+            .unwrap();
+    }
+
+    let tally = crate::tally::tally(&ring, &store, opened);
+    assert!(tally.truncated, "six of the ten were overwritten");
+    assert!(!tally.complete());
+    assert!(
+        !tally.measured(),
+        "and so the counts must not be reported: {tally:?}"
+    );
+    // The counts are still there — they are a floor, and the caller is told not to trust them
+    // rather than handed a zero it cannot distinguish from a quiet robot.
+    assert_eq!(tally.cycles, 4);
+}
+
+#[test]
+fn a_window_that_fits_is_not_truncated() {
+    // The boundary the truncation test needs beside it: the ring holding exactly the window is the
+    // ordinary case, and reporting it as lost would make every counter permanently unmeasured.
+    let (mut ring, mut store) = ring_of(4);
+    let opened = ring.next_sequence();
+    for tick in 1..=4 {
+        let cycle = plain_cycle(tick);
+        let view = cycle.view();
+        ring.append(&mut store, tick * 1_000, Entry::Cycle(&view))
+            .unwrap();
+    }
+
+    let tally = crate::tally::tally(&ring, &store, opened);
+    assert!(!tally.truncated, "{tally:?}");
+    assert_eq!(tally.cycles, 4);
+    assert!(tally.measured());
+}
+
+#[test]
+fn a_ring_with_no_channels_reports_unmeasured_rather_than_zero() {
+    // §74.3, and the reason this is a property of the *ring* rather than of the edition: a ring
+    // created with no action channels is a robot with no command path, so zero cycles is the
+    // absence of a producer and not a measurement. The day a control loop opens a ring with
+    // channels in it, these counters begin reporting with no change here.
+    let empty = Shape {
+        joints: 0,
+        channels: 0,
+    };
+    let geometry = Geometry {
+        shape: empty,
+        record_size: empty.record_size(),
+        capacity: 8,
+        header_len: 4096,
+        digests: 4,
+        capabilities: 4,
+    };
+    let (mut ring, mut store) = Ring::create(geometry, meta());
+    ring.append(
+        &mut store,
+        1_000,
+        Entry::Event(&EventView {
+            code: EventCode::RecordingStarted,
+            subject: "skynetd",
+            detail: "started",
+        }),
+    )
+    .unwrap();
+
+    let tally = crate::tally::tally(&ring, &store, 0);
+    assert_eq!(tally.cycles, 0);
+    assert!(!tally.commands);
+    assert!(
+        !tally.measured(),
+        "zero cycles here is the absence of a control loop, not a measurement"
+    );
+    // And it is complete: nothing was lost. The two reasons a tally cannot be reported are
+    // separate facts, and collapsing them would make a wrapped ring indistinguishable from a
+    // robot that never commanded anything.
+    assert!(tally.complete());
+}
+
+#[test]
+fn an_estop_is_counted_where_it_is_recorded_and_a_clearance_is_not() {
+    // §26 puts an estop on the event channel, which is where it is counted from. Counting the
+    // clearance too would report two for one stop, and make the rate depend on whether an operator
+    // had got round to clearing it.
+    let (mut ring, mut store) = ring_of(8);
+    let opened = ring.next_sequence();
+    for (code, detail) in [
+        (EventCode::Estop, "button"),
+        (EventCode::EstopCleared, "operator"),
+        (EventCode::Estop, "button"),
+    ] {
+        ring.append(
+            &mut store,
+            1_000,
+            Entry::Event(&EventView {
+                code,
+                subject: "robot",
+                detail,
+            }),
+        )
+        .unwrap();
+    }
+
+    let tally = crate::tally::tally(&ring, &store, opened);
+    assert_eq!(tally.estops, 2);
+    assert_eq!(tally.cycles, 0);
+}
+
+#[test]
+fn a_gap_inside_the_window_makes_it_unreportable() {
+    // §47.4: the producer saying what it lost is the only reason the loss is visible. A window
+    // holding a gap is a window whose counts are a floor, so it is reported as unmeasured — and
+    // the Hub sees a window it does not have rather than a small number it believes.
+    let (mut ring, mut store) = ring_of(8);
+    let opened = ring.next_sequence();
+    let cycle = plain_cycle(1);
+    let view = cycle.view();
+    ring.append(&mut store, 1_000, Entry::Cycle(&view)).unwrap();
+    ring.append(
+        &mut store,
+        2_000,
+        Entry::Gap(Gap {
+            dropped: 400,
+            first_tick: 2,
+            reason: GapReason::WriterBehind,
+        }),
+    )
+    .unwrap();
+
+    let tally = crate::tally::tally(&ring, &store, opened);
+    assert_eq!(tally.cycles, 1);
+    assert_eq!(tally.dropped, 400);
+    assert!(!tally.complete());
+    assert!(!tally.measured());
+}

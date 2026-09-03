@@ -1367,11 +1367,20 @@ fn telemetry<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let layout = context.daemon.store.layout().clone();
     let queue = crate::outbound::Queue::of(&layout);
     let dropped: u64 = queue.status().dropped.iter().map(|(_, count)| *count).sum();
+    // The ring, counted over the open window: the same five counters a closed one would carry, so
+    // an operator watching this route sees them arrive rather than discovering at the Hub that they
+    // did not. Reading the ring does not advance it, so this stays a `GET` in the sense that
+    // matters.
+    let tally = context
+        .blackbox
+        .as_ref()
+        .and_then(|recorder| recorder.tally(context.daemon.counting.opened_sequence));
     crate::telemetry::to_json(
         &context.daemon.counting,
         wall_ms() as f64,
         context.now_ms as f64,
         dropped,
+        tally,
     )
 }
 

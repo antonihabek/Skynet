@@ -202,8 +202,14 @@ const HUB = 'lib/skynet/os'
  * what the Hub accepts.
  *
  * See `reference/wire/README.md`, including what is deliberately *not* frozen here.
+ *
+ * `telemetry` and `telemetry-counted` are two fixtures for one route, and the pair is deliberate.
+ * The first is what every robot alive sends: no control loop, so the five counters §13's ring
+ * supplies are absent. The second is what a robot that commands a body sends. Freezing only the
+ * first would leave the Hub's guard-trip and conformance columns exercised against nulls forever;
+ * freezing only the second would freeze a document no robot can currently produce.
  */
-const WIRE = ['checkin', 'episode', 'incident', 'telemetry']
+const WIRE = ['checkin', 'episode', 'incident', 'telemetry', 'telemetry-counted']
 
 const WIRE_REFERENCE = 'reference/wire'
 const WIRE_HUB = 'lib/skynet/os/wire'

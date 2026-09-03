@@ -10092,3 +10092,174 @@ forty-second; 59–61 from the forty-third.
 63. **Two functions with one name is a comment that has stopped working.** The console had a note
     saying two different plans share a word. The note was right and it does not travel: it lives in
     HTML and the collision happened in Rust, where the compiler is what said so.
+
+## 2026-09-03 (forty-fifth) — the five counters that were never waiting on a kernel
+
+§74 gives telemetry eight counters. Five of them have been reported unmeasured since the section was
+written, and `skynetd-io/src/telemetry.rs` said why in its own header:
+
+> **five of the eight counters have no source.** `cycles`, `guard_trips`, `clamps` and `estops` need
+> a kernel, which this daemon does not host, and `interventions` needs teleoperation.
+
+The first clause is true and the conclusion does not follow.
+
+### They need a kernel to happen. They do not need one to be counted
+
+§13's ring is the record of what the kernel did. `Cycle` carries the guards that tripped and the
+channels that were clamped; `Cycle::intervened` has computed the numerator §15 divides by since the
+ring was written, and its doc comment says so in as many words — *"the input to `field_conformance`
+(§13, §15)"*. §26 puts an estop on the event channel beside them.
+
+And `skynetd` **holds that ring**. It opens it before the first reconcile pass, writes §26's events
+into it, seals it on a fault, serves it at `GET /blackbox` and downloads it at `GET /blackbox/{name}`.
+The producer and the consumer have been in one process for twenty sessions and nothing had walked
+from one to the other. This is finding 33's shape again — a field whose only consumer is a sentence
+in a specification — except that here the *producer* was the one nobody had read.
+
+`skynet_blackbox::tally` is the walk. It takes a sequence number, counts every record at or after
+it, and returns the five with the three facts that decide whether they may be reported at all.
+
+### `interventions` was wrong for a second reason, and it is one word
+
+It was recorded as needing **teleoperation**. §15 defines field conformance as *"the ratio of cycles
+the kernel did not have to intervene in"* — a kernel intervention. A human taking over is §54.4's
+`intervention_count` on an **episode**: a different number, measured by a different thing, on a
+different route, and this repository has been careful about *that* one for three sessions (§76.3).
+
+Two facts, one word between them, and the one written into the header was the one that made the
+counter look impossible. It is the cheapest kind of defect to introduce and among the more expensive
+to notice, because nothing is broken — a counter is simply absent, with a reason beside it that reads
+as considered.
+
+### Under-counting is the failure to avoid here, and it is detectable
+
+A ring is circular. A window whose opening sequence has been overwritten still yields a number, and
+that number is a **floor presented as a count** — §47.4's *"gap that looks like a quiet period"*, in
+the one place §74.1 picked its entire shape to avoid it. A robot logging at 1 kHz into a ring that
+holds seventy seconds overwrites a five-minute window four times over.
+
+So `Tally::complete` is not advisory. Truncation, a gap inside the window, a hole in the sequence and
+a torn slot each make the counts unreportable, and the window goes out with the five absent — which,
+because §74.1 made the windows tile, leaves the Hub with a hole it can name rather than a small number
+it believes.
+
+`damaged` is counted over the **whole ring** rather than the window, and it cannot be otherwise: a
+torn record's sequence number is part of what was torn, so there is nothing to place it in a window
+by. Any damage puts the window in doubt. That is the safe direction.
+
+### The other reason to say nothing, and why it is a property of the ring
+
+A ring created with no action channels is a robot with **no command path**. §26's four cycle channels
+have no producer, and neither has the safety path that asserts a stop. Zero cycles there is the
+absence of a writer, not a measurement, and a fleet page rendering it would show a green guard column
+over a robot that has never commanded a joint.
+
+`Recorder::index` has said this in a sentence since it was written. `Tally::commands` is the
+machine-readable half of the same fact, and putting it on the **ring** rather than in a `cfg` or a
+constant is what makes this change do nothing today and everything later: the day a control loop
+opens a ring with channels in it, the five counters begin reporting and no line here changes.
+
+The two conditions are kept separate — `complete()` and `commands` — because collapsing them would
+make a wrapped ring indistinguishable from a robot that never commanded anything, and those send an
+operator to opposite ends of the building.
+
+The five also arrive **all five or none**. They come from one walk of one recording, so a window
+carrying some of them would describe a ring that was partly readable, which is not a state a ring
+has — and would leave a consumer dividing a measured numerator by an absent denominator.
+
+### `GET /telemetry` says which of the three silences it is
+
+Five nulls look identical and mean three different things to go and fix: the disk would not answer,
+this robot has no control loop, or the window fell out of the ring. The route now carries the
+sentence rather than the reader carrying the guess, and `unmeasured_note` is a function so the
+console and the terminal name it the same way. It is `None` when the five are present, because a note
+explaining an absence that is not there is text a reader learns to skip.
+
+### Two fixtures for one route, and the argument for the pair
+
+§31.6 freezes the exact document a robot puts on the wire, and there are now two for this one.
+
+`telemetry` is unchanged, byte for byte — which is itself the check that this change breaks nothing:
+the shipping robot has a recorder, opens it at zero channels, and produces exactly the window it
+produced before. It is now taken through a **real** `Recorder` rather than from a hand-built
+`Counting`, so the fixture is the daemon's output rather than a reconstruction of it.
+
+`telemetry-counted` is what a robot that commands a body sends: a real ring at a real shape, cycles
+encoded by the ring's own encoder, counted by the real tally, closed by the real `Counting::close`.
+The cycles are the only synthetic ingredient, which is the same and only one
+`telemetry.replay.deterministic` has.
+
+Freezing only the first would leave the Hub's guard-trip column and §15's field figure exercised
+against nulls for as long as no robot commands anything — a column nobody has seen work. Freezing
+only the second would freeze a document no robot can currently produce. That is the third time in
+three sessions that a fixture taken on an empty robot has turned out to freeze the empty case; the
+answer this time is not to move the fixture but to have both.
+
+### `guard_trips` and `interventions` are different numbers
+
+One cycle in which three guards fire is **one** intervention and **three** trips; `clamps` counts
+**channels** whose command was altered. Each counter is at the granularity of the thing its name
+names. Had they been collapsed, a console would draw one line twice and §15's ratio would be computed
+from the wrong numerator — and nothing would look wrong, because both are plausible small integers.
+
+### One re-export, found by needing it
+
+`skynet-blackbox` exposes `CycleView { tripped: &[Guard], response: Option<FaultResponse> }` in its
+public API and re-exported neither type. Anything that builds or reads a cycle had to take a direct
+dependency on `skynet-kernel` to name them — which would put the `no_std` kernel in the graph of
+consumers that have no other reason for it. `skynetd-io` is the first crate that needed to, which is
+why nobody had noticed.
+
+### Numbers
+
+Rust: **1,336** tests, 14 new — 7 on the tally in `skynet-blackbox`, 6 on the window in
+`skynetd-io/src/telemetry.rs`, 1 the second wire fixture. The suite runs **1,306** of them on this
+machine: 4 are `#[ignore]`d and **26 are POSIX-only** and do not compile on Windows, which is where
+this was run. That decomposition is worth writing down — it is the first time the gap between the
+number in §73 and the number `cargo test` prints has been explained rather than restated, and
+1,292 + 4 + 26 = 1,322 reproduces the previous session's figure exactly.
+
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets` clean; the golden path counts
+48 commands; the mirrors match, with `wire/telemetry-counted` added to the mirrored set.
+
+Hub: **1,490** tests, 5 new. `columnsFor` was split out of `recordWindows` so §74.3's boundary — a
+measured zero arriving as `0` and an unmeasured counter as `null` — can be exercised without a
+database. It could not be before, which is to say it never had been.
+
+§73 loses two claims it should no longer make: the black box row no longer says five counters have no
+source, and the interface row no longer says nothing counts a trip. Both gain the honest replacement,
+which is that the counting exists and a robot that trips a guard does not.
+
+### What this does not do
+
+**No robot reports a number today**, and the change is written so that this is visible rather than
+worked around. Every shipping robot's ring has zero action channels, so every window still goes out
+with the five absent — and now says which of three reasons that is. The value banked is that the path
+is built, tested against a document produced by the real producer, and gated on a property of the
+ring rather than on a sentence somebody has to remember to delete.
+
+§15's `field` suite is therefore **measurable rather than measured**. It has a numerator, a
+denominator, a coverage figure and a wire fixture proving they survive the crossing. What it needs is
+a robot that runs a cycle, which is the same thing five other rows of §73 are waiting for.
+
+### Findings, restated
+
+1–28 as before; 29–51 from the sessions above; 52–56 from the forty-first; 57–58 from the
+forty-second; 59–61 from the forty-third; 62–63 from the forty-fourth.
+
+64. **"X needs Y" is a claim about when X happens, and it gets read as a claim about when X can be
+    measured.** Four counters needed a kernel to occur and none of them needed one to be counted,
+    because the thing that occurs is written to a ring this process already holds. The sentence was
+    true and the conclusion drawn from it was not, and it survived twenty sessions because nothing
+    was broken — an absent counter with a reason beside it reads as considered.
+65. **A word that names two facts will eventually be written down as the wrong one.** `intervention`
+    is a kernel intervention in §15 and a human takeover in §54.4. This repository has been careful
+    about the second for three sessions and had the first recorded as impossible for the same
+    reason the second is hard.
+66. **Put the "can this be measured" test on the artifact, not on the edition.** `Tally::commands`
+    asks the ring whether it has action channels. A `cfg` flag or a constant naming this edition
+    would have been shorter and would need deleting by somebody who remembered it existed.
+67. **A number that a suite cannot print is a number worth decomposing once.** §73's test count has
+    been 30 higher than `cargo test` on this machine for as long as the machine has been Windows.
+    Nobody had subtracted the POSIX-gated tests from it, so every session either copied the figure
+    forward or quietly disagreed with it.

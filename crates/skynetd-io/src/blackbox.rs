@@ -127,6 +127,32 @@ impl Recorder {
         self.ring.geometry()
     }
 
+    /// The sequence the next record written will get.
+    ///
+    /// Taken when §74's telemetry window opens, so the window can later be counted off the ring
+    /// rather than off counters kept beside it. Counters beside the ring would be a second copy of
+    /// a fact the ring already holds, and the two would disagree the first time a write failed.
+    pub fn next_sequence(&self) -> u64 {
+        self.ring.next_sequence()
+    }
+
+    /// Count §74's counters over the records at or after `from_sequence`.
+    ///
+    /// Reads the whole file, for [`Recorder::read`]'s reason, and runs once per reconcile pass
+    /// rather than once per cycle.
+    ///
+    /// A ring that cannot be read produces **no tally rather than an empty one**: a caller handed
+    /// zeroes could not tell a robot that counted nothing from a disk that would not answer, and
+    /// those are the two facts §74.3 exists to keep apart.
+    pub fn tally(&self, from_sequence: u64) -> Option<skynet_blackbox::tally::Tally> {
+        let store = self.read().ok()?;
+        Some(skynet_blackbox::tally::tally(
+            &self.ring,
+            &store,
+            from_sequence,
+        ))
+    }
+
     /// Record something that changed.
     pub fn event(
         &mut self,
