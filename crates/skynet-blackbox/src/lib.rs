@@ -84,6 +84,7 @@ pub mod replay;
 pub mod ring;
 pub mod schema;
 pub mod seal;
+pub mod tally;
 
 #[cfg(test)]
 mod tests;
@@ -94,6 +95,16 @@ pub use record::{
 };
 pub use ring::{Geometry, Meta, Ring, RingError};
 pub use seal::{seal, Continuity, Hole, Reason, Sealed};
+pub use tally::{tally, Tally};
+
+/// The kernel types this crate's own public API is written in terms of.
+///
+/// [`CycleView::tripped`] is a `&[Guard]` and [`CycleView::response`] is an `Option<FaultResponse>`,
+/// so anything that builds or reads a cycle has to name both. Until this re-export existed the only
+/// way to do that was to take a direct dependency on `skynet-kernel` — which a crate should not
+/// have to do in order to use the crate it already has, and which would put the `no_std` kernel in
+/// the dependency graph of consumers that have no other reason for it.
+pub use skynet_kernel::{FaultResponse, Guard};
 
 /// The ring's on-disk format version.
 ///

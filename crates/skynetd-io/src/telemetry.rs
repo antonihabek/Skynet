@@ -4,20 +4,48 @@
 //! half — reading two clocks, counting what there is to count, and putting the result in §34.4's
 //! queue as the class that is dropped first and aggressively.
 //!
-//! # Almost every counter is unmeasured, and that is the report
+//! # Where each counter comes from
 //!
-//! §74.3 keeps zero and unmeasured apart for §33.6's reason, and on this edition the distinction is
-//! not academic: **five of the eight counters have no source.** `cycles`, `guard_trips`, `clamps`
-//! and `estops` need a kernel, which this daemon does not host, and `interventions` needs
-//! teleoperation (§17 of the Hub's own document).
+//! §74.3 keeps zero and unmeasured apart for §33.6's reason, and every counter here has to say
+//! which of the two it is. They come from three places:
 //!
-//! Three are real. `queue_dropped` is §34.4's own counter — the one the section is written around,
-//! *"this robot dropped forty thousand telemetry items last month"* — `reconcile_passes` is what
-//! this loop actually did, and `package_restarts` is §33.5's supervisor, which decides every
-//! restart on this machine and had simply never been asked how many. Reporting those three and
-//! naming the other five is the whole content of a window today, and it is worth sending: a robot
-//! that is up, reconciling and dropping nothing is a fact, and the gaps between windows are what
-//! make a fleet page able to say when it was not.
+//! * **This loop.** `reconcile_passes` is what it did, `queue_dropped` is §34.4's own counter — the
+//!   one the section is written around, *"this robot dropped forty thousand telemetry items last
+//!   month"* — and `package_restarts` is §33.5's supervisor, which decides every restart on this
+//!   machine.
+//! * **§13's ring.** `cycles`, `interventions`, `guard_trips`, `clamps` and `estops` are counted
+//!   off the black box by [`skynet_blackbox::tally`], because that is where the kernel's verdicts
+//!   already are. See below.
+//! * **Nowhere.** Nothing, now. There is no counter left in §74's set with no source.
+//!
+//! ## The five were never waiting on a kernel to count them
+//!
+//! This module used to say the five *"need a kernel, which this daemon does not host"*, and that
+//! they needed one to **happen** is true. It does not follow that they needed one to be counted:
+//! §13's ring is the record of what the kernel did, cycle by cycle, §26 puts an estop on its event
+//! channel, and this daemon opens that ring, holds it, seals it and serves it over §33.7. The
+//! source was in the process the whole time and nothing had walked it.
+//!
+//! One of the five was wrong for a second reason. `interventions` was recorded as needing
+//! *teleoperation*, and §15 is explicit that field conformance is *"the ratio of cycles the kernel
+//! did not have to intervene in"* — a kernel intervention, which `Cycle::intervened` has computed
+//! and named as `field_conformance`'s input since the ring was written. A human taking over is
+//! §54.4's `intervention_count` on an **episode**, which is a different number on a different
+//! route. Two facts with one word between them, and the wrong one had been written down.
+//!
+//! ## What the ring cannot tell you is reported as unmeasured, not as zero
+//!
+//! [`skynet_blackbox::tally::Tally::measured`] has two halves and both matter here. A ring created
+//! with no action channels is a robot with **no command path** — the policy runtime and observation
+//! assembly (§25) are unwritten on this edition — so its zero cycles are the absence of a producer
+//! rather than a measurement, and reporting them would put a green guard column over a robot that
+//! has never commanded a joint. And a ring that **wrapped over the window it was asked about**
+//! yields a floor rather than a count, which is §47.4's *"gap that looks like a quiet period"* in
+//! the one place §74.1 chose its whole shape to avoid it.
+//!
+//! So on the edition that ships today these five are still absent from a window, and the reason is
+//! now a property of the ring rather than a sentence in this file. The day a control loop opens a
+//! ring with channels in it, they begin reporting, and nothing here changes.
 //!
 //! # The window is closed by the same pass that opens the next one
 //!
@@ -56,28 +84,54 @@ pub struct Counting {
     /// expire out of §33.5's window. Subtracting two readings of that would report a *negative*
     /// number of restarts on a robot that had been quiet for ten minutes.
     pub restarts: u64,
+    /// The black box's next sequence number when this window opened.
+    ///
+    /// The window's boundary in the ring, and the only thing that has to be remembered for the five
+    /// counters the ring supplies: everything else is read back out of the recording at close.
+    ///
+    /// Zero is a window opened with **no recorder**, which is a robot whose black box would not
+    /// open — [`crate::blackbox::Recorder::open`] recreates a damaged ring rather than refusing to
+    /// start, so this is rare and is not the ordinary case. It is carried as zero rather than as an
+    /// `Option` because [`skynet_blackbox::tally::tally`] already gives zero the meaning "no
+    /// boundary was named", and a second spelling of the same absence is how the two drift apart.
+    pub opened_sequence: u64,
 }
 
 impl Counting {
     /// Open a window now.
-    pub fn opened(wall_ms: f64, monotonic_ms: f64, dropped: u64) -> Counting {
+    ///
+    /// `sequence` is the black box's next sequence number, or zero when there is no recorder.
+    pub fn opened(wall_ms: f64, monotonic_ms: f64, dropped: u64, sequence: u64) -> Counting {
         Counting {
             opened_wall_ms: wall_ms,
             opened_monotonic_ms: monotonic_ms,
             passes: 0,
             dropped_at_open: dropped,
             restarts: 0,
+            opened_sequence: sequence,
         }
     }
 
     /// Close it, producing the window that crosses to the Hub.
     ///
-    /// The six counters this edition cannot measure are **left absent** rather than set to zero.
-    /// That is §74.3, and it is the difference between a fleet page saying "this robot has tripped
-    /// no guards" and "nothing on this robot has ever counted a guard trip" — the first of which is
-    /// a claim about a machine nobody has measured.
-    pub fn close(&self, wall_ms: f64, monotonic_ms: f64, dropped: u64) -> Window {
-        Window {
+    /// A counter this robot could not measure is **left absent** rather than set to zero. That is
+    /// §74.3, and it is the difference between a fleet page saying "this robot has tripped no
+    /// guards" and "nothing on this robot has ever counted a guard trip" — the first of which is a
+    /// claim about a machine nobody has measured.
+    ///
+    /// `tally` is what §13's ring holds for this window, or `None` when there is no ring to ask or
+    /// it could not be read. A tally that is present but not
+    /// [`measured`](skynet_blackbox::tally::Tally::measured) is treated exactly like its absence,
+    /// and the module header says why: a ring with no command path and a ring that wrapped over the
+    /// window are different reasons to say nothing, and both of them are reasons to say nothing.
+    pub fn close(
+        &self,
+        wall_ms: f64,
+        monotonic_ms: f64,
+        dropped: u64,
+        tally: Option<skynet_blackbox::tally::Tally>,
+    ) -> Window {
+        let window = Window {
             from_ms: Some(self.opened_wall_ms),
             to_ms: Some(wall_ms),
             elapsed_ms: Some(monotonic_ms - self.opened_monotonic_ms),
@@ -88,7 +142,22 @@ impl Counting {
             Some(dropped.saturating_sub(self.dropped_at_open) as f64),
         )
         .with("reconcile_passes", Some(self.passes as f64))
-        .with("package_restarts", Some(self.restarts as f64))
+        .with("package_restarts", Some(self.restarts as f64));
+
+        // All five or none of them. They come from one walk of one recording, so a window carrying
+        // some of them would be describing a ring that was partly readable — which is not a state
+        // the ring has, and would leave a consumer dividing a measured numerator by an absent
+        // denominator.
+        let Some(tally) = tally.filter(|tally| tally.measured()) else {
+            return window;
+        };
+
+        window
+            .with("cycles", Some(tally.cycles as f64))
+            .with("interventions", Some(tally.interventions as f64))
+            .with("guard_trips", Some(tally.guard_trips as f64))
+            .with("clamps", Some(tally.clamps as f64))
+            .with("estops", Some(tally.estops as f64))
     }
 }
 
@@ -191,40 +260,91 @@ pub fn enqueue(
 /// Reports the window **being counted** rather than the last one sent, because on a robot this
 /// edition runs the second is very often nothing and a route that answered `null` would leave an
 /// operator unable to see whether their robot is counting at all.
-pub fn to_json(counting: &Counting, wall_ms: f64, monotonic_ms: f64, dropped: u64) -> Json {
-    let window = counting.close(wall_ms, monotonic_ms, dropped);
+pub fn to_json(
+    counting: &Counting,
+    wall_ms: f64,
+    monotonic_ms: f64,
+    dropped: u64,
+    tally: Option<skynet_blackbox::tally::Tally>,
+) -> Json {
+    let window = counting.close(wall_ms, monotonic_ms, dropped, tally);
     let report = assess_window(&window);
 
     let mut out = Json::obj();
-    out.set("open", window_to_json(&window))
-        .set(
-            "report",
-            skynet_contracts::telemetry::window_report_to_json(&report),
-        )
-        .set(
-            "note",
-            Json::Str(
-                "six of §74's eight counters have no source on this edition — four need a kernel, \
-                 one needs teleoperation and one needs the supervisor to count restarts. They are \
-                 reported unmeasured rather than as zero (§74.3)."
-                    .to_string(),
-            ),
-        );
+    out.set("open", window_to_json(&window)).set(
+        "report",
+        skynet_contracts::telemetry::window_report_to_json(&report),
+    );
+
+    // Why the ring-derived counters are absent, when they are — as a sentence, because the answer
+    // is not "this edition cannot" but one of three specific things about this robot's recording,
+    // and an operator looking at five nulls should not have to guess which.
+    if let Some(note) = unmeasured_note(tally) {
+        out.set("note", Json::Str(note.to_string()));
+    }
     out
+}
+
+/// Why §74's ring-derived counters are not in the window, or `None` when they are.
+///
+/// Separate from [`to_json`] so the console and any future consumer name the reason the same way,
+/// and so the three cases stay visibly distinct: no recorder, no command path, and a window the
+/// recording no longer covers are three different things to go and fix.
+pub fn unmeasured_note(tally: Option<skynet_blackbox::tally::Tally>) -> Option<&'static str> {
+    match tally {
+        None => Some(
+            "§74's cycles, interventions, guard_trips, clamps and estops are counted off §13's \
+             black box, and this robot's ring could not be read. They are reported unmeasured \
+             rather than as zero (§74.3).",
+        ),
+        Some(tally) if !tally.commands => Some(
+            "§74's cycles, interventions, guard_trips, clamps and estops are counted off §13's \
+             black box, and this recording has no action channels: there is no control loop on \
+             this robot, so §26's cycle channels have no producer. Zero here would be a claim \
+             about a machine that has never commanded a joint, so they are reported unmeasured \
+             (§74.3).",
+        ),
+        Some(tally) if !tally.complete() => Some(
+            "§74's cycles, interventions, guard_trips, clamps and estops are counted off §13's \
+             black box, and this window is no longer whole in it — the ring wrapped over it, or it \
+             holds a gap. The counts would be a floor rather than a count, so they are reported \
+             unmeasured and this window is one the Hub can see it does not have (§47.4, §74.1).",
+        ),
+        Some(_) => None,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::tests::TempRoot;
+    use skynet_blackbox::tally::Tally;
+
+    /// A tally that may be reported: a ring with a command path, whole over the window.
+    fn measured(
+        cycles: u64,
+        interventions: u64,
+        guard_trips: u64,
+        clamps: u64,
+        estops: u64,
+    ) -> Tally {
+        Tally {
+            cycles,
+            interventions,
+            guard_trips,
+            clamps,
+            estops,
+            commands: true,
+            ..Tally::default()
+        }
+    }
 
     #[test]
-    fn a_closed_window_carries_what_was_counted_and_names_the_rest() {
-        let counting = Counting::opened(1_000.0, 500.0, 7);
-        let mut counting = counting;
+    fn a_closed_window_carries_what_the_loop_counted() {
+        let mut counting = Counting::opened(1_000.0, 500.0, 7, 0);
         counting.passes = 12;
         counting.restarts = 3;
-        let window = counting.close(301_000.0, 300_500.0, 9);
+        let window = counting.close(301_000.0, 300_500.0, 9, None);
 
         assert_eq!(window.from_ms, Some(1_000.0));
         assert_eq!(window.elapsed_ms, Some(300_000.0));
@@ -233,19 +353,105 @@ mod tests {
         assert_eq!(window.counter("reconcile_passes"), Some(12.0));
         // §33.5's supervisor, counted since the window opened rather than read off a total.
         assert_eq!(window.counter("package_restarts"), Some(3.0));
+    }
 
-        // And the five with no source are absent rather than zero — §74.3, which is the difference
-        // between "this robot has tripped no guards" and "nothing here counts guard trips".
+    #[test]
+    fn the_rings_five_counters_reach_the_window() {
+        // §74's five, off §13's ring. The point of the whole arrangement: what the kernel did is
+        // already written down, and this is the walk that counts it.
+        let counting = Counting::opened(1_000.0, 500.0, 0, 1);
+        let window = counting.close(
+            301_000.0,
+            300_500.0,
+            0,
+            Some(measured(30_000, 12, 19, 41, 1)),
+        );
+
+        assert_eq!(window.counter("cycles"), Some(30_000.0));
+        assert_eq!(window.counter("interventions"), Some(12.0));
+        assert_eq!(window.counter("guard_trips"), Some(19.0));
+        assert_eq!(window.counter("clamps"), Some(41.0));
+        assert_eq!(window.counter("estops"), Some(1.0));
+
+        // And with all eight present, nothing in §74's set is unmeasured.
         let report = assess_window(&window);
         assert!(report.usable);
+        assert!(report.unmeasured.is_empty(), "{:?}", report.unmeasured);
+    }
+
+    #[test]
+    fn a_ring_with_no_command_path_leaves_the_five_absent_rather_than_zero() {
+        // The edition that ships today. §74.3: zero and unmeasured are opposite facts, and a fleet
+        // page showing "0 guard trips" over a robot that has never commanded a joint is the one
+        // that gets misread.
+        let counting = Counting::opened(1_000.0, 500.0, 0, 1);
+        let window = counting.close(
+            301_000.0,
+            300_500.0,
+            0,
+            Some(Tally {
+                commands: false,
+                ..Tally::default()
+            }),
+        );
+
+        let report = assess_window(&window);
         for name in ["cycles", "guard_trips", "clamps", "interventions", "estops"] {
             assert!(report.unmeasured.contains(&name.to_string()), "{name}");
         }
+        // The three this loop keeps are still there. A robot with no control loop still reports
+        // that it is up, reconciling and dropping nothing.
         assert!(
-            !report.unmeasured.contains(&"package_restarts".to_string()),
-            "and this one has a source now: {:?}",
+            !report.unmeasured.contains(&"reconcile_passes".to_string()),
+            "{:?}",
             report.unmeasured
         );
+    }
+
+    #[test]
+    fn a_window_the_ring_wrapped_over_is_reported_as_unmeasured_rather_than_small() {
+        // The counts exist and are a floor. Reporting them would put a plausible small number where
+        // a fleet needs a hole it can see — §47.4, and the reason §74.1 made windows tile.
+        let counting = Counting::opened(1_000.0, 500.0, 0, 1);
+        let window = counting.close(
+            301_000.0,
+            300_500.0,
+            0,
+            Some(Tally {
+                cycles: 400,
+                interventions: 3,
+                commands: true,
+                truncated: true,
+                ..Tally::default()
+            }),
+        );
+
+        assert_eq!(
+            window.counter("cycles"),
+            None,
+            "a floor must not be sent as a count"
+        );
+        let report = assess_window(&window);
+        assert!(report.unmeasured.contains(&"cycles".to_string()));
+    }
+
+    #[test]
+    fn the_five_arrive_together_or_not_at_all() {
+        // One walk of one recording produces all five, so a window carrying some of them would be
+        // describing a ring that was partly readable — a state the ring does not have, and one that
+        // would leave a consumer dividing a measured numerator by an absent denominator.
+        let counting = Counting::opened(0.0, 0.0, 0, 1);
+        let full = counting.close(1_000.0, 1_000.0, 0, Some(measured(10, 1, 1, 0, 0)));
+        let empty = counting.close(1_000.0, 1_000.0, 0, None);
+
+        let present = |window: &Window| {
+            ["cycles", "interventions", "guard_trips", "clamps", "estops"]
+                .iter()
+                .filter(|name| window.counter(name).is_some())
+                .count()
+        };
+        assert_eq!(present(&full), 5);
+        assert_eq!(present(&empty), 0);
     }
 
     /// A quiet robot reports **zero** restarts, not an absence, and the two are the whole of §74.3.
@@ -255,8 +461,26 @@ mod tests {
     /// fleet page filtering for churn has a robot to compare against.
     #[test]
     fn a_window_with_no_restarts_reports_zero_rather_than_nothing() {
-        let window = Counting::opened(0.0, 0.0, 0).close(1_000.0, 1_000.0, 0);
+        let window = Counting::opened(0.0, 0.0, 0, 0).close(1_000.0, 1_000.0, 0, None);
         assert_eq!(window.counter("package_restarts"), Some(0.0));
+    }
+
+    /// A robot that ran cycles and tripped nothing reports **zero** trips, which is the fact.
+    ///
+    /// The other half of §74.3, and the one this change makes reachable: with a command path and a
+    /// whole window, "no guard tripped" is a measurement rather than an absence, and it is the
+    /// number a certification's field suite needs to see.
+    #[test]
+    fn a_robot_that_tripped_nothing_says_so_rather_than_saying_nothing() {
+        let window = Counting::opened(0.0, 0.0, 0, 1).close(
+            1_000.0,
+            1_000.0,
+            0,
+            Some(measured(500, 0, 0, 0, 0)),
+        );
+        assert_eq!(window.counter("guard_trips"), Some(0.0));
+        assert_eq!(window.counter("interventions"), Some(0.0));
+        assert_eq!(window.counter("cycles"), Some(500.0));
     }
 
     #[test]
@@ -264,7 +488,7 @@ mod tests {
         let root = TempRoot::new("telemetry-unpaired");
         let layout = root.layout();
         let queue = Queue::of(&layout);
-        let window = Counting::opened(0.0, 0.0, 0).close(1_000.0, 1_000.0, 0);
+        let window = Counting::opened(0.0, 0.0, 0, 0).close(1_000.0, 1_000.0, 0, None);
         assert_eq!(enqueue(&queue, &layout, &window), Err(NotQueued::Unpaired));
     }
 
@@ -276,7 +500,7 @@ mod tests {
         let root = TempRoot::new("telemetry-unusable");
         let layout = root.layout();
         let queue = Queue::of(&layout);
-        let window = Counting::opened(0.0, 500.0, 0).close(1_000.0, 500.0, 0);
+        let window = Counting::opened(0.0, 500.0, 0, 0).close(1_000.0, 500.0, 0, None);
         match enqueue(&queue, &layout, &window) {
             Err(NotQueued::Unpaired) => {}
             Err(NotQueued::Unusable(_)) => {}
@@ -286,8 +510,8 @@ mod tests {
 
     #[test]
     fn the_open_window_is_reported_rather_than_the_last_one_sent() {
-        let counting = Counting::opened(1_000.0, 0.0, 0);
-        let document = to_json(&counting, 61_000.0, 60_000.0, 3);
+        let counting = Counting::opened(1_000.0, 0.0, 0, 0);
+        let document = to_json(&counting, 61_000.0, 60_000.0, 3, None);
         assert_eq!(
             document
                 .get("open")
@@ -300,5 +524,26 @@ mod tests {
             .and_then(|report| report.get("usable"))
             .and_then(Json::as_bool)
             .unwrap_or(false));
+    }
+
+    #[test]
+    fn the_route_says_which_of_the_three_silences_this_is() {
+        // Three different things to go and fix, and five nulls look identical. An operator reading
+        // this route should not have to guess whether the disk failed, the robot has no control
+        // loop, or the window fell out of the ring.
+        assert!(unmeasured_note(None).unwrap().contains("could not be read"));
+        assert!(unmeasured_note(Some(Tally::default()))
+            .unwrap()
+            .contains("no action channels"));
+        assert!(unmeasured_note(Some(Tally {
+            commands: true,
+            truncated: true,
+            ..Tally::default()
+        }))
+        .unwrap()
+        .contains("no longer whole"));
+        // And nothing at all when the five are in the window, because a note explaining an absence
+        // that is not there is the kind of text a reader learns to skip.
+        assert!(unmeasured_note(Some(measured(1, 0, 0, 0, 0))).is_none());
     }
 }

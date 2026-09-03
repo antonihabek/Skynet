@@ -8762,14 +8762,173 @@ mod wire {
         frozen("checkin", &document);
     }
 
-    /// §74's window, closed the way a reconcile pass closes one.
+    /// §74's window, closed the way a reconcile pass closes one **on the edition that ships**.
+    ///
+    /// Through a real recorder, opened at the shape the daemon opens one at: zero joints and zero
+    /// channels, because there is no control loop. So the five counters §13's ring supplies are
+    /// absent, and that is not this test being lazy — it is the document every robot alive sends,
+    /// and the one the Hub has to render today.
+    ///
+    /// [`the_telemetry_window_a_robot_with_a_control_loop_closes`] is the other half, and the two
+    /// exist together on purpose: a fixture taken on an empty robot freezes the empty case, and a
+    /// fixture taken only on a full one freezes a case no robot can currently produce.
     #[test]
     fn the_telemetry_window_a_reconcile_pass_closes() {
-        let mut counting = crate::telemetry::Counting::opened(1_788_307_200_000.0, 60_000.0, 7);
+        let root = TempRoot::new("wire-telemetry");
+        let layout = root.layout();
+        let recorder = crate::blackbox::Recorder::open(
+            &layout,
+            crate::blackbox::supervisor_meta(&layout),
+            skynet_blackbox::record::Shape {
+                joints: 0,
+                channels: 0,
+            },
+            64 * 1024,
+        )
+        .expect("a recorder");
+
+        let mut counting = crate::telemetry::Counting::opened(
+            1_788_307_200_000.0,
+            60_000.0,
+            7,
+            recorder.next_sequence(),
+        );
         counting.passes = 30;
         // Five minutes of wall clock, five of monotonic, and two drops inside the window.
-        let window = counting.close(1_788_307_500_000.0, 360_000.0, 9);
+        let window = counting.close(
+            1_788_307_500_000.0,
+            360_000.0,
+            9,
+            recorder.tally(counting.opened_sequence),
+        );
         frozen("telemetry", &crate::telemetry::window_to_json(&window));
+    }
+
+    /// §74's window from a robot that **commands a body**, counted off §13's ring.
+    ///
+    /// Every step is the real producer: a real ring at a real shape, cycles encoded by the ring's
+    /// own encoder, counted by the real [`skynet_blackbox::tally::tally`], closed by the real
+    /// `Counting::close`. What is synthetic is the cycles themselves — no policy runtime exists to
+    /// have produced them — which is the same and only synthetic ingredient
+    /// `telemetry.replay.deterministic` has, for the same reason.
+    ///
+    /// It is frozen now rather than when a control loop appears, because the Hub has to render this
+    /// today: a fleet page whose guard-trip column is only ever exercised against nulls is a column
+    /// nobody has seen work.
+    #[test]
+    fn the_telemetry_window_a_robot_with_a_control_loop_closes() {
+        use skynet_blackbox::record::{
+            CycleView, Entry, EventCode, EventView, Shape, NO_CAPABILITY,
+        };
+        use skynet_blackbox::ring::{Geometry, Meta, Ring};
+
+        let shape = Shape {
+            joints: 2,
+            channels: 2,
+        };
+        let (mut ring, mut store) = Ring::create(
+            Geometry {
+                shape,
+                record_size: shape.record_size(),
+                capacity: 64,
+                header_len: 4096,
+                digests: 4,
+                capabilities: 4,
+            },
+            Meta {
+                robot_id: "dev-0001".to_string(),
+                embodiment: [0x11; 32],
+                os_image: [0x22; 32],
+                tier: 1,
+                enforcement: 1,
+                simulator: false,
+                wall_epoch_ns: 1_788_307_200_000_000_000,
+                mono_ns: 60_000_000_000,
+                channels: vec![
+                    "arm.shoulder.pitch".to_string(),
+                    "arm.elbow.pitch".to_string(),
+                ],
+            },
+        );
+
+        let opened = ring.next_sequence();
+
+        // Ten cycles. Two of them trip — one on a single guard, one on two at once — so the frozen
+        // document carries the case the two counters exist to tell apart: three trips across two
+        // interventions.
+        for tick in 1..=10u64 {
+            let tripped: Vec<skynet_blackbox::Guard> = match tick {
+                4 => vec![skynet_blackbox::Guard::Envelope],
+                7 => vec![
+                    skynet_blackbox::Guard::Envelope,
+                    skynet_blackbox::Guard::RateLimit,
+                ],
+                _ => Vec::new(),
+            };
+            let clamped = vec![!tripped.is_empty(), false];
+            let view = CycleView {
+                tick,
+                observation: [0xAB; 32],
+                policy: 0,
+                state_flags: 0,
+                fault_code: 0,
+                rhal_result: 0,
+                state_seq: tick as u32,
+                state_stamp_ns: tick * 1_000_000,
+                command_stamp_ns: tick * 1_000_000,
+                command_seq: tick as u32,
+                mode: 0,
+                advisory: false,
+                response: None,
+                tripped: &tripped,
+                capability: NO_CAPABILITY,
+                nearest_person_m: f32::NAN,
+                base_pose: [f32::NAN; 7],
+                base_twist: [0.0; 6],
+                desired: &[0.10, 0.20],
+                command: &[0.10, 0.20],
+                mask: &[1, 1],
+                clamped: &clamped,
+                position: &[0.09, 0.19],
+                velocity: &[0.0, 0.0],
+                effort: &[1.0, 2.0],
+            };
+            ring.append(&mut store, tick * 1_000_000, Entry::Cycle(&view))
+                .expect("a cycle");
+        }
+        ring.append(
+            &mut store,
+            11_000_000,
+            Entry::Event(&EventView {
+                code: EventCode::Estop,
+                subject: "robot",
+                detail: "button",
+            }),
+        )
+        .expect("an estop");
+
+        let mut counting =
+            crate::telemetry::Counting::opened(1_788_307_200_000.0, 60_000.0, 7, opened);
+        counting.passes = 30;
+        let window = counting.close(
+            1_788_307_500_000.0,
+            360_000.0,
+            9,
+            Some(skynet_blackbox::tally::tally(&ring, &store, opened)),
+        );
+
+        // The assertions belong here as well as in the frozen bytes: a fixture that changed for the
+        // wrong reason would still be a fixture, and these say what the right numbers are.
+        assert_eq!(window.counter("cycles"), Some(10.0));
+        assert_eq!(window.counter("interventions"), Some(2.0));
+        assert_eq!(window.counter("guard_trips"), Some(3.0));
+        assert_eq!(window.counter("clamps"), Some(2.0));
+        assert_eq!(window.counter("estops"), Some(1.0));
+
+        frozen(
+            "telemetry-counted",
+            &crate::telemetry::window_to_json(&window),
+        );
     }
 
     /// §38.1's alarm, through the reconcile path that raises it.

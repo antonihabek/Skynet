@@ -274,7 +274,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         // Opens §74's window and closes nothing, which is the honest output of a single pass: a
         // window needs two passes to have an interval, and a zero-length one would be a row that
         // could produce no rate and no coverage.
-        report_telemetry(&mut daemon, &layout, now);
+        report_telemetry(&mut daemon, recorder.as_ref(), &layout, now);
         let mut sender =
             skynetd_io::connectivity::Sender::new(skynetd_io::outbound::Queue::of(&layout));
         report_drain(&mut sender, &layout, sink.as_ref(), now, 1.0);
@@ -380,7 +380,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                 // a robot that stops reconciling stops producing windows, and the gap is then
                 // visible on the Hub as a gap — which is what §47.4 asks for and what a heartbeat
                 // on a separate timer would hide.
-                report_telemetry(&mut daemon, &layout, now);
+                report_telemetry(&mut daemon, recorder.as_ref(), &layout, now);
                 // §34.4's queue, drained. Bounded per pass rather than to exhaustion: a reconcile
                 // loop that spent ten minutes uploading episodes would be a supervisor that stopped
                 // supervising, and §33.2's watchdog would notice — correctly — that the loop had
@@ -1117,8 +1117,13 @@ where
 ///
 /// The window is opened on the **first** call rather than at start-up, so its first bound is a real
 /// pass and not a robot that had not begun.
+///
+/// `recorder` is §13's ring, which is where five of §74's eight counters are read from. A robot
+/// whose black box would not open still reports a window — the three counters this loop keeps are
+/// still true — and says nothing about the other five rather than zero for them.
 fn report_telemetry<L, S>(
     daemon: &mut skynetd_io::runtime::Daemon<L, S>,
+    recorder: Option<&skynetd_io::blackbox::Recorder>,
     layout: &Layout,
     now_ms: u64,
 ) where
@@ -1129,15 +1134,24 @@ fn report_telemetry<L, S>(
     let dropped: u64 = queue.status().dropped.iter().map(|(_, count)| *count).sum();
     let wall = skynetd_io::api::wall_ms() as f64;
     let monotonic = now_ms as f64;
+    // Where the ring is now, which is where the *next* window begins. Read once and used for both
+    // the close and the open below, so the two windows tile in the recording exactly as they tile
+    // on the clock — a second reading taken between them would leave any record written in between
+    // in neither window (§74.1).
+    let sequence = recorder
+        .map(|recorder| recorder.next_sequence())
+        .unwrap_or(0);
 
     // Nothing open yet: this pass is the first bound, not a window from the epoch.
     if daemon.counting.opened_monotonic_ms == 0.0 && daemon.counting.opened_wall_ms == 0.0 {
-        daemon.counting = skynetd_io::telemetry::Counting::opened(wall, monotonic, dropped);
+        daemon.counting =
+            skynetd_io::telemetry::Counting::opened(wall, monotonic, dropped, sequence);
         return;
     }
 
     daemon.counting.passes = daemon.counting.passes.saturating_add(1);
-    let window = daemon.counting.close(wall, monotonic, dropped);
+    let tally = recorder.and_then(|recorder| recorder.tally(daemon.counting.opened_sequence));
+    let window = daemon.counting.close(wall, monotonic, dropped, tally);
 
     match skynetd_io::telemetry::enqueue(&queue, layout, &window) {
         Ok(_) => {}
@@ -1150,7 +1164,7 @@ fn report_telemetry<L, S>(
         }
     }
 
-    daemon.counting = skynetd_io::telemetry::Counting::opened(wall, monotonic, dropped);
+    daemon.counting = skynetd_io::telemetry::Counting::opened(wall, monotonic, dropped, sequence);
 }
 
 /// Cache the release manifest for the desired OS version (§12, §57).
