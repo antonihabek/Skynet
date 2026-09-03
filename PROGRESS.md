@@ -10119,17 +10119,21 @@ in a specification — except that here the *producer* was the one nobody had re
 `skynet_blackbox::tally` is the walk. It takes a sequence number, counts every record at or after
 it, and returns the five with the three facts that decide whether they may be reported at all.
 
-### `interventions` was wrong for a second reason, and it is one word
+### `interventions` was wrong for a second reason
 
 It was recorded as needing **teleoperation**. §15 defines field conformance as *"the ratio of cycles
-the kernel did not have to intervene in"* — a kernel intervention. A human taking over is §54.4's
-`intervention_count` on an **episode**: a different number, measured by a different thing, on a
-different route, and this repository has been careful about *that* one for three sessions (§76.3).
+the kernel did not have to intervene in"* — a kernel intervention.
 
-Two facts, one word between them, and the one written into the header was the one that made the
-counter look impossible. It is the cheapest kind of defect to introduce and among the more expensive
-to notice, because nothing is broken — a counter is simply absent, with a reason beside it that reads
-as considered.
+> **Corrected in the forty-eighth session.** This entry originally went on to say that a human taking
+> over is §54.4's `intervention_count` on an episode, *"a different number on a different route"*.
+> That is not in the specification and both implementations contradict it: §54.4's count is the same
+> kernel number over a narrower window, and §54.4's own diagram ends `running` on a guard trip. The
+> original sentence was invented here to explain the wrong claim it was correcting, which is a worse
+> failure than the one it fixed. See the forty-eighth session.
+
+The comment that was replaced made a counter look impossible, which is the cheapest kind of defect to
+introduce and among the more expensive to notice: nothing is broken, a counter is simply absent, and
+the reason beside it reads as considered.
 
 ### Under-counting is the failure to avoid here, and it is detectable
 
@@ -10252,10 +10256,12 @@ forty-second; 59–61 from the forty-third; 62–63 from the forty-fourth.
     because the thing that occurs is written to a ring this process already holds. The sentence was
     true and the conclusion drawn from it was not, and it survived twenty sessions because nothing
     was broken — an absent counter with a reason beside it reads as considered.
-65. **A word that names two facts will eventually be written down as the wrong one.** `intervention`
-    is a kernel intervention in §15 and a human takeover in §54.4. This repository has been careful
-    about the second for three sessions and had the first recorded as impossible for the same
-    reason the second is hard.
+65. **A comment that explains why something is impossible is a claim, and it should be checked like
+    one.** `telemetry.rs` said `interventions` needed teleoperation. It does not — and the
+    correction written here first said the word meant two things in two sections, which was also
+    not true and was invented to make the original error make sense. ~~A word that names two facts
+    will eventually be written down as the wrong one.~~ *Restated in the forty-eighth session, which
+    found the same wrong claim in `skill.rs` and no support for the second meaning anywhere.*
 66. **Put the "can this be measured" test on the artifact, not on the edition.** `Tally::commands`
     asks the ring whether it has action channels. A `cfg` flag or a constant naming this edition
     would have been shorter and would need deleting by somebody who remembered it existed.
@@ -10472,3 +10478,112 @@ forty-second; 59–61 from the forty-third; 62–63 from the forty-fourth; 64–
     two fields makes a guard hold at a distance; the other makes a guard report a better sentence
     and nothing else. Shipping both and saying which is which is more useful than shipping the first
     and being quiet about the second.
+
+## 2026-09-03 (forty-eighth) — the sweep the forty-fifth session's finding asked for, and the sentence it had to retract
+
+Finding 64 said *"'X needs Y' is a claim about when X happens, and it gets read as a claim about when
+X can be measured."* A finding like that is worth a sweep, so this session grepped every *"no
+source"*, *"nothing carries"*, *"nowhere to arrive from"* and *"cannot be measured"* in the tree and
+read each against what is actually available.
+
+It found one, and it found it in the file next door.
+
+### The same wrong claim, in `skill.rs`
+
+> **`interventions` is absent rather than zero** when nothing on this robot counts them. §54.4 asks
+> for the number; this edition has no kernel channel and therefore no source for it.
+
+Word for word the argument the forty-fifth session removed from `telemetry.rs`, in the module that
+produces §54.4's episode. The conclusion is wrong for the same reason: the kernel does not have to be
+**asked** what it did, because it wrote it down, and this daemon holds the recording.
+
+Everything else was already built and built well. `Invocation::interventions` is an `Option<u32>`,
+`Cycle::guards_observable` is the switch that keeps a zero out of the episode, `episode()` writes
+`interventions_measured: false` into `metadata` when it has nothing. One producer was missing, and
+`runtime.rs` supplied a hard-coded `false` with a comment saying why.
+
+### And the retraction, which is the more important half
+
+The forty-fifth session's correction did not stop at *"`interventions` is a kernel intervention"*. It
+went on:
+
+> A human taking over is §54.4's `intervention_count` on an **episode**, which is a different
+> number, measured by a different thing, on a different route.
+
+**That is not in the specification.** §54.4 lists *"intervention count"* with no qualifier; the only
+sentence anywhere claiming a human-takeover meaning is the one written in the forty-fifth session.
+Both implementations contradict it — the Hub's `devices.ts` says *"a robot with no kernel channel
+cannot count interventions"* — and §54.4's own diagram ends `running` on a **guard trip**, which is a
+kernel intervention by definition.
+
+So a session that corrected an invented explanation invented one of its own, in the same paragraph,
+to make the original error make sense. That is worse than the defect it fixed: a wrong comment in one
+crate misleads whoever reads that crate, and a wrong sentence in §74.6 is in the document every
+edition is measured against. §74.6, the forty-fifth entry above and the Hub's twelfth are all
+corrected in place rather than quietly rewritten, because a log that edits away its own mistakes is
+not evidence of anything.
+
+### Added, not edge-detected
+
+`Cycle::interventions_since` is an `Option<u64>` and it replaced `guard_tripped: bool` plus
+`guards_observable: bool`. The pair is worth a sentence: §7.2 dislikes exactly that shape — a value
+and a second value saying whether the first is real — and an `Option` says both and cannot be read
+without the question being asked.
+
+The counting is a **sum**, because the ring reports how many cycles the kernel intervened in over an
+interval and a reconcile pass is not a control cycle. The rising edge it replaced existed only
+because the input was a boolean, and it collapsed a whole pass of trips into one. On the real shape
+that matters more than it sounds: §54.4 ends `running` at the first trip, so the interval that
+reports interventions is usually the *only* one an invocation sees — and the number it carries is the
+whole of the episode's count. Reporting `1` where the ring said `3` would not be a rounding error,
+it would be the number.
+
+`guard_tripped` did not disappear; §54.4's transition still asks a yes/no question and
+`interventions_since.is_some_and(|n| n > 0)` answers it. `None` reads as `false`, which is the value
+the daemon used to supply, so a robot that counts nothing aborts no skill it would not have aborted
+before.
+
+### One invocation at a time, and the limit is named rather than hidden
+
+A count off the ring covers an **interval**; an episode wants an **invocation**. With one skill in
+`running` they are the same thing. With two, the interval's trips belong to whichever policy was
+commanding — the recording knows by digest and nothing reads that yet — so a pass with more than one
+invocation in `running` leaves the count unmeasured **for all of them**.
+
+Attributing an interval's trips to every live invocation would have been one line shorter and would
+put a number on the wrong skill, which §7.2 rules out: a measurement nobody can attribute is not one.
+
+### What it does not do
+
+**No robot reports a count today**, for the same reason §74.6's five counters report nothing: the
+tally is `None` unless the ring can hold a cycle, and no edition writes one. The value is that the
+path exists, is tested against the real producer, and is gated on a property of the ring rather than
+a constant.
+
+### Numbers
+
+Rust: **1,346** tests, 4 new, **1,316** run here. `cargo fmt --all --check` and
+`cargo clippy --workspace --all-targets` clean; golden path 48 commands; mirrors match.
+
+Two of the four tests were rewritten after failing, and both failures were the code being right:
+§54.4 aborts at the first guard trip, so an invocation cannot accumulate trips across passes and the
+episode is emitted *at* the trip rather than after the unit exits. The tests as first written assumed
+otherwise and asserted a shape the lifecycle does not produce.
+
+### Findings, restated
+
+1–28 as before; 29–51 from the sessions above; 52–56 from the forty-first; 57–58 from the
+forty-second; 59–61 from the forty-third; 62–63 from the forty-fourth; 64–67 from the forty-fifth
+(65 restated there); 68–71 from the forty-sixth; 72–73 from the forty-seventh.
+
+74. **A correction is a claim and deserves the same evidence as the thing it corrects.** The
+    forty-fifth session's fix was right and its explanation was invented. The invention was more
+    dangerous than the original error because it landed in the specification rather than in a
+    comment, and because it read as the kind of careful distinction this document is full of.
+75. **A finding that names a *pattern* is worth grepping for the same day.** Finding 64 was written
+    about one file. The identical sentence was two files away, in the module that produces the
+    document §76.3 spends a section on protecting, and nobody had looked.
+76. **A test that fails because the system is right is the cheapest lesson available.** Both rewrites
+    here came from assuming an invocation could accumulate interventions across passes. §54.4 ends
+    at the first one, which is a property worth knowing and was not written down anywhere near the
+    counter.

@@ -4911,6 +4911,8 @@ mod skills {
         /// §36.1's `low` row, when the test puts the robot in it. `None` on a healthy robot, which
         /// is what `World::new` builds and what every test that is about something else gets.
         power_withheld: Option<String>,
+        /// §13's ring, as the caller would have counted it. `None` is nothing counted.
+        interventions_since: Option<u64>,
     }
 
     impl World {
@@ -4927,6 +4929,9 @@ mod skills {
                 robot: OperatingState::Running,
                 now_ms: 0,
                 power_withheld: None,
+                // Nothing counted, which is what a robot with no recording reports and what every
+                // test that does not set it should see.
+                interventions_since: None,
             }
         }
 
@@ -4936,8 +4941,7 @@ mod skills {
                 now_ms: self.now_ms,
                 inputs: &self.inputs,
                 robot: self.robot,
-                guard_tripped: false,
-                guards_observable: false,
+                interventions_since: self.interventions_since,
                 // A fixed wall clock, so `recorded_at` is a value the suite can assert on rather
                 // than whatever the machine running the tests thinks the date is.
                 wall_ms: Some(1_788_307_200_000 + self.now_ms),
@@ -4994,6 +4998,120 @@ mod skills {
             .iter()
             .map(|report| report.transition.to.as_str())
             .collect()
+    }
+
+    /// Walk one invocation to its episode, reporting `per_pass[i]` on the i-th pass after `running`.
+    ///
+    /// Every pass's effects are collected rather than only the last one's, because §54.4's diagram
+    /// ends `running` on a guard trip: an invocation that sees an intervention emits its episode
+    /// *at that pass* and the passes after it do nothing at all.
+    fn episode_with(before: Option<u64>, per_pass: &[Option<u64>]) -> Json {
+        let mut runtime = Runtime::new();
+        let mut world = World::new();
+        let m = skill_manifest("acme/pick", Some(10.0), &[]);
+        world.interventions_since = before;
+
+        let _ = invoke(&mut runtime, &m, &[]);
+        let mut episodes: Vec<Json> = Vec::new();
+        let collect = |reports: Vec<crate::skill::Report>, into: &mut Vec<Json>| {
+            for effect in reports.iter().flat_map(|report| report.effects.iter()) {
+                if let Effect::Episode { body } = effect {
+                    into.push(body.clone());
+                }
+            }
+        };
+
+        for _ in 0..3 {
+            // preconditions, acquiring, running
+            collect(world.step(&mut runtime, 1), &mut episodes);
+        }
+
+        for count in per_pass {
+            world.interventions_since = *count;
+            collect(world.step(&mut runtime, 1), &mut episodes);
+        }
+
+        // The ordinary ending, for an invocation no guard trip has already finished.
+        world.running.remove("acme/pick");
+        collect(world.step(&mut runtime, 1), &mut episodes);
+        collect(world.step(&mut runtime, 1), &mut episodes);
+
+        assert_eq!(episodes.len(), 1, "§54.4: one episode per invocation");
+        episodes.remove(0)
+    }
+
+    /// §54.4's intervention count, off §13's ring rather than off a boolean.
+    ///
+    /// **Added, not edge-detected**, and one pass is enough to show the difference. A reconcile pass
+    /// is not a control cycle: the ring can hold three interventions inside one interval, and the
+    /// boolean this replaced could only say *something tripped* — so the episode recorded one.
+    ///
+    /// One pass rather than several because §54.4's diagram ends `running` on a guard trip: the
+    /// first interval that reports an intervention is also the last one this invocation sees. That
+    /// is the shape of the real thing, and it is why the count has to be right on a single pass
+    /// rather than accumulated over many.
+    #[test]
+    fn an_episodes_interventions_are_the_rings_count_and_not_an_edge() {
+        let episode = episode_with(Some(0), &[Some(3)]);
+        assert_eq!(
+            episode.get("interventions").and_then(Json::as_f64),
+            Some(3.0),
+            "three cycles the kernel intervened in, not one rising edge"
+        );
+        // And the trip is what ended it, which is §54.4's diagram rather than this counter.
+        assert_eq!(
+            episode.get("outcome").and_then(Json::as_str),
+            Some("aborted")
+        );
+    }
+
+    /// A skill that ran and tripped nothing reports **zero**, which is the fact.
+    ///
+    /// The half of §74.3 this change makes reachable: with a recording to count, "no guard tripped
+    /// during this skill" is a measurement rather than an absence, and it is the number a
+    /// marketplace is entitled to quote.
+    #[test]
+    fn a_skill_that_tripped_nothing_reports_zero_rather_than_nothing() {
+        let episode = episode_with(Some(0), &[Some(0), Some(0)]);
+        assert_eq!(
+            episode.get("interventions").and_then(Json::as_f64),
+            Some(0.0)
+        );
+    }
+
+    /// Nothing counted keeps the field **out** of the episode rather than in it as a zero.
+    ///
+    /// §74.3 at the boundary it crosses. A zero here is read by a marketplace as evidence of a clean
+    /// run — the number that gets misread precisely because it looks like good news — and §76.3 is
+    /// three sessions of care about this one column.
+    #[test]
+    fn an_uncounted_invocation_omits_the_field_and_says_it_was_not_measured() {
+        let episode = episode_with(None, &[None, None]);
+        assert!(
+            episode.get("interventions").is_none(),
+            "a robot with no recording to count does not report a count"
+        );
+        assert_eq!(
+            episode
+                .get("metadata")
+                .and_then(|metadata| metadata.get("interventions_measured")),
+            Some(&Json::Bool(false)),
+            "and it says so, so a Hub can tell it from a Hub that dropped the field"
+        );
+    }
+
+    /// A recording that stops being countable mid-invocation unmeasures the whole episode.
+    ///
+    /// Not a partial sum. The count is over the invocation, and an invocation with a hole in it has
+    /// a floor rather than a total — the same rule `Tally::complete` applies one layer down, and the
+    /// same reason: a number that is quietly smaller than the truth is worse than no number.
+    #[test]
+    fn an_invocation_that_loses_its_recording_reports_nothing_rather_than_a_partial_sum() {
+        let episode = episode_with(Some(0), &[Some(0), None]);
+        assert!(
+            episode.get("interventions").is_none(),
+            "a counted pass and an uncounted one is not a total"
+        );
     }
 
     /// The whole ladder, one pass at a time, on a skill that does everything right.

@@ -41,18 +41,33 @@
 //! one's `Start` would be a start of something already running. Refusing is the honest shape, and it
 //! keeps the lease holder equal to the thing an operator sees on the console.
 //!
-//! # What this edition cannot observe, and does not pretend to
+//! # Where the intervention count comes from
 //!
-//! §33.1 keeps the daemon away from the actuator path, so there is no kernel channel and no guard
-//! state. Two consequences, both deliberate:
+//! §33.1 keeps the daemon away from the actuator path, so there is no kernel channel to ask *"is a
+//! guard tripped right now"*. This module used to conclude from that that nothing could count an
+//! episode's interventions, which does not follow and is the same mistake §74.6 records for
+//! telemetry: the kernel does not have to be **asked**, because what it did is already written
+//! down. §13's ring holds every cycle with the guards that tripped in it, and this daemon holds
+//! the ring.
 //!
-//! * **`guard_tripped` is an input**, supplied by the daemon, and the daemon supplies `false` with
-//!   a reason. When the kernel channel exists it will supply the real thing, and nothing here
-//!   changes.
-//! * **`intervention_count` is absent from the episode**, not zero. §54.4 asks the episode to carry
-//!   it; a count of zero on a robot where nothing counts is a number a marketplace would consume as
-//!   evidence. [`Cycle::guards_observable`] is the switch, and it is the same shape
-//!   `calibration::conditions_now` uses for a temperature nothing reads.
+//! So [`Cycle::interventions_since`] is a **count over the interval since the last pass**, read off
+//! the recording by the caller. It replaced a `guard_tripped` boolean and a `guards_observable`
+//! boolean beside it, and the pair is worth a sentence because §7.2 dislikes exactly that shape: a
+//! value and a second value saying whether the first is real. An `Option` says both, and it cannot
+//! be read without the question being asked.
+//!
+//! `None` is *nothing counted*, and it keeps `intervention_count` **out** of the episode rather
+//! than in it as a zero — §54.4 asks for the number and a zero on a robot where nothing counts is
+//! evidence a marketplace would quote.
+//!
+//! ## One invocation at a time, and the reason the limit is here
+//!
+//! A count read off the ring covers an interval, not an invocation. With one skill running the two
+//! are the same thing; with two, the interval's trips belong to whichever policy was commanding and
+//! the recording says which by digest — machinery this does not have. So a pass with more than one
+//! invocation in `running` leaves the count **unmeasured for all of them**, because a number
+//! attributed to the wrong skill is worse than no number, and §7.2's rule is that a measurement
+//! nobody can attribute is not one.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -220,7 +235,6 @@ pub struct Invocation {
     entry_permitted: Option<bool>,
     hold_lost: bool,
     interventions: Option<u32>,
-    guard_was_tripped: bool,
 }
 
 impl Invocation {
@@ -391,13 +405,11 @@ pub struct Cycle<'a> {
     pub inputs: &'a LiveInputs,
     /// Where §27's machine says the robot is.
     pub robot: OperatingState,
-    /// Whether a guard tripped since the last pass.
-    pub guard_tripped: bool,
-    /// Whether anything on this robot can answer the question at all.
+    /// Kernel interventions recorded since the last pass, or `None` when nothing counted.
     ///
-    /// `false` means `guard_tripped` is a default and not an observation, and it is what keeps
-    /// `intervention_count` out of the episode rather than in it as a zero.
-    pub guards_observable: bool,
+    /// Read off §13's ring by the caller — see the module header. `None` is not zero: it keeps
+    /// `intervention_count` out of the episode rather than putting it in as evidence of a clean run.
+    pub interventions_since: Option<u64>,
     /// Wall-clock milliseconds, when this robot has a clock (§35.1).
     ///
     /// The one thing §35.1 permits wall time for in this module: the timestamp on a record that a
@@ -663,7 +675,6 @@ impl Runtime {
             entry_permitted: None,
             hold_lost: false,
             interventions: None,
-            guard_was_tripped: false,
         });
         self.forget_old();
         Ok(id)
@@ -724,18 +735,30 @@ impl Runtime {
     /// Level-triggered and safe to call faster than the work: `advance` returns `running → running`
     /// while a skill's own code runs, so nothing has to remember it already asked.
     pub fn advance_all(&mut self, cycle: &mut Cycle<'_>) -> Vec<Report> {
+        // Whether the interval's interventions can be attributed to anybody. See the module header:
+        // the ring counts an interval and an episode wants an invocation, and with two skills
+        // running the recording knows which policy was commanding by digest and this does not.
+        // Counted before anything advances, so a skill that reaches `running` this pass does not
+        // change the attribution of the pass it arrived in.
+        let solo_running = self
+            .invocations
+            .iter()
+            .filter(|invocation| invocation.phase == SkillPhase::Running)
+            .count()
+            <= 1;
+
         let mut reports = Vec::new();
         for index in 0..self.invocations.len() {
             if self.invocations[index].terminal() {
                 continue;
             }
-            let report = self.advance_one(index, cycle);
+            let report = self.advance_one(index, cycle, solo_running);
             reports.push(report);
         }
         reports
     }
 
-    fn advance_one(&mut self, index: usize, cycle: &mut Cycle<'_>) -> Report {
+    fn advance_one(&mut self, index: usize, cycle: &mut Cycle<'_>, solo_running: bool) -> Report {
         // The per-package context. `skill.grants` is filled here rather than by the caller because
         // it is the one branch of §54.2 that differs between two skills on one robot.
         let mut inputs = cycle.inputs.clone();
@@ -806,17 +829,22 @@ impl Runtime {
             _ => {}
         }
 
-        // Interventions are counted only where they can be counted at all (§33.1: there is no
-        // kernel channel), and a rising edge rather than every pass a trip persists for.
+        // §54.4's intervention count, added rather than edge-detected: the ring reports how many
+        // cycles the kernel intervened in over the interval, and two passes that each saw trips are
+        // two lots of trips. The rising edge this replaced was a consequence of the input being a
+        // boolean, and it collapsed a whole pass of them into one.
         {
+            let attributable = solo_running;
             let invocation = &mut self.invocations[index];
-            if cycle.guards_observable {
-                let count = invocation.interventions.get_or_insert(0);
-                if cycle.guard_tripped && !invocation.guard_was_tripped {
-                    *count += 1;
+            match (cycle.interventions_since, attributable) {
+                (Some(count), true) => {
+                    *invocation.interventions.get_or_insert(0) += count as u32;
                 }
+                // Nothing counted, or the interval's trips cannot be told apart between two live
+                // invocations. Both leave the episode without the field, which is the honest report
+                // and the one §74.3 asks for.
+                _ => invocation.interventions = None,
             }
-            invocation.guard_was_tripped = cycle.guard_tripped;
         }
 
         let progress = self.progress_of(index, cycle);
@@ -851,7 +879,11 @@ impl Runtime {
                 .map(|started| cycle.now_ms.saturating_sub(started) as f64),
             deadline: invocation.deadline,
             hold_lost: invocation.hold_lost,
-            guard_tripped: cycle.guard_tripped,
+            // §54.4's `running` row ends on a guard trip, which is a yes/no question and the
+            // count answers it. `None` reads as `false` here — the same value the daemon used
+            // to supply — so a robot that counts nothing aborts no skill it would not have
+            // aborted before, which is the safe direction for a transition nobody measured.
+            guard_tripped: cycle.interventions_since.is_some_and(|count| count > 0),
             robot: cycle.robot,
             // §54.4's `running` row ends when the skill's own code returns, and the evidence for
             // that is its unit no longer running.
