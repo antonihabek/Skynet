@@ -42,6 +42,8 @@
  * covers.
  */
 
+import { fieldConformance } from './conformance.ts'
+
 /**
  * What a window may count.
  *
@@ -306,7 +308,16 @@ export function coverage(windows: readonly Window[]): Coverage {
  */
 export function conformanceOf(coverageOf: Coverage): number | undefined {
   const cycles = coverageOf.totals.cycles
-  if (!Number.isFinite(cycles) || cycles <= 0) return undefined
+  if (cycles === undefined || !Number.isFinite(cycles)) return undefined
+  // Absent interventions read as zero *only once there are cycles*, and that is not the usual rule.
+  // §74.3 keeps unmeasured and zero apart everywhere else — but a window that counted cycles and
+  // did not count interventions is a robot whose kernel intervened in none of them, because the
+  // counter that would have recorded one is the counter that recorded the cycles.
   const interventions = coverageOf.totals.interventions ?? 0
-  return Math.max(0, Math.min(1, (cycles - interventions) / cycles))
+  // **Through `fieldConformance`, not beside it.** These two functions computed the same ratio,
+  // with the same clamp, in two modules, and neither had a caller — so the day one of them gained a
+  // rule about a robot whose counters disagree, the other would have kept the old answer and
+  // nothing would have compared them. §15's number has one definition and it belongs to the module
+  // that checks it against §15's floor.
+  return fieldConformance({ cycles, interventions })
 }

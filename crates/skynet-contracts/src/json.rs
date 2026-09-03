@@ -34,6 +34,7 @@ use crate::embodiment::*;
 use crate::live::{BasePose, CalibrationFact, JointReading, LiveInputs};
 use crate::opstate::OperatingState;
 use crate::ota::{BenchPass, BootEvidence, BundleManifest, UpdateSubject, DEFAULT_BOOT_BUDGET_MS};
+use crate::power::PowerProfile;
 use crate::readiness::*;
 use crate::roles::ParsedRole;
 use crate::transport::*;
@@ -498,6 +499,23 @@ pub fn descriptor_from_json(value: &Json) -> Result<EmbodimentDescriptor, Decode
             soc_wdt_ms: opt_f64(block, "soc_wdt_ms"),
             drive_command_timeout_ms: opt_f64(block, "drive_command_timeout_ms"),
         }),
+        // §36. `brownout_fault_codes` is read through `as_usize` rather than `as_f64`: a fault code
+        // is an integer the vendor writes down, and `4097.5` is a typo rather than a code between
+        // two codes. A non-integer entry is dropped rather than rounded — matching one is what
+        // makes a robot stop, and a stop caused by rounding is a stop nobody can explain.
+        power: value.get_present("power").map(|block| PowerProfile {
+            time_to_safe_state_s: opt_f64(block, "time_to_safe_state_s"),
+            safe_stop_energy_wh: opt_f64(block, "safe_stop_energy_wh"),
+            pack_capacity_wh: opt_f64(block, "pack_capacity_wh"),
+            thermal_throttle_c: opt_f64(block, "thermal_throttle_c"),
+            thermal_critical_c: opt_f64(block, "thermal_critical_c"),
+            brownout_fault_codes: block
+                .arr_or_empty("brownout_fault_codes")
+                .iter()
+                .filter_map(|code| code.as_usize())
+                .map(|code| code as u32)
+                .collect(),
+        }),
         frames: frames_from_json(value.get("frames")),
     })
 }
@@ -710,6 +728,14 @@ pub fn manifest_from_json(value: &Json) -> Result<PackageManifest, DecodeError> 
             container_image: opt_string(runtime, "container_image"),
         }),
         depends_on,
+        // §6, for §37.1's `transport` stage. Read from `source_embodiment`, and a block that does
+        // not decode is an **error** rather than an absence: an action space nobody could parse and
+        // an action space nobody declared are opposite facts, and the second is a package that
+        // transports trivially while the first is a package nobody has checked.
+        source_embodiment: match value.get_present("source_embodiment") {
+            Some(block) => Some(source_from_json(block)?),
+            None => None,
+        },
         min_os_version: opt_string(value, "min_os_version"),
     })
 }
@@ -1185,6 +1211,97 @@ pub fn live_inputs_from_json(value: &Json) -> LiveInputs {
         grants: value.str_arr("grants"),
         env: value.get_present("env").cloned(),
     }
+}
+
+// ── Power and thermal (§36) ──────────────────────────────────────────────────
+
+/// Serialise §36's whole answer for one cycle: the state, the reserve, the thermal ladder, the
+/// faults, and whether the running policy is still inside its declared budget.
+///
+/// One document rather than four, for the reason §46's is one: they are one question — *what is
+/// this robot's power situation right now* — and a console that had to join them would be the
+/// second place §36.1's table was written down. The budget is in here rather than beside it because
+/// the answer to "may this policy keep running" is exactly as much a power answer as the state is;
+/// §36.3 puts them in the same paragraph.
+///
+/// The four booleans are derived rather than left to a consumer, and they are four rather than one
+/// because §36.1's rows differ in more than severity: `low` withholds leases and lets a running
+/// task finish, `reserve` asks for a safe state, `critical` asks for it immediately, and a robot
+/// with a dead gauge withholds leases while being in none of those rows.
+pub fn power_to_json(
+    profile: &crate::power::PowerProfile,
+    observation: &crate::power::PowerObservation,
+    declared_budget_ms: Option<f64>,
+    observed_inference_ms: Option<f64>,
+) -> Json {
+    let assessment = crate::power::assess(profile, observation);
+
+    let mut reserve = Json::obj();
+    reserve.set("wh", nullable_num(assessment.reserve.wh));
+    // An array in §36.2's own order, not sorted: the terms are a sentence about which parts of a
+    // computation happened, and a canonical object would alphabetise them into nonsense.
+    reserve.set(
+        "unaccounted",
+        Json::Arr(
+            assessment
+                .reserve
+                .unaccounted
+                .iter()
+                .map(|term| Json::Str(term.to_string()))
+                .collect(),
+        ),
+    );
+    reserve.set("complete", Json::Bool(assessment.reserve.complete()));
+
+    let mut faults = Json::arr();
+    for fault in &assessment.faults {
+        let mut row = Json::obj();
+        row.set("code", Json::Str(fault.code.as_str().to_string()));
+        row.set("detail", Json::Str(fault.detail.clone()));
+        faults.push(row);
+    }
+
+    let mut out = Json::obj();
+    out.set("state", Json::Str(assessment.state.as_str().to_string()));
+    out.set("reason", Json::Str(assessment.reason.as_str().to_string()));
+    out.set("remaining_wh", nullable_num(assessment.remaining_wh));
+    out.set("reserve", reserve);
+    out.set(
+        "thermal",
+        Json::Str(assessment.thermal.as_str().to_string()),
+    );
+    out.set(
+        "shed",
+        Json::Arr(
+            assessment
+                .shed
+                .iter()
+                .map(|rung| Json::Str(rung.to_string()))
+                .collect(),
+        ),
+    );
+    out.set("faults", faults);
+    out.set("degraded", Json::Bool(assessment.degraded()));
+    out.set(
+        "grants_new_leases",
+        Json::Bool(assessment.grants_new_leases()),
+    );
+    out.set(
+        "requires_safe_state",
+        Json::Bool(assessment.requires_safe_state()),
+    );
+    out.set(
+        "stops_immediately",
+        Json::Bool(assessment.stops_immediately()),
+    );
+    out.set(
+        "budget_missed",
+        nullable_str(&crate::power::budget_missed(
+            declared_budget_ms,
+            observed_inference_ms,
+        )),
+    );
+    out
 }
 
 // ── The watchdog chain (§46) ─────────────────────────────────────────────────

@@ -59,6 +59,11 @@ import {
 } from '../../reference/typescript/calibration.ts'
 import type { Windows as WatchdogWindows } from '../../reference/typescript/watchdog.ts'
 import {
+  NEVER_SHED, POWER_FAULT_CODES, POWER_REASONS, POWER_STATES, RESERVE_TERMS, SHED_ORDER,
+  THERMAL_PRESSURES,
+  type PowerObservation, type PowerProfile,
+} from '../../reference/typescript/power.ts'
+import {
   assembleObservation, latestCommonInstant, type Stream as ObservationStream,
 } from '../../reference/typescript/observation.ts'
 import {
@@ -69,7 +74,7 @@ import type { SafetyEnvelope } from '../../reference/typescript/types.ts'
 import {
   shapeAdmission, shapeCertification, shapeFleet, shapeFrameFault, shapeLimits, shapePlan,
   shapeDigest, shapeObservation, shapeReadiness, shapeSolved, shapeVerdict, shapeCalibration,
-  shapeWatchdog, shapePredicate, shapeSatisfies, shapeVersion,
+  shapeWatchdog, shapePower, shapePredicate, shapeSatisfies, shapeVersion,
   shapeComposition, shapeDeadline, shapePreconditions, shapeSuccess,
   shapeCellFaults, shapeCellLayer,
   shapeStateProperties, shapeTransition, shapeWarningMatrix, shapeSkillTransition,
@@ -2492,6 +2497,151 @@ watchdogCase('command-loss', 'unrecognised',
   + 'body says nothing" are different facts with different remedies.',
   'freewheel', NESTED)
 
+// ── power and thermal (§36) ──────────────────────────────────────────────────
+//
+// One corpus, for the reason §46's is one: the state, the reserve, the thermal ladder and the
+// inference budget are one question — what is this robot's power situation right now — and an
+// edition could agree about every band and still disagree about which rung it gives up first,
+// which is the half that decides whether the control loop or the telemetry uploader goes.
+//
+// The bands are multiples of the reserve rather than of the pack, so every case here uses one
+// pack — 500 Wh with a 20 Wh reserve — and the interesting range is the bottom tenth of the gauge.
+// That is not a quirk of the fixture; it is §36's opening sentence.
+
+function powerCase(
+  file: string, id: string, note: string,
+  profile: PowerProfile, observation: PowerObservation,
+  declaredBudgetMs?: number, observedInferenceMs?: number,
+): void {
+  add('power', file, {
+    id, note,
+    input: {
+      profile, observation,
+      ...(declaredBudgetMs !== undefined && { declared_budget_ms: declaredBudgetMs }),
+      ...(observedInferenceMs !== undefined && { observed_inference_ms: observedInferenceMs }),
+    },
+    expected: canonical(shapePower(profile, observation, declaredBudgetMs, observedInferenceMs)),
+  })
+}
+
+const PACK: PowerProfile = {
+  time_to_safe_state_s: 2,
+  safe_stop_energy_wh: 20,
+  pack_capacity_wh: 500,
+  thermal_throttle_c: 70,
+  thermal_critical_c: 90,
+  brownout_fault_codes: [4097],
+}
+
+powerCase('state', 'normal', 'Nine per cent of a 500 Wh pack is 45 Wh, which is above 2.25 × the '
+  + '20 Wh reserve. Full operation, and nothing wrong.',
+  PACK, { state_of_charge: 0.09 })
+powerCase('state', 'low', 'Forty watt-hours: inside the low band. New task leases stop and the '
+  + 'running one may finish, which is the only state where those two differ.',
+  PACK, { state_of_charge: 0.08 })
+powerCase('state', 'at-reserve', 'Inside the reserve band. A controlled stop, then a safe state — '
+  + 'and not yet the immediate one, which is what the quarter-reserve band buys.',
+  PACK, { state_of_charge: 0.045 })
+powerCase('state', 'critical', 'Below the reserve. The stop is immediate and the drives are '
+  + 'disabled once at rest.',
+  PACK, { state_of_charge: 0.03 })
+powerCase('state', 'exactly-at-reserve', 'Twenty watt-hours exactly. At reserve rather than below '
+  + 'it: the other reading gives the harshest state to the body that computed its budget perfectly.',
+  PACK, { energy_remaining_wh: 20 })
+// The four boundary cases, and they earn their place: without them the corpus does not pin
+// RESERVE_BAND or LOW_BAND at all. A tamper test that moved the reserve band from 1.25 to 1.9 left
+// every other case in this file byte-identical — the fixtures all sat well inside their bands — so
+// an edition could have disagreed about where `low` becomes `reserve` and reproduced the corpus
+// exactly. Reported in watt-hours rather than as a fraction of the pack, so the numbers are the
+// boundaries themselves rather than a multiplication that lands near them.
+powerCase('state', 'just-below-the-low-band', 'A hair under 1.25 × the reserve: still at reserve, '
+  + 'and the case that pins where that band ends.',
+  PACK, { energy_remaining_wh: 24.999 })
+powerCase('state', 'at-the-low-band', 'Exactly 1.25 × the reserve. Low, because the bands are '
+  + 'inclusive at the bottom throughout — the same rule that puts a body exactly at its reserve at '
+  + 'reserve rather than below it.',
+  PACK, { energy_remaining_wh: 25 })
+powerCase('state', 'just-below-normal', 'A hair under 2.25 × the reserve. Still low, and the case '
+  + 'that pins where the low band ends.',
+  PACK, { energy_remaining_wh: 44.999 })
+powerCase('state', 'at-normal', 'Exactly 2.25 × the reserve: one whole further safe stop in hand '
+  + 'above the reserve band, which is the width §36.1\'s `low` row needs to keep its promise.',
+  PACK, { energy_remaining_wh: 45 })
+
+powerCase('state', 'energy-beats-fraction', 'Both reported and they disagree. The gauge reporting '
+  + 'watt-hours wins, because whatever told it the capacity is closer to the pack than a '
+  + 'descriptor field is.',
+  PACK, { state_of_charge: 0.9, energy_remaining_wh: 10 })
+
+powerCase('brownout', 'declared-code', '§36.4: the bus says sag and the gauge says full. The gauge '
+  + 'is not consulted, because a gauge that disagrees with the bus is a gauge that is wrong.',
+  PACK, { state_of_charge: 1, rhal_degraded: true, fault_code: 4097 })
+powerCase('brownout', 'undeclared-code', 'A degraded RHAL with a code this vendor did not call a '
+  + 'brownout. The OS matches a declared list; §24 forbids it interpreting a vendor code, so a '
+  + 'code that is not on the list is not a sag.',
+  PACK, { state_of_charge: 1, rhal_degraded: true, fault_code: 9999 })
+powerCase('brownout', 'no-codes-declared', 'The gap §36.4 has until a vendor fills it in: the RHAL '
+  + 'is degraded and nothing on this body can tell a voltage sag from a dead encoder. Reported, '
+  + 'and the robot keeps working — a hole in a declaration is not a reason to stop a machine.',
+  { ...PACK, brownout_fault_codes: [] },
+  { state_of_charge: 0.9, rhal_degraded: true, fault_code: 4097 })
+powerCase('brownout', 'no-gauge-at-all', 'The override does not consult the gauge, and does not '
+  + 'consult the absence of one either.',
+  PACK, { rhal_degraded: true, fault_code: 4097 })
+
+powerCase('unmetered', 'no-pack', 'An arm bolted to a bench and run off mains. §36.1 has four '
+  + 'states and all four assume a battery; this is the fifth, and it grants leases, because a body '
+  + 'with no pack is not a body in trouble.',
+  { thermal_throttle_c: 70, thermal_critical_c: 90 }, {})
+powerCase('unmetered', 'gauge-silent', 'A body that declares a pack and got nothing back. Not '
+  + 'critical — missing evidence is never a positive finding — and not normal either: no new lease '
+  + 'until something answers for the pack.',
+  PACK, {})
+powerCase('unmetered', 'capacity-undeclared', 'A fraction with nothing to scale it by. The remedy '
+  + 'is a descriptor field, and the fault says which one.',
+  { ...PACK, pack_capacity_wh: undefined }, { state_of_charge: 0.5 })
+powerCase('unmetered', 'reserve-undeclared', 'A pack with no safe-stop energy: §36.2 has nothing '
+  + 'to compute a reserve from, so the four states have no boundary. This is the field '
+  + '`power.safe_state.reachable` has been measuring against since Part II, with nothing to read.',
+  { ...PACK, safe_stop_energy_wh: undefined }, { state_of_charge: 0.5 })
+powerCase('unmetered', 'charge-out-of-range', 'A state of charge of 1.4. Discarded rather than '
+  + 'clamped — a clamped 1.4 is a full battery — and reported as a gauge to fix rather than as a '
+  + 'descriptor to fill in, which is the distinction `reading_unusable` exists for.',
+  PACK, { state_of_charge: 1.4 })
+
+powerCase('thermal', 'nominal', 'Warm and under the threshold. Nothing is given up.',
+  PACK, { state_of_charge: 0.9, temperature_c: 60 })
+powerCase('thermal', 'brief-throttle', 'Above the throttle point for four seconds. The three '
+  + 'housekeeping rungs go and DEGRADED does not: a thermal transient from one heavy motion is not '
+  + 'a degraded robot.',
+  PACK, { state_of_charge: 0.9, temperature_c: 75, throttled_for_ms: 4_000 })
+powerCase('thermal', 'sustained-throttle', 'Thirty seconds. §36.3 raises DEGRADED, which is the '
+  + 'impaired *running* state — leases are still granted, because a robot that stops for being '
+  + 'warm is a robot nobody deploys.',
+  PACK, { state_of_charge: 0.9, temperature_c: 75, throttled_for_ms: 30_000 })
+powerCase('thermal', 'critical', 'Every rung of the ladder, inference included. Never the RHAL, '
+  + 'the kernel or the control loop: there is no thermal situation in which giving up the safety '
+  + 'envelope is the right trade.',
+  PACK, { state_of_charge: 0.9, temperature_c: 95, throttled_for_ms: 120_000 })
+powerCase('thermal', 'undeclared-thresholds', 'Something is reading 95 °C and nothing on this body '
+  + 'says what hot is. Nothing is shed and the gap is named: 85 °C is right for a CPU package and '
+  + 'fifty degrees wrong for a harmonic drive.',
+  { ...PACK, thermal_throttle_c: undefined, thermal_critical_c: undefined },
+  { state_of_charge: 0.9, temperature_c: 95 })
+
+powerCase('budget', 'inside', 'A loop comfortably inside its declared budget, on a warm robot. '
+  + 'Thermal state does not block a package; a missed deadline does.',
+  PACK, { state_of_charge: 0.9, temperature_c: 75, throttled_for_ms: 60_000 }, 20, 18)
+powerCase('budget', 'missed', 'The loop is late. §36.3 throttles inference before control, so this '
+  + 'is a package refused rather than a robot in danger — and the sentence names both numbers.',
+  PACK, { state_of_charge: 0.9, temperature_c: 75, throttled_for_ms: 60_000 }, 20, 31)
+powerCase('budget', 'undeclared', 'A package that declares no budget cannot miss one. Blocking on '
+  + 'an absence is the mistake this whole document is written against.',
+  PACK, { state_of_charge: 0.9 }, undefined, 400)
+powerCase('budget', 'unmeasured', 'A budget with nothing measured against it. Same rule, other '
+  + 'direction.',
+  PACK, { state_of_charge: 0.9 }, 20, undefined)
+
 // ── calibration (§45.7) ──────────────────────────────────────────────────────
 //
 // §45.7 asks for three conformance additions and they are one question asked of one input, so they
@@ -4243,6 +4393,34 @@ lifecycleCase('lease-denied',
     lease_holder: 'acme/pick-place',
   }))
 
+lifecycleCase('power-withheld',
+  '§36.1\'s `low` row, which was a sentence in the specification and a rule nothing obeyed until '
+  + '§36 was written. No new task leases are granted, so the invocation aborts rather than waiting: '
+  + 'an invocation parked in `acquiring` hoping for a charger burns §54.4\'s timeout and then '
+  + 'aborts with the wrong reason on it.',
+  'acquiring', progress({
+    power_withheld: "§36.1 withholds new task leases: this robot's power state is `reserve` "
+      + '(at_reserve)',
+  }))
+
+lifecycleCase('power-withheld-outranks-a-held-token',
+  'Both refusals true at once. Power answers first, and the order is not a preference: a refusal '
+  + 'for want of energy is a fact about the robot and a held token is a fact about another package, '
+  + 'so the robot-wide one is what an operator needs. It is also the only order that works — a '
+  + 'runtime that withholds does not ask §25.2\'s table, so `leases` would read `pending`.',
+  'acquiring', progress({
+    power_withheld: '§36.1 withholds new task leases: this robot\'s power state is `critical`',
+    leases: 'denied',
+    lease_token: 'manipulation.grasp',
+    lease_holder: 'acme/pick-place',
+  }))
+
+lifecycleCase('power-withheld-empty-is-not-a-refusal',
+  'An empty sentence is not a refusal. §64 makes a refusal name its fix, and a skill aborted with a '
+  + 'blank reason on it is the one shape that cannot — so a caller that sets the field to nothing '
+  + 'gets the acquiring rules exactly as they were.',
+  'acquiring', progress({ power_withheld: '   ', leases: 'held' }))
+
 lifecycleCase('lease-never-granted',
   'The other half of §25.2, and the one no case had. A token the operator never granted reports no '
   + 'holder — "nobody has the arm, this package may not ask for it" — and the refusal has to say '
@@ -5870,6 +6048,37 @@ coverageCase('overlapping-windows-are-merged-for-the-span-and-summed-for-the-cou
       counters: { cycles: 15_000 } },
   ])
 
+// §15's floor, from both sides. Every case above sits comfortably over 0.999, so none of them
+// discriminates the number the third suite exists to produce — an edition could compute
+// conformance differently and reproduce all four. These four are the ones that pin it.
+
+coverageCase('conformance-under-the-floor',
+  '§15 suspends below 0.999, "because a robot whose commands have been leaving its envelope is not '
+  + 'a lower-tier robot — it is one whose certificate no longer describes it." Thirty thousand '
+  + 'cycles and forty interventions is 0.99867, and this is the case the third suite exists for.',
+  [{ ...FIVE_MINUTES, counters: { cycles: 30_000, interventions: 40 } }])
+
+coverageCase('conformance-exactly-at-the-floor',
+  'Thirty interventions in thirty thousand cycles is exactly 0.999. §15 puts the floor at 0.999 '
+  + 'rather than 1.0 because "a hundred robots at 100 Hz produce tens of millions of cycles a day, '
+  + 'and demanding literal perfection would suspend every honest vendor on sensor noise" — so the '
+  + 'boundary is worth a vector of its own.',
+  [{ ...FIVE_MINUTES, counters: { cycles: 30_000, interventions: 30 } }])
+
+coverageCase('cycles-counted-and-no-interventions-counted',
+  'The one place §74.3\'s unmeasured-is-not-zero rule bends, and it bends because of what the '
+  + 'counters are: the thing that would have recorded an intervention is the same loop that '
+  + 'recorded the cycles, so a window with cycles and no interventions is a kernel that intervened '
+  + 'in none of them. Conformance is 1, not undefined.',
+  [{ ...FIVE_MINUTES, counters: { cycles: 30_000 } }])
+
+coverageCase('more-interventions-than-cycles',
+  'A robot whose counters disagree with each other. Clamped to zero rather than reported negative: '
+  + '§15 checks this against a floor, and a negative number sails under it — which happens to reach '
+  + 'the right verdict for the wrong reason, and would reach the wrong one the day somebody '
+  + 'compared it against anything else.',
+  [{ ...FIVE_MINUTES, counters: { cycles: 100, interventions: 250 } }])
+
 coverageCase('nothing-at-all',
   'No windows. Zero observed, zero spanned, no gaps and every counter unmeasured — which is a '
   + 'different answer from a robot that reported windows full of zeroes.',
@@ -5879,6 +6088,41 @@ vocabulary('telemetry_counters',
   '§74’s closed set of counters. Frozen because a fleet console divides by these, and six spellings '
   + 'of one counter is six columns that each look empty.',
   TELEMETRY_COUNTERS)
+
+vocabulary('power_states',
+  '§36.1\'s four, plus the fifth §36.1 does not have. Ordered most capable first, which is the '
+  + 'order a console renders a fleet in — and `unmetered` is last because it is not a rung of the '
+  + 'same ladder.',
+  POWER_STATES)
+
+vocabulary('power_reasons',
+  'Why a robot is in the power state it is in, in rule order. The brownout override is first '
+  + 'because it is the one rule that ignores a reading it has.',
+  POWER_REASONS)
+
+vocabulary('power_fault_codes',
+  'Everything §36 can find wrong with the power subsystem itself, as distinct from a level of '
+  + 'charge. Two of the eight raise DEGRADED and five withhold leases, and an edition that agreed '
+  + 'about the states could still disagree about which — so the set is frozen alongside them.',
+  POWER_FAULT_CODES)
+
+vocabulary('thermal_pressures', '§36.3\'s three levels.', THERMAL_PRESSURES)
+
+vocabulary('shed_order',
+  '§36.3\'s ladder, weakest claim first. Order **is** the agreement here: an edition that sorted '
+  + 'this alphabetically would give up the black box before the OTA download and the policy loop '
+  + 'before either.',
+  SHED_ORDER)
+
+vocabulary('never_shed',
+  'The three §36.3 never gives up, at any pressure. Frozen so that "never" is something a test can '
+  + 'check rather than a word in a comment.',
+  NEVER_SHED)
+
+vocabulary('reserve_terms',
+  '§36.2\'s three terms, in that section\'s order. Two of them have no source anywhere on this '
+  + 'platform, which is why they are reported as unaccounted rather than silently omitted.',
+  RESERVE_TERMS)
 
 vocabulary('telemetry_window_faults',
   'Everything §74 can find wrong with a window. Three refuse it and one reports — the clock skew is '

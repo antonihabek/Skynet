@@ -30,7 +30,7 @@
  * This is the one place the package format is stricter than an APK, and the reason is physics.
  */
 
-import type { ControlMode } from './embodiment.ts'
+import type { ControlMode, SourceEmbodiment } from './embodiment.ts'
 
 /**
  * What a package can be.
@@ -113,6 +113,22 @@ export interface PackageManifest {
   depends_on?: Array<{ id: string; range: string }>
   /** Minimum OS version. */
   min_os_version?: string
+  /**
+   * The body this policy was trained on, and what it emits (§6).
+   *
+   * §37.1's install pipeline has a `transport` stage — *"`resolveTransport()` against this body; a
+   * `refused` verdict fails the install"* — and until this field existed the stage had no input on
+   * a robot. `AdmissionParams.transport_verdict` has been optional since admission was written and
+   * was always absent there: a consumer with no producer.
+   *
+   * `admitPackage` does not read it. The *robot* reads it, plans against its own descriptor, and
+   * hands the verdict in — which is why this is a field on the document rather than an argument to
+   * the decision. Absent means the publisher declared no action space, which is correct for a
+   * driver, an environment or a dataset, and is neither a pass nor a refusal: `resolveTransport`
+   * over an empty source warns `no_source_embodiment` and says nothing about its fit can be
+   * checked.
+   */
+  source_embodiment?: SourceEmbodiment
 }
 
 /**

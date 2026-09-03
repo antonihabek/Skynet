@@ -70,11 +70,18 @@ const HERE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
  * named"*. Both sides compute it from declared facts and neither is authoritative, which is the
  * test this list applies.
  *
- * `watchdog` (§46), `entitlement` (§51) and `skill` (§54) are deliberately **not** here yet. Each is a contract the Hub will need — a fleet page that cannot
+ * `watchdog` (§46), `entitlement` (§51), `skill` (§54) and `power` (§36) are deliberately **not** here yet. Each is a contract the Hub will need — a fleet page that cannot
  * say which robots are running on a lapsed entitlement is a fleet page missing the one commercial
  * fact §51 defines — and each waits on a surface that does not exist. Mirroring them now would put
  * four modules nothing imports into an application, and the honest place to record that they are
  * coming is here rather than in somebody's memory.
+ *
+ * `power` is the newest of the four and has the sharpest trigger: the Hub's robot registry holds
+ * the descriptor, so the moment a robot page wants to say *"this body declares a pack and no
+ * safe-stop energy, so §36.2's reserve has no boundary"* — which is a readiness question, asked of
+ * declared facts, on the Hub, before a robot is anywhere near it — both sides need to be computing
+ * the same `assess`. Today nothing on the Hub reads a `power` block at all, so a mirror would be a
+ * copy with no reader, which is the state this list exists to avoid.
  *
  * `birth` (§50) was the fifth name in that paragraph until §57's `POST /robots/{slug}/attestations`
  * was written, and it is the clearest case in this list of why the test is *both sides must agree*

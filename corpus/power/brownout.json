@@ -1,0 +1,91 @@
+{
+  "corpus": "power",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "declared-code",
+      "note": "§36.4: the bus says sag and the gauge says full. The gauge is not consulted, because a gauge that disagrees with the bus is a gauge that is wrong.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "thermal_throttle_c": 70,
+          "thermal_critical_c": 90,
+          "brownout_fault_codes": [
+            4097
+          ]
+        },
+        "observation": {
+          "state_of_charge": 1,
+          "rhal_degraded": true,
+          "fault_code": 4097
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"reason\":\"brownout\",\"remaining_wh\":500,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"critical\",\"stops_immediately\":true,\"thermal\":\"nominal\"}"
+    },
+    {
+      "id": "undeclared-code",
+      "note": "A degraded RHAL with a code this vendor did not call a brownout. The OS matches a declared list; §24 forbids it interpreting a vendor code, so a code that is not on the list is not a sag.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "thermal_throttle_c": 70,
+          "thermal_critical_c": 90,
+          "brownout_fault_codes": [
+            4097
+          ]
+        },
+        "observation": {
+          "state_of_charge": 1,
+          "rhal_degraded": true,
+          "fault_code": 9999
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"reason\":\"above_reserve\",\"remaining_wh\":500,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+    },
+    {
+      "id": "no-codes-declared",
+      "note": "The gap §36.4 has until a vendor fills it in: the RHAL is degraded and nothing on this body can tell a voltage sag from a dead encoder. Reported, and the robot keeps working — a hole in a declaration is not a reason to stop a machine.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "thermal_throttle_c": 70,
+          "thermal_critical_c": 90,
+          "brownout_fault_codes": []
+        },
+        "observation": {
+          "state_of_charge": 0.9,
+          "rhal_degraded": true,
+          "fault_code": 4097
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[{\"code\":\"brownout_undeclarable\",\"detail\":\"the RHAL is reporting `RHAL_DEGRADED` and this body declares no `brownout_fault_codes`, so nothing here can tell a voltage sag from a dead encoder. §24 makes a fault code vendor-specific and surfaced verbatim, which is precisely why the vendor rather than the OS has to name the codes that mean sag (§36.4).\"}],\"grants_new_leases\":true,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+    },
+    {
+      "id": "no-gauge-at-all",
+      "note": "The override does not consult the gauge, and does not consult the absence of one either.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "thermal_throttle_c": 70,
+          "thermal_critical_c": 90,
+          "brownout_fault_codes": [
+            4097
+          ]
+        },
+        "observation": {
+          "rhal_degraded": true,
+          "fault_code": 4097
+        }
+      },
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[{\"code\":\"gauge_silent\",\"detail\":\"this body declares a pack and nothing on this robot read one. The state is reported as unmetered rather than critical — §36.4 overrides the gauge on a positive reading from the bus, and a missing reading is not one — and no new task lease is granted until something answers for the pack (§36.1).\"}],\"grants_new_leases\":false,\"reason\":\"brownout\",\"remaining_wh\":null,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"critical\",\"stops_immediately\":true,\"thermal\":\"nominal\"}"
+    }
+  ]
+}

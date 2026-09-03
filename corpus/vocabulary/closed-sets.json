@@ -320,7 +320,7 @@
       "input": {
         "set": "lifecycle_reasons"
       },
-      "expected": "[\"not_invoked\",\"invoked\",\"preconditions_pending\",\"preconditions_refused\",\"preconditions_met\",\"leases_held_by_root\",\"lease_pending\",\"lease_denied\",\"leases_acquired\",\"timeout\",\"hold_lost\",\"guard_tripped\",\"robot_stopped\",\"running\",\"verifying\",\"verdict_pending\",\"judged\",\"terminal\"]"
+      "expected": "[\"not_invoked\",\"invoked\",\"preconditions_pending\",\"preconditions_refused\",\"preconditions_met\",\"leases_held_by_root\",\"lease_pending\",\"lease_denied\",\"power_withheld\",\"leases_acquired\",\"timeout\",\"hold_lost\",\"guard_tripped\",\"robot_stopped\",\"running\",\"verifying\",\"verdict_pending\",\"judged\",\"terminal\"]"
     },
     {
       "id": "lease_states",
@@ -489,6 +489,62 @@
         "set": "telemetry_counters"
       },
       "expected": "[\"cycles\",\"guard_trips\",\"clamps\",\"interventions\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"]"
+    },
+    {
+      "id": "power_states",
+      "note": "§36.1's four, plus the fifth §36.1 does not have. Ordered most capable first, which is the order a console renders a fleet in — and `unmetered` is last because it is not a rung of the same ladder.",
+      "input": {
+        "set": "power_states"
+      },
+      "expected": "[\"normal\",\"low\",\"reserve\",\"critical\",\"unmetered\"]"
+    },
+    {
+      "id": "power_reasons",
+      "note": "Why a robot is in the power state it is in, in rule order. The brownout override is first because it is the one rule that ignores a reading it has.",
+      "input": {
+        "set": "power_reasons"
+      },
+      "expected": "[\"brownout\",\"below_reserve\",\"at_reserve\",\"approaching_reserve\",\"above_reserve\",\"no_pack\",\"no_reading\",\"no_reserve\",\"no_capacity\",\"reading_unusable\"]"
+    },
+    {
+      "id": "power_fault_codes",
+      "note": "Everything §36 can find wrong with the power subsystem itself, as distinct from a level of charge. Two of the eight raise DEGRADED and five withhold leases, and an edition that agreed about the states could still disagree about which — so the set is frozen alongside them.",
+      "input": {
+        "set": "power_fault_codes"
+      },
+      "expected": "[\"gauge_silent\",\"capacity_undeclared\",\"reserve_undeclared\",\"brownout_undeclarable\",\"charge_out_of_range\",\"thermal_sustained\",\"thermal_critical\",\"thermal_undeclared\"]"
+    },
+    {
+      "id": "thermal_pressures",
+      "note": "§36.3's three levels.",
+      "input": {
+        "set": "thermal_pressures"
+      },
+      "expected": "[\"nominal\",\"throttling\",\"critical\"]"
+    },
+    {
+      "id": "shed_order",
+      "note": "§36.3's ladder, weakest claim first. Order **is** the agreement here: an edition that sorted this alphabetically would give up the black box before the OTA download and the policy loop before either.",
+      "input": {
+        "set": "shed_order"
+      },
+      "expected": "[\"telemetry\",\"ota\",\"blackbox_compression\",\"inference_rate\",\"non_essential_sensors\"]"
+    },
+    {
+      "id": "never_shed",
+      "note": "The three §36.3 never gives up, at any pressure. Frozen so that \"never\" is something a test can check rather than a word in a comment.",
+      "input": {
+        "set": "never_shed"
+      },
+      "expected": "[\"rhal\",\"kernel\",\"control_loop\"]"
+    },
+    {
+      "id": "reserve_terms",
+      "note": "§36.2's three terms, in that section's order. Two of them have no source anywhere on this platform, which is why they are reported as unaccounted rather than silently omitted.",
+      "input": {
+        "set": "reserve_terms"
+      },
+      "expected": "[\"declared_energy\",\"payload\",\"distance_to_safe_state\"]"
     },
     {
       "id": "telemetry_window_faults",

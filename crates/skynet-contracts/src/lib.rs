@@ -58,6 +58,7 @@ pub mod live;
 pub mod observation;
 pub mod opstate;
 pub mod ota;
+pub mod power;
 pub mod predicate;
 pub mod provenance;
 pub mod readiness;

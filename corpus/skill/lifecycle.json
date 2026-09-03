@@ -183,6 +183,74 @@
       "expected": "{\"changed\":true,\"detail\":\"`manipulation.grasp` is held by acme/pick-place\",\"from\":\"acquiring\",\"outcome\":\"aborted\",\"reason\":\"lease_denied\",\"release_leases\":true,\"to\":\"terminal\"}"
     },
     {
+      "id": "power-withheld",
+      "note": "§36.1's `low` row, which was a sentence in the specification and a rule nothing obeyed until §36 was written. No new task leases are granted, so the invocation aborts rather than waiting: an invocation parked in `acquiring` hoping for a charger burns §54.4's timeout and then aborts with the wrong reason on it.",
+      "input": {
+        "phase": "acquiring",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running",
+          "power_withheld": "§36.1 withholds new task leases: this robot's power state is `reserve` (at_reserve)"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"§36.1 withholds new task leases: this robot's power state is `reserve` (at_reserve)\",\"from\":\"acquiring\",\"outcome\":\"aborted\",\"reason\":\"power_withheld\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "power-withheld-outranks-a-held-token",
+      "note": "Both refusals true at once. Power answers first, and the order is not a preference: a refusal for want of energy is a fact about the robot and a held token is a fact about another package, so the robot-wide one is what an operator needs. It is also the only order that works — a runtime that withholds does not ask §25.2's table, so `leases` would read `pending`.",
+      "input": {
+        "phase": "acquiring",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "denied",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running",
+          "power_withheld": "§36.1 withholds new task leases: this robot's power state is `critical`",
+          "lease_token": "manipulation.grasp",
+          "lease_holder": "acme/pick-place"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"§36.1 withholds new task leases: this robot's power state is `critical`\",\"from\":\"acquiring\",\"outcome\":\"aborted\",\"reason\":\"power_withheld\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
+      "id": "power-withheld-empty-is-not-a-refusal",
+      "note": "An empty sentence is not a refusal. §64 makes a refusal name its fix, and a skill aborted with a blank reason on it is the one shape that cannot — so a caller that sets the field to nothing gets the acquiring rules exactly as they were.",
+      "input": {
+        "phase": "acquiring",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running",
+          "power_withheld": "   "
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"every required capability is leased\",\"from\":\"acquiring\",\"outcome\":null,\"reason\":\"leases_acquired\",\"release_leases\":false,\"to\":\"running\"}"
+    },
+    {
       "id": "lease-never-granted",
       "note": "The other half of §25.2, and the one no case had. A token the operator never granted reports no holder — \"nobody has the arm, this package may not ask for it\" — and the refusal has to say that rather than \"held by another package\", which sends an operator hunting for a package that does not exist when the fix is one grant. Found by writing a runtime, not by reading the document.",
       "input": {
