@@ -6163,7 +6163,7 @@ fn a_signed_profile_carries_the_cell_into_the_precondition_context() {
     )
     .unwrap();
 
-    let inputs = fixture.daemon.live_inputs(None);
+    let inputs = fixture.daemon.live_inputs(None, None);
     let built = skynet_contracts::live::live_context(&inputs);
     let env = built.context.get("env").expect("the cell reaches env.*");
     assert_eq!(env.get("cell").and_then(Json::as_str), Some("bench"));
@@ -6181,7 +6181,7 @@ fn a_signed_profile_carries_the_cell_into_the_precondition_context() {
 #[test]
 fn the_daemon_claims_nothing_it_cannot_observe() {
     let fixture = Fixture::new("skill-context-honesty");
-    let inputs = fixture.daemon.live_inputs(None);
+    let inputs = fixture.daemon.live_inputs(None, None);
     assert!(inputs.joints.is_empty());
     assert!(inputs.battery_percent.is_none());
     assert!(inputs.gripper.is_none());
@@ -10734,5 +10734,105 @@ mod context_omissions {
             }],
         );
         assert!(runtime.omissions().is_empty(), "the sensor recovered");
+    }
+}
+
+// ── Two facts this robot knew and §54.2 could not read ───────────────────────
+//
+// The same shape as `explain_omissions`, one layer down: `LiveInputs` has a field, the robot has
+// the number, and nothing connected them. `battery_percent` is the sharper of the two because it is
+// the example §54.2's own module documentation uses —
+//
+//   > A robot with no battery sensor that reported `robot.state.battery_percent = 0` would refuse
+//   > every skill; one that reported `100` would run every skill; one that omits the path refuses
+//   > only the skills that asked.
+//
+// — and this robot reads its own state of charge on every pass, prints it on `GET /power`, renders
+// it in §33.6's health column and carries it to the Hub. The one place it did not arrive was the
+// context that decides whether a skill may start.
+
+mod live_context_inputs {
+    use super::*;
+
+    #[test]
+    fn the_battery_reaches_the_precondition_context_as_a_percentage() {
+        let mut fixture = Fixture::new("live-battery");
+        fixture.provision();
+        let now = 1_000;
+
+        // Without a reading, absent — never a zero and never a hundred. §54.2's first rule, and the
+        // reason the field is an `Option` at all.
+        let blind = fixture.daemon.live_inputs(None, None);
+        assert_eq!(blind.battery_percent, None);
+
+        // With one, the number the rest of the platform reports, converted once at the boundary:
+        // §33.6 wants a fraction because a fleet page draws a bar, and a precondition is written by
+        // a person who writes `> 20`.
+        let reading = crate::power::Reading {
+            charge_fraction: Some(0.42),
+            ..fixture.daemon.read_power(now)
+        };
+        let seen = fixture.daemon.live_inputs(None, Some(&reading));
+        assert_eq!(seen.battery_percent, Some(42.0));
+
+        // And it is addressable, which is the half that matters: a value in a struct nothing
+        // publishes is the gap this test exists to close.
+        let built = skynet_contracts::live::live_context(&seen);
+        let percent = built
+            .context
+            .get_present("robot")
+            .and_then(|robot| robot.get_present("state"))
+            .and_then(|state| state.get_present("battery_percent"))
+            .and_then(Json::as_f64);
+        assert_eq!(percent, Some(42.0));
+    }
+
+    #[test]
+    fn a_guard_with_no_input_is_named_in_the_context() {
+        // §45.5's unavailable set is derived from what the *body declares* — a chassis with no IMU
+        // can never run `balance` — so it is answerable on this side of §33.1's line and is already
+        // computed twice a pass for `GET /limits` and the check-in.
+        let mut fixture = Fixture::new("live-guards");
+        fixture.provision();
+        write_embodiment(&fixture, BENCH_ARM_WATCHDOG);
+
+        let inputs = fixture.daemon.live_inputs(None, None);
+        assert!(
+            !inputs.guards_unavailable.is_empty(),
+            "a bench arm cannot feed every guard"
+        );
+
+        let built = skynet_contracts::live::live_context(&inputs);
+        let unavailable = built
+            .context
+            .get_present("robot")
+            .and_then(|robot| robot.get_present("guards"))
+            .and_then(|guards| guards.get_present("unavailable"))
+            .cloned()
+            .expect("§45.5's set is in the context");
+        let names: Vec<&str> = unavailable
+            .as_arr()
+            .map(|items| items.iter().filter_map(Json::as_str).collect())
+            .unwrap_or_default();
+        assert_eq!(names.len(), inputs.guards_unavailable.len());
+
+        // `guards.active` stays absent, and the asymmetry is the point. Running is a fact about a
+        // kernel this process has no channel to; unavailable is a fact about a body on this disk.
+        assert!(built
+            .context
+            .get_present("robot")
+            .and_then(|robot| robot.get_present("guards"))
+            .and_then(|guards| guards.get_present("active"))
+            .is_none());
+    }
+
+    #[test]
+    fn the_tier_is_still_refused_and_that_is_deliberate() {
+        // The one field on this struct that must stay absent. §15 awards a tier and no robot may
+        // assert one about itself — `limits.rs` says so in as many words, and a sweep that filled
+        // every empty field would have filled this one too.
+        let mut fixture = Fixture::new("live-tier");
+        fixture.provision();
+        assert_eq!(fixture.daemon.live_inputs(None, None).tier, None);
     }
 }

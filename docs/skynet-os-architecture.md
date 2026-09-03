@@ -4832,7 +4832,7 @@ miniature, and currently trivial to fix.
 | Interface — Hub-side and on-robot | §32 | **Built on both sides** — the console, the fleet page, the device page; §7.6's guards and limits cross §17 and are rendered on both, relayed rather than recomputed, and §32.2's four console panels all draw something measured | The transport plan does not cross §17, and should not until a policy runtime exists to be running one — the robot serves it per package at `GET /limits?package=`, for staged packages as well as active ones (§6.2). §32.1's guard-trip column now has its source and is frozen against a document a robot produces (§74.6); what it does not yet have is a robot that trips a guard |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **98,000 lines of Rust** across fifteen crates with 1,384
+**Built** means running, tested code: **98,000 lines of Rust** across fifteen crates with 1,387
 tests over a corpus of 77 files and 1,055 cases, **13,300 lines** of the TypeScript reference edition
 that the corpus holds it to, **5,400 lines** of drivers, and **8,200 lines** in the Hub's mirror of
 the shared contracts. The Hub's own suite is 1,499 tests.

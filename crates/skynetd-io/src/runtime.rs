@@ -1398,7 +1398,11 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     ///
     /// `skill.grants` is filled per invocation by the runtime, because a grant belongs to a package
     /// and two skills on one robot do not hold the same tokens.
-    pub fn live_inputs(&self, wall_s: Option<f64>) -> LiveInputs {
+    pub fn live_inputs(
+        &self,
+        wall_s: Option<f64>,
+        power: Option<&crate::power::Reading>,
+    ) -> LiveInputs {
         let layout = self.store.layout();
         let body = crate::embodiment::load(layout);
 
@@ -1442,11 +1446,54 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             .and_then(|profile| profile.get_present("cell").cloned())
             .map(|document| cell_environment(&cell_from_json(&document)));
 
+        // §45.5's unavailable set, which this robot computes on every pass for `GET /limits` and
+        // carries to the Hub on every check-in (§7.6). It is derived from what the **body declares**
+        // — a chassis with no IMU can never run `balance`, whatever a kernel is doing — so it is
+        // answerable on this side of §33.1's line, and it is a different question from
+        // `guards_active` below rather than the other half of one.
+        let guards_unavailable = crate::limits::report(&crate::limits::read(
+            layout,
+            &body,
+            crate::limits::ROBOT_TIER,
+        ))
+        .unavailable
+        .into_iter()
+        .map(|entry| entry.guard)
+        .collect();
+
         LiveInputs {
             operating_state: Some(self.operating_state),
+            // §36's gauge, reaching §54.2 at last. The robot has read its own state of charge on
+            // every pass since §36 was built — `GET /power` prints it, §33.6's health column
+            // renders it, the check-in carries it — and the one place it did not arrive was the
+            // context a precondition reads. So `robot.state.battery_percent > 20`, which is the
+            // example §54.2's own documentation uses, refused every skill on a robot that knew the
+            // answer and named the path as unresolvable.
+            //
+            // Supplied rather than read here, for the reason `Pass` gives about the same number: a
+            // battery figure taken in a different turn of the loop than the decision it informs is
+            // the one thing that struct exists not to be. `None` where the caller had no reading,
+            // which is absent rather than zero — §54.2's first rule, and the whole reason this
+            // field is an `Option`.
+            //
+            // A **fraction** on the reading and a **percentage** here, because that is what the two
+            // consumers are: §33.6 renders a bar and a precondition is written by a person. The
+            // conversion is one multiplication and it belongs at the boundary rather than in either
+            // consumer's head.
+            battery_percent: power
+                .and_then(|reading| reading.charge_fraction)
+                .map(|fraction| fraction * 100.0),
             // Not `Some(vec![])`. §33.1: there is no kernel channel, so nobody has asked which
             // guards are running, and an empty list would be this daemon claiming none are.
+            //
+            // `guards_unavailable` beside it is filled, and the asymmetry is the point rather than
+            // an oversight. *Running* is a fact about a kernel and this process has no channel to
+            // one. *Unavailable* is a fact about a body: §45.5 makes a guard unavailable when its
+            // input is missing, and whether this chassis declares an IMU is written in a descriptor
+            // on this disk. One is unobservable from here and the other is already computed here
+            // twice a pass.
             guards_active: None,
+            guards_unavailable,
             calibration,
             frames_resolved,
             frames_fault,
@@ -1472,10 +1519,14 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         actual: &Actual,
         interventions_since: Option<u64>,
     ) -> Vec<crate::skill::Report> {
-        let inputs = self.live_inputs(wall_s);
+        // One reading, used twice. §36.1's refusal and §54.2's `battery_percent` are two
+        // consumers of the same measurement, and reading the gauge separately for each would let a
+        // skill be refused a lease for a battery level its own precondition had just cleared.
+        let reading = self.read_power(now_ms);
+        let inputs = self.live_inputs(wall_s, Some(&reading));
         let running = crate::skill::running_set(actual);
         let grants = actual.grants.clone();
-        let power_withheld = self.power_refusal(now_ms);
+        let power_withheld = self.power_refusal_from(&reading);
 
         let mut runtime = core::mem::take(&mut self.skills);
         let reports = {
@@ -1618,10 +1669,20 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     /// here — so wiring this in changes nothing on a body that declares no pack, which is what
     /// every test in this suite and every development host is.
     pub fn power_refusal(&mut self, now_ms: u64) -> Option<String> {
+        let reading = self.read_power(now_ms);
+        self.power_refusal_from(&reading)
+    }
+
+    /// The same refusal, over a reading the caller already took.
+    ///
+    /// Split out because a pass has two consumers of one measurement — this and §54.2's
+    /// `battery_percent` — and taking the gauge twice would let a skill be refused a lease for a
+    /// battery level its own precondition had just cleared. It is the rule `Pass` states about the
+    /// health figure, applied to the two places that would otherwise disagree.
+    pub fn power_refusal_from(&self, reading: &crate::power::Reading) -> Option<String> {
         let layout = self.store.layout().clone();
         let body = crate::embodiment::load(&layout);
         let profile = crate::power::profile_of(&body);
-        let reading = self.read_power(now_ms);
         let assessment = skynet_contracts::power::assess(&profile, &reading.observation);
         if assessment.grants_new_leases() {
             return None;

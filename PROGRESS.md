@@ -11023,6 +11023,58 @@ robot whose sensors are not reporting is exactly the robot on which nothing will
 that hid the reason behind an empty list would answer *"nothing has been invoked"* to the question
 *"why"*.
 
+### The same sweep, one layer down: fields rather than functions
+
+`explain_omissions` was found by asking which *functions* nothing called. The same question about
+**fields** — which members of a contract struct are never mentioned in the robot crates — returns 59
+of 422, and most are false: a field serialised inside a `to_json` helper is never named by the robot
+even though it crosses to the Hub on every window, and a struct the robot does not build at all
+(`provenance::RunBundle`, `observation::Frame`) contributes a dozen names that are correctly absent.
+
+Two were real, and both are on `LiveInputs` — the struct that *is* §54.2's precondition context.
+
+**`battery_percent` was never filled.** This is the sharpest one in either sweep, because it is the
+example §54.2's own module documentation uses to explain why absence matters:
+
+> A robot with no battery sensor that reported `robot.state.battery_percent = 0` would refuse every
+> skill; one that reported `100` would run every skill; one that omits the path refuses only the
+> skills that asked, and names the path in the refusal. Only the third is honest, and only the third
+> is useful.
+
+The robot reads its own state of charge every pass. `GET /power` prints it, §33.6's health column
+renders it as a bar, the check-in carries it to the Hub. The one place it did not arrive was the
+context that decides whether a skill may start — so `robot.state.battery_percent > 20`, the most
+ordinary precondition anybody would write, was refused as unresolvable on a robot that knew the
+answer. The third case in that paragraph was honest and it was not useful, because the field was
+absent for the wrong reason.
+
+It is **supplied** rather than read where it is used, for the reason `Pass` states about the same
+number: a battery figure taken in a different turn of the loop than the decision it informs is the
+one thing that struct exists not to be. `advance_skills` now takes one reading and gives it to both
+consumers — §36.1's lease refusal and §54.2's context — because reading the gauge twice would let a
+skill be refused a lease for a level its own precondition had just cleared.
+
+**`guards_unavailable` was never filled either**, and the asymmetry with `guards_active` beside it is
+worth stating because it looks like an inconsistency and is the opposite. `guards_active` is `None`
+and must stay `None`: which guards are *running* is a fact about a kernel, and §33.1 gives this
+process no channel to one — an empty list from it would be a claim rather than an observation.
+Whether a guard is **unavailable** is a fact about a *body*: §45.5 makes a guard unavailable when its
+input is missing, and whether this chassis declares an IMU is written in a descriptor on this disk.
+The robot already computes that set twice a pass, for `GET /limits` and for §7.6's block on the
+check-in.
+
+### The field the sweep must not touch
+
+`LiveInputs::tier` is empty and stays empty, and finding out why is the argument for reading before
+filling. `limits.rs` says it outright:
+
+> `resolve_limits` takes a `Tier`, and **nothing on this robot decides one**: §15 awards a tier […]
+> `crate::runtime` already refuses to fill `robot.tier` for that reason.
+
+A sweep that filled every empty field on the struct would have made this robot assert a tier about
+itself, which is the one thing §15 exists to prevent. There is a test asserting it stays `None`, so
+the next sweep finds a reason rather than a hole.
+
 ### One more from the same sweep, smaller and worth the two lines
 
 `admit_package` decided §37.1's transport stage by comparing a string to the literal `"refused"`. The
@@ -11049,7 +11101,7 @@ constant.
 
 ### Numbers
 
-Rust: **1,384** tests, 4 new, **1,354** run here. `cargo fmt --all --check` and
+Rust: **1,387** tests, 7 new, **1,357** run here. `cargo fmt --all --check` and
 `cargo clippy --workspace --all-targets` clean; corpus unchanged at 77 files and 1,055 cases; golden
 path 48 commands; mirrors match.
 
@@ -11072,3 +11124,11 @@ the forty-ninth; 83–86 from the fiftieth.
     comparison unbreakable; the Rust's literal made the same comparison a rename away from silence.
     A corpus compares *output*, so it cannot see this — which is an argument for reading the two
     implementations side by side rather than trusting that identical bytes mean identical strength.
+90. **The documentation of a rule is a good place to look for a violation of it.** §54.2's module
+    header explains, at length and correctly, why `battery_percent` must be absent when unknown —
+    on a struct where it was absent because nobody had filled it in. The paragraph was true and it
+    was describing a different robot from the one that shipped.
+91. **An empty field is not a gap until you know why it is empty.** Three fields on one struct:
+    `battery_percent` was an oversight, `guards_unavailable` was an oversight, and `tier` is a rule
+    that another module documents in as many words. A sweep that filled all three would have made
+    this robot award itself a safety tier.
