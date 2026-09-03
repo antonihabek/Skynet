@@ -1773,6 +1773,7 @@ pub fn guard_report_from_json(value: &Json) -> crate::checkin::GuardReport {
         base_velocity_max_m_s: opt_f64(value, "base_velocity_max_m_s"),
         min_control_hz: opt_f64(value, "min_control_hz"),
         max_delta_per_cycle: opt_f64(value, "max_delta_per_cycle"),
+        self_collision_margin_m: opt_f64(value, "self_collision_margin_m"),
         source: opt_string(value, "source"),
         active: strings(value, "active"),
         unavailable,

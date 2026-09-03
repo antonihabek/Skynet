@@ -5880,6 +5880,10 @@ documentCase('the-limits-a-robot-is-under',
       base_velocity_max_m_s: null,
       min_control_hz: null,
       max_delta_per_cycle: null,
+      // A floor among ceilings, set here rather than left null so the case carries the one number
+      // in this block where larger is stricter. §11 delivers it on the profile; a robot that has
+      // one holds its collision bodies apart instead of at the moment they touch.
+      self_collision_margin_m: 0.05,
       source: 'vendor datasheet rev C',
       active: ['watchdog', 'envelope', 'mode_gate'],
       unavailable: [

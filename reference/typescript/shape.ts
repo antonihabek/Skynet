@@ -179,6 +179,11 @@ export function shapeLimits(limits: ResolvedLimits): unknown {
     base_velocity_max_m_s: nullable(limits.base_velocity_max_m_s),
     min_control_hz: nullable(limits.min_control_hz),
     max_delta_per_cycle: nullable(limits.max_delta_per_cycle),
+    // §7.1's fifth guard holds at this distance. Absent from this shape until §11 could
+    // deliver it, when it was always null and not worth a column; reported now, because an
+    // operator who cannot see the margin in force cannot tell a robot holding 5 cm from one
+    // holding at contact.
+    self_collision_margin_m: nullable(limits.self_collision_margin_m),
     per_channel: limits.per_channel,
     active_guards: limits.active_guards,
     unavailable_guards: limits.unavailable_guards.map(entry => ({
@@ -953,6 +958,7 @@ export function shapeGuardReport(report: GuardReport | null): unknown {
     joint_torque_max_nm: report.joint_torque_max_nm,
     joint_velocity_max_rad_s: report.joint_velocity_max_rad_s,
     max_delta_per_cycle: report.max_delta_per_cycle,
+    self_collision_margin_m: report.self_collision_margin_m,
     min_control_hz: report.min_control_hz,
     notices: report.notices.map(notice => ({
       code: notice.code,

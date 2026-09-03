@@ -500,14 +500,30 @@ the tier decides is the enforcement mode and two notices — `advisory_only` and
 `no_independent_stop`. That is asserted by a test rather than assumed, and the day it fails is the
 day the assumption has to be replaced by an awarded tier rather than defended.
 
-**Three of the operator profile's fields have no delivery path.** `resolveLimits()` accepts seven,
-and §11's desired state carries four ceilings and §55.2's cell. `proximity` and
-`self_collision_margin_m` have nowhere to arrive from, so the `proximity` guard can never be active
-on this edition however the body is described. `people_detection` is the third and it is a
-different kind of absence: §5 declares nine sensing modalities and none of them is a person
-detector. A camera is not one — detection is a perception component, not a sensor — and inferring
-one from `rgb` would be exactly the claim-about-the-body-that-nothing-checks §7.2 removed two
-fields for.
+**Two of the operator profile's fields had no delivery path, and now have one.** `resolveLimits()`
+accepts seven, and §11's desired state carried four ceilings and §55.2's cell. `proximity` and
+`self_collision_margin_m` are on the profile too, so both arrive under the profile's own signature
+rather than through a second path (§38.1).
+
+They land differently, and the difference is worth stating. `self_collision_margin_m` changes what
+the machine does: §7.1's fifth guard holds at a distance instead of waiting for two surfaces to meet,
+and `no_collision_margin` stops being emitted on every robot alive. `proximity` changes what the
+machine *says* — it also needs `available.people_detection`, so the guard stays unavailable and now
+names the sensor it has not got rather than a profile field that could not be delivered. That is the
+difference between *"this platform cannot do it"* and *"this robot has not got one"*, and only the
+second is a fact about the body.
+
+**One thing to know about the margin**, because it is the only figure in the block that behaves this
+way: it is a **floor**. Every other limit here is a ceiling, where a smaller number is stricter; a
+larger margin keeps two bodies further apart. §33.4's asymmetry — *narrowings apply immediately,
+widenings wait* — is computed by a classifier that assumed smaller-is-stricter, and running a margin
+through it would have classified halving one as a narrowing and applied it under a running policy.
+Two thresholds of `proximity` are floors for the same reason, and its `slow_factor` is a ceiling.
+
+**`people_detection` is the third and it is a different kind of absence**: §5 declares nine sensing
+modalities and none of them is a person detector. A camera is not one — detection is a perception
+component, not a sensor — and inferring one from `rgb` would be exactly the
+claim-about-the-body-that-nothing-checks §7.2 removed two fields for.
 
 **A guard can be active and have nothing to compare against.** `envelope` has no missing input, so
 it is active on every robot; the ceiling it applies to a joint comes from the transport plan's
@@ -4798,7 +4814,7 @@ miniature, and currently trivial to fix.
 | Boot, faults, POST, homing | §27, §48 | **Built** — §27's machine, POST's eight checks | Five of the eight are the kernel's, through a path §33.1 denies the daemon |
 | Networking and time | §34–35 | **Built** — bearers, metering, the outbound queue, backoff, two clocks kept apart | — |
 | Power and thermal | §36 | **Built** — the four states plus `unmetered`, the reserve, §36.3's ladder, §36.4's override; the gauge and the thermal zones read from `/sys`; enforced at §54.4's `acquiring`; `GET /power` and `skynet power` | §36.4's override has no input: the RHAL flag and its fault code reach this daemon through a path §33.1 denies it, so no robot can report a brownout. §36.1's `reserve` and `critical` rows ask for a controlled stop, and nothing performs one — the stop path is the kernel's |
-| Configuration, calibration | §38, §45 | **Built on both sides** — and the ceilings a profile resolves to now reach the Hub, not just the digest that was applied | Three of the operator profile's seven fields have no delivery path: `proximity` and `self_collision_margin_m` are accepted by the kernel and carried by nothing, and `people_detection` is not a thing §5 lets a body declare (§7.6) |
+| Configuration, calibration | §38, §45 | **Built on both sides** — the ceilings a profile resolves to reach the Hub, and §11's profile now delivers `self_collision_margin_m` and `proximity` as well, so six of `resolveLimits()`'s seven inputs have a path (§7.6) | The seventh is `people_detection`, which is not a thing §5 lets a body declare — so `proximity` is delivered and its guard is still unavailable, naming the sensor rather than the profile |
 | Resource enforcement | §40 | **Built** — cgroup limits, the RT core | — |
 | Frames | §44 | **Built** — the graph, forward kinematics, both pose guards | — |
 | Sensor and media pipeline | §47 | **Built** — capture, gaps annotated as gaps | — |
@@ -4808,10 +4824,10 @@ miniature, and currently trivial to fix.
 | Interface — Hub-side and on-robot | §32 | **Built on both sides** — the console, the fleet page, the device page; §7.6's guards and limits cross §17 and are rendered on both, relayed rather than recomputed, and §32.2's four console panels all draw something measured | The transport plan does not cross §17, and should not until a policy runtime exists to be running one — the robot serves it per package at `GET /limits?package=`, for staged packages as well as active ones (§6.2). §32.1's guard-trip column now has its source and is frozen against a document a robot produces (§74.6); what it does not yet have is a robot that trips a guard |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **93,200 lines of Rust** across fifteen crates with 1,336
+**Built** means running, tested code: **93,400 lines of Rust** across fifteen crates with 1,342
 tests over a corpus of 73 files and 1,020 cases, **13,300 lines** of the TypeScript reference edition
 that the corpus holds it to, **5,400 lines** of drivers, and **8,200 lines** in the Hub's mirror of
-the shared contracts. The Hub's own suite is 1,498 tests.
+the shared contracts. The Hub's own suite is 1,499 tests.
 
 Numbers go stale; the shape does not. What the table is for is the **last column**, and the honest
 summary of it is that every subsystem that can be built without hardware has been, every subsystem

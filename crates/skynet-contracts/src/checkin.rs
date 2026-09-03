@@ -456,6 +456,13 @@ pub struct GuardReport {
     pub min_control_hz: Option<f64>,
     /// Jerk ceiling as a fraction of the channel ceiling per cycle.
     pub max_delta_per_cycle: Option<f64>,
+    /// How close two collision bodies may come before §7.1's fifth guard holds, in metres.
+    ///
+    /// A **floor** among ceilings, and the only number in this block where a larger value is the
+    /// stricter setting. Absent is not zero-and-safe: `skynet_kernel` treats an unset margin as
+    /// zero, which is a legal setting and a late one — the surfaces have to actually meet before
+    /// anything happens — and emits `no_collision_margin` to say so.
+    pub self_collision_margin_m: Option<f64>,
     /// Where the numbers came from. `None` is a limit set nobody cited a datasheet for.
     pub source: Option<String>,
     /// Guards that will run, in evaluation order.
@@ -538,6 +545,10 @@ pub fn guard_report_to_json(report: Option<&GuardReport>) -> Json {
             number(report.joint_velocity_max_rad_s),
         )
         .set("max_delta_per_cycle", number(report.max_delta_per_cycle))
+        .set(
+            "self_collision_margin_m",
+            number(report.self_collision_margin_m),
+        )
         .set("min_control_hz", number(report.min_control_hz))
         .set("notices", notices)
         .set("resolved_at", Json::Str(report.resolved_at.clone()))
@@ -790,6 +801,7 @@ mod tests {
             base_velocity_max_m_s: None,
             min_control_hz: None,
             max_delta_per_cycle: None,
+            self_collision_margin_m: None,
             source: Some("vendor datasheet rev C".to_string()),
             active: vec!["watchdog".to_string(), "envelope".to_string()],
             unavailable: vec![UnavailableGuard {

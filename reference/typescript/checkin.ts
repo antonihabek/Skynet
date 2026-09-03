@@ -328,6 +328,15 @@ export interface GuardReport {
   base_velocity_max_m_s: number | null
   min_control_hz: number | null
   max_delta_per_cycle: number | null
+  /**
+   * How close two collision bodies may come before §7.1's fifth guard holds, in metres.
+   *
+   * A **floor** among ceilings, and the only number in this block where a larger value is the
+   * stricter setting. `null` is not zero-and-safe: the kernel treats an unset margin as zero, which
+   * is a legal setting and a late one — the surfaces have to meet before anything happens — and
+   * emits `no_collision_margin` to say so.
+   */
+  self_collision_margin_m: number | null
   /** Where the numbers came from. `null` is a limit set nobody cited a datasheet for. */
   source: string | null
   /** Guards that will run, in evaluation order. */

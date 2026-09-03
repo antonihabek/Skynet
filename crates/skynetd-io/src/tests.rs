@@ -1975,10 +1975,115 @@ const SITE_PROFILE: &str = r#"{
                           "shape": { "kind": "box", "min": [-1, -1, 0], "max": [1, 1, 2] } }] }
 }"#;
 
+const MARGIN_PROFILE: &str = r#"{
+  "name": "site-a",
+  "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "limits": { "joint_velocity_max_rad_s": 0.5, "self_collision_margin_m": 0.05,
+              "proximity": { "stop_distance_m": 1.2, "slow_distance_m": 2.5, "slow_factor": 0.25 } }
+}"#;
+
+const PARTIAL_PROXIMITY_PROFILE: &str = r#"{
+  "name": "site-a",
+  "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "limits": { "proximity": { "stop_distance_m": 1.2 } }
+}"#;
+
 fn write_profile(fixture: &Fixture, document: &str) {
     let layout = fixture.daemon.store.layout();
     std::fs::create_dir_all(layout.profiles()).unwrap();
     std::fs::write(layout.active_profile(), document).unwrap();
+}
+
+/// §7.6's two undeliverable profile fields, delivered.
+///
+/// `resolveLimits` has accepted `self_collision_margin_m` and `proximity` since it was written and
+/// §11's profile carried neither, so two of the seven fields the kernel reads had nowhere to arrive
+/// from. Both are on the profile now, under the profile's own signature (§38.1) rather than through
+/// a second path.
+///
+/// The two land differently and the test says so, because the difference is the honest report:
+/// the margin changes what the machine does, and the separation thresholds change what it *says*.
+#[test]
+fn the_profile_delivers_a_collision_margin_and_separation_thresholds() {
+    let mut fixture = Fixture::new("limits-margin");
+    fixture.provision();
+    write_embodiment(&fixture, LIMITED_ARM);
+    write_profile(&fixture, MARGIN_PROFILE);
+
+    let (status, body) = fixture.request("GET", "/limits", Some("observer-token"), "");
+    assert_eq!(status, 200);
+
+    // The margin reached the kernel, so §7.1's fifth guard has a distance to hold at instead of
+    // waiting for two surfaces to meet.
+    assert_eq!(
+        body.get("self_collision_margin_m").and_then(Json::as_f64),
+        Some(0.05)
+    );
+
+    // And `no_collision_margin` is no longer emitted, which it was on every robot alive.
+    let notices: Vec<&str> = body
+        .arr_or_empty("notices")
+        .iter()
+        .filter_map(|notice| notice.get("code").and_then(Json::as_str))
+        .collect();
+    assert!(
+        !notices.contains(&"no_collision_margin"),
+        "the margin is set: {notices:?}"
+    );
+
+    // `proximity` is delivered and the guard is still unavailable — and the input it names is now
+    // the sensor rather than the profile. That is the whole change on this half: "this platform
+    // cannot deliver it" became "this robot has not got one", which is a fact about the body and
+    // the thing §7.2 asks a guard to report.
+    let unavailable = body
+        .arr_or_empty("unavailable_guards")
+        .iter()
+        .find(|entry| entry.get("guard") == Some(&Json::from("proximity")))
+        .cloned()
+        .expect("proximity is unavailable without a person detector");
+    let missing: Vec<&str> = unavailable
+        .arr_or_empty("missing")
+        .iter()
+        .filter_map(Json::as_str)
+        .collect();
+    assert!(
+        !missing.iter().any(|why| why.contains("profile.proximity")),
+        "the profile carries it now: {missing:?}"
+    );
+    assert!(!missing.is_empty(), "and something is still missing");
+}
+
+/// A separation block a profile did not finish stays unfinished.
+///
+/// `skynet_kernel::Proximity` needs all three numbers. Inventing the missing one would be this
+/// layer choosing a safety parameter, so an incomplete block leaves the guard naming
+/// `profile.proximity` — §7.2's rule, and the reason the promotion is a `?` chain rather than a
+/// set of defaults.
+#[test]
+fn a_half_written_separation_block_does_not_acquire_a_default() {
+    let mut fixture = Fixture::new("limits-partial-proximity");
+    fixture.provision();
+    write_embodiment(&fixture, LIMITED_ARM);
+    write_profile(&fixture, PARTIAL_PROXIMITY_PROFILE);
+
+    let (status, body) = fixture.request("GET", "/limits", Some("observer-token"), "");
+    assert_eq!(status, 200);
+
+    let unavailable = body
+        .arr_or_empty("unavailable_guards")
+        .iter()
+        .find(|entry| entry.get("guard") == Some(&Json::from("proximity")))
+        .cloned()
+        .expect("still unavailable");
+    let missing: Vec<&str> = unavailable
+        .arr_or_empty("missing")
+        .iter()
+        .filter_map(Json::as_str)
+        .collect();
+    assert!(
+        missing.iter().any(|why| why.contains("profile.proximity")),
+        "two of three is not a proximity configuration: {missing:?}"
+    );
 }
 
 /// §15's runtime tests, over the real router.

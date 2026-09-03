@@ -264,6 +264,19 @@ pub fn read_profile(layout: &Layout) -> (Option<String>, Option<ProfileLimits>) 
             joint_torque_max_nm: number("joint_torque_max_nm"),
             base_velocity_max_m_s: number("base_velocity_max_m_s"),
             max_delta_per_cycle: number("max_delta_per_cycle"),
+            self_collision_margin_m: number("self_collision_margin_m"),
+            proximity: limits.get_present("proximity").map(|prox| {
+                let distance = |key: &str| {
+                    prox.get_present(key)
+                        .and_then(Json::as_f64)
+                        .filter(|n| n.is_finite())
+                };
+                skynetd::desired::ProfileProximity {
+                    stop_distance_m: distance("stop_distance_m"),
+                    slow_distance_m: distance("slow_distance_m"),
+                    slow_factor: distance("slow_factor"),
+                }
+            }),
         }),
     )
 }

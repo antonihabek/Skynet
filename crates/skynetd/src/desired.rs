@@ -175,6 +175,30 @@ pub struct ProfileLimits {
     pub base_velocity_max_m_s: Option<f64>,
     /// Jerk ceiling, as a fraction of the ceiling per cycle.
     pub max_delta_per_cycle: Option<f64>,
+    /// How close two collision bodies may come before §7.1's fifth guard holds, in metres.
+    ///
+    /// A **floor**, not a ceiling, and every rule below has to know that. Absent means zero, which
+    /// `skynet_kernel` calls a legal setting and a late one — the surfaces have to actually meet
+    /// before anything happens — so a larger margin is the *stricter* profile.
+    pub self_collision_margin_m: Option<f64>,
+    /// §7.1's speed-and-separation thresholds.
+    pub proximity: Option<ProfileProximity>,
+}
+
+/// Speed-and-separation thresholds, as a profile carries them.
+///
+/// The reader's shape rather than the kernel's: `skynet_kernel::Proximity` requires all three, and a
+/// profile that declares two of them is a document an operator wrote, not a fault. So they arrive
+/// optional and are promoted to the kernel's triple only when all three are present — an incomplete
+/// set leaves the guard reporting the input it has not got, which is §7.2 rather than a default.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ProfileProximity {
+    /// Below this separation the robot stops. A **larger** distance is stricter.
+    pub stop_distance_m: Option<f64>,
+    /// Below this separation the robot is slowed. A **larger** distance is stricter.
+    pub slow_distance_m: Option<f64>,
+    /// The multiplier applied between the two. A **smaller** factor is stricter.
+    pub slow_factor: Option<f64>,
 }
 
 impl ProfileLimits {
@@ -200,12 +224,52 @@ impl ProfileLimits {
         ) && narrower(self.joint_torque_max_nm, other.joint_torque_max_nm)
             && narrower(self.base_velocity_max_m_s, other.base_velocity_max_m_s)
             && narrower(self.max_delta_per_cycle, other.max_delta_per_cycle)
+            // Not `narrower`. A collision margin and a separation distance are **floors**: a bigger
+            // number keeps the robot further away, so smaller-is-stricter would classify a profile
+            // that halved the stop distance as a narrowing and apply it under a running policy —
+            // which is the precise failure §33.4's asymmetry exists to prevent, arriving through
+            // the function written to prevent it.
+            && wider(self.self_collision_margin_m, other.self_collision_margin_m)
+            && self.proximity_narrows(other.proximity)
+    }
+
+    /// Whether this profile's separation thresholds allow no more than `other`'s.
+    ///
+    /// Two of the three are floors and the third is a ceiling, so they are classified separately
+    /// rather than as a block. Dropping the whole set is a widening for the same reason dropping a
+    /// ceiling is: it removes a limit.
+    fn proximity_narrows(&self, other: Option<ProfileProximity>) -> bool {
+        match (self.proximity, other) {
+            (Some(new), Some(old)) => {
+                wider(new.stop_distance_m, old.stop_distance_m)
+                    && wider(new.slow_distance_m, old.slow_distance_m)
+                    && narrower(new.slow_factor, old.slow_factor)
+            }
+            (Some(_), None) => true,
+            (None, None) => true,
+            (None, Some(_)) => false,
+        }
     }
 }
 
+/// Whether `new` is no looser than `old` for a value where **smaller is stricter** — a ceiling.
 fn narrower(new: Option<f64>, old: Option<f64>) -> bool {
     match (new, old) {
         (Some(new), Some(old)) => new <= old,
+        (Some(_), None) => true,
+        (None, None) => true,
+        (None, Some(_)) => false,
+    }
+}
+
+/// Whether `new` is no looser than `old` for a value where **larger is stricter** — a floor.
+///
+/// The mirror of [`narrower`], and it exists because this file had one classifier and acquired a
+/// second kind of number. Every case but the comparison is identical: declaring a floor where there
+/// was none is still a narrowing, and dropping one is still a widening.
+fn wider(new: Option<f64>, old: Option<f64>) -> bool {
+    match (new, old) {
+        (Some(new), Some(old)) => new >= old,
         (Some(_), None) => true,
         (None, None) => true,
         (None, Some(_)) => false,
@@ -383,6 +447,14 @@ impl DesiredState {
                         joint_torque_max_nm: number(&limits, "joint_torque_max_nm"),
                         base_velocity_max_m_s: number(&limits, "base_velocity_max_m_s"),
                         max_delta_per_cycle: number(&limits, "max_delta_per_cycle"),
+                        self_collision_margin_m: number(&limits, "self_collision_margin_m"),
+                        proximity: limits
+                            .get_present("proximity")
+                            .map(|prox| ProfileProximity {
+                                stop_distance_m: number(prox, "stop_distance_m"),
+                                slow_distance_m: number(prox, "slow_distance_m"),
+                                slow_factor: number(prox, "slow_factor"),
+                            }),
                     },
                     cell: raw.get_present("cell").cloned(),
                 })
