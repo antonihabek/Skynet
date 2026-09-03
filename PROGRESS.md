@@ -10560,6 +10560,31 @@ tally is `None` unless the ring can hold a cycle, and no edition writes one. The
 path exists, is tested against the real producer, and is gated on a property of the ring rather than
 a constant.
 
+### What the sweep cleared, which is the other half of running one
+
+Ten claims, one defect. The rest hold, and they are recorded so the next sweep does not re-derive
+them:
+
+* **`power.rs`'s two unaccounted reserve terms.** `payload` and `distance_to_safe_state` genuinely
+  have no source. `Conditions::payload_kg` exists and looks like one — §45.3 lists payload among a
+  calibration's conditions — and it is a field an operator *declares on a record*, not something the
+  robot senses; `conditions_now` returns `None` for it and says why. `mass_kg` on a frame is the
+  geometry's mass, not the carried load. `Reserve::unaccounted` carries the fact and
+  `Reserve::complete` is a method rather than a constant so the day one arrives the consumers do not
+  have to be found again.
+* **`capacity.rs`'s "field that has no source"** is a runtime message about one robot's missing
+  reading, not a claim about the platform.
+* **`limits.rs`'s three** are the ones the forty-seventh session dealt with; one remains
+  (`people_detection`) and it is a gap in §5's vocabulary rather than in a delivery path.
+* **`blackbox.rs`'s "nothing carries the bytes"** is §77, which is an owner's decision on upload
+  design rather than a missing consumer.
+* **`skill.rs`'s** was the defect.
+
+The pattern that distinguishes them is worth stating: a claim about **a body or a document** —
+"no payload sensor", "§5 declares no person detector" — held up every time. A claim about **this
+process** — "there is no kernel channel" — was wrong twice, because the thing being reached for was
+in the same process under a different name.
+
 ### Numbers
 
 Rust: **1,346** tests, 4 new, **1,316** run here. `cargo fmt --all --check` and
