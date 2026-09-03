@@ -1046,6 +1046,104 @@ impl Fixture {
 
 // ── Rendering the console without a robot ────────────────────────────────────
 
+/// Every route the console fixture records an answer for.
+///
+/// A constant rather than a literal in the loop, because [`every_console_feed_has_a_fixture_route`]
+/// checks it against the page. A feed the fixture does not record renders as a 404 from
+/// `fixture-serve.mjs` — which the console correctly draws as an unreachable panel, so the omission
+/// looks exactly like the failure the fixture exists to let somebody look at.
+const CONSOLE_FIXTURE_ROUTES: &[&str] = &[
+    "status",
+    "embodiment",
+    "limits",
+    // §32.2's Plan panel asks for one package's plan, so the fixture records one. The console's
+    // picker asks for whichever package the operator chose; this is the one the fixture installs.
+    "limits?package=openrobot%2Fgrasp",
+    "plan",
+    "packages",
+    "health",
+    "blackbox",
+    "capacity",
+    "grants",
+    "trust",
+    "audit",
+    "calibration",
+    "cell",
+    "outbound",
+    "watchdog",
+    "post",
+    "state",
+    "skills",
+    "ota",
+    "releases",
+    "identity",
+    "checkin",
+    "intent",
+];
+
+/// The file one request's answer is recorded in.
+///
+/// **The query is part of the request.** `/limits` and `/limits?package=openrobot/grasp` are two
+/// different answers — the body's own ceilings, and those with a package's transport clamp folded
+/// in — and a fixture that recorded one under both names would show the first where the console
+/// asked for the second. `console/fixture-serve.mjs` computes the same name; the two are one rule
+/// in two languages, and the rule is written where the server reads it.
+fn fixture_name(route: &str) -> String {
+    let Some((path, query)) = route.split_once('?') else {
+        return route.to_string();
+    };
+    let flattened: String = query
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    // Runs of non-alphanumerics collapse, matching the server's `[^A-Za-z0-9]+`.
+    let mut collapsed = String::with_capacity(flattened.len());
+    for ch in flattened.chars() {
+        if ch == '-' && collapsed.ends_with('-') {
+            continue;
+        }
+        collapsed.push(ch);
+    }
+    format!("{path}__{collapsed}")
+}
+
+/// The fixture records an answer for every feed the page polls.
+///
+/// Two lists in two languages, kept in step by reading one of them. `console.js` is compiled into
+/// this binary by `include_str!`, so the page under test is the page that ships — and the check is
+/// a scan for `new Feed('name', '/path'`, which is the one place a feed is declared.
+///
+/// Not `--ignored` like the fixture itself: writing the fixture needs a temporary directory and a
+/// human to look at the result, and *this* needs neither. The failure it catches is a panel added
+/// to the console and silently missing from every fixture anybody renders afterwards, which is a
+/// gap nobody notices because the page still draws.
+#[test]
+fn every_console_feed_has_a_fixture_route() {
+    let script = include_str!("../console/console.js");
+    let mut declared: Vec<String> = Vec::new();
+    for tail in script.split("new Feed(").skip(1) {
+        let Some(path) = tail.split('\'').nth(3) else {
+            continue;
+        };
+        let Some(route) = path.strip_prefix('/') else {
+            panic!("a feed path that is not absolute: `{path}`");
+        };
+        declared.push(route.to_string());
+    }
+    assert!(
+        declared.len() > 15,
+        "the scan found {} feeds, which means `new Feed(` stopped being how one is declared",
+        declared.len()
+    );
+    for route in &declared {
+        assert!(
+            CONSOLE_FIXTURE_ROUTES.contains(&route.as_str()),
+            "the console polls `/{route}` and the fixture records no answer for it, so anybody \
+             rendering the fixture sees that panel unreachable rather than drawn"
+        );
+    }
+}
+
 /// Write the console and one answer per route it fetches, so a browser can render it.
 ///
 /// `cargo test -p skynetd-io -- --ignored console_fixture --nocapture`, then serve the directory it
@@ -1239,7 +1337,26 @@ fn console_fixture() {
     .unwrap();
 
     let source = fixture.root.path().join("source");
-    let m = manifest("openrobot/grasp", "1.0.0", "policy");
+    let mut m = manifest("openrobot/grasp", "1.0.0", "policy");
+    // §37.1's `transport` stage needs the body this policy was trained on. Without it the console's
+    // Plan panel renders the honest-but-uninteresting "this package commands no joints", and the
+    // shape §32.2 asks the panel for — bindings, a method per channel, a ceiling with provenance,
+    // and a `scaled_down` warning naming the joint — goes unlooked-at.
+    // The digest a publisher declares over its own version. Separate from the digest this store
+    // observes over the blob — admission compares the two and the planner reads neither.
+    m.set(
+        "digest",
+        Json::from(format!("sha256:{}", "1".repeat(64)).as_str()),
+    );
+    m.set(
+        "source_embodiment",
+        Json::parse(
+            r#"{"control_mode":"torque","control_hz":50,
+                 "action_channels":[{"index":0,"kind":"joint_torque",
+                                     "role":"right_arm.shoulder.pitch","unit":"Nm","peak":180}]}"#,
+        )
+        .expect("the source parses"),
+    );
     let digest = write_package(&source, &m, &[("bin/run", "#!/bin/sh\nsleep 1\n")]);
     let id = PackageId::parse("openrobot/grasp").unwrap();
     fixture
@@ -1284,32 +1401,12 @@ fn console_fixture() {
     // A 503 replayed as a 200 is a different page: the console's job on a failed panel is to say
     // what is missing, and serving the error body with a success status would render the error
     // object as data and hide exactly the behaviour worth looking at.
-    for route in [
-        "status",
-        "embodiment",
-        "plan",
-        "packages",
-        "health",
-        "blackbox",
-        "capacity",
-        "grants",
-        "trust",
-        "audit",
-        "calibration",
-        "outbound",
-        "watchdog",
-        "post",
-        "state",
-        "skills",
-        "ota",
-        "identity",
-        "checkin",
-        "intent",
-    ] {
+    for route in CONSOLE_FIXTURE_ROUTES {
         let response = fixture.raw("GET", &format!("/{route}"), Some("observer-token"));
-        std::fs::write(out.join(route), &response.body).unwrap();
+        let name = fixture_name(route);
+        std::fs::write(out.join(&name), &response.body).unwrap();
         std::fs::write(
-            out.join(format!("{route}.status")),
+            out.join(format!("{name}.status")),
             response.status.to_string(),
         )
         .unwrap();
@@ -1666,6 +1763,224 @@ fn a_body_that_declares_no_power_block_is_unmetered_without_a_fault() {
     assert!(body.arr_or_empty("faults").is_empty());
 }
 
+/// §7.3's limits, over the real router.
+///
+/// The route is the first thing on a robot that calls `resolve_limits`, and what it answers is a
+/// composition of three files this fixture writes: the descriptor's envelope, the signed profile's
+/// ceilings and §55.2's cell. Asserting the composition rather than the fields, because a route
+/// that read one file and rendered it would pass a field-by-field test.
+#[test]
+fn the_limits_route_composes_the_body_the_profile_and_the_cell() {
+    let mut fixture = Fixture::new("limits-route");
+    fixture.provision();
+    write_embodiment(&fixture, LIMITED_ARM);
+    write_profile(&fixture, SITE_PROFILE);
+
+    let (status, body) = fixture.request("GET", "/limits", Some("observer-token"), "");
+    assert_eq!(status, 200);
+
+    // The profile narrows the envelope's velocity and the envelope keeps its torque: the minimum
+    // of every source, which is the one rule §7.3 has.
+    assert_eq!(
+        body.get("joint_velocity_max_rad_s").and_then(Json::as_f64),
+        Some(0.5)
+    );
+    assert_eq!(
+        body.get("joint_torque_max_nm").and_then(Json::as_f64),
+        Some(80.0)
+    );
+    assert_eq!(
+        body.get("source").and_then(Json::as_str),
+        Some("vendor datasheet rev C"),
+        "a safety limit without provenance is a rumour"
+    );
+
+    // The cell's volumes reached the guard that reads them.
+    let active: Vec<&str> = body
+        .arr_or_empty("active_guards")
+        .iter()
+        .filter_map(Json::as_str)
+        .collect();
+    assert!(active.contains(&"workspace"), "{active:?}");
+
+    // And the route never claims any of it is enforced.
+    assert_eq!(body.get("enforced"), Some(&Json::Bool(false)));
+    assert!(body
+        .get("tier_source")
+        .and_then(Json::as_str)
+        .is_some_and(|note| note.contains("Nothing on this robot decides its tier")));
+}
+
+/// A named package that is not installed is refused by name rather than answered with the body's
+/// own ceilings, which a caller would read as the package's.
+#[test]
+fn the_limits_route_refuses_a_package_it_does_not_have() {
+    let mut fixture = Fixture::new("limits-package");
+    fixture.provision();
+    write_embodiment(&fixture, LIMITED_ARM);
+
+    let (status, body) = fixture.request(
+        "GET",
+        "/limits?package=acme%2Fwalk",
+        Some("observer-token"),
+        "",
+    );
+    assert_eq!(status, 200);
+    assert!(body
+        .get("package_clamp")
+        .and_then(Json::as_str)
+        .is_some_and(|note| note.contains("neither installed nor staged")));
+    assert_eq!(
+        body.get("sources")
+            .and_then(|sources| sources.get("transport_of")),
+        Some(&Json::Null)
+    );
+}
+
+/// §6.3's hand-off, and §32.2's Plan panel, over the real router.
+///
+/// `?package=` folds §37.1's transport clamp into the resolution and answers with the plan it came
+/// from. The two halves are different questions and the panel asks both: the clamp is the number a
+/// guard would enforce, and the plan is why that number is what it is — which channel bound to
+/// which joint, by what method, and whether anything was scaled down on the way.
+#[test]
+fn the_limits_route_folds_in_an_installed_packages_plan() {
+    let mut fixture = Fixture::new("limits-plan");
+    fixture.provision();
+    write_embodiment(&fixture, LIMITED_ARM);
+
+    // A policy that commands one torque channel on the role this arm declares, peaking well above
+    // what the joint is rated for — so the plan has to scale it and say so.
+    let source = Json::parse(
+        r#"{"control_mode":"torque","control_hz":50,
+             "action_channels":[{"index":0,"kind":"joint_torque","role":"right_arm.shoulder.pitch",
+                                 "unit":"Nm","peak":180}]}"#,
+    )
+    .expect("the source parses");
+    let mut document = manifest("openrobot/lift", "1.0.0", "policy");
+    // The digest a publisher declares over its own version, which is a different number from the
+    // one this store observes over the blob — admission compares them and the planner does not.
+    document
+        .set(
+            "digest",
+            Json::from(format!("sha256:{}", "1".repeat(64)).as_str()),
+        )
+        .set("source_embodiment", source);
+
+    let dir = fixture.root.path().join("lift");
+    let digest = write_package(&dir, &document, &[("bin/run", "#!/bin/sh\nsleep 1\n")]);
+    let id = PackageId::parse("openrobot/lift").unwrap();
+    fixture
+        .daemon
+        .store
+        .stage(&id, "policy", "1.0.0", &digest, &dir)
+        .unwrap();
+    // Staged and not activated, which is the state §6.2 says this answer is most wanted in — and
+    // the state a developer's machine can actually reach: §37.1's activation is an atomic symlink
+    // swap, which is POSIX, and a test that needed one would be green in CI and unrunnable here.
+    let (status, body) = fixture.request(
+        "GET",
+        "/limits?package=openrobot%2Flift",
+        Some("observer-token"),
+        "",
+    );
+    assert_eq!(status, 200);
+    assert_eq!(body.get("package_clamp"), Some(&Json::Null), "no refusal");
+
+    // The plan, which is the half no ceiling carries.
+    let plan = body.get("plan").expect("a plan");
+    assert_eq!(plan.get("verdict").and_then(Json::as_str), Some("direct"));
+    // §6.1: scaling never guesses, and when it scales it names the joint. 80 of 180 is 0.44, and a
+    // panel that showed only the resulting ceiling would not say the policy had been turned down.
+    let warnings: Vec<&str> = plan
+        .arr_or_empty("warnings")
+        .iter()
+        .filter_map(|entry| entry.get("code").and_then(Json::as_str))
+        .collect();
+    assert!(warnings.contains(&"scaled_down"), "{warnings:?}");
+
+    // And the clamp reached `resolve_limits`, which is §6.3's hand-off: the plan's per-channel
+    // ceiling is what gives a joint a limit the `envelope` guard can compare a command against.
+    let per_channel = body.get("per_channel").expect("per-channel ceilings");
+    assert_eq!(
+        per_channel.get("shoulder").and_then(Json::as_f64),
+        Some(80.0)
+    );
+    assert_eq!(
+        body.get("sources")
+            .and_then(|sources| sources.get("transport_of"))
+            .and_then(Json::as_str),
+        Some("openrobot/lift")
+    );
+    // The sentence that was true of every robot until a plan was in force stops being printed once
+    // one is: this robot now has a ceiling to clamp against.
+    assert_eq!(body.get("per_channel_note"), None);
+    assert_eq!(
+        body.get("package_state").and_then(Json::as_str),
+        Some("staged"),
+        "a plan for a package that is not running is a different sentence, and the route says which"
+    );
+}
+
+/// A read that does work is still a read.
+#[test]
+fn reading_the_limits_changes_nothing() {
+    let mut fixture = Fixture::new("limits-pure");
+    fixture.provision();
+    write_embodiment(&fixture, LIMITED_ARM);
+    let before = fixture
+        .request("GET", "/status", Some("observer-token"), "")
+        .1;
+    fixture.request("GET", "/limits", Some("observer-token"), "");
+    let after = fixture
+        .request("GET", "/status", Some("observer-token"), "")
+        .1;
+    assert_eq!(before, after);
+}
+
+/// An arm with an envelope worth resolving, an IMU, and a frame graph with two collision bodies.
+const LIMITED_ARM: &str = r#"{
+  "robot_slug": "bench-arm",
+  "base": "fixed",
+  "dof": 1,
+  "envelope": { "joint_velocity_max_rad_s": 1.0, "joint_torque_max_nm": 80,
+                "watchdog_ms": 100, "source": "vendor datasheet rev C" },
+  "sensors": [{"name": "torso_imu", "modality": "imu"}],
+  "joints": [{"name": "shoulder", "role": "right_arm.shoulder.pitch", "type": "revolute",
+              "control_modes": ["position", "torque"],
+              "limits": {"effort_max_nm": 80, "velocity_max_rad_s": 1.0}}],
+  "frames": {
+    "root": "base_link",
+    "convention": "rep103",
+    "nodes": [
+      {"name": "base_link", "parent": null, "kind": "root", "collision": true,
+       "collision_shape": {"kind": "capsule", "radius_m": 0.1, "length_m": 0.2},
+       "translation": [0, 0, 0], "rotation": [0, 0, 0, 1], "source": "descriptor"},
+      {"name": "tool0", "parent": "base_link", "kind": "dynamic",
+       "joint": "shoulder", "joint_type": "revolute", "axis": [0, 1, 0],
+       "translation": [0, 0, 0.1], "rotation": [0, 0, 0, 1],
+       "source": "descriptor", "collision": true,
+       "collision_shape": {"kind": "capsule", "radius_m": 0.05, "length_m": 0.3}}
+    ]
+  }
+}"#;
+
+/// The profile as `crate::runtime` writes it once a signature has verified (§38.1).
+const SITE_PROFILE: &str = r#"{
+  "name": "site-a",
+  "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "limits": { "joint_velocity_max_rad_s": 0.5, "max_delta_per_cycle": 0.1 },
+  "cell": { "name": "bay-3", "facts": { "door_closed": true },
+            "allowed": [{ "frame": "tool0",
+                          "shape": { "kind": "box", "min": [-1, -1, 0], "max": [1, 1, 2] } }] }
+}"#;
+
+fn write_profile(fixture: &Fixture, document: &str) {
+    let layout = fixture.daemon.store.layout();
+    std::fs::create_dir_all(layout.profiles()).unwrap();
+    std::fs::write(layout.active_profile(), document).unwrap();
+}
+
 /// §15's runtime tests, over the real router.
 #[test]
 fn the_conformance_route_runs_what_it_can_and_names_what_it_cannot() {
@@ -1685,11 +2000,37 @@ fn the_conformance_route_runs_what_it_can_and_names_what_it_cannot() {
             .to_string()
     };
 
-    // The one this edition passes, by running the function its own updater runs.
+    // The one this edition passes, by running the function its own updater runs. Host-independent:
+    // `admit_bundle` reads no file and asks the machine nothing.
     assert_eq!(by_id("ota.safety_gate"), "pass");
-    // And the one it fails, which is the point of running the suite on yourself.
-    assert_eq!(by_id("package.signature.required"), "fail");
     assert_eq!(by_id("safety.policy.isolation"), "skipped");
+
+    // And the one it fails, which is the point of running the suite on yourself — and the only row
+    // whose verdict depends on the **host** rather than on the edition. §8.1's memory figure comes
+    // from `/proc/meminfo`, and `crate::capacity` refuses to invent one anywhere else, so the
+    // admission probe runs on a robot and is honestly skipped on a developer's laptop.
+    //
+    // Asserting `fail` unconditionally made this suite green in CI (ubuntu-latest) and red on
+    // every other machine, in the direction that hides the single row the runner exists to
+    // report. Both branches are asserted, so neither host is checking a shorter exam.
+    if cfg!(target_os = "linux") {
+        assert_eq!(by_id("package.signature.required"), "fail");
+        assert_eq!(body.get("executed"), Some(&Json::Num(2.0)));
+    } else {
+        assert_eq!(by_id("package.signature.required"), "skipped");
+        assert_eq!(body.get("executed"), Some(&Json::Num(1.0)));
+        let detail = body
+            .arr_or_empty("results")
+            .iter()
+            .find(|r| r.get("test_id").and_then(Json::as_str) == Some("package.signature.required"))
+            .and_then(|r| r.get("detail").and_then(Json::as_str))
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            detail.contains("capacity could not be assembled"),
+            "a skip has to name what it was waiting for: {detail}"
+        );
+    }
 
     // Every row carries a sentence, including — especially — the skipped ones.
     for result in body.arr_or_empty("results") {
@@ -1707,6 +2048,75 @@ fn the_conformance_route_runs_what_it_can_and_names_what_it_cannot() {
         .get("note")
         .and_then(Json::as_str)
         .is_some_and(|note| note.contains("never signs")));
+}
+
+/// `telemetry.replay.deterministic`, which had never executed anywhere.
+///
+/// Two robots, and the pair is the test: one with no descriptor, which is skipped with the reason,
+/// and one with a body, which runs a window through its own ring and its own kernel and replays it.
+/// Asserting only the second would leave a runner that could quietly report a pass for a machine it
+/// had described to itself.
+#[test]
+fn the_replay_test_runs_on_a_robot_with_a_body_and_is_skipped_on_one_without() {
+    let outcome = |fixture: &mut Fixture| -> (String, String) {
+        let (_, body) = fixture.request("GET", "/conformance", Some("observer-token"), "");
+        let row = body
+            .arr_or_empty("results")
+            .iter()
+            .find(|r| {
+                r.get("test_id").and_then(Json::as_str) == Some("telemetry.replay.deterministic")
+            })
+            .cloned()
+            .expect("the replay row is always present");
+        (
+            row.get("outcome")
+                .and_then(Json::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            row.get("detail")
+                .and_then(Json::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        )
+    };
+
+    let mut bare = Fixture::new("replay-bare");
+    bare.provision();
+    let (state, detail) = outcome(&mut bare);
+    assert_eq!(state, "skipped");
+    assert!(
+        detail.contains("no channel names"),
+        "a skip names what it was waiting for: {detail}"
+    );
+
+    let mut described = Fixture::new("replay-body");
+    described.provision();
+    write_embodiment(&described, LIMITED_ARM);
+    let (state, detail) = outcome(&mut described);
+    assert_eq!(state, "pass", "{detail}");
+    // The window is not trivially deterministic: a guard actually had something to say about it,
+    // and the sentence says which. A pass over a window nothing tripped is a weaker claim and the
+    // runner distinguishes the two rather than printing one word for both.
+    assert!(detail.contains("guards exercised: watchdog"), "{detail}");
+    assert!(
+        detail.contains("4 of them with a predecessor"),
+        "five cycles, four warmed: {detail}"
+    );
+    // Always said, because a reader must not take this for a recorded policy replaying.
+    assert!(detail.contains("no recorded policy to replay"), "{detail}");
+
+    // The other branch, and the more interesting one. A body that declares no envelope has no
+    // watchdog window either, so nothing in the window trips — and the runner names the reason
+    // rather than reporting a bare pass. §73's transport row, measured on a machine: the third
+    // cycle asks for a thousand times any plausible ceiling and is forwarded unchanged, because a
+    // joint's ceiling comes from a transport plan and no policy is running to have one.
+    let mut bare_body = Fixture::new("replay-unclamped");
+    bare_body.provision();
+    write_embodiment(&bare_body, BENCH_ARM);
+    let (state, detail) = outcome(&mut bare_body);
+    assert_eq!(state, "pass", "{detail}");
+    assert!(detail.contains("§73's transport row"), "{detail}");
+    assert!(detail.contains("active with nothing to clamp"), "{detail}");
 }
 
 /// A `GET` that runs checks must still be a `GET`: nothing it does may change the robot.
@@ -3234,7 +3644,9 @@ const BENCH_ARM_WATCHDOG: &str = r#"{
   "on_command_loss": "coast",
   "envelope": { "watchdog_ms": 100 },
   "watchdog": { "soc_wdt_ms": 40, "drive_command_timeout_ms": 500 },
-  "joints": [{"name": "shoulder", "type": "revolute", "control_modes": ["position"]}]
+  "joints": [{"name": "shoulder", "role": "right_arm.shoulder.pitch", "type": "revolute",
+              "control_modes": ["position", "torque"],
+              "limits": {"effort_max_nm": 80}}]
 }"#;
 
 fn write_embodiment(fixture: &Fixture, document: &str) {
@@ -6998,7 +7410,10 @@ mod checkin {
         }
     }
 
-    fn become_paired(fixture: &Fixture) {
+    /// `pub(super)` so `mod wire` can freeze a check-in from a robot this module already knows how
+    /// to make. The alternative is a second pairing written beside the fixture, which is how a
+    /// fixture stops being a document the production path produces.
+    pub(super) fn become_paired(fixture: &Fixture) {
         let layout = fixture.daemon.store.layout().clone();
         let hub = RecordingEnrolment::accepting(enrolled());
         pair(
@@ -7013,7 +7428,7 @@ mod checkin {
         .unwrap();
     }
 
-    fn built_for(fixture: &mut Fixture) -> skynet_contracts::checkin::CheckIn {
+    pub(super) fn built_for(fixture: &mut Fixture) -> skynet_contracts::checkin::CheckIn {
         built_with_power(fixture, None)
     }
 
@@ -7045,6 +7460,13 @@ mod checkin {
             health(&observed, 0, lag),
             fixture.daemon.operating_state.as_str(),
             &crate::intent::held_digest(&layout),
+            // §7.6, over whatever body this fixture has been given — so a test that writes a
+            // descriptor gets that descriptor's guard partition on the wire rather than a fixed one.
+            Some(crate::limits::report(&crate::limits::read(
+                &layout,
+                &crate::embodiment::load(&layout),
+                crate::limits::ROBOT_TIER,
+            ))),
         )
     }
 
@@ -8279,6 +8701,66 @@ fn frozen(name: &str, document: &Json) {
 
 mod wire {
     use super::*;
+
+    /// §17's check-in, from a robot with a body and a profile.
+    ///
+    /// The fourth fixture, and the one that closes a gap the other three made visible: the check-in
+    /// is the most-sent document on §17 and it had never been frozen. Both repositories decode it,
+    /// both suites passed, and nothing held one side's real bytes against the other side's real
+    /// route — which is exactly the arrangement the twenty-seventh session found the episode path in.
+    ///
+    /// The robot is **described and configured** on purpose. A fixture taken on a bare development
+    /// root freezes a check-in whose `limits` block is all nulls, and the shape a fleet page
+    /// actually has to render — ceilings with provenance, three active guards, five unavailable
+    /// ones each naming what it wants — would go untested on both sides.
+    #[test]
+    fn the_check_in_a_described_robot_sends() {
+        let mut fixture = Fixture::new("wire-checkin");
+        // Through the check-in module's own helpers, so this document is built by exactly the path
+        // forty other tests assert about rather than by a second assembly written beside a fixture.
+        super::checkin::become_paired(&fixture);
+        write_embodiment(&fixture, LIMITED_ARM);
+        write_profile(&fixture, SITE_PROFILE);
+        fixture.daemon.reload();
+
+        let built = super::checkin::built_for(&mut fixture);
+        let document = skynet_contracts::checkin::check_in_to_json(&built);
+
+        // Asserted before it is frozen, because a fixture is only worth freezing if somebody has
+        // said what it is supposed to contain. §7.6's block is the reason this fixture exists.
+        let limits = document.get("limits").expect("§7.6's block");
+        assert_eq!(limits.get("resolved_at"), Some(&Json::from("guest")));
+        assert_eq!(
+            limits.get("enforced"),
+            Some(&Json::Bool(false)),
+            "a fleet page must never render a guard list as enforcement this edition does not do"
+        );
+        assert_eq!(
+            limits.get("source"),
+            Some(&Json::from("vendor datasheet rev C")),
+            "a safety limit without provenance is a rumour, and the provenance has to cross"
+        );
+        let active: Vec<&str> = limits
+            .arr_or_empty("active")
+            .iter()
+            .filter_map(Json::as_str)
+            .collect();
+        assert!(active.contains(&"workspace"), "{active:?}");
+        // §7.2's sentence, verbatim across the boundary: a wheeled or fixed base is a shape and not
+        // a defect, and a Hub that re-derived this row would re-derive it as a missing IMU.
+        let balance = limits
+            .arr_or_empty("unavailable")
+            .iter()
+            .find(|entry| entry.get("guard") == Some(&Json::from("balance")))
+            .cloned()
+            .expect("balance is unavailable on a fixed base");
+        assert_eq!(
+            balance.arr_or_empty("missing")[0],
+            Json::from("a legged base — not applicable to this body")
+        );
+
+        frozen("checkin", &document);
+    }
 
     /// §74's window, closed the way a reconcile pass closes one.
     #[test]

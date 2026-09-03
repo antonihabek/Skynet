@@ -405,6 +405,11 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         // key, carries no bundle, and is the panel somebody reads when a fleet has stopped
         // updating.
         ("GET", ["ota"]) => Role::Observer,
+        // The ceilings the kernel would enforce, and which of the eight guards can run. §39.1
+        // gives observer "read health, guards, plan", and this is the guard half of that sentence
+        // stated as numbers: it names no key, changes nothing, and is the panel somebody reads
+        // when a robot will not move as far as they expected.
+        ("GET", ["limits"]) => Role::Observer,
         ("GET", ["skills"]) => Role::Observer,
         ("GET", ["skills", _]) => Role::Observer,
 

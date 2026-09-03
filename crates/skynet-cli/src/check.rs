@@ -19,9 +19,14 @@
 //! X" for as long as this list existed, and five of the eight named an X the platform has since
 //! built — so every one of them pointed at a gap that had closed. They point at
 //! `skynet conformance` now, which runs them on a robot against that robot's own installed code
-//! (`skynetd-io::conformance`), and the two that remain genuinely open say what they are waiting
+//! (`skynetd-io::conformance`), and the ones that remain genuinely open say what they are waiting
 //! for rather than naming a component that exists. A sentence explaining an absence is a claim, and
 //! it decays exactly as fast as the absence does.
+//!
+//! Three of the eight execute there today. `telemetry.replay.deterministic` was the third and it
+//! arrived the same way the others did: its sentence said *"pending resolved limits"*, and the
+//! resolution turned out to be one module away — `skynetd-io::limits`, the first caller of
+//! `resolve_limits` that is a robot.
 //!
 //! `safety.kernel.parity` is the interesting one: for an *edition* it means "reproduces the
 //! conformance corpus", which `cargo test -p skynet-corpus` measures and this command cannot. It is
@@ -247,7 +252,7 @@ pub const NOT_COVERED: &[(&str, &str)] = &[
     ),
     (
         "telemetry.replay.deterministic",
-        "a runtime property — `skynet conformance`, pending resolved limits",
+        "a runtime property — `skynet conformance`, where it runs on this robot's own limits",
     ),
     (
         "security.identity.attested",

@@ -45,6 +45,18 @@ use skynet_json::Json;
 
 use crate::layout::Layout;
 
+/// The cell in force, decoded, or nothing.
+///
+/// Three of [`to_json`]'s four states collapse to `None` here — no profile, a profile with no
+/// cell, and a cell that carries faults is still a cell — because a caller that wants the
+/// descriptor wants the descriptor, and the four-way distinction is a *report*. `crate::limits`
+/// is that caller: it folds §55.2's volumes into the kernel's operator profile, and a cell with
+/// faults layers the volumes that survived them exactly as `GET /cell` says it does.
+pub fn active(layout: &Layout) -> Option<CellDescriptor> {
+    let profile = crate::observe::read_json(&layout.active_profile())?;
+    Some(cell_from_json(profile.get_present("cell")?))
+}
+
 /// The cell in force, as `GET /cell` answers.
 ///
 /// Four states, and they are four different things to do about it:

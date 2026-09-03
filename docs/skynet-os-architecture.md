@@ -479,6 +479,69 @@ the `safety.kernel.parity` conformance test — which feeds identical cycle vect
 requires identical verdicts. Two implementations of one specification, held to each other by the
 suite.
 
+### 7.6 Resolving on a robot, and the tier that is not one
+
+`resolveLimits()` composes three sources into the one set the kernel enforces (§7.3), and for a
+long time nothing on a machine ever called it. Its callers were the kernel's own suite, the
+corpus, and the Hub's renderer — all of which hand it a document. The robot-side composition is
+`skynetd-io::limits`, served at `GET /limits` and printed by `skynet limits`, and it is worth
+stating what it reads and what it cannot.
+
+**The tier is an input, and the robot does not have one.** §15 awards a tier from bench evidence a
+human witnessed and §11 would deliver the award in desired state; neither path is written, so
+nothing on a robot decides its own tier and a module that chose one would be inventing the fact the
+whole arrangement exists to prevent. The daemon therefore resolves at **guest** and says so, which
+is defensible only because of a property of `resolveLimits()` itself:
+
+> The tier changes what is done with the limits. It never changes what they are.
+
+Every ceiling, every active guard and every unavailable guard is identical at all three tiers. What
+the tier decides is the enforcement mode and two notices — `advisory_only` and
+`no_independent_stop`. That is asserted by a test rather than assumed, and the day it fails is the
+day the assumption has to be replaced by an awarded tier rather than defended.
+
+**Three of the operator profile's fields have no delivery path.** `resolveLimits()` accepts seven,
+and §11's desired state carries four ceilings and §55.2's cell. `proximity` and
+`self_collision_margin_m` have nowhere to arrive from, so the `proximity` guard can never be active
+on this edition however the body is described. `people_detection` is the third and it is a
+different kind of absence: §5 declares nine sensing modalities and none of them is a person
+detector. A camera is not one — detection is a perception component, not a sensor — and inferring
+one from `rgb` would be exactly the claim-about-the-body-that-nothing-checks §7.2 removed two
+fields for.
+
+**A guard can be active and have nothing to compare against.** `envelope` has no missing input, so
+it is active on every robot; the ceiling it applies to a joint comes from the transport plan's
+`per_channel` (§6.3), and a robot running no policy has no plan in force. The whole-body velocity
+and torque figures are deliberately not applied per channel, because nothing at this layer knows
+whether a given channel carries radians per second or newton-metres. So a robot can report
+`envelope` active, hold a declared envelope, and clamp nothing — and reading "active" as "enforcing
+a ceiling" is the wrong reading and the natural one. The route says so in a sentence rather than
+leaving it to be derived from two fields.
+
+#### It crosses §17, and it is relayed rather than recomputed
+
+§17's check-in carries a `limits` block: the ceilings with their provenance, the guard partition
+with every missing input named, and two fields a consumer must not collapse. `enforcement` is what
+the tier permits; `enforced` is whether anything on the robot applies them, which on an edition with
+no policy runtime is false at every tier. A fleet page holding only the first would render a green
+guard list over a robot that enforces nothing.
+
+The block belongs on the check-in rather than on a route of its own because §34.4 collapses
+check-ins on the grounds that *every field in one is a statement about now* — and these are: the
+limits in force this pass, not a count, a delta or a history. It is about five hundred bytes, which
+is what a robot that has been offline for a week should reconnect saying exactly one of.
+
+The Hub **relays it and recomputes nothing**, and the restraint is load-bearing rather than
+fastidious. The Hub holds a copy of the descriptor and a mirror of `resolveLimits()`, so a computed
+table would typecheck — and would report `balance` on a fixed base as a missing IMU, where §7.2
+requires *"not applicable to this body"*. It would also report the limits a robot *should* be
+running rather than the ones it is, which is the failure §17's own rule is written against.
+
+Notices cross as **codes and subjects, never sentences**. Both sides hold the same catalogue, and a
+robot shipping English prose would put the translation into thirty-five locales (§32.3) on the side
+that cannot do it. `guard_unavailable` is carried even though the guard table beside it says the
+same thing: the wire is evidence and a renderer decides what to show.
+
 ---
 
 ## 8. Packages and permissions
@@ -4717,17 +4780,17 @@ miniature, and currently trivial to fix.
 |---|---|---|---|
 | Thesis, tiers, the honest meaning of universal | §1–3 | Designed | — |
 | RHAL — ABI, structs, drivers | §4, §24, §66–71 | **Built** — C, C++ and Python headers; mock, MuJoCo and LeRobot drivers | No vendor has written one |
-| Embodiment descriptor and transport | §5–6, §44, §52 | **Built on both sides** — and, since §37.1's `transport` stage, resolved at install on the robot | The ceilings the plan computes are handed to nothing: §6.3 gives them to the Safety Kernel, and no policy runtime exists to carry a command as far as one |
-| Safety Kernel — guards, limits, tiers | §7, §23.1, §25, §46 | **Built** — `no_std`, no allocator, 101 tests | Nothing has driven a physical joint |
+| Embodiment descriptor and transport | §5–6, §44, §52 | **Built on both sides** — and, since §37.1's `transport` stage, resolved at install on the robot; §6.3's hand-off performed at `GET /limits?package=` | The ceilings reach `resolveLimits()` and stop there: no policy runtime exists to carry a command as far as a guard, so a robot running nothing has no plan in force and `envelope` is active with nothing to clamp (§7.6) |
+| Safety Kernel — guards, limits, tiers | §7, §23.1, §25, §46 | **Built on both sides** — `no_std`, no allocator, 101 tests; §7.6's resolution runs on the robot at `GET /limits` and crosses §17 to the device page | Nothing has driven a physical joint, and the tier it resolves at is assumed rather than awarded (§7.6) |
 | Packages, permissions, admission | §8, §37 | **Built** | Nothing on a robot can *produce* a signature (§19) |
 | skynetd — reconciliation, supervision, health | §9, §33 | **Built** — level-triggered, six ordered stages | — |
 | Identity, pairing, attestation, factory provisioning | §10, §50 | **Built on both sides** | `security.identity.attested` needs a TPM; no key is generated on a robot |
 | Desired state, fleet, OTA | §11–12, §14, §33.3 | **Built on both sides** — including §75's bundle fetch | No robot has yet applied an image from this Hub |
-| Black box, telemetry, replay | §13, §26, §41 | **Built** — ring, MCAP, sealing, deterministic replay; §74's telemetry on both sides | The sealed bytes do not cross §17 (§77); five of eight counters have no source, and four of the five need the kernel |
-| Conformance and certification | §15, §31.4, §56 | **Built on both sides** — and a robot now runs §15's eight runtime tests on itself (`GET /conformance`) | Two of the eight execute; the other six name what they wait for. Nothing signs a result and nothing will on a robot — §19 makes that a rule rather than a gap (§15.1) |
+| Black box, telemetry, replay | §13, §26, §41 | **Built** — ring, MCAP, sealing, deterministic replay, and a robot now replays a window against its own resolved limits (`telemetry.replay.deterministic`); §74's telemetry on both sides | The sealed bytes do not cross §17 (§77); five of eight counters have no source, and four of the five need the kernel. No recording of a *policy* has ever been replayed, because none has run |
+| Conformance and certification | §15, §31.4, §56 | **Built on both sides** — and a robot now runs §15's eight runtime tests on itself (`GET /conformance`) | Three of the eight execute; the other five name what they wait for. Nothing signs a result and nothing will on a robot — §19 makes that a rule rather than a gap (§15.1) |
 | LeRobot | §16, §67 | **Built** — the bridge and its self-test | — |
-| Hub contract | §17, §57 | **Built** — twelve endpoints, no breaking change | Two of them carry assertions rather than evidence (§57.1) |
-| Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 44 CLI commands, the golden path checked mechanically | — |
+| Hub contract | §17, §57 | **Built** — twelve endpoints, no breaking change; four of them frozen as wire fixtures produced by the real producer (§31.6) | Two of them carry assertions rather than evidence (§57.1) |
+| Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 48 CLI commands, the golden path checked mechanically | — |
 | Security, local access control | §19, §39 | **Built** — Ed25519, the trust store, five signature states, four roles | — |
 | Distribution and business model | §20, §72 | Designed | — |
 | Languages, editions, levels | §23, §31, §42 | **Built** — one edition, held to a corpus of 68 files and 973 cases | The second edition, which is what the corpus is for |
@@ -4735,20 +4798,20 @@ miniature, and currently trivial to fix.
 | Boot, faults, POST, homing | §27, §48 | **Built** — §27's machine, POST's eight checks | Five of the eight are the kernel's, through a path §33.1 denies the daemon |
 | Networking and time | §34–35 | **Built** — bearers, metering, the outbound queue, backoff, two clocks kept apart | — |
 | Power and thermal | §36 | **Built** — the four states plus `unmetered`, the reserve, §36.3's ladder, §36.4's override; the gauge and the thermal zones read from `/sys`; enforced at §54.4's `acquiring`; `GET /power` and `skynet power` | §36.4's override has no input: the RHAL flag and its fault code reach this daemon through a path §33.1 denies it, so no robot can report a brownout. §36.1's `reserve` and `critical` rows ask for a controlled stop, and nothing performs one — the stop path is the kernel's |
-| Configuration, calibration | §38, §45 | **Built on both sides** | — |
+| Configuration, calibration | §38, §45 | **Built on both sides** — and the ceilings a profile resolves to now reach the Hub, not just the digest that was applied | Three of the operator profile's seven fields have no delivery path: `proximity` and `self_collision_margin_m` are accepted by the kernel and carried by nothing, and `people_detection` is not a thing §5 lets a body declare (§7.6) |
 | Resource enforcement | §40 | **Built** — cgroup limits, the RT core | — |
 | Frames | §44 | **Built** — the graph, forward kinematics, both pose guards | — |
 | Sensor and media pipeline | §47 | **Built** — capture, gaps annotated as gaps | — |
 | Audio | §49 | Designed | — |
 | Entitlement | §51 | **Built** — offline verification | — |
 | Skills, environments, on-robot evaluation | §54–56 | **Built** — §54.4's lifecycle, composition, safety notes | Nothing on this edition can run a policy, so no skill has ever executed |
-| Interface — Hub-side and on-robot | §32 | **Built on both sides** — the console, the fleet page, the device page | Three of §32.1's four panels are named gaps |
+| Interface — Hub-side and on-robot | §32 | **Built on both sides** — the console, the fleet page, the device page; §7.6's guards and limits cross §17 and are rendered on both, relayed rather than recomputed, and §32.2's four console panels all draw something measured | The transport plan does not cross §17, and should not until a policy runtime exists to be running one — the robot serves it per package at `GET /limits?package=`, for staged packages as well as active ones (§6.2). Guard trip rates come from §74's telemetry, and nothing counts a trip |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **85,700 lines of Rust** across fifteen crates with 1,179
-tests, **12,600 lines** of the TypeScript reference edition that the corpus holds it to, **5,400
-lines** of drivers, and **8,100 lines** in the Hub's mirror of the shared contracts. The Hub's own
-suite is 1,478 tests.
+**Built** means running, tested code: **92,900 lines of Rust** across fifteen crates with 1,322
+tests, **13,300 lines** of the TypeScript reference edition that the corpus holds it to, **5,400
+lines** of drivers, and **8,200 lines** in the Hub's mirror of the shared contracts. The Hub's own
+suite is 1,485 tests.
 
 Numbers go stale; the shape does not. What the table is for is the **last column**, and the honest
 summary of it is that every subsystem that can be built without hardware has been, every subsystem

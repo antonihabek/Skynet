@@ -1235,6 +1235,13 @@ fn report_checkin<L, S>(
         rolled,
         daemon.operating_state.as_str(),
         &skynetd_io::intent::held_digest(layout),
+        // §7.6. Over the `body` this pass already loaded, so the check-in and `GET /limits` cannot
+        // report two different limit sets for one robot.
+        Some(skynetd_io::limits::report(&skynetd_io::limits::read(
+            layout,
+            &body,
+            skynetd_io::limits::ROBOT_TIER,
+        ))),
     );
     let queue = skynetd_io::outbound::Queue::of(layout);
     match skynetd_io::checkin::enqueue(&queue, &identity, &built) {

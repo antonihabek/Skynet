@@ -53,6 +53,9 @@ skynet — talking to a running robot (§33.7)
   plan                        The last reconcile pass, and anything deferred
   cell                        The cell descriptor, its env.* facts and its faults
   power                       §36: the state, the reserve, and what is being given up
+  limits [--package <ns/name>]
+                              §7.3: the ceilings the kernel would enforce, and which of
+                              the eight guards can run on this body
   conformance                 §15's eight runtime tests, run by this robot on itself
   grants                      What is granted, and what is leased
   grants add <ns/name> <token> [--acknowledge <digest>]
@@ -158,6 +161,7 @@ pub fn run(command: &str, argv: &[String]) -> i32 {
         "releases" => show(argv, "GET", "/releases", None, print_releases),
         "cell" => show(argv, "GET", "/cell", None, print_cell),
         "power" => show(argv, "GET", "/power", None, print_power),
+        "limits" => limits(argv),
         "conformance" => show(argv, "GET", "/conformance", None, print_conformance),
         "pair" => pair(argv),
         "unpair" => show(
@@ -1249,11 +1253,184 @@ fn grants(argv: &[String]) -> i32 {
     }
 }
 
-/// §55.2's cell, and the faults that explain a refused precondition.
+/// `skynet limits` (§7.3, §6.3).
 ///
-/// The environment is printed as the **context a precondition sees**, not as the facts as they were
-/// written, because those differ by exactly the faults below — and an operator whose skill was
-/// refused for `env.door closed` needs to see that the key never made it into the context.
+/// `--package` asks what one installed package would be held to, which folds §37.1's transport
+/// clamp into the resolution. Without it the answer is the body's own ceilings — the right default,
+/// because a clamp belongs to a policy and this edition runs none.
+fn limits(argv: &[String]) -> i32 {
+    let path = match flag(argv, "--package") {
+        // Percent-encoding the id rather than interpolating it: a package id carries a `/`, and a
+        // `/` in a query value is legal but a `#` or a `&` in one is a different request.
+        Some(id) => format!("/limits?package={}", encode_query(&id)),
+        None => "/limits".to_string(),
+    };
+    show(argv, "GET", &path, None, print_limits)
+}
+
+/// Percent-encode a query value, keeping the unreserved set and `/`.
+fn encode_query(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                out.push(byte as char)
+            }
+            other => out.push_str(&format!("%{other:02X}")),
+        }
+    }
+    out
+}
+
+/// The resolved set, for a terminal (§64).
+///
+/// The guards before the numbers, because the question an operator brings to this command is
+/// usually *"why did nothing stop it"* rather than *"what is the ceiling"* — and a guard that
+/// cannot run is the answer to the first. Every unavailable guard prints what it is missing, so the
+/// output is a list of things to go and fix rather than a list of things that are wrong.
+fn print_limits(document: &Json) {
+    let text = |key: &str| document.get(key).and_then(Json::as_str).unwrap_or("—");
+    println!(
+        "limits resolved at {} ({}) — enforced by nothing on this edition",
+        term::bold(text("tier")),
+        text("enforcement"),
+    );
+
+    let number = |key: &str| match document.get(key).and_then(Json::as_f64) {
+        Some(value) => format!("{value}"),
+        None => "—".to_string(),
+    };
+    println!(
+        "  joint velocity {} rad/s · torque {} Nm · base {} m/s · jerk {}",
+        number("joint_velocity_max_rad_s"),
+        number("joint_torque_max_nm"),
+        number("base_velocity_max_m_s"),
+        number("max_delta_per_cycle"),
+    );
+    println!(
+        "  source: {}",
+        match document.get("source").and_then(Json::as_str) {
+            Some(source) => source.to_string(),
+            None => term::dim("none cited — a safety limit without provenance is a rumour"),
+        }
+    );
+
+    let active: Vec<&str> = document
+        .arr_or_empty("active_guards")
+        .iter()
+        .filter_map(Json::as_str)
+        .collect();
+    let unavailable = document.arr_or_empty("unavailable_guards");
+    println!(
+        "\n{} of {} guards would run",
+        active.len(),
+        active.len() + unavailable.len()
+    );
+    for guard in &active {
+        println!("  {} {guard}", term::ok("✓"));
+    }
+    for entry in unavailable {
+        let missing: Vec<&str> = entry
+            .arr_or_empty("missing")
+            .iter()
+            .filter_map(Json::as_str)
+            .collect();
+        println!(
+            "  {} {:<16} needs {}",
+            term::dim("·"),
+            entry.get("guard").and_then(Json::as_str).unwrap_or("?"),
+            term::dim(&missing.join(", "))
+        );
+    }
+
+    for notice in document.arr_or_empty("notices") {
+        println!(
+            "\n{} {}",
+            term::bold(
+                notice
+                    .get("code")
+                    .and_then(Json::as_str)
+                    .unwrap_or("notice")
+            ),
+            notice.get("message").and_then(Json::as_str).unwrap_or(""),
+        );
+    }
+
+    print_transport_plan(document);
+
+    if let Some(refusal) = document.get("package_clamp").and_then(Json::as_str) {
+        println!("\n{} {}", term::bold("no package clamp:"), refusal);
+    }
+    if let Some(note) = document.get("enforced_note").and_then(Json::as_str) {
+        println!("\n{}", term::dim(note));
+    }
+}
+
+/// §37.1's transport plan for one package, when `--package` named one (§6, §32.2).
+///
+/// `print_transport_plan` rather than `print_plan`, and the collision is worth a name rather than a
+/// disambiguating comment: `skynet plan` is the last **reconcile** pass and this is the resolved
+/// **transport** plan. §32.2's console already carries a note saying two different plans share a
+/// word, and two functions sharing one is how that note stops being enough.
+///
+/// The bindings that came out `direct` are not listed and the warnings always are, which is §64's
+/// rule about what a terminal is for: "twelve channels bound direct" is a number, and "this policy
+/// peaked at 180 Nm and your elbow is rated for 80, so it is scaled to 0.44" is the sentence
+/// somebody came to the command for.
+fn print_transport_plan(document: &Json) {
+    let Some(plan) = document.get_present("plan") else {
+        return;
+    };
+    let text = |value: &Json, key: &str| {
+        value
+            .get(key)
+            .and_then(Json::as_str)
+            .unwrap_or("—")
+            .to_string()
+    };
+
+    println!(
+        "\n{} {} — {} channel(s) onto `{}`{}",
+        term::bold("transport plan:"),
+        text(plan, "verdict"),
+        plan.arr_or_empty("bindings").len(),
+        text(plan, "robot_slug"),
+        match plan.get("control_hz").and_then(Json::as_f64) {
+            Some(hz) => format!(" at {hz} Hz"),
+            None => String::new(),
+        }
+    );
+    // Which package, and whether it is the one running. "What would this be held to" and "what is
+    // this held to" are different answers and only one of them is about the robot right now.
+    if let Some(state) = document.get("package_state").and_then(Json::as_str) {
+        println!("  {}", term::dim(&format!("this package is {state}")));
+    }
+
+    for binding in plan.arr_or_empty("bindings") {
+        let method = text(binding, "method");
+        if method == "direct" {
+            continue;
+        }
+        println!(
+            "  {:<10} {} → {}",
+            method,
+            text(binding, "source_role"),
+            binding
+                .get("target")
+                .and_then(Json::as_str)
+                .unwrap_or("nothing on this body"),
+        );
+    }
+    for warning in plan.arr_or_empty("warnings") {
+        println!(
+            "  {} {} {}",
+            term::bold("!"),
+            text(warning, "code"),
+            term::dim(&text(warning, "message")),
+        );
+    }
+}
+
 /// `skynet conformance` (§15).
 ///
 /// The outcomes first and the sentences under them, because the sentences are long and an operator
@@ -1392,6 +1569,11 @@ fn print_power(document: &Json) {
     }
 }
 
+/// §55.2's cell, and the faults that explain a refused precondition.
+///
+/// The environment is printed as the **context a precondition sees**, not as the facts as they were
+/// written, because those differ by exactly the faults below — and an operator whose skill was
+/// refused for `env.door closed` needs to see that the key never made it into the context.
 fn print_cell(document: &Json) {
     if document.get("held") != Some(&Json::Bool(true)) {
         println!(

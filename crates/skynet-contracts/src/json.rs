@@ -1725,6 +1725,53 @@ pub fn check_in_input_from_json(value: &Json) -> crate::checkin::CheckInInput {
             .unwrap_or_default(),
         attestation: attestation_from_json(value.get("attestation").unwrap_or(&Json::Null)),
         desired_digest: opt_string(value, "desired_digest").unwrap_or_default(),
+        limits: value.get_present("limits").map(guard_report_from_json),
+    }
+}
+
+/// The strings in one array field, dropping anything that is not one.
+fn strings(value: &Json, key: &str) -> Vec<String> {
+    value
+        .arr_or_empty(key)
+        .iter()
+        .filter_map(|item| item.as_str().map(alloc::string::ToString::to_string))
+        .collect()
+}
+
+/// Read §7.6's guard report.
+///
+/// Lenient in the direction every decoder in this file is: a field that is not there is absent, and
+/// absent is never a zero. `enforced` is the one exception worth naming — it defaults to `false`,
+/// which is the claim-least direction: a document that forgot to say whether its limits are
+/// enforced is not a document asserting that they are.
+pub fn guard_report_from_json(value: &Json) -> crate::checkin::GuardReport {
+    let mut unavailable = Vec::new();
+    for entry in value.arr_or_empty("unavailable") {
+        unavailable.push(crate::checkin::UnavailableGuard {
+            guard: opt_string(entry, "guard").unwrap_or_default(),
+            missing: strings(entry, "missing"),
+        });
+    }
+    let mut notices = Vec::new();
+    for entry in value.arr_or_empty("notices") {
+        notices.push(crate::checkin::Notice {
+            code: opt_string(entry, "code").unwrap_or_default(),
+            subjects: strings(entry, "subjects"),
+        });
+    }
+    crate::checkin::GuardReport {
+        resolved_at: opt_string(value, "resolved_at").unwrap_or_default(),
+        enforcement: opt_string(value, "enforcement").unwrap_or_default(),
+        enforced: value.get("enforced") == Some(&Json::Bool(true)),
+        joint_velocity_max_rad_s: opt_f64(value, "joint_velocity_max_rad_s"),
+        joint_torque_max_nm: opt_f64(value, "joint_torque_max_nm"),
+        base_velocity_max_m_s: opt_f64(value, "base_velocity_max_m_s"),
+        min_control_hz: opt_f64(value, "min_control_hz"),
+        max_delta_per_cycle: opt_f64(value, "max_delta_per_cycle"),
+        source: opt_string(value, "source"),
+        active: strings(value, "active"),
+        unavailable,
+        notices,
     }
 }
 

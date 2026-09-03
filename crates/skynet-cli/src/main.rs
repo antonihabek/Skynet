@@ -62,7 +62,7 @@ skynet — Skynet OS workstation tools
   Talking to a robot (§33.7), over /run/skynetd.sock or --host:
 
   status · ps · plan · logs · grants · estop · rollback · cell · power
-  conformance · identity · pair · unpair · checkin · intent · releases · ota
+  conformance · limits · identity · pair · unpair · checkin · intent · releases · ota
   skills · skill run <ns/name> · skill stop <inv-id>
   install <dir> --id <ns/name> --kind <k> --version <v> --digest <hex>
   blackbox [index] · blackbox seal · blackbox get <name>
@@ -110,7 +110,9 @@ fn dispatch(argv: &[String]) -> i32 {
         "role" => role(rest),
         "status" | "ps" | "plan" | "logs" | "grants" | "estop" | "rollback" | "install"
         | "blackbox" | "skills" | "skill" | "ota" | "identity" | "pair" | "unpair" | "checkin"
-        | "intent" | "releases" | "cell" | "power" | "conformance" => robot_cmd::run(command, rest),
+        | "intent" | "releases" | "cell" | "power" | "limits" | "conformance" => {
+            robot_cmd::run(command, rest)
+        }
         other => term::fail(&format!("`{other}` is not a skynet command.\n\n{USAGE}")),
     }
 }

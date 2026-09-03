@@ -33,8 +33,8 @@
 //! which is a different fact from zero and is the one §33.6 asks for.
 
 use skynet_contracts::checkin::{
-    check_in, check_in_to_json, CheckIn, CheckInInput, HealthInput, Measured, PackageHealth,
-    Pending, Progress, Readiness, STAGES,
+    check_in, check_in_to_json, CheckIn, CheckInInput, GuardReport, HealthInput, Measured,
+    PackageHealth, Pending, Progress, Readiness, STAGES,
 };
 use skynet_json::Json;
 use skynetd::actual::Actual;
@@ -176,6 +176,7 @@ pub fn build(
     health: HealthInput,
     state: &str,
     desired_digest: &str,
+    limits: Option<GuardReport>,
 ) -> CheckIn {
     check_in(&CheckInInput {
         device_id: identity.identity.device_id.clone(),
@@ -188,6 +189,11 @@ pub fn build(
         // Passed in rather than read here, so this function stays a function of what has already
         // been observed — the same shape `attestation` and `progress` arrive in.
         desired_digest: desired_digest.to_string(),
+        // §7.6's ceilings and guard partition, from the same `crate::limits` composition
+        // `GET /limits` serves — so the fleet page and the robot's own console can never be
+        // describing two different limit sets. `None` is a caller that could not compose them,
+        // which is not the same as a robot with no ceilings (see `GuardReport`).
+        limits,
     })
 }
 

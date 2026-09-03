@@ -186,7 +186,10 @@ tr:last-child td { border-bottom: none; }
 tr.active td { font-weight: 600; }
 td.num { font-variant-numeric: tabular-nums; }
 
-.pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11.5px; font-weight: 600; border: 1px solid currentColor; }
+/* `white-space: nowrap` because a pill is a label and not a sentence: a 999px radius on a box that
+   has wrapped to three lines is not a rounded rectangle, it is a shape with the text falling out of
+   its corners. A pill that will not fit belongs in the cell beside it. */
+.pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11.5px; font-weight: 600; border: 1px solid currentColor; white-space: nowrap; }
 .pill.ok { color: var(--ok); }
 .pill.warn { color: var(--warn); }
 .pill.bad { color: var(--danger); }

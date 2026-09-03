@@ -79,20 +79,35 @@
 
   <!-- ── Guards ─────────────────────────────────────────────────────────── -->
   <!--
-    §32.2 wants this live: which guards are active, which are unavailable with the exact input
-    missing, and trip counts this session. None of that exists on this robot, and the panel says
-    which absent thing is the reason rather than rendering eight green ticks.
+    §32.2 wants three things here: which guards are active, which are unavailable with the exact
+    input missing, and trip counts this session. Two of the three arrive now, from `GET /limits` —
+    §7.6's resolution, computed by the same `resolve_limits` a control loop would call, over this
+    robot's own descriptor, profile and cell.
+
+    Trip counts are the third and they still have nothing to count: §33.1 keeps skynetd off the
+    actuator path, so no cycle is evaluated here. The panel says so under the table rather than
+    printing a zero, because zero trips and no measurement of trips are opposite facts.
+
+    Until this panel was wired to that route it carried a hand-written list of what each guard was
+    missing — and the list had gone wrong in the way hand-written lists do: it said `balance` was
+    "implemented by no edition" about a guard the kernel implements and reports `not applicable` on
+    a fixed base, and it drew all eight as unavailable when two of them are active on every robot.
   -->
   <section class="panel" id="panel-guards">
-    <h2>Guards</h2>
+    <h2>Guards <span class="age" data-age="guards"></span></h2>
     <div id="guards-body"></div>
   </section>
 
   <!-- ── Plan ───────────────────────────────────────────────────────────── -->
   <!--
     Two different plans share a word. §32.2's Plan panel is the resolved *transport* plan and its
-    clamps; `GET /plan` is the last *reconcile* pass. The reconcile pass is real and worth showing,
-    so it is shown under its own name, and the transport plan is reported absent with its reason.
+    clamps; `GET /plan` is the last *reconcile* pass. Both are real and both are shown, each under
+    its own name.
+
+    The transport plan belongs to a **package** rather than to the robot (§6.3), so the subpanel
+    asks which one. A robot running no policy still has an answer worth reading — §6.2 says the
+    planner exists to answer "does this run on my robot, and how well" *before* anything is
+    committed to — and the answer says whether the package it planned is active or only staged.
   -->
   <section class="panel" id="panel-plan">
     <h2>Reconcile pass <span class="age" data-age="plan"></span></h2>

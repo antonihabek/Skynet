@@ -19,8 +19,9 @@
  *      fails does not clear the panel — losing the last thing the robot said is worse — but it
  *      cannot leave it looking live either.
  *   3. Panels with no data source at all render what is missing and why, rather than a plausible
- *      shape. The guards panel is the whole of that case: §32.2 asks for live guard state, this
- *      daemon has none, and eight green ticks would be a lie told convincingly.
+ *      shape. The guards panel used to be the whole of that case and is now the opposite one: it
+ *      draws §7.6's resolved limits, and the part that still has no source — trip counts — is
+ *      written under the table rather than printed as a zero.
  *
  * ── Escaping ────────────────────────────────────────────────────────────────
  *
@@ -374,26 +375,83 @@ function renderState(feed) {
 }
 
 /**
- * The guards panel, which has nothing to show and says so precisely.
+ * The guards panel, drawn from §7.6's resolved limits.
  *
- * §32.2 asks for live guard state: which are active, which are unavailable with the exact input
- * missing, trip counts this session. That needs the Safety Kernel evaluating cycles on this robot,
- * and §33.1 keeps `skynetd` away from the body entirely — it supervises processes, it does not
- * command joints. So there is no guard state here to report, and there will not be until the
- * policy runtime and the kernel channel exist.
+ * §32.2 asks for three things: which guards are active, which are unavailable *with the exact input
+ * missing*, and trip counts this session. The first two are `GET /limits` — the same
+ * `resolve_limits` a control loop would call, over this robot's real descriptor, its signed profile
+ * and §55.2's cell — and every "missing input" string here is the kernel's own, for this body.
  *
- * Written out rather than left as an empty panel because an empty panel reads as "nothing wrong".
+ * The third has nothing to count. §33.1 keeps `skynetd` off the actuator path, so no cycle is
+ * evaluated on this robot and there are no trips to total. That is said under the table rather than
+ * rendered as `0`, which is the distinction this whole file exists to preserve.
  *
- * The two pose guards are the reason this is redrawn when the body arrives. With no descriptor,
- * what they are missing is a frame graph; with one, the tree is here and what is missing is a
- * control loop to walk it in cycle. Both are "unavailable" and they are different jobs, and a
- * panel that named the wrong one would send somebody to write a generator that already ran.
+ * ── What this panel replaced ────────────────────────────────────────────────
+ *
+ * A hand-written list of eight guards and what each was missing, maintained here, drawn entirely as
+ * `unavailable`. It had drifted the way such lists do: it said `balance` was *"implemented by no
+ * edition"* about a guard `skynet-kernel` implements and reports `not applicable` for on a fixed
+ * base, and it drew `envelope` and `mode_gate` as unavailable when both are active on every robot.
+ * The panel was confidently wrong about the machine, in a page whose one rule is never to show a
+ * value it did not receive.
+ *
+ * ── The sentence that has to stay ───────────────────────────────────────────
+ *
+ * None of this is enforced. The limits are composed and reported; no verdict reaches an actuator,
+ * because no policy runtime exists to carry a command as far as a guard. An operator reading
+ * "active" as "enforcing" is the misreading this panel is most able to cause, so it says so twice:
+ * once at the top, and once for `envelope` specifically, which is active on every robot and has
+ * nothing to clamp against until a transport plan is in force (§6.3).
  */
-function renderGuards() {
+function renderGuards(feed) {
   const body = clear($('guards-body'))
-  const known = bodyFeed.value && bodyFeed.value.state === 'present' ? bodyFeed.value : null
-  const frames = known && known.frames && known.frames.present ? known.frames : null
 
+  if (!feed.value) {
+    body.appendChild(el('p', 'note', feed.detail || 'no answer from the daemon yet'))
+    return
+  }
+  const limits = feed.value
+
+  const heading = el('p')
+  heading.appendChild(pill('resolved at ' + (limits.tier || '?'), 'off'))
+  heading.appendChild(document.createTextNode(' '))
+  heading.appendChild(pill(limits.enforced ? 'enforced' : 'enforced by nothing', 'warn'))
+  body.appendChild(heading)
+
+  // ── The ceilings, with provenance ─────────────────────────────────────────
+  const number = (value, unit) =>
+    Number.isFinite(value) ? String(value) + (unit ? ' ' + unit : '') : null
+
+  const ceilings = el('table')
+  const chead = el('tr')
+  chead.appendChild(el('th', null, 'Ceiling'))
+  chead.appendChild(el('th', null, 'In force'))
+  ceilings.appendChild(chead)
+  for (const [label, value, unit] of [
+    ['joint velocity', limits.joint_velocity_max_rad_s, 'rad/s'],
+    ['joint torque', limits.joint_torque_max_nm, 'Nm'],
+    ['base velocity', limits.base_velocity_max_m_s, 'm/s'],
+    ['jerk, per cycle', limits.max_delta_per_cycle, ''],
+    ['minimum control rate', limits.min_control_hz, 'Hz'],
+  ]) {
+    const row = el('tr')
+    row.appendChild(el('td', null, label))
+    const cell = el('td')
+    const rendered = number(value, unit)
+    cell.appendChild(rendered ? document.createTextNode(rendered) : absent('nobody declared one'))
+    row.appendChild(cell)
+    ceilings.appendChild(row)
+  }
+  body.appendChild(ceilings)
+
+  const provenance = el('p', 'note')
+  provenance.appendChild(document.createTextNode('Source: '))
+  provenance.appendChild(limits.source
+    ? document.createTextNode(limits.source)
+    : absent('none cited — a safety limit without provenance is a rumour'))
+  body.appendChild(provenance)
+
+  // ── The eight, as the kernel partitioned them ─────────────────────────────
   const list = el('table')
   const head = el('tr')
   head.appendChild(el('th', null, 'Guard'))
@@ -401,45 +459,54 @@ function renderGuards() {
   head.appendChild(el('th', null, 'Missing input'))
   list.appendChild(head)
 
-  // The eight of §7.1, in evaluation order, each with the input this robot does not have. Naming
-  // them individually is §7.2's rule applied to the console: a guard that cannot run reports what
-  // it wanted, not just that it is off.
-  const guards = [
-    ['mode_gate', 'the capability token on a command cycle'],
-    ['envelope', 'a resolved envelope and a command to clamp'],
-    ['rate_limit', 'two successive commands to difference'],
-    ['workspace', frames
-      ? frames.dynamic + ' of ' + frames.nodes + ' frames move with a joint — what is missing is a ' +
-        'control loop to walk them in cycle'
-      : 'a frame graph on this robot, and forward kinematics in cycle'],
-    ['self_collision', frames
-      ? (frames.collision_bodies >= 2
-        ? frames.collision_bodies + ' frames carry collision geometry — what is missing is a ' +
-          'control loop to place them'
-        : frames.collision_bodies + ' frame(s) carry collision geometry, and a body with fewer ' +
-          'than two has nothing to collide with')
-      : 'a frame graph with collision geometry, and forward kinematics in cycle'],
-    ['proximity', 'a separation distance from a sensor'],
-    ['balance', 'a centre of pressure — implemented by no edition'],
-    ['watchdog', 'a command deadline from a running control loop'],
-  ]
-  for (const [name, wants] of guards) {
-    const row = el('tr')
-    row.appendChild(el('td', null, name))
-    const state = el('td')
-    state.appendChild(pill('unavailable', 'off'))
-    row.appendChild(state)
-    row.appendChild(el('td', 'dim', wants))
-    list.appendChild(row)
+  const row = (name, state, tone, missing) => {
+    const tr = el('tr')
+    tr.appendChild(el('td', null, name))
+    const cell = el('td')
+    cell.appendChild(pill(state, tone))
+    tr.appendChild(cell)
+    tr.appendChild(el('td', 'dim', missing || ''))
+    list.appendChild(tr)
+  }
+
+  for (const name of limits.active_guards || []) {
+    // The one active guard that can be idle, and the console is where that is most likely to be
+    // misread. `per_channel_note` is present exactly when there are no per-channel ceilings.
+    const idle = name === 'envelope' && limits.per_channel_note
+    row(name, idle ? 'active · no ceiling' : 'active', idle ? 'warn' : 'ok',
+      idle ? 'a per-channel ceiling — §6.3 hands one to the kernel from a transport plan, and no ' +
+             'policy is running to have one' : '')
+  }
+  for (const entry of limits.unavailable_guards || []) {
+    row(entry.guard, 'unavailable', 'off', (entry.missing || []).join(', '))
   }
   body.appendChild(list)
 
+  // ── The notices, which are the kernel's own sentences ─────────────────────
+  //
+  // `guard_unavailable` is dropped, and only that one. The kernel emits it because a consumer with
+  // nothing but the notice list would otherwise never learn a guard is off — but this panel has the
+  // table above, which says the same thing with the missing input in its own column. Rendering both
+  // puts one fact in two places for a reader to reconcile, five times over, and pushes the notices
+  // that carry something new off the bottom of the panel.
+  for (const notice of limits.notices || []) {
+    if (notice.code === 'guard_unavailable') continue
+    const note = el('p', 'note')
+    note.appendChild(pill(notice.code, 'warn'))
+    note.appendChild(document.createTextNode(' ' + (notice.message || '')))
+    body.appendChild(note)
+  }
+
+  // ── The two things this panel cannot report ───────────────────────────────
   body.appendChild(el('p', 'note',
-    'No guard state is reported because none exists on this robot. §33.1 keeps skynetd away from ' +
-    'the body — it supervises processes and never commands a joint — so the Safety Kernel is not ' +
-    'evaluating cycles here, and trip counts have nothing to count. This panel will carry live ' +
-    'state when the policy runtime and the kernel channel are written; until then eight green ' +
-    'ticks would be the one thing worse than an empty panel.'))
+    'Trip counts are absent, not zero. §33.1 keeps skynetd off the actuator path, so no cycle is ' +
+    'evaluated on this robot and there is nothing to total — and a zero here would read as ' +
+    '"nothing tripped", which is a different fact from "nothing was measured".'))
+  if (limits.enforced_note) body.appendChild(el('p', 'note', limits.enforced_note))
+  if (limits.tier_source) body.appendChild(el('p', 'note', 'Tier: ' + limits.tier_source))
+  for (const gap of limits.unmeasured || []) {
+    body.appendChild(el('p', 'note', gap))
+  }
 }
 
 /**
@@ -465,8 +532,6 @@ function renderEmbodiment(feed) {
       b.state === 'absent' ? 'off' : 'bad'))
     body.appendChild(heading)
     body.appendChild(el('p', 'note', b.detail || ''))
-    // Redraw the guards, because what they are missing depends on this.
-    renderGuards()
     return
   }
 
@@ -512,8 +577,6 @@ function renderEmbodiment(feed) {
   // §5 has the vendor sign the descriptor and SCTS checks it. Nothing here did, and the panel says
   // so rather than letting a digest imply provenance it does not carry.
   if (b.signature_note) body.appendChild(el('p', 'note', b.signature_note))
-
-  renderGuards()
 }
 
 function renderPlan(feed) {
@@ -561,20 +624,139 @@ function renderPlan(feed) {
     }
   }
 
-  // The other plan §32.2 asks for, and the reason it is not above.
+  // The other plan §32.2 asks for, under its own name in its own subpanel.
+  renderTransport()
+}
+
+// ── §32.2's Plan panel: the transport plan, per package ─────────────────────
+
+/** Which package the transport subpanel is showing, or '' for none chosen. */
+let transportPackage = ''
+/** The last answer for it, so a redraw does not refetch. */
+let transportAnswer = null
+
+/**
+ * The resolved transport plan and the clamps in force, with provenance for every number (§32.2).
+ *
+ * For a long time this subpanel said "unavailable on this robot" and explained that `skynet
+ * transport` computes the same plan on a workstation. That stopped being true when §37.1's
+ * `transport` stage started running at install and `GET /limits?package=` started serving what it
+ * produced — so the panel asks which package and shows the answer.
+ *
+ * **A picker rather than a list**, because a plan is per package and fetching one per installed
+ * package would put N requests on a link-local socket every two seconds, on a listener §33.7 gives
+ * one request per connection. The operator picks; the panel fetches once.
+ *
+ * The plan is shown for **staged** packages too, and the panel says which. §6.2's whole argument for
+ * a pure planner is that it answers "does this run on my robot, and how well" before anything is
+ * committed to — and a panel that only spoke about running packages would answer it only after.
+ */
+function renderTransport() {
   const transport = clear($('transport-body'))
   transport.appendChild(el('h2', null, 'Transport plan'))
-  transport.appendChild(absent('unavailable on this robot'))
-  const hasBody = bodyFeed.value && bodyFeed.value.state === 'present'
-  transport.appendChild(el('p', 'note',
-    '§32.2 asks for the resolved transport plan and the clamps in force, with provenance for ' +
-    'every number. Resolving one needs a body and a policy trained on some other body. ' +
-    (hasBody
-      ? 'This robot now has the first. What is missing is a policy declaring the embodiment it ' +
-        'was trained on, which arrives with the package that carries it.'
-      : 'This robot has neither.') +
-    ' `skynet transport` computes exactly this plan on a workstation, and the numbers it produces ' +
-    'are the numbers this panel will show.'))
+
+  const installed = (packagesFeed.value && packagesFeed.value.packages) || []
+  if (installed.length === 0) {
+    transport.appendChild(absent('no package is installed or staged on this robot'))
+    transport.appendChild(el('p', 'note',
+      '§6.3 hands a per-channel ceiling to the Safety Kernel from a plan, and a plan belongs to a ' +
+      'package. A robot with none has no per-channel ceiling in force, which the Guards panel ' +
+      'above says in the row for the `envelope` guard.'))
+    return
+  }
+
+  const picker = el('select')
+  picker.appendChild(el('option', null, '— choose a package —'))
+  for (const entry of installed) {
+    const option = el('option', null, entry.id)
+    option.value = entry.id
+    if (entry.id === transportPackage) option.selected = true
+    picker.appendChild(option)
+  }
+  picker.addEventListener('change', async () => {
+    transportPackage = picker.value
+    transportAnswer = null
+    if (transportPackage) {
+      // `encodeURIComponent` and not interpolation: a package id carries a `/`, which is legal in a
+      // query value, and anything else in one would be a different request.
+      const result = await call('GET', '/limits?package=' + encodeURIComponent(transportPackage))
+      transportAnswer = result.ok ? result.body : { error: (result.body && result.body.error) || ('HTTP ' + result.status) }
+    }
+    renderTransport()
+  })
+  transport.appendChild(picker)
+
+  if (!transportPackage) return
+  if (!transportAnswer) {
+    transport.appendChild(el('p', 'note', 'asking…'))
+    return
+  }
+  if (transportAnswer.error) {
+    transport.appendChild(el('p', 'bad', transportAnswer.error))
+    return
+  }
+  if (transportAnswer.package_clamp) {
+    // Not an error: a driver has no action space, and "there is nothing to plan" is the answer.
+    transport.appendChild(absent(transportAnswer.package_clamp))
+    return
+  }
+
+  const plan = transportAnswer.plan
+  if (!plan) {
+    transport.appendChild(absent('this package produced no plan'))
+    return
+  }
+
+  const head = el('p')
+  head.appendChild(pill(plan.verdict || '?', plan.verdict === 'refused' ? 'bad' : plan.verdict === 'direct' ? 'ok' : 'warn'))
+  head.appendChild(document.createTextNode(
+    ' ' + (plan.bindings || []).length + ' channel(s) onto ' + (plan.robot_slug || '?') +
+    (Number.isFinite(plan.control_hz) ? ' at ' + plan.control_hz + ' Hz' : '')))
+  transport.appendChild(head)
+  if (transportAnswer.package_state) {
+    transport.appendChild(el('p', 'note',
+      'This package is ' + transportAnswer.package_state + '. ' +
+      (transportAnswer.package_state === 'staged'
+        ? 'Nothing is running under this plan; it is what the package would be held to.'
+        : '')))
+  }
+
+  const table = el('table')
+  const header = el('tr')
+  header.appendChild(el('th', null, 'Channel'))
+  header.appendChild(el('th', null, 'Method'))
+  header.appendChild(el('th', null, 'Target'))
+  header.appendChild(el('th', null, 'Ceiling'))
+  table.appendChild(header)
+  for (const binding of plan.bindings || []) {
+    const row = el('tr')
+    row.appendChild(el('td', 'dim', binding.source_role || ('channel ' + binding.source_index)))
+    const method = el('td')
+    method.appendChild(pill(binding.method || '?',
+      binding.method === 'blocked' ? 'bad' : binding.method === 'direct' ? 'ok' : 'warn'))
+    row.appendChild(method)
+    const target = el('td')
+    target.appendChild(binding.target
+      ? document.createTextNode(binding.target)
+      : absent('nothing on this body'))
+    row.appendChild(target)
+    const ceiling = el('td')
+    // Provenance for every number, which is what §32.2 asks for: this ceiling is the joint's own
+    // rating out of the descriptor, not a figure the plan invented.
+    ceiling.appendChild(Number.isFinite(binding.limit)
+      ? document.createTextNode(String(binding.limit))
+      : absent('this joint declares no rating'))
+    row.appendChild(ceiling)
+    table.appendChild(row)
+  }
+  transport.appendChild(table)
+
+  for (const warning of plan.warnings || []) {
+    const note = el('p', 'note')
+    note.appendChild(pill(warning.code || 'warning', 'warn'))
+    note.appendChild(document.createTextNode(' ' + (warning.message || '')))
+    transport.appendChild(note)
+  }
 }
 
 /**
@@ -1926,13 +2108,16 @@ function renderAudit(feed) {
 // ── The poll loop ────────────────────────────────────────────────────────────
 
 const bodyFeed = new Feed('embodiment', '/embodiment', renderEmbodiment)
+// Named, because §32.2's Plan panel lists the packages a transport plan can be asked for.
+const packagesFeed = new Feed('packages', '/packages', renderPackages)
 
 const feeds = [
   new Feed('status', '/status', renderStatus),
   new Feed('state', '/state', renderState),
   bodyFeed,
+  new Feed('guards', '/limits', renderGuards),
   new Feed('plan', '/plan', renderPlan),
-  new Feed('packages', '/packages', renderPackages),
+  packagesFeed,
   new Feed('identity', '/identity', renderIdentity),
   new Feed('intent', '/intent', renderIntent),
   new Feed('checkin', '/checkin', renderCheckin),
@@ -2018,7 +2203,6 @@ function start() {
     if (event.key === 'Enter') applyToken()
   })
 
-  renderGuards()
   paintTokenState()
   refresh()
   setInterval(refresh, POLL_MS)
