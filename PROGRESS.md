@@ -10843,3 +10843,131 @@ stopped being a statement about a file.
     pin is the most byte-exact thing in this repository and it was one `git add` away from being a
     digest of bytes that exist on one machine. The guard costs four lines and the failure it
     prevents is one that only appears in CI, on a different platform, for a file nobody edited.
+
+## 2026-09-03 (fiftieth) — every rule about the tone, and nothing that made a sound
+
+§73's table has called §49 **Designed** since it was written, and the word was hiding a shape worth
+naming. Two thirds of §49.1 were not designed — they were *built, enforced and corpus-verified* —
+and the third was missing entirely.
+
+* `hri.warning` is a **reserved** capability token. No grant confers it, `CapabilityReserved` refuses
+  the package that asks, and `corpus/vocabulary/closed-sets.json` holds both editions to the
+  refusal. *"A package cannot suppress it"* has had teeth for twenty sessions.
+* `warning_required(from, to)` decides exactly which transitions demand a tone, and does it well: it
+  is phrased over `commands_autonomously` rather than over the literal `"running"`, so *"into
+  `RUNNING`"* and *"on resumption after a stop"* are one rule, and `hold → degraded` — a policy
+  beginning to command an impaired body — cannot fall through the gap between them. An earlier
+  session found and fixed exactly that bug.
+* **Nothing made a sound.** `Transition::warning` reached `observe_state`, which dropped it.
+
+Every rule about the control enforced, and the control absent. It is invisible from either half,
+because each half is complete and neither mentions the other.
+
+### Declared, like a bearer
+
+Which output is the warning speaker is a fact about the machine, exactly as which interface is the
+modem is (§34.3). `/sys` will not say whether an ALSA device is a klaxon on a mast or an HDMI port
+nobody plugged in. So the command is declared in `state/audio.json` and `skynetd` runs it.
+
+A robot with no declaration reports that it **cannot warn** rather than falling back to a default
+device. That fallback is the worse failure by a distance: it produces a robot that believes it is
+warning people while playing a sound into a disconnected port, and every surface agrees with it.
+
+A declaration whose command list is empty is not a declaration either — that is what a half-finished
+provisioning script leaves behind.
+
+### The question §49 does not ask
+
+*What does a robot do when a transition demands a tone and there is no channel?*
+
+It cannot refuse. §27's state is **derived from conditions**, not granted by a supervisor: there is
+no point at which `skynetd` decides whether `RUNNING` may happen, so there is nothing to withhold.
+Inventing one would be a second definition of §27's machine, living in the module that plays sounds.
+
+So the answer is the strongest one available to a process that does not hold the switch — an
+incident, which §34.4 never drops, carrying the transition, the failure, and **what this robot
+believed its warning channel was**. That last field is the one that separates a broken speaker from a
+provisioning script that named the wrong device, and an investigator without it has to go and look.
+
+Refusing to command a body that cannot warn is the right rule for a certified tier, it belongs in the
+kernel's interlock where the transition is, and it is in §80 rather than invented here.
+
+### The tone is before the motion, and this daemon cannot make that true
+
+§49.1 puts the tone before autonomous motion. `skynetd` sounds it before committing the new state to
+its own fields, which is the strongest ordering available from this side of §33.1's line and is **not
+the same guarantee**: on a robot whose kernel owns the transition, this daemon learns about `RUNNING`
+by observing it, and by then the body is commanded. A tone that sounds a reconcile period after
+motion begins is a record, not a warning. Written down rather than smoothed over, because the
+difference is the whole value of the control.
+
+### The path is split out precisely because this edition cannot reach it
+
+§33.1 leaves seven of §27's eight conditions unobserved, so the machine derives `safe` every pass and
+`warning_required` is never true. **No robot on this edition ever enters a commanding state**, so the
+tone never sounds and the incident is never raised — the same position §74.6's five counters are in.
+
+That is why the failure handling is `Daemon::warn_for_transition` rather than four lines inside
+`refresh_operating_state`. A safety control whose only exercise is a state this edition cannot reach
+is a safety control that ships untested, and the extraction is what let the suite drive the
+consequence: a declared channel that fails, one incident in §34.4's queue, and the channel named
+inside it.
+
+### §49.2 was already true, except for the half that was not
+
+> `sensing.audio` is a capability token gated like any other […] the default is denied and the grant
+> is explicit and audit-logged.
+
+Two of the three needed nothing. A token nobody granted is not held; a grant is an explicit operator
+action through `POST /grants`. The third was **false, and not only for this token**.
+
+**A capability grant left no audit entry and no black box record.** §38.3 asks for both on every
+configuration change — *"who, when, which layer, and the previous value"* — and a grant is the
+configuration change with the largest safety consequence the platform has: the moment a package
+acquires permission to do something to a body.
+
+The shape of it is what makes it worth recording. §54.2's *acknowledgement* of a skill's safety notes
+**was** written, and refuses the grant if it cannot be. So this robot recorded that somebody read the
+warning, and not that it then handed over the capability the warning was about.
+
+And `EventCode::GrantChanged` had existed since §26 was written, with exactly one producer: the
+reconciler, applying a grant that came down in a desired state. The ring recorded every grant a *Hub*
+made and none an operator made standing at the robot.
+
+Both are now written, as `capability.grant` and `capability.revoke`, with `previous` set to `held` on
+a revocation — for a token that is the whole of the previous value. A request that changed nothing
+writes nothing: `already_held` and `not_held` are the replays an operator's shell history produces,
+and a log that recorded them would teach its reader to skim.
+
+The order is deliberately the opposite of the acknowledgement's. An unrecorded acknowledgement means
+the operator is asked again — a grant that did not happen. An unrecorded grant has *already
+happened*: the file is written and the reconciler will act on it, so refusing at that point would
+return an error for a permission the robot now holds. Best effort, and loud when it fails.
+
+### Numbers
+
+Rust: **1,380** tests, 11 new, **1,350** run here. `cargo fmt --all --check` and
+`cargo clippy --workspace --all-targets` clean; golden path 48 commands; corpus 77 files, 1,055
+cases; mirrors match and the specification is re-pinned.
+
+### Findings, restated
+
+1–28 as before; 29–51 from the sessions above; 52–56 from the forty-first; 57–58 from the
+forty-second; 59–61 from the forty-third; 62–63 from the forty-fourth; 64–67 from the forty-fifth;
+68–71 from the forty-sixth; 72–73 from the forty-seventh; 74–76 from the forty-eighth; 77–82 from
+the forty-ninth.
+
+83. **"Designed" can mean "every rule enforced and the thing itself absent."** §73's table had one
+    word for §49 and the truth needed three sentences: the token was reserved, the predicate was
+    written and corpus-held, and no code could make a noise. A state table with three states cannot
+    say that, which is an argument for the last column rather than against the table.
+84. **A control that cannot be refused must be loud, and the loudness has to name the control.** The
+    incident carries the channel this robot believed it had, because "the warning did not sound" and
+    "the warning device is `/dev/nothing`" send different people to different places.
+85. **The record of consenting to a risk is not the record of taking it.** §54.2's acknowledgement
+    was logged and the grant it gated was not. Auditing the ceremony and not the act is a failure
+    mode that looks like diligence.
+86. **A code with one producer is a vocabulary entry half-used.** `GrantChanged` existed, was
+    emitted by the reconciler, and was therefore a record of what the *Hub* did — so the ring was
+    complete about remote changes and silent about local ones, which is exactly backwards for a
+    device an operator stands next to.

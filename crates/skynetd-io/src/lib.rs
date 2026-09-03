@@ -48,6 +48,7 @@
 
 pub mod admit;
 pub mod api;
+pub mod audio;
 pub mod audit;
 pub mod auth;
 pub mod birth;

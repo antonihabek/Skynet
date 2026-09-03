@@ -4154,6 +4154,77 @@ fn a_grant_can_be_added_and_removed_over_the_api() {
 }
 
 #[test]
+fn a_grant_made_at_the_robot_is_recorded_in_both_places() {
+    // §38.3 asks for two records of every configuration change, and §49.2 names the audit half
+    // again for one token. Neither was written for a grant made over the local API: this robot
+    // recorded that somebody read a safety note (§54.2) and not that it then handed over the
+    // capability the note was about.
+    let mut fixture = Fixture::new("api-grant-audit");
+    fixture.provision();
+
+    let (status, _) = fixture.request(
+        "POST",
+        "/grants",
+        Some("admin-token"),
+        r#"{"id":"openrobot/grasp","token":"sensing.audio"}"#,
+    );
+    assert_eq!(status, 201);
+
+    let log = crate::audit::Audit::of(fixture.daemon.store.layout()).read();
+    let entry = log
+        .entries
+        .iter()
+        .find(|entry| entry.action == "capability.grant")
+        .expect("the grant is in the audit log");
+    assert_eq!(entry.subject, "openrobot/grasp:sensing.audio");
+    assert_eq!(entry.previous, None);
+
+    let (status, _) = fixture.request(
+        "DELETE",
+        "/grants/openrobot:grasp/sensing.audio",
+        Some("admin-token"),
+        "",
+    );
+    assert_eq!(status, 200);
+    let log = crate::audit::Audit::of(fixture.daemon.store.layout()).read();
+    let revoked = log
+        .entries
+        .iter()
+        .find(|entry| entry.action == "capability.revoke")
+        .expect("the revocation too");
+    // §38.3 wants the previous value, and for a token there is only one thing it can be.
+    assert_eq!(revoked.previous.as_deref(), Some("held"));
+}
+
+#[test]
+fn a_request_that_changed_nothing_is_not_recorded_as_a_change() {
+    // An audit log that recorded no-ops would train a reader to skim it, which is the failure
+    // §38.3's log exists to avoid — and `already_held` and `not_held` are exactly the replays an
+    // operator's shell history produces.
+    let mut fixture = Fixture::new("api-grant-audit-noop");
+    fixture.provision();
+    let body = r#"{"id":"openrobot/grasp","token":"sensing.audio"}"#;
+    fixture.request("POST", "/grants", Some("admin-token"), body);
+    fixture.request("POST", "/grants", Some("admin-token"), body);
+    fixture.request(
+        "DELETE",
+        "/grants/openrobot:grasp/manipulation.grasp",
+        Some("admin-token"),
+        "",
+    );
+
+    let log = crate::audit::Audit::of(fixture.daemon.store.layout()).read();
+    assert_eq!(
+        log.entries
+            .iter()
+            .filter(|entry| entry.action.starts_with("capability."))
+            .count(),
+        1,
+        "one grant happened; the repeat and the revocation of a token nobody held did not"
+    );
+}
+
+#[test]
 fn a_hostile_package_id_in_a_route_is_refused() {
     let mut fixture = Fixture::new("api-hostile");
     fixture.provision();
@@ -10245,5 +10316,297 @@ mod upload {
             .expect("the seal wrote a manifest");
         let (computed, _) = crate::bundle::hash_file(&dir.join(&name)).unwrap();
         assert_eq!(declared, computed);
+    }
+}
+
+// ── §49.1's warning tone ─────────────────────────────────────────────────────
+//
+// Two thirds of §49.1 were enforceable before this: `hri.warning` is reserved so no grant can
+// confer it, and `warning_required` decides which transitions demand a tone. The third — anything
+// that makes a sound — did not exist, and `Transition::warning` reached `observe_state` and was
+// dropped.
+//
+// The case worth reading first is `a_robot_that_cannot_warn_raises_an_incident`. This process
+// cannot refuse to enter a commanding state, because §27's state is derived rather than granted, so
+// the only honest answer to a missing safety control is to be loud about it.
+
+mod audio {
+    use super::*;
+    use crate::audio::{warn_for, Channel, Sounded, Sounder};
+    use skynet_contracts::opstate::{OperatingState, StateReason, Transition};
+
+    /// A speaker the suite writes the script for.
+    struct Scripted {
+        answers: std::collections::VecDeque<Sounded>,
+        heard: Vec<Vec<String>>,
+    }
+
+    impl Scripted {
+        fn new(answers: Vec<Sounded>) -> Scripted {
+            Scripted {
+                answers: answers.into_iter().collect(),
+                heard: Vec::new(),
+            }
+        }
+    }
+
+    impl Sounder for Scripted {
+        fn warn(&mut self, channel: &Channel) -> Sounded {
+            self.heard.push(channel.command.clone());
+            self.answers.pop_front().unwrap_or(Sounded::Yes)
+        }
+    }
+
+    fn declared() -> Channel {
+        Channel {
+            command: vec!["aplay".to_string(), "warning.wav".to_string()],
+            label: "mast klaxon".to_string(),
+        }
+    }
+
+    fn transition(from: OperatingState, to: OperatingState) -> Transition {
+        Transition {
+            from,
+            to,
+            reason: StateReason::Nominal,
+            changed: from != to,
+            warning: skynet_contracts::opstate::warning_required(from, to),
+        }
+    }
+
+    #[test]
+    fn the_tone_sounds_when_a_policy_begins_commanding_and_not_otherwise() {
+        let mut speaker = Scripted::new(vec![Sounded::Yes, Sounded::Yes]);
+        let channel = declared();
+
+        // Into a commanding state: the tone sounds.
+        assert_eq!(
+            warn_for(
+                &mut speaker,
+                &channel,
+                &transition(OperatingState::Hold, OperatingState::Running)
+            ),
+            Some(Sounded::Yes)
+        );
+
+        // §27's `DEGRADED` is the impaired *running* state, not a third resting one — so entering
+        // it from `hold` is a policy beginning to command a body and demands the same tone. This is
+        // the case the old string-typed predicate got wrong.
+        assert_eq!(
+            warn_for(
+                &mut speaker,
+                &channel,
+                &transition(OperatingState::Hold, OperatingState::Degraded)
+            ),
+            Some(Sounded::Yes)
+        );
+
+        // And moving between two commanding states does not re-warn: the motion never stopped.
+        assert_eq!(
+            warn_for(
+                &mut speaker,
+                &channel,
+                &transition(OperatingState::Running, OperatingState::Degraded)
+            ),
+            None
+        );
+        assert_eq!(speaker.heard.len(), 2);
+    }
+
+    #[test]
+    fn resumption_after_a_stop_warns_again() {
+        // §49.1: "on transition into RUNNING **and on resumption after a stop**". It falls out of
+        // the predicate rather than being a second rule — `safe` and `stopping` command nothing.
+        let mut speaker = Scripted::new(vec![Sounded::Yes]);
+        assert_eq!(
+            warn_for(
+                &mut speaker,
+                &declared(),
+                &transition(OperatingState::Safe, OperatingState::Running)
+            ),
+            Some(Sounded::Yes)
+        );
+    }
+
+    #[test]
+    fn an_undeclared_channel_is_reported_rather_than_guessed_at() {
+        // Which output is the warning speaker is a property of the machine. A default device would
+        // be a robot that believes it is warning people while playing into an unplugged port.
+        let mut speaker = Scripted::new(vec![Sounded::Yes]);
+        let outcome = warn_for(
+            &mut speaker,
+            &Channel::default(),
+            &transition(OperatingState::Hold, OperatingState::Running),
+        );
+        assert_eq!(outcome, Some(Sounded::Undeclared));
+        assert!(
+            speaker.heard.is_empty(),
+            "nothing was asked to make a noise"
+        );
+        assert!(!outcome.unwrap().ok());
+    }
+
+    /// A robot with a declared warning channel, and a speaker the test controls.
+    fn robot(label: &str, answers: Vec<Sounded>) -> Fixture {
+        let mut fixture = Fixture::new(label);
+        let layout = fixture.daemon.store.layout().clone();
+        std::fs::create_dir_all(layout.state()).unwrap();
+        std::fs::write(
+            layout.state().join("audio.json"),
+            r#"{"warning":{"command":["aplay","warning.wav"],"label":"mast klaxon"}}"#,
+        )
+        .unwrap();
+        fixture.daemon.sounder = Box::new(Scripted::new(answers));
+        fixture
+    }
+
+    /// Every incident in §34.4's queue, decoded.
+    fn incidents(layout: &Layout) -> Vec<Json> {
+        let queue = crate::outbound::Queue::of(layout);
+        let mut found = Vec::new();
+        while let Some(item) = queue.next() {
+            if item.class == crate::outbound::Class::Incident {
+                if let Ok(document) = Json::parse(&item.body) {
+                    found.push(document);
+                }
+            }
+            queue.remove(&item.id).unwrap();
+        }
+        found
+    }
+
+    #[test]
+    fn a_robot_that_cannot_warn_raises_an_incident() {
+        // §49.1 makes the tone a control an operator's risk assessment relies on, and this process
+        // cannot refuse to enter a commanding state — §27's state is derived, not granted. So the
+        // failure is raised, which §34.4 never drops, and it names the channel that did not work
+        // rather than only the fact that something did not.
+        let mut fixture = robot(
+            "audio-incident",
+            vec![Sounded::Failed("no such device".into())],
+        );
+        let layout = fixture.daemon.store.layout().clone();
+
+        let outcome = fixture
+            .daemon
+            .warn_for_transition(&transition(OperatingState::Hold, OperatingState::Running))
+            .expect("this transition demands a tone");
+        assert!(!outcome.ok());
+
+        let raised = incidents(&layout);
+        assert_eq!(raised.len(), 1, "one incident, never dropped (§34.4)");
+        let incident = &raised[0];
+        assert_eq!(
+            incident.get("kind").and_then(Json::as_str),
+            Some("warning_did_not_sound")
+        );
+        assert_eq!(incident.get("from").and_then(Json::as_str), Some("hold"));
+        assert_eq!(incident.get("to").and_then(Json::as_str), Some("running"));
+        assert!(incident
+            .get("detail")
+            .and_then(Json::as_str)
+            .unwrap_or_default()
+            .contains("no such device"));
+        // The channel goes with it. An investigator reading "the warning did not sound" needs to
+        // know what this robot believed its warning channel *was*, which is the field that
+        // distinguishes a broken speaker from a provisioning script that named the wrong device.
+        assert_eq!(
+            incident
+                .get("channel")
+                .and_then(|channel| channel.get("declared"))
+                .and_then(Json::as_bool),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn a_warning_that_sounds_raises_nothing() {
+        // The other half, and the one that keeps the rule above from being an alarm generator: a
+        // robot that warns correctly on every transition must leave the queue empty, or an operator
+        // learns to close these without reading them.
+        let mut fixture = robot("audio-quiet", vec![Sounded::Yes]);
+        let layout = fixture.daemon.store.layout().clone();
+        let outcome = fixture
+            .daemon
+            .warn_for_transition(&transition(OperatingState::Safe, OperatingState::Running));
+        assert_eq!(outcome, Some(Sounded::Yes));
+        assert!(incidents(&layout).is_empty());
+    }
+
+    #[test]
+    fn a_transition_that_needs_no_tone_neither_sounds_nor_records() {
+        let mut fixture = robot("audio-none", vec![]);
+        let layout = fixture.daemon.store.layout().clone();
+        assert_eq!(
+            fixture
+                .daemon
+                .warn_for_transition(&transition(OperatingState::Hold, OperatingState::Safe)),
+            None
+        );
+        assert!(fixture.daemon.last_warning.is_none());
+        assert!(incidents(&layout).is_empty());
+    }
+
+    #[test]
+    fn the_channel_is_read_from_the_file_and_absent_where_there_is_none() {
+        let root = TempRoot::new("audio-channel");
+        let layout = root.layout();
+        assert!(!Channel::of(&layout).declared());
+        assert!(Channel::of(&layout).detail().contains("no warning channel"));
+
+        std::fs::create_dir_all(layout.state()).unwrap();
+        std::fs::write(
+            layout.state().join("audio.json"),
+            r#"{"warning":{"command":["speaker-test","-t","sine"],"label":"cabinet buzzer"}}"#,
+        )
+        .unwrap();
+        let channel = Channel::of(&layout);
+        assert!(channel.declared());
+        assert_eq!(channel.label, "cabinet buzzer");
+        assert_eq!(channel.command.len(), 3);
+
+        // A declaration with an empty command is not a declaration. It is the shape a
+        // half-finished provisioning script leaves behind, and reading it as "declared" would give
+        // this robot a warning channel that runs nothing.
+        std::fs::write(
+            layout.state().join("audio.json"),
+            r#"{"warning":{"command":[],"label":"nothing"}}"#,
+        )
+        .unwrap();
+        assert!(!Channel::of(&layout).declared());
+    }
+
+    #[test]
+    fn the_state_route_says_whether_this_robot_can_warn_and_whether_it_has() {
+        let mut fixture = Fixture::new("audio-route");
+        fixture.provision();
+        let (status, body) = fixture.request("GET", "/state", Some("observer-token"), "");
+        assert_eq!(status, 200);
+        let warning = body
+            .get("warning")
+            .expect("§49.1's channel is on this route");
+        assert_eq!(warning.get("declared").and_then(Json::as_bool), Some(false));
+
+        // Three states, and this is the third: nothing has been attempted, which is not a success
+        // and not a failure. A `last: false` here would report a robot as having failed to warn
+        // when it has never been asked to.
+        assert!(warning.get_present("last").is_none());
+        assert!(warning
+            .get("last_detail")
+            .and_then(Json::as_str)
+            .unwrap_or_default()
+            .contains("has yet required"));
+    }
+
+    #[test]
+    fn no_grant_can_confer_the_warning_channel() {
+        // The half that was already built, asserted here beside the half that was not — because
+        // §49.1 is one sentence and a suite that tested the two in different files would let one of
+        // them rot. `hri.warning` exists precisely to be refused.
+        assert!(skynet_contracts::admission::is_reserved(
+            skynet_contracts::admission::WARNING_CHANNEL
+        ));
+        assert!(!skynet_contracts::admission::is_reserved("hri.speech"));
+        assert!(!skynet_contracts::admission::is_reserved("sensing.audio"));
     }
 }

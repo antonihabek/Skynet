@@ -4815,7 +4815,7 @@ miniature, and currently trivial to fix.
 | LeRobot | §16, §67 | **Built** — the bridge and its self-test | — |
 | Hub contract | §17, §57 | **Built** — twelve endpoints, no breaking change; four of them frozen as wire fixtures produced by the real producer (§31.6) | Two of them carry assertions rather than evidence (§57.1) |
 | Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 48 CLI commands, the golden path checked mechanically | — |
-| Security, local access control | §19, §39 | **Built** — Ed25519, the trust store, five signature states, four roles | — |
+| Security, local access control | §19, §39 | **Built** — Ed25519, the trust store, five signature states, four roles; §38.3's two records now written for a capability grant, which had left neither (§81.4) | — |
 | Distribution and business model | §20, §72 | Designed | — |
 | Languages, editions, levels | §23, §31, §42 | **Built** — one edition, held to a corpus of 77 files and 1,055 cases | The second edition, which is what the corpus is for |
 | IPC, observation assembly, arbitration | §25 | **Built** — the shared-memory ring and the command frame | — |
@@ -4826,13 +4826,13 @@ miniature, and currently trivial to fix.
 | Resource enforcement | §40 | **Built** — cgroup limits, the RT core | — |
 | Frames | §44 | **Built** — the graph, forward kinematics, both pose guards | — |
 | Sensor and media pipeline | §47 | **Built** — capture, gaps annotated as gaps | — |
-| Audio | §49 | Designed | — |
+| Audio | §49 | **Built** — §49.1's warning channel: the tone sounds on every transition into a commanding state, the channel is declared like a bearer, and a robot that cannot warn raises an incident rather than moving quietly (§81) | No robot has sounded one: §33.1 leaves seven of §27's conditions unobserved, so this edition never enters a commanding state. §49.2's speech-discarding capture is a backend that does not exist |
 | Entitlement | §51 | **Built** — offline verification | — |
 | Skills, environments, on-robot evaluation | §54–56 | **Built** — §54.4's lifecycle, composition, safety notes, and an episode's `intervention_count` read off §13's ring rather than defaulted away (§74.6) | Nothing on this edition can run a policy, so no skill has ever executed. The count is attributed only while one invocation is in `running`: the ring counts an interval and the recording knows which policy was commanding by digest, which nothing reads yet |
 | Interface — Hub-side and on-robot | §32 | **Built on both sides** — the console, the fleet page, the device page; §7.6's guards and limits cross §17 and are rendered on both, relayed rather than recomputed, and §32.2's four console panels all draw something measured | The transport plan does not cross §17, and should not until a policy runtime exists to be running one — the robot serves it per package at `GET /limits?package=`, for staged packages as well as active ones (§6.2). §32.1's guard-trip column now has its source and is frozen against a document a robot produces (§74.6); what it does not yet have is a robot that trips a guard |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **97,000 lines of Rust** across fifteen crates with 1,369
+**Built** means running, tested code: **98,000 lines of Rust** across fifteen crates with 1,380
 tests over a corpus of 77 files and 1,055 cases, **13,300 lines** of the TypeScript reference edition
 that the corpus holds it to, **5,400 lines** of drivers, and **8,200 lines** in the Hub's mirror of
 the shared contracts. The Hub's own suite is 1,499 tests.
@@ -4847,8 +4847,8 @@ Open questions are collected in §43, §53, §58.3 and §61 rather than closed p
 are not engineering: retargeting fidelity is a research result nobody has, joint-level access is a
 property of hardware other people already shipped, and the certified tier needs a notified body.
 
-Version one ends here. Part X is what building the other half found — and §79, which is what
-finishing one of Part X's own sentences found.
+Version one ends here. Part X is what building the other half found — and §79 and §81, which are
+what finishing two of this document's own sentences found.
 
 ---
 ---
@@ -5457,4 +5457,127 @@ already gives it.
 |---|---|
 | **Retention of sealed windows** | §79.4 keeps every one. A robot that seals daily for a year holds a year of windows, and §28's disk floor does not survive that. Deleting one the Hub has acknowledged is the obvious rule, and it is a decision about evidence rather than about disk: the acknowledgement is another party's word, and §13 exists precisely for the day that party is the one being asked questions. |
 | **`people_detection` in §5's vocabulary** | The seventh of `resolveLimits()`'s inputs, and the only one with no path. It is not a missing delivery — §11's profile delivers six — it is that no body can *declare* a person detector, so `proximity` resolves to a ceiling whose guard is permanently unavailable. Adding it means extending the sensor vocabulary, which §30 says needs a governance process first. |
+| **Refusing to command a body that cannot warn** | §81.3. A transition that demands a tone and cannot produce one is a robot moving with a control missing from somebody's risk assessment, and `skynetd` cannot decline it: §27's state is derived from conditions rather than granted, so there is nothing to withhold. The rule belongs in the kernel's interlock, where the transition is, and putting it anywhere else would be a second definition of §27's machine. |
 | **A signature on a conformance result** | §57.1's asserted row. §19 forbids a robot holding a signing key, so a runner cannot sign its own result, and §12's kernel gate therefore reads evidence nobody signed. The shape that would close it — the Hub countersigning what a device credential delivered — is a different claim from the one §15 asks for and should not be built as though it were the same. |
+
+---
+
+## 81. Amendment to §49 — the tone, and the two records a grant never left
+
+§73's table has called §49 **Designed** since it was written, and that was almost right in a way
+worth being precise about: two thirds of §49.1 were not designed, they were *built and enforceable*,
+and the third was missing.
+
+* `hri.warning` is a reserved capability token. No grant confers it, `CapabilityReserved` refuses the
+  package that asks, and the corpus holds both editions to the refusal. **"A package cannot suppress
+  it" is a rule with teeth.**
+* `warning_required(from, to)` decides exactly which transitions demand a tone, phrased over
+  `commands_autonomously` so that "into `RUNNING`" and "on resumption after a stop" are one rule
+  rather than two — and so `hold → degraded`, a policy beginning to command an impaired body, cannot
+  fall through the gap between them.
+* **Nothing made a sound.** `Transition::warning` reached `observe_state` and was dropped.
+
+That is a recognisable shape: every rule about a control enforced, and the control absent. It is
+invisible from either half, because each half is complete.
+
+### 81.1 Declared, then attempted
+
+Which output is the warning speaker is a fact about the machine, exactly as which interface is the
+modem is (§34.3). `/sys` will not say whether an ALSA device is a klaxon on the mast or an HDMI port
+nobody plugged in, so the command is **declared** in `state/audio.json` and `skynetd` runs it:
+
+```json
+{ "warning": { "command": ["aplay", "-q", "/usr/share/skynet/warning.wav"],
+               "label": "mast klaxon" } }
+```
+
+A robot with no declaration reports that it has **no warning channel** rather than falling back to a
+plausible default device. The fallback is the worse failure by some distance: it produces a robot
+that believes it is warning people while playing a sound into a disconnected port, and every surface
+agrees with it.
+
+A declaration whose command is empty is not a declaration either. That is the shape a half-finished
+provisioning script leaves behind, and reading it as declared would give a robot a warning channel
+that runs nothing.
+
+### 81.2 The ordering §49.1 asks for, and the one available here
+
+§49.1 puts the tone **before** autonomous motion. `skynetd` sounds it before it commits the new state
+to its own fields, and that is the strongest ordering available from this side of §33.1's line — it
+is not the same guarantee. On a robot whose kernel owns the transition, this daemon learns about
+`RUNNING` by observing it, and by then the body is commanded.
+
+Making the tone a *precondition* of the transition is the kernel's, across a line §33.1 draws
+deliberately. Stated here rather than papered over, because the difference is the whole value of the
+control: a tone that sounds a reconcile period after motion begins is a record, not a warning.
+
+### 81.3 A robot that cannot warn is loud about it, because it cannot refuse
+
+The interesting question in §49 is the one the section does not ask: what does a robot do when a
+transition demands a tone and there is no channel, or the channel fails?
+
+It cannot refuse. §27's state is **derived from conditions**, not granted by a supervisor — there is
+no point at which `skynetd` decides whether `RUNNING` may happen, so there is nothing to withhold.
+Inventing one would be inventing a second definition of §27's machine in the module that plays
+sounds.
+
+So the answer is the strongest one a process without the switch has:
+
+* **An incident**, which §34.4 never drops, carrying the transition, the failure and *what this robot
+  believed its warning channel was* — the field that separates a broken speaker from a provisioning
+  script that named the wrong device.
+* **A line on the console** and a field on `GET /state`, with three states rather than two: declared
+  and sounded, declared and failed, and **never asked** — a robot that has not entered a commanding
+  state has not failed to warn, and reporting that as either answer is the error §33.6 names about
+  undated health fields.
+
+Refusing to enter a commanding state without a working warning is the right rule for a certified
+tier and it belongs in the kernel's interlock, not here. §80 carries it.
+
+### 81.4 §49.2 was already true, except for the half that was not
+
+> `sensing.audio` is a capability token gated like any other […] the default is denied and the grant
+> is explicit and audit-logged.
+
+Two of those three needed nothing: a token nobody granted is not held, and a grant is an explicit
+operator action through `POST /grants` (§39.1). The third was false, and not only for this token.
+
+**A capability grant left no audit entry and no black box record.** §38.3 asks for both on *every*
+configuration change — *"a black box event and an audit-log entry, carrying who, when, which layer,
+and the previous value"* — and a grant is the configuration change with the largest safety
+consequence the platform has: it is the moment a package acquires permission to do something to a
+body.
+
+The shape of the omission is what makes it worth writing down. §54.2's *acknowledgement* of a safety
+note **was** recorded, and refuses the grant if it cannot be. So this robot recorded that somebody
+read the warning, and not that it then handed over the capability the warning was about.
+
+`EventCode::GrantChanged` had existed since §26 was written, with exactly one producer: the
+reconciler, applying a grant that arrived in a desired state. The ring recorded every grant a *Hub*
+made and none an operator made standing at the robot.
+
+Both records are now written, `capability.grant` and `capability.revoke`, with `previous` set to
+`held` on a revocation — for a token that is the whole of the previous value. A request that changed
+nothing writes nothing: `already_held` and `not_held` are the replays an operator's shell history
+produces, and a log that recorded them would train its reader to skim.
+
+The order is the opposite of the acknowledgement's, deliberately. An unrecorded acknowledgement means
+the operator is asked again — a grant that did not happen. An unrecorded grant has **already
+happened**; the file is written and the reconciler will act on it, so refusing at that point would
+return an error for a permission the robot now holds. Best effort, and loud when it fails.
+
+### 81.5 What this does not do
+
+**No robot has sounded one.** §33.1 leaves seven of §27's eight conditions unobserved, so the machine
+derives `safe` every pass and `warning_required` is never true — a robot on this edition never enters
+a commanding state. The tone is in the same position as §74.6's five counters: the path exists, is
+tested against the real producer, and is gated on a property rather than on a constant.
+
+That is also why the failure path is a method rather than four lines inside
+`refresh_operating_state`. A safety control whose only exercise is a state this edition cannot reach
+is a safety control that ships untested.
+
+**§49.2's microphone is not gated beyond the general rule**, and does not need to be: `sensing.audio`
+is a token like any other, default-denied because grants are explicit, and now audit-logged like
+every other. What §49.2 asks for beyond that — *"a spectrum with speech discarded at the source"* —
+is a property of a capture backend, and no capture backend exists.
