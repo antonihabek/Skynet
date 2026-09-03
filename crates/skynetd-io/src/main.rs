@@ -1333,7 +1333,23 @@ fn converge_and_record<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::
         .ok()
         .map(|elapsed| elapsed.as_secs() as f64);
     let actual = daemon.observe(now_ms);
-    let skills = daemon.advance_skills(now_ms, wall_s, &actual);
+
+    // §54.4's intervention count, off §13's ring. The kernel does not have to be asked what it did:
+    // it wrote it down, and this daemon holds the recording. `None` is a robot with no recorder or
+    // a ring that cannot hold a cycle — the same discriminator §74.6 uses — and it keeps the field
+    // out of the episode rather than putting a zero in it.
+    //
+    // The cursor is advanced whether or not anything is counted, so an interval that produced no
+    // reading is not re-counted into the next one.
+    let interventions_since = recorder.as_deref().and_then(|recorder| {
+        let tally = recorder.tally(daemon.skills_sequence)?;
+        tally.measured().then_some(tally.interventions)
+    });
+    if let Some(recorder) = recorder.as_deref() {
+        daemon.skills_sequence = recorder.next_sequence();
+    }
+
+    let skills = daemon.advance_skills(now_ms, wall_s, &actual, interventions_since);
 
     // §12's second rule, after the reconcile for the same reason the skills are: two of the three
     // health inputs — whether the wanted packages are running, and whether the plan converged — are

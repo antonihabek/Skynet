@@ -284,6 +284,15 @@ pub struct Daemon<L: Launcher, S: Slots> {
     /// running total in disguise, and §74.1 rules those out — a drop becomes invisible because the
     /// next total absorbs it. A reboot ends a window, and the *gap* is what the Hub sees.
     pub counting: crate::telemetry::Counting,
+    /// Where §13's ring had got to when §54.4's lifecycle was last advanced.
+    ///
+    /// A second cursor beside `counting.opened_sequence` rather than a shared one, because the two
+    /// windows are different: telemetry's is between two *telemetry* closes and this is between two
+    /// *skill* passes, and a shared cursor would make each one's read consume the other's interval.
+    ///
+    /// Zero is a robot that has not advanced a skill yet — or has no recorder — and reads as "count
+    /// the whole recording", which is what a first pass should see.
+    pub skills_sequence: u64,
     /// The last release-catalogue pull (§12, §57).
     ///
     /// Kept here for `last_pull`'s reason: `GET /releases` reports what happened rather than making
@@ -350,6 +359,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             last_pass: None,
             last_pull: None,
             counting: crate::telemetry::Counting::default(),
+            skills_sequence: 0,
             // From the kernel's own interfaces, not through the layout — for `cpus`'s reason two
             // fields above: the pack and the thermal zones are properties of the machine and live
             // at `/sys` on every one of them, whatever `/data` a store was rooted at.
@@ -1394,6 +1404,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         now_ms: u64,
         wall_s: Option<f64>,
         actual: &Actual,
+        interventions_since: Option<u64>,
     ) -> Vec<crate::skill::Report> {
         let inputs = self.live_inputs(wall_s);
         let running = crate::skill::running_set(actual);
@@ -1406,10 +1417,11 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
                 now_ms,
                 inputs: &inputs,
                 robot: self.operating_state,
-                // §33.1 again. Supplied rather than observed, and `guards_observable` is what keeps
-                // the false from being counted as an observation of nothing having tripped.
-                guard_tripped: false,
-                guards_observable: false,
+                // §13's ring, counted over the interval since the last pass by the caller —
+                // which holds the recorder, because the ring has exactly one writer and this
+                // struct is not it. `None` is a robot with no recording to count, and it keeps
+                // `intervention_count` out of the episode rather than in it as a zero.
+                interventions_since,
                 // §35.1's correlation clock, for the one field that needs it: the episode's
                 // `recorded_at`. Zero means the platform could not answer, which is not a time.
                 wall_ms: wall_s

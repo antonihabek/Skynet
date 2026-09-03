@@ -4820,11 +4820,11 @@ miniature, and currently trivial to fix.
 | Sensor and media pipeline | §47 | **Built** — capture, gaps annotated as gaps | — |
 | Audio | §49 | Designed | — |
 | Entitlement | §51 | **Built** — offline verification | — |
-| Skills, environments, on-robot evaluation | §54–56 | **Built** — §54.4's lifecycle, composition, safety notes | Nothing on this edition can run a policy, so no skill has ever executed |
+| Skills, environments, on-robot evaluation | §54–56 | **Built** — §54.4's lifecycle, composition, safety notes, and an episode's `intervention_count` read off §13's ring rather than defaulted away (§74.6) | Nothing on this edition can run a policy, so no skill has ever executed. The count is attributed only while one invocation is in `running`: the ring counts an interval and the recording knows which policy was commanding by digest, which nothing reads yet |
 | Interface — Hub-side and on-robot | §32 | **Built on both sides** — the console, the fleet page, the device page; §7.6's guards and limits cross §17 and are rendered on both, relayed rather than recomputed, and §32.2's four console panels all draw something measured | The transport plan does not cross §17, and should not until a policy runtime exists to be running one — the robot serves it per package at `GET /limits?package=`, for staged packages as well as active ones (§6.2). §32.1's guard-trip column now has its source and is frozen against a document a robot produces (§74.6); what it does not yet have is a robot that trips a guard |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **93,400 lines of Rust** across fifteen crates with 1,342
+**Built** means running, tested code: **93,500 lines of Rust** across fifteen crates with 1,346
 tests over a corpus of 73 files and 1,020 cases, **13,300 lines** of the TypeScript reference edition
 that the corpus holds it to, **5,400 lines** of drivers, and **8,200 lines** in the Hub's mirror of
 the shared contracts. The Hub's own suite is 1,499 tests.
@@ -4964,12 +4964,16 @@ divides by since the ring was written, and §26 puts an estop on the event chann
 it, seals it on a fault and serves it over §33.7. The producer and the consumer were in one process
 for twenty sessions and nothing had walked from one to the other.
 
-The fifth was wrong for a different reason and it is worth naming, because it is the failure §76.1
-is about wearing a different hat. `interventions` was recorded as needing teleoperation. §15 defines
-field conformance as *"the ratio of cycles the kernel did not have to intervene in"* — a **kernel**
-intervention. A human taking over is §54.4's `intervention_count` on an **episode**, which is a
-different number, measured by a different thing, on a different route. One word, two facts, and the
-one written down was the one that made the counter look impossible.
+The fifth was wrong for a different reason. `interventions` was recorded as needing
+**teleoperation**, and §15 defines field conformance as *"the ratio of cycles the kernel did not have
+to intervene in"* — a kernel intervention, which `Cycle::intervened` has computed and named as
+`field_conformance`'s input since the ring was written.
+
+Nothing in this specification asks any producer for a count of human takeovers. There is **one**
+meaning of the word here, and §54.4's `intervention_count` on an episode is the same kernel number
+over a narrower window — §54.4's own lifecycle ends `running` on a *guard trip*. So a comment had
+invented a second meaning in order to explain why the first was impossible, which is a more expensive
+mistake than a wrong word: it made a counter look like somebody else's problem.
 
 #### A window of the ring, and the two ways it can say nothing
 
