@@ -101,6 +101,24 @@ const hub = given ? resolve(given) : findHub()
 const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex')
 
 /**
+ * Does this file hold Windows line endings?
+ *
+ * `.gitattributes` pins the working tree to LF on every platform, for the three reasons stated at
+ * the top of that file — the corpus, these mirrors and `versionDigest()` are all decided by exact
+ * bytes. A tool that rewrites a file on Windows can undo it silently, and `git add` then normalises
+ * on the way in, so the *commit* is right and the **working tree the pin was computed from is not**.
+ *
+ * That is the failure this guard exists for, and it is a nasty one because every local check passes:
+ * the two trees agree, the digest is written, the commit is clean, and CI — which checks out LF —
+ * reports the specification as changed without the pin being updated. Refused rather than
+ * normalised: silently hashing bytes other than the ones on the disk is how a pin stops being a
+ * statement about a file.
+ */
+function hasCrlf(path) {
+  return readFileSync(path).includes(String.fromCharCode(13) + String.fromCharCode(10))
+}
+
+/**
  * The pinned digests of the shared documents.
  *
  * Written by `--sync`, from the copies the two repositories agreed on at that moment, and checked
@@ -166,6 +184,17 @@ function checkPins() {
  * stale pin and a red CI job. None of them is what the rule is for.
  */
 function writePins(agreed) {
+  const wrong = [...agreed].filter(ours => hasCrlf(join(HERE, ours)))
+  if (wrong.length > 0) {
+    console.error(
+      `\nRefusing to pin: ${wrong.join(', ')} ${wrong.length === 1 ? 'holds' : 'hold'} CRLF line endings.\n\n`
+        + `.gitattributes pins this working tree to LF, and a digest taken over CRLF bytes\n`
+        + `describes a file no checkout will ever produce — so it passes here and fails in CI.\n`
+        + `Convert the file(s) to LF and run this again; \`git add --renormalize .\` does it for\n`
+        + 'a whole tree.',
+    )
+    process.exit(1)
+  }
   const existing = existsSync(PINS)
     ? (JSON.parse(readFileSync(PINS, 'utf8')).digests ?? {})
     : {}

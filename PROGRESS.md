@@ -10820,3 +10820,26 @@ forty-second; 59–61 from the forty-third; 62–63 from the forty-fourth; 64–
 81. **An interpretation that lives in a transport is not part of the protocol.** `404` meaning zero
     was a property of the route sitting inside the curl client. The suite's double found it in one
     run, which is the argument for the double.
+
+### Postscript, added after the commit: the pin was nearly wrong for a reason the pin exists to catch
+
+This session's own tooling wrote several files with CRLF line endings, on a Windows machine, into a
+repository whose `.gitattributes` opens with a paragraph explaining why the working tree is LF
+everywhere — *"this repository is built around byte-identical artifacts […] on a machine with
+`core.autocrlf=true` a checkout rewrites every line ending on the way in."*
+
+Every local check passed. `git add` normalises on the way in, so the **commit** was correct; the
+mirror was correct, because both trees had been given the same CRLF bytes; the digest was written
+without complaint. What was wrong was the one thing nobody would have looked at: the pin described
+a file that no checkout would ever produce, and CI — which checks out LF — would have reported the
+specification as edited here without the pin being updated.
+
+`check-mirrors.mjs` now refuses to pin a file holding CRLF, naming `.gitattributes` and
+`git add --renormalize`. Refused rather than normalised, for the reason the file already gives about
+hand-edited pins: a digest quietly taken over bytes other than the ones on the disk is a pin that has
+stopped being a statement about a file.
+
+82. **A check that reads the working tree can be defeated by a tool that writes it.** The mirror
+    pin is the most byte-exact thing in this repository and it was one `git add` away from being a
+    digest of bytes that exist on one machine. The guard costs four lines and the failure it
+    prevents is one that only appears in CI, on a different platform, for a file nobody edited.
