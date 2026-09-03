@@ -13,7 +13,7 @@
 //! | `POST /stop` | *(none)* | Stop every package. The software stop §32.2 puts on the console |
 //! | `GET /embodiment` | observer | What body this is (§5): slug, joints, frame graph, and the digest every recording carries |
 //! | `GET /capacity` | observer | What `admit_package` would be told about this robot (§8), or why it cannot be assembled |
-//! | `GET /state` | observer | §27's operating state, the reason, and which of its conditions anybody observed |
+//! | `GET /state` | observer | §27's operating state, the reason, which of its conditions anybody observed, and §49.1's warning channel |
 //! | `GET /health` | observer | Per-package liveness and readiness, every field with its age |
 //! | `GET /packages` | observer | Installed, active digest, wanted state, grants |
 //! | `GET /packages/{ns}:{name}` | observer | One package, with its rollback target |
@@ -196,7 +196,7 @@ pub fn handle<L: Launcher, S: Slots>(
         ("POST", ["packages", id, "stop"]) => act(context, id, Verb::Stop),
         ("POST", ["packages", id, "rollback"]) => act(context, id, Verb::Rollback),
         ("POST", ["grants"]) => edit_grant(context, request, true),
-        ("DELETE", ["grants", id, token]) => remove_grant(context, id, token),
+        ("DELETE", ["grants", id, token]) => remove_grant(context, request, id, token),
         ("GET", ["ota"]) => ok(ota(context)),
         ("GET", ["identity"]) => ok(identity(context)),
         ("GET", ["checkin"]) => ok(checkin(context)),
@@ -528,6 +528,33 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
         observed.set(condition, Json::Bool(false));
     }
     out.set("observed", observed);
+
+    // §49.1's channel, on the route that reports the state whose transitions demand it. Not a
+    // route of its own: a warning channel is not a subsystem an operator inspects on its own, it is
+    // a property of the transitions this document is about — and a console that had to fetch two
+    // routes to say "this robot is about to command a body and cannot warn anybody" would be one
+    // request away from not saying it.
+    let mut warning = crate::audio::Channel::of(context.daemon.store.layout()).to_json();
+    // Three states, and the third is why this is here rather than derived from `declared`. A robot
+    // that has never entered a commanding state has never been asked to warn, and reporting that as
+    // a success would be the same error as a health field nobody dated (§33.6).
+    match &context.daemon.last_warning {
+        Some(sounded) => {
+            warning.set("last", Json::Bool(sounded.ok()));
+            warning.set("last_detail", Json::Str(sounded.detail()));
+        }
+        None => {
+            warning.set(
+                "last_detail",
+                Json::Str(
+                    "no transition on this robot has yet required a warning (§49.1), so nothing                      has been attempted"
+                        .to_string(),
+                ),
+            );
+        }
+    }
+    out.set("warning", warning);
+
     out.set(
         "partial",
         Json::Str(
@@ -1259,8 +1286,82 @@ fn edit_grant<L: Launcher, S: Slots>(
     held.push(entry);
     held.sort();
     match crate::observe::write_pairs(&layout.grants(), &held) {
-        Ok(()) => Response::json(201, encode(&grant_body(&id, token, "granted"))),
+        Ok(()) => {
+            record_grant(
+                context,
+                request,
+                &layout,
+                &id,
+                token,
+                "capability.grant",
+                None,
+            );
+            Response::json(201, encode(&grant_body(&id, token, "granted")))
+        }
         Err(err) => error(500, &err.to_string()),
+    }
+}
+
+/// Write §38.3's two records for one capability change.
+///
+/// §38.3 asks for *"a black box event and an audit-log entry, carrying who, when, which layer, and
+/// the previous value"* for **every configuration change**, and a capability grant is the
+/// configuration change with the largest safety consequence this platform has: it is the moment a
+/// package acquires permission to do something to a body. §49.2 names it again for one token —
+/// *"the default is denied and the grant is explicit and audit-logged"*.
+///
+/// Neither record was written. §54.2's *acknowledgement* of a safety note was, which is the shape
+/// of the omission: this robot recorded that somebody read the warning and not that it then handed
+/// over the capability the warning was about.
+///
+/// # After the write, and not refused when it fails
+///
+/// The opposite order from `notes::acknowledge`, which refuses the grant if it cannot be recorded,
+/// and the difference is which way the two failures point. An unrecorded acknowledgement means the
+/// operator is asked again — a grant that did not happen. An unrecorded *grant* has already
+/// happened: the file is written, the reconciler will act on it, and refusing at this point would
+/// return an error for a permission the robot now holds. So the record is best effort and the
+/// failure is loud, which is the same rule `raise_incident` follows for the same reason.
+fn record_grant<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    request: &Request,
+    layout: &crate::layout::Layout,
+    id: &PackageId,
+    token: &str,
+    action: &str,
+    previous: Option<&str>,
+) {
+    let actor = context
+        .credentials
+        .label_of_header(request.header("authorization"))
+        .unwrap_or("unknown")
+        .to_string();
+    let subject = format!("{}:{token}", id.as_str());
+    if let Err(failure) = crate::audit::Audit::of(layout).append(
+        &crate::audit::rfc3339(wall_ms()),
+        &actor,
+        action,
+        &subject,
+        "over the local API (§39.1)",
+        previous,
+    ) {
+        eprintln!("skynetd: `{action}` on {subject} could not be recorded: {failure}");
+    }
+    // The black box half. §38.3 wants both and they are not redundant: the ring holds the last few
+    // minutes at full fidelity for an incident review, and the log is what answers "when did this
+    // robot start letting that package move an arm" eleven months later.
+    //
+    // `GrantChanged` rather than `ConfigChanged`, and the distinction is why §26's vocabulary has
+    // both. The code existed and had exactly one producer — the reconciler, applying a grant that
+    // came down in a desired state — so the ring recorded every grant a *Hub* made and none an
+    // operator made at the robot.
+    if let Some(recorder) = context.blackbox.as_mut() {
+        let _ = recorder.event(
+            context.mono_ns,
+            skynet_blackbox::record::EventCode::GrantChanged,
+            &actor,
+            &format!("{action} {subject}"),
+        );
     }
 }
 
@@ -1296,6 +1397,7 @@ fn notes_for<L: Launcher, S: Slots>(
 
 fn remove_grant<L: Launcher, S: Slots>(
     context: &mut Context<'_, L, S>,
+    request: &Request,
     raw: &str,
     token: &str,
 ) -> Response {
@@ -1313,7 +1415,22 @@ fn remove_grant<L: Launcher, S: Slots>(
     // lease goes with it, so a revocation cannot take the permission away and leave the exclusivity.
     context.daemon.leases.release(&id.as_str(), token);
     match crate::observe::write_pairs(&layout.grants(), &held) {
-        Ok(()) => ok(grant_body(&id, token, "revoked")),
+        Ok(()) => {
+            // `previous` is "held", which is the whole of the previous value for a token: a grant
+            // is present or it is not. §38.3 asks for it so a reader can tell a revocation from a
+            // request that changed nothing — and `not_held` returns above without a record, because
+            // nothing was configured.
+            record_grant(
+                context,
+                request,
+                &layout,
+                &id,
+                token,
+                "capability.revoke",
+                Some("held"),
+            );
+            ok(grant_body(&id, token, "revoked"))
+        }
         Err(err) => error(500, &err.to_string()),
     }
 }

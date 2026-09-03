@@ -367,6 +367,29 @@ function renderState(feed) {
   }
   add('Needs a human to leave', human)
 
+  // §49.1's warning channel, on the panel about the transitions that demand it. Three states, and
+  // the third is the one a two-state rendering would get wrong: a robot that has never entered a
+  // commanding state has never been asked to warn, and drawing that as a success would be the same
+  // error as an undated health field (§33.6).
+  const warning = s.warning || {}
+  const heard = el('span')
+  if (!warning.declared) {
+    heard.appendChild(pill('none declared', 'warn'))
+  } else if (warning.last === true) {
+    heard.appendChild(pill('sounded', 'ok'))
+  } else if (warning.last === false) {
+    heard.appendChild(pill('DID NOT SOUND', 'bad'))
+  } else {
+    heard.appendChild(pill(warning.label || 'declared', 'ok'))
+    heard.appendChild(document.createTextNode(' '))
+    heard.appendChild(el('span', 'dim', 'never asked to'))
+  }
+  if (warning.last_detail) {
+    heard.appendChild(document.createTextNode(' '))
+    heard.appendChild(el('span', 'dim', warning.last_detail))
+  }
+  add('Warning tone (§49.1)', heard)
+
   // Which of §27's conditions anybody looked at. The list, not a count, because "1 of 9" tells an
   // operator how bad it is and this tells them which one they have.
   const observed = s.observed || {}

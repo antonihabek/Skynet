@@ -317,6 +317,18 @@ pub struct Daemon<L: Launcher, S: Slots> {
     /// Boxed for `updater`'s reason and used the same way — a handful of calls in the life of an
     /// image, against a pair of type parameters read on every pass.
     pub fetcher: Box<dyn crate::bundle::Fetcher>,
+    /// §49.1's warning channel: what makes the noise before autonomous motion.
+    ///
+    /// Boxed for `updater`'s reason, and used far less often than either of the other two — a tone
+    /// sounds on a transition into a commanding state, which on a working robot is a handful of
+    /// times a shift.
+    pub sounder: Box<dyn crate::audio::Sounder>,
+    /// What the last warning did, when one was called for.
+    ///
+    /// In memory rather than on disk, and it is not a record: §38.3's records are the audit log and
+    /// the ring, both written at the moment. This is what the surfaces read, and a robot that had
+    /// never entered a commanding state has nothing to say rather than a stale `ok`.
+    pub last_warning: Option<crate::audio::Sounded>,
     /// §36's sensors, and the one instant they remember (§36.3's "sustained").
     ///
     /// Here for `counting`'s reason: a throttle window is a duration, a duration is not observable
@@ -370,6 +382,8 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             skills: crate::skill::Runtime::new(),
             updater: Box::new(crate::ota::RaucUpdater),
             fetcher: Box::new(crate::bundle::CurlFetcher),
+            sounder: Box::new(crate::audio::CommandSounder),
+            last_warning: None,
             jitter: 1.0,
         }
     }
@@ -511,9 +525,61 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             ..Conditions::default()
         };
         let transition = evaluate_state(self.operating_state, &conditions);
+
+        // §49.1, before the state is committed rather than after. On this edition the daemon is
+        // the thing that decides §27's state, so sounding here really is sounding before the
+        // transition takes effect in this process — which is the strongest ordering available from
+        // this side of §33.1's line and is not the guarantee §49.1 asks for. See `audio`'s header.
+        self.warn_for_transition(&transition);
+
         self.operating_state = transition.to;
         self.state_reason = transition.reason;
         transition
+    }
+
+    /// Sound §49.1's warning if this transition demands one, and report a failure to.
+    ///
+    /// A method rather than four lines inside [`Daemon::refresh_operating_state`], and the reason is
+    /// that the interesting half of it is unreachable from there **on this edition**: §33.1 leaves
+    /// seven of §27's eight conditions unobserved, so the machine derives `safe` every pass and
+    /// `warning_required` is never true. A robot here never enters a commanding state, so the tone
+    /// never sounds and the incident is never raised — for the same reason §74.6's counters report
+    /// nothing on a shipping robot.
+    ///
+    /// Split out so the consequence can be driven directly by the suite. The alternative was a path
+    /// that only runs on a robot that does not exist yet, which is how a safety control ships
+    /// untested.
+    ///
+    /// # Raised, because it cannot be refused
+    ///
+    /// §49.1 makes the tone a control an operator's risk assessment relies on. This process cannot
+    /// decline to enter a commanding state — §27's state is *derived from conditions*, not granted
+    /// by a supervisor — so the strongest available answer to "the robot is about to move and
+    /// nobody was warned" is an incident, which §34.4 never drops, plus a line on the console and a
+    /// field on `GET /state`. That is weaker than refusing and it is the honest answer for a
+    /// process that does not hold the switch.
+    pub fn warn_for_transition(
+        &mut self,
+        transition: &Transition,
+    ) -> Option<crate::audio::Sounded> {
+        let channel = crate::audio::Channel::of(self.store.layout());
+        let sounded = crate::audio::warn_for(self.sounder.as_mut(), &channel, transition)?;
+        if !sounded.ok() {
+            let mut extra = Json::obj();
+            extra.set("detail", Json::Str(sounded.detail()));
+            extra.set("from", Json::from(transition.from.as_str()));
+            extra.set("to", Json::from(transition.to.as_str()));
+            extra.set("channel", channel.to_json());
+            self.raise_incident("warning_did_not_sound", extra);
+            eprintln!(
+                "skynetd: autonomous motion without a warning ({} -> {}): {}",
+                transition.from.as_str(),
+                transition.to.as_str(),
+                sounded.detail()
+            );
+        }
+        self.last_warning = Some(sounded.clone());
+        Some(sounded)
     }
 
     /// Re-read the desired state from disk, walking §33.8's ladder.

@@ -98,7 +98,7 @@ it, which says no when the answer is no.
 | `crates/skynet-urdf` — URDF import (§63.4) | XML reader, model, role suggestion, descriptor, collision geometry, 45 tests |
 | `crates/skynet-cli` — the `skynet` command | descriptor, transport, frames, role, driver new/check, plus the robot commands over the local socket, `blackbox`, `skill run` / `skill stop` / `skills`, `ota`, §10's `pair` / `unpair` / `identity`, `checkin`, `intent`, `cell`, `power`, `conformance` and §7.6's `limits` — which carries §37.1's transport plan for a named package, staged or active; 48 commands, 44 tests |
 | `crates/skynetd` — the supervisor's brain (§33) | Reconciler, supervision, health, leases — including §54.4's all-or-nothing acquisition; pure, 45 tests, and CI asserts it stays pure |
-| `crates/skynetd-io` — the I/O half, and the `skynetd` binary | Package store, systemd launcher, observation, local API, the on-robot console (§32.2), the black box on disk, the trust store (§19), §34.3's bearers and the outbound sender, §51's cached entitlement tokens, §50's birth certificate, §27's state observed once a pass and §33.4's barrier read off it, **§54's skill runtime** — the loop that drives the lifecycle, assembles the precondition context, takes the leases, records every transition and emits one episode per invocation — **§12's OTA half**: the signed release manifest and bench pass, the RAUC updater behind a trait, and the boot that confirms or condemns its own slot, the loop; **§10's identity**: two files so the identity is public and the credential is not, a pairing exchange behind a trait whose one HTTPS request never puts the code or the credential on a command line, and the attestation assembled from what this machine can actually measure; **§34.2's outbound path**: one function that makes every HTTPS request this daemon makes, with the credential in curl's config on stdin and never on a command line, and the queue drained to the Hub a robot was paired with; **§17's check-in**, built every reconcile pass and collapsed by §34.4 to exactly one; **§11's pull**, which decodes before it writes so a proxy's answer can never overwrite the intent a robot is reconciling against; **§7.6's resolved limits**, the first caller of `resolve_limits` that is a robot — and the block §17's check-in carries to the Hub's device page — the descriptor's envelope, the signed profile's ceilings, §55.2's cell and §6.3's transport clamp composed into the one set the kernel would enforce, at a tier the robot is honest about not having; **§79's upload**, the mirror of §75's fetch — the probe that asks the receiver for an offset the robot cannot read off its own disk, a resumable `PUT` bounded to one twenty-second slice a pass, and a receipt written only against the digest recorded at the seal; 497 tests plus an end-to-end run against real systemd |
+| `crates/skynetd-io` — the I/O half, and the `skynetd` binary | Package store, systemd launcher, observation, local API, the on-robot console (§32.2), the black box on disk, the trust store (§19), §34.3's bearers and the outbound sender, §51's cached entitlement tokens, §50's birth certificate, §27's state observed once a pass and §33.4's barrier read off it, **§54's skill runtime** — the loop that drives the lifecycle, assembles the precondition context, takes the leases, records every transition and emits one episode per invocation — **§12's OTA half**: the signed release manifest and bench pass, the RAUC updater behind a trait, and the boot that confirms or condemns its own slot, the loop; **§10's identity**: two files so the identity is public and the credential is not, a pairing exchange behind a trait whose one HTTPS request never puts the code or the credential on a command line, and the attestation assembled from what this machine can actually measure; **§34.2's outbound path**: one function that makes every HTTPS request this daemon makes, with the credential in curl's config on stdin and never on a command line, and the queue drained to the Hub a robot was paired with; **§17's check-in**, built every reconcile pass and collapsed by §34.4 to exactly one; **§11's pull**, which decodes before it writes so a proxy's answer can never overwrite the intent a robot is reconciling against; **§7.6's resolved limits**, the first caller of `resolve_limits` that is a robot — and the block §17's check-in carries to the Hub's device page — the descriptor's envelope, the signed profile's ceilings, §55.2's cell and §6.3's transport clamp composed into the one set the kernel would enforce, at a tier the robot is honest about not having; **§79's upload**, the mirror of §75's fetch — the probe that asks the receiver for an offset the robot cannot read off its own disk, a resumable `PUT` bounded to one twenty-second slice a pass, and a receipt written only against the digest recorded at the seal; **§49.1's warning channel**, declared like a bearer because which output is the klaxon is a property of the machine, sounded before the state is committed, and raising an incident when it cannot be; 508 tests plus an end-to-end run against real systemd |
 | `crates/skynet-blackbox` — the black box (§13, §26) | The preallocated ring, the MCAP writer, sealing, deterministic replay; `no_std`, 31 tests. Record format **2**: a frame now records the capture paths that produced nothing, and an unmeasurable skew rather than a zero one |
 | `crates/skynet-ring` — the SPSC command ring (§25) | The only channel from a policy to the kernel: 4 KiB slots, a seqlock, latest-wins, never blocks. `no_std`, no `alloc`, no `unsafe`; 18 tests including a two-thread torture run |
 | `crates/skynet-ring-shm` — the `memfd` under it | Creates, seals and maps the anonymous file; the consumer's mapping carries no `PROT_WRITE`. 9 tests, one of which re-executes itself so a command crosses two real processes |
@@ -221,6 +221,39 @@ against a **last-known-good** copy looks identical, on every other surface, to o
 against a current desired state.
 `cargo test -p skynetd-io -- --ignored console_fixture` writes the page and one file per route it
 fetches, from the real router, so anybody can serve the directory and look at it without a robot.
+
+§49's warning tone is built, and the shape of what was missing is worth a paragraph because it
+is invisible from either half. `hri.warning` has been a **reserved** capability token since §8 was
+built — no grant confers it, `CapabilityReserved` refuses the package that asks, and the corpus holds
+both editions to the refusal. `warning_required` has decided exactly which transitions demand a tone,
+phrased over "a policy is commanding this body" so that *into `RUNNING`* and *on resumption after a
+stop* are one rule rather than two. Every rule about the tone was enforceable, and **nothing had ever
+made a sound**: `Transition::warning` reached the daemon's observe step and was dropped.
+
+The channel is now declared in `state/audio.json` and sounded before the daemon commits the new
+state. A robot with no declaration reports that it cannot warn rather than falling back to a
+plausible default device — the fallback is the worse failure, because it produces a robot that
+believes it is warning people while playing into a disconnected port.
+
+The question §49 does not ask is what a robot does when a transition demands a tone and there is no
+channel. It cannot refuse: §27's state is *derived from conditions* rather than granted, so there is
+no point at which `skynetd` decides whether `RUNNING` may happen and nothing to withhold. So it
+raises an incident — which §34.4 never drops — carrying the transition, the failure, and what this
+robot believed its warning channel was. Refusing to command a body that cannot warn is the right rule
+for a certified tier and it belongs in the kernel's interlock, where the transition is.
+
+No robot has sounded one. Seven of §27's eight conditions are unobserved on this edition, so the
+machine derives `safe` every pass and no robot ever enters a commanding state — the tone is in the
+same position as the black box's cycle counters: the path exists, is tested against the real
+producer, and is gated on a property rather than on a constant.
+
+One thing found beside it and fixed: **a capability grant left no record at all.** §38.3 asks for a
+black box event and an audit-log entry on every configuration change, and a grant is the change with
+the largest safety consequence on the platform. The acknowledgement of a skill's safety notes *was*
+recorded, which is the shape of the omission — this robot recorded that somebody read the warning and
+not that it then handed over the capability the warning was about. `EventCode::GrantChanged` had
+existed since the black box was written with exactly one producer, the reconciler, so the ring
+recorded every grant a *Hub* made and none an operator made standing at the robot.
 
 The black box is a partial entry rather than either column. The ring, the format, the seal and the
 replay are written and held to the corpus; what a *supervisor* can put in one is §26's event channel
