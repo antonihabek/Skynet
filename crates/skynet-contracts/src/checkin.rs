@@ -407,6 +407,151 @@ pub fn summarize(health: &HealthInput) -> HealthReport {
     }
 }
 
+// ── §7.6's limits, as a check-in carries them ────────────────────────────────
+
+/// What the Safety Kernel would enforce on this robot (§7.3, §7.6, §32.1).
+///
+/// §32.1 asks a device page for *"active and unavailable guards with the missing input named,
+/// resolved limits and their provenance"*, and until this field existed nothing carried them: the
+/// robot resolved them, served them on its own LAN console, and the Hub's own route said so in a
+/// `gaps` list. A producer with no consumer on one side of §17 and a consumer with no producer on
+/// the other, which is the shape Part X was written about.
+///
+/// # It is a statement about now, which is what makes it belong here
+///
+/// §34.4 collapses check-ins because every field in one describes the present. These do: they are
+/// the ceilings in force and the guard partition as of this pass, not a count, a delta or a
+/// history. A robot whose profile changed twice while offline should reconnect reporting the limits
+/// it is under, and exactly one of them.
+///
+/// # `resolved_at` is not a tier claim, and the name is the reason
+///
+/// It is *"the tier these limits were resolved at"* — `skynet_kernel::ResolvedLimits`' own field,
+/// under its own name. §15 awards a tier from bench evidence a human witnessed and a robot never
+/// awards itself one (§19), so a field called `tier` here would be read as one within a week.
+/// §7.6: nothing on a robot decides its tier, the daemon resolves at the floor, and the numbers
+/// above are identical at all three tiers either way.
+///
+/// # `enforcement` and `enforced` are different facts
+///
+/// `enforcement` is what the tier *permits* — advisory, enforcing, enforcing-redundant — and is
+/// derived from `resolved_at`. `enforced` is whether anything on this robot actually applies these
+/// limits to a command, which on an edition with no policy runtime is `false` at every tier. A
+/// consumer that had only the first would render a green guard list over a robot enforcing nothing.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GuardReport {
+    /// The tier these limits were resolved at. Never a tier claim — see the type's docs.
+    pub resolved_at: String,
+    /// What that tier permits.
+    pub enforcement: String,
+    /// Whether anything on this robot applies them to a command.
+    pub enforced: bool,
+    /// Narrowest declared joint velocity ceiling.
+    pub joint_velocity_max_rad_s: Option<f64>,
+    /// Narrowest declared joint torque ceiling.
+    pub joint_torque_max_nm: Option<f64>,
+    /// Narrowest declared base velocity ceiling.
+    pub base_velocity_max_m_s: Option<f64>,
+    /// Slowest loop rate the controller tolerates.
+    pub min_control_hz: Option<f64>,
+    /// Jerk ceiling as a fraction of the channel ceiling per cycle.
+    pub max_delta_per_cycle: Option<f64>,
+    /// Where the numbers came from. `None` is a limit set nobody cited a datasheet for.
+    pub source: Option<String>,
+    /// Guards that will run, in evaluation order.
+    pub active: Vec<String>,
+    /// Guards specified and inoperable here, each with what it wanted.
+    pub unavailable: Vec<UnavailableGuard>,
+    /// Everything an operator must read, as codes and subjects.
+    ///
+    /// **Codes, never sentences.** The Hub renders these in thirty-five locales (§32.3) and a robot
+    /// that shipped English prose would put the translation on the side that cannot do it. Both
+    /// editions hold the same catalogue, so the code is enough.
+    ///
+    /// `guard_unavailable` is carried here *as well as* in [`Self::unavailable`], and the
+    /// duplication is deliberate: this field is what the kernel produced, and a wire that dropped
+    /// part of it would be a view rather than evidence. A renderer with the table beside it should
+    /// filter the code out; that is the renderer's decision to make.
+    pub notices: Vec<Notice>,
+}
+
+/// A guard that is specified and cannot run here.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnavailableGuard {
+    /// Which guard.
+    pub guard: String,
+    /// What it needs and does not have — a missing input, or *"not applicable to this body"*.
+    pub missing: Vec<String>,
+}
+
+/// One thing an operator must read, as the kernel emitted it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Notice {
+    /// The code. `skynet_kernel::NoticeCode`'s wire spelling.
+    pub code: String,
+    /// The specific things named — missing inputs, widened fields.
+    pub subjects: Vec<String>,
+}
+
+/// Serialise the guard report, or `null`.
+///
+/// Present-and-null rather than absent, because *"this robot resolved no limits"* and *"this robot
+/// runs an edition that does not report them"* are the same absence to a consumer switching on a
+/// key, and both are facts a fleet page acts on differently from a robot that resolved some.
+pub fn guard_report_to_json(report: Option<&GuardReport>) -> Json {
+    let Some(report) = report else {
+        return Json::Null;
+    };
+
+    let number = |value: Option<f64>| match value {
+        Some(value) => Json::Num(value),
+        None => Json::Null,
+    };
+
+    let mut unavailable = Json::arr();
+    for entry in &report.unavailable {
+        let mut row = Json::obj();
+        row.set("guard", Json::Str(entry.guard.clone()))
+            .set("missing", str_arr(&entry.missing));
+        unavailable.push(row);
+    }
+
+    let mut notices = Json::arr();
+    for notice in &report.notices {
+        let mut row = Json::obj();
+        row.set("code", Json::Str(notice.code.clone()))
+            .set("subjects", str_arr(&notice.subjects));
+        notices.push(row);
+    }
+
+    let mut out = Json::obj();
+    out.set("active", str_arr(&report.active))
+        .set(
+            "base_velocity_max_m_s",
+            number(report.base_velocity_max_m_s),
+        )
+        .set("enforced", Json::Bool(report.enforced))
+        .set("enforcement", Json::Str(report.enforcement.clone()))
+        .set("joint_torque_max_nm", number(report.joint_torque_max_nm))
+        .set(
+            "joint_velocity_max_rad_s",
+            number(report.joint_velocity_max_rad_s),
+        )
+        .set("max_delta_per_cycle", number(report.max_delta_per_cycle))
+        .set("min_control_hz", number(report.min_control_hz))
+        .set("notices", notices)
+        .set("resolved_at", Json::Str(report.resolved_at.clone()))
+        .set(
+            "source",
+            match &report.source {
+                Some(source) => Json::Str(source.clone()),
+                None => Json::Null,
+            },
+        )
+        .set("unavailable", unavailable);
+    out
+}
+
 // ── The document ─────────────────────────────────────────────────────────────
 
 /// Everything a check-in is built from.
@@ -447,6 +592,12 @@ pub struct CheckInInput {
     /// contents to a fleet, watch every robot refuse it, and see nothing but robots that had
     /// stopped converging. Here it is one comparison.
     pub desired_digest: String,
+    /// §7.6's resolved limits and guard partition, when this robot composed any.
+    ///
+    /// `None` is an edition that does not resolve them, and it is not the same as a robot with no
+    /// ceilings — that one reports a [`GuardReport`] whose numbers are all absent, with the
+    /// `no_envelope` notice saying why.
+    pub limits: Option<GuardReport>,
 }
 
 /// The document a robot sends.
@@ -470,6 +621,8 @@ pub struct CheckIn {
     pub pending: Vec<Pending>,
     /// The document behind the generation. See [`CheckInInput::desired_digest`].
     pub desired_digest: String,
+    /// §7.6's limits, carried through unchanged. See [`GuardReport`].
+    pub limits: Option<GuardReport>,
 }
 
 /// Build the document a robot sends (§11, §17).
@@ -495,6 +648,10 @@ pub fn check_in(input: &CheckInInput) -> CheckIn {
         state: input.state.trim().to_string(),
         pending,
         desired_digest: input.desired_digest.trim().to_string(),
+        // Carried through rather than derived. What the guards are and what they lack is the
+        // kernel's answer for this body, and a builder that recomputed any of it would be a second
+        // implementation of §7.3 living in the reporting path.
+        limits: input.limits.clone(),
     }
 }
 
@@ -605,6 +762,9 @@ pub fn check_in_to_json(built: &CheckIn) -> Json {
         .set("device_id", Json::Str(built.device_id.clone()))
         .set("generation", Json::Num(built.claim.generation as f64))
         .set("health", health)
+        // §7.6's ceilings and guard partition, or `null`. Present-and-null so a consumer can tell
+        // "this edition does not report them" from "this robot resolved none".
+        .set("limits", guard_report_to_json(built.limits.as_ref()))
         .set("pending", pending)
         .set("state", Json::Str(built.state.clone()));
     out
@@ -619,6 +779,29 @@ mod tests {
     use super::*;
     use crate::identity::Measure;
     use alloc::vec;
+
+    fn report() -> GuardReport {
+        GuardReport {
+            resolved_at: "guest".to_string(),
+            enforcement: "advisory".to_string(),
+            enforced: false,
+            joint_velocity_max_rad_s: Some(0.5),
+            joint_torque_max_nm: Some(80.0),
+            base_velocity_max_m_s: None,
+            min_control_hz: None,
+            max_delta_per_cycle: None,
+            source: Some("vendor datasheet rev C".to_string()),
+            active: vec!["watchdog".to_string(), "envelope".to_string()],
+            unavailable: vec![UnavailableGuard {
+                guard: "balance".to_string(),
+                missing: vec!["a legged base — not applicable to this body".to_string()],
+            }],
+            notices: vec![Notice {
+                code: "advisory_only".to_string(),
+                subjects: Vec::new(),
+            }],
+        }
+    }
 
     fn pending(stage: &str, deferred: bool) -> Pending {
         Pending {
@@ -785,6 +968,7 @@ mod tests {
             health: HealthInput::default(),
             attestation: attestation(),
             desired_digest: String::new(),
+            limits: None,
         });
         let document = check_in_to_json(&built);
         let fields = document
@@ -812,6 +996,7 @@ mod tests {
                 embodiment: Measure::nothing(),
             },
             desired_digest: String::new(),
+            limits: None,
         });
         let document = check_in_to_json(&built);
         let attestation = document.get("attestation").expect("attestation");
@@ -863,6 +1048,7 @@ mod tests {
             health: HealthInput::default(),
             attestation: attestation(),
             desired_digest: "  sha256:dddd  ".to_string(),
+            limits: None,
         });
         assert_eq!(built.desired_digest, "sha256:dddd");
         assert_eq!(
@@ -890,6 +1076,7 @@ mod tests {
             health: HealthInput::default(),
             attestation: attestation(),
             desired_digest: String::new(),
+            limits: None,
         });
         assert_eq!(
             check_in_to_json(&built)
@@ -917,6 +1104,7 @@ mod tests {
             health: HealthInput::default(),
             attestation: attestation(),
             desired_digest: String::new(),
+            limits: None,
         });
         let document = check_in_to_json(&built);
         let attestation = document.get("attestation").expect("attestation");
@@ -950,6 +1138,7 @@ mod tests {
             health: HealthInput::default(),
             attestation: attestation(),
             desired_digest: String::new(),
+            limits: None,
         });
         let stages: Vec<&str> = built.pending.iter().map(|p| p.stage.as_str()).collect();
         assert_eq!(stages, vec!["os_image", "policy"]);
@@ -963,5 +1152,101 @@ mod tests {
         for stage in STAGES {
             assert!(!stage.is_empty());
         }
+    }
+
+    /// §7.6's block is carried, never recomputed.
+    ///
+    /// What the guards are and what they lack is the kernel's answer for one body. A builder that
+    /// derived any of it would be a second implementation of §7.3 living in the reporting path, and
+    /// the two would disagree first on the machine nobody was looking at.
+    #[test]
+    fn the_limits_cross_unchanged() {
+        let built = check_in(&CheckInInput {
+            device_id: "dev_7".to_string(),
+            agent: "skynetd/0.1.0".to_string(),
+            contracts: "1.0.0".to_string(),
+            state: "running".to_string(),
+            progress: Progress::default(),
+            health: HealthInput::default(),
+            attestation: attestation(),
+            desired_digest: String::new(),
+            limits: Some(report()),
+        });
+        assert_eq!(built.limits.as_ref(), Some(&report()));
+
+        let document = check_in_to_json(&built);
+        let limits = document.get("limits").expect("present");
+        assert_eq!(limits.get("resolved_at"), Some(&Json::from("guest")));
+        assert_eq!(
+            limits.get("source"),
+            Some(&Json::from("vendor datasheet rev C"))
+        );
+        // Absent ceilings are null rather than zero. A base velocity of 0 m/s is a robot forbidden
+        // to move; a base velocity nobody declared is a robot with no whole-body ceiling, and §7.2
+        // spends its whole length on the difference.
+        assert_eq!(limits.get("base_velocity_max_m_s"), Some(&Json::Null));
+        assert_eq!(
+            limits.arr_or_empty("unavailable")[0].arr_or_empty("missing")[0],
+            Json::from("a legged base — not applicable to this body"),
+            "§7.2's sentence has to survive the crossing verbatim: a fixed base is a shape and not \
+             a defect, and a Hub re-deriving this row would report a missing IMU"
+        );
+    }
+
+    /// `enforcement` and `enforced` are different facts, and a consumer with only the first would
+    /// render a green guard list over a robot that enforces nothing.
+    #[test]
+    fn a_tier_that_permits_enforcement_is_not_a_robot_that_enforces() {
+        let mut permitting = report();
+        permitting.resolved_at = "host".to_string();
+        permitting.enforcement = "enforcing".to_string();
+        // Still false: the tier permits it and this edition has no policy runtime to do it.
+        assert!(!permitting.enforced);
+
+        let document = guard_report_to_json(Some(&permitting));
+        assert_eq!(document.get("enforcement"), Some(&Json::from("enforcing")));
+        assert_eq!(document.get("enforced"), Some(&Json::Bool(false)));
+    }
+
+    /// A robot that reports no limits and a robot with no ceilings are different documents.
+    ///
+    /// `null` rather than an absent key, because a consumer switching on the presence of a field
+    /// would read "this edition does not report them" and "this robot resolved none" as one fact,
+    /// and a fleet page acts on them differently.
+    #[test]
+    fn no_limits_is_null_and_no_ceilings_is_a_report_full_of_nulls() {
+        let silent = check_in(&CheckInInput {
+            device_id: "dev_7".to_string(),
+            agent: String::new(),
+            contracts: String::new(),
+            state: String::new(),
+            progress: Progress::default(),
+            health: HealthInput::default(),
+            attestation: attestation(),
+            desired_digest: String::new(),
+            limits: None,
+        });
+        assert_eq!(check_in_to_json(&silent).get("limits"), Some(&Json::Null));
+
+        let bare = GuardReport {
+            joint_velocity_max_rad_s: None,
+            joint_torque_max_nm: None,
+            source: None,
+            active: Vec::new(),
+            unavailable: Vec::new(),
+            notices: vec![Notice {
+                code: "no_envelope".to_string(),
+                subjects: Vec::new(),
+            }],
+            ..report()
+        };
+        let document = guard_report_to_json(Some(&bare));
+        assert_ne!(document, Json::Null);
+        assert_eq!(document.get("joint_velocity_max_rad_s"), Some(&Json::Null));
+        assert_eq!(
+            document.arr_or_empty("notices")[0].get("code"),
+            Some(&Json::from("no_envelope")),
+            "the report says why it is empty rather than being empty"
+        );
     }
 }

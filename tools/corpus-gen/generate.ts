@@ -5830,6 +5830,49 @@ documentCase('a-robot-that-holds-no-desired-state',
     progress: { observed_generation: 0, desired_generation: 0, pending: [] },
   })
 
+documentCase('the-limits-a-robot-is-under',
+  '§7.6 crossing §17. The robot resolves its own ceilings and guard partition and until this field '
+  + 'existed nothing carried them: §32.1 asks a device page for exactly this and the Hub’s own '
+  + 'route answered with a `gaps` list naming it. Frozen because the two halves of the sentence an '
+  + 'operator reads — which guards run, and whether anything enforces them — are in '
+  + 'different fields, and an edition that agreed about one could disagree about the other.',
+  {
+    ...CONVERGED,
+    limits: {
+      resolved_at: 'guest',
+      enforcement: 'advisory',
+      // False at the guest tier and false at every other one on an edition with no policy runtime.
+      // The pair of fields is the case: `enforcement` says what the tier permits and this says
+      // whether anything does it.
+      enforced: false,
+      joint_velocity_max_rad_s: 0.5,
+      joint_torque_max_nm: 80,
+      base_velocity_max_m_s: null,
+      min_control_hz: null,
+      max_delta_per_cycle: null,
+      source: 'vendor datasheet rev C',
+      active: ['watchdog', 'envelope', 'mode_gate'],
+      unavailable: [
+        { guard: 'rate_limit', missing: ['profile.max_delta_per_cycle'] },
+        // The row that has to survive verbatim: `balance` on a fixed base is not a defect, and
+        // §7.2 spends a paragraph on saying so rather than reporting a missing IMU.
+        { guard: 'balance', missing: ['a legged base — not applicable to this body'] },
+      ],
+      notices: [
+        { code: 'advisory_only', subjects: [] },
+        { code: 'no_independent_stop', subjects: [] },
+        { code: 'guard_unavailable', subjects: ['profile.max_delta_per_cycle'] },
+      ],
+    },
+  })
+
+documentCase('a-robot-that-resolves-no-limits',
+  'The same document from an edition that does not compose them. `limits` is present and null, '
+  + 'because "this robot reports no limits" and "this robot has no ceilings" are different facts '
+  + 'and a consumer switching on a missing key cannot tell them apart — the second is a report '
+  + 'whose numbers are all null and whose notices say `no_envelope`.',
+  { ...CONVERGED, limits: undefined })
+
 documentCase('a-stalled-policy-on-a-converged-robot',
   'Applied, and degraded. The two are independent and a document that collapsed them would hide '
   + 'the case §33.6 spends a paragraph on: a robot that reconciled perfectly and is standing still.',

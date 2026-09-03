@@ -9578,3 +9578,517 @@ wait for".
     session is a `fail` on a guest-tier test, produced by the platform about itself, sitting on a
     route an operator can read. A runner built only when it would come out green would be a runner
     that never measured anything anybody did not already believe.
+
+---
+
+## 2026-09-03 (forty-first) — the limits a robot is under, and the replay that was waiting for them
+
+The fortieth session ended by naming this one: `telemetry.replay.deterministic` was skipped because
+*"nothing on this daemon calls `resolve_limits`"*, and `resolve_limits` was an orphan on the robot.
+It is not an orphan any more, and closing it turned out to answer four other things.
+
+### The suite was red on the machine it is written on
+
+Before any of it: `cargo test --workspace` failed here, on one assertion, and had been failing since
+the fortieth session landed.
+
+`the_conformance_route_runs_what_it_can_and_names_what_it_cannot` asserts that
+`package.signature.required` comes back `fail`. It does — **on Linux**. §8.1's memory figure comes
+from `/proc/meminfo`, `crate::capacity` refuses to invent one anywhere else, and the runner then
+skips the admission probe rather than running it against a machine that does not exist. All of that
+is correct and every piece of it was written deliberately. The test simply asserted one of the two
+answers.
+
+CI is `ubuntu-latest`, so it was green there and red on the developer's machine — and red on the
+*one row the runner exists to report*, which is the row a reader most wants to trust. Both branches
+are asserted now, with the executed count either side of them, so neither host is sitting a shorter
+exam than the other.
+
+The thing worth keeping is not the fix. It is that a repository whose suite is red locally and green
+remotely teaches its author to stop reading the suite, and it does that within about a week.
+
+### An orphan with three callers
+
+`resolve_limits` is the function §7.3 exists to describe: three sources of ceilings — the declared
+envelope, the transport plan, the operator profile — composed by minimum into the one set the kernel
+enforces. Its callers were the kernel's own suite, the corpus runner, and `skynet-contracts`'
+renderer.
+
+Every one of them hands it a document. **None of them is a robot.** So the function that decides what
+a machine may do had never once been asked what *this* machine may do — and no sweep finds that,
+because the function is used.
+
+`skynetd-io/src/limits.rs` is the composition, `GET /limits` serves it, `skynet limits` prints it.
+What it reads is the descriptor's envelope and frame graph, the signed profile's ceilings, and
+§55.2's cell; `?package=<id>` folds in §37.1's transport clamp for one installed package, which is
+§6.3's *"hands the ceilings to the Safety Kernel"* performed for the first time.
+
+### The tier is an input, and the robot does not have one
+
+`resolve_limits` takes a tier. Nothing on a robot decides one — §15 awards it from bench evidence a
+human witnessed, §11 would deliver the award in desired state, and neither path is written.
+`crate::runtime` already refuses to fill `robot.tier` for exactly that reason.
+
+Choosing one anyway would be the invented fact the whole arrangement exists to prevent. What makes it
+safe to resolve at all is a property of the function, and the property is asserted rather than
+asserted-in-a-comment:
+
+> The tier changes what is done with the limits. It never changes what they are.
+
+`the_ceilings_do_not_depend_on_the_tier_and_only_the_enforcement_moves` resolves the same machine
+three times and requires every ceiling, every active guard and every unavailable guard to be
+identical, then requires the two notices that *do* move — `advisory_only` and `no_independent_stop`
+— to move. The day it fails is the day the assumption has to be replaced by an awarded tier rather
+than defended, and the failure will say so.
+
+The daemon resolves at **guest**, which is a description of this build rather than a claim about the
+machine: §1 defines guest as the tier that does not own the control loop, and no policy runtime
+exists here to own one.
+
+### Three inputs with no source, named rather than defaulted
+
+`OperatorProfile` has seven fields. §11's desired state carries four ceilings and a cell. So:
+
+| Input | Why it is absent |
+|---|---|
+| `profile.proximity` | no field in desired state — so the `proximity` guard can never be active on this edition, however the body is described |
+| `profile.self_collision_margin_m` | the same; two of this robot's own bodies must meet before the guard holds |
+| `available.people_detection` | §5 declares nine sensing modalities and **none of them is a person detector** |
+
+The third is the one worth defending. A camera is not a person detector — detection is a perception
+component, not a sensor — and reading `people_detection` off an `rgb` stream would be precisely the
+*claim about the body that nothing checks* that `Available` had two fields deleted for. It is `false`
+on every body and the `proximity` guard says so, naming what it wants.
+
+### The cell's volumes stop being reported and start being applied
+
+`crate::cell` has said this about §55.2's workspace layer since it was written:
+
+> the layer is computed and **reported**, with the reason it goes no further
+
+It goes further now. The layer is folded into the operator profile the kernel reads, so a robot with
+a surveyed cell and a frame graph that reaches the frames it names has `workspace` among its active
+guards for the first time — and one whose graph does not reach them gets the missing frame named,
+which is §44.5 working rather than a body quietly unguarded.
+
+### A guard can be active and have nothing to compare against
+
+The replay check found this and it is the most useful thing in the session.
+
+`envelope` has no missing input, so it is active on every robot. The window the runner records asks
+for a thousand times any plausible ceiling — and it is forwarded unchanged, on a body that declares
+`joint_velocity_max_rad_s: 1.0`.
+
+That is correct. A joint's ceiling comes from the transport plan's `per_channel` (§6.3), because
+nothing at the kernel's layer knows whether a channel carries radians per second or newton-metres —
+and a robot running no policy has no plan in force. So the honest report is: envelope declared,
+guard active, nothing clamped.
+
+`active` reads as `enforcing`. §7.2 spent a subsection making *unavailable* guards visible and this
+is the case it does not cover, because the guard is genuinely available and genuinely idle. Both the
+route and the conformance detail now say it in a sentence rather than leaving it to be derived from
+`active_guards` and an empty `per_channel`.
+
+### The third of eight, and what it caught on its first run
+
+`telemetry.replay.deterministic` executes. This robot's ring holds audit events and no control
+cycles, because nothing here drives a loop — so the runner records a window itself, the same way
+`signature_required` builds two manifests and `ota_safety_gate` builds a bundle. What is synthetic is
+five commands. What is real is everything that decides the answer: this body's channel names, its
+resolved limits, the same `evaluate_cycle` a control loop would call, the same ring the recorder
+writes, and the same `replay()` an incident review runs.
+
+The window is shaped for the fields a round trip can lose — an unwarmed cycle, a warmed one, one far
+above any ceiling, **one stamped long enough ago that the watchdog discards it and emits no command
+at all** (a different record from a command of zero), and a return to zero.
+
+It failed the first time it ran, on two cycles, with `command recorded shoulder=0.2, recomputed
+shoulder=0.20000000298023224`.
+
+Not a bug in replay. §25's command ring carries `f32` and §26 records `desired` as `f32`, so on a
+robot every desired value the kernel sees is already exactly representable in `f32` — which is what
+makes an unclamped command survive the recording bit for bit, and `replay()` compares commands by bit
+equality on purpose. `0.2` is not representable. The window was made of numbers no policy on this
+robot could ever have produced.
+
+The fix is one line and it is load-bearing: the runner quantises through `f32` before the kernel sees
+anything, so it models the wire. Loosening the comparison would have been the other option and it
+would have thrown away the guarantee the check exists for.
+
+### Numbers
+
+Rust: `skynetd-io` goes from **450** tests to **463** — thirteen new: eight on the limits module,
+three on the route, two on the conformance runner. The workspace figure in §73 moves by the same
+thirteen, 1,303 to 1,316. A Windows checkout runs 1,286 of them, because six `memfd` tests and the
+systemd end-to-end need Linux.
+
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets` clean; both document mirrors
+match and were re-pinned; the two synced contracts match; the golden path counts **48** commands,
+which is 47 plus `limits`.
+
+§73 gains §7.6 behind it and moves five rows: transport (the hand-off is performed), the Safety
+Kernel (resolution runs on a robot, at an assumed tier), the black box (a robot replays a window
+against its own limits — and no *policy* recording has ever been replayed, because none has run),
+conformance (two of eight execute becomes three), and configuration (the three undeliverable
+profile fields). The stale figures in §73's summary and the README's crate table were re-measured
+while the tables were open.
+
+### Findings, restated
+
+1–28 as before; 29–51 from the sessions above.
+
+52. **A suite that is green in CI and red on the machine it is written on stops being read.** The one
+    failing assertion here was about the *host* rather than about the edition, and it failed on the
+    single row the runner exists to report. The fix is not the interesting part: the mechanism is
+    that a developer who sees red every morning learns within a week to run the suite and skim past
+    it, and no test catches that.
+53. **An orphan can have callers.** `resolve_limits` had three and every one of them was a test, a
+    corpus or a renderer. Dead-code tooling finds a function nobody calls; nothing finds a function
+    nobody *in the place that matters* calls, and the tell is a caller list in which no entry is the
+    production path. Worth asking of any core function: which of its callers is the machine?
+54. **An assumption is defensible exactly when you can prove it decides nothing.** The tier had to be
+    assumed. What makes that honest rather than a fudge is a test that resolves the same robot at all
+    three tiers and requires the numbers to be identical — so the assumption is confined to a label
+    on a report, mechanically, and the confinement breaks loudly.
+55. **A guard reported active is not a guard enforcing anything.** `envelope` is active on every robot
+    and clamps nothing without a transport plan. §7.2 made *unavailable* guards say what they lack;
+    the available-and-idle case has no such mechanism, reads as the reassuring one, and had to be
+    written down in a sentence because there is no field that carries it.
+56. **A wire format's precision is a constraint on every synthetic input, not only on the wire.** The
+    replay window diverged because `0.2` does not survive `f32`, and the answer was to model the wire
+    rather than to loosen the comparison. A test input the real path could not have carried is a test
+    reporting on arithmetic instead of on the machine — and the tempting fix, an epsilon, would have
+    deleted the guarantee the check exists for.
+
+---
+
+## 2026-09-03 (forty-second) — the Guards panel, which had been confidently wrong
+
+`GET /limits` existed for about an hour before it became obvious where it was most needed. §32.2's
+console has a Guards panel, and this is what it drew:
+
+> §32.2 asks for live guard state, this daemon has none, and eight green ticks would be a lie told
+> convincingly.
+
+The instinct was right and the execution had rotted. What the panel actually contained was a
+hand-written list of eight guards, each with a hand-written sentence naming what it was missing, all
+eight drawn as `unavailable`. Written when that was true. Maintained by nobody, because nothing
+compares a sentence against a machine.
+
+### Two things it said that were not so
+
+**`balance` — "implemented by no edition".** `skynet-kernel` implements it, in the 101 tests that row
+of §73 counts, and on a fixed base it reports **not applicable to this body** — which is a distinction
+§7.2 spends a paragraph on, so that *"nobody reads a shape difference as a defect"*. The console read
+it as a defect and told the operator no edition had built it.
+
+**All eight `unavailable`.** `envelope` and `mode_gate` have no missing input at all; they are active
+on every robot. `watchdog` is active on any body that declares a window. The panel drew three active
+guards as off.
+
+A page whose one rule is *never show a value it did not receive* was showing five values it had made
+up, in the panel an operator opens to find out why the robot did not stop.
+
+### What it draws now
+
+The route. Every string in the guard table is the kernel's own, computed for this body:
+
+```
+GUARD           STATE                 MISSING INPUT
+watchdog        active
+envelope        active · no ceiling   a per-channel ceiling — §6.3 hands one to the kernel
+                                      from a transport plan, and no policy is running to have one
+mode_gate       active
+rate_limit      unavailable           profile.max_delta_per_cycle
+workspace       unavailable           profile.workspace, embodiment.frames
+self_collision  unavailable           embodiment.frames
+balance         unavailable           a legged base — not applicable to this body
+proximity       unavailable           profile.proximity
+```
+
+Above it the five ceilings with their provenance, and `nobody declared one` where there is none.
+Below it the notices, the tier and why it is assumed, and the three inputs with no delivery path.
+
+**Trip counts stay absent**, and they are the reason the old panel's instinct was right: §33.1 keeps
+the daemon off the actuator path, nothing evaluates a cycle here, and a `0` in that column would read
+as *nothing tripped*. It is a sentence under the table instead.
+
+### Three small things, all found by opening the page
+
+The fixture (§32.2's, from the thirty-first session) exists precisely so somebody looks, and looking
+found three:
+
+* **`guard_unavailable` notices, five of them, saying what the table said.** The kernel emits them
+  because a consumer holding only the notice list would otherwise never learn a guard is off. This
+  panel has the table, with the missing input in its own column — so the notice is one fact in two
+  places, and five copies of it pushed the four notices that *do* carry something new off the bottom.
+  Dropped, and only that code.
+* **A pill wrapped to three lines.** A `border-radius: 999px` on a box that has wrapped is not a
+  rounded rectangle; it is a shape with its text falling out of the corners. `.pill` is
+  `white-space: nowrap` now, because a pill is a label and not a sentence, and the label that would
+  not fit is shorter.
+* **Two feeds the fixture never recorded.** `releases` and `cell` are polled by the page and had no
+  answer in the fixture, so anybody rendering it saw two panels unreachable — which looks exactly
+  like the failure the fixture exists to let somebody look at. The route list is a constant now, and
+  `every_console_feed_has_a_fixture_route` reads `new Feed(` out of the page and checks it. Two
+  lists in two languages, kept in step by reading one of them.
+
+### Numbers
+
+Rust: **1,317** tests, one new. `cargo fmt --all --check` and `cargo clippy --workspace
+--all-targets` clean; the mirrors match and were re-pinned; the golden path counts 48 commands.
+
+§73's interface row moves from *"three of §32.1's four panels are named gaps"* to a sharper
+statement: the robot now computes two of the device page's four panels, **and neither crosses §17**.
+The check-in carries no guard set and no limits, so the Hub cannot render what the robot knows. That
+is a producer with no consumer, which is the exact shape Part X was written about — and it is the
+next thing to build.
+
+### Findings, restated
+
+1–28 as before; 29–51 from the sessions above; 52–56 from the forty-first.
+
+57. **A panel that says "this is not measured" can itself be a fabrication.** The old Guards panel was
+    written to avoid showing eight green ticks — the right instinct — and did it by hand-writing
+    eight rows of what was missing. Two of them were false and three had the wrong state. Refusing to
+    invent a *value* while inventing the *explanation* is the same failure wearing the humbler
+    costume, and it is harder to spot because the page reads as scrupulous.
+58. **When a computed answer arrives, the hand-written one has to be deleted rather than checked.**
+    The temptation on wiring `/limits` in was to keep the sentences and fill in the states. Every
+    sentence in that table is now the kernel's, for this body, and none of it can drift again —
+    which is the only version of "keep it up to date" that has ever worked.
+
+---
+
+## 2026-09-03 (forty-third) — the limits cross §17, and the Hub stops guessing
+
+The forty-second session ended naming this one:
+
+> the robot now computes two of the device page's four panels, **and neither crosses §17**. That is
+> a producer with no consumer, which is the exact shape Part X was written about.
+
+**Touches the Hub.** Both repositories, in one session, per `docs/README.md`'s rule — and recorded
+here because this log has to be a complete account of what was done from this side.
+
+### What each half already said about the other
+
+The Hub's device-state route has carried this since it was written:
+
+> §32.1 wants *"active and unavailable guards with the missing input named, resolved limits and
+> their provenance, current transport plan"* on this page. **None of those are in a check-in.** The
+> robot has all three and serves them on its own LAN console, and no route brings them here.
+
+And it did the honest thing: a `gaps` list, three entries, each naming what was missing and why —
+rather than deriving a guard state from the health rollup, which is what a fleet page would be most
+tempted to do. Two of those three entries are deleted now, and **deleted rather than softened**: a
+gap that has closed and is still described points every reader away from the thing that works.
+
+### The block, and the two fields nobody may collapse
+
+§17's check-in carries `limits`:
+
+```
+resolved_at  guest          the tier these limits were resolved at
+enforcement  advisory       what that tier permits
+enforced     false          whether anything on the robot applies them
+… five ceilings, each null or a number, and where they came from
+active       [watchdog, envelope, rate_limit, workspace, self_collision, mode_gate]
+unavailable  [{balance, ["a legged base — not applicable to this body"]}, …]
+notices      [{advisory_only, []}, {no_collision_margin, []}, …]
+```
+
+Four decisions in that shape are worth defending.
+
+**`resolved_at` is not called `tier`.** §15 awards a tier from bench evidence a human witnessed and
+§19 says a robot never awards itself one. A field called `tier` on a document a robot sends would be
+read as a claim within a week; `resolved_at` is `ResolvedLimits`' own field under its own name, and
+it means what it says.
+
+**`enforcement` and `enforced` are different facts.** The first is what the tier permits; the second
+is whether anything does it, which on an edition with no policy runtime is false at every tier. A
+consumer holding only the first renders a green guard list over a robot that enforces nothing, which
+is the single most misleading thing this page could draw.
+
+**Notices cross as codes and subjects, never sentences.** Both sides hold the same catalogue, and
+the Hub renders in thirty-five locales — a robot shipping English prose puts the translation on the
+side that cannot do it. `guard_unavailable` is carried anyway, even though the guard table beside it
+says the same thing: the wire is evidence, and a *renderer* decides what to show. Both renderers
+filter it; neither wire does.
+
+**It is a field on the check-in rather than a route.** §34.4 collapses check-ins because every field
+in one is a statement about now, and these are — the limits in force this pass, not a count, a delta
+or a history. About five hundred bytes, which is what a robot reconnecting after a week offline
+should send exactly one of.
+
+### Relayed, and the restraint is the point
+
+The Hub does not recompute a single row, and that is a rule rather than an omission. It holds a copy
+of the descriptor **and** a mirror of `resolveLimits()`, so a computed table would typecheck. It
+would also be wrong twice over:
+
+* it would report the limits a robot *should* be running rather than the ones it is — a profile that
+  has not been applied yet is precisely the case §17's own rule exists for;
+* it would get `balance` on a fixed base wrong first, reporting a missing IMU where §7.2 requires
+  *"not applicable to this body"* — the distinction that section spends a paragraph on so that
+  *"nobody reads a shape difference as a defect"*.
+
+That sentence now crosses two repositories verbatim, and there is a test on each side asserting it
+does.
+
+### A fourth wire fixture, and the one that was overdue
+
+`reference/wire/checkin.json`. The check-in is the **most-sent document on §17** and it had never
+been frozen: both repositories decoded it, both suites passed, and nothing held one side's real
+bytes against the other side's real route — which is the arrangement the twenty-seventh session
+found the episode path in, where the two ends did not agree about a single field name.
+
+Taken from a robot that is **described and configured**, on purpose. A fixture from a bare
+development root freezes a `limits` block of all nulls, and the shape a fleet page actually has to
+render — six active guards, two unavailable with their reasons, ceilings with provenance — would go
+untested on both sides. Six assertions run against it in the Hub's suite.
+
+### The corpus, and both editions
+
+`checkin/document` gains two cases: a robot under limits, and one that reports none. The second is
+the distinction the field is shaped around — `limits: null` is *"this edition does not compose
+them"* and a block full of nulls with a `no_envelope` notice is *"this robot has no ceilings"*, and a
+consumer switching on a missing key cannot tell them apart.
+
+The Rust edition reproduced both byte for byte on the first run, which is what the reference and the
+corpus are for.
+
+### Numbers
+
+Rust: **1,321** tests, up from 1,317 — three on the contract and one wire fixture. The corpus is
+1,017 cases across 73 files. `cargo fmt --all --check` and `cargo clippy --workspace --all-targets`
+clean; both document mirrors and all eighteen contract mirrors match and were re-pinned, along with
+a fourth wire fixture.
+
+Hub: **1,485** tests, up from 1,479 — six on the new fixture. `tsc --noEmit` clean. Sixteen new
+`messages/en.json` keys, synced to all thirty-five locales; one existing string was rewritten, which
+invalidated its thirty-four translations, which is the sync doing its job.
+
+§73 moves four rows: the Safety Kernel becomes **built on both sides**, the Hub contract counts four
+frozen fixtures, configuration notes that the ceilings a profile resolves to now reach the Hub
+rather than only the digest that was applied, and the interface row goes from two panels that do not
+cross to one panel that remains — the transport plan, which belongs to a package on a robot running
+none.
+
+### Findings, restated
+
+1–28 as before; 29–51 from the sessions above; 52–56 from the forty-first; 57–58 from the
+forty-second.
+
+59. **A well-written gap list is the thing most likely to survive the gap.** The Hub's `gaps` array
+    was exemplary — three entries, each naming what was missing and why, refusing to approximate.
+    That quality is exactly what made it read as current, and it would have gone on being read as
+    current for as long as nobody re-derived it. The habit that catches it is not a test: it is
+    treating "the other side says it cannot" as a claim to check whenever this side builds something.
+60. **Two implementations of one rule is a defect even when one of them is right.** The Hub could
+    compute the guard table — it has the descriptor and a mirror of the kernel — and the argument
+    against is not that it would be wrong today. It is that the robot's answer is about the profile
+    the robot *applied*, and the Hub's would be about the profile it *sent*, and the two differ
+    exactly in the window an operator is looking at the page.
+61. **A field's name is a load-bearing part of the contract.** `tier` would have been read as a tier
+    claim by the first person to touch the fleet page, and no doc comment reaches that person.
+    `resolved_at` cannot be misread the same way. The same is true of the `enforcement` / `enforced`
+    pair: two words apart, and the distinction between what is permitted and what is done.
+
+---
+
+## 2026-09-03 (forty-fourth) — the Plan panel, and a plan for a package that is not running yet
+
+§32.2's console has a Plan panel, and half of it said this:
+
+> **Transport plan** — *unavailable on this robot.* Resolving one needs a body and a policy trained
+> on some other body. This robot now has the first… `skynet transport` computes exactly this plan on
+> a workstation, and the numbers it produces are the numbers this panel will show.
+
+Every clause was true when it was written. §37.1's `transport` stage has been running at install
+since the thirty-ninth session, `GET /limits?package=` has been folding its clamp into
+`resolve_limits` since the forty-first, and the panel had gone on saying the plan was computed
+somewhere else.
+
+### The route answers with the plan, not only its clamp
+
+They are different questions and §32.2 asks both. The clamp is *the number a guard would enforce*;
+the plan is *why that number is what it is*. A ceiling of 80 Nm on `shoulder` says nothing about the
+sentence a warning carries:
+
+> Commands to "shoulder" are scaled to 44% because the policy was trained on a stronger joint.
+
+That is §6.1's *"scaling never guesses"* arriving in front of an operator, and no ceiling carries it.
+`GET /limits?package=` now answers with both, `skynet limits --package` prints it, and the console's
+subpanel asks which package and draws it.
+
+### Staged, and the answer says so
+
+The route looks up the active digest first and then the **staged** one. §37.1 makes *staged but not
+activated* an observable state deliberately — fetching and verifying happen under a running policy
+and only the symlink swap waits for a gate — and it is the state this answer is most wanted in. §6.2
+is explicit that a pure planner exists to answer *"does this run on my robot, and how well"* **before**
+anything is committed to, and a route that only spoke about running packages would answer it only
+after.
+
+`package_state` says which, and both the panel and the terminal print it, because *"what would this
+be held to"* and *"what is this held to"* are different sentences and only one is about the robot now.
+
+That decision came out of a test failure rather than out of design. The first version activated the
+package and died on `the atomic symlink swap §37.1 requires exists on POSIX and this is not POSIX` —
+a test that would have been green in CI and unrunnable on the machine it was written on, which is
+finding 52 from three sessions ago arriving again in a different costume. The fix was not to gate the
+test on `cfg(unix)`. It was to notice that the route was refusing an answer it had.
+
+### A picker, and why not a list
+
+A plan belongs to a package, so the subpanel needs one named. Rendering all of them would be one
+request per installed package every two seconds, on a §33.7 listener that serves one request per
+connection. The operator picks; the panel fetches once.
+
+### Three things found by opening the page again
+
+* **`print_plan` already existed.** `skynet plan` is the last *reconcile* pass and this is the
+  resolved *transport* plan; the console's own HTML has carried a comment since it was written
+  saying two different plans share a word. Two functions sharing one name is how that comment stops
+  being enough, so the new one is `print_transport_plan`.
+* **The fixture server dropped the query.** `/limits` and `/limits?package=openrobot/grasp` are two
+  different answers — the body's own ceilings, and those with a package's clamp folded in — and the
+  fixture served the first where the console asked for the second, which is precisely the §32.2
+  violation the fixture exists to make visible rather than to commit. The query is part of the
+  request now, flattened into the filename by a rule written in both languages.
+* **The fixture's package declared no source embodiment**, so the panel would have rendered the
+  honest-but-uninteresting *"this package commands no joints"* and the shape §32.2 actually asks for
+  would have gone unlooked-at. Same reasoning as the check-in fixture in the forty-third session: a
+  fixture taken on an empty robot freezes the empty case.
+
+Opened, the panel draws: `remap` by role onto `shoulder`, a ceiling of 80 with its provenance, and
+four warnings — unverified embodiment, an unsupported control mode, an undeclared latency, and the
+scale.
+
+### Numbers
+
+Rust: **1,322** tests, one new — the route test, which plans a staged policy against a described arm
+and asserts both halves: that the `scaled_down` warning survives, and that the clamp reached
+`resolve_limits` so the `envelope` guard has a ceiling to compare against. That last assertion is
+§6.3's hand-off, checked rather than described.
+
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets` clean; the golden path counts
+48 commands; the mirrors match.
+
+§73's interface row loses its last device-page qualifier on the robot side: all four of §32.2's
+panels now draw something measured. What remains is that the transport plan does not cross §17 —
+which is where it should stay until a policy runtime exists to be running one.
+
+### Findings, restated
+
+1–28 as before; 29–51 from the sessions above; 52–56 from the forty-first; 57–58 from the
+forty-second; 59–61 from the forty-third.
+
+62. **A test that will not run on the machine it is written on is worth re-reading as a design
+    question.** The activation this test needed is POSIX-only, and the reflex is `cfg(unix)`. The
+    second look found that the route was refusing to answer for a staged package — which §37.1 makes
+    an observable state on purpose and §6.2 says is the state the answer is most wanted in. The
+    platform limitation was pointing at a real gap, and gating the test would have hidden both.
+63. **Two functions with one name is a comment that has stopped working.** The console had a note
+    saying two different plans share a word. The note was right and it does not travel: it lives in
+    HTML and the collision happened in Rust, where the compiler is what said so.

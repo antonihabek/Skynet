@@ -203,7 +203,7 @@ const HUB = 'lib/skynet/os'
  *
  * See `reference/wire/README.md`, including what is deliberately *not* frozen here.
  */
-const WIRE = ['episode', 'incident', 'telemetry']
+const WIRE = ['checkin', 'episode', 'incident', 'telemetry']
 
 const WIRE_REFERENCE = 'reference/wire'
 const WIRE_HUB = 'lib/skynet/os/wire'

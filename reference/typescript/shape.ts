@@ -44,7 +44,7 @@ import {
   blocksField, explain as provenanceExplain, rankable, rankedSeparately, replayable,
   scoresAgree, explainDisagreement, type Classified,
 } from './provenance.ts'
-import type { CheckIn, ClaimVerdict, HealthReport } from './checkin.ts'
+import type { CheckIn, ClaimVerdict, GuardReport, HealthReport } from './checkin.ts'
 import type { OfferVerdict } from './intent.ts'
 import { conformanceOf, type Coverage, type WindowReport } from './telemetry.ts'
 import { attest as attestOfMeasures } from './identity.ts'
@@ -930,12 +930,40 @@ export function shapeCheckIn(built: CheckIn): unknown {
     device_id: built.device_id,
     generation: built.claim.generation,
     health: shapeHealthReport(built.health),
+    // §7.6's ceilings and guard partition, or null. Present-and-null so a consumer can tell "this
+    // edition does not report them" from "this robot resolved none".
+    limits: shapeGuardReport(built.limits),
     pending: built.pending.map(entry => ({
       deferred: entry.deferred,
       reason: entry.reason,
       stage: entry.stage,
     })),
     state: built.state,
+  }
+}
+
+/** §7.6's guard report, as a check-in carries it. */
+export function shapeGuardReport(report: GuardReport | null): unknown {
+  if (report === null) return null
+  return {
+    active: [...report.active],
+    base_velocity_max_m_s: report.base_velocity_max_m_s,
+    enforced: report.enforced,
+    enforcement: report.enforcement,
+    joint_torque_max_nm: report.joint_torque_max_nm,
+    joint_velocity_max_rad_s: report.joint_velocity_max_rad_s,
+    max_delta_per_cycle: report.max_delta_per_cycle,
+    min_control_hz: report.min_control_hz,
+    notices: report.notices.map(notice => ({
+      code: notice.code,
+      subjects: [...notice.subjects],
+    })),
+    resolved_at: report.resolved_at,
+    source: report.source,
+    unavailable: report.unavailable.map(entry => ({
+      guard: entry.guard,
+      missing: [...entry.missing],
+    })),
   }
 }
 

@@ -285,6 +285,84 @@ export function summarize(health: HealthInput): HealthReport {
 
 // ── The document ─────────────────────────────────────────────────────────────
 
+/**
+ * What the Safety Kernel would enforce on this robot (§7.3, §7.6, §32.1).
+ *
+ * §32.1 asks a device page for *"active and unavailable guards with the missing input named,
+ * resolved limits and their provenance"*, and until this field existed nothing carried them: the
+ * robot resolved them, served them on its own LAN console, and the Hub's own route said so in a
+ * `gaps` list. A producer with no consumer on one side of §17 and a consumer with no producer on
+ * the other, which is the shape Part X was written about.
+ *
+ * # It is a statement about now, which is what makes it belong here
+ *
+ * §34.4 collapses check-ins because every field in one describes the present. These do: they are
+ * the ceilings in force and the guard partition as of this pass, not a count, a delta or a history.
+ * A robot whose profile changed twice while offline should reconnect reporting the limits it is
+ * under, and exactly one of them.
+ *
+ * # `resolved_at` is not a tier claim, and the name is the reason
+ *
+ * It is *"the tier these limits were resolved at"* — `ResolvedLimits`' own field, under its own
+ * name. §15 awards a tier from bench evidence a human witnessed and a robot never awards itself one
+ * (§19), so a field called `tier` here would be read as one within a week. §7.6: nothing on a robot
+ * decides its tier, the daemon resolves at the floor, and the numbers are identical at all three
+ * tiers either way.
+ *
+ * # `enforcement` and `enforced` are different facts
+ *
+ * `enforcement` is what the tier *permits* — advisory, enforcing, enforcing-redundant — and is
+ * derived from `resolved_at`. `enforced` is whether anything on this robot actually applies these
+ * limits to a command, which on an edition with no policy runtime is `false` at every tier. A
+ * consumer that had only the first would render a green guard list over a robot enforcing nothing.
+ */
+export interface GuardReport {
+  /** The tier these limits were resolved at. Never a tier claim — see above. */
+  resolved_at: string
+  /** What that tier permits. */
+  enforcement: string
+  /** Whether anything on this robot applies them to a command. */
+  enforced: boolean
+  joint_velocity_max_rad_s: number | null
+  joint_torque_max_nm: number | null
+  base_velocity_max_m_s: number | null
+  min_control_hz: number | null
+  max_delta_per_cycle: number | null
+  /** Where the numbers came from. `null` is a limit set nobody cited a datasheet for. */
+  source: string | null
+  /** Guards that will run, in evaluation order. */
+  active: string[]
+  /** Guards specified and inoperable here, each with what it wanted. */
+  unavailable: UnavailableGuard[]
+  /**
+   * Everything an operator must read, as codes and subjects.
+   *
+   * **Codes, never sentences.** The Hub renders these in thirty-five locales (§32.3) and a robot
+   * that shipped English prose would put the translation on the side that cannot do it. Both
+   * editions hold the same catalogue, so the code is enough.
+   *
+   * `guard_unavailable` is carried here *as well as* in `unavailable`, and the duplication is
+   * deliberate: this field is what the kernel produced, and a wire that dropped part of it would be
+   * a view rather than evidence. A renderer with the table beside it should filter the code out;
+   * that is the renderer's decision to make.
+   */
+  notices: Notice[]
+}
+
+/** A guard that is specified and cannot run here. */
+export interface UnavailableGuard {
+  guard: string
+  /** What it needs and does not have — a missing input, or "not applicable to this body". */
+  missing: string[]
+}
+
+/** One thing an operator must read, as the kernel emitted it. */
+export interface Notice {
+  /** The code. `NoticeCode`'s wire spelling. */
+  code: string
+  subjects: string[]
+}
+
 export interface CheckInInput {
   device_id?: string
   agent?: string
@@ -316,6 +394,14 @@ export interface CheckInInput {
    * and see nothing but robots that had quietly stopped converging.
    */
   desired_digest?: string
+  /**
+   * §7.6's resolved limits and guard partition, when this robot composed any.
+   *
+   * `undefined` is an edition that does not resolve them, and it is not the same as a robot with no
+   * ceilings — that one reports a `GuardReport` whose numbers are all null, with the `no_envelope`
+   * notice saying why.
+   */
+  limits?: GuardReport
 }
 
 export interface CheckIn {
@@ -329,6 +415,8 @@ export interface CheckIn {
   pending: Required<Pending>[]
   /** The document behind the generation. See `CheckInInput.desired_digest`. */
   desired_digest: string
+  /** §7.6's limits, carried through unchanged. See `GuardReport`. */
+  limits: GuardReport | null
 }
 
 /**
@@ -360,6 +448,10 @@ export function checkIn(input: CheckInInput): CheckIn {
     state: (input.state ?? '').trim(),
     pending,
     desired_digest: (input.desired_digest ?? '').trim(),
+    // Carried through rather than derived. What the guards are and what they lack is the kernel's
+    // answer for this body, and a builder that recomputed any of it would be a second
+    // implementation of §7.3 living in the reporting path.
+    limits: input.limits ?? null,
   }
 }
 

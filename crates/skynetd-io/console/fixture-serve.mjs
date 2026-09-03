@@ -35,9 +35,28 @@ const TYPES = {
   '.png': 'image/png',
 }
 
+/**
+ * The file one request's answer was recorded in.
+ *
+ * **The query is part of the request.** `/limits` and `/limits?package=openrobot/grasp` are two
+ * different answers — one is the body's own ceilings and the other folds in a package's transport
+ * clamp — and a server that dropped the query would serve the first as the second, which is the
+ * §32.2 violation this fixture exists to make visible rather than to commit.
+ *
+ * The query is flattened into the name because a `?` is not a filename on every platform this is
+ * looked at from. `skynetd-io`'s fixture writer computes the same name; the two are one rule in two
+ * languages and the rule is written here.
+ */
+function fixtureName(url) {
+  const [path, query] = (url || '/').split('?')
+  if (path === '/') return 'index.html'
+  const base = decodeURIComponent(path.slice(1))
+  return query ? `${base}__${query.replace(/[^A-Za-z0-9]+/g, '-')}` : base
+}
+
 createServer((request, response) => {
   const path = (request.url || '/').split('?')[0]
-  const name = path === '/' ? 'index.html' : decodeURIComponent(path.slice(1))
+  const name = fixtureName(request.url)
   const file = join(HERE, normalize(name))
 
   // A fixture is a local toy and still not a directory traversal: `normalize` collapses `..`, and

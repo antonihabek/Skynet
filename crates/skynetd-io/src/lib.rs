@@ -69,6 +69,7 @@ pub mod identity;
 pub mod intent;
 pub mod launch;
 pub mod layout;
+pub mod limits;
 pub mod notes;
 pub mod observe;
 pub mod ota;

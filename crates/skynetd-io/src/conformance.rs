@@ -54,7 +54,12 @@ use skynet_contracts::certification::{
     award_certification, CertificationInput, SctsOutcome, SctsResult,
 };
 use skynet_contracts::ota::{admit_bundle, BundleManifest, UpdateSubject};
+use skynet_contracts::safety::{evaluate_cycle, CommandCycle, Guard};
 use skynet_json::Json;
+
+use skynet_blackbox::record::{CycleView, Entry, Shape, NO_CAPABILITY};
+use skynet_blackbox::replay::replay_ring;
+use skynet_blackbox::ring::{Geometry, Meta, Ring};
 
 use crate::capacity::Capacity;
 use crate::embodiment::Body;
@@ -144,7 +149,7 @@ fn skipped(id: &str, detail: impl Into<String>) -> SctsResult {
 /// `at` is an ISO-8601 timestamp from §35.1's correlation clock — the one thing wall time is for
 /// here, because a result is a record a Hub places against other robots' records. Nothing in this
 /// module decides anything with it.
-pub fn run(capacity: &Capacity, body: &Body, at: &str) -> Run {
+pub fn run(capacity: &Capacity, body: &Body, limits: &crate::limits::Owned, at: &str) -> Run {
     let mut results = Vec::with_capacity(RUNTIME_TESTS.len());
 
     results.push(skipped(
@@ -173,14 +178,7 @@ pub fn run(capacity: &Capacity, body: &Body, at: &str) -> Run {
 
     results.push(ota_safety_gate(at));
 
-    results.push(skipped(
-        "telemetry.replay.deterministic",
-        "the black box, the sealing and `replay()` are all written, and what is missing between \
-         them is the resolved limits: replay is a function of the recording *and* the envelope, \
-         the profile and the transport clamp it ran under, and nothing on this daemon calls \
-         `resolve_limits` to produce them. Handing replay the wrong limits would be a replay that \
-         diverged for a reason that is not the robot's.",
-    ));
+    results.push(replay_deterministic(body, limits, at));
 
     results.push(skipped(
         "security.identity.attested",
@@ -202,7 +200,6 @@ pub fn run(capacity: &Capacity, body: &Body, at: &str) -> Run {
         .iter()
         .filter(|result| result.outcome != SctsOutcome::Skipped)
         .count();
-    let _ = body;
     Run { results, executed }
 }
 
@@ -349,6 +346,345 @@ fn ota_safety_gate(at: &str) -> SctsResult {
     )
 }
 
+/// `telemetry.replay.deterministic` — *"given the same policy digest, observation stream and
+/// embodiment digest, replay reproduces the same actions."*
+///
+/// # What this can honestly check, and what it cannot
+///
+/// Not that a neural network reproduces its output on a different accelerator — `skynet-blackbox`
+/// says in its own header that it cannot make that claim, and neither can this. What replay
+/// verifies is the deterministic half of the cycle: **given the recorded desired values, the
+/// recorded timing and the same resolved limits, does this edition's Safety Kernel reach the
+/// recorded verdict?**
+///
+/// # The window is synthesised, and the limits are not
+///
+/// This robot's ring holds audit events and notes and **no control cycles**, because nothing on
+/// this edition drives a control loop. So the runner records a window itself, exactly as
+/// `signature_required` builds two manifests and `ota_safety_gate` builds a bundle: synthetic
+/// documents, real decision functions, this robot's real state.
+///
+/// What is real here is everything that decides the answer — this body's channel names out of its
+/// descriptor, `crate::limits`' resolved set out of its envelope, its signed profile and its cell,
+/// the same `evaluate_cycle` a control loop would call, the same ring the recorder writes, and the
+/// same `replay()` an incident review runs. What is synthetic is only the four commands, and they
+/// are chosen to exercise the fields a round trip can lose: a trip, a clamp, an advisory
+/// forwarding, and a jump large enough for the rate limit to see.
+///
+/// So it is a real check with a stated reach: it catches the regression its own module names —
+/// *"an OS upgrade that quietly altered a clamp"* — and a record format that stops carrying
+/// something a verdict depends on. It does not and cannot say that a recording made a week ago by
+/// a policy replays, because no policy has ever run here.
+///
+/// # A body with no joints is skipped rather than invented
+///
+/// The same rule `signature_required` applies to an unknown capacity. Replay indexes commands by
+/// the header's channel names, and a window recorded over invented ones would be a conformance
+/// result about a machine that does not exist.
+fn replay_deterministic(body: &Body, limits: &crate::limits::Owned, at: &str) -> SctsResult {
+    let id = "telemetry.replay.deterministic";
+    let Some(known) = body.known() else {
+        return skipped(
+            id,
+            "this robot has no usable embodiment descriptor, so it has no channel names to record \
+             a command on. Replay indexes a recorded command by the header's channels, and a \
+             window recorded over invented ones would be a conformance result about a machine that \
+             does not exist (`GET /embodiment`).",
+        );
+    };
+
+    // Sorted, because `CommandCycle::desired` is documented as sorted by name and a descriptor
+    // lists joints in whatever order its author wrote them.
+    let mut channels: Vec<String> = known
+        .descriptor
+        .joints
+        .iter()
+        .map(|joint| joint.name.clone())
+        .collect();
+    channels.sort();
+    channels.dedup();
+    if channels.is_empty() {
+        return skipped(
+            id,
+            "this robot's descriptor declares no joints, so there is no action space to record a \
+             command over. A body with nothing to command is not a body a replay can say anything \
+             about.",
+        );
+    }
+    if channels.len() > skynet_contracts::safety::MAX_CHANNELS {
+        return skipped(
+            id,
+            "this robot declares more joints than the kernel evaluates channels for \
+             (`MAX_CHANNELS`), so a window over all of them could not be evaluated. Recording a \
+             subset would be a replay of part of a robot reported as a replay of the robot.",
+        );
+    }
+
+    limits.with_resolved(|resolved, envelope| {
+        let count = channels.len();
+        let shape = Shape {
+            joints: count as u16,
+            channels: count as u16,
+        };
+        let geometry = Geometry {
+            shape,
+            record_size: shape.record_size(),
+            capacity: WINDOW.len(),
+            header_len: 4096,
+            digests: 1,
+            capabilities: 1,
+        };
+        let (mut ring, mut store) = Ring::create(
+            geometry,
+            Meta {
+                // The real identity and the real body digest. A recording is *of* a robot, and the
+                // two fields that say which are the two this daemon can actually fill (§26).
+                robot_id: known.descriptor.robot_slug.clone(),
+                embodiment: body.digest_or_zero(),
+                os_image: [0u8; 32],
+                tier: resolved.tier as u8,
+                enforcement: resolved.enforcement as u8,
+                simulator: known.descriptor.simulator,
+                wall_epoch_ns: 0,
+                mono_ns: 0,
+                channels: channels.clone(),
+            },
+        );
+
+        let names: Vec<&str> = channels.iter().map(String::as_str).collect();
+        let mut previous: Option<Vec<f64>> = None;
+        let mut last_sequence: Option<u64> = None;
+        let mut exercised: Vec<&'static str> = Vec::new();
+
+        for (index, step) in WINDOW.iter().enumerate() {
+            let tick = index as u64 + 1;
+            // A second a cycle, so a command can be stamped half a second ago without the
+            // arithmetic going negative on the first one.
+            let now_ms = tick as f64 * 1000.0;
+            let command_ms = now_ms - step.age_ms;
+            // Quantised to `f32` before the kernel ever sees it, and this line is load-bearing.
+            //
+            // §25's command ring carries `f32` values and §26 records `desired` as `f32`, so on a
+            // robot every desired value the kernel is handed is already exactly representable in
+            // `f32` — which is what makes an unclamped command survive the recording bit for bit.
+            // A window built from `f64` values that are not (0.2 is not) records a command computed
+            // from one number and replays it against another, and `replay()` compares commands by
+            // bit equality. The first run of this check diverged on exactly that, and the answer
+            // was not to loosen the comparison: a desired value §25's wire cannot carry is a value
+            // no policy on this robot could ever have produced, so a runner using one would be
+            // reporting a failure about arithmetic rather than about the machine.
+            let asked = f64::from(step.value as f32);
+            let desired: Vec<(&str, f64)> = names.iter().map(|name| (*name, asked)).collect();
+            let carried: Option<Vec<(&str, f64)>> = previous.as_ref().map(|held| {
+                names
+                    .iter()
+                    .zip(held.iter())
+                    .map(|(name, value)| (*name, *value))
+                    .collect()
+            });
+
+            let verdict = evaluate_cycle(
+                &CommandCycle {
+                    now_ms,
+                    command_ms,
+                    sequence: tick,
+                    desired: &desired,
+                    previous: carried.as_deref(),
+                    capability: None,
+                    nearest_person_m: None,
+                },
+                resolved,
+                envelope,
+                last_sequence,
+            );
+
+            for guard in verdict.tripped.iter() {
+                if !exercised.contains(&guard.as_str()) {
+                    exercised.push(guard.as_str());
+                }
+            }
+
+            let command: Vec<f64> = names
+                .iter()
+                .map(|name| {
+                    verdict
+                        .command
+                        .iter()
+                        .find(|(channel, _)| channel == name)
+                        .map(|(_, value)| *value)
+                        .unwrap_or(0.0)
+                })
+                .collect();
+            let clamped: Vec<bool> = names
+                .iter()
+                .map(|name| verdict.clamped.iter().any(|entry| entry.channel == *name))
+                .collect();
+            let tripped: Vec<Guard> = verdict.tripped.iter().copied().collect();
+            let desired_f32: Vec<f32> = vec![asked as f32; count];
+            let zeros_f32: Vec<f32> = vec![0.0; count];
+            let mask: Vec<u8> = vec![1; count];
+
+            let view = CycleView {
+                tick,
+                observation: [0u8; 32],
+                policy: 0,
+                state_flags: 0,
+                fault_code: 0,
+                rhal_result: 0,
+                state_seq: tick as u32,
+                state_stamp_ns: (now_ms * 1.0e6) as u64,
+                command_stamp_ns: (command_ms * 1.0e6) as u64,
+                command_seq: tick as u32,
+                mode: 0,
+                advisory: verdict.advisory,
+                response: verdict.response,
+                tripped: &tripped,
+                // Nothing supplied one, which is not the same as "no capability" — and the mode
+                // gate treats the two differently, so the round trip has to carry the difference.
+                capability: NO_CAPABILITY,
+                nearest_person_m: f32::NAN,
+                base_pose: [f32::NAN; 7],
+                base_twist: [0.0; 6],
+                desired: &desired_f32,
+                command: &command,
+                mask: &mask,
+                clamped: &clamped,
+                position: &zeros_f32,
+                velocity: &zeros_f32,
+                effort: &zeros_f32,
+            };
+            if let Err(error) =
+                ring.append(&mut store, (now_ms * 1.0e6) as u64, Entry::Cycle(&view))
+            {
+                return ran(
+                    id,
+                    SctsOutcome::Fail,
+                    at,
+                    format!(
+                        "this robot's black box refused to record a cycle it had just evaluated: \
+                         {error:?}. A recording that cannot be written is a recording no incident \
+                         review can read (§13)."
+                    ),
+                );
+            }
+
+            previous = Some(command);
+            last_sequence = Some(tick);
+        }
+
+        let result = replay_ring(&ring, &store, resolved, envelope);
+
+        // Said plainly rather than hidden, and said *precisely*. A pass over a window in which no
+        // guard had anything to say is a weaker claim than one in which several did, and an
+        // operator reading the one word both produce would take the first for more evidence than
+        // it is. The reason is the interesting half: the third cycle asks for a thousand times any
+        // plausible ceiling and is forwarded unchanged, because a joint's ceiling comes from
+        // §6.3's transport plan and no plan is in force on a robot running no policy (§73).
+        let exercised_note = if !exercised.is_empty() {
+            format!("guards exercised: {}", exercised.join(", "))
+        } else if resolved.per_channel.is_empty() {
+            "no guard tripped anywhere in the window, and the reason is §73's transport row: a \
+             joint's ceiling comes from the transport plan (§6.3) and no plan is in force on a \
+             robot running no policy, so the `envelope` guard is active with nothing to clamp \
+             against. The round trip was exercised and the guard verdicts were not"
+                .to_string()
+        } else {
+            "no guard tripped anywhere in the window: this robot's resolved limits are wide enough \
+             that nothing in it was refused. The round trip was exercised and the guard verdicts \
+             were not"
+                .to_string()
+        };
+
+        if result.deterministic() {
+            return ran(
+                id,
+                SctsOutcome::Pass,
+                at,
+                format!(
+                    "{} cycles recorded through this robot's own ring against its resolved limits \
+                     and replayed by the same `replay()` an incident review runs; all {} \
+                     reproduced, {} of them with a predecessor in the window so the rate limit was \
+                     evaluated as it was. {exercised_note}. The window is synthetic and the limits \
+                     are this machine's: nothing on this edition drives a control loop, so there \
+                     is no recorded policy to replay.",
+                    result.cycles, result.agreed, result.warmed,
+                ),
+            );
+        }
+
+        let mut detail = format!(
+            "{} of {} cycles did not reproduce against the limits they were recorded under. This \
+             edition's Safety Kernel and its own recording disagree, which is either a kernel that \
+             changed behaviour or a record format that has stopped carrying something a verdict \
+             depends on (§31.4).",
+            result.diverged.len(),
+            result.cycles,
+        );
+        for outcome in result.diverged.iter().take(3) {
+            for divergence in &outcome.divergences {
+                detail.push_str(&format!(
+                    " tick {}: {} recorded {}, recomputed {}.",
+                    outcome.tick, divergence.field, divergence.recorded, divergence.recomputed
+                ));
+            }
+        }
+        for skip in result.skipped.iter().take(3) {
+            detail.push_str(&format!(
+                " cycle {} could not be evaluated: {}.",
+                skip.sequence, skip.reason
+            ));
+        }
+        ran(id, SctsOutcome::Fail, at, detail)
+    })
+}
+
+/// One cycle of the replay window.
+struct Asked {
+    /// The desired value, on every channel, in the body's own units.
+    value: f64,
+    /// How long before this cycle the command was stamped, in milliseconds.
+    age_ms: f64,
+}
+
+/// The window the runner records, and why it is this shape.
+///
+/// A window of constant fresh values would round-trip perfectly while exercising one code path, so
+/// each row is here for a field the round trip could lose:
+///
+/// | Cycle | For |
+/// |---|---|
+/// | an ordinary command | the baseline, with no predecessor — the unwarmed cycle |
+/// | a second ordinary command | the first cycle whose rate limit is evaluated as it was |
+/// | far above any plausible ceiling | whatever clamp this body declares: a reduction at the host tier, an advisory forwarding at guest |
+/// | a command stamped long ago | the watchdog, which short-circuits and emits **no** command — a different record from a command of zero |
+/// | back to nothing | recovery after a trip, and the largest single-cycle change a jerk ceiling could object to |
+///
+/// Every value is exactly representable in `f32`; see the quantisation in [`replay_deterministic`]
+/// for why that is not a coincidence.
+const WINDOW: [Asked; 5] = [
+    Asked {
+        value: 0.25,
+        age_ms: 0.0,
+    },
+    Asked {
+        value: 0.5,
+        age_ms: 0.0,
+    },
+    Asked {
+        value: 1024.0,
+        age_ms: 0.0,
+    },
+    // Older than any watchdog window a body would declare — §46 measures them in milliseconds.
+    Asked {
+        value: 0.5,
+        age_ms: 500.0,
+    },
+    Asked {
+        value: 0.0,
+        age_ms: 0.0,
+    },
+];
+
 /// The two components §12 gates on.
 fn alloc_changes() -> Vec<String> {
     vec!["safety_kernel".to_string(), "envelope".to_string()]
@@ -469,6 +805,19 @@ mod tests {
         }))
     }
 
+    /// The limits of a robot nobody has provisioned: no descriptor, no profile, no cell.
+    ///
+    /// Rooted at a path that does not exist, on purpose. Every read `crate::limits` performs is a
+    /// file read that returns nothing, which is exactly the state these tests are about — and a
+    /// fixture that wrote files would be testing the writer.
+    fn bare_limits() -> crate::limits::Owned {
+        crate::limits::read(
+            &crate::layout::Layout::new("does-not-exist"),
+            &Body::Absent,
+            crate::limits::ROBOT_TIER,
+        )
+    }
+
     fn outcome(run: &Run, id: &str) -> SctsOutcome {
         run.results
             .iter()
@@ -479,7 +828,12 @@ mod tests {
 
     #[test]
     fn every_runtime_test_gets_exactly_one_entry_in_order() {
-        let run = run(&capacity(), &Body::Absent, "2026-09-02T00:00:00Z");
+        let run = run(
+            &capacity(),
+            &Body::Absent,
+            &bare_limits(),
+            "2026-09-02T00:00:00Z",
+        );
         let ids: Vec<&str> = run
             .results
             .iter()
@@ -515,7 +869,12 @@ mod tests {
     /// test, and the runner says so rather than reporting the gap as unmeasured.
     #[test]
     fn an_unsigned_package_installs_so_this_edition_fails_its_own_guest_bar() {
-        let run = run(&capacity(), &Body::Absent, "2026-09-02T00:00:00Z");
+        let run = run(
+            &capacity(),
+            &Body::Absent,
+            &bare_limits(),
+            "2026-09-02T00:00:00Z",
+        );
         assert_eq!(
             outcome(&run, "package.signature.required"),
             SctsOutcome::Fail
@@ -531,7 +890,12 @@ mod tests {
     /// The one it passes, and it is a real refusal by the function the updater runs.
     #[test]
     fn the_safety_gate_refuses_a_kernel_change_with_no_bench_pass() {
-        let run = run(&capacity(), &Body::Absent, "2026-09-02T00:00:00Z");
+        let run = run(
+            &capacity(),
+            &Body::Absent,
+            &bare_limits(),
+            "2026-09-02T00:00:00Z",
+        );
         assert_eq!(outcome(&run, "ota.safety_gate"), SctsOutcome::Pass);
         assert!(run.results[4]
             .detail
@@ -541,7 +905,12 @@ mod tests {
 
     #[test]
     fn two_of_the_eight_are_executed_and_six_are_named() {
-        let run = run(&capacity(), &Body::Absent, "2026-09-02T00:00:00Z");
+        let run = run(
+            &capacity(),
+            &Body::Absent,
+            &bare_limits(),
+            "2026-09-02T00:00:00Z",
+        );
         assert_eq!(run.executed, 2);
         for result in &run.results {
             assert!(
@@ -558,7 +927,12 @@ mod tests {
     /// the decay it should be causing.
     #[test]
     fn a_skipped_test_carries_no_date() {
-        let run = run(&capacity(), &Body::Absent, "2026-09-02T00:00:00Z");
+        let run = run(
+            &capacity(),
+            &Body::Absent,
+            &bare_limits(),
+            "2026-09-02T00:00:00Z",
+        );
         for result in &run.results {
             if result.outcome == SctsOutcome::Skipped {
                 assert!(result.ran_at.is_empty(), "{}", result.test_id);
@@ -577,6 +951,7 @@ mod tests {
                 detail: "/proc/meminfo could not be read".to_string(),
             },
             &Body::Absent,
+            &bare_limits(),
             "2026-09-02T00:00:00Z",
         );
         assert_eq!(
@@ -590,7 +965,12 @@ mod tests {
     /// skipped and one failed it cannot be anything but the floor.
     #[test]
     fn the_attainable_tier_is_capped_by_what_was_not_run() {
-        let run = run(&capacity(), &Body::Absent, "2026-09-02T00:00:00Z");
+        let run = run(
+            &capacity(),
+            &Body::Absent,
+            &bare_limits(),
+            "2026-09-02T00:00:00Z",
+        );
         let verdict = run.attainable(false);
         assert_ne!(verdict.awarded, "certified");
         assert!(
@@ -608,7 +988,12 @@ mod tests {
 
     #[test]
     fn the_wire_says_it_is_not_a_certificate() {
-        let run = run(&capacity(), &Body::Absent, "2026-09-02T00:00:00Z");
+        let run = run(
+            &capacity(),
+            &Body::Absent,
+            &bare_limits(),
+            "2026-09-02T00:00:00Z",
+        );
         let document = to_json(&run, false);
         assert_eq!(document.arr_or_empty("results").len(), 8);
         assert_eq!(document.get("executed"), Some(&Json::Num(2.0)));

@@ -150,6 +150,7 @@ pub fn handle<L: Launcher, S: Slots>(
         ("GET", ["audit"]) => ok(audit(context)),
         ("GET", ["watchdog"]) => ok(watchdog(context)),
         ("GET", ["power"]) => ok(power(context)),
+        ("GET", ["limits"]) => ok(limits(context, request)),
         ("GET", ["conformance"]) => ok(conformance(context)),
         ("GET", ["post"]) => {
             // Wall time, because the calibration row is an age comparison (§45.4). Not a control
@@ -236,6 +237,7 @@ fn known_path(segments: &[&str]) -> bool {
             | ["outbound"]
             | ["watchdog"]
             | ["power"]
+            | ["limits"]
             | ["conformance"]
             | ["post"]
             | ["cell"]
@@ -602,6 +604,138 @@ fn power<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     out
 }
 
+/// §7.3's resolved limits, composed from what this robot actually holds.
+///
+/// The first caller of `resolve_limits` that is a robot. Everything about the answer is a file on
+/// this machine — the descriptor's envelope and frame graph, the signed profile's ceilings, §55.2's
+/// cell — so the route is a read in the strictest sense: it computes, it writes nothing, and two
+/// calls a millisecond apart differ only if a file did.
+///
+/// `?package=<id>` folds in §37.1's transport clamp for one **installed** package, which is §6.3's
+/// hand-off — *"hands the ceilings to the Safety Kernel"* — performed for the first time. Without
+/// it the answer is the body's own ceilings, which is the right default: a clamp belongs to a
+/// policy, and no policy is running.
+fn limits<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, request: &Request) -> Json {
+    let layout = context.daemon.store.layout().clone();
+    let body = crate::embodiment::load(&layout);
+    let mut owned = crate::limits::read(&layout, &body, crate::limits::ROBOT_TIER);
+
+    let mut refused: Option<String> = None;
+    let mut plan: Option<Box<skynet_contracts::transport::TransportPlan>> = None;
+    if let Some(id) = request.param("package") {
+        match package_plan(context, &body, &id) {
+            Ok(resolved) => {
+                if let Some(clamp) = resolved.clamp.clone() {
+                    owned = owned.with_package(&id, clamp);
+                }
+                plan = Some(Box::new(resolved));
+            }
+            // Named rather than silently ignored. A caller who asked for a package's ceilings and
+            // got the body's would read the body's as the package's, which is the one wrong answer
+            // this route can give.
+            Err(detail) => refused = Some(detail),
+        }
+    }
+
+    let mut document = crate::limits::to_json(&owned);
+    document.set(
+        "package_clamp",
+        match &refused {
+            Some(detail) => Json::from(detail.as_str()),
+            None => Json::Null,
+        },
+    );
+    // §32.2's Plan panel asks for *"the resolved transport plan and the clamps in force, with
+    // provenance for every number"*. The clamps are folded into the limits above; this is the plan
+    // they came from, which is the half that says **why** a channel has the ceiling it has —
+    // whether it bound direct, was remapped onto a differently-named joint, or was scaled down
+    // because the policy peaked above what the joint is rated for (§6.1).
+    document.set(
+        "plan",
+        match &plan {
+            Some(plan) => skynet_contracts::json::plan_to_json(plan),
+            None => Json::Null,
+        },
+    );
+    // Which of the two the plan was made against. A plan for a staged package answers "what would
+    // this be held to"; one for an active package answers "what is this held to", and a panel that
+    // rendered both the same way would let an operator read the first as the second.
+    document.set(
+        "package_state",
+        match (&plan, request.param("package")) {
+            (Some(_), Some(id)) => match PackageId::parse(&id) {
+                Ok(package) if context.daemon.store.active_digest(&package).is_some() => {
+                    Json::from("active")
+                }
+                _ => Json::from("staged"),
+            },
+            _ => Json::Null,
+        },
+    );
+    document
+}
+
+/// The transport plan §37.1 resolves for one installed package, or why there is none.
+///
+/// Four refusals and each sends somebody somewhere different: an unknown package is a typo, an
+/// unreadable manifest is a broken store, a package with no `source_embodiment` is one that
+/// commands no joints, and an undescribed body is a provisioning step nobody ran.
+///
+/// The **plan** rather than only its clamp, because §32.2 asks for both and they answer different
+/// questions: the clamp is the number a guard would enforce, and the plan is why that number is
+/// what it is. A `scaled_down` warning naming a joint is the whole content of "this policy peaked
+/// at 180 Nm and your elbow is rated for 80", and no ceiling carries it.
+fn package_plan<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    body: &crate::embodiment::Body,
+    id: &str,
+) -> Result<skynet_contracts::transport::TransportPlan, String> {
+    let package =
+        PackageId::parse(id).map_err(|error| format!("`{id}` is not a package id: {error}"))?;
+    // Active first, then staged. §37.1 makes *staged but not activated* an observable state on
+    // purpose — fetching and verifying happen under a running policy and only the symlink swap
+    // waits for a gate — and it is exactly the state in which somebody wants this answer: §6.2 says
+    // the planner exists to answer *"does this run on my robot, and how well"* **before** anything
+    // is committed to. The answer names which of the two it planned against, because a plan for a
+    // package that is not running is a different sentence.
+    let digest = context
+        .daemon
+        .store
+        .active_digest(&package)
+        .or_else(|| {
+            context
+                .daemon
+                .store
+                .staged()
+                .into_iter()
+                .find(|(staged, _)| *staged == package)
+                .map(|(_, digest)| digest)
+        })
+        .ok_or_else(|| format!("`{id}` is neither installed nor staged on this robot"))?;
+    let document = context
+        .daemon
+        .store
+        .manifest(&digest)
+        .map_err(|error| format!("`{id}`'s manifest could not be read: {error}"))?;
+    let manifest = skynet_contracts::json::manifest_from_json(&document)
+        .map_err(|error| format!("`{id}`'s manifest does not decode: {error:?}"))?;
+    // `allow_retarget` is false, and §6.1 is why: retargeting changes what the policy is doing and
+    // that is a decision somebody makes at an install. Nobody is standing at a `GET`.
+    crate::admit::transport_plan(&manifest, body, false).ok_or_else(|| {
+        if manifest.source_embodiment.is_none() {
+            format!(
+                "`{id}` declares no source embodiment, so it commands no joints and there is \
+                 nothing to plan"
+            )
+        } else {
+            format!(
+                "this robot has no usable embodiment descriptor, so `{id}` cannot be planned \
+                 against it (`GET /embodiment`)"
+            )
+        }
+    })
+}
+
 /// §15's eight runtime tests, run by this robot on itself.
 ///
 /// The half of §73's conformance row this daemon can close: `skynet driver check` runs the
@@ -621,7 +755,10 @@ fn conformance<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     // §35.1's correlation clock, for the one thing it is for here: a result is a record a Hub
     // places against other robots' records. Nothing in the run decides anything with it.
     let at = crate::audit::rfc3339(wall_ms());
-    let run = crate::conformance::run(&capacity, &body, &at);
+    // The same composition `GET /limits` serves, so a conformance result and the limits panel
+    // beside it can never be about two different limit sets.
+    let limits = crate::limits::read(&layout, &body, crate::limits::ROBOT_TIER);
+    let run = crate::conformance::run(&capacity, &body, &limits, &at);
     crate::conformance::to_json(
         &run,
         body.known().is_some_and(|known| known.descriptor.simulator),
@@ -1300,6 +1437,14 @@ fn checkin<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
         rolled,
         context.daemon.operating_state.as_str(),
         &crate::intent::held_digest(&layout),
+        // §7.6, composed here rather than remembered, for the reason `actual` above is observed
+        // rather than remembered: the descriptor and the profile are files somebody can replace on
+        // a running robot, and a check-in reports the limits in force now.
+        Some(crate::limits::report(&crate::limits::read(
+            &layout,
+            &crate::embodiment::load(&layout),
+            crate::limits::ROBOT_TIER,
+        ))),
     );
 
     // Read, never written. This route reports what a check-in *would* say; the reconcile loop is

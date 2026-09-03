@@ -46,7 +46,7 @@
           }
         }
       },
-      "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":true,\"attestation\":{\"complete\":true,\"embodiment\":{\"digest\":\"sha256:cccc\",\"state\":\"known\",\"why\":null},\"os_image\":{\"digest\":\"sha256:aaaa\",\"state\":\"known\",\"why\":null},\"policy\":{\"digest\":\"sha256:bbbb\",\"state\":\"known\",\"why\":null},\"sentence\":\"dev_7 is running image `sha256:aaaa`, policy `sha256:bbbb`, against body `sha256:cccc`.\",\"unmeasured\":[]},\"blocking\":[],\"claim\":\"applied\",\"contracts\":\"1.0.0\",\"desired_digest\":\"sha256:dddd\",\"detail\":\"Generation 41 is applied and the plan is empty.\",\"device_id\":\"dev_7\",\"generation\":41,\"health\":{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":{\"age_ms\":900,\"value\":0.42},\"temperature_c\":null},\"packages\":[{\"age_ms\":12,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"ready\"}],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"temperature_c\"]},\"pending\":[],\"state\":\"running\"}"
+      "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":true,\"attestation\":{\"complete\":true,\"embodiment\":{\"digest\":\"sha256:cccc\",\"state\":\"known\",\"why\":null},\"os_image\":{\"digest\":\"sha256:aaaa\",\"state\":\"known\",\"why\":null},\"policy\":{\"digest\":\"sha256:bbbb\",\"state\":\"known\",\"why\":null},\"sentence\":\"dev_7 is running image `sha256:aaaa`, policy `sha256:bbbb`, against body `sha256:cccc`.\",\"unmeasured\":[]},\"blocking\":[],\"claim\":\"applied\",\"contracts\":\"1.0.0\",\"desired_digest\":\"sha256:dddd\",\"detail\":\"Generation 41 is applied and the plan is empty.\",\"device_id\":\"dev_7\",\"generation\":41,\"health\":{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":{\"age_ms\":900,\"value\":0.42},\"temperature_c\":null},\"packages\":[{\"age_ms\":12,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"ready\"}],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"temperature_c\"]},\"limits\":null,\"pending\":[],\"state\":\"running\"}"
     },
     {
       "id": "waiting-for-a-safe-state",
@@ -98,7 +98,7 @@
           }
         }
       },
-      "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":false,\"attestation\":{\"complete\":true,\"embodiment\":{\"digest\":\"sha256:cccc\",\"state\":\"known\",\"why\":null},\"os_image\":{\"digest\":\"sha256:aaaa\",\"state\":\"known\",\"why\":null},\"policy\":{\"digest\":\"sha256:bbbb\",\"state\":\"known\",\"why\":null},\"sentence\":\"dev_7 is running image `sha256:aaaa`, policy `sha256:bbbb`, against body `sha256:cccc`.\",\"unmeasured\":[]},\"blocking\":[\"os_image\"],\"claim\":\"deferred\",\"contracts\":\"1.0.0\",\"desired_digest\":\"sha256:dddd\",\"detail\":\"Everything left to do is waiting for a safe state (§33.4): os_image. Nothing here converges until the robot is put in one, which is an operator action rather than a matter of time.\",\"device_id\":\"dev_7\",\"generation\":40,\"health\":{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":{\"age_ms\":900,\"value\":0.42},\"temperature_c\":null},\"packages\":[{\"age_ms\":12,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"ready\"}],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"temperature_c\"]},\"pending\":[{\"deferred\":true,\"reason\":\"applying an image reboots\",\"stage\":\"os_image\"}],\"state\":\"hold\"}"
+      "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":false,\"attestation\":{\"complete\":true,\"embodiment\":{\"digest\":\"sha256:cccc\",\"state\":\"known\",\"why\":null},\"os_image\":{\"digest\":\"sha256:aaaa\",\"state\":\"known\",\"why\":null},\"policy\":{\"digest\":\"sha256:bbbb\",\"state\":\"known\",\"why\":null},\"sentence\":\"dev_7 is running image `sha256:aaaa`, policy `sha256:bbbb`, against body `sha256:cccc`.\",\"unmeasured\":[]},\"blocking\":[\"os_image\"],\"claim\":\"deferred\",\"contracts\":\"1.0.0\",\"desired_digest\":\"sha256:dddd\",\"detail\":\"Everything left to do is waiting for a safe state (§33.4): os_image. Nothing here converges until the robot is put in one, which is an operator action rather than a matter of time.\",\"device_id\":\"dev_7\",\"generation\":40,\"health\":{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":{\"age_ms\":900,\"value\":0.42},\"temperature_c\":null},\"packages\":[{\"age_ms\":12,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"ready\"}],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"temperature_c\"]},\"limits\":null,\"pending\":[{\"deferred\":true,\"reason\":\"applying an image reboots\",\"stage\":\"os_image\"}],\"state\":\"hold\"}"
     },
     {
       "id": "a-robot-that-can-measure-almost-nothing",
@@ -122,7 +122,7 @@
           }
         }
       },
-      "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":true,\"attestation\":{\"complete\":false,\"embodiment\":{\"digest\":null,\"state\":\"nothing\",\"why\":null},\"os_image\":{\"digest\":null,\"state\":\"unmeasured\",\"why\":\"no Skynet OS image is reported\"},\"policy\":{\"digest\":null,\"state\":\"nothing\",\"why\":null},\"sentence\":\"This robot is running an unmeasured OS image (no Skynet OS image is reported), no policy, against no body.\",\"unmeasured\":[\"os_image\"]},\"blocking\":[],\"claim\":\"applied\",\"contracts\":\"1.0.0\",\"desired_digest\":\"\",\"detail\":\"Generation 0 is applied and the plan is empty.\",\"device_id\":\"\",\"generation\":0,\"health\":{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":null,\"temperature_c\":null},\"packages\":[],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"storage_headroom\",\"temperature_c\"]},\"pending\":[],\"state\":\"post\"}"
+      "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":true,\"attestation\":{\"complete\":false,\"embodiment\":{\"digest\":null,\"state\":\"nothing\",\"why\":null},\"os_image\":{\"digest\":null,\"state\":\"unmeasured\",\"why\":\"no Skynet OS image is reported\"},\"policy\":{\"digest\":null,\"state\":\"nothing\",\"why\":null},\"sentence\":\"This robot is running an unmeasured OS image (no Skynet OS image is reported), no policy, against no body.\",\"unmeasured\":[\"os_image\"]},\"blocking\":[],\"claim\":\"applied\",\"contracts\":\"1.0.0\",\"desired_digest\":\"\",\"detail\":\"Generation 0 is applied and the plan is empty.\",\"device_id\":\"\",\"generation\":0,\"health\":{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":null,\"temperature_c\":null},\"packages\":[],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"storage_headroom\",\"temperature_c\"]},\"limits\":null,\"pending\":[],\"state\":\"post\"}"
     },
     {
       "id": "a-robot-that-holds-no-desired-state",
@@ -168,7 +168,145 @@
           }
         }
       },
-      "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":true,\"attestation\":{\"complete\":true,\"embodiment\":{\"digest\":\"sha256:cccc\",\"state\":\"known\",\"why\":null},\"os_image\":{\"digest\":\"sha256:aaaa\",\"state\":\"known\",\"why\":null},\"policy\":{\"digest\":\"sha256:bbbb\",\"state\":\"known\",\"why\":null},\"sentence\":\"dev_7 is running image `sha256:aaaa`, policy `sha256:bbbb`, against body `sha256:cccc`.\",\"unmeasured\":[]},\"blocking\":[],\"claim\":\"applied\",\"contracts\":\"1.0.0\",\"desired_digest\":\"\",\"detail\":\"Generation 0 is applied and the plan is empty.\",\"device_id\":\"dev_7\",\"generation\":0,\"health\":{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":{\"age_ms\":900,\"value\":0.42},\"temperature_c\":null},\"packages\":[{\"age_ms\":12,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"ready\"}],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"temperature_c\"]},\"pending\":[],\"state\":\"running\"}"
+      "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":true,\"attestation\":{\"complete\":true,\"embodiment\":{\"digest\":\"sha256:cccc\",\"state\":\"known\",\"why\":null},\"os_image\":{\"digest\":\"sha256:aaaa\",\"state\":\"known\",\"why\":null},\"policy\":{\"digest\":\"sha256:bbbb\",\"state\":\"known\",\"why\":null},\"sentence\":\"dev_7 is running image `sha256:aaaa`, policy `sha256:bbbb`, against body `sha256:cccc`.\",\"unmeasured\":[]},\"blocking\":[],\"claim\":\"applied\",\"contracts\":\"1.0.0\",\"desired_digest\":\"\",\"detail\":\"Generation 0 is applied and the plan is empty.\",\"device_id\":\"dev_7\",\"generation\":0,\"health\":{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":{\"age_ms\":900,\"value\":0.42},\"temperature_c\":null},\"packages\":[{\"age_ms\":12,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"ready\"}],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"temperature_c\"]},\"limits\":null,\"pending\":[],\"state\":\"running\"}"
+    },
+    {
+      "id": "the-limits-a-robot-is-under",
+      "note": "§7.6 crossing §17. The robot resolves its own ceilings and guard partition and until this field existed nothing carried them: §32.1 asks a device page for exactly this and the Hub’s own route answered with a `gaps` list naming it. Frozen because the two halves of the sentence an operator reads — which guards run, and whether anything enforces them — are in different fields, and an edition that agreed about one could disagree about the other.",
+      "input": {
+        "device_id": "dev_7",
+        "agent": "skynetd/0.1.0",
+        "contracts": "1.0.0",
+        "state": "running",
+        "desired_digest": "sha256:dddd",
+        "progress": {
+          "observed_generation": 41,
+          "desired_generation": 41,
+          "pending": []
+        },
+        "health": {
+          "packages": [
+            {
+              "id": "acme/grasp",
+              "live": true,
+              "readiness": "ready",
+              "age_ms": 12
+            }
+          ],
+          "storage_headroom": {
+            "value": 0.42,
+            "age_ms": 900
+          }
+        },
+        "attestation": {
+          "device_id": "dev_7",
+          "os_image": {
+            "state": "known",
+            "digest": "sha256:aaaa"
+          },
+          "policy": {
+            "state": "known",
+            "digest": "sha256:bbbb"
+          },
+          "embodiment": {
+            "state": "known",
+            "digest": "sha256:cccc"
+          }
+        },
+        "limits": {
+          "resolved_at": "guest",
+          "enforcement": "advisory",
+          "enforced": false,
+          "joint_velocity_max_rad_s": 0.5,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": null,
+          "min_control_hz": null,
+          "max_delta_per_cycle": null,
+          "source": "vendor datasheet rev C",
+          "active": [
+            "watchdog",
+            "envelope",
+            "mode_gate"
+          ],
+          "unavailable": [
+            {
+              "guard": "rate_limit",
+              "missing": [
+                "profile.max_delta_per_cycle"
+              ]
+            },
+            {
+              "guard": "balance",
+              "missing": [
+                "a legged base — not applicable to this body"
+              ]
+            }
+          ],
+          "notices": [
+            {
+              "code": "advisory_only",
+              "subjects": []
+            },
+            {
+              "code": "no_independent_stop",
+              "subjects": []
+            },
+            {
+              "code": "guard_unavailable",
+              "subjects": [
+                "profile.max_delta_per_cycle"
+              ]
+            }
+          ]
+        }
+      },
+      "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":true,\"attestation\":{\"complete\":true,\"embodiment\":{\"digest\":\"sha256:cccc\",\"state\":\"known\",\"why\":null},\"os_image\":{\"digest\":\"sha256:aaaa\",\"state\":\"known\",\"why\":null},\"policy\":{\"digest\":\"sha256:bbbb\",\"state\":\"known\",\"why\":null},\"sentence\":\"dev_7 is running image `sha256:aaaa`, policy `sha256:bbbb`, against body `sha256:cccc`.\",\"unmeasured\":[]},\"blocking\":[],\"claim\":\"applied\",\"contracts\":\"1.0.0\",\"desired_digest\":\"sha256:dddd\",\"detail\":\"Generation 41 is applied and the plan is empty.\",\"device_id\":\"dev_7\",\"generation\":41,\"health\":{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":{\"age_ms\":900,\"value\":0.42},\"temperature_c\":null},\"packages\":[{\"age_ms\":12,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"ready\"}],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"temperature_c\"]},\"limits\":{\"active\":[\"watchdog\",\"envelope\",\"mode_gate\"],\"base_velocity_max_m_s\":null,\"enforced\":false,\"enforcement\":\"advisory\",\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":0.5,\"max_delta_per_cycle\":null,\"min_control_hz\":null,\"notices\":[{\"code\":\"advisory_only\",\"subjects\":[]},{\"code\":\"no_independent_stop\",\"subjects\":[]},{\"code\":\"guard_unavailable\",\"subjects\":[\"profile.max_delta_per_cycle\"]}],\"resolved_at\":\"guest\",\"source\":\"vendor datasheet rev C\",\"unavailable\":[{\"guard\":\"rate_limit\",\"missing\":[\"profile.max_delta_per_cycle\"]},{\"guard\":\"balance\",\"missing\":[\"a legged base — not applicable to this body\"]}]},\"pending\":[],\"state\":\"running\"}"
+    },
+    {
+      "id": "a-robot-that-resolves-no-limits",
+      "note": "The same document from an edition that does not compose them. `limits` is present and null, because \"this robot reports no limits\" and \"this robot has no ceilings\" are different facts and a consumer switching on a missing key cannot tell them apart — the second is a report whose numbers are all null and whose notices say `no_envelope`.",
+      "input": {
+        "device_id": "dev_7",
+        "agent": "skynetd/0.1.0",
+        "contracts": "1.0.0",
+        "state": "running",
+        "desired_digest": "sha256:dddd",
+        "progress": {
+          "observed_generation": 41,
+          "desired_generation": 41,
+          "pending": []
+        },
+        "health": {
+          "packages": [
+            {
+              "id": "acme/grasp",
+              "live": true,
+              "readiness": "ready",
+              "age_ms": 12
+            }
+          ],
+          "storage_headroom": {
+            "value": 0.42,
+            "age_ms": 900
+          }
+        },
+        "attestation": {
+          "device_id": "dev_7",
+          "os_image": {
+            "state": "known",
+            "digest": "sha256:aaaa"
+          },
+          "policy": {
+            "state": "known",
+            "digest": "sha256:bbbb"
+          },
+          "embodiment": {
+            "state": "known",
+            "digest": "sha256:cccc"
+          }
+        }
+      },
+      "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":true,\"attestation\":{\"complete\":true,\"embodiment\":{\"digest\":\"sha256:cccc\",\"state\":\"known\",\"why\":null},\"os_image\":{\"digest\":\"sha256:aaaa\",\"state\":\"known\",\"why\":null},\"policy\":{\"digest\":\"sha256:bbbb\",\"state\":\"known\",\"why\":null},\"sentence\":\"dev_7 is running image `sha256:aaaa`, policy `sha256:bbbb`, against body `sha256:cccc`.\",\"unmeasured\":[]},\"blocking\":[],\"claim\":\"applied\",\"contracts\":\"1.0.0\",\"desired_digest\":\"sha256:dddd\",\"detail\":\"Generation 41 is applied and the plan is empty.\",\"device_id\":\"dev_7\",\"generation\":41,\"health\":{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":{\"age_ms\":900,\"value\":0.42},\"temperature_c\":null},\"packages\":[{\"age_ms\":12,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"ready\"}],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"temperature_c\"]},\"limits\":null,\"pending\":[],\"state\":\"running\"}"
     },
     {
       "id": "a-stalled-policy-on-a-converged-robot",
@@ -214,7 +352,7 @@
           }
         }
       },
-      "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":true,\"attestation\":{\"complete\":true,\"embodiment\":{\"digest\":\"sha256:cccc\",\"state\":\"known\",\"why\":null},\"os_image\":{\"digest\":\"sha256:aaaa\",\"state\":\"known\",\"why\":null},\"policy\":{\"digest\":\"sha256:bbbb\",\"state\":\"known\",\"why\":null},\"sentence\":\"dev_7 is running image `sha256:aaaa`, policy `sha256:bbbb`, against body `sha256:cccc`.\",\"unmeasured\":[]},\"blocking\":[],\"claim\":\"applied\",\"contracts\":\"1.0.0\",\"desired_digest\":\"sha256:dddd\",\"detail\":\"Generation 41 is applied and the plan is empty.\",\"device_id\":\"dev_7\",\"generation\":41,\"health\":{\"degraded\":true,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":{\"age_ms\":900,\"value\":0.42},\"temperature_c\":null},\"packages\":[{\"age_ms\":4000,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"stalled\"}],\"stalled\":[\"acme/grasp\"],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"temperature_c\"]},\"pending\":[],\"state\":\"running\"}"
+      "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":true,\"attestation\":{\"complete\":true,\"embodiment\":{\"digest\":\"sha256:cccc\",\"state\":\"known\",\"why\":null},\"os_image\":{\"digest\":\"sha256:aaaa\",\"state\":\"known\",\"why\":null},\"policy\":{\"digest\":\"sha256:bbbb\",\"state\":\"known\",\"why\":null},\"sentence\":\"dev_7 is running image `sha256:aaaa`, policy `sha256:bbbb`, against body `sha256:cccc`.\",\"unmeasured\":[]},\"blocking\":[],\"claim\":\"applied\",\"contracts\":\"1.0.0\",\"desired_digest\":\"sha256:dddd\",\"detail\":\"Generation 41 is applied and the plan is empty.\",\"device_id\":\"dev_7\",\"generation\":41,\"health\":{\"degraded\":true,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":{\"age_ms\":900,\"value\":0.42},\"temperature_c\":null},\"packages\":[{\"age_ms\":4000,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"stalled\"}],\"stalled\":[\"acme/grasp\"],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"temperature_c\"]},\"limits\":null,\"pending\":[],\"state\":\"running\"}"
     }
   ]
 }

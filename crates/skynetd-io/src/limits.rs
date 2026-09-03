@@ -1,0 +1,879 @@
+//! §7.3's resolved limits, composed on the robot (§6.3, §38.2).
+//!
+//! `skynet_kernel::resolve_limits` is the one place a ceiling is chosen. It has had three callers
+//! since it was written — the kernel's own suite, the corpus runner, and `skynet-contracts`'
+//! renderer — and **none of them on a robot**. So the function that composes the envelope, the
+//! transport plan and the operator profile into the single set the kernel enforces had never once
+//! been asked what *this machine's* limits are.
+//!
+//! That absence was cheap to miss because nothing downstream of it existed either: no policy
+//! runtime, so no cycle to enforce over. But two things did depend on it and both were stuck:
+//!
+//! * §6.3 — *"this module decides what is possible and under what ceilings, and hands the ceilings
+//!   to the Safety Kernel"*. The plan computed a clamp at install (§37.1) and handed it to nothing,
+//!   which is §73's transport row in one sentence.
+//! * `telemetry.replay.deterministic` — replay is a function of the recording **and** the limits
+//!   that were in force, and `crate::conformance` reported it skipped for exactly that reason.
+//!
+//! # The tier is an input here, and it is never invented
+//!
+//! `resolve_limits` takes a [`Tier`], and **nothing on this robot decides one**: §15 awards a tier
+//! from conformance evidence a human witnessed, §11 would deliver it in desired state, and neither
+//! path is written. `crate::runtime` already refuses to fill `robot.tier` for that reason.
+//!
+//! So this module takes the tier from its caller and states which one it resolved at. What makes
+//! that safe rather than a fudge is a property of `resolve_limits` itself, asserted in this
+//! module's own suite rather than assumed: **the tier changes what is done with the limits, never
+//! what they are.** Every ceiling, every active guard and every unavailable guard is identical at
+//! all three tiers. What the tier decides is the enforcement mode and two notices —
+//! `advisory_only` and `no_independent_stop` — which is precisely the honest report: *these are the
+//! numbers, and here is what this integration depth would do with them.*
+//!
+//! [`ROBOT_TIER`] is guest and the reason is not a preference. §1's table defines guest as the tier
+//! that does not own the control loop and enforces nothing, and this edition has no policy runtime
+//! and no kernel on a control path — so guest is a description of this build rather than a claim
+//! about the machine, and it is the reading that claims least.
+//!
+//! # Where each input comes from, and the three that have no source
+//!
+//! | Input | Source |
+//! |---|---|
+//! | `envelope` | the embodiment descriptor's `envelope` (§5) |
+//! | `frames` | the descriptor's frame graph, flattened (§44.3) |
+//! | `available.legged` | the descriptor's `base` |
+//! | `available.imu` | a sensor whose modality is `imu` |
+//! | `profile.*` ceilings | `/data/state/profiles/active.json` (§38.1) |
+//! | `profile.workspace` | §55.2's cell, out of the same profile |
+//! | `transport` | §37.1's plan, for a named installed package |
+//! | `available.people_detection` | **nothing** — see below |
+//! | `profile.proximity` | **nothing** — desired state carries no such field |
+//! | `profile.self_collision_margin_m` | **nothing** — the same |
+//!
+//! `people_detection` is `false` on every body, and that is a measured absence rather than a
+//! default: §5's sensor vocabulary has nine modalities and none of them is a person detector. A
+//! camera is not one — detection is a perception component, not a sensor — and inferring one from
+//! `rgb` would be exactly the *"claim about the body that nothing checks"* that `Available` had two
+//! fields removed for. The consequence is visible and correct: the `proximity` guard reports
+//! unavailable naming a sensor that detects people, on a robot that has not got one.
+//!
+//! The other two are gaps in the **delivery path** rather than in the body. `DesiredProfile` (§11)
+//! carries four ceilings and a cell, so `proximity` and `self_collision_margin_m` — both of which
+//! `skynet_kernel::OperatorProfile` accepts and two guards read — have nowhere to arrive from. They
+//! are absent here, they are reported as unmeasured on the route, and the effect on the machine is
+//! that `proximity` can never be an active guard on this edition however the robot is described.
+//!
+//! # The cell's volumes stop being reported and start being applied
+//!
+//! `crate::cell` computes §55.2's workspace layer and says of it:
+//!
+//! > the layer is computed and **reported**, with the reason it goes no further
+//!
+//! This is where it goes further. The layer is folded into the operator profile the kernel reads,
+//! so a robot with a surveyed cell and a frame graph that reaches the frames it names has
+//! `workspace` in its active guards for the first time — and one whose graph does not reach them
+//! has the missing frame named, which is §44.5 working rather than a body silently unguarded.
+
+use skynet_contracts::cell::CellLayer;
+use skynet_contracts::checkin::{GuardReport, Notice, UnavailableGuard};
+use skynet_contracts::embodiment::SafetyEnvelope;
+use skynet_contracts::kinematics::{flatten, FlatFrames};
+use skynet_contracts::transport::TransportClamp as PlanClamp;
+use skynet_json::Json;
+
+// Through `skynet-contracts` rather than through a direct edge to `skynet-kernel`. The daemon's
+// dependency set is a thing CI asserts about (§33.1), and every kernel type this module needs is
+// already re-exported by the layer that renders them — so the composition and the rendering read
+// the same names out of the same place.
+use skynet_contracts::safety::kinematics::{Frame, FrameSet, Volume, WorkspaceLayer};
+use skynet_contracts::safety::{
+    limits_to_json, resolve_limits, Available, Envelope, OperatorProfile, ResolveLimitsParams,
+    ResolvedLimits, Tier, TransportClamp,
+};
+
+use crate::embodiment::Body;
+use crate::layout::Layout;
+
+/// The tier this edition resolves at, and why it is not a choice.
+///
+/// §1: guest *"runs on a container beside the vendor stack"*, does not own the control loop, and
+/// its Safety Kernel is advisory. This build has no policy runtime, so nothing here owns a control
+/// loop and no verdict reaches an actuator — which is that row, describing this repository.
+///
+/// A robot integrated more deeply than this is still reported at guest, and the error is in the
+/// safe direction: the numbers are identical at every tier, and what is understated is only what
+/// this software would be permitted to *do* with them.
+pub const ROBOT_TIER: Tier = Tier::Guest;
+
+/// The limits, and everything they were composed from.
+///
+/// Owned, because [`skynet_kernel`] borrows: it is `no_std` with no allocator and takes `&str` and
+/// `&[(&str, f64)]` throughout. `skynet-corpus` performs the same ceremony for a JSON document and
+/// its own module docs predicted this one — *"it is the same ceremony `skynetd` will perform for
+/// real"*.
+#[derive(Debug, Clone)]
+pub struct Owned {
+    tier: Tier,
+    envelope: Option<SafetyEnvelope>,
+    profile: Option<ProfileOwned>,
+    /// §55.2's cell layer, when the cell draws usable volumes.
+    cell: Option<CellLayer>,
+    frames: Option<FlatFrames>,
+    /// Why there is no frame set, when the descriptor declared one.
+    frames_fault: Option<String>,
+    available: Available,
+    transport: Option<PlanClamp>,
+    /// Which package the clamp above came from, when one did.
+    transport_of: Option<String>,
+}
+
+/// The operator profile in force, as far as this robot receives one (§38.1).
+#[derive(Debug, Clone, Default)]
+struct ProfileOwned {
+    name: String,
+    joint_velocity_max_rad_s: Option<f64>,
+    joint_torque_max_nm: Option<f64>,
+    base_velocity_max_m_s: Option<f64>,
+    max_delta_per_cycle: Option<f64>,
+}
+
+/// Compose the limits this robot would run under.
+///
+/// Never fails. Every input is optional to `resolve_limits` and every absence produces a notice
+/// rather than a refusal — a body nobody described resolves to no ceilings and a `no_envelope`
+/// notice, which is the honest answer for an unprovisioned robot and not an error.
+///
+/// A **malformed** descriptor is the one case worth distinguishing and it is distinguished by the
+/// same rule `crate::capacity` applies: nothing is salvaged from it. A malformed body carries no
+/// envelope and no frames here, so the limits come out as though nobody had described the body —
+/// which is what a document nobody could read amounts to — and `GET /embodiment` is where the
+/// reason lives.
+pub fn read(layout: &Layout, body: &Body, tier: Tier) -> Owned {
+    let known = body.known();
+    let descriptor = known.map(|known| &known.descriptor);
+
+    let (frames, frames_fault) = match descriptor.and_then(|d| d.frames.as_ref()) {
+        None => (None, None),
+        Some(graph) => match flatten(graph) {
+            Ok(flat) => (Some(flat), None),
+            // §44.5: a graph that does not flatten leaves both pose guards unavailable, naming
+            // `embodiment.frames`, and the fault itself is carried so the route can say which node
+            // broke it rather than leaving an operator to diff two panels.
+            Err(fault) => (None, Some(format!("{} — {}", fault.code, fault.detail))),
+        },
+    };
+
+    let available = Available {
+        // Declared, not inferred. A body with no `imu` sensor leaves `balance` unavailable naming
+        // an IMU, which is the guard reporting on the body rather than on the descriptor's author.
+        imu: descriptor.is_some_and(|d| d.sensors.iter().any(|s| s.modality == "imu")),
+        // See the module docs. Nothing in §5 declares a person detector, so this is false on every
+        // body and the `proximity` guard says so.
+        people_detection: false,
+        legged: descriptor.is_some_and(|d| d.base == "legged"),
+    };
+
+    Owned {
+        tier,
+        envelope: descriptor.and_then(|d| d.envelope.clone()),
+        profile: read_profile(layout),
+        cell: crate::cell::active(layout)
+            .as_ref()
+            .and_then(skynet_contracts::cell::cell_workspace_layer),
+        frames,
+        frames_fault,
+        available,
+        // §37.1 resolves a plan per package at install and this robot runs none, so there is no
+        // clamp in force. `with_package` is how a caller asks for a specific one.
+        transport: None,
+        transport_of: None,
+    }
+}
+
+/// The profile in force, or nothing.
+///
+/// Reads the file `crate::runtime` writes after a signature verified (§38.1), which is why nothing
+/// here re-checks one: a document that reached `active.json` is a document this robot verified, and
+/// a second opinion taken from the same bytes would not be a second opinion.
+fn read_profile(layout: &Layout) -> Option<ProfileOwned> {
+    let document = crate::observe::read_json(&layout.active_profile())?;
+    let (_, limits) = crate::observe::read_profile(layout);
+    let limits = limits?;
+    Some(ProfileOwned {
+        name: document
+            .get("name")
+            .and_then(Json::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        joint_velocity_max_rad_s: limits.joint_velocity_max_rad_s,
+        joint_torque_max_nm: limits.joint_torque_max_nm,
+        base_velocity_max_m_s: limits.base_velocity_max_m_s,
+        max_delta_per_cycle: limits.max_delta_per_cycle,
+    })
+}
+
+impl Owned {
+    /// Fold in the ceilings §37.1's plan computed for one installed package (§6.3).
+    ///
+    /// The clamp narrows and can never widen — `resolve_limits` takes the minimum of every source
+    /// — so adding it is safe whichever package a caller names. What it cannot do is speak for a
+    /// *running* policy, because none runs: this is "what would this package be held to", which is
+    /// the question `skynet limits --package` exists to answer.
+    pub fn with_package(mut self, id: &str, clamp: PlanClamp) -> Self {
+        self.transport = Some(clamp);
+        self.transport_of = Some(id.to_string());
+        self
+    }
+
+    /// The envelope, borrowed.
+    fn envelope_ref(&self) -> Option<Envelope<'_>> {
+        self.envelope.as_ref().map(|declared| Envelope {
+            joint_velocity_max_rad_s: declared.joint_velocity_max_rad_s,
+            joint_torque_max_nm: declared.joint_torque_max_nm,
+            base_velocity_max_m_s: declared.base_velocity_max_m_s,
+            watchdog_ms: declared.watchdog_ms,
+            estop: declared.estop,
+            source: declared.source.as_deref(),
+        })
+    }
+
+    /// Per-channel ceilings, sorted by name.
+    ///
+    /// `TransportClamp::per_channel` is documented as sorted and the planner emits it in binding
+    /// order, which nothing has ever noticed because this is the first caller to hand one to the
+    /// kernel. Sorted here rather than there because the ordering is this interface's requirement
+    /// and the plan is a document with an order of its own.
+    fn per_channel_refs(&self) -> Vec<(&str, f64)> {
+        let mut out: Vec<(&str, f64)> = self
+            .transport
+            .as_ref()
+            .map(|clamp| {
+                clamp
+                    .per_channel
+                    .iter()
+                    .map(|(name, limit)| (name.as_str(), *limit))
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.sort_by_key(|(name, _)| *name);
+        out
+    }
+
+    /// Resolve, and hand the result to `f`.
+    ///
+    /// A closure because a resolved set borrows four separate views that have to outlive it and
+    /// cannot be returned alongside it. The alternative is every caller repeating the same five
+    /// lines, which is how two callers end up resolving slightly different limit sets.
+    ///
+    /// The envelope is passed through as well because `evaluate_cycle` and
+    /// `skynet_blackbox::replay` both want it beside the limits: the watchdog guard reads the
+    /// declared window from the envelope rather than from the resolved set.
+    pub fn with_resolved<T>(
+        &self,
+        f: impl FnOnce(&ResolvedLimits<'_>, Option<&Envelope<'_>>) -> T,
+    ) -> T {
+        let per_channel = self.per_channel_refs();
+        let frame_refs: Option<Vec<Frame<'_>>> = self.frames.as_ref().map(FlatFrames::frames);
+        let volumes: Vec<Volume<'_>> = self
+            .cell
+            .as_ref()
+            .map(CellLayer::volumes)
+            .unwrap_or_default();
+        let layers: Vec<WorkspaceLayer<'_>> = match &self.cell {
+            Some(cell) if !volumes.is_empty() => vec![cell.layer(&volumes)],
+            _ => Vec::new(),
+        };
+
+        let params = ResolveLimitsParams {
+            tier: self.tier,
+            envelope: self.envelope_ref(),
+            transport: self.transport.as_ref().map(|clamp| TransportClamp {
+                joint_velocity_max_rad_s: clamp.joint_velocity_max_rad_s,
+                joint_torque_max_nm: clamp.joint_torque_max_nm,
+                base_velocity_max_m_s: clamp.base_velocity_max_m_s,
+                min_control_hz: clamp.min_control_hz,
+                per_channel: &per_channel,
+                source: clamp.source.as_deref(),
+            }),
+            profile: self.profile.as_ref().map(|profile| OperatorProfile {
+                name: profile.name.as_str(),
+                joint_velocity_max_rad_s: profile.joint_velocity_max_rad_s,
+                joint_torque_max_nm: profile.joint_torque_max_nm,
+                base_velocity_max_m_s: profile.base_velocity_max_m_s,
+                max_delta_per_cycle: profile.max_delta_per_cycle,
+                // See the module docs: no delivery path, so absent rather than defaulted.
+                proximity: None,
+                workspace: &layers,
+                self_collision_margin_m: None,
+            }),
+            available: self.available,
+            frames: frame_refs
+                .as_deref()
+                .and_then(|frames| FrameSet::new(frames).ok()),
+        };
+        let limits = resolve_limits(&params);
+        f(&limits, params.envelope.as_ref())
+    }
+
+    /// The profile's name, for the widened-limits notice.
+    pub fn profile_name(&self) -> Option<&str> {
+        self.profile.as_ref().map(|profile| profile.name.as_str())
+    }
+}
+
+/// §7.6's limits, as §17's check-in carries them.
+///
+/// A projection rather than the route's document, and the differences are the point. It carries no
+/// rendered English — the Hub renders notice codes in thirty-five locales (§32.3) and a robot that
+/// shipped sentences would put the translation on the side that cannot do it — no `sources` block,
+/// and none of the prose the console needs. What is left is about five hundred bytes, which is what
+/// makes it a field on a document §34.4 sends every reconcile pass rather than a route of its own.
+///
+/// `enforced` is `false` and it is not read from anything: no policy runtime exists on this
+/// edition, so nothing carries a command as far as a guard at any tier (§73). It is a constant with
+/// a reason rather than a field waiting for one, and the day a runtime exists is the day this line
+/// has to become a measurement.
+pub fn report(owned: &Owned) -> GuardReport {
+    owned.with_resolved(|limits, _| GuardReport {
+        resolved_at: limits.tier.as_str().to_string(),
+        enforcement: limits.enforcement.as_str().to_string(),
+        enforced: false,
+        joint_velocity_max_rad_s: limits.joint_velocity_max_rad_s,
+        joint_torque_max_nm: limits.joint_torque_max_nm,
+        base_velocity_max_m_s: limits.base_velocity_max_m_s,
+        min_control_hz: limits.min_control_hz,
+        max_delta_per_cycle: limits.max_delta_per_cycle,
+        source: limits.source.map(str::to_string),
+        active: limits
+            .active_guards
+            .iter()
+            .map(|guard| guard.as_str().to_string())
+            .collect(),
+        unavailable: limits
+            .unavailable_guards
+            .iter()
+            .map(|entry| UnavailableGuard {
+                guard: entry.guard.as_str().to_string(),
+                missing: entry.missing.iter().map(|s| (*s).to_string()).collect(),
+            })
+            .collect(),
+        notices: limits
+            .notices
+            .iter()
+            .map(|notice| Notice {
+                code: notice.code.as_str().to_string(),
+                subjects: notice.subjects.iter().map(|s| (*s).to_string()).collect(),
+            })
+            .collect(),
+    })
+}
+
+/// What `GET /limits` answers.
+///
+/// The resolved set as `skynet-contracts` renders it, plus a `sources` block, because the numbers
+/// alone do not answer the question an operator actually has — *why is this ceiling that?* A limit
+/// set with no provenance is the `unsourced_limits` notice applied to the report instead of to the
+/// envelope.
+pub fn to_json(owned: &Owned) -> Json {
+    owned.with_resolved(|limits, _| {
+        let mut out = limits_to_json(limits, owned.profile_name());
+
+        let mut sources = Json::obj();
+        sources
+            .set("envelope", Json::Bool(owned.envelope.is_some()))
+            .set("profile", Json::Bool(owned.profile.is_some()))
+            .set(
+                "workspace_layers",
+                Json::Num(if owned.cell.is_some() { 1.0 } else { 0.0 }),
+            )
+            .set(
+                "frames",
+                match &owned.frames {
+                    Some(flat) => Json::Num(flat.frames().len() as f64),
+                    None => Json::Null,
+                },
+            )
+            .set(
+                "frames_fault",
+                match &owned.frames_fault {
+                    Some(fault) => Json::from(fault.as_str()),
+                    None => Json::Null,
+                },
+            )
+            .set(
+                "transport_of",
+                match &owned.transport_of {
+                    Some(id) => Json::from(id.as_str()),
+                    None => Json::Null,
+                },
+            );
+        out.set("sources", sources);
+
+        let mut available = Json::obj();
+        available
+            .set("imu", Json::Bool(owned.available.imu))
+            .set("legged", Json::Bool(owned.available.legged))
+            .set(
+                "people_detection",
+                Json::Bool(owned.available.people_detection),
+            );
+        out.set("available", available);
+
+        // Named absences, never zeros. Each is a field the kernel's `OperatorProfile` accepts and a
+        // guard reads, with nothing on this robot able to deliver one.
+        out.set(
+            "unmeasured",
+            Json::Arr(vec![
+                Json::from(
+                    "profile.proximity — §11's desired state carries no such field, so the \
+                     `proximity` guard cannot run on this edition however the body is described",
+                ),
+                Json::from(
+                    "profile.self_collision_margin_m — the same, so two of this robot's own bodies \
+                     must meet before the `self_collision` guard holds",
+                ),
+                Json::from(
+                    "available.people_detection — §5 declares nine sensing modalities and none of \
+                     them is a person detector",
+                ),
+            ]),
+        );
+
+        out.set(
+            "tier_source",
+            Json::from(
+                "assumed. Nothing on this robot decides its tier: §15 awards one from conformance \
+                 evidence and §11 would deliver it in desired state, and neither path is written. \
+                 Resolved at the floor, which claims least — and the ceilings above are identical \
+                 at all three tiers, so what the assumption decides is the enforcement mode and \
+                 two notices rather than a number.",
+            ),
+        );
+        // The one thing an operator would otherwise have to derive from two fields. `envelope` is
+        // in `active_guards` on every robot — it has no missing input — and with an empty
+        // `per_channel` it has nothing to compare a joint command against, because §6.3 says a
+        // joint's ceiling comes from the transport plan and this robot has none in force. Reading
+        // "active" as "enforcing a ceiling" is the wrong reading and it is the natural one.
+        if limits.per_channel.is_empty() {
+            out.set(
+                "per_channel_note",
+                Json::from(
+                    "No per-channel ceiling is in force. The `envelope` guard is active and \
+                     has nothing to clamp a joint command against: §6.3 hands a joint's \
+                     ceiling to the kernel from the transport plan, and a plan belongs to a \
+                     package (`?package=`). The whole-body figures above are not applied per \
+                     channel, because nothing at this layer knows whether a channel carries \
+                     radians per second or newton-metres.",
+                ),
+            );
+        }
+        out.set("enforced", Json::Bool(false));
+        out.set(
+            "enforced_note",
+            Json::from(
+                "These are the limits the Safety Kernel would enforce, composed by the same \
+                 `resolve_limits` a control loop would call. Nothing enforces them here: §33.1 \
+                 keeps this daemon off the actuator path and no policy runtime exists to carry a \
+                 command as far as a guard (§73).",
+            ),
+        );
+        out
+    })
+}
+
+/// The set, for a terminal (§64).
+pub fn to_lines(owned: &Owned) -> Vec<String> {
+    owned.with_resolved(|limits, _| {
+        let number = |value: Option<f64>| match value {
+            Some(value) => format!("{value}"),
+            None => "—".to_string(),
+        };
+        let mut lines = vec![
+            format!(
+                "limits: resolved at `{}` ({}), and enforced by nothing on this edition",
+                limits.tier.as_str(),
+                limits.enforcement.as_str()
+            ),
+            format!(
+                "  joint velocity {} rad/s · torque {} Nm · base {} m/s · jerk {}",
+                number(limits.joint_velocity_max_rad_s),
+                number(limits.joint_torque_max_nm),
+                number(limits.base_velocity_max_m_s),
+                number(limits.max_delta_per_cycle),
+            ),
+            format!(
+                "  source: {}",
+                limits
+                    .source
+                    .unwrap_or("none cited — a safety limit without provenance is a rumour"),
+            ),
+        ];
+        let active: Vec<&str> = limits.active_guards.iter().map(|g| g.as_str()).collect();
+        lines.push(format!(
+            "  {} of 8 guards would run: {}",
+            active.len(),
+            if active.is_empty() {
+                "none".to_string()
+            } else {
+                active.join(", ")
+            }
+        ));
+        for entry in limits.unavailable_guards.iter() {
+            let missing: Vec<&str> = entry.missing.iter().copied().collect();
+            lines.push(format!(
+                "    {:<16} needs {}",
+                entry.guard.as_str(),
+                missing.join(", ")
+            ));
+        }
+        for notice in limits.notices.iter() {
+            lines.push(format!(
+                "  ! {}: {}",
+                notice.code.as_str(),
+                skynet_contracts::safety::notice_message(notice, owned.profile_name())
+            ));
+        }
+        lines
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An arm that declares an envelope, a jointed frame graph with two collision bodies, and an
+    /// IMU. Enough for six of the eight guards to have something to say.
+    const ARM: &str = r#"{
+        "robot_slug": "bench-arm",
+        "base": "fixed",
+        "dof": 1,
+        "envelope": { "joint_velocity_max_rad_s": 1.0, "joint_torque_max_nm": 80,
+                      "watchdog_ms": 100, "source": "vendor datasheet rev C" },
+        "sensors": [{"name": "torso_imu", "modality": "imu"},
+                    {"name": "head_cam", "modality": "rgb"}],
+        "joints": [{"name": "shoulder", "type": "revolute", "control_modes": ["position"]}],
+        "frames": {
+            "root": "base_link",
+            "convention": "rep103",
+            "nodes": [
+                {"name": "base_link", "parent": null, "kind": "root", "collision": true,
+                 "collision_shape": {"kind": "capsule", "radius_m": 0.1, "length_m": 0.2},
+                 "translation": [0, 0, 0], "rotation": [0, 0, 0, 1], "source": "descriptor"},
+                {"name": "tool0", "parent": "base_link", "kind": "dynamic",
+                 "joint": "shoulder", "joint_type": "revolute", "axis": [0, 1, 0],
+                 "translation": [0, 0, 0.1], "rotation": [0, 0, 0, 1],
+                 "source": "descriptor", "collision": true,
+                 "collision_shape": {"kind": "capsule", "radius_m": 0.05, "length_m": 0.3}}
+            ]
+        }
+    }"#;
+
+    /// A profile that narrows two ceilings and surveys a cell around `tool0`.
+    const PROFILE: &str = r#"{
+        "name": "site-a",
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "limits": { "joint_velocity_max_rad_s": 0.5, "max_delta_per_cycle": 0.1 },
+        "cell": {
+            "name": "bay-3",
+            "facts": { "door_closed": true },
+            "allowed": [{ "frame": "tool0",
+                          "shape": { "kind": "box", "min": [-1, -1, 0], "max": [1, 1, 2] } }]
+        }
+    }"#;
+
+    struct Bench {
+        root: std::path::PathBuf,
+    }
+
+    impl Bench {
+        fn new(label: &str) -> Bench {
+            let root =
+                std::env::temp_dir().join(format!("skynetd-limits-{}-{label}", std::process::id()));
+            std::fs::remove_dir_all(&root).ok();
+            let bench = Bench { root };
+            std::fs::create_dir_all(bench.layout().state()).unwrap();
+            bench
+        }
+
+        fn layout(&self) -> Layout {
+            Layout::new(&self.root)
+        }
+
+        fn describe(&self, document: &str) -> &Bench {
+            std::fs::write(self.layout().embodiment(), document).unwrap();
+            self
+        }
+
+        fn profile(&self, document: &str) -> &Bench {
+            std::fs::create_dir_all(self.layout().profiles()).unwrap();
+            std::fs::write(self.layout().active_profile(), document).unwrap();
+            self
+        }
+
+        fn resolve(&self, tier: Tier) -> Owned {
+            let layout = self.layout();
+            read(&layout, &crate::embodiment::load(&layout), tier)
+        }
+    }
+
+    impl Drop for Bench {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.root).ok();
+        }
+    }
+
+    fn guards(owned: &Owned) -> (Vec<String>, Vec<String>) {
+        owned.with_resolved(|limits, _| {
+            (
+                limits
+                    .active_guards
+                    .iter()
+                    .map(|guard| guard.as_str().to_string())
+                    .collect(),
+                limits
+                    .unavailable_guards
+                    .iter()
+                    .map(|entry| entry.guard.as_str().to_string())
+                    .collect(),
+            )
+        })
+    }
+
+    fn notices(owned: &Owned) -> Vec<String> {
+        owned.with_resolved(|limits, _| {
+            limits
+                .notices
+                .iter()
+                .map(|notice| notice.code.as_str().to_string())
+                .collect()
+        })
+    }
+
+    /// The claim the whole module rests on, checked rather than believed.
+    ///
+    /// This robot's tier is an assumption (§15 awards one and nothing here does), and the
+    /// assumption is only defensible if it decides nothing about the numbers. So: resolve the same
+    /// machine three times and assert that every ceiling, every active guard and every unavailable
+    /// guard is identical, and that exactly two notices move.
+    ///
+    /// If this ever fails, `ROBOT_TIER` has stopped being a label on a report and become an input
+    /// to a safety-relevant value — which is the moment the assumption has to be replaced by an
+    /// awarded tier rather than defended.
+    #[test]
+    fn the_ceilings_do_not_depend_on_the_tier_and_only_the_enforcement_moves() {
+        let bench = Bench::new("tier-invariance");
+        bench.describe(ARM).profile(PROFILE);
+
+        let shape = |tier: Tier| {
+            bench.resolve(tier).with_resolved(|limits, _| {
+                (
+                    limits.joint_velocity_max_rad_s,
+                    limits.joint_torque_max_nm,
+                    limits.base_velocity_max_m_s,
+                    limits.max_delta_per_cycle,
+                    limits
+                        .active_guards
+                        .iter()
+                        .map(|guard| guard.as_str())
+                        .collect::<Vec<_>>(),
+                    limits
+                        .unavailable_guards
+                        .iter()
+                        .map(|entry| entry.guard.as_str())
+                        .collect::<Vec<_>>(),
+                )
+            })
+        };
+        assert_eq!(shape(Tier::Guest), shape(Tier::Host));
+        assert_eq!(shape(Tier::Host), shape(Tier::Certified));
+
+        // And the two things that do move, so this is not asserting that the tier is inert.
+        let codes = |tier: Tier| notices(&bench.resolve(tier));
+        assert!(codes(Tier::Guest).contains(&"advisory_only".to_string()));
+        assert!(!codes(Tier::Host).contains(&"advisory_only".to_string()));
+        assert!(codes(Tier::Host).contains(&"no_independent_stop".to_string()));
+        assert!(!codes(Tier::Certified).contains(&"no_independent_stop".to_string()));
+    }
+
+    /// A robot nobody has described has no ceilings, and says so rather than having none quietly.
+    #[test]
+    fn an_undescribed_body_resolves_to_no_ceilings_and_a_notice_saying_why() {
+        let bench = Bench::new("bare");
+        let owned = bench.resolve(ROBOT_TIER);
+        owned.with_resolved(|limits, envelope| {
+            assert!(limits.joint_velocity_max_rad_s.is_none());
+            assert!(limits.source.is_none());
+            assert!(envelope.is_none());
+        });
+        assert!(notices(&owned).contains(&"no_envelope".to_string()));
+
+        let document = to_json(&owned);
+        assert_eq!(
+            document
+                .get("sources")
+                .and_then(|s| s.get("envelope"))
+                .and_then(Json::as_bool),
+            Some(false)
+        );
+        // Not enforced, and the route says so on every answer rather than in a footnote nobody
+        // reads: these are limits nothing on this edition applies.
+        assert_eq!(document.get("enforced"), Some(&Json::Bool(false)));
+    }
+
+    /// §55.2's volumes reach the guard that reads them, which is the whole of this session's
+    /// second half. Before it, `cell_workspace_layer` was computed and shown to a human.
+    #[test]
+    fn the_cells_volumes_make_the_workspace_guard_active() {
+        let bench = Bench::new("cell-workspace");
+        bench.describe(ARM);
+        let (_, unavailable) = guards(&bench.resolve(ROBOT_TIER));
+        assert!(
+            unavailable.contains(&"workspace".to_string()),
+            "with no profile there are no volumes: {unavailable:?}"
+        );
+
+        bench.profile(PROFILE);
+        let (active, _) = guards(&bench.resolve(ROBOT_TIER));
+        assert!(
+            active.contains(&"workspace".to_string()),
+            "a surveyed cell whose frame the graph reaches: {active:?}"
+        );
+    }
+
+    /// §44.5, from this module's side: a cell naming a frame the body does not have leaves the
+    /// guard unavailable **with the frame named**, rather than silently guarding nothing.
+    #[test]
+    fn a_cell_naming_a_frame_the_body_does_not_have_names_it() {
+        let bench = Bench::new("cell-dangling");
+        bench
+            .describe(ARM)
+            .profile(&PROFILE.replace(r#""frame": "tool0""#, r#""frame": "gripper""#));
+
+        let missing = bench.resolve(ROBOT_TIER).with_resolved(|limits, _| {
+            limits
+                .unavailable_guards
+                .iter()
+                .find(|entry| entry.guard.as_str() == "workspace")
+                .map(|entry| entry.missing.iter().copied().collect::<Vec<_>>().join(", "))
+        });
+        assert_eq!(missing.as_deref(), Some("gripper"));
+    }
+
+    /// §38.2 only ever narrows, and the attempt to widen is recorded before it is discarded.
+    #[test]
+    fn a_profile_narrows_and_a_widening_is_recorded_then_discarded() {
+        let bench = Bench::new("narrowing");
+        bench.describe(ARM).profile(PROFILE);
+        bench.resolve(ROBOT_TIER).with_resolved(|limits, _| {
+            assert_eq!(limits.joint_velocity_max_rad_s, Some(0.5), "the profile's");
+            assert_eq!(limits.joint_torque_max_nm, Some(80.0), "the envelope's");
+        });
+
+        bench.profile(&PROFILE.replace("0.5", "9.0"));
+        let owned = bench.resolve(ROBOT_TIER);
+        owned.with_resolved(|limits, _| {
+            assert_eq!(
+                limits.joint_velocity_max_rad_s,
+                Some(1.0),
+                "a profile cannot raise the envelope's ceiling"
+            );
+        });
+        assert!(notices(&owned).contains(&"profile_widened".to_string()));
+    }
+
+    /// The three inputs with no source, and the guards that report them.
+    ///
+    /// A camera is not a person detector, so `proximity` is unavailable on a body that has one —
+    /// and the reason names the sensor rather than the profile, because the profile field has no
+    /// delivery path either and naming only that would send somebody to fix the wrong thing.
+    #[test]
+    fn a_camera_is_not_a_person_detector() {
+        let bench = Bench::new("proximity");
+        bench.describe(ARM).profile(PROFILE);
+        let owned = bench.resolve(ROBOT_TIER);
+        assert!(!owned.available.people_detection);
+        assert!(owned.available.imu, "the descriptor declares one");
+
+        let missing = owned.with_resolved(|limits, _| {
+            limits
+                .unavailable_guards
+                .iter()
+                .find(|entry| entry.guard.as_str() == "proximity")
+                .map(|entry| entry.missing.iter().copied().collect::<Vec<_>>().join(", "))
+        });
+        assert_eq!(missing.as_deref(), Some("profile.proximity"));
+
+        let document = to_json(&owned);
+        assert_eq!(document.arr_or_empty("unmeasured").len(), 3);
+    }
+
+    /// `balance` is not applicable to a fixed base, and the wording says which — so nobody reads a
+    /// shape difference as a defect (§7.2).
+    #[test]
+    fn a_fixed_base_is_not_a_balance_failure() {
+        let bench = Bench::new("balance");
+        bench.describe(ARM);
+        let missing = bench.resolve(ROBOT_TIER).with_resolved(|limits, _| {
+            limits
+                .unavailable_guards
+                .iter()
+                .find(|entry| entry.guard.as_str() == "balance")
+                .map(|entry| entry.missing.iter().copied().collect::<Vec<_>>().join(", "))
+        });
+        assert!(
+            missing
+                .as_deref()
+                .is_some_and(|m| m.contains("not applicable")),
+            "{missing:?}"
+        );
+    }
+
+    /// §6.3's hand-off, and the rule that makes it safe to fold in whichever package is named: a
+    /// clamp can only narrow.
+    #[test]
+    fn a_transport_clamp_narrows_and_never_widens() {
+        let bench = Bench::new("clamp");
+        bench.describe(ARM);
+        let clamp = PlanClamp {
+            joint_velocity_max_rad_s: Some(9.0),
+            joint_torque_max_nm: Some(10.0),
+            base_velocity_max_m_s: None,
+            min_control_hz: Some(50.0),
+            // Deliberately out of order: the plan is a document with an order of its own and the
+            // kernel's interface asks for sorted.
+            per_channel: vec![("wrist".to_string(), 0.2), ("elbow".to_string(), 0.4)],
+            source: Some("plan".to_string()),
+        };
+        let owned = bench.resolve(ROBOT_TIER).with_package("acme/walk", clamp);
+        owned.with_resolved(|limits, _| {
+            assert_eq!(limits.joint_velocity_max_rad_s, Some(1.0), "the envelope's");
+            assert_eq!(limits.joint_torque_max_nm, Some(10.0), "the plan's");
+            assert_eq!(limits.min_control_hz, Some(50.0));
+            assert_eq!(
+                limits.per_channel,
+                &[("elbow", 0.4), ("wrist", 0.2)],
+                "sorted by name, as the interface asks"
+            );
+            assert_eq!(limits.ceiling_for("wrist"), Some(0.2));
+        });
+        assert_eq!(
+            to_json(&owned)
+                .get("sources")
+                .and_then(|s| s.get("transport_of"))
+                .and_then(Json::as_str),
+            Some("acme/walk")
+        );
+    }
+
+    /// The terminal rendering names what each unavailable guard is waiting for, so the output is a
+    /// list of things to go and fix rather than a list of things that are wrong.
+    #[test]
+    fn the_terminal_form_names_what_each_missing_guard_needs() {
+        let bench = Bench::new("lines");
+        bench.describe(ARM).profile(PROFILE);
+        let lines = to_lines(&bench.resolve(ROBOT_TIER)).join("\n");
+        assert!(lines.contains("guest"), "{lines}");
+        assert!(lines.contains("vendor datasheet rev C"), "{lines}");
+        assert!(lines.contains("proximity"), "{lines}");
+        assert!(lines.contains("guards would run"), "{lines}");
+    }
+}
