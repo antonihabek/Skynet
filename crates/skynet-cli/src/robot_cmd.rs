@@ -876,6 +876,25 @@ fn bytes(count: f64) -> String {
 /// The phase and the reason on the same line, because neither is enough alone: `terminal` says it
 /// is over and `lease_denied` says whether to grant a token, stop a package, or call the publisher.
 fn print_skills(document: &Json) {
+    // §54.2's omissions, before the invocations rather than after. A refusal names a *path* and
+    // this is why that path is absent — an operator reading "refused by: robot.tool_temperature >
+    // 40" and then a line saying the sensor reported NaN has the whole answer; the same two lines
+    // in the other order is a puzzle.
+    let omissions = document.str_arr("context_omissions");
+    if !omissions.is_empty() {
+        println!(
+            "{}",
+            term::warn(&format!(
+                "{} fact(s) are missing from every precondition context on this robot (§54.2):",
+                omissions.len()
+            ))
+        );
+        for line in &omissions {
+            println!("  {}", term::dim(line));
+        }
+        println!();
+    }
+
     let rows = document.arr_or_empty("invocations");
     if rows.is_empty() {
         println!("Nothing has been invoked.");

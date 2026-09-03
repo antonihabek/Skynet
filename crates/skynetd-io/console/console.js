@@ -1255,6 +1255,23 @@ function renderSkills(feed) {
     body.appendChild(el('p', 'note', feed.detail || 'no answer yet'))
     return
   }
+  // §54.2's omissions, drawn whether or not anything has been invoked — a robot whose sensors are
+  // not reporting is exactly the robot on which nothing will start, and a panel that hid the reason
+  // behind an empty invocation list would answer "nothing has been invoked" to the question "why".
+  const omissions = feed.value.context_omissions || []
+  if (omissions.length > 0) {
+    const note = el('p', 'note')
+    note.appendChild(el('strong', null,
+      omissions.length + ' fact(s) are missing from every precondition context (\u00a754.2). '))
+    note.appendChild(document.createTextNode(
+      'A precondition naming one of these is refused with the path, which is the question rather ' +
+      'than the answer:'))
+    body.appendChild(note)
+    const list = el('ul', 'note')
+    for (const line of omissions) list.appendChild(el('li', null, line))
+    body.appendChild(list)
+  }
+
   const list = feed.value.invocations || []
   if (list.length === 0) {
     // §32.3: an empty state says what is absent. Nothing has been invoked is a fact, and it is not

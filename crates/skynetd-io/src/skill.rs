@@ -456,6 +456,18 @@ fn str_list(values: &[String]) -> Json {
 pub struct Runtime {
     invocations: Vec<Invocation>,
     next: u64,
+    /// §54.2's context, in the parts of it this robot could not build.
+    ///
+    /// Refreshed every pass rather than remembered, because both entries are facts about the robot
+    /// *now*: a sensor that resumes reporting a finite number stops being unreadable, and a
+    /// descriptor somebody replaced changes which names carry a dot. A list that persisted would
+    /// tell an operator to chase a sensor that has since recovered.
+    ///
+    /// Not per invocation, deliberately. `live_context` is built per package because
+    /// `skill.grants` differs between two skills on one robot; `unaddressable` and `unreadable`
+    /// come from the robot's own facts and are identical for all of them, so hanging a copy on
+    /// each invocation would be the same list rendered *n* times.
+    omissions: Vec<String>,
 }
 
 /// How many terminal invocations are kept for `GET /skills` before the oldest is dropped.
@@ -747,6 +759,22 @@ impl Runtime {
             .count()
             <= 1;
 
+        // §54.2's omissions, refreshed for the pass. `explain_omissions` documents its own
+        // consumer — *"what a console shows about a context it could not fully build"* — and until
+        // this line there was no console showing it: `advance_one` built a context, read
+        // `built.context` for the preconditions and dropped `unaddressable` and `unreadable` on the
+        // floor.
+        //
+        // It matters because §54.2's refusal names a **path**, which is the question and not the
+        // answer. An operator reading *"refused by: robot.tool_temperature > 40"* has no way to
+        // learn that the sensor reported NaN and the fact is therefore absent rather than false —
+        // and "absent" and "false" send them to two different places.
+        //
+        // Built from `cycle.inputs` without a package's grants, which is right for what it is used
+        // for: `skill.grants` is always addressable and always readable, so it can contribute
+        // neither entry.
+        self.omissions = skynet_contracts::live::explain_omissions(&live_context(cycle.inputs));
+
         let mut reports = Vec::new();
         for index in 0..self.invocations.len() {
             if self.invocations[index].terminal() {
@@ -756,6 +784,11 @@ impl Runtime {
             reports.push(report);
         }
         reports
+    }
+
+    /// What §54.2 could not put in a context this pass, one sentence each.
+    pub fn omissions(&self) -> &[String] {
+        &self.omissions
     }
 
     fn advance_one(&mut self, index: usize, cycle: &mut Cycle<'_>, solo_running: bool) -> Report {
@@ -1015,6 +1048,11 @@ impl Runtime {
         let mut out = Json::obj();
         out.set("invocations", rows);
         out.set("busy", Json::Bool(self.busy()));
+        // Always present, empty where there is nothing to say. A key that appeared only when
+        // something was wrong would make its absence mean two things — an edition that does not
+        // report omissions, and a robot with none — which is §7.2's rule about the shape rather
+        // than about the value.
+        out.set("context_omissions", str_list(&self.omissions));
         out
     }
 }

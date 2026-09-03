@@ -748,7 +748,13 @@ pub fn admit_package(params: &AdmissionParams) -> AdmissionResult {
         }
     }
 
-    if params.transport_verdict.as_deref() == Some("refused") {
+    // Against the enum's own spelling rather than a literal. §6's verdict is a closed vocabulary
+    // and this is the one place on the platform that compares it as text — the value arrives on the
+    // wire as a string, so it cannot be an enum here, but the *thing it is compared to* can be. A
+    // literal would be the second definition of `refused`, and §78 is what that costs.
+    if params.transport_verdict.as_deref()
+        == Some(crate::transport::TransportVerdict::Refused.as_str())
+    {
         findings.push(PackageFinding {
             code: PackageRejectionCode::TransportRefused,
             severity: Severity::Error,

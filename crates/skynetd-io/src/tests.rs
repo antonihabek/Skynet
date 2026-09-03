@@ -10610,3 +10610,129 @@ mod audio {
         assert!(!skynet_contracts::admission::is_reserved("sensing.audio"));
     }
 }
+
+// ── §54.2's omissions, which nothing had ever shown ──────────────────────────
+//
+// `explain_omissions` documents its own consumer — "what a console shows about a context it could
+// not fully build" — and there was no console showing it. `advance_one` built a context, read
+// `built.context` for the preconditions, and dropped `unaddressable` and `unreadable`.
+//
+// The gap is not cosmetic. §54.2's refusal names a **path**, which is the question; the omission is
+// the answer, and "absent because a sensor reported NaN" and "false" send an operator to two
+// different places.
+//
+// No invocation is needed to exercise it, and that is itself the point: the omissions are facts
+// about the *robot*, identical for every skill on it, which is why they are refreshed per pass and
+// hang off the runtime rather than off an invocation.
+
+mod context_omissions {
+    use skynet_contracts::live::{JointReading, LiveInputs};
+    use skynet_contracts::opstate::OperatingState;
+    use skynetd::lease::LeaseTable;
+
+    /// One pass with nothing invoked, over the joints a test names.
+    fn omissions_for(joints: Vec<JointReading>) -> Vec<String> {
+        let mut runtime = crate::skill::Runtime::new();
+        pass(&mut runtime, joints);
+        runtime.omissions().to_vec()
+    }
+
+    fn pass(runtime: &mut crate::skill::Runtime, joints: Vec<JointReading>) {
+        let inputs = LiveInputs {
+            battery_percent: Some(80.0),
+            operating_state: Some(OperatingState::Running),
+            joints,
+            ..LiveInputs::default()
+        };
+        let running = std::collections::BTreeSet::new();
+        let grants: Vec<(String, String)> = Vec::new();
+        let mut leases = LeaseTable::new();
+        let mut cycle = crate::skill::Cycle {
+            now_ms: 0,
+            inputs: &inputs,
+            robot: OperatingState::Running,
+            interventions_since: None,
+            wall_ms: Some(1_788_307_200_000),
+            running: &running,
+            leases: &mut leases,
+            grants: &grants,
+            power_withheld: None,
+        };
+        runtime.advance_all(&mut cycle);
+    }
+
+    #[test]
+    fn a_joint_reporting_nan_reaches_the_surface_as_a_sentence() {
+        let mut runtime = crate::skill::Runtime::new();
+        pass(
+            &mut runtime,
+            vec![JointReading {
+                name: "shoulder_pitch".to_string(),
+                position: f64::NAN,
+            }],
+        );
+
+        let omissions = runtime.omissions();
+        assert_eq!(omissions.len(), 1, "{omissions:?}");
+        assert!(omissions[0].contains("shoulder_pitch"), "{}", omissions[0]);
+        assert!(omissions[0].contains("did not report a finite value"));
+
+        // And on the document a console reads. Always present, empty where there is nothing to
+        // say, so its absence means "this edition does not report them" and never "there are none".
+        assert_eq!(runtime.to_json().str_arr("context_omissions").len(), 1);
+    }
+
+    #[test]
+    fn a_name_a_path_cannot_address_is_named_too() {
+        // §54.2 addresses members with dots, so a joint whose own name contains one cannot be
+        // written in a precondition at all. Nothing here can be done about it — the body chose the
+        // name — which is exactly why it has to be said out loud rather than silently dropped.
+        let omissions = omissions_for(vec![JointReading {
+            name: "arm.wrist".to_string(),
+            position: 0.5,
+        }]);
+        assert_eq!(omissions.len(), 1);
+        assert!(omissions[0].contains("carries a dot"), "{}", omissions[0]);
+    }
+
+    #[test]
+    fn a_robot_whose_context_is_whole_says_nothing() {
+        // The half that keeps the rule above from becoming noise. A healthy robot must produce an
+        // empty list, or an operator learns to skim the one place this information appears.
+        let mut runtime = crate::skill::Runtime::new();
+        pass(
+            &mut runtime,
+            vec![JointReading {
+                name: "shoulder_pitch".to_string(),
+                position: 0.25,
+            }],
+        );
+        assert!(runtime.omissions().is_empty());
+        assert!(runtime.to_json().str_arr("context_omissions").is_empty());
+    }
+
+    #[test]
+    fn the_list_is_refreshed_rather_than_accumulated() {
+        // Both entries are facts about the robot *now*: a sensor that resumes reporting a finite
+        // number stops being unreadable. A list that persisted would send an operator after a
+        // sensor that has since recovered.
+        let mut runtime = crate::skill::Runtime::new();
+        pass(
+            &mut runtime,
+            vec![JointReading {
+                name: "shoulder_pitch".to_string(),
+                position: f64::NAN,
+            }],
+        );
+        assert_eq!(runtime.omissions().len(), 1);
+
+        pass(
+            &mut runtime,
+            vec![JointReading {
+                name: "shoulder_pitch".to_string(),
+                position: 0.25,
+            }],
+        );
+        assert!(runtime.omissions().is_empty(), "the sensor recovered");
+    }
+}
