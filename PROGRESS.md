@@ -8698,3 +8698,883 @@ counts 44 commands.
 §54.5 gained the sentence that says where each check lives and why there are two, because the
 version that only said "refused at install" is the version that let this sit for six sessions
 looking done.
+
+---
+
+## 2026-09-02 (thirty-fourth) — the suite the last commit left red
+
+`cargo test --workspace` failed on this branch before anything new was written. Two tests, both
+from the previous commit, and neither failure was a regression in the thing the commit was about —
+which is why they shipped: the work was the bundle route, the bundle route passed, and the two
+casualties were somewhere else.
+
+Starting a session on a red suite is starting without a baseline. Nothing built on top of it can be
+said to have broken anything, because everything is already broken.
+
+### The OTA test that had outlived its own subject
+
+`an_os_update_nobody_can_apply_is_reported_rather_than_dropped` asserted `Outcome::Unimplemented`
+with a reason containing "§12". It got a `Failed` naming release `2.0.0`.
+
+Both are the same *behaviour* — the action stays in the plan, the generation does not advance, the
+robot does not report itself up to date — and the reason changed underneath it because §75 wrote
+OTA. The refusal is no longer *"there is no bundle fetcher"*; it is *"nothing on this robot
+describes release `2.0.0`"*, which is a condition of this robot that the next check-in can fix
+rather than a feature nobody has written. `Failed` is the right variant for that and
+`Unimplemented` was the right variant for the other.
+
+The dead arm came with it. `Runtime::apply` still carried
+
+```rust
+#[allow(unreachable_patterns)]
+ActionKind::StageOsImage { .. } | ActionKind::ApplyOsImage { .. } => Outcome::Unimplemented { … }
+```
+
+behind the two arms that now handle both — an `#[allow]` whose only job was to stop the compiler
+saying the code was already dead. Removed, along with the `converge` doc comment that still gave
+*"an OS update while §12 is unwritten"* as its example of an action nobody can apply. §12 is
+written. The example is now the release manifest nobody has sent.
+
+### The cell test that was written against a document neither edition reads
+
+`the_workspace_layer_is_computed_and_says_it_is_not_applied` built its cell with
+
+```json
+{"frame":"base","shape":{"box":{"min":[0,0,0],"max":[2,2,2]}}}
+```
+
+and asserted one volume in the layer. The reader — and the corpus, and the reference edition —
+spell a shape `{"kind":"box","min":…,"max":…}`. So the volume was unreadable, the layer was `null`,
+and the assertion counted zero.
+
+Fixed by writing the document the way both editions read it. But the failure is worth more than the
+fix, because the *route's* answer to a malformed volume had no test at all, and it is an answer with
+two halves that only mean something together:
+
+* **No layer**, not an empty one. An empty layer forbids every frame it names, so a cell whose
+  geometry nobody could parse would refuse to let the robot move, with no volume anywhere to explain
+  why. `cell_workspace_layer` returns `None` and the route renders `null`.
+* **A `volume_shape_invalid` fault naming it.** Without that, `null` is indistinguishable from a
+  cell that draws nothing on purpose — and those are opposite situations. `CellVolume::shape` is an
+  `Option` for precisely this reason, and the comment on it says so; nothing had checked the route
+  honoured it.
+
+`a_volume_whose_shape_cannot_be_read_draws_no_layer_and_is_named` now pins both halves, using the
+same broken document that produced the red test.
+
+### And one warning
+
+`cargo clippy` wanted `skew > 60_000.0 || skew < -60_000.0` folded into
+`!(-60_000.0..=60_000.0).contains(&skew)`. It is the same expression for every number and a
+different one for `NaN`: the range says *not contained* and raises the fault, the two comparisons
+say *neither greater nor less* and do not. The reference edition spells it with two comparisons.
+An edition difference reachable only through a value JSON cannot carry is still an edition
+difference, and the corpus exists to have none — so the comparisons stay, with an `#[allow]` whose
+comment says which of the two readings is load-bearing.
+
+`cargo fmt` had one diff outstanding from the same commit.
+
+### Numbers
+
+Rust: **1221** tests, from 1219 green plus two that were not running and one new. `cargo fmt --all
+--check` and `cargo clippy --workspace --all-targets` clean, the mirrors match, the corpus passes,
+and the golden path counts 45 commands.
+
+### Findings, restated
+
+1–28 as before; 29–35 from the sessions above.
+
+36. **A commit can be green in the thing it was about and red beside it.** Both failures were in
+    subsystems the bundle work never touched — one had been true for however long OTA has been
+    written, one was a test that never passed. The habit that catches it is not a smarter test, it
+    is running the whole suite before writing anything, and treating a red suite as the session's
+    first task rather than as noise to work around. A baseline you did not measure is not a
+    baseline.
+37. **A test written against a document the reader rejects tests nothing, and looks like it tests
+    something.** It asserted a count and got zero, which is the same shape a genuine regression has.
+    The tell was that the fault list — which the route was filling in correctly the whole time —
+    already said `volume_shape_invalid`. When a test fails on a count, read what the code *did* say
+    before assuming it said nothing.
+
+---
+
+## 2026-09-02 (thirty-fifth) — §36, the one row that said "Unwritten"
+
+§73's last column had one entry that was not a gap in something built. Every other row named a
+thing waiting on hardware, or a signature nobody can produce yet, or a panel nobody has drawn.
+§36's said:
+
+> **Unwritten.** `battery` and `temperature_c` are reported absent in every check-in, which is why
+> the health rollup has two permanently unmeasured fields.
+
+Eleven parts of a specification and four subsections of prose, and no code had ever read a word of
+it. `power.safe_state.reachable` has been in the conformance suite since Part II, measuring a
+declared figure against *"the `time_to_safe_state_s` it declares (§36.2)"* — and no descriptor on
+either edition had a `time_to_safe_state_s` to declare. A test with nothing to test, sitting in the
+required set for the host tier, for six parts of a document.
+
+Built as `crates/skynet-contracts/src/power.rs` and `reference/typescript/power.ts`, held together
+by 28 corpus cases and seven frozen vocabularies.
+
+### Five things §36 does not say, and code cannot avoid deciding
+
+This is the part worth recording, because the next person to read §36.1's table will find the
+numbers there and needs to know where they came from.
+
+**1. The band widths.** §36.1 says `low` is "approaching reserve" and `reserve` is "at the reserve
+budget" — a shape, not a number. They are now 2.25 × and 1.25 × the reserve, and both are multiples
+of the **reserve** rather than percentages of the pack, because the reserve is the only energy scale
+the body declares and a percentage means something different on every robot.
+
+The two widths have different arguments. The reserve band is a quarter of a reserve wide so a gauge
+that jitters near the boundary does not chatter between *begin a controlled stop* and *stop
+immediately*, on a robot already mid-ramp. The low band is **one whole reserve** wide because
+`low`'s only behaviour is *a running task may finish and no new one may start* — a warning arriving
+with less than one further safe stop in hand is a warning the robot cannot act on, and the row's
+promise would be one it cannot keep.
+
+**2. A fifth state.** §36.1's four all assume a battery. An arm bolted to a bench and run off mains
+has no state of charge, and forcing it into one of the four either immobilises it or claims a
+headroom nobody measured. `unmetered` grants leases and is listed last rather than under `critical`,
+because it is not a rung of the same ladder.
+
+**3. What a silent gauge is.** Two bodies reach `unmetered` and they are not the same robot: one
+declares no pack, one declares a pack whose gauge stopped answering. The difference is a **fault**
+rather than a state, because it is a fact about whether the number can be believed rather than about
+how much energy is left. And it is deliberately not `critical` — §36.4 overrides the gauge on a
+*positive* reading from the bus, missing evidence is never a positive finding anywhere else in this
+system, and a robot that stopped dead on a failed I²C read would be a robot that stops dead on a
+failed I²C read. It withholds new leases and leaves the running task alone, which is `low`'s
+behaviour reached from the other direction.
+
+**4. How the OS recognises a brownout, which as written it could not.** §36.4 says voltage sag
+arrives as `RHAL_DEGRADED` with a vendor fault code. §24 says a fault code is *"vendor-specific,
+surfaced verbatim to the black box"* — the OS is told never to interpret one. Both sentences cannot
+be honoured by an OS that guesses, and `RHAL_DEGRADED` also covers a dead encoder and a thermal
+fault, so guessing means either stopping a working machine or failing to stop a falling one.
+
+The resolution is `power.brownout_fault_codes`: the vendor who defined the codes names the ones that
+mean sag, and the OS **matches** a number against a list rather than interpreting anything. §24's
+rule survives intact. An empty list is not *this body cannot brown out* — it is *nobody has said*,
+reported as `brownout_undeclarable` at the one moment it matters, with the robot still running,
+because a hole in a vendor's declaration is a reason to say so and not a reason to stop a machine.
+
+**5. How deep §36.3's ladder is cut.** The section gives an order and no schedule. Throttling gives
+up the first three rungs — telemetry, OTA, black box compression — and critical gives up all five.
+The line between three and four is where housekeeping ends: the first three cost the robot nothing
+it was hired to do, and rungs four and five change what it can *do*. `NEVER_SHED` is data rather
+than a comment, so "never the RHAL, the kernel or the control loop" is something a test checks.
+
+"Sustained", for the DEGRADED that §36.3 raises, is thirty seconds — one cycle makes every heavy
+motion a degraded robot, ten minutes makes DEGRADED a state a thermally limited machine never
+reaches while spending its afternoon at the throttle point.
+
+### The reserve is a floor, and it says so
+
+§36.2 computes the reserve from three things: the declared figures, the current payload, and the
+distance to the nearest safe state. **One of the three exists on this platform.** There is no
+payload mass anywhere on the descriptor and no distance-to-safe-state anywhere in an observation.
+
+So the arithmetic is the identity — the reserve *is* `safe_stop_energy_wh` — and `unaccounted` names
+the two missing terms on every robot. A reserve with a non-empty `unaccounted` is reported as a
+**floor**: every missing term can only add energy, so the figure under-estimates, and
+under-estimating is the direction that runs a robot past the point where it can still sit down.
+
+Scaling by a plausible payload factor would have been one line and a number nobody could defend.
+This is the number that decides when a two-metre humanoid stops walking.
+
+### The corpus caught a constant nothing tested
+
+Halfway through, a tamper test: move `RESERVE_BAND` from 1.25 to 1.9 and confirm the corpus fails.
+**It passed.** Then 2.5 — passed. The runner was fine; every fixture sat comfortably inside its
+band, so a constant deciding where `low` becomes `reserve` was not discriminated by a single one of
+the twenty-four vectors. Two editions could have disagreed about it and both reproduced the corpus.
+
+Four boundary cases in watt-hours fixed it — 24.999, 25, 44.999, 45 against a 20 Wh reserve — and
+both constants now fail the corpus when moved. A matching unit test carries the same four readings
+and the reason they exist.
+
+The general form is worth keeping: **a corpus proves an edition reproduces the cases it has, and
+says nothing about the constants no case sits near.** Tampering with each constant and requiring a
+failure is the only check that the vectors discriminate what they appear to. It cost four cases.
+
+### And a mirror run the wrong way
+
+`node tools/check-mirrors.mjs --sync ../RobotOverflow` copies **from** the Hub **into** this
+repository — the script says so plainly — and running it after amending §36 here silently restored
+the unamended copy. Nothing was lost that was not reproducible, and the tell was `git diff` showing
+no change to a file that had just been edited six times.
+
+The rule the script enforces is right and the direction is not guessable from the flag name. The
+sequence that works is: edit here, copy the file across, then `--sync` to re-pin the digests from
+two copies that already agree.
+
+### Numbers
+
+Rust: **1252** tests, up from 1221. Thirty-one new, all in `power`. The corpus is **1008 cases
+across 73 files**, up from 997 across 73 — 28 in `corpus/power/` and seven vocabularies in
+`closed-sets.json`.
+
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets` clean; both mirror checks
+match; the golden path counts 45 commands.
+
+### What §36 still does not have
+
+Named in §73's last column rather than left to be inferred: **nothing on a robot reads a gauge or a
+thermal zone.** The contract decides what a reading means and nothing supplies one, so `battery` and
+`temperature_c` are still absent in every check-in. That is the next session's work and it is
+`skynetd-io`'s, not the contract's.
+
+Two smaller ones, recorded here because they are the kind that survive by not being written down:
+
+* **Readiness has no power check.** `ReadinessSubject` is a registry row with no power fields, and a
+  useful check — *this body declares a pack and no safe-stop energy* — needs to tell that from *this
+  body has no pack*, which the row cannot express today. Adding it means plumbing the profile
+  through the subject and the Hub's mirror.
+* **`power` is not in the Hub's mirror list**, and the reason is now written into
+  `check-contract-mirrors.mjs` beside the other three: nothing on the Hub reads a `power` block, so
+  a mirror would be a copy with no reader. The trigger for changing that is a robot page wanting to
+  say the reserve has no boundary — which is a readiness question, which is the bullet above.
+
+### Findings, restated
+
+1–28 as before; 29–37 from the sessions above.
+
+38. **A conformance test can outlive its subject by years without anybody noticing.**
+    `power.safe_state.reachable` measured a descriptor field that did not exist, in the required set
+    for the host tier, since Part II. Nothing could catch it: the test list is data, the field list
+    is a struct, and no check relates them. The mechanism that would — assert every quantitative
+    test names a field some edition reads — is worth building, and is a session of its own.
+39. **A corpus does not test the constants its cases do not sit near.** Tamper with each and require
+    a failure; the ones that pass are the ones two editions can disagree about while both being
+    green. Cheap to check, and it found one on the first try.
+40. **Two rules in one document can be individually right and jointly unimplementable.** §24 forbids
+    interpreting a vendor fault code; §36.4 requires acting on one meaning of one. Neither is wrong
+    and an implementation must do something. The way out was to move the interpretation to the party
+    that owns the vocabulary — the vendor declares which codes mean sag — which is a third option
+    that only appears once somebody tries to write the code.
+
+---
+
+## 2026-09-02 (thirty-sixth) — the gauge, and the two columns that had never held a number
+
+The last session built §36's contract and left one line in §73:
+
+> Nothing on a robot reads a gauge or a thermal zone, so `battery` and `temperature_c` are still
+> absent in every check-in.
+
+This is that half. `crates/skynetd-io/src/power.rs` reads `/sys/class/power_supply` and
+`/sys/class/thermal`, and the two fields §33.6 has named since the health rollup existed now carry
+numbers on a machine that has them.
+
+They had never held one. Not "sometimes null" — the rollup contained `battery: Measured::none()` as
+a **literal**, so a check-in from a robot with a full battery said exactly what a check-in from a
+robot with no battery said. There was no code path that could have distinguished them.
+
+### Which supply is the pack is a question; which zone is hottest is not
+
+Every `/sys/class/power_supply` entry declares its own `type`, so the batteries are *found* rather
+than guessed at. What is left is the real ambiguity: a machine with two batteries has not said which
+one drives the legs. Summing them would be a guess about whether the second is a backup cell, a tool
+battery or half of one pack — and §36.2's reserve is compared against the answer.
+
+So: no battery reads nothing; one battery is the pack; more than one reads nothing and names them,
+until `state/power.json` says which. That is exactly §34.3's shape for bearers, and it is here for
+§34.3's reason — the parts a machine can measure are measured, the parts it cannot are declared, and
+every surface says which is which.
+
+A declaration naming a supply this machine does not have reads **nothing**, rather than falling back
+to whatever is present. The operator named a pack; substituting another is the OS deciding which
+battery the reserve is about.
+
+The thermal zones need no declaration at all, and the asymmetry is worth stating rather than
+noticing: the maximum over every zone the kernel exposes *is* "the hottest thermal zone", whatever
+each zone happens to measure. There is no question there to get wrong.
+
+### The conversion that was not done
+
+A gauge exposing `charge_now` and `voltage_now` but no `energy_now` can be turned into watt-hours by
+multiplying them, and every desktop battery applet does. It is not done here.
+
+The product is an energy computed from an *instantaneous* voltage, and voltage sags under load — so
+the figure under-reads exactly when the robot is working hardest, which is exactly when §36.1's
+bands are being consulted. A named gap beats a number whose error moves with the thing it is
+measuring, and the contract already has the fault for it (`capacity_undeclared`) and the other path
+(a fraction plus a declared `pack_capacity_wh`).
+
+### One health source, because two would eventually disagree
+
+The first wiring passed the reading into `checkin::health` as a fourth argument, leaving
+`Daemon::health` — which `GET /health` renders — still returning `battery: None`. That would have
+been a robot showing one battery figure on its own console and sending a different one to its Hub,
+which is the shape of divergence this repository spends most of its checks on.
+
+Rewritten so `Daemon::health` takes the reading and fills the two fields, and `checkin::health` reads
+them back out of the same struct. One source, one number, two renderings. `checkin::health` also
+lost a parameter on the way: its three measured fields are all taken in one pass, so there is one
+measurement instant and one `age_ms`, and `dated()` is that rule written once instead of three
+`match`es.
+
+### `throttled_for_ms` is the one thing §36 remembers
+
+A duration is not observable in a single reading. The instant the temperature first crossed the
+threshold lives on the daemon beside `counting`, and for `counting`'s reason: a throttle window that
+survived a reboot would be a robot reporting an hour of continuous throttling across a power cycle
+it spent switched off.
+
+It clears the moment the temperature drops back under, which makes "sustained" mean *continuously*
+rather than *cumulatively* — a body that crosses the line for a second every minute is not a body
+that has been throttling for an hour, and §36.3's DEGRADED is about the second robot.
+
+And the subtraction is `saturating_sub`, because §35.1 keeps two clocks and corrects them
+independently: a `now_ms` behind the instant the window opened is a corrected clock, and the
+alternative to zero is a wrapped `u64` reporting eighteen quintillion milliseconds of throttling.
+
+### `GET /power`, `skynet power`, and a note that says what the word cannot mean
+
+The route reports the contract's assessment and the reader's notes **apart**, and that is not
+tidiness: a fault is *§36 has a problem with what it was given* and a note is *this daemon could not
+read a number*. Different remedies, usually different people, and one merged list is how an operator
+learns to skim both.
+
+It also carries a `brownout_note`, because §36.4's override has no input on this edition — the RHAL
+flag and its fault code reach the daemon through a path §33.1 denies it. A robot can therefore report
+`normal` while its bus is sagging, so the route says in as many words that `normal` here means *the
+gauge agrees*, not *the bus does*. A word that cannot carry a claim should not be left looking like
+it does.
+
+The console needed no change at all, which is the pleasant confirmation that the wiring landed in the
+right place: it has rendered `Battery` and `Temperature` from `GET /health` since the panel was
+written, and both had been showing "unmeasured" for as long as the panel had existed.
+
+### A checker that would have admitted the false name it exists to catch
+
+`tools/check-golden-path.mjs` builds the CLI's command table by harvesting quoted literals followed
+by a `|` or a `=>`. Adding one command took the count from 45 to **48**, because `print_power`
+contained
+
+```rust
+match state { "critical" | "reserve" => term::bold(&headline), _ => headline }
+```
+
+and the harvester read the match arm as two more commands. Rewriting it as `state == "critical" ||
+…` took it to 47 — the regex reads the first `|` of a `||` as an alternation, so a boolean is a
+match arm as far as it is concerned.
+
+Both halves are now fixed: the CLI uses a slice (`["critical", "reserve"].contains(&state)`), and
+the regex guards its `\|` against `||`. The count is 46, which is 45 plus `power`.
+
+The cost of leaving it was small and pointed the wrong way: the check exists to catch a document
+writing a `skynet` command that does not exist, and every stray literal it absorbs is one more false
+name it would have waved through.
+
+### Numbers
+
+Rust: **1279** tests, up from 1252. Twenty-seven new — nineteen in `skynetd-io::power`, six on the
+route, two on the check-in. `cargo fmt --all --check` and `cargo clippy --workspace --all-targets`
+clean; the corpus regenerates byte-identically; both mirrors match; the golden path counts 46
+commands.
+
+The suite's own fixture now points its sensors at a directory that does not exist, and that is
+load-bearing: a daemon left on the real `/sys` would read *the build machine's* battery, so the same
+fixture would produce different check-in documents on a laptop and in a container, and the suite
+would pass on one and fail on the other for a reason nothing in it mentions.
+
+### What §36 still does not have
+
+* **The brownout override has no input**, as above. It is the same gap §48.2's self-test has, and it
+  closes when the kernel channel does.
+* **Nothing acts on the assessment.** `grants_new_leases` is computed, reported and read by nobody:
+  §25.2's lease table does not consult it, so a robot at `reserve` will still be handed a new task.
+  That is the next piece and it is the one with teeth — everything up to here is reporting.
+
+### Findings, restated
+
+1–28 as before; 29–40 from the sessions above.
+
+41. **A field that is a literal `None` is not an unmeasured field, it is an unwritten one, and they
+    render identically.** `battery: Measured::none()` sat in the rollup for as long as the rollup
+    existed, and every surface downstream correctly reported "unmeasured" — the console, the
+    check-in, the fleet page. The whole stack was honest and the bottom of it was a constant. The
+    tell is a `None` with no `if` above it.
+42. **Wiring a new reading into two consumers is where the divergence gets built.** The first
+    attempt filled the check-in and left `GET /health` on the old literal, which would have been a
+    robot with two battery figures. The habit that catches it: after adding a source, grep for every
+    consumer of the *field*, not of the function you just changed.
+43. **A check that harvests source text will absorb whatever the source starts saying.** One `match`
+    on two strings put two false command names into the set of things `skynet <x>` may be, silently,
+    in the check whose only job is to reject a `skynet <x>` that does not exist. Nothing failed. The
+    tell was a count that moved by three when one command was added — which is only visible if you
+    read the number the tool prints, rather than the word `ok` beside it.
+
+---
+
+## 2026-09-02 (thirty-seventh) — the row that was a rule nothing obeyed
+
+§36.1's table has four rows and one of them contains an imperative:
+
+> `low` — Approaching reserve — **No new task leases granted**; running task may finish; operator
+> notified
+
+The last two sessions built the state that computes it and the sensors that feed it.
+`Assessment::grants_new_leases()` has been returning `false` on a robot below its reserve since
+yesterday, and **nothing called it.** §25.2's lease table granted whatever it was asked for, on any
+battery, and the row was a paragraph.
+
+This session is the call site.
+
+### Where the check goes decides whether the *other* half of the row works
+
+§54.4's `acquiring` stage, before §25.2's table is consulted. Three consequences, and two of them
+are the reason it is there rather than anywhere else:
+
+* **The table is not touched at all.** A refusal that had already taken two of three tokens would be
+  holding an arm for an invocation that is about to abort — the leaked-lease symptom
+  `release_all` exists to prevent, arriving through the front door.
+* **A running task finishes.** A skill past `acquiring` holds its leases and is not disturbed when
+  the battery falls. That is §36.1's row read exactly, and it is not a separate rule: it falls out of
+  gating the *acquisition* rather than the *holding*. A policy dropped mid-motion is the failure a
+  controlled stop exists to avoid.
+* **It outranks a held token.** Both refusals can be true at once, and the robot-wide one is what an
+  operator needs first. It is also the only order that works: the runtime does not ask the table when
+  power withholds, so `leases` reads `pending`, and the other order would pin the invocation in
+  `acquiring` until its deadline expired.
+
+Refused rather than parked, for the same reason. An invocation waiting for somebody to bring a
+charger burns §54.4's timeout and then aborts with `timeout` on it — the wrong reason, on the wrong
+screen, for the wrong person.
+
+### One field, not two, and its default is the permissive one
+
+`Progress.power_withheld: Option<String>` — the sentence, or nothing. A boolean and a reason beside
+it are two fields that must agree, which is two fields that eventually do not; §27's
+`Conditions::stop: Option<StopCause>` is the same shape for the same reason.
+
+The sentence is composed by the *runtime* rather than by the contract, because the runtime is where
+§36's assessment is in hand — and the two ways a robot withholds are different sentences:
+
+* below its reserve, which wants a charger;
+* a declared pack whose gauge answers nothing, which wants a look at the machine.
+
+Both withhold. A shared sentence sends half the operators to the wrong errand, which is the whole
+argument §64 makes.
+
+The default is `None` — permissive — and that is unlike almost everything else in this crate, so it
+is written down where the field is: **it is not a guess.** §36's own answer for a body nobody has
+observed is `unmetered`, which grants leases. `None` is what the power contract computes, not an
+assumption made in its absence. A default of "withholding" would have refused every skill on every
+robot with no power subsystem wired up, silently, which is every development host and every test in
+this suite.
+
+### `power_withheld` is its own lifecycle reason
+
+Not a second `lease_denied`. That enumeration now has nineteen entries and its own doc comment says
+why: *"only the reason tells an operator whether to call the publisher, look at the cell, find the
+package holding the arm, or read the black box."* Add **put the robot on a charger** to that list.
+Three errands behind one word is two operators sent to the wrong place.
+
+### The suite's own completeness test found it before I did
+
+`every_lifecycle_reason_is_produced_by_some_evidence` failed on the first build after the variant
+was added — *"no evidence produces `power_withheld`"* — because it walks `LIFECYCLE_REASONS` and
+asserts each is reachable from some `Progress`. A vocabulary entry no rule produces is a wire value
+nothing can ever send, and this repository has one test that makes that impossible to add by
+accident.
+
+It is worth naming the shape: the test is not about the new reason, it is about the *set*. Written
+once, it catches every future addition. That is a different and better thing from a test per
+variant.
+
+### Numbers
+
+Rust: **1285** tests, up from 1279. Six new — four in the contract, two through the runtime. The
+corpus is **1011 cases across 73 files**, up from 1008: three lifecycle vectors (the refusal, the
+order against a held token, and an empty sentence that is not a refusal) and the
+`lifecycle_reasons` vocabulary, which now has nineteen.
+
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets`, both mirrors, the corpus and
+the golden path all clean.
+
+### What §36 still does not have
+
+One thing, and it is the same shape as the other outstanding one:
+
+* **Nothing performs a controlled stop.** §36.1's `reserve` and `critical` rows ask for one — "a
+  controlled stop, then a safe state" — and `requires_safe_state` and `stops_immediately` are
+  computed, reported on `GET /power`, and read by nobody. The stop path is the kernel's (§33.1), and
+  this is the third entry in §73's last column waiting on the same channel as §36.4's override and
+  five of §48.2's eight POST checks.
+
+That is the honest boundary of what this edition can do about power: it can **refuse**, because a
+refusal is a decision not to start something, and this daemon is what starts things. It cannot
+**stop**, because stopping is the kernel's, and pretending otherwise is exactly the display §1 says
+the OS must refuse to show.
+
+### Findings, restated
+
+1–28 as before; 29–43 from the sessions above.
+
+44. **A computed boolean nobody reads is not enforcement, and it looks exactly like enforcement.**
+    `grants_new_leases()` was correct, tested, corpus-frozen and rendered on a route for a whole
+    session, and a robot at `reserve` would still have been handed a new task. The tell is a
+    predicate with no call site outside its own tests — the same shape `read_calls`, `bundle` and
+    `SkillManifest.task` had, which is four times in this repository now.
+45. **Where a check goes decides which half of a two-clause rule you get for free.** §36.1's row
+    says *no new leases* and *running task may finish*. Gating the acquisition gives both; gating
+    the holding gives the first and breaks the second; a check in the daemon loop would have given
+    neither cleanly. The second clause was never written as code, and it is tested.
+
+---
+
+## 2026-09-02 (thirty-eighth) — the sweep, and the install stage that never ran
+
+Finding 44, from an hour ago: *"a computed boolean nobody reads is not enforcement, and it looks
+exactly like enforcement."* The log has now recorded that shape four times — `read_calls`,
+`skynet_contracts::bundle`, `SkillManifest.task`, and `grants_new_leases` — each found by accident,
+each after months. So the first thing this session did was look for the rest of them mechanically.
+
+### The sweep
+
+Every `pub fn` in `skynet-contracts`, minus the corpus wire-shape helpers, against every reference
+to it anywhere in the workspace outside its own module, its own tests and the corpus runner.
+
+**Seven of eighty-eight decision functions had no consumer at all.** Four are legitimate API
+surface — a convenience wrapper (`role_key_of`), a borrow-chain helper (`with_frame_set`), a display
+formatter (`format_pairing_code`), a console sentence generator whose console does not exist yet
+(`explain_omissions`). Three were real:
+
+* `field_conformance` and `conformance_of` — §15's field suite, computed from a telemetry window and
+  read by nothing. Left for a session of its own; it belongs with the conformance runner §73 already
+  names as missing.
+* **`is_installable`** — *"Whether the OS will install a policy under this plan."*
+
+The third is the one worth an evening, and it is worse than the sweep suggested. It is not that the
+predicate has no caller: **`resolve_transport` itself has no caller on a robot.** Its three callers
+are the Hub's repository page, `skynet transport` (a developer diagnostic), and the corpus.
+
+### §37.1 has six stages and one of them had never run
+
+```
+resolve → fetch → verify → admit → transport → stage → activate
+```
+
+> `transport` — `resolveTransport()` against this body; a `refused` verdict fails the install
+
+§6 calls transport *"the heart of the system"* and §6.2 says it runs *"on the robot, at install
+time, with no network at all."* `admit_package` has taken a `transport_verdict: Option<_>` since
+admission was written, and on a robot it was `None` every time, with a comment saying why: *"there
+is no policy to plan for at stage time and no source embodiment to plan from."*
+
+Which was true, and was the whole of the gap. The manifest had no action space in it.
+
+`PackageManifest.source_embodiment` is the missing half — the body the policy was trained on and
+the channels it emits, which is exactly what `skynet transport` has been reading out of a file all
+along. The other half, the descriptor, has been on the robot since §28.
+
+So the stage runs. A policy whose required channel this body has no equivalent for is now **refused
+at install**, which §6 has said since Part I and no robot has ever done.
+
+### Two options, decided rather than declared
+
+**`requested_hz` is the package's `budget.control_hz`**, not the source embodiment's. Those are two
+declarations by one publisher in one document and they may disagree: the first is the rate the loop
+will run at *here*, the second is the rate it was *trained* at. The plan is made against the first,
+because a plan that cleared a rate the package never intends to run is a plan about a different
+robot.
+
+**`allow_retarget` is the operator's**, and §6.1 says why it cannot be the publisher's:
+*"retargeting changes what the policy is doing. That should be a decision somebody made, not a
+fallback that happens quietly."* A publisher setting it in a manifest is precisely the quiet
+fallback. So it is `--allow-retarget` on `skynetd stage` — the person running the command is the
+somebody — and the reconcile loop, which has nobody standing at it, passes `false`.
+
+Asking for it does not manufacture a solver, and there is a test that says so: a body declaring no
+IK solver refuses the channel however the flag is set, which is §6.1's *"the request is refused
+rather than promised and discovered at the first command."*
+
+### Two ways there is nothing to plan, and neither is a pass
+
+* **The package declares no action space** — a driver, an environment, a dataset. None of them
+  command a joint. A verdict about them would answer a question nobody asked.
+* **The robot has no usable descriptor.** §7.2's rule: the absence is reported by the surfaces that
+  report descriptors, not converted into a verdict here. A `refused` invented from a missing body
+  would fail every install on an unprovisioned robot with a sentence about the *policy* — which
+  would send an operator to the publisher for a problem in their own provisioning.
+
+Both produce `None`, which admission reads as *no verdict was reached* rather than as a pass. That
+distinction was already in `admit_package` and had never had a second case to distinguish.
+
+### The refusal names the channel
+
+`TransportRefused`'s message is *"The policy's action space cannot be transported onto this body."*
+True, and it tells nobody which joint to look at. So the report carries every binding that came out
+anything but `direct` — its index, its declared role, its method, its target and its reason — and
+the `direct` ones are omitted, because naming all forty on a humanoid buries the one that is
+blocked. That is §8.2's rule about findings, applied to the thing the findings are about.
+
+### The mirror check earned its place again
+
+`package.ts` is a mirrored contract, so adding `source_embodiment` to the Rust manifest and to the
+reference left `check-contract-mirrors.mjs` reporting `DIVERGED package — 18 line(s) differ`
+immediately. The Hub's copy took the same edit and the pins were rewritten from the two agreeing
+copies. Nothing about `admitPackage` changes — the Hub does not read the field, the robot does —
+which is exactly the case where a mirror would otherwise rot unnoticed for months.
+
+### Numbers
+
+Rust: **1290** tests, up from 1285. Five new, all on the stage: a policy that fits, a required
+channel that does not, the two absences, the retarget decision, and the rate the plan is made
+against. `cargo fmt --all --check` and `cargo clippy --workspace --all-targets` clean — the latter
+after boxing `Report::Ran`'s plan, because a binding per channel on a forty-joint body would
+otherwise make every `Report`, including the one that carries a single sentence, that size.
+
+The corpus is unchanged at 1011 cases, and that is the right answer: `admitPackage` does not read
+the new field, so no frozen vector moves. Both mirror checks match, the golden path counts 46
+commands.
+
+### What is still missing here
+
+§73's transport row said "—" in its last column, and it was wrong in the direction §73 is always
+wrong in. It now says the true thing: **the ceilings the plan computes are handed to nothing.** §6.3
+is explicit that deciding and enforcing are separate and that the clamp goes to the Safety Kernel —
+and `TransportClamp` has no reader on this robot, because no policy runtime exists to carry a
+command as far as a kernel. Planning at install is now real; enforcing at 1 kHz is still the
+kernel's, through the channel §33.1 denies this daemon.
+
+### Findings, restated
+
+1–28 as before; 29–45 from the sessions above.
+
+46. **The orphan sweep is worth running, and it is four lines of Python.** Every `pub fn` against
+    every reference to it outside its own module, its tests and the corpus. Four of the seven hits
+    were legitimate API surface, which is a false-positive rate a person can read in a minute — and
+    the three real ones included a whole install stage that had never executed. The log had recorded
+    this shape four times without anybody thinking to look for the fifth.
+47. **An orphaned predicate can be the smaller half of the problem.** `is_installable` had no
+    caller; the sharper fact was that the *function it asks about* had no caller either. When a
+    sweep turns up an unused decision, the next question is not "who should call this" but "does
+    anything compute what it decides about" — and here the answer was: three places, none of them
+    the one the specification names.
+
+---
+
+## 2026-09-02 (thirty-ninth) — the other two orphans, and one formula written twice
+
+The sweep in the previous session flagged three genuine orphans and one was §37.1's transport stage.
+The other two were `field_conformance` and `conformance_of` — and the interesting thing about them
+is not that neither had a caller. It is that **they are the same formula.**
+
+```rust
+// certification.rs                       // telemetry.rs
+(cycles - interventions) / cycles         ((cycles - interventions) / cycles)
+    .clamp(0.0, 1.0)                          .clamp(0.0, 1.0)
+```
+
+Two crates, two doc comments arguing the same clamp, neither with a consumer, and nothing anywhere
+comparing them. §15's field conformance is *"the mechanism by which certification stops being a
+document and becomes a live property"* — the number that decides whether a robot's certificate is
+suspended — and it had two definitions.
+
+`conformance_of` now calls `field_conformance`, in both editions. One definition, and it belongs to
+the module that checks it against §15's floor.
+
+### A value both editions compute and neither corpus holds
+
+Worse than the duplication: **`conformance_of` was in no corpus at all.** `shapeCoverage` emitted
+gaps, totals, spans and unmeasured names, and not the one number the coverage is computed *for*.
+Two editions, free to disagree, with a green suite either way.
+
+It is in the shape now, and with it four cases that the existing five could not have discriminated —
+because every one of them sat comfortably above §15's floor:
+
+| Case | Conformance |
+|---|---|
+| under the floor — 40 interventions in 30,000 cycles | 0.99867 |
+| exactly at the floor — 30 in 30,000 | 0.999 |
+| cycles counted, interventions not | 1 |
+| more interventions than cycles | 0 |
+
+The tamper tests now bite: removing the clamp fails two vectors, and removing the
+absent-interventions rule fails two. Before them, both changes passed.
+
+The third case is the one that needed a decision. §74.3's rule is that unmeasured and zero are never
+the same, and here they are: a window that counted cycles and did not count interventions is a robot
+whose **kernel intervened in none of them**, because the counter that would have recorded one is the
+same loop that recorded the cycles. The rule bends exactly once and the reason is written where it
+bends. Absent *cycles* is still absent.
+
+### `package_restarts` had a source and had never been asked
+
+`skynetd-io/src/telemetry.rs` opened with:
+
+> **six of the eight counters have no source.** … `interventions` needs teleoperation and
+> `package_restarts` needs the supervisor to count them, **which it does not**.
+
+That last clause was a statement about the wiring dressed as a statement about the machine. §33.5's
+supervisor decides every restart on this robot — `on_exit` returns `RestartAt`, `Failed` or
+`AwaitOperator` — and the daemon threw the decision away.
+
+Counted at the **decision** rather than at the start it leads to. The two are one reconcile pass
+apart, and a decision whose start never happened is a robot in *worse* trouble, so a counter waiting
+for the start would under-report exactly the robot a fleet page is hunting for. `Failed` and
+`AwaitOperator` are not restarts and are not counted: they are a package that stopped coming back,
+which the readiness column already says.
+
+It is a count since the window opened rather than a reading taken at both ends — unlike
+`queue_dropped` beside it — because the supervisor keeps a *bounded* failure list whose entries
+expire out of §33.5's ten-minute window, and subtracting two readings of that would report a
+negative number of restarts on a robot that had been quiet.
+
+Three of eight now, and the five that remain are the four the kernel owns plus teleoperation.
+
+### Both freezes fired, which is why they exist
+
+Two tests failed the moment the counter appeared, and neither was a nuisance:
+
+* the unit test asserting which six counters are unmeasured;
+* **`reference/wire/telemetry.json`** — the frozen bytes this daemon puts on §17's wire, which the
+  Hub holds a copy of and asserts against.
+
+The wire fixture was re-frozen, resynced, and the Hub's own assertion updated — *"this edition
+measures two of the eight"* became three, with `package_restarts` asserted as **zero rather than
+undefined**, because a quiet robot has to be distinguishable from one that counts nothing or a fleet
+page filtering for churn has no robot to compare against.
+
+That is the twenty-seventh session's mechanism paying off again: a producer and a consumer in two
+repositories, and the change could not land in one without the other being made to say something.
+
+### Numbers
+
+Rust: **1291** tests, up from 1290. The corpus is **1015 cases across 73 files**, up from 1011 —
+four coverage vectors and the conformance field on every existing one. `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets`, both mirrors and the golden path clean; the Hub's two
+synced contracts typecheck.
+
+§73's telemetry row goes from *"six of eight counters have no source"* to five, and now says which
+five and why: four are the kernel's, one is teleoperation's.
+
+### Findings, restated
+
+1–28 as before; 29–47 from the sessions above.
+
+48. **Two orphans can be one duplicate.** The sweep found `field_conformance` and `conformance_of`
+    separately and the finding was not "two unused functions" — it was that §15's number had two
+    implementations. An unused function is cheap; an unused function that is a *second* copy of a
+    rule is a divergence waiting for the first caller. Worth asking of every sweep hit: is anything
+    else computing this?
+49. **"Which we do not" is a sentence to check, not to believe.** The telemetry module said
+    `package_restarts` needed a supervisor to count them, which it did not — written when it was
+    true of the wiring, and read for months as though it were true of the machine. The supervisor
+    was three lines away. The tell is a doc comment that explains an absence by naming a component
+    the repository already has.
+
+---
+
+## 2026-09-02 (fortieth) — the suite, run by the robot on itself
+
+§73's conformance row has said the same thing since it was written:
+
+> No runner executes the suite on a robot, and nothing signs a result.
+
+The second clause turns out not to be a gap at all — §19 says a robot verifies and never signs, so a
+robot signing a certificate about itself is a thing the design forbids rather than a thing it lacks.
+The first clause was real, and this session is it.
+
+### The eight sentences, and five that had gone stale
+
+`skynet driver check` runs the driver-facing sim tests and lists, by name, eight it cannot cover:
+tests that are properties of the **runtime** rather than of a driver. Each carries a sentence
+explaining the omission, and each sentence is of the form *"needs X"*.
+
+Five of them named an X the platform has since built:
+
+| Test | Said | Built since |
+|---|---|---|
+| `package.signature.required` | needs the package installer | §37.1's installer, five signature states |
+| `package.grants.gate` | needs the permission model | grants, admission, `effective_grants` |
+| `ota.safety_gate` | needs the updater | §12, and §75's bundle route |
+| `telemetry.replay.deterministic` | needs the black box | ring, MCAP, sealing, replay |
+| `security.credential.scope` | needs device tokens | `skd_` credentials and their scopes |
+
+This is finding 49 at scale, and it is the same mechanism: a sentence explaining an absence is a
+claim, it decays exactly as fast as the absence does, and nothing in a repository re-reads one.
+
+Re-asking the eight questions turned out to be worth as much as answering them:
+
+* **Two execute now.** `ota.safety_gate` and `package.signature.required`.
+* **One is answerable and is not this machine's to answer.** `security.credential.scope` asks
+  whether a credential lifted from a robot can read repositories or write to another namespace —
+  which is a question about whether *the Hub* enforces the scopes. A robot reporting a pass would be
+  reporting on somebody else's enforcement. The sentence now says so.
+* **One turns out to be half-built, and not the half the test measures.** `package.grants.gate` is
+  about a package that *commands* an ungranted capability and the `mode_gate` guard refusing it.
+  Admission refuses one that *requests* one, at install. Those are different moments and different
+  components, and the second is the kernel's.
+* **Two are waiting on something real.** `safety.policy.isolation` needs a sandbox; the black box's
+  replay needs `resolve_limits`, which exists in the kernel crate and has no caller on the daemon —
+  another orphan, and the next session's.
+
+### The result the runner exists to produce
+
+`package.signature.required` — *"An unsigned package, and one whose bytes do not match its digest,
+are both refused"* — runs against this robot's real capacity, through the same `admit_package` its
+installer runs, over two synthetic manifests. Both are refused by the decision.
+
+**And it reports `fail`,** because §37.1's `admit` stage *reports* on this edition rather than
+gating, for every package kind but a driver. An unsigned package installs. `crate::admit` has said
+so in its own header for sessions; nothing had ever turned it into a verdict.
+
+That is the whole argument for a runner. Reporting it as `skipped` would hide a deliberate decision
+behind an unmeasured absence, and the two look identical on a dashboard. It is a fail, it caps this
+robot's own evidence below guest, and a platform whose suite says that about it is a platform whose
+suite means something.
+
+`ota.safety_gate` passes, and the pass is real rather than a restatement: an image changing
+`safety_kernel` **and** `envelope`, with no bench pass, put through the same `admit_bundle` the
+updater runs, refused.
+
+### A `GET` that runs checks
+
+Worth defending, because a read that does work is how a route acquires a side effect nobody notices.
+Neither check has one: both are pure functions over synthetic documents, nothing is written and
+nothing is staged. There is a test that runs the suite twice and asserts `GET /status` is
+byte-identical either side of it.
+
+### Two rules the runner applies to itself
+
+* **Absence is not a pass**, harder here than anywhere: a conformance runner that reported `pass`
+  for a test it did not perform would be the most damaging thing this repository could ship. Every
+  entry is a check that executed or a named absence, and there is no third state. A test that
+  produced neither would be a row with no sentence, and there is a test for that too.
+* **A skipped test carries no date.** §15 decays an award from the age of the oldest result, so a
+  gap dated today would postpone the decay it should be causing.
+
+And the tier: `attainable` claims `certified` deliberately, because §15's rule is that the evidence
+caps the award rather than the claim — a low claim would produce a low award for a reason that has
+nothing to do with the machine. With six of eight skipped and one failed, it cannot come out
+anywhere but the floor, which is the correct answer for a robot that has run two sim tests.
+
+### Numbers
+
+Rust: **1303** tests, up from 1291. Twelve new — nine on the runner, three on the route. `cargo fmt
+--all --check` and `cargo clippy --workspace --all-targets` clean; both mirrors match; the golden
+path counts 47 commands, which is 46 plus `conformance`.
+
+§15 gains §15.1, which says which runner runs which half of the suite and why nothing on a robot
+signs. §73's row moves from "no runner" to "two of the eight execute; the other six name what they
+wait for".
+
+### Findings, restated
+
+1–28 as before; 29–49 from the sessions above.
+
+50. **A list of things you cannot do is a list that rots, and it rots silently in the direction that
+    matters.** Five of eight sentences named a component the repository had since built, so the list
+    understated the platform *and* pointed every reader away from the place the work should go. It
+    cannot be caught by a test, because there is nothing to compare a sentence against — the only
+    mechanism is to re-read the omissions when the components they name are built, which is a habit
+    rather than a check.
+51. **Running the suite on yourself is worth doing before it passes.** The valuable output of this
+    session is a `fail` on a guest-tier test, produced by the platform about itself, sitting on a
+    route an operator can read. A runner built only when it would come out green would be a runner
+    that never measured anything anybody did not already believe.

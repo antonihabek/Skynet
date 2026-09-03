@@ -26,10 +26,11 @@
 //!
 //! # What it cannot measure
 //!
-//! Four of §33.6's five aggregate fields. `generation_lag` is arithmetic this daemon can do;
-//! `guard_trip_rate` needs the kernel, `storage_headroom` needs a `statvfs` nothing here calls, and
-//! `battery` and `temperature_c` need §36, which is unwritten. All four are reported absent, which
-//! is a different fact from zero and is the one §33.6 asks for.
+//! Two of §33.6's five aggregate fields, down from four. `generation_lag` is arithmetic this daemon
+//! can do and `battery` and `temperature_c` are §36's, read from `/sys` by [`crate::power`]. What
+//! is left is `guard_trip_rate`, which needs the kernel through a path §33.1 denies this daemon,
+//! and `storage_headroom`, which needs a `statvfs` nothing here calls. Both are reported absent,
+//! which is a different fact from zero and is the one §33.6 asks for.
 
 use skynet_contracts::checkin::{
     check_in, check_in_to_json, CheckIn, CheckInInput, HealthInput, Measured, PackageHealth,
@@ -108,14 +109,21 @@ pub fn progress(
 
 /// Roll the daemon's health observation into the shape a check-in carries (§33.6).
 ///
-/// Every aggregate field arrives **undated** from [`skynetd::health::Health`], which carries values
-/// and no ages — so all five would be dropped by §33.6's age rule if they had values. Four of them
-/// have none, and the fifth, `generation_lag`, is computed here and dated with the observation it
-/// came from. That is the honest arrangement: an age is a property of a measurement, and the only
-/// measurement this daemon takes is the one it can date.
+/// Three of §33.6's five aggregate fields now have a source, and two do not. `generation_lag` is
+/// arithmetic this daemon can do, and `battery` and `temperature_c` are §36's, read from `/sys` by
+/// [`crate::power`] and arriving here through [`skynetd::health::Health`] — the same struct
+/// `GET /health` renders, so a robot cannot show one battery figure on its console and send another
+/// to its Hub. `guard_trip_rate` needs the kernel and `storage_headroom` needs a `statvfs` nothing
+/// here calls, and both are reported absent, which is a different fact from zero.
+///
+/// **One age for all three**, because they are one pass: the caller observes, reads the gauge and
+/// rolls up in the same turn of the loop, so there is one measurement instant and `age_ms` is its
+/// age. §33.6 drops any field carrying a value and no age, so a reading that arrived undated would
+/// be reported as unmeasured — correctly by the rule, and baffling on a robot whose battery had
+/// just been read.
 pub fn health(
     observed: &skynetd::health::Health,
-    lag_age_ms: u64,
+    age_ms: u64,
     generation_lag: Option<u64>,
 ) -> HealthInput {
     HealthInput {
@@ -134,16 +142,29 @@ pub fn health(
                 age_ms: package.age_ms,
             })
             .collect(),
-        generation_lag: match generation_lag {
-            Some(lag) => Measured::at(lag as f64, lag_age_ms),
-            None => Measured::none(),
-        },
-        // The four §33.6 names nothing on this robot measures. Absent rather than zero: no
+        generation_lag: dated(generation_lag.map(|lag| lag as f64), age_ms),
+        // The two §33.6 names that nothing on this robot measures. Absent rather than zero: no
         // measurement of guard trips and zero guard trips are opposite facts.
         guard_trip_rate: Measured::none(),
         storage_headroom: Measured::none(),
-        battery: Measured::none(),
-        temperature_c: Measured::none(),
+        // §36's two, and the shape of the conversion is the interesting part. `battery` is a
+        // *fraction*, which is what §33.6 asks for and what a fleet page renders as a bar — so a
+        // gauge that reported watt-hours is turned back into one against the declared capacity, and
+        // a body with no declared capacity reports no battery rather than a watt-hour figure in a
+        // column labelled with a percentage.
+        battery: dated(observed.battery, age_ms),
+        temperature_c: dated(observed.temperature_c, age_ms),
+    }
+}
+
+/// A value and the age of the pass it was measured in, or an absence.
+///
+/// One helper rather than three `match`es, because §33.6's rule is one rule: a value with no age is
+/// reported as unmeasured, and the three fields that have values all have the same one.
+fn dated(value: Option<f64>, age_ms: u64) -> Measured {
+    match value {
+        Some(value) => Measured::at(value, age_ms),
+        None => Measured::none(),
     }
 }
 

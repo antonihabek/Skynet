@@ -149,6 +149,8 @@ pub fn handle<L: Launcher, S: Slots>(
         }
         ("GET", ["audit"]) => ok(audit(context)),
         ("GET", ["watchdog"]) => ok(watchdog(context)),
+        ("GET", ["power"]) => ok(power(context)),
+        ("GET", ["conformance"]) => ok(conformance(context)),
         ("GET", ["post"]) => {
             // Wall time, because the calibration row is an age comparison (§45.4). Not a control
             // decision, so §35.1 permits it.
@@ -233,6 +235,8 @@ fn known_path(segments: &[&str]) -> bool {
             | ["calibration"]
             | ["outbound"]
             | ["watchdog"]
+            | ["power"]
+            | ["conformance"]
             | ["post"]
             | ["cell"]
             | ["packages"]
@@ -537,6 +541,93 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     out
 }
 
+/// §36 as this robot sees it right now: the state, the reserve, the ladder and what was read.
+///
+/// The assessment comes from the contract and the reading from `/sys`, and the route reports both
+/// halves separately — because "the state is `unmetered`" and "there is no battery in this machine"
+/// are the same sentence read from two ends, and an operator staring at a robot that will not take
+/// new work needs the second.
+///
+/// `notes` is the reader's, `faults` is the contract's, and they are deliberately not merged. A
+/// note is *this daemon could not read a number*; a fault is *§36 has a problem with what it was
+/// given*. They have different remedies and often different people.
+fn power<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
+    let layout = context.daemon.store.layout().clone();
+    let body = crate::embodiment::load(&layout);
+    let (profile, reading) =
+        crate::power::observe(&mut context.daemon.power, &layout, &body, context.now_ms);
+
+    // The budget is not asked about here and the field is null rather than absent, for the reason
+    // §57.1 gives about assertions: no package on this robot declares an `inference_budget_ms` that
+    // anything measures against, so a route that omitted the key would let a console infer the
+    // question had been asked and answered.
+    let mut out = skynet_contracts::json::power_to_json(&profile, &reading.observation, None, None);
+
+    out.set(
+        "supply",
+        match &reading.supply {
+            Some(name) => Json::from(name.as_str()),
+            None => Json::Null,
+        },
+    );
+    out.set("zones", Json::Num(reading.zones as f64));
+    out.set(
+        "notes",
+        Json::Arr(
+            reading
+                .notes
+                .iter()
+                .map(|note| Json::from(note.as_str()))
+                .collect(),
+        ),
+    );
+    out.set(
+        "declared",
+        Json::Bool(
+            body.known()
+                .is_some_and(|known| known.descriptor.power.is_some()),
+        ),
+    );
+    // §33.1, said out loud on the one route where its absence changes an answer. §36.4's override
+    // is the only rule that can reach `critical` past a healthy gauge, and it has no input here —
+    // so a console reading `normal` on this route is reading *the gauge agrees*, not *the bus does*.
+    out.set(
+        "brownout_note",
+        Json::from(
+            "§36.4's override reads `RHAL_DEGRADED` and a vendor fault code, and §33.1 keeps this \
+             daemon off the RHAL — so on this edition nothing here can ever report a brownout. A \
+             state of `normal` on this route means the gauge agrees, not that the bus does.",
+        ),
+    );
+    out
+}
+
+/// §15's eight runtime tests, run by this robot on itself.
+///
+/// The half of §73's conformance row this daemon can close: `skynet driver check` runs the
+/// driver-facing sim tests and names eight it cannot cover, and those eight are properties of the
+/// runtime — which is what this is. The other half, *"nothing signs a result"*, stays open by
+/// design rather than by omission: §19 says a robot verifies and never signs, so what this route
+/// serves is a report and never a certificate, and it says so in its own body.
+///
+/// A `GET`, and it runs real checks — which is worth defending, because a read that does work
+/// invites a route that has a side effect. Neither check has one: `admit_package` and
+/// `admit_bundle` are pure functions over synthetic documents, nothing is written, nothing is
+/// staged, and running this route a thousand times leaves the robot exactly as it was.
+fn conformance<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
+    let layout = context.daemon.store.layout().clone();
+    let body = crate::embodiment::load(&layout);
+    let capacity = crate::capacity::read(&context.daemon.store, &body, VERSION);
+    // §35.1's correlation clock, for the one thing it is for here: a result is a record a Hub
+    // places against other robots' records. Nothing in the run decides anything with it.
+    let at = crate::audit::rfc3339(wall_ms());
+    let run = crate::conformance::run(&capacity, &body, &at);
+    crate::conformance::to_json(
+        &run,
+        body.known().is_some_and(|known| known.descriptor.simulator),
+    )
+}
+
 fn watchdog<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let body = crate::embodiment::load(context.daemon.store.layout());
     let known = body.known();
@@ -624,7 +715,10 @@ fn audit<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
 
 fn health<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let actual = context.daemon.observe(context.now_ms);
-    let health = context.daemon.health(&actual, context.now_ms);
+    let reading = context.daemon.read_power(context.now_ms);
+    let health = context
+        .daemon
+        .health(&actual, context.now_ms, Some(&reading));
 
     let mut packages = Json::arr();
     for package in &health.packages {
@@ -653,9 +747,10 @@ fn health<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let mut body = Json::obj();
     body.set("packages", packages)
         .set("degraded", Json::Bool(health.is_degraded()))
-        // Every one of these is `null` because nothing has measured it. §33.6: a health field
-        // nobody has measured is absent, never zero — zero guard trips and no measurement of guard
-        // trips are opposite facts.
+        // Three of these five can now carry a number and two cannot. §33.6: a health field nobody
+        // has measured is absent, never zero — zero guard trips and no measurement of guard trips
+        // are opposite facts, and a page that rendered the second as the first would be reporting a
+        // clean robot on the strength of a subsystem nobody has written.
         .set(
             "generation_lag",
             nullable(health.generation_lag.map(|n| n as f64)),
@@ -667,8 +762,11 @@ fn health<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
         .set(
             "unmeasured",
             Json::from(
-                "readiness needs a command sequence from the policy runtime, and guard trip rate \
-                 needs the kernel. Neither is written, so both report unknown rather than a value.",
+                "readiness needs a command sequence from the policy runtime and guard trip rate \
+                 needs the kernel; neither is written, so both report unknown rather than a value. \
+                 Storage headroom needs a `statvfs` this daemon does not call. Battery and \
+                 temperature are read from `/sys` (§36) and are absent only on a machine that \
+                 exposes neither — `GET /power` says which, and why.",
             ),
         );
     body
@@ -1175,7 +1273,10 @@ fn checkin<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let (identity, _) = crate::identity::evaluate(&layout, &trust);
 
     let actual = context.daemon.observe(context.now_ms);
-    let health = context.daemon.health(&actual, context.now_ms);
+    let reading = context.daemon.read_power(context.now_ms);
+    let health = context
+        .daemon
+        .health(&actual, context.now_ms, Some(&reading));
     let policy = crate::identity::running_policy(&context.daemon.store, &actual);
     let attestation =
         crate::identity::attestation(&layout, &trust, &identity, &actual.os.active, &policy);
@@ -1187,6 +1288,9 @@ fn checkin<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
         .generation
         .checked_sub(actual.generation)
         .filter(|_| context.daemon.desired.generation >= actual.generation);
+    // §36. Read here rather than remembered from the last reconcile pass, for the reason `actual`
+    // above is observed rather than remembered: a check-in reports the robot as it is now, and a
+    // battery figure from ten seconds ago is the reading somebody dispatches an engineer on.
     let rolled = crate::checkin::health(&health, 0, lag);
 
     let built = crate::checkin::build(

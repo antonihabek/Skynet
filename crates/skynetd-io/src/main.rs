@@ -47,7 +47,7 @@ skynetd — the Skynet OS supervisor
   skynetd [--root <dir>] [--lan <addr:port>] [--interval <ms>]
   skynetd once [--root <dir>]
   skynetd stage <dir> --id <ns/name> --kind <kind> --version <v> --digest <hex>
-              [--signed-by <64 hex key>] [--signature <128 hex>]
+              [--signed-by <64 hex key>] [--signature <128 hex>] [--allow-retarget]
   skynetd credential add --label <name> --role observer|operator|admin
   skynetd calibration
   skynetd trust list
@@ -825,6 +825,11 @@ fn stage(argv: &[String]) -> i32 {
         }
     };
 
+    // §6.1: *"retargeting changes what the policy is doing. That should be a decision somebody
+    // made, not a fallback that happens quietly."* A flag on the command is that decision, and the
+    // person running it is the somebody. The reconcile loop has no such person and passes `false`.
+    let allow_retarget = argv.iter().any(|arg| arg == "--allow-retarget");
+
     // §37.1's `verify` step is "digest, then Ed25519 signature against a key the operator trusts",
     // and this is where the second half arrives. The two flags are read before staging so a
     // half-given signature is a usage error rather than something discovered after the bytes are
@@ -888,6 +893,8 @@ fn stage(argv: &[String]) -> i32 {
                         &capacity,
                         &staged.digest,
                         verdict.into(),
+                        &body,
+                        allow_retarget,
                     );
                     for line in skynetd_io::admit::to_lines(&report) {
                         println!("{line}");
@@ -1199,7 +1206,13 @@ fn report_checkin<L, S>(
     }
 
     let actual = daemon.observe(now_ms);
-    let health = daemon.health(&actual, now_ms);
+    // §36's gauge, read in this pass and dated with it. The descriptor is loaded here rather than
+    // held on the daemon for the reason every other read in this function is fresh: the loop is
+    // level-triggered (§33.3), and a power profile cached at start-up would survive a descriptor
+    // somebody replaced on a running robot.
+    let body = skynetd_io::embodiment::load(layout);
+    let (_, reading) = skynetd_io::power::observe(&mut daemon.power, layout, &body, now_ms);
+    let health = daemon.health(&actual, now_ms, Some(&reading));
     let policy = skynetd_io::identity::running_policy(&daemon.store, &actual);
     let attestation =
         skynetd_io::identity::attestation(layout, &trust, &identity, &actual.os.active, &policy);

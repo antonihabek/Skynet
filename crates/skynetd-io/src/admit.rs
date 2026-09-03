@@ -42,6 +42,8 @@ use skynet_contracts::admission::{
 use skynet_contracts::skill::{
     read_calls, validate_composition, CompositionFault, SkillCall, MAX_SKILL_DEPTH,
 };
+use skynet_contracts::transport::{TransportMethod, TransportPlan};
+use skynet_contracts::{resolve_transport, ResolveTransportOptions};
 use skynet_json::Json;
 
 use crate::capacity::Capacity;
@@ -63,6 +65,19 @@ pub enum Report {
         result: AdmissionResult,
         /// What was concluded about the signature, and by whom.
         signature: SignatureNote,
+        /// §37.1's `transport` stage, when there was something to plan — see [`transport_plan`].
+        ///
+        /// Carried beside the result rather than folded into it, because the *verdict* is what
+        /// admission acts on and the *plan* is what an operator reads: which channel is blocked,
+        /// which joint a torque was scaled against, which chain would need a solver. A refusal that
+        /// said only "the policy's action space cannot be transported onto this body" would be
+        /// true, useless, and the sort of message §64 exists to prevent.
+        ///
+        /// Boxed for [`crate::capacity::Capacity::Known`]'s reason: a plan carries a binding per
+        /// channel and a body has forty of them, so an unboxed variant would make every `Report`
+        /// — including the `NotRun` that carries a sentence — the size of a humanoid's action
+        /// space. `Option<Box<_>>` is a null pointer when there was nothing to plan.
+        plan: Option<Box<TransportPlan>>,
     },
 }
 
@@ -189,16 +204,69 @@ pub fn composition_refusal(id: &str, fault: &CompositionFault) -> String {
     )
 }
 
+/// §37.1's `transport` stage, which had never run.
+///
+/// > `transport` — `resolveTransport()` against this body; a `refused` verdict fails the install
+///
+/// One of six stages in §37.1's pipeline and the only one with no implementation: `resolve_transport`
+/// had three callers — the Hub, `skynet transport`, and the corpus — and none of them was an
+/// install. `AdmissionParams::transport_verdict` has been an `Option` since admission was written
+/// and was `None` on every robot, with a comment saying there was no source embodiment to plan
+/// from. There is one now (`PackageManifest::source_embodiment`).
+///
+/// Returns `None` when there is nothing to plan, and the two cases are different and both correct:
+///
+/// * **The package declares no action space.** A driver, an environment, a dataset — none of them
+///   command joints, and a transport verdict about them would be an answer to a question nobody
+///   asked.
+/// * **This robot has no usable descriptor.** Planning needs the body, and §7.2's rule applies: the
+///   absence is reported by the routes that report descriptors rather than converted into a verdict
+///   here. A `refused` invented from a missing body would fail every install on an unprovisioned
+///   robot with a sentence about the *policy*.
+///
+/// # The two options, and why neither is guessed
+///
+/// `requested_hz` is the package's own `budget.control_hz` — the rate it declares it will run at on
+/// this robot — rather than the source embodiment's `control_hz`, which is the rate it was
+/// *trained* at. A publisher may declare both and they may differ; the plan is made against the one
+/// the loop will actually use, because a plan that cleared a rate the package never intends to run
+/// is a plan about a different robot.
+///
+/// `allow_retarget` is the caller's, and §6.1 is the reason it is a parameter rather than a
+/// constant: *"retargeting changes what the policy is doing. That should be a decision somebody
+/// made, not a fallback that happens quietly."* The person running `skynetd install` is standing
+/// there; a reconcile loop is not, and passes `false`.
+pub fn transport_plan(
+    manifest: &skynet_contracts::admission::PackageManifest,
+    body: &crate::embodiment::Body,
+    allow_retarget: bool,
+) -> Option<TransportPlan> {
+    let source = manifest.source_embodiment.as_ref()?;
+    let known = body.known()?;
+    Some(resolve_transport(
+        source,
+        &known.descriptor,
+        ResolveTransportOptions {
+            allow_retarget,
+            requested_hz: manifest.budget.control_hz,
+        },
+    ))
+}
+
 /// Run admission for one package on this robot.
 ///
 /// `observed_digest` is the digest the bytes actually hash to — the store computes it while
 /// verifying, so admission is told what was measured rather than what was claimed. `signature` is
 /// what [`crate::trust`] concluded, for the same reason: a measured verdict, never a default.
+///
+/// `body` is here for §37.1's `transport` stage — see [`transport_plan`].
 pub fn run(
     manifest: &skynet_contracts::admission::PackageManifest,
     capacity: &Capacity,
     observed_digest: &str,
     signature: SignatureNote,
+    body: &crate::embodiment::Body,
+    allow_retarget: bool,
 ) -> Report {
     let Some(capacity) = capacity.known() else {
         let Capacity::Unavailable { detail } = capacity else {
@@ -209,22 +277,28 @@ pub fn run(
         };
     };
 
+    let plan = transport_plan(manifest, body, allow_retarget).map(Box::new);
+
     let result = admit_package(&AdmissionParams {
         manifest: manifest.clone(),
         capacity: capacity.clone(),
         signature: signature.state,
         observed_digest: observed_digest.to_string(),
-        // §37.1 resolves transport at install and a `refused` verdict fails the install. There is
-        // no policy to plan for at stage time and no source embodiment to plan from, so `None` —
-        // which admission reads as "no transport verdict was reached" rather than as a pass.
-        transport_verdict: None,
+        // §37.1's `transport` stage, resolved above. `None` is still reachable and still means
+        // "no transport verdict was reached" rather than a pass — a package with no action space,
+        // or a robot with no descriptor to plan against.
+        transport_verdict: plan.as_ref().map(|plan| plan.verdict.as_str().to_string()),
         // Nothing scans the package. `false` is what this edition can establish, and it is the
         // conservative direction: it does not claim the package is inert.
         executes_on_load: false,
         trust_remote_code: false,
     });
 
-    Report::Ran { result, signature }
+    Report::Ran {
+        result,
+        signature,
+        plan,
+    }
 }
 
 /// The verdict in one line, for a record rather than for a reader.
@@ -236,7 +310,11 @@ pub fn run(
 pub fn summary(report: &Report) -> String {
     match report {
         Report::NotRun { detail } => format!("admission not run: {detail}"),
-        Report::Ran { result, signature } => {
+        Report::Ran {
+            result,
+            signature,
+            plan,
+        } => {
             let errors = result
                 .findings
                 .iter()
@@ -247,10 +325,17 @@ pub fn summary(report: &Report) -> String {
                 (Some(signer), SignatureState::Verified) => format!("signed by {signer}"),
                 _ => format!("signature {}", signature.state.as_str()),
             };
+            // The verdict rather than the plan. §41.1: what lands on the event channel is the
+            // *decision*, and a ring full of per-channel bindings is a ring holding fewer control
+            // cycles. Which channel was blocked stays in the report an operator reads.
+            let transport = match plan {
+                Some(plan) => format!(", transport {}", plan.verdict.as_str()),
+                None => String::new(),
+            };
             if result.findings.is_empty() {
-                format!("admitted, nothing found, {signer}")
+                format!("admitted, nothing found, {signer}{transport}")
             } else {
-                format!("{errors} error(s), {warnings} warning(s), {signer}")
+                format!("{errors} error(s), {warnings} warning(s), {signer}{transport}")
             }
         }
     }
@@ -271,7 +356,11 @@ pub fn to_lines(report: &Report) -> Vec<String> {
                     .to_string(),
             );
         }
-        Report::Ran { result, signature } => {
+        Report::Ran {
+            result,
+            signature,
+            plan,
+        } => {
             match (&signature.signer, signature.state) {
                 (Some(signer), SignatureState::Verified) => {
                     lines.push(format!("signature: verified — signed by `{signer}`"));
@@ -308,6 +397,7 @@ pub fn to_lines(report: &Report) -> Vec<String> {
                     result.effective_grants.join(", ")
                 ));
             }
+            lines.extend(transport_lines(plan));
             // Said on every run rather than only when it matters, for the same reason it always
             // was: a reader who sees a clean report must not come away believing more was enforced
             // than was.
@@ -331,7 +421,11 @@ pub fn to_json(report: &Report) -> Json {
                 .set("state", Json::from("not_run"))
                 .set("detail", Json::from(detail.as_str()));
         }
-        Report::Ran { result, signature } => {
+        Report::Ran {
+            result,
+            signature,
+            plan,
+        } => {
             let mut note = Json::obj();
             note.set("state", Json::from(signature.state.as_str()));
             note.set(
@@ -403,10 +497,71 @@ pub fn to_json(report: &Report) -> Json {
                             .map(|s| Json::from(s.as_str()))
                             .collect(),
                     ),
+                )
+                // §37.1's `transport` stage. Present-and-null when there was nothing to plan,
+                // rather than absent: "this package declares no action space" is a fact worth
+                // stating, and a consumer reading an absent key cannot tell it from a producer that
+                // forgot to run the stage — which is precisely what every producer did until now.
+                .set(
+                    "transport",
+                    match plan {
+                        Some(plan) => skynet_contracts::json::plan_to_json(plan),
+                        None => Json::Null,
+                    },
                 );
         }
     }
     document
+}
+
+/// The transport plan, for a terminal (§64).
+///
+/// Silent when there is nothing to plan — a driver has no action space and a line saying so on
+/// every driver install is a line that trains an operator to skim. A plan that came out anything
+/// but `direct` gets its channels named, because "the policy's action space cannot be transported
+/// onto this body" is a true sentence that tells nobody which joint to look at.
+fn transport_lines(plan: &Option<Box<TransportPlan>>) -> Vec<String> {
+    let Some(plan) = plan else {
+        return Vec::new();
+    };
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "transport: {} — {} channel(s) onto `{}`{}",
+        plan.verdict.as_str(),
+        plan.bindings.len(),
+        plan.robot_slug,
+        match plan.control_hz {
+            Some(hz) => format!(" at {hz} Hz"),
+            None => String::new(),
+        }
+    ));
+
+    for binding in &plan.bindings {
+        // The bindings that came out `direct` are the ones nobody needs to read about. Naming all
+        // forty on a humanoid would bury the one that is blocked, which is §8.2's rule about
+        // findings applied to the thing findings are about.
+        if binding.method == TransportMethod::Direct {
+            continue;
+        }
+        lines.push(format!(
+            "  channel {}{} — {}{}: {}",
+            binding.source_index,
+            match &binding.source_role {
+                Some(role) => format!(" `{role}`"),
+                None => String::new(),
+            },
+            binding.method.as_str(),
+            match &binding.target {
+                Some(joint) => format!(" → `{joint}`"),
+                None => String::new(),
+            },
+            binding.reason
+        ));
+    }
+    for warning in &plan.warnings {
+        lines.push(format!("  {} — {}", warning.code.as_str(), warning.message));
+    }
+    lines
 }
 
 #[cfg(test)]
@@ -441,6 +596,7 @@ mod tests {
             runtime: None,
             depends_on: Vec::new(),
             min_os_version: None,
+            source_embodiment: None,
         }
     }
 
@@ -461,6 +617,28 @@ mod tests {
         }
     }
 
+    /// [`run`], on a robot with no descriptor and no retargeting.
+    ///
+    /// §37.1's `transport` stage needs the body, and every test in this module is about something
+    /// else — the signature, the budget, a capability. `Body::Absent` is what a robot nobody has
+    /// provisioned has, it produces no transport verdict, and admission reads that as *no verdict
+    /// was reached* rather than as a pass. The tests that are about the stage build a body.
+    fn ran(
+        manifest: &skynet_contracts::admission::PackageManifest,
+        capacity: &Capacity,
+        observed_digest: &str,
+        signature: SignatureNote,
+    ) -> Report {
+        run(
+            manifest,
+            capacity,
+            observed_digest,
+            signature,
+            &crate::embodiment::Body::Absent,
+            false,
+        )
+    }
+
     fn untrusted() -> SignatureNote {
         SignatureNote {
             state: SignatureState::Untrusted,
@@ -478,7 +656,7 @@ mod tests {
     /// findings at all, which is the first time that has been true.
     #[test]
     fn a_verified_package_on_a_fine_robot_has_nothing_wrong_with_it() {
-        let report = run(
+        let report = ran(
             &manifest(64.0, &[]),
             &capacity(1024.0, &[]),
             &"a".repeat(64),
@@ -512,7 +690,7 @@ mod tests {
                 signer: None,
                 detail: "detail".to_string(),
             };
-            let report = run(
+            let report = ran(
                 &manifest(64.0, &[]),
                 &capacity(1024.0, &[]),
                 &"a".repeat(64),
@@ -530,7 +708,7 @@ mod tests {
     /// nobody signed it — is the one everybody thinks of, and it is not the dangerous one.
     #[test]
     fn a_driver_needs_a_trusted_signature_and_not_merely_a_valid_one() {
-        let verified = run(
+        let verified = ran(
             &manifest(64.0, &[]),
             &capacity(1024.0, &[]),
             &"a".repeat(64),
@@ -538,7 +716,7 @@ mod tests {
         );
         assert!(verified.driver_may_activate());
 
-        let stranger = run(
+        let stranger = ran(
             &manifest(64.0, &[]),
             &capacity(1024.0, &[]),
             &"a".repeat(64),
@@ -550,7 +728,7 @@ mod tests {
     /// The findings that are worth having today.
     #[test]
     fn a_budget_the_robot_cannot_feed_is_found() {
-        let report = run(
+        let report = ran(
             &manifest(4096.0, &[]),
             &capacity(512.0, &[]),
             &"a".repeat(64),
@@ -567,7 +745,7 @@ mod tests {
 
     #[test]
     fn a_capability_this_body_does_not_provide_is_found() {
-        let report = run(
+        let report = ran(
             &manifest(64.0, &["manipulation.grasp"]),
             &capacity(1024.0, &[]),
             &"a".repeat(64),
@@ -585,7 +763,7 @@ mod tests {
     /// §5.0's whole point, from the other side: declaring the token admits the package.
     #[test]
     fn a_body_that_declares_the_capability_provides_it() {
-        let report = run(
+        let report = ran(
             &manifest(64.0, &["manipulation.grasp"]),
             &capacity(1024.0, &["manipulation.grasp"]),
             &"a".repeat(64),
@@ -597,7 +775,7 @@ mod tests {
     /// An unknown robot is not one to make an install decision about.
     #[test]
     fn an_unavailable_capacity_does_not_produce_an_admission() {
-        let report = run(
+        let report = ran(
             &manifest(64.0, &[]),
             &Capacity::Unavailable {
                 detail: "no /proc/meminfo".to_string(),
@@ -617,7 +795,7 @@ mod tests {
     /// The signer's name reaches the report, because a hex string is not an answer.
     #[test]
     fn a_verified_report_names_who_signed_it() {
-        let report = run(
+        let report = ran(
             &manifest(64.0, &[]),
             &capacity(1024.0, &[]),
             &"a".repeat(64),
@@ -643,13 +821,13 @@ mod tests {
     #[test]
     fn every_report_says_what_staging_does_and_does_not_enforce() {
         for report in [
-            run(
+            ran(
                 &manifest(64.0, &[]),
                 &capacity(1024.0, &[]),
                 &"a".repeat(64),
                 signed_by("acme-robotics"),
             ),
-            run(
+            ran(
                 &manifest(9999.0, &["nope"]),
                 &capacity(16.0, &[]),
                 &"a".repeat(64),
@@ -667,10 +845,198 @@ mod tests {
         }
     }
 
+    // ── §37.1's `transport` stage ────────────────────────────────────────────
+
+    /// A body with one joint, one role, and a rating.
+    ///
+    /// Written to a file and read back through [`crate::embodiment::read`] rather than constructed,
+    /// so the test exercises the same decoder an install does — a descriptor built in memory would
+    /// skip the reader that is half of what the stage depends on.
+    fn arm(label: &str, role: &str, effort_nm: f64) -> crate::embodiment::Body {
+        let document = format!(
+            r#"{{"robot_slug":"bench-arm","base":"fixed","dof":1,
+                 "control":{{"modes":["torque"],"rate_hz_max":100}},
+                 "envelope":{{"joint_torque_max_nm":{effort_nm},"watchdog_ms":100,
+                              "source":"https://example.invalid/arm.pdf"}},
+                 "joints":[{{"name":"J1","role":"{role}","type":"revolute",
+                             "control_modes":["torque"],
+                             "limits":{{"effort_max_nm":{effort_nm}}}}}]}}"#
+        );
+        let root = crate::tests::TempRoot::new(label);
+        let path = root.path().join("embodiment.json");
+        std::fs::write(&path, document).unwrap();
+        let body = crate::embodiment::read(&path);
+        assert!(body.known().is_some(), "the fixture descriptor loads");
+        body
+    }
+
+    /// A policy that commands one torque channel on one role, at a declared peak.
+    fn policy_for(
+        role: &str,
+        peak_nm: f64,
+        hz: Option<f64>,
+    ) -> skynet_contracts::admission::PackageManifest {
+        let source = Json::parse(&format!(
+            r#"{{"control_mode":"torque","control_hz":50,
+                 "action_channels":[{{"index":0,"kind":"joint_torque","role":"{role}",
+                                      "unit":"Nm","peak":{peak_nm}}}]}}"#
+        ))
+        .expect("the source parses");
+        let mut manifest = manifest(64.0, &[]);
+        manifest.budget.control_hz = hz;
+        manifest.source_embodiment =
+            Some(skynet_contracts::json::source_from_json(&source).expect("decodes"));
+        manifest
+    }
+
+    fn ran_on(
+        manifest: &skynet_contracts::admission::PackageManifest,
+        body: &crate::embodiment::Body,
+        retarget: bool,
+    ) -> Report {
+        run(
+            manifest,
+            &capacity(1024.0, &[]),
+            &"a".repeat(64),
+            signed_by("acme-robotics"),
+            body,
+            retarget,
+        )
+    }
+
+    /// The stage, running for the first time. A channel whose role the body has goes `direct`, and
+    /// the verdict reaches admission — which had taken `None` on every robot since it was written.
+    #[test]
+    fn a_policy_that_fits_the_body_transports_direct_and_admission_is_told() {
+        let report = ran_on(
+            &policy_for("right_arm.elbow.flex", 40.0, None),
+            &arm("transport-fit", "right_arm.elbow.flex", 80.0),
+            false,
+        );
+        let Report::Ran { plan, result, .. } = &report else {
+            panic!("{report:?}");
+        };
+        let plan = plan.as_ref().expect("a plan");
+        assert_eq!(plan.verdict.as_str(), "direct");
+        assert!(result.admitted, "{:?}", result.findings);
+        assert_eq!(
+            to_json(&report)
+                .get("transport")
+                .map(|t| t.get("verdict").cloned()),
+            Some(Some(Json::from("direct"))),
+            "and it is on the wire, where nothing was before"
+        );
+    }
+
+    /// §6: *"One blocked required channel refuses the whole plan, because a policy missing an
+    /// actuator it depends on does not do most of its job — it does something nobody has
+    /// characterised."* This is that refusal reaching an install, which it never has.
+    #[test]
+    fn a_required_channel_this_body_has_no_equivalent_for_refuses_the_install() {
+        let report = ran_on(
+            &policy_for("left_leg.knee.flex", 40.0, None),
+            &arm("transport-fit", "right_arm.elbow.flex", 80.0),
+            false,
+        );
+        let Report::Ran { plan, result, .. } = &report else {
+            panic!("{report:?}");
+        };
+        assert_eq!(plan.as_ref().expect("a plan").verdict.as_str(), "refused");
+        assert!(!result.admitted);
+        assert!(
+            result
+                .findings
+                .iter()
+                .any(|f| f.code == PackageRejectionCode::TransportRefused),
+            "{:?}",
+            result.findings
+        );
+        // §64: the refusal names the channel, not only the verdict. "The policy's action space
+        // cannot be transported onto this body" is true and tells nobody which joint to look at.
+        let lines = to_lines(&report).join("\n");
+        assert!(lines.contains("left_leg.knee.flex"), "{lines}");
+        assert!(lines.contains("blocked"), "{lines}");
+    }
+
+    /// The two ways there is nothing to plan, and neither is a pass.
+    #[test]
+    fn no_action_space_and_no_descriptor_both_produce_no_verdict() {
+        // A driver, an environment, a dataset: nothing that commands a joint.
+        let no_space = ran_on(
+            &manifest(64.0, &[]),
+            &arm("transport-fit", "right_arm.elbow.flex", 80.0),
+            false,
+        );
+        assert!(matches!(&no_space, Report::Ran { plan: None, .. }));
+        assert!(no_space.clean(), "{no_space:?}");
+
+        // And a robot nobody has provisioned. The descriptor's absence is reported by the routes
+        // that report descriptors; inventing a `refused` here would fail every install on it with
+        // a sentence about the policy.
+        let no_body = ran_on(
+            &policy_for("right_arm.elbow.flex", 40.0, None),
+            &crate::embodiment::Body::Absent,
+            false,
+        );
+        assert!(matches!(&no_body, Report::Ran { plan: None, .. }));
+        assert!(
+            !no_body
+                .errors()
+                .iter()
+                .any(|f| f.code == PackageRejectionCode::TransportRefused),
+            "a missing body is not a refused transport"
+        );
+    }
+
+    /// §6.1: retargeting is off unless somebody decided otherwise, and the decision is the
+    /// operator's — a flag on the command they are standing at, not a field the publisher fills in.
+    #[test]
+    fn retargeting_is_off_until_the_operator_asks_for_it() {
+        // A role this body does not have, on a chain it does: with no solver and no permission the
+        // channel is blocked either way, and what changes is *which* refusal an operator reads.
+        let policy = policy_for("right_arm.wrist.roll", 10.0, None);
+        let body = arm("transport-body", "right_arm.elbow.flex", 80.0);
+
+        let refused = ran_on(&policy, &body, false);
+        let Report::Ran { plan, .. } = &refused else {
+            panic!()
+        };
+        assert_eq!(plan.as_ref().unwrap().verdict.as_str(), "refused");
+
+        // Asking for it does not manufacture a solver: this body declares none, so §6.1's "the
+        // request is refused rather than promised and discovered at the first command" holds.
+        let asked = ran_on(&policy, &body, true);
+        let Report::Ran { plan, .. } = &asked else {
+            panic!()
+        };
+        assert_eq!(
+            plan.as_ref().unwrap().verdict.as_str(),
+            "refused",
+            "a body with no solver cannot retarget, however the flag is set"
+        );
+    }
+
+    /// The rate the plan is made against is the one the loop will run at, not the one the policy
+    /// was trained at. A publisher may declare both.
+    #[test]
+    fn the_plan_uses_the_rate_the_package_will_actually_run_at() {
+        let body = arm("transport-body", "right_arm.elbow.flex", 80.0);
+        // Trained at 50, and this package declares it will run its loop at 25.
+        let report = ran_on(
+            &policy_for("right_arm.elbow.flex", 40.0, Some(25.0)),
+            &body,
+            false,
+        );
+        let Report::Ran { plan, .. } = &report else {
+            panic!()
+        };
+        assert_eq!(plan.as_ref().unwrap().control_hz, Some(25.0));
+    }
+
     /// An untrusted report carries the detail, because the code alone does not say where to look.
     #[test]
     fn an_untrusted_signature_reports_where_to_look() {
-        let report = run(
+        let report = ran(
             &manifest(64.0, &[]),
             &capacity(1024.0, &[]),
             &"a".repeat(64),

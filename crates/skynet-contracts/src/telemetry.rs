@@ -218,6 +218,13 @@ pub fn assess_window(window: &Window) -> WindowReport {
     // toward positive infinity and [`crate::round_half_away`] is half away from zero, and the two
     // disagree on exactly the negative halves a backwards clock produces. Truncation is the one
     // reading both editions can spell identically without a helper.
+    // The two comparisons are kept rather than folded into a range, which is the same expression
+    // for every number and a different one for `NaN`: a range says *not contained* and raises the
+    // fault, two comparisons say *neither greater nor less* and do not. The reference edition
+    // spells it with two comparisons, so this one does too — an edition difference reachable only
+    // by a value JSON cannot carry is still an edition difference, and the corpus exists to have
+    // none.
+    #[allow(clippy::manual_range_contains)]
     if skew > 60_000.0 || skew < -60_000.0 {
         faults.push(fault(
             WindowFaultCode::ImplausibleDuration,
@@ -380,15 +387,21 @@ pub fn coverage(windows: &[Window]) -> Coverage {
 /// reported.
 pub fn conformance_of(coverage: &Coverage) -> Option<f64> {
     let cycles = coverage.total("cycles")?;
-    if !(cycles.is_finite() && cycles > 0.0) {
+    if !cycles.is_finite() {
         return None;
     }
+    // Absent interventions read as zero *only once there are cycles*, and that is not the usual
+    // rule. §74.3 keeps unmeasured and zero apart everywhere else — but a window that counted
+    // cycles and did not count interventions is a robot whose kernel intervened in none of them,
+    // because the counter that would have recorded one is the same counter that recorded the
+    // cycles. Absent `cycles` is still absent, which is the guard above.
     let interventions = coverage.total("interventions").unwrap_or(0.0);
-    // More interventions than cycles is a robot whose counters disagree with each other, and the
-    // honest floor for that is zero rather than a negative conformance figure §15 has no reading
-    // for. Clamped rather than trusted, because §15 checks this number against a floor and a
-    // negative one would sail under it.
-    Some(((cycles - interventions) / cycles).clamp(0.0, 1.0))
+    // **Through `field_conformance`, not beside it.** These two functions computed the same ratio,
+    // with the same clamp, in two crates, and neither had a caller — so the day one of them gained
+    // a rule about a robot whose counters disagree, the other would have kept the old answer and
+    // nothing would have compared them. §15's number has one definition and it belongs to the
+    // module that checks it against §15's floor.
+    crate::certification::field_conformance(cycles, interventions)
 }
 
 /// One window report, as the corpus holds it.
@@ -442,7 +455,20 @@ pub fn coverage_to_json(coverage: &Coverage) -> Json {
     }
 
     let mut out = Json::obj();
-    out.set("gaps", gaps)
+    out
+        // §15's third suite, over what was actually observed. Nullable rather than optional, and
+        // frozen here rather than left to each consumer, because this is the number that decides
+        // whether a certificate is suspended — and it had two implementations, in two crates,
+        // pinned by nothing. A value both editions compute and neither corpus holds is a value
+        // they are free to disagree about.
+        .set(
+            "conformance",
+            match conformance_of(coverage) {
+                Some(ratio) => Json::Num(ratio),
+                None => Json::Null,
+            },
+        )
+        .set("gaps", gaps)
         .set("observed_ms", Json::Num(coverage.observed_ms))
         .set("spanned_ms", Json::Num(coverage.spanned_ms))
         .set("totals", totals)

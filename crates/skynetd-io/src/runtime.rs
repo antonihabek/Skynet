@@ -51,7 +51,7 @@ use skynetd::desired::{DesiredState, PackageKind, RunState};
 use skynetd::health::{Health, PackageHealth, Readiness};
 use skynetd::lease::LeaseTable;
 use skynetd::reconcile::{Action, ActionKind, Plan, SafeState};
-use skynetd::supervise::{CrashPolicy, Supervision};
+use skynetd::supervise::{CrashPolicy, RestartDecision, Supervision};
 
 use crate::launch::{Cpus, LaunchError, Launcher, Limits, Unit};
 use crate::layout::{Layout, PackageId};
@@ -308,6 +308,13 @@ pub struct Daemon<L: Launcher, S: Slots> {
     /// Boxed for `updater`'s reason and used the same way — a handful of calls in the life of an
     /// image, against a pair of type parameters read on every pass.
     pub fetcher: Box<dyn crate::bundle::Fetcher>,
+    /// §36's sensors, and the one instant they remember (§36.3's "sustained").
+    ///
+    /// Here for `counting`'s reason: a throttle window is a duration, a duration is not observable
+    /// in one reading, and the instant it opened has to live somewhere. In memory rather than on
+    /// disk, and by the same argument — a throttle window that survived a reboot would be a robot
+    /// reporting an hour of continuous throttling across a power cycle it spent switched off.
+    pub power: crate::power::Sensors,
     /// The fraction §34.4's backoff is jittered by, supplied rather than drawn (§35.2).
     ///
     /// A field rather than an argument threaded through `reconcile`, `apply` and six action arms to
@@ -343,6 +350,10 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             last_pass: None,
             last_pull: None,
             counting: crate::telemetry::Counting::default(),
+            // From the kernel's own interfaces, not through the layout — for `cpus`'s reason two
+            // fields above: the pack and the thermal zones are properties of the machine and live
+            // at `/sys` on every one of them, whatever `/data` a store was rooted at.
+            power: crate::power::Sensors::new(),
             last_release_pull: None,
             desired_source,
             desired: nothing(),
@@ -704,7 +715,11 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         // the Hub asked for".
         let remaining = skynetd::plan(&self.desired, &actual).actions.len();
 
-        let health = self.health(&actual, now_ms);
+        // §36's gauge, read in the pass whose health it goes into. A `Pass` is the record of one
+        // turn of the loop, so a battery figure in it that came from a different turn would be the
+        // one thing this struct exists not to be.
+        let reading = self.read_power(now_ms);
+        let health = self.health(&actual, now_ms, Some(&reading));
         let pass = Pass {
             at_ms: now_ms,
             plan,
@@ -742,10 +757,11 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     /// and then starting would otherwise take two reconcile intervals to arrive, and an interval is
     /// ten seconds.
     ///
-    /// The budget is what stops it spinning. An action nobody can apply — an OS update while §12 is
-    /// unwritten — stays in the plan for ever by design, so a loop with no bound would turn for
-    /// ever making no progress. [`MAX_PASSES`] is the bound and it is generous: §33.4 has six
-    /// stages, so a plan whose actions each enable the next arrives in six.
+    /// The budget is what stops it spinning. An action nobody can apply — an OS update whose
+    /// release manifest this robot has never been sent — stays in the plan for ever by design, so
+    /// a loop with no bound would turn for ever making no progress. [`MAX_PASSES`] is the bound and
+    /// it is generous: §33.4 has six stages, so a plan whose actions each enable the next arrives
+    /// in six.
     pub fn converge(&mut self, now_ms: u64) -> Vec<Pass> {
         let mut passes = Vec::new();
         for _ in 0..MAX_PASSES {
@@ -770,16 +786,6 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         match &action.kind {
             ActionKind::StageOsImage { version } => self.stage_image(version, now_ms),
             ActionKind::ApplyOsImage { version } => self.apply_image(version),
-            #[allow(unreachable_patterns)]
-            ActionKind::StageOsImage { .. } | ActionKind::ApplyOsImage { .. } => {
-                Outcome::Unimplemented {
-                    reason:
-                        "OTA (§12) is not written: there is no bundle fetcher, no RAUC install \
-                             and no health gate. The action stays in the plan rather than being \
-                             dropped, so the robot does not report itself up to date"
-                            .to_string(),
-                }
-            }
 
             ActionKind::FetchPackage { id, digest } => {
                 // Already present is the answer §37.1 wants — "skipping any blob already present" —
@@ -1252,7 +1258,8 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         };
 
         let post = crate::post::run(&layout, wall_s);
-        let health = self.health(actual, now_ms);
+        let reading = self.read_power(now_ms);
+        let health = self.health(actual, now_ms, Some(&reading));
         let wanted_running = !health.packages.is_empty()
             && health
                 .packages
@@ -1391,6 +1398,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         let inputs = self.live_inputs(wall_s);
         let running = crate::skill::running_set(actual);
         let grants = actual.grants.clone();
+        let power_withheld = self.power_refusal(now_ms);
 
         let mut runtime = core::mem::take(&mut self.skills);
         let reports = {
@@ -1410,6 +1418,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
                 running: &running,
                 leases: &mut self.leases,
                 grants: &grants,
+                power_withheld,
             };
             runtime.advance_all(&mut cycle)
         };
@@ -1490,10 +1499,71 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             .supervision
             .entry(id.to_string())
             .or_insert_with(|| Supervision::new(id, kind, CrashPolicy::default()));
-        record.on_exit(now_ms, jitter);
+        let decision = record.on_exit(now_ms, jitter);
+        // §74's `package_restarts`, which had no source and needed none it did not already have:
+        // the supervisor is what decides a restart, and this is where it decides one.
+        //
+        // Counted at the **decision** rather than at the start it leads to. The two are one pass
+        // apart, and a decision whose start never happened is a robot in worse trouble rather than
+        // better — a counter that waited for the start would under-report exactly the robot a fleet
+        // page is looking for. `Failed` and `AwaitOperator` are not restarts and are not counted;
+        // they are a package that stopped coming back, which the readiness column already says.
+        if matches!(decision, RestartDecision::RestartAt(_)) {
+            self.counting.restarts += 1;
+        }
         // Whatever it held, it is not holding now.
         self.leases.release_all(id);
         let _ = self.write_leases();
+    }
+
+    /// One §36 reading, against the descriptor as it is on disk right now (§36).
+    ///
+    /// The descriptor is loaded per call rather than held on the daemon, for the reason `actual` is
+    /// observed rather than remembered (§33.3): a profile cached at start-up would survive a
+    /// descriptor somebody replaced on a running robot, and the thresholds in it are what decide
+    /// when this robot stops.
+    pub fn read_power(&mut self, now_ms: u64) -> crate::power::Reading {
+        let layout = self.store.layout().clone();
+        let body = crate::embodiment::load(&layout);
+        let (_, reading) = crate::power::observe(&mut self.power, &layout, &body, now_ms);
+        reading
+    }
+
+    /// §36.1's `low` row as a sentence, or `None` when new task leases may be granted.
+    ///
+    /// The sentence names *which* of §36's two reasons is in force, because they send an operator
+    /// to different places: a body below its reserve wants a charger, and a body whose gauge
+    /// nothing can read wants a look at the machine. Both withhold, and a shared sentence would
+    /// send half the operators to the wrong one (§64).
+    ///
+    /// A robot with no power subsystem wired up is `unmetered`, grants leases, and returns `None`
+    /// here — so wiring this in changes nothing on a body that declares no pack, which is what
+    /// every test in this suite and every development host is.
+    pub fn power_refusal(&mut self, now_ms: u64) -> Option<String> {
+        let layout = self.store.layout().clone();
+        let body = crate::embodiment::load(&layout);
+        let profile = crate::power::profile_of(&body);
+        let reading = self.read_power(now_ms);
+        let assessment = skynet_contracts::power::assess(&profile, &reading.observation);
+        if assessment.grants_new_leases() {
+            return None;
+        }
+
+        let mut sentence = format!(
+            "§36.1 withholds new task leases: this robot's power state is `{}` ({})",
+            assessment.state.as_str(),
+            assessment.reason.as_str()
+        );
+        // The faults are what make the two cases distinguishable. A robot at `low` has none and the
+        // state is the whole story; a robot reporting `unmetered` has one, and it is the sentence
+        // that says whether to fetch a charger or a screwdriver.
+        for fault in &assessment.faults {
+            if fault.code.withholds_leases() {
+                sentence.push_str(". ");
+                sentence.push_str(&fault.detail);
+            }
+        }
+        Some(sentence)
     }
 
     /// Aggregate health (§33.6).
@@ -1504,7 +1574,18 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     /// runtime posts into, and the policy runtime is not written. An `Unknown` on the console reads
     /// as "running, nobody has measured whether it is producing", which is true. A `Ready` would be
     /// the green tick §33.6 exists to prevent.
-    pub fn health(&self, actual: &Actual, now_ms: u64) -> Health {
+    ///
+    /// `power` is §36's reading, taken by the caller. **Passed in rather than taken here** for two
+    /// reasons that point the same way: this method is `&self` and the throttle window is the one
+    /// thing §36 remembers, and a health rollup that opened `/sys` would be doing I/O behind a name
+    /// that promises an aggregate. `None` is a caller that did not read one, which reports the two
+    /// fields absent — as they were on every check-in until §36 was written.
+    pub fn health(
+        &self,
+        actual: &Actual,
+        now_ms: u64,
+        power: Option<&crate::power::Reading>,
+    ) -> Health {
         let packages = actual
             .units
             .iter()
@@ -1528,8 +1609,11 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             generation_lag: None,
             storage_headroom: None,
             guard_trip_rate: None,
-            battery: None,
-            temperature_c: None,
+            // §36's two, and this is their only source. `GET /health` and the check-in both read
+            // this struct, so a robot cannot report one battery figure on its console and another
+            // to its Hub — which is what filling them in two places would eventually produce.
+            battery: power.and_then(|reading| reading.charge_fraction),
+            temperature_c: power.and_then(|reading| reading.observation.temperature_c),
         }
     }
 

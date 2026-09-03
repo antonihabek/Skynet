@@ -15,6 +15,14 @@
 //! vendor arrive at certification believing they had evidence they do not have. So they are listed
 //! as **not covered**, by name, at the end of every run.
 //!
+//! **Where they are covered is now a place rather than a hope.** Each entry's sentence said "needs
+//! X" for as long as this list existed, and five of the eight named an X the platform has since
+//! built — so every one of them pointed at a gap that had closed. They point at
+//! `skynet conformance` now, which runs them on a robot against that robot's own installed code
+//! (`skynetd-io::conformance`), and the two that remain genuinely open say what they are waiting
+//! for rather than naming a component that exists. A sentence explaining an absence is a claim, and
+//! it decays exactly as fast as the absence does.
+//!
 //! `safety.kernel.parity` is the interesting one: for an *edition* it means "reproduces the
 //! conformance corpus", which `cargo test -p skynet-corpus` measures and this command cannot. It is
 //! named as covered elsewhere rather than silently omitted.
@@ -223,28 +231,31 @@ pub const NOT_COVERED: &[(&str, &str)] = &[
     ),
     (
         "safety.policy.isolation",
-        "a runtime property — needs skynetd and a sandbox",
+        "a runtime property — needs a sandbox, which no edition has yet",
     ),
     (
         "package.signature.required",
-        "a runtime property — needs the package installer",
+        "a runtime property — `skynet conformance`, and it fails there today",
     ),
     (
         "package.grants.gate",
-        "a runtime property — needs the permission model",
+        "a runtime property — `skynet conformance`, where half of it is built",
     ),
-    ("ota.safety_gate", "a runtime property — needs the updater"),
+    (
+        "ota.safety_gate",
+        "a runtime property — `skynet conformance`, where it passes",
+    ),
     (
         "telemetry.replay.deterministic",
-        "a runtime property — needs the black box",
+        "a runtime property — `skynet conformance`, pending resolved limits",
     ),
     (
         "security.identity.attested",
-        "a runtime property — needs pairing and attestation",
+        "a runtime property — `skynet conformance`, pending a TPM to bind a key to",
     ),
     (
         "security.credential.scope",
-        "a runtime property — needs device tokens",
+        "a runtime property, and the Hub's rather than a robot's — see `skynet conformance`",
     ),
 ];
 

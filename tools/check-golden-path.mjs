@@ -114,6 +114,11 @@ function checkMakeTargets(document, source) {
  * regex takes every quoted literal on a match arm's left-hand side across those files, which is
  * broader than the true command set and deliberately so: a check that reported a false failure when
  * somebody added a command would be a check somebody deleted.
+ *
+ * Broader by design is not the same as broader by accident. The `\|` is guarded against `||`,
+ * because a boolean `state == "critical" || …` is not a match arm and reading it as one puts
+ * `critical` in the set of things `skynet <x>` may be — which is exactly the false name this check
+ * exists to catch, admitted by the check itself.
  */
 function commands() {
   const directory = join(HERE, 'crates/skynet-cli/src')
@@ -121,7 +126,7 @@ function commands() {
   for (const name of readdirSync(directory)) {
     if (!name.endsWith('.rs')) continue
     const source = readFileSync(join(directory, name), 'utf8')
-    for (const match of source.matchAll(/(?:Some\()?"([a-z][a-z0-9-]*)"\)?\s*(?:\||=>)/g)) {
+    for (const match of source.matchAll(/(?:Some\()?"([a-z][a-z0-9-]*)"\)?\s*(?:\|(?!\|)|=>)/g)) {
       found.add(match[1])
     }
   }

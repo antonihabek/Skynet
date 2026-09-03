@@ -29,7 +29,7 @@
           }
         ]
       },
-      "expected": "{\"gaps\":[],\"observed_ms\":600000,\"spanned_ms\":600000,\"totals\":{\"cycles\":60000,\"guard_trips\":2,\"interventions\":1},\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
+      "expected": "{\"conformance\":0.9999833333333333,\"gaps\":[],\"observed_ms\":600000,\"spanned_ms\":600000,\"totals\":{\"cycles\":60000,\"guard_trips\":2,\"interventions\":1},\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
     },
     {
       "id": "a-dropped-window-leaves-a-gap",
@@ -56,7 +56,7 @@
           }
         ]
       },
-      "expected": "{\"gaps\":[{\"from_ms\":1760000300000,\"to_ms\":1760000900000}],\"observed_ms\":600000,\"spanned_ms\":1200000,\"totals\":{\"cycles\":60000,\"guard_trips\":2,\"interventions\":1},\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
+      "expected": "{\"conformance\":0.9999833333333333,\"gaps\":[{\"from_ms\":1760000300000,\"to_ms\":1760000900000}],\"observed_ms\":600000,\"spanned_ms\":1200000,\"totals\":{\"cycles\":60000,\"guard_trips\":2,\"interventions\":1},\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
     },
     {
       "id": "an-unusable-window-is-counted-apart",
@@ -85,7 +85,7 @@
           }
         ]
       },
-      "expected": "{\"gaps\":[],\"observed_ms\":300000,\"spanned_ms\":300000,\"totals\":{\"cycles\":30000,\"guard_trips\":2,\"interventions\":1},\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":1}"
+      "expected": "{\"conformance\":0.9999666666666667,\"gaps\":[],\"observed_ms\":300000,\"spanned_ms\":300000,\"totals\":{\"cycles\":30000,\"guard_trips\":2,\"interventions\":1},\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":1}"
     },
     {
       "id": "overlapping-windows-are-merged-for-the-span-and-summed-for-the-counts",
@@ -112,7 +112,78 @@
           }
         ]
       },
-      "expected": "{\"gaps\":[],\"observed_ms\":600000,\"spanned_ms\":450000,\"totals\":{\"cycles\":45000,\"guard_trips\":2,\"interventions\":1},\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
+      "expected": "{\"conformance\":0.9999777777777777,\"gaps\":[],\"observed_ms\":600000,\"spanned_ms\":450000,\"totals\":{\"cycles\":45000,\"guard_trips\":2,\"interventions\":1},\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
+    },
+    {
+      "id": "conformance-under-the-floor",
+      "note": "§15 suspends below 0.999, \"because a robot whose commands have been leaving its envelope is not a lower-tier robot — it is one whose certificate no longer describes it.\" Thirty thousand cycles and forty interventions is 0.99867, and this is the case the third suite exists for.",
+      "input": {
+        "windows": [
+          {
+            "from_ms": 1760000000000,
+            "to_ms": 1760000300000,
+            "elapsed_ms": 300000,
+            "counters": {
+              "cycles": 30000,
+              "interventions": 40
+            }
+          }
+        ]
+      },
+      "expected": "{\"conformance\":0.9986666666666667,\"gaps\":[],\"observed_ms\":300000,\"spanned_ms\":300000,\"totals\":{\"cycles\":30000,\"interventions\":40},\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
+    },
+    {
+      "id": "conformance-exactly-at-the-floor",
+      "note": "Thirty interventions in thirty thousand cycles is exactly 0.999. §15 puts the floor at 0.999 rather than 1.0 because \"a hundred robots at 100 Hz produce tens of millions of cycles a day, and demanding literal perfection would suspend every honest vendor on sensor noise\" — so the boundary is worth a vector of its own.",
+      "input": {
+        "windows": [
+          {
+            "from_ms": 1760000000000,
+            "to_ms": 1760000300000,
+            "elapsed_ms": 300000,
+            "counters": {
+              "cycles": 30000,
+              "interventions": 30
+            }
+          }
+        ]
+      },
+      "expected": "{\"conformance\":0.999,\"gaps\":[],\"observed_ms\":300000,\"spanned_ms\":300000,\"totals\":{\"cycles\":30000,\"interventions\":30},\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
+    },
+    {
+      "id": "cycles-counted-and-no-interventions-counted",
+      "note": "The one place §74.3's unmeasured-is-not-zero rule bends, and it bends because of what the counters are: the thing that would have recorded an intervention is the same loop that recorded the cycles, so a window with cycles and no interventions is a kernel that intervened in none of them. Conformance is 1, not undefined.",
+      "input": {
+        "windows": [
+          {
+            "from_ms": 1760000000000,
+            "to_ms": 1760000300000,
+            "elapsed_ms": 300000,
+            "counters": {
+              "cycles": 30000
+            }
+          }
+        ]
+      },
+      "expected": "{\"conformance\":1,\"gaps\":[],\"observed_ms\":300000,\"spanned_ms\":300000,\"totals\":{\"cycles\":30000},\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
+    },
+    {
+      "id": "more-interventions-than-cycles",
+      "note": "A robot whose counters disagree with each other. Clamped to zero rather than reported negative: §15 checks this against a floor, and a negative number sails under it — which happens to reach the right verdict for the wrong reason, and would reach the wrong one the day somebody compared it against anything else.",
+      "input": {
+        "windows": [
+          {
+            "from_ms": 1760000000000,
+            "to_ms": 1760000300000,
+            "elapsed_ms": 300000,
+            "counters": {
+              "cycles": 100,
+              "interventions": 250
+            }
+          }
+        ]
+      },
+      "expected": "{\"conformance\":0,\"gaps\":[],\"observed_ms\":300000,\"spanned_ms\":300000,\"totals\":{\"cycles\":100,\"interventions\":250},\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
     },
     {
       "id": "nothing-at-all",
@@ -120,7 +191,7 @@
       "input": {
         "windows": []
       },
-      "expected": "{\"gaps\":[],\"observed_ms\":0,\"spanned_ms\":0,\"totals\":{},\"unmeasured\":[\"clamps\",\"cycles\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
+      "expected": "{\"conformance\":null,\"gaps\":[],\"observed_ms\":0,\"spanned_ms\":0,\"totals\":{},\"unmeasured\":[\"clamps\",\"cycles\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
     }
   ]
 }

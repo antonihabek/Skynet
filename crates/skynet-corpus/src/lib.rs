@@ -40,6 +40,7 @@ use skynet_contracts::json;
 use skynet_contracts::live;
 use skynet_contracts::opstate;
 use skynet_contracts::ota;
+use skynet_contracts::power;
 use skynet_contracts::predicate;
 use skynet_contracts::provenance;
 use skynet_contracts::readiness::{evaluate_readiness, summarize_readiness, ReadinessReport};
@@ -752,6 +753,25 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
                     .collect(),
                 "provenance_reason_codes" => provenance::PROVENANCE_REASON_CODES.to_vec(),
                 "birth_required_fields" => birth::REQUIRED_FIELDS.to_vec(),
+                "power_states" => power::POWER_STATES
+                    .iter()
+                    .map(|state| state.as_str())
+                    .collect(),
+                "power_reasons" => power::POWER_REASONS
+                    .iter()
+                    .map(|reason| reason.as_str())
+                    .collect(),
+                "power_fault_codes" => power::POWER_FAULT_CODES
+                    .iter()
+                    .map(|code| code.as_str())
+                    .collect(),
+                "thermal_pressures" => power::THERMAL_PRESSURES
+                    .iter()
+                    .map(|pressure| pressure.as_str())
+                    .collect(),
+                "shed_order" => power::SHED_ORDER.to_vec(),
+                "never_shed" => power::NEVER_SHED.to_vec(),
+                "reserve_terms" => power::RESERVE_TERMS.to_vec(),
                 "birth_ownership_fields" => birth::OWNERSHIP_FIELDS.to_vec(),
                 // Not a skip. A set the corpus names and this edition does not is exactly the
                 // divergence this file exists to catch, and answering "unsupported" is how it gets
@@ -872,6 +892,54 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
         // corpus: the chain, the command-loss verdict and the nesting are one question — is this
         // robot's watchdog chain sound — and pinning them separately would let an edition agree
         // about the inversion and disagree about what it costs.
+        // §36. One runner for the states, the reserve, the thermal ladder and the inference
+        // budget, for the reason §46's chain is one: they are one question — what is this robot's
+        // power situation right now — and an edition could agree about every band and still
+        // disagree about which rung it gives up first, which is the half that decides whether the
+        // control loop or the telemetry uploader goes.
+        "power" => {
+            let profile = input.get("profile").ok_or("no `profile`")?;
+            let observation = input.get("observation").ok_or("no `observation`")?;
+            json::power_to_json(
+                &skynet_contracts::power::PowerProfile {
+                    time_to_safe_state_s: profile
+                        .get("time_to_safe_state_s")
+                        .and_then(Json::as_f64),
+                    safe_stop_energy_wh: profile.get("safe_stop_energy_wh").and_then(Json::as_f64),
+                    pack_capacity_wh: profile.get("pack_capacity_wh").and_then(Json::as_f64),
+                    thermal_throttle_c: profile.get("thermal_throttle_c").and_then(Json::as_f64),
+                    thermal_critical_c: profile.get("thermal_critical_c").and_then(Json::as_f64),
+                    brownout_fault_codes: profile
+                        .arr_or_empty("brownout_fault_codes")
+                        .iter()
+                        .filter_map(Json::as_usize)
+                        .map(|code| code as u32)
+                        .collect(),
+                },
+                &skynet_contracts::power::PowerObservation {
+                    state_of_charge: observation.get("state_of_charge").and_then(Json::as_f64),
+                    energy_remaining_wh: observation
+                        .get("energy_remaining_wh")
+                        .and_then(Json::as_f64),
+                    temperature_c: observation.get("temperature_c").and_then(Json::as_f64),
+                    throttled_for_ms: observation
+                        .get("throttled_for_ms")
+                        .and_then(Json::as_f64)
+                        .unwrap_or(0.0) as u64,
+                    rhal_degraded: observation
+                        .get("rhal_degraded")
+                        .and_then(Json::as_bool)
+                        .unwrap_or(false),
+                    fault_code: observation
+                        .get("fault_code")
+                        .and_then(Json::as_usize)
+                        .map(|code| code as u32),
+                },
+                input.get("declared_budget_ms").and_then(Json::as_f64),
+                input.get("observed_inference_ms").and_then(Json::as_f64),
+            )
+        }
+
         "watchdog" => {
             let windows = skynet_contracts::watchdog::Windows {
                 kernel_cycle_worst_case_ms: input

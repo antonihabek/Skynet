@@ -247,6 +247,15 @@ pub struct EmbodimentDescriptor {
     /// already, and the kernel's worst-case cycle is the kernel's to measure. These two are facts
     /// about the board and the drive, which makes the descriptor the only place they can come from.
     pub watchdog: Option<DeclaredWindows>,
+    /// What this body declares about power and heat (§36.2, §36.3, §36.4).
+    ///
+    /// `None` and a block whose every field is null are **the same body** to every consumer, which
+    /// is unlike [`Self::frames`] and worth saying rather than leaving to be discovered: a power
+    /// profile carries no list whose emptiness is a claim, so there is nothing for the two spellings
+    /// to disagree about. It is an `Option` so that a descriptor written before Part IV can be told
+    /// apart from a vendor who filled the block in with nulls — a distinction nothing acts on, and
+    /// one a console can show an operator chasing a missing declaration.
+    pub power: Option<crate::power::PowerProfile>,
     /// The frame graph (§44.3), or `None` where the generator could not express this body's tree.
     ///
     /// Absent, null and empty are three different bodies. Absent and null both arrive here as

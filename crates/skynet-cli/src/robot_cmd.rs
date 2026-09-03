@@ -52,6 +52,8 @@ skynet — talking to a running robot (§33.7)
   logs <ns/name> [--lines N]  The package's journal
   plan                        The last reconcile pass, and anything deferred
   cell                        The cell descriptor, its env.* facts and its faults
+  power                       §36: the state, the reserve, and what is being given up
+  conformance                 §15's eight runtime tests, run by this robot on itself
   grants                      What is granted, and what is leased
   grants add <ns/name> <token> [--acknowledge <digest>]
                               A skill's safety notes are shown once and acknowledged (§54.2)
@@ -155,6 +157,8 @@ pub fn run(command: &str, argv: &[String]) -> i32 {
         "intent" => show(argv, "GET", "/intent", None, print_intent),
         "releases" => show(argv, "GET", "/releases", None, print_releases),
         "cell" => show(argv, "GET", "/cell", None, print_cell),
+        "power" => show(argv, "GET", "/power", None, print_power),
+        "conformance" => show(argv, "GET", "/conformance", None, print_conformance),
         "pair" => pair(argv),
         "unpair" => show(
             argv,
@@ -1250,6 +1254,144 @@ fn grants(argv: &[String]) -> i32 {
 /// The environment is printed as the **context a precondition sees**, not as the facts as they were
 /// written, because those differ by exactly the faults below — and an operator whose skill was
 /// refused for `env.door closed` needs to see that the key never made it into the context.
+/// `skynet conformance` (§15).
+///
+/// The outcomes first and the sentences under them, because the sentences are long and an operator
+/// scanning eight rows wants the shape before the argument. Every row has one: a skipped test with
+/// no reason is exactly the shape §15's first rule exists against, and printing the outcome alone
+/// would reproduce it on the terminal after the runner had avoided it in the data.
+fn print_conformance(document: &Json) {
+    println!(
+        "conformance {} of {} runtime tests executed — this robot's own evidence supports {}",
+        document
+            .get("executed")
+            .and_then(Json::as_f64)
+            .unwrap_or(0.0),
+        document.get("of").and_then(Json::as_f64).unwrap_or(0.0),
+        term::bold(
+            document
+                .get("attainable")
+                .and_then(Json::as_str)
+                .unwrap_or("—")
+        )
+    );
+
+    for result in document.arr_or_empty("results") {
+        let outcome = result.get("outcome").and_then(Json::as_str).unwrap_or("?");
+        let id = result.get("test_id").and_then(Json::as_str).unwrap_or("?");
+        // A failure is the row an operator has to see. A skip is a gap and reads as one.
+        let label = format!("  {id:<32} {outcome}");
+        println!(
+            "{}",
+            if outcome == "fail" {
+                term::bold(&label)
+            } else {
+                label
+            }
+        );
+        if let Some(detail) = result.get("detail").and_then(Json::as_str) {
+            println!("      {}", term::dim(detail));
+        }
+    }
+
+    if let Some(note) = document.get("note").and_then(Json::as_str) {
+        println!("\n{}", term::dim(note));
+    }
+}
+
+/// `skynet power` (§36).
+///
+/// The state first, because it is the one word an operator came for, and the reserve underneath it
+/// with the terms nobody supplied — §36.2's figure is a floor and a line that printed it bare would
+/// be the one place on this platform that presented an under-estimate as a measurement.
+///
+/// The notes and the faults are printed apart. A note is *this daemon could not read a number* and
+/// a fault is *§36 has a problem with what it was given*; they usually have different remedies and
+/// often different people, and one merged list is how an operator learns to skim both.
+fn print_power(document: &Json) {
+    let text = |key: &str| document.get(key).and_then(Json::as_str).unwrap_or("—");
+    let flag = |key: &str| document.get(key).and_then(Json::as_bool).unwrap_or(false);
+
+    let state = text("state");
+    let headline = format!("power {}   {}", state, text("reason"));
+    // The two states in which the robot is stopping. A slice rather than a `match` or a pair of
+    // `||` comparisons, and the reason is in another file: `tools/check-golden-path.mjs` builds the
+    // command table by harvesting quoted literals that a `|` or a `=>` follows, so both of those
+    // spellings would put `critical` in the set of things `skynet <x>` may be — and a document that
+    // wrote `skynet critical` would then pass a check whose whole job is to catch that.
+    let stopping = ["critical", "reserve"].contains(&state);
+    println!(
+        "{}",
+        if stopping {
+            term::bold(&headline)
+        } else {
+            headline
+        }
+    );
+
+    match document.get("remaining_wh").and_then(Json::as_f64) {
+        Some(wh) => println!("  {wh} Wh remaining, from {}", text("supply")),
+        None => println!("  {}", term::dim("no energy figure")),
+    }
+
+    if let Some(reserve) = document.get("reserve") {
+        let unaccounted = reserve.str_arr("unaccounted");
+        match reserve.get("wh").and_then(Json::as_f64) {
+            Some(wh) if unaccounted.is_empty() => println!("  reserve {wh} Wh"),
+            Some(wh) => println!(
+                "  reserve {wh} Wh {}",
+                term::dim(&format!(
+                    "— a floor: §36.2 also counts {}, and nothing on this robot supplies either",
+                    unaccounted.join(" and ")
+                ))
+            ),
+            None => println!(
+                "  {}",
+                term::dim("no reserve — this body declares no `safe_stop_energy_wh` (§36.2)")
+            ),
+        }
+    }
+
+    let shed = document.str_arr("shed");
+    let thermal = text("thermal");
+    if shed.is_empty() {
+        println!("  thermal {thermal}");
+    } else {
+        println!("  thermal {thermal} — giving up {}", shed.join(", "));
+    }
+
+    // Three booleans an operator acts on, printed only when they say something. A line reading
+    // "new leases: yes" on every healthy robot is a line nobody reads on the one robot where it
+    // says no.
+    if !flag("grants_new_leases") {
+        println!("  {}", term::bold("no new task leases (§36.1)"));
+    }
+    if flag("requires_safe_state") {
+        println!(
+            "  {}",
+            term::bold(if flag("stops_immediately") {
+                "stop now, then a safe state (§36.1)"
+            } else {
+                "controlled stop, then a safe state (§36.1)"
+            })
+        );
+    }
+    if flag("degraded") {
+        println!("  {}", term::bold("DEGRADED — sustained thermal (§36.3)"));
+    }
+
+    for fault in document.arr_or_empty("faults") {
+        println!(
+            "  {} {}",
+            term::bold(fault.get("code").and_then(Json::as_str).unwrap_or("fault")),
+            fault.get("detail").and_then(Json::as_str).unwrap_or("")
+        );
+    }
+    for note in document.arr_or_empty("notes") {
+        println!("  {}", term::dim(note.as_str().unwrap_or("")));
+    }
+}
+
 fn print_cell(document: &Json) {
     if document.get("held") != Some(&Json::Bool(true)) {
         println!(
@@ -1267,7 +1409,10 @@ fn print_cell(document: &Json) {
     println!(
         "cell {}   {} fixture(s)",
         term::bold(document.get("name").and_then(Json::as_str).unwrap_or("—")),
-        document.get("fixtures").and_then(Json::as_f64).unwrap_or(0.0),
+        document
+            .get("fixtures")
+            .and_then(Json::as_f64)
+            .unwrap_or(0.0),
     );
 
     if let Some(environment) = document.get("environment").and_then(Json::as_obj) {
