@@ -20,6 +20,7 @@ name = "skynet-cli"
 version = "0.1.0"
 dependencies = [
  "skynet-contracts",
+ "skynet-dl",
  "skynet-json",
  "skynet-rhal",
  "skynet-sha256",
@@ -48,6 +49,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "skynet-dl"
+version = "0.1.0"
+dependencies = [
+ "skynet-rhal",
+]
+
+[[package]]
 name = "skynet-ed25519"
 version = "0.1.0"
 dependencies = [
@@ -61,6 +69,17 @@ version = "0.1.0"
 [[package]]
 name = "skynet-kernel"
 version = "0.1.0"
+
+[[package]]
+name = "skynet-kernel-host"
+version = "0.1.0"
+dependencies = [
+ "skynet-blackbox",
+ "skynet-dl",
+ "skynet-kernel",
+ "skynet-rhal",
+ "skynet-ring",
+]
 
 [[package]]
 name = "skynet-rhal"

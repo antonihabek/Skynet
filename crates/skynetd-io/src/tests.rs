@@ -10085,7 +10085,10 @@ mod upload {
         assert_eq!(slice_len(SLICE_BYTES * 3, None), SLICE_BYTES);
         // The receiver said, so the receiver decides.
         assert_eq!(slice_len(SLICE_BYTES * 3, Some(1_000)), 1_000);
-        assert_eq!(slice_len(SLICE_BYTES * 3, Some(SLICE_BYTES * 2)), SLICE_BYTES * 2);
+        assert_eq!(
+            slice_len(SLICE_BYTES * 3, Some(SLICE_BYTES * 2)),
+            SLICE_BYTES * 2
+        );
         // …up to the point where what it said would decide how much of this disk to copy.
         assert_eq!(
             slice_len(u64::MAX, Some(u64::MAX)),
@@ -10110,10 +10113,7 @@ mod upload {
         let digest = digest_of(WINDOW);
 
         // A receiver that takes four bytes at a time, which is smaller than the window.
-        let mut server = Scripted::new(
-            vec![Reply::Limits(0, 4)],
-            vec![Reply::Holds(4, None)],
-        );
+        let mut server = Scripted::new(vec![Reply::Limits(0, 4)], vec![Reply::Holds(4, None)]);
         match send(&layout, &mut server, &table, 1_000) {
             Step::Moved { held, .. } => assert_eq!(held, Some(4)),
             other => panic!("{other:?}"),

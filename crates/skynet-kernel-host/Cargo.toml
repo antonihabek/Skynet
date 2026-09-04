@@ -1,0 +1,23 @@
+[package]
+name = "skynet-kernel-host"
+description = "The process that owns the control loop: reads the RHAL, drives the Safety Kernel, and is the only writer to an actuator (§25)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "skynetk"
+path = "src/main.rs"
+
+[dependencies]
+skynet-blackbox = { path = "../skynet-blackbox" }
+skynet-dl = { path = "../skynet-dl" }
+skynet-kernel = { path = "../skynet-kernel" }
+skynet-rhal = { path = "../skynet-rhal" }
+skynet-ring = { path = "../skynet-ring" }
+
+[lints.rust]
+missing_docs = "warn"

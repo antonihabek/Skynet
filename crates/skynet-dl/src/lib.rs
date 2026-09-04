@@ -2,9 +2,14 @@
 //!
 //! The one place in this workspace with `unsafe` in it, and it is unavoidable: the thing being
 //! loaded is arbitrary native code compiled by somebody else, and no amount of Rust can make
-//! calling into it a safe operation. What can be done is to keep the unsafety in one small module
+//! calling into it a safe operation. What can be done is to keep the unsafety in one small crate
 //! whose whole surface is "open a library, look up one symbol, close it", and to say at each block
 //! what is being assumed.
+//!
+//! It is a crate rather than a module because it has two callers. `skynet driver check` opens a
+//! driver to run the sim half of SCTS against it (§63.3); `skynet-kernel-host` opens one to run a
+//! robot (§25). A second copy of this file would be a second copy of the only `unsafe` in the
+//! workspace, and the whole argument above depends on there being one.
 //!
 //! The platform declarations are written out rather than taken from `libc` or `libloading` for the
 //! workspace's stated reason: no third-party dependencies. Four functions on each platform, and
@@ -16,6 +21,8 @@
 //! `RTLD_NOW` so a missing symbol is a load failure rather than a crash halfway through a
 //! conformance run, which is exactly the difference between a diagnosable failure and a puzzling
 //! one.
+
+pub mod driver;
 
 use std::ffi::{c_char, c_void, CString};
 use std::path::Path;

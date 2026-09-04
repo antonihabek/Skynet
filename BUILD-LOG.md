@@ -1,0 +1,167 @@
+# Build log — 2026-09-04 onward
+
+A running record of this build session, kept beside the two canonical logs rather than instead of
+them: [`PROGRESS.md`](PROGRESS.md) is the OS repository's session log and the *Progress log* in
+[`docs/skynet-build-plan.md`](docs/skynet-build-plan.md) §33 is the Hub's. This file is the working
+record — what was audited, what was found, what was changed, and what is verified — and its findings
+are folded into those two when a round closes.
+
+**Nothing in this session is pushed.** Commits are held on `main` locally until asked for.
+
+---
+
+## Audit — where the plan actually stood
+
+Both repositories clean and level with `origin/main`. The plan is **not** finished; nearly everything
+that can be finished without hardware, a GPU or an owner's decision is.
+
+| | Verified today |
+|---|---|
+| Skynet OS | `cargo test --workspace` — **1,362 passed**, 4 ignored, exit 0, on Windows |
+| Skynet Hub | 96 routes under `/api/skynet/v1`, 22 tracked migrations, 8 verifier scripts |
+
+### Open, and blocked on the owner
+
+| Item | What is actually blocked |
+|---|---|
+| Account erasure | The last unbuilt half of Phase 14's privacy line. Crosses namespaces, org membership, audit rows that must survive a deletion, and evaluations one person filed about another's work |
+| Who may decide an abuse report | The states are already in the CHECK constraint; nothing says who may move them |
+| Retention of sealed windows (§80) | They are charged for; deleting one the Hub has acknowledged is a decision about evidence |
+| Collections | A product decision, deferred seven times |
+
+### Open, and blocked on infrastructure that does not exist
+
+| Item | Evidence |
+|---|---|
+| Phase 10 — a real worker | `lib/skynet/workers/in-process.ts` runs dataset-index and search-reindex only. Simulation, training and deployment queue and stay queued |
+| Phase 11 — Spaces, GPU training, inference endpoints | The spec, the config and the job row exist; nothing executes one |
+| Phase 12 — teleoperation | No module, no table, no route. Episodes and intervention counts exist; the operator session does not |
+
+### Open, and blocked on hardware
+
+The policy runtime's consumers (§25), real drivers (`ros2_control`, EtherCAT, CANopen, vendor SDKs),
+capture backends (V4L2, GenICam), the safety MCU, TPM binding, a device key, §36.4's brownout input,
+and OTA against real RAUC. §59.5 says this plainly and this log does not improve on it.
+
+### Open, and buildable now — this session's queue
+
+1. ~~README drift in the OS repository~~ — **done below**
+2. ~~The Hub's base schema~~ — the two generated records were missing and are restored; a baseline migration was started and dropped as scaffolding
+3. Phase 9: protected release channels, review approvals, required checks, source-to-release traceability
+4. Phase 9: Git interoperability or an external-Git mirror
+5. Phase 9: dataset completion — split/shard manifest, range access, quality reports, licence lineage
+6. §31.3's second language edition, which is what the 1,055-case corpus exists for
+9. ~~§25's control loop — the process eight rows of §73 were waiting on~~ — **done below**
+7. `/skynet/os/editions` — §32.4 item 2, the only item of that list unbuilt
+8. Six dead catalogue keys orphaned across 34 locale files
+
+---
+
+## 1. The README described a robot three features behind the one in the repository
+
+`README.md` is the first thing a vendor reads and it carried four claims that the code had made
+false. None of them was a small wording drift; each named a feature as absent that is built, tested
+and in the table three paragraphs above it.
+
+| It said | The code |
+|---|---|
+| *"What is **not** built is the fetch — §34's inbound half"* | `crates/skynetd-io/src/bundle.rs` fetches, resumes and hashes. `stage_image` has not reported `Unimplemented` for want of bytes since §75 |
+| *"The **bundle** is still not fetched"* | Same module, said twice |
+| *"The one class §34.4 names that still has nowhere to go is **telemetry**"* | `connectivity.rs:963` routes it to `/devices/{id}/telemetry`; §74's window is built every pass and all eight counters have a source |
+| *"The half that is **not** here is the Hub's. Nothing serves that route yet"* | `PUT /devices/{id}/recordings/{sha256}` is served and has 27 live checks against the real bucket |
+
+The fourth is the one worth being careful about, because the replacement is not *"it works now"*.
+The Hub's half exists and the robot's half exists and **the two have never met**: each is exercised
+against a double. That is a different sentence from either the one that was there or the one a
+green tick would have written, and it is the one in the README now.
+
+Two rows of the crate table gained what they were missing — §75's fetch under `skynetd-io`'s OTA
+half, and §74's telemetry window beside §17's check-in.
+
+**Verified:** `cargo test --workspace` — 1,362 passed, exit 0.
+
+---
+
+## 2. The Hub's test suite was red, and the log said it was green
+
+Two files the build log's twenty-first session (fourth) describes as written — the ones its title
+calls *"the repository now contains its own schema"* — were **not in the tree** and not in any
+commit. The two generators were committed; their output was not.
+
+Two tests read them at module scope, so the suite could not have been passing:
+
+```
+FAIL  lib/__tests__/skynet-export-schema.test.ts
+Error: ENOENT: no such file or directory, open '…\supabase\skynet-schema.json'
+Test Files  1 failed | 69 passed (70)
+      Tests  1665 passed (1665)
+```
+
+Regenerated with the repository's own scripts — both read-only against the live database, one over
+PostgREST's OpenAPI document and one through `pg_dump --schema-only`:
+
+* `supabase/skynet-schema.json` — 59 tables, 823 columns
+* `supabase/schema/skynet.sql` — 58 tables, 88 indexes, 63 policies, 15 triggers, 16 functions
+
+`npx vitest run` — **1,691 passed, 70 files**, which is the number the log had been claiming. Both
+generators' `--check` modes confirm the files are current, so the round trip is stable rather than
+merely written once.
+
+**A baseline migration was started here and abandoned** on the owner's instruction, as scaffolding
+rather than product. The gap it was aimed at is real and stays open: `supabase/migrations` holds 22
+increments on a base schema that no file in the tree creates.
+
+---
+
+## 3. §25's command path had two ends and one of them
+
+The item: §73's last column has eight rows saying some version of *nothing has run a cycle*, and all
+eight are downstream of one absent process. `skynet-kernel` is the guards, `skynet-ring` the channel,
+`skynet-rhal` the wire, `skynet-blackbox` the record — and nothing in the workspace opened a driver,
+read the ring, asked the kernel and wrote a joint.
+
+Built: **`crates/skynet-kernel-host`** and the `skynetk` binary, plus **`crates/skynet-dl`**, which is
+the old `skynet-cli/src/dl.rs` extracted so the loader `unsafe` has one home and two callers.
+
+The full argument is in [`PROGRESS.md`](PROGRESS.md)'s fifty-fourth session. The three decisions
+worth repeating anywhere:
+
+| | |
+|---|---|
+| **A hold is a mask of zeros** | §24 defines a zero mask entry as *hold this joint*. Zeros with a mask of ones slams a position-controlled arm to its origin and makes a torque-controlled one go limp |
+| **The deceleration bound is the acceleration bound** | No deceleration figure exists anywhere, and a controlled stop needs a rate. `max_delta_per_cycle` is the jerk ceiling the rate limiter enforces going up; ramping down at it is the declared number read the other way, not a new one |
+| **An escalation is recorded as one** | With no jerk ceiling there is no rate, so a Cat 2 becomes a Cat 0. That is the wrong trade for a robot holding a load and doing it silently is worse — the record carries demanded, performed, and the missing input |
+
+### Verified
+
+* `cargo test --workspace` — **1,376 passed** (1,362 before; fourteen new), `fmt --check` and
+  `clippy --workspace --all-targets` clean
+* `skynetk run --driver drivers/mock/mock_robot.dll --tier host --velocity-max 2.0 --jerk 0.1
+  --watchdog-ms 50 --cycles 40 --hz 200` — Enforcing, four guards active, four naming what they
+  lack, **zero overruns**
+* corpus 77 files / 1,055 cases, golden path 48 commands, mirrors re-pinned after the §73 edit
+
+### One bug it found in its own first run
+
+`--jerk` was parsed, stored and wired nowhere. No test failed. What said so was §7.2's own output on
+the first real run: `unavailable RateLimit — needs profile.max_delta_per_cycle`, printed on a run
+where `--jerk 0.1` had just been passed. The jerk ceiling is the operator's and had been put on the
+transport clamp, which has no such field.
+
+### What it does not do
+
+It is the ring's **consumer**. The producer — inference, observation assembly from real sensors, the
+sandbox holding them — is unwritten, so the ring is empty every cycle and the kernel holds every
+cycle. That is §33.1's own property rather than a defect, and it is now watchable instead of only
+arguable. It also does not make a robot host-tier: `Tier::enforcement` still derives enforcement,
+and `overruns` is the only number this loop can honestly contribute to that question.
+
+---
+
+## Round state
+
+Nothing pushed. Both repositories have uncommitted work on `main`.
+
+**Next:** the OS side's remaining buildable items are §31.3's second language edition and §80's
+`people_detection` vocabulary gap. The Hub's are Phase 9's release gates, `/skynet/os/editions`, and
+the six dead catalogue keys.
