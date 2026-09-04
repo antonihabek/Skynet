@@ -780,3 +780,110 @@ cannot be checked on the machine it is being reviewed on.
 eight guards), `transport` (§6), `admission` (§8), `certification` (§15). The foundation is the part
 that was worth getting right; the rest is mechanical against a runner that will not lie about what
 it has not done.
+
+---
+
+## 14. The release-channel feature had never held a row, and a live run found nothing wrong with it
+
+Item 11 above ended on a sentence this repository has now written four times: *"the migration has not
+been applied, so not one of these three tables has ever held a row"*. The migration was applied
+later the same round, and what was still missing was the thing that had found the last three
+defects of this shape — a probe that drives the real routes against the real database.
+
+[`scripts/skynet-verify-channels.mjs`](../Robot%20Overflow/scripts/skynet-verify-channels.mjs) is
+that, and it is the ninth verifier: **60 live checks**, every fixture removed in a `finally`.
+
+The policy arithmetic is unit-tested and is deliberately not re-tested. What the probe covers is
+everything the arithmetic sits on and no unit test can reach:
+
+| | |
+|---|---|
+| the three CHECK constraints | an unknown check name, a protected channel with an empty policy, a review state that is not a verdict — refused through the route **and** straight at the table, because only the database's half cannot be bypassed |
+| the unique index | `stable` cannot be declared twice |
+| `ON DELETE RESTRICT` | the version a channel recommends cannot be deleted. The one constraint whose entire purpose is to refuse, and nothing that does not delete a row can see it |
+| RLS, both ways | a public repository's channels are readable through the anon key; a private one's are not, and neither are the reviews on its proposals |
+| the frozen evidence | read back out of `jsonb`, then the review it recorded is superseded and the evidence checked again — it does not move |
+| the counting rules | approve, request changes, approve again: three rows kept, one verdict counted. Then the base moves underneath the approval and the tally reports **superseded**, not zero |
+
+It passed on the second run. The three failures on the first were not in the feature.
+
+### One was the probe's own, and it is worth writing down
+
+`supabase.auth.signInWithPassword` stores the session **on the client instance**, and
+`persistSession: false` keeps it off disk rather than out of memory. The probe signed in on the same
+client it then used to ask *"what can the public see?"* — so two RLS checks were the owner reading
+their own private repository, reported as a leak. The fix is a second anon-key client that never
+signs in, and the same mistake would make a "public read works" check prove nothing at all.
+
+### The other two were a real defect, and it was not in this feature
+
+`origin` on a release trace came back `source_gone` — the value that means *"it came from somewhere
+that is not there any more"* — for a version whose source was sitting in the table.
+
+---
+
+## 15. The query nineteen places in the Hub could not run, and the two layers that now say so
+
+`skynet_repo_versions` and `skynet_repos` are joined **twice**: a version belongs to a repository,
+and a repository points at its latest version (`skynet_repos.latest_version_id`). PostgREST will not
+choose between them. `versions.select('…, repo:skynet_repos(…)')` is not a query that returns the
+wrong row — it is a query that returns an **error and no rows**, decided while parsing the request,
+before a table is read.
+
+Nineteen embeds in nine modules were written that way. Every caller destructured `{ data }` and
+discarded the error, so each produced a different plausible wrong answer:
+
+| Module | What a user would have seen |
+|---|---|
+| `versions.ts`, `artifacts.ts` | a version listing and an artifact read, empty |
+| `deployments.ts` | *"deployment not found"* for a deployment that exists |
+| `training.ts`, `spaces.ts` | runs and Spaces invisible |
+| `evaluations.ts` (5) | leaderboards and evaluation reads, empty |
+| `reports.ts` | **`410 gone`** when reporting an unsafe *version* — the platform telling somebody the thing they are reporting does not exist |
+| `repos.ts` | the robots a repository supports, empty |
+| `release-trace.ts` | `source_gone`, which is the one that started this |
+
+**Ten of the nineteen carried `!inner`**, and that is why they read as correct in review: `!inner` is
+a join modifier and looks exactly like the disambiguating hint the query needs.
+
+None of it was visible. The Skynet schema holds **no rows** — 0 repos, 0 versions, 0 deployments,
+0 training runs, 0 spaces — so these queries had never run against anything, and a suite that mocks
+the client parses no select strings. `tsc` sees `string`.
+
+### Two layers, failing at different times
+
+* [`lib/__tests__/skynet-embed-ambiguity.test.ts`](../Robot%20Overflow/lib/__tests__/skynet-embed-ambiguity.test.ts)
+  — offline, every commit. Builds the foreign-key graph from `supabase/schema` and
+  `supabase/migrations`, extracts every select in `lib/skynet`, walks each embed tree and fails on
+  any embed between a twice-joined pair that does not name its constraint. Four of its nine cases
+  test **the detector**, including that `!inner` does not satisfy it: a check that cannot fail is
+  the thing this whole feature set is written against.
+* [`scripts/skynet-verify-embeds.mjs`](../Robot%20Overflow/scripts/skynet-verify-embeds.mjs) — the
+  tenth verifier. Puts **all 291 selects** in front of a real PostgREST with `limit(1)`. An empty
+  database is fine, because the refusal happens at parse time. It therefore also catches what a
+  graph read from SQL cannot: a column that does not exist, a table renamed, a relationship never
+  declared.
+
+### The scanner lied twice before it was right, and both lies are now checks
+
+Writing the extractor reproduced this document's own subject in miniature.
+
+1. A fixed character window paired `sk('skynet_pairing_codes')` with the `.select('handle')` of the
+   *next* query in the file. Four reported failures were the scanner's. Pairing is by statement now
+   — the codebase omits semicolons, so a statement ends where a line stops being a continuation.
+2. Then it read **only the first line** of a multi-line template literal, so evaluations' three
+   largest queries were dropped and the file reported clean. `collectSelects` now returns
+   `{ selects, unresolved }` and both the test and the verifier fail on a non-empty `unresolved`,
+   because a scanner that silently skips what it cannot read produces the same green run as one that
+   checked everything.
+
+A floor of 250 selects is asserted for the same reason: the failure mode of a scanner is not
+miscounting, it is finding nothing.
+
+### Verified
+
+* `npx vitest run` — **1,735 passed**, 72 files (1,726 / 71 before). `npm run typecheck` clean
+* `node scripts/skynet-verify-channels.mjs` — **60 checks**, all pass
+* `node scripts/skynet-verify-embeds.mjs` — 291 selects, 160 distinct, **every one parses**
+* Ten live verifiers now, and the Hub's schema record is the thing that made the offline half
+  possible: it was added two rounds ago and this is the second defect class it has caught
