@@ -7523,7 +7523,7 @@ after it.
 | A robot that signs a conformance result | §19 makes this a rule, not a gap |
 | A robot that produces a run bundle | Unchanged |
 | `/skynet/os/editions` | Still one edition |
-| The base schema as a migration | New. `supabase/skynet-schema.json` records it; it does not fix it |
+| ~~The base schema as a migration~~ | **Withdrawn — the owner's decision, 2026-09-04.** It was attempted: `pg_dump` of `public` and `skynet_private` behind a prerequisites file, applied to a throwaway Postgres and dumped back for a byte-for-byte round trip. It was dropped before it landed, as scaffolding rather than product — a baseline is a file that exists so that a database nobody is standing up could be. What the tree actually needed was the record of the schema it already has, and `supabase/skynet-schema.json` and `supabase/schema/skynet.sql` are that; they were missing from every commit until this round, and two tests read them, so the suite was red while the log reported it green. A fresh environment still cannot be built from `supabase/` and that is now a stated property rather than an open task |
 | Six dead catalogue keys | New, and small. Removing a key from `en.json` orphans it in 34 files that `sync` does not prune |
 | `npx eslint` in this repo | Pre-existing: `typescript-eslint does not support TS 7.0`. Lint coverage is `tsc` only |
 
@@ -7782,12 +7782,27 @@ columns against, so a stale snapshot is a guard silently checking last week's sc
 
 `npx vitest run` — **1,676 passed, 69 files**. `npm run typecheck` — clean.
 
-### Added to *Still not built*
+### Added to *Still not built* — and withdrawn on 2026-09-04
 
 **A baseline migration.** `supabase/migrations` cannot create the database it migrates, and neither
 can the transcript above. Closing it means a baseline for the marketplace schema and the Skynet
 schema in dependency order, which is a bigger piece of work than a session should start at its end
 and is now at least *visible* rather than merely true.
+
+> **Withdrawn by the owner.** It was built far enough to know the shape — `pg_dump` of `public` and
+> `skynet_private` behind a generated prerequisites file, applied to a throwaway Postgres container
+> and dumped back for a byte-for-byte round trip — and then removed, on the grounds that it is
+> scaffolding rather than product: a file that exists so that a database nobody is standing up
+> could be.
+>
+> The judgement holds and the distinction is worth keeping. What the tree needed was not a way to
+> *build* the schema but a record of the schema it *has*, so that code can be held to it — which is
+> what `supabase/skynet-schema.json` and `supabase/schema/skynet.sql` are, and what the `follows`
+> defect happened for want of. That those two files were described in this log and present in no
+> commit is the finding that mattered here.
+>
+> A fresh environment still cannot be built from `supabase/` alone. That is a **stated property**
+> of this repository now rather than an open task in it.
 
 ---
 

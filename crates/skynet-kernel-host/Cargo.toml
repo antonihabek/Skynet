@@ -16,6 +16,7 @@ path = "src/main.rs"
 skynet-blackbox = { path = "../skynet-blackbox" }
 skynet-dl = { path = "../skynet-dl" }
 skynet-kernel = { path = "../skynet-kernel" }
+skynet-lock = { path = "../skynet-lock" }
 skynet-rhal = { path = "../skynet-rhal" }
 skynet-ring = { path = "../skynet-ring" }
 

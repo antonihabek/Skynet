@@ -894,10 +894,11 @@ fn a_second_writer_is_refused_rather_than_allowed_to_corrupt_the_ring() {
 
     let second = crate::recorder::Recorder::open(&dir, meta.clone(), shape, 64 * 1024);
     match second {
-        Err(crate::recorder::RecorderError::Locked { holder, .. }) => {
+        Err(crate::recorder::RecorderError::Locked(error)) => {
+            let said = error.to_string();
             assert!(
-                holder.contains("skynetk"),
-                "the refusal has to name who holds the ring, not just that it is held: {holder}",
+                said.contains("skynetk"),
+                "the refusal has to name who holds the ring, not just that it is held: {said}",
             );
         }
         Err(other) => panic!("refused for the wrong reason: {other}"),

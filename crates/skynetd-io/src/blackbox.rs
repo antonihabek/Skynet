@@ -38,6 +38,7 @@ use skynet_blackbox::record::{Entry, EventCode, EventView, Gap, Shape};
 use skynet_blackbox::ring::{Geometry, Meta, Ring};
 use skynet_blackbox::seal::{seal, Reason, Sealed};
 use skynet_json::Json;
+use skynet_lock::WriterLock;
 
 use crate::layout::Layout;
 
@@ -62,6 +63,8 @@ pub struct Recorder {
     path: PathBuf,
     sealed: PathBuf,
     scratch: Vec<u8>,
+    // §26.2: one ring, one writer. Held for the recorder's life and released on drop.
+    _lock: WriterLock,
 }
 
 fn io_error(doing: &str, path: &Path, error: std::io::Error) -> std::io::Error {
@@ -84,6 +87,17 @@ impl Recorder {
         let dir = layout.blackbox();
         let sealed = dir.join("sealed");
         fs::create_dir_all(&sealed).map_err(|e| io_error("creating", &sealed, e))?;
+
+        // §26.2, before the ring is touched. A `Ring` keeps its next sequence in memory, so a
+        // second writer over this file would encode two records into one slot and produce a
+        // recording that is intact by every check a reader applies and wrong where it matters.
+        //
+        // Refused rather than shared, and the caller treats the refusal as "no black box" rather
+        // than as a reason not to start: §33.1 means a supervisor that cannot record is still a
+        // supervisor that can stop a robot.
+        let lock = WriterLock::take(&dir, "skynetd")
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+
         let path = dir.join("ring");
 
         if let Ok(store) = fs::read(&path) {
@@ -95,6 +109,7 @@ impl Recorder {
                         path,
                         sealed,
                         scratch,
+                        _lock: lock,
                     });
                 }
                 // The body changed under the recording. Keep what is there as a file before the
@@ -119,6 +134,7 @@ impl Recorder {
             path,
             sealed,
             scratch,
+            _lock: lock,
         })
     }
 
