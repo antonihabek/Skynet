@@ -943,3 +943,52 @@ and neither edition had done it.
 * Complete: `digest`, `frames`, `kinematics`, `predicate`, `roles`, `semver`, `vocabulary`,
   `watchdog`. The runner still prints the 23 it cannot do on every line of every run
 * `cargo test --workspace` — 1,398 passed, unchanged: nothing outside `editions/` was touched
+
+---
+
+## 17. Where this session stops
+
+Stopped on request, at a clean point rather than mid-transcription. Everything below is committed
+locally on `main` in both repositories. **Nothing is pushed.**
+
+### What this session built
+
+| | |
+|---|---|
+| §31.3's second edition | 3 corpora → **8**; 172 of 1,055 cases → **328**. `predicate`, `digest`, `kinematics`, `watchdog`, and both halves of `frames` |
+| Phase 9's release gates | committed, and given the live verifier the round before it had not got to — **60 checks** |
+| A defect class in the Hub | **19 PostgREST embeds in 9 modules** the database refuses to parse, each discarded into a plausible wrong answer. Fixed, with two layers of coverage |
+| §81.3's interlock | wired to a caller, with the three refusals that are dormant in `skynetk` named rather than implied |
+
+### Left mid-way, deliberately, and exactly where
+
+`editions/python/kinematics.py` gained the six geometry functions §7.1's two pose guards consume —
+`margin`, `segment_distance_squared`, `capsule_in_world`, `ignores`, `adjacent`, `distance` — and
+they are the groundwork for `safety.py`, which is **not written**. Those functions are exercised by
+nothing but a smoke test at present; the corpus does not reach them until the guards call them.
+
+That was the next item, and it is the largest remaining lever on the edition: `safety.ts` alone
+unlocks `limits` (19 cases), `cycle` (35) and `fuzz/cycle` (40) — 94 of the 727 outstanding.
+
+**One runner change has to come with it.** `fuzz` is one corpus spanning three files — `cycle`,
+`observation` and `transport` — and the dispatch is keyed on the corpus, so implementing one of the
+three would send the other two into a handler that raises, counting them as *failures* rather than
+as *unimplemented*. The honest fix is a per-file `Unimplemented` signal the runner counts in the
+same bucket it already counts a missing corpus in, and a `complete` list that refuses to name a
+corpus with an unimplemented file in it. That is the first thing to write, before any of `safety.py`,
+because it is the property that keeps the number on every run true.
+
+### The order after that, unchanged
+
+`observation.ts` (16 + 48 fuzz cases), then `transport` (40 + 60), then `admission` (34) and
+`certification` (18). The four that §31.3 calls the ones that carry the weight.
+
+### Verified at the stopping point
+
+* `python editions/python/run_corpus.py` — **328 passed, 0 failed**, 727 in corpora with no handler
+* `cargo test --workspace` — **1,398 passed**, 0 failed, `cargo fmt --check` clean
+* `npx vitest run` — **1,735 passed**, 72 files; `npm run typecheck` clean
+* `node scripts/skynet-verify-channels.mjs` — 60 checks; `skynet-verify-embeds.mjs` — 291 selects,
+  every one parses
+* `node tools/check-contract-mirrors.mjs "../Robot Overflow"` — every mirrored contract matches;
+  `docs/skynet-os-architecture.md` byte-identical in both repositories

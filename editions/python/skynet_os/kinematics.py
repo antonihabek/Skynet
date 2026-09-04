@@ -617,3 +617,138 @@ def solved_to_json(graph: dict[str, Any], bindings: list[dict[str, Any]], comman
         "unresolved": [frames[index]["name"] for index in solved["unresolved"]],
         "collision_pairs": collision_pairs(frames),
     }
+
+
+# ── Volumes ──────────────────────────────────────────────────────────────────
+
+
+def margin(shape: dict[str, Any], point: list[float]) -> float:
+    """Signed distance from a point to a volume's boundary: **positive inside**.
+
+    A layer of the operator's workspace configuration (§38.2) is a set of these, and layers compose
+    by conjunction — a frame must be inside at least one volume of every layer that names it. That
+    is "each layer may only narrow" as a predicate rather than as geometry: intersecting a box with
+    a sphere is a shape neither of them is, and a composition rule producing a third shape would be
+    one no operator could check by reading their own configuration.
+    """
+    point = [float(value) for value in point]
+
+    if shape["kind"] == "sphere":
+        centre = [float(value) for value in shape["centre"]]
+        dx = point[0] - centre[0]
+        dy = point[1] - centre[1]
+        dz = point[2] - centre[2]
+        return float(shape["radius_m"]) - sqrt(dx * dx + dy * dy + dz * dz)
+
+    low = [float(value) for value in shape["min"]]
+    high = [float(value) for value in shape["max"]]
+    outside = [0.0, 0.0, 0.0]
+    any_outside = False
+    inside_margin = math.inf
+    for axis in range(3):
+        below = low[axis] - point[axis]
+        above = point[axis] - high[axis]
+        if below > 0:
+            outside[axis] = below
+            any_outside = True
+        elif above > 0:
+            outside[axis] = above
+            any_outside = True
+        to_low = point[axis] - low[axis]
+        to_high = high[axis] - point[axis]
+        nearest = to_low if to_low < to_high else to_high
+        if nearest < inside_margin:
+            inside_margin = nearest
+    if any_outside:
+        return -sqrt(outside[0] * outside[0] + outside[1] * outside[1] + outside[2] * outside[2])
+    return inside_margin
+
+
+# ── Distance between two capsules ────────────────────────────────────────────
+
+
+def _sub(a: list[float], b: list[float]) -> list[float]:
+    return [float(a[0]) - float(b[0]), float(a[1]) - float(b[1]), float(a[2]) - float(b[2])]
+
+
+def _dot(a: list[float], b: list[float]) -> float:
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _clamp01(v: float) -> float:
+    if v > 1:
+        return 1.0
+    if v > 0:
+        return v
+    return 0.0
+
+
+def segment_distance_squared(p1: list[float], q1: list[float], p2: list[float], q2: list[float]) -> float:
+    """Closest distance between two segments, **squared**.
+
+    Squared, because the self-collision guard's decision compares it against a squared threshold and
+    no square root can therefore move a verdict. The root is taken only for the number the report
+    carries.
+    """
+    d1 = _sub(q1, p1)
+    d2 = _sub(q2, p2)
+    r = _sub(p1, p2)
+    a = _dot(d1, d1)
+    e = _dot(d2, d2)
+    f = _dot(d2, r)
+
+    epsilon = 1e-18
+    if a <= epsilon and e <= epsilon:
+        return _dot(r, r)
+    if a <= epsilon:
+        s = 0.0
+        t = _clamp01(f / e)
+    else:
+        c = _dot(d1, r)
+        if e <= epsilon:
+            t = 0.0
+            s = _clamp01(-c / a)
+        else:
+            b = _dot(d1, d2)
+            denominator = a * e - b * b
+            s = _clamp01((b * f - c * e) / denominator) if denominator > epsilon else 0.0
+            t = (b * s + f) / e
+            if t < 0:
+                t = 0.0
+                s = _clamp01(-c / a)
+            elif t > 1:
+                t = 1.0
+                s = _clamp01((b - c) / a)
+
+    p1f = [float(v) for v in p1]
+    p2f = [float(v) for v in p2]
+    c1 = [p1f[0] + d1[0] * s, p1f[1] + d1[1] * s, p1f[2] + d1[2] * s]
+    c2 = [p2f[0] + d2[0] * t, p2f[1] + d2[1] * t, p2f[2] + d2[2] * t]
+    diff = _sub(c1, c2)
+    return _dot(diff, diff)
+
+
+def capsule_in_world(pose: dict[str, Any], capsule: dict[str, Any]) -> tuple[list[float], list[float]]:
+    """A capsule's two endpoints, in the root frame."""
+    a = rotate(pose["rotation"], capsule["a"])
+    b = rotate(pose["rotation"], capsule["b"])
+    translation = [float(value) for value in pose["translation"]]
+    return (
+        [translation[0] + a[0], translation[1] + a[1], translation[2] + a[2]],
+        [translation[0] + b[0], translation[1] + b[1], translation[2] + b[2]],
+    )
+
+
+def ignores(frames: list[dict[str, Any]], a: int, b: int) -> bool:
+    """Whether ``a`` lists ``b``, or ``b`` lists ``a``. Symmetric on purpose."""
+    return b in frames[a].get("ignore", []) or a in frames[b].get("ignore", [])
+
+
+def adjacent(frames: list[dict[str, Any]], a: int, b: int) -> bool:
+    """Whether one frame is the other's parent. Excluded from the collision test unconditionally."""
+    return frames[a]["parent"] == b or frames[b]["parent"] == a
+
+
+def distance(squared: float) -> float:
+    """The specified square root, for a consumer reporting a distance."""
+    return sqrt(abs(squared))
