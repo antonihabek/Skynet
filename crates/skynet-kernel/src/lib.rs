@@ -1404,18 +1404,89 @@ fn signum(value: f64) -> f64 {
     }
 }
 
+/// Whether this body can produce §49.1's warning tone, as far as anything knows (§81.3).
+///
+/// Three states rather than two, and the third is the one that matters. §49.1 makes the tone a
+/// **system function**: it sounds before autonomous motion and a package cannot suppress it. Whether
+/// a robot *can* sound one is a fact about the machine, declared in `state/audio.json` the way a
+/// bearer is (§34.3), because `/sys` will not say whether an ALSA device is a klaxon on a mast or
+/// an HDMI port nobody plugged in.
+///
+/// `Ready` is deliberately the weakest possible claim: a channel is declared and no attempt has
+/// failed. It is not a promise that the speaker works — nothing short of sounding it is — and a
+/// robot that has never been asked to warn is in exactly this state. Reporting anything stronger
+/// would be inventing a measurement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WarningChannel {
+    /// Declared, and no attempt has failed.
+    Ready,
+    /// Declared, and the last attempt did not sound. A device that is broken rather than absent.
+    Failed,
+    /// Nothing is declared on this robot.
+    Undeclared,
+}
+
+impl WarningChannel {
+    /// The wire spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WarningChannel::Ready => "ready",
+            WarningChannel::Failed => "failed",
+            WarningChannel::Undeclared => "undeclared",
+        }
+    }
+}
+
 /// Whether a transport plan and a limit set are safe enough to start.
 ///
-/// The kernel refuses two things and only two: a plan that could not be resolved, and enforcement
-/// that was promised and cannot be delivered. Everything else — a missing guard, an unsourced
-/// limit, a degraded observation — is a notice an operator reads and accepts, because a system
-/// that refuses to start on every imperfection is a system that gets bypassed.
-pub fn can_start(transport_refused: bool, limits: &ResolvedLimits<'_>) -> Result<(), &'static str> {
+/// The kernel refuses three things and only three: a plan that could not be resolved, enforcement
+/// that was promised and cannot be delivered, and — at the certified tier — a body that cannot
+/// warn. Everything else — a missing guard, an unsourced limit, a degraded observation — is a
+/// notice an operator reads and accepts, because a system that refuses to start on every
+/// imperfection is a system that gets bypassed.
+///
+/// # Why the third refusal is certified-only
+///
+/// §81.3 asks the question §49 does not: what does a robot do when a transition demands a tone and
+/// there is no channel, or the channel fails? On the daemon's side of §33.1 the answer is that it
+/// **cannot refuse** — §27's state is derived from conditions rather than granted, so there is no
+/// point at which `skynetd` decides whether `RUNNING` may happen and nothing to withhold. What it
+/// does instead is raise an incident and say so on every surface.
+///
+/// The refusal belongs here, because this is where the start is. And it is scoped to the certified
+/// tier because that is the tier whose meaning is *the declared safety controls are present*: a
+/// certified robot moving without the audible warning somebody's risk assessment assumed is the
+/// exact claim the tier exists to make and would be false. At host and guest the incident stands,
+/// and refusing every bench robot without a speaker would be the "refuses to start on every
+/// imperfection" failure this function's own rule warns about.
+///
+/// `Undeclared` and `Failed` both refuse and are reported apart, because the fix is different: one
+/// is a provisioning script that never finished and the other is a broken speaker.
+pub fn can_start(
+    transport_refused: bool,
+    limits: &ResolvedLimits<'_>,
+    warning: WarningChannel,
+) -> Result<(), &'static str> {
     if transport_refused {
         return Err("The policy cannot be transported onto this body.");
     }
     if limits.tier != Tier::Guest && limits.enforcement == Enforcement::Advisory {
         return Err("This tier promises enforcement and the kernel resolved to advisory.");
+    }
+    if limits.tier == Tier::Certified {
+        match warning {
+            WarningChannel::Ready => {}
+            WarningChannel::Undeclared => {
+                return Err(
+                    "The certified tier requires an audible warning before autonomous motion and                      no warning channel is declared on this robot.",
+                )
+            }
+            WarningChannel::Failed => {
+                return Err(
+                    "The certified tier requires an audible warning before autonomous motion and                      this robot's declared warning channel did not sound.",
+                )
+            }
+        }
     }
     Ok(())
 }

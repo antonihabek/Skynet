@@ -4876,10 +4876,15 @@ miniature, and currently trivial to fix.
 | Interface — Hub-side and on-robot | §32 | **Built on both sides** — the console, the fleet page, the device page; §7.6's guards and limits cross §17 and are rendered on both, relayed rather than recomputed, and §32.2's four console panels all draw something measured | The transport plan does not cross §17, and should not until a policy runtime exists to be running one — the robot serves it per package at `GET /limits?package=`, for staged packages as well as active ones (§6.2). §32.1's guard-trip column now has its source and is frozen against a document a robot produces (§74.6); what it does not yet have is a robot that trips a guard |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **100,000 lines of Rust** across seventeen crates with 1,376
-tests over a corpus of 77 files and 1,055 cases, **13,300 lines** of the TypeScript reference edition
-that the corpus holds it to, **5,400 lines** of drivers, and **8,200 lines** in the Hub's mirror of
-the shared contracts. The Hub's own suite is 1,499 tests.
+**Built** means running, tested code: **103,000 lines of Rust** across **eighteen crates** with
+**1,392 tests** over a corpus of 77 files and 1,055 cases, **13,300 lines** of the TypeScript
+reference edition that the corpus holds it to, **5,400 lines** of drivers, and **8,200 lines** in
+the Hub's mirror of the shared contracts. The Hub's own suite is **1,726 tests**.
+
+The three crates past fifteen are the ones §25's control loop needed and the workspace did not have:
+`skynet-dl` (the loader `unsafe`, extracted so it has one home and two callers), `skynet-kernel-host`
+(the loop itself), and `skynet-lock` (§26.2's one ring, one writer, enforced on both writers rather
+than only the new one).
 
 Numbers go stale; the shape does not. What the table is for is the **last column**, and the honest
 summary of it is that every subsystem that can be built without hardware has been, every subsystem
@@ -5607,7 +5612,7 @@ cause — a client asserting something about a route it does not own:
 | Open | Why |
 |---|---|
 | **A ring two processes can write** | §26.2. `skynetd` records events and the kernel host records cycles, both belong in one recording, and a `Ring` holds its next sequence in memory — so two writers over one file would encode two records into one slot and produce a recording that passes every check a reader applies and is wrong in the interval that matters. An exclusive directory lock makes the interim safe: the second writer is refused by name rather than allowed to corrupt evidence. The fix is the sequence as an atomic in a mapped header, claimed by fetch-add, which is what `skynet-ring-shm` already does for §25's command ring. |
-| **Retention of sealed windows** | §79.4 keeps every one. A robot that seals daily for a year holds a year of windows, and §28's disk floor does not survive that. Deleting one the Hub has acknowledged is the obvious rule, and it is a decision about evidence rather than about disk: the acknowledgement is another party's word, and §13 exists precisely for the day that party is the one being asked questions. |
+| **Retention of sealed windows** — *decided 2026-09-04, unbuilt* | §79.4 keeps every one, and a robot that seals daily for a year does not survive §28's disk floor. The owner's rule, and the reasoning it answers: the Hub's acknowledgement is **another party's word**, and §13 exists precisely for the day that party is the one being asked questions — so acknowledgement alone never authorises a deletion. A window an **incident names is never reclaimed**. A routine window may be reclaimed only when a receipt exists, the receipt's digest **is** the window's digest, and the disk is under the floor — oldest first. A reclaim writes a **tombstone**: digest, seal time, byte count, reason. The chain of custody is therefore complete for ever and only the bytes are ever freed, which is the difference between a robot that cannot account for a window and one that can say what it held and when it let it go. |
 | **`people_detection` in §5's vocabulary** | The seventh of `resolveLimits()`'s inputs, and the only one with no path. It is not a missing delivery — §11's profile delivers six — it is that no body can *declare* a person detector, so `proximity` resolves to a ceiling whose guard is permanently unavailable. Adding it means extending the sensor vocabulary, which §30 says needs a governance process first. |
 | **Refusing to command a body that cannot warn** | §81.3. A transition that demands a tone and cannot produce one is a robot moving with a control missing from somebody's risk assessment, and `skynetd` cannot decline it: §27's state is derived from conditions rather than granted, so there is nothing to withhold. The rule belongs in the kernel's interlock, where the transition is, and putting it anywhere else would be a second definition of §27's machine. |
 | **A signature on a conformance result** | §57.1's asserted row. §19 forbids a robot holding a signing key, so a runner cannot sign its own result, and §12's kernel gate therefore reads evidence nobody signed. The shape that would close it — the Hub countersigning what a device credential delivered — is a different claim from the one §15 asks for and should not be built as though it were the same. |

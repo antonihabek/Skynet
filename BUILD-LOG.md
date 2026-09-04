@@ -377,3 +377,406 @@ where it was found.
 
 §26.2 — one ring, one writer — and the refusal to print a field-conformance figure over a window
 nothing commanded.
+
+---
+
+## 10. Four decisions, taken by the owner, recorded where they were open
+
+The four items this session's audit filed as *blocked on the owner* were put to them and answered.
+They are recorded in the plan's *Still not built* table and, for the last one, in §80 — not in this
+file, because a decision that lives only in a session log is a decision nobody will find.
+
+**None of the four is built yet.** What changed is that none of them is blocked.
+
+### Account erasure — GitHub's model
+
+The owner's answer was *"it should be like on GitHub"*, and GitHub's model is more specific than it
+sounds, so it is written out rather than referred to:
+
+| | |
+|---|---|
+| Their repositories | Deleted, public and private alike |
+| What they wrote in **somebody else's** place | Kept, reattributed to a placeholder — comments, discussions, and **evaluations**. An evaluation is a claim about another person's model; deleting it silently moves that person's leaderboard position |
+| Forks of their work | Survive |
+| A namespace with other members | **Refuses the deletion** until it is transferred or deleted. This is GitHub's organisation rule and it is the one that stops a company losing its repositories because a founder left |
+| Audit rows | Kept, actor reattributed. They exist for other people's security, not the actor's convenience |
+
+**The one case GitHub has never had to answer** is the one this platform has: a published version
+that robots are running right now. Those bytes stay until nothing references them — which is not a
+new rule, it is the reachability [reclaim.ts](lib/skynet/reclaim.ts) already computes from
+`ARTIFACT_REFERRERS` rather than from `ref_count`. A rollback target that vanished because somebody
+closed their account is a robot that cannot roll back.
+
+### Who may decide a report — a platform staff role
+
+The question had to be asked twice, and the first answer is worth recording because the
+misunderstanding is the natural one: *"you mean like an account handle?"*
+
+It is not about handles. A **namespace** here is the account or organisation that owns things —
+`acme` in `acme/gripper` — and the gap was that **nobody in this system has authority over anybody
+else's**. `permissions.ts` grants capabilities within a namespace; `org_members` is the only roster;
+neither describes a person who can act on a stranger's repository. So a report of *unsafe* could be
+filed, stored, and read by its reporter, and then nothing could happen to it. Not even by the owner
+of the platform, who had no role in the code.
+
+Decided: **a platform staff role, held by the owner**, is the only thing that may move a report to
+`upheld` or `rejected`, and upholding is the only thing that may hide another namespace's content.
+Nothing else gains cross-namespace power, and every decision is audit-logged with who made it.
+
+### Retention of sealed windows — chosen here, at the owner's instruction
+
+*"I don't know which is correct so choose it yourself."* The reasoning §80 already carried decides
+it: the Hub's acknowledgement is **another party's word**, and §13 exists precisely for the day that
+party is the one being asked questions. So acknowledgement alone never authorises a deletion.
+
+* A window an **incident names is never reclaimed**.
+* A routine window is reclaimed only when all three hold: a receipt exists, the receipt's digest
+  **is** the window's digest, and the disk is under §28's floor. Oldest first.
+* A reclaim writes a **tombstone** — digest, seal time, byte count, reason.
+
+The tombstone is the part worth defending. It costs almost nothing, it is kept for ever, and it is
+the difference between a robot that cannot account for a window and one that can say what it held
+and when it let it go. Only bytes are ever freed.
+
+Nothing charges a namespace for a stored window on the Hub side either. That stays open, and it is
+an accounting item rather than an evidence one.
+
+### Collections — yes
+
+Curated cross-repo sets, deferred seven times. Wanted. Out of *Still not built* and into the queue.
+
+**Mirrors re-pinned** after the plan and §80 edits.
+
+---
+
+## 11. Phase 9's release gates — the whole of a sentence nothing had implemented
+
+Phase 9's second bullet is *"protected release channels, review approvals, required checks, release
+policy, and source-to-release traceability"*. A grep across `lib/skynet`, `supabase/migrations` and
+`app/api/skynet` for `protected`, `required_check`, `release_channel` and `approval` returned
+**nothing**. The platform's entire release process was: hold `repo.publish`, publish, and watch
+`latest_version_id` move to whichever semver was highest.
+
+### What a channel is, and the one thing it must never become
+
+A channel is a named moving pointer at one published version — `acme/gripper-policy@stable`. The
+load-bearing rule is written into the migration header and the module both:
+
+> **A robot never resolves a channel.**
+
+§11 says no control decision may require a network round trip, which is why a desired-state document
+carries a pinned digest. A channel is resolved by a **person**, at the moment they promote, and what
+reaches the fleet is the digest that resolution produced. The alternative — a fleet following
+`stable` — is a design where promoting a version puts forty robots in motion with no deployment and
+no record beyond a pointer update.
+
+So this is a publishing concept and nothing in the device path reads it.
+
+### Three checks, and the fourth that was written and deleted
+
+| `scan` | every loadable file has been scanned, and none executes on load |
+| `signature` | at least one signature over *this* version's digest from a key still active |
+| `evaluation` | at least one succeeded, verified, non-demo evaluation |
+
+**`compatibility` was written and removed.** A version is compatible *with a robot*, never in the
+abstract, so a repository-level compatibility check has to choose its own subject — and a check that
+chooses what it is about always passes. It would have been the most reassuring badge on the page and
+would have meant nothing.
+
+`scan` calls the existing `hardwareSafetyGate` rather than defining a second answer to the same
+question, and adds exactly one condition the deployment gate deliberately lacks: **the file must
+have been scanned at all.** The gate is right that an `unknown` verdict should not block — refusing
+every unrecognised format makes a gate people route around — but `unknown` covers two facts. Scanned
+and unclassifiable is a measurement; never scanned is the absence of one. §74.3's rule, one
+subsystem over.
+
+### The counting is the difficulty, not the storing
+
+`tallyApprovals` is pure and has seven tests, because four plausible rules each produce a green tick
+that is wrong:
+
+* **Latest verdict per reviewer.** Approving after requesting changes is the normal path and
+  produces two rows for one person.
+* **An approval is about a proposal *and* a base.** Approving 1.2.0 onto a base of 1.1.0 is not
+  approval of merging it onto 1.3.0. A verdict whose captured versions have moved is **superseded**
+  — shown in the timeline, never counted — because the attack here is not adversarial, it is a busy
+  repository.
+* **An author does not approve their own proposal.** Enforced, not assumed.
+* **One `changes_requested` blocks three approvals.** Deliberately asymmetric: a threshold is a
+  number somebody chose, an objection is a statement that something is wrong, and out-voting it
+  would make the count the safety property instead of the reading.
+
+### A promotion freezes its evidence
+
+Every input to a check moves — a scanner is updated, a key is revoked, an evaluation is superseded.
+All three are correct behaviours and all three would silently rewrite history if the promotion
+record were a join. *"It was green when it was promoted"* and *"it is green now"* are different
+facts and an incident review needs the first. Same rule as `deployments_at_report` one table over.
+
+The release trace reports both, named so they cannot be confused: `reviews.tally` is **now**,
+`promotions[].evidence` is **then**.
+
+### Two constraints worth naming
+
+**Protection cannot be a badge with nothing behind it.** A channel marked protected with no
+approvals and no checks reads as a guarantee on every surface and enforces nothing. Refused by CHECK
+and by `validatePolicy`, so the message can name the field.
+
+**Promotion refuses `latest`.** The dry run accepts it like every other read path; the write does
+not. Promotion is the act that tells everybody else which version to use, and resolving a moving
+pointer inside it lets the operator and the server disagree about what was promoted — the one place
+in this feature where that is unrecoverable, because the channel is what other people then follow.
+
+### Built
+
+| | |
+|---|---|
+| `20260904220000_skynet_release_channels.sql` | three tables, six indexes, three RLS policies |
+| `lib/skynet/reviews.ts` | verdicts, and the tally that decides what one is worth |
+| `lib/skynet/channels.ts` | the check resolvers, the policy verdict, promotion |
+| `lib/skynet/release-trace.ts` | version → source → proposal → reviews → promotions |
+| 11 routes | reviews (2), channels (5), promote (2), trace (1) |
+| `skynet review / channels / promote / trace` | four CLI commands |
+| `Repo.reviews/review/channels/channel/promotable/promote/trace` | seven SDK methods |
+
+`origin` on a trace is `direct`, `merged` or **`source_gone`** — the third being a version merged
+from a repository since deleted or made private. A null would have collapsed that into "no source",
+which is what a direct publish looks like.
+
+### The eighth and ninth rows on a list that was seven
+
+The client contract test's own argument is that *"a workflow with no client is a failure, not a
+warning: the alternative is this list quietly acquiring an eighth exemption."* `release-channel` and
+`review` were added **with** the feature rather than after it, so a channel API with no client would
+be found the way `device` was.
+
+### Verified
+
+* `npx vitest run` — **1,726 passed**, 71 files (1,700 / 70 before)
+* `npm run typecheck` — clean
+* 24 new policy tests; the i18n error test caught all 23 new refusal keys, which is the test working
+* 38 catalogue keys added, `i18n-catalog.mjs sync` run — **translation not run**, it needs the
+  owner's approval per rule 17
+
+### What this does not do, and it is the same gap this repository keeps finding
+
+**The migration has not been applied, so not one of these three tables has ever held a row.** The
+twenty-first session's finding was exactly this shape: the recordings receiver, the reports surface
+and the incident chain were all written against a database where their tables did not exist, all
+three were carefully reasoned and unit-tested, and the first real request found a column named in a
+string literal and a whole collection missing from every document. Unit tests cover arithmetic;
+the schema, the RLS and the order of the writes are what they cannot reach.
+
+Also absent: any UI, and a `skynet-verify-channels.mjs` to drive the routes against a real database.
+Both are next, and neither is worth writing before the tables exist.
+
+### The panel, added after the log entry above
+
+`components/skynet/ChannelsPanel.tsx`, and a `channels` tab on all five repository kinds — a
+dataset with a `stable` channel is making the same claim a model is, and a repository whose
+releases nobody may recommend is not a different kind of repository.
+
+Two things on it are easy to render wrongly:
+
+* **A channel with nothing on it says so.** `version_id` is null until the first promotion, which is
+  the normal state of a channel declared before its first release. A blank cell would make a channel
+  *waiting* for a release look like one whose release failed to load.
+* **The evidence against a promotion is read from the frozen column**, never recomputed. A reader
+  looking at last month's promotion is asking what was true last month, and a scanner update would
+  otherwise rewrite the answer.
+
+The panel ends on the sentence the whole feature turns on: *a channel is a publishing concept;
+robots are never given one to resolve.*
+
+58 catalogue keys total this round, synced. `npx vitest run` — **1,726**, typecheck clean.
+
+**Still unapplied, still unrendered against real rows.** The panel has not been loaded in a browser
+because the three tables do not exist yet in the database, and rendering it against an empty
+`listChannels` would only prove the empty state.
+
+### Applied, on the owner's instruction — and what applying it found
+
+`psql` against the pooler, single transaction, `ON_ERROR_STOP`. Three `CREATE TABLE`, six
+`CREATE INDEX`, three `ALTER TABLE … ENABLE ROW LEVEL SECURITY`, three policies, ten comments.
+
+Then the part `skynet-verify-migrations.mjs` says in its own header it **cannot** do — *"policies,
+indexes, triggers, grants, CHECK expressions and function bodies are not visible over REST"* — read
+straight out of `pg_constraint` and `pg_policy`:
+
+| | |
+|---|---|
+| three tables | RLS **enabled**, one policy and three indexes each |
+| **eight CHECK constraints** | every expression exactly as written, including `required_checks <@ ARRAY['scan','signature','evaluation']` and the protection rule `protected = false OR required_approvals > 0 OR cardinality(required_checks) > 0` |
+| **eleven foreign keys** | and the two that matter are `RESTRICT`: the version a channel points at, and the version a promotion names. A channel silently emptying because its version was removed is the failure that column exists to prevent |
+
+**What this is and is not.** A CHECK constraint whose definition is right does refuse — Postgres has
+no state where the expression is correct and unenforced — so this is real evidence about the schema.
+It is **not** the end-to-end run: nothing has yet gone through `createChannel` → `promoteVersion` and
+come back out. That is `scripts/skynet-verify-channels.mjs`'s job and it is not written.
+
+### The finding: the Skynet schema holds no rows at all
+
+```
+ repos | versions | pull_requests | namespaces
+     0 |        0 |             0 |          0
+```
+
+Fifty-eight sessions of "live checks against the production database", and the answer is that every
+one of those scripts **builds its own fixtures and removes them in a `finally`**. That is the right
+design and it is not the same sentence as the log has been writing. The database this platform runs
+against is empty of Skynet data; what has been verified is that the code works against rows it
+created seconds earlier, which is a much narrower claim than *"verified against production"* and
+should be written that way from here on.
+
+It also explains a first attempt at the behavioural probes that reported every constraint as failing
+to refuse: `INSERT … SELECT … FROM skynet_repos LIMIT 1` inserts **nothing** when there are no repos,
+raises no exception, and leaves the "did it refuse?" flag false. Seven probes, all reporting the same
+alarming answer, and the giveaway was the *positive* control failing too — a probe suite where even
+"this should be accepted" comes back false is measuring its own fixtures, not the thing under test.
+
+---
+
+## 12. §81.3's interlock, and the gate that had no caller
+
+The item as §80 states it: *"Refusing to command a body that cannot warn. §81.3. A transition that
+demands a tone and cannot produce one is a robot moving with a control missing from somebody's risk
+assessment, and `skynetd` cannot decline it: §27's state is derived from conditions rather than
+granted, so there is nothing to withhold. The rule belongs in the kernel's interlock."*
+
+The kernel's interlock is `can_start`, and looking for it found something else first.
+
+### `can_start` had no production caller
+
+Four tests asked it. Nothing else in the workspace did. `skynetk` opened a driver, resolved limits
+and turned a cycle without the start gate ever being consulted — so the kernel's own refusal rule
+was correct, tested, and protecting nothing.
+
+That is finding 107's shape exactly, one crate over: a rule written down is not a rule applied, and
+the gap is invisible because the rule itself is fine.
+
+### The third refusal
+
+`WarningChannel` — three states, `no_std`, no allocator:
+
+| `Ready` | declared, and no attempt has failed |
+| `Failed` | declared, and the last attempt did not sound — a broken device |
+| `Undeclared` | nothing declared on this robot |
+
+`Ready` is deliberately the **weakest** claim available: nothing short of sounding a klaxon proves a
+klaxon works, and a robot that has never been asked to warn sits here. Reporting anything stronger
+would invent a measurement.
+
+**The refusal is certified-only**, which is §81.3's own scoping and not a softening. The certified
+tier's meaning is *the declared safety controls are present*; a certified robot moving without the
+audible warning a risk assessment assumed makes that claim false. At host and guest §81.3's incident
+and console line stand, and refusing every bench robot without a speaker is precisely the *"refuses
+to start on every imperfection is a system that gets bypassed"* failure `can_start`'s own header
+warns about.
+
+`Undeclared` and `Failed` refuse separately and say so separately, because the fix differs: a
+provisioning script that never finished, versus a speaker that is broken.
+
+### What wiring it in does and does not do, stated exactly
+
+`skynetk` now calls `can_start` before `Host::new`. **All three refusals are dormant in that
+binary**, and it is worth writing down why rather than implying a gate went live:
+
+* `transport_refused` is `false` — this binary builds its own clamp from the command line and has no
+  plan that could fail to resolve. On a robot the plan arrives from §6.3's hand-off and can.
+* enforcement is a pure function of tier (`Tier::enforcement`), so `resolve_limits` cannot produce
+  the host-tier-resolved-to-advisory case. The existing test says this already: *"not reachable
+  through `resolve_limits` … which is exactly when it is worth having"* — the gate defends against a
+  limit set assembled some other way, which on a robot is the usual case.
+* `--tier certified` is **deliberately not selectable** in `skynetk`, so the new refusal cannot fire
+  here either.
+
+The value is that the gate is now **on the path**. The warning channel is passed as `Undeclared`
+because that is what is true — `skynetk` is a bench harness with no audio device and §81.1's
+declaration lives in `state/audio.json`, which `skynetd` owns. Passing `Ready` to keep it quiet
+would have been asserting a control this process has never had.
+
+### Verified
+
+* `cargo test --workspace` — **1,398 passed** (1,392 before), 0 failed. Kernel suite 101 → **107**
+* `cargo fmt --check` clean, `cargo clippy --workspace --all-targets` — zero warnings
+* `skynetk run --driver drivers/mock/mock_robot.dll --tier host --velocity-max 2.0 --jerk 0.1
+  --watchdog-ms 50 --cycles 40 --hz 200` — 40 cycles, **zero overruns**, four guards naming what
+  they lack. The interlock is on the path and the loop still makes its deadline
+
+### §73's numbers, corrected
+
+The table said *100,000 lines of Rust across seventeen crates with 1,376 tests* and *the Hub's own
+suite is 1,499 tests*. Measured: **103,000 lines, eighteen crates, 1,392 tests** (before this item),
+Hub **1,726**. The three crates past fifteen are named in the table now, since "eighteen" without
+them is a number nobody can check.
+
+---
+
+## 13. §31.3's second edition — started, and honest about how far it got
+
+§73's last column has carried one entry against §31 since the table was written: *"The second
+edition, which is what the corpus is for."* `editions/python/` is the start of it.
+
+**It is not yet an edition, and the runner says so on every line it prints.** §31.4: *"An edition
+that has not passed the corpus is not an edition."* It passes **172 of 1,055 cases, in 3 of 31
+corpora** — `vocabulary` (73), `semver` (61), `roles` (38) — and the other 883 are reported as *in
+corpora with no handler*, counted rather than skipped.
+
+That last property was designed before anything else. A runner that quietly passed three corpora and
+printed "OK" would be the single most misleading artifact in this repository, and the temptation is
+real precisely because the number is small.
+
+### The discipline that makes any of it worth anything
+
+**Every value is transcribed from `reference/typescript/`, never from `corpus/`.** A corpus exists to
+catch a divergence between an edition and the reference; an edition generated *from* the corpus
+agrees with it by construction and proves nothing. So the reference's source is read and the corpus
+judges the transcription.
+
+It paid twice on the first day.
+
+**`reserved_capabilities` came out as eight members.** A first extraction pass used a regex that ran
+past the end of the declaration. The real value is one token — `hri.warning` — and both the Rust and
+TypeScript editions say so. A corpus-generated table would have had eight and been wrong in the same
+direction as the tool that produced it, which is the failure mode that makes "generate it from the
+expected output" so appealing and so useless.
+
+**And the one the corpus caught on its first run: Python has arbitrary-precision integers and this
+specification is IEEE-754.**
+
+The `large-major` case compares `9007199254740993.0.0` with `9007199254740992.0.0`. Its note says in
+advance what it is for: *"Components are read with `Number()`, so a value beyond an integer's exact
+range rounds rather than failing to parse. Both editions must round it the same way."*
+
+`int("9007199254740993")` is exact in Python. `Number(…)` rounds, and so does Rust's `f64`. So this
+edition ordered the two versions **1** where the reference says **0** — and serialised both majors
+identically, because canonical form renders the rounded value either way. A disagreement about
+ordering that is invisible in the output is the worst shape a divergence can take, and nothing but a
+byte-for-byte comparison finds it. Version components are read as doubles now, with the reasoning in
+the function rather than in a commit message.
+
+### What is built
+
+| | |
+|---|---|
+| `canonical.py` | the serialisation rule, a deliberate **third** implementation beside `crates/skynet-json` and `reference/typescript/canonical.ts` |
+| `vocabulary.py` | all 73 closed sets, in declaration order — order is part of the set, since `FAULT_RESPONSES` runs least to most severe |
+| `roles.py` | §5's grammar, including the refusal: an unrecognised role parses to nothing, never to a nearby guess |
+| `semver.py` | ordering and ranges, with `is_valid_range` kept apart from `satisfies` for §54.2's reason |
+| `corpus.py` + `run_corpus.py` | the runner, and a dispatch keyed on corpus *and* file label — the Rust runner's own lesson about catch-all arms |
+
+Two Python-specific traps are handled in `canonical.py` and written down there: **`bool` is a
+subclass of `int`**, so a naive number branch renders `True` as `1`; and **`int` and `float` are
+different types where the reference has one `number`**, so integrality decides the rendering and
+never the Python type. An edition that let `1.0` render as `1.0` would diverge on the first velocity
+ceiling anybody declared as a whole number.
+
+No third-party dependencies, deliberately: an edition whose conformance run needs a package index
+cannot be checked on the machine it is being reviewed on.
+
+### Next, in dependency order
+
+`predicate`, `digest`, `kinematics`, `watchdog`, then the four that carry the weight — `cycle` (§7's
+eight guards), `transport` (§6), `admission` (§8), `certification` (§15). The foundation is the part
+that was worth getting right; the rest is mechanical against a runner that will not lie about what
+it has not done.
