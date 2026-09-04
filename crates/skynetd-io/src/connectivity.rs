@@ -765,6 +765,22 @@ fn run_curl(url: &str, credential: Option<&str>, body: &Path) -> Result<Posted, 
         "POST",
         "--header",
         "content-type: application/json",
+        // A redirect is not an error and it is not something this robot may decline to follow.
+        //
+        // §17 gives every route in this queue as a path — `/devices/{id}/checkin` and its five
+        // siblings — and a Hub is entitled to canonicalise a path. The one this robot pairs to
+        // adds a trailing slash and answers `308` to the spelling §17 prints, so without this flag
+        // every check-in, every incident, every telemetry window and every episode this edition has
+        // ever produced arrived at a redirect, was not followed, and was recorded as a delivery
+        // that did not happen. That is not a Hub bug: `308` preserves the method and the body and
+        // means *ask again over there*, and a client that does not is one that cannot be deployed
+        // behind any canonicalising proxy either.
+        //
+        // Credentials are **not** carried across hosts. curl drops the `Authorization` header on a
+        // cross-host redirect unless told otherwise with `--location-trusted`, and this
+        // deliberately does not tell it otherwise — the same sentence [`crate::bundle`] has
+        // carried since the fetch was written, and the asymmetry between the two was the defect.
+        "--location",
         "--max-time",
         "60",
         // The status on a line of its own after the body, so one stream carries both and no
