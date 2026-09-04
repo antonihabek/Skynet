@@ -285,9 +285,13 @@ pub fn extract(ask: &Push) -> Result<u64, String> {
 
     let mut source = std::fs::File::open(&ask.file)
         .map_err(|error| format!("{} could not be opened: {error}", ask.file.display()))?;
-    source
-        .seek(SeekFrom::Start(ask.from))
-        .map_err(|error| format!("{} could not be sought to {}: {error}", ask.file.display(), ask.from))?;
+    source.seek(SeekFrom::Start(ask.from)).map_err(|error| {
+        format!(
+            "{} could not be sought to {}: {error}",
+            ask.file.display(),
+            ask.from
+        )
+    })?;
 
     let mut sink = std::fs::File::create(&ask.scratch)
         .map_err(|error| format!("{} could not be written: {error}", ask.scratch.display()))?;

@@ -49,8 +49,8 @@ use skynet_contracts::safety::kinematics::FrameSet;
 use skynet_json::Json;
 use skynet_rhal::{flags, status, Command, Ctx, Frame, Mode, RawDriver, State};
 
-use crate::dl::Library;
 use crate::term;
+use skynet_dl::Library;
 
 /// How one check came out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 use crate::args::{Args, Spec};
 use crate::check;
-use crate::dl::Library;
 use crate::scaffold;
 use crate::term;
+use skynet_dl::Library;
 
 /// What `--help` prints for this command.
 pub const USAGE: &str = "\

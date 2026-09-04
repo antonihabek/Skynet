@@ -11358,3 +11358,142 @@ files and 1,055 cases with regeneration a no-op, golden path 48 commands, mirror
 98. **The comment that was right about one document was applied to two.** *"Not a history table"* is
     correct about a check-in and wrong about an instruction, and the two live in one row. A sentence
     scoped to a column and stored beside a table is a sentence that will be read about the table.
+
+---
+
+## 2026-09-04 (fifty-fourth) — the band in §3's diagram that the repository did not have
+
+§3 draws a stack with the Safety Kernel as a band across the middle, and §25 draws the command path
+through it. Both pictures were accurate about every part except the crank. `skynet-kernel` is the
+eight guards and their arithmetic; `skynet-ring` is the channel; `skynet-ring-shm` is the `memfd`
+under it; `skynet-rhal` is the wire; `skynet-blackbox` is the record. **Nothing turned them.** No
+process in this workspace opened a driver, read the ring, asked the kernel and wrote a joint.
+
+That absence is what §73's last column has been describing from eight different directions: five of
+§74's counters unmeasured because §13's ring has no action channels, seven of §27's eight conditions
+unobserved so no robot enters a commanding state, §49's tone never sounded, `field_conformance`
+measurable rather than measured, no guard ever tripped on a machine. One missing process, eight
+rows.
+
+`crates/skynet-kernel-host` is that process, and `skynetk` is its binary.
+
+### The loop, and the three rules that shape it
+
+Read the body, take whatever the policy posted, ask the kernel, write what it allows, record what
+happened — once per control period.
+
+* **It never blocks on the producer** (§25). `Fresh`, `Empty` and `Stale` are three answers and none
+  of them is a reason to wait.
+* **A cycle always produces a record**, including the ones where nothing was posted, the driver
+  refused the command, or the state read failed. §15's `field_conformance` is a ratio over cycles,
+  and a loop that recorded only the interesting ones would compute it over a flattering denominator.
+* **`last_sequence` is nearly all the loop remembers.** The kernel keeps nothing between cycles, so
+  the little that must be kept — the sequence the watchdog compares against, what was actually sent
+  for the rate limiter, where a ramp has got to — lives in the host and is passed back in. That is
+  what lets the kernel stay `no_std` with no allocator.
+
+### Three translations, and each one is a place this could have been quietly wrong
+
+**A hold is a mask of zeros, never a command of zeros.** `CycleVerdict::command` is empty under a
+hold, and the RHAL wire has no way to say *nothing* — it has values and a mask, and §24 defines a
+zero mask entry as *hold this joint at its current setpoint*. Sending zeros with a mask of ones
+instead commands the zero pose: on a position-controlled arm every joint slams to its origin, and on
+a torque-controlled one it is not holding but going limp. §24 spells that difference out and this is
+the code where it is honoured or not. Not writing at all is a third thing and also wrong — the
+driver's own `on_command_loss` timeout would decide the response instead of the guard, at a time
+nobody chose.
+
+**The deceleration bound is the acceleration bound.** §7.1's Cat 2 is *"controlled ramp to zero
+velocity"* and Cat 1 is that ramp then power removal. A ramp needs a rate and **no deceleration
+figure exists anywhere** — not in the envelope, not in `ResolvedLimits`, not in the descriptor. It
+does not have to be invented, because a declared number already means it: `max_delta_per_cycle` is
+the jerk ceiling the rate-limit guard enforces on the way *up*, and ramping down at the same rate is
+inside what the machine is declared to withstand, by the same declaration. Not a new number, and not
+a guess — the existing one read in the other direction.
+
+**An escalation is recorded as an escalation.** With no jerk ceiling there is no rate at all, so the
+ramp cannot be performed and the response escalates to Cat 0. That is the wrong trade for a humanoid
+holding a crate, and doing it *silently* is worse: an operator reading the black box would conclude
+the guard demanded the harder stop. `Decision::escalated` carries what was demanded, what was
+performed, and the missing input that is the reason.
+
+### Where the unsafe went
+
+`skynet-cli/src/dl.rs` was the loader and had one caller. It is now `crates/skynet-dl`, with the safe
+RHAL wrapper — open, read state, write command, emergency stop, describe, close — beside it. The
+host crate keeps `#![forbid(unsafe_code)]`, which it could not have done with its own `unsafe`
+module: a crate that declares that and then makes an exception inside itself is making the claim and
+breaking it in the same file.
+
+### Run on a real driver
+
+`drivers/mock` built as a shared object and driven at 200 Hz:
+
+```
+skynetk run --driver drivers/mock/mock_robot.dll --tier host \
+            --velocity-max 2.0 --jerk 0.1 --watchdog-ms 50 --cycles 40 --hz 200
+```
+
+Tier Host, enforcement Enforcing. Four guards active. Four unavailable and each naming its missing
+input — `Workspace` needs `profile.workspace` and `embodiment.frames`, `SelfCollision` needs
+`embodiment.frames`, `Balance` is not applicable to a body with no legs, `Proximity` needs
+`profile.proximity`. Forty cycles, zero read failures, zero write failures, **zero overruns**. That
+is §7.2 on a machine rather than in a test.
+
+### One bug this found in its own first run
+
+`--jerk` was accepted and wired nowhere. The output said so without being asked: `unavailable
+RateLimit — needs profile.max_delta_per_cycle`, on a run where `--jerk 0.1` had been passed. The
+jerk ceiling is the **operator's**, read off `OperatorProfile`, and it had been put on the transport
+clamp, which has no such field. The guard reporting what it lacked is what caught a flag that did
+nothing.
+
+### What this does not do
+
+**It is not the policy runtime.** Nothing here loads a model, assembles an observation frame from
+real sensors, or produces a desired command. The host is the ring's *consumer*; the producer is
+still unwritten, so the ring is empty on every cycle and the kernel holds on every cycle. That is
+not a degenerate case being tolerated — it is exactly §33.1's property, *"a robot with no `skynetd`
+at all is a robot that holds position safely"*, and it can now be watched instead of only argued
+about.
+
+**It does not make a robot host-tier.** `Tier::enforcement` still derives enforcement and no caller
+passes one in. `--tier host` says what to resolve limits at; whether the clamp is real is a property
+of the scheduler underneath, and `overruns` is the one number this loop can honestly contribute to
+that question.
+
+**The ring is private to the process.** §25 has the runtime create the ring and hand the fd to the
+sandbox; there is no sandbox, and `skynet-ring-shm` is Linux-only. The binary allocates the ring in
+its own address space and prints that on every run rather than a path nothing can open.
+
+### Numbers
+
+`cargo test --workspace` — **1,376 passed**, up from 1,362: fourteen new. `cargo fmt --all --check`
+and `cargo clippy --workspace --all-targets` clean. Corpus 77 files and 1,055 cases, golden path 48
+commands, mirrors match and re-pinned after the §73 edit.
+
+### One thing found on the way, unrelated to the loop
+
+`main` was not `cargo fmt --all --check` clean. Two files from the fifty-second session's §79
+upload work — `skynetd-io/src/upload.rs` and its tests — carried lines rustfmt reflows, and CI runs
+that check with `RUSTFLAGS: -D warnings`, so the `rust` job would have failed on the branch. Fixed
+by the `cargo fmt --all` this session ran for its own code; recorded because the session that
+introduced it reported the check as clean.
+
+### Findings, restated
+
+1-98 as before.
+
+99. **One missing process was eight rows of a status table.** Every entry in §73's last column that
+    said some version of *nothing has run a cycle* was downstream of a single absent binary, and the
+    table gave no way to see that they were one item rather than eight. A per-row "what is missing"
+    column is honest and it does not show a shared cause.
+100. **A guard that reports what it lacks catches a flag that does nothing.** `--jerk` was parsed,
+     stored, and never reached `resolve_limits`. No test failed. What said so was §7.2's own output,
+     on the first real run, in the form of a guard naming an input that had just been supplied on
+     the command line.
+
+101. **A repository can be one commit away from a red CI job and not know it.** `cargo fmt
+     --all --check` fails on `main`, on two files whose own session log reports the check as clean.
+     Nothing runs it locally; the job that would have caught it runs on push, and the push had not
+     happened.

@@ -1,0 +1,15 @@
+[package]
+name = "skynet-dl"
+description = "Loading an RHAL driver shared object: the workspace's only `unsafe`, kept in one place with two callers."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+skynet-rhal = { path = "../skynet-rhal" }
+
+[lints.rust]
+missing_docs = "warn"

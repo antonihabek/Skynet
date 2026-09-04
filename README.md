@@ -98,11 +98,13 @@ it, which says no when the answer is no.
 | `crates/skynet-urdf` — URDF import (§63.4) | XML reader, model, role suggestion, descriptor, collision geometry, 45 tests |
 | `crates/skynet-cli` — the `skynet` command | descriptor, transport, frames, role, driver new/check, plus the robot commands over the local socket, `blackbox`, `skill run` / `skill stop` / `skills`, `ota`, §10's `pair` / `unpair` / `identity`, `checkin`, `intent`, `cell`, `power`, `conformance` and §7.6's `limits` — which carries §37.1's transport plan for a named package, staged or active; 48 commands, 44 tests |
 | `crates/skynetd` — the supervisor's brain (§33) | Reconciler, supervision, health, leases — including §54.4's all-or-nothing acquisition; pure, 45 tests, and CI asserts it stays pure |
-| `crates/skynetd-io` — the I/O half, and the `skynetd` binary | Package store, systemd launcher, observation, local API, the on-robot console (§32.2), the black box on disk, the trust store (§19), §34.3's bearers and the outbound sender, §51's cached entitlement tokens, §50's birth certificate, §27's state observed once a pass and §33.4's barrier read off it, **§54's skill runtime** — the loop that drives the lifecycle, assembles the precondition context, takes the leases, records every transition and emits one episode per invocation — **§12's OTA half**: the signed release manifest and bench pass, the RAUC updater behind a trait, and the boot that confirms or condemns its own slot, the loop; **§10's identity**: two files so the identity is public and the credential is not, a pairing exchange behind a trait whose one HTTPS request never puts the code or the credential on a command line, and the attestation assembled from what this machine can actually measure; **§34.2's outbound path**: one function that makes every HTTPS request this daemon makes, with the credential in curl's config on stdin and never on a command line, and the queue drained to the Hub a robot was paired with; **§17's check-in**, built every reconcile pass and collapsed by §34.4 to exactly one; **§11's pull**, which decodes before it writes so a proxy's answer can never overwrite the intent a robot is reconciling against; **§7.6's resolved limits**, the first caller of `resolve_limits` that is a robot — and the block §17's check-in carries to the Hub's device page — the descriptor's envelope, the signed profile's ceilings, §55.2's cell and §6.3's transport clamp composed into the one set the kernel would enforce, at a tier the robot is honest about not having; **§79's upload**, the mirror of §75's fetch — the probe that asks the receiver for an offset the robot cannot read off its own disk, a resumable `PUT` bounded to one twenty-second slice a pass, and a receipt written only against the digest recorded at the seal; **§49.1's warning channel**, declared like a bearer because which output is the klaxon is a property of the machine, sounded before the state is committed, and raising an incident when it cannot be; 515 tests plus an end-to-end run against real systemd |
+| `crates/skynetd-io` — the I/O half, and the `skynetd` binary | Package store, systemd launcher, observation, local API, the on-robot console (§32.2), the black box on disk, the trust store (§19), §34.3's bearers and the outbound sender, §51's cached entitlement tokens, §50's birth certificate, §27's state observed once a pass and §33.4's barrier read off it, **§54's skill runtime** — the loop that drives the lifecycle, assembles the precondition context, takes the leases, records every transition and emits one episode per invocation — **§12's OTA half**: the signed release manifest and bench pass, the RAUC updater behind a trait, and the boot that confirms or condemns its own slot, plus **§75's fetch** — the bytes themselves, one bounded slice a pass, resumed from the partial's own length and held to the manifest's digest before the updater is shown them; **§10's identity**: two files so the identity is public and the credential is not, a pairing exchange behind a trait whose one HTTPS request never puts the code or the credential on a command line, and the attestation assembled from what this machine can actually measure; **§34.2's outbound path**: one function that makes every HTTPS request this daemon makes, with the credential in curl's config on stdin and never on a command line, and the queue drained to the Hub a robot was paired with; **§17's check-in**, built every reconcile pass and collapsed by §34.4 to exactly one; **§74's telemetry window**, whose eight counters are three from this loop and five walked off §13's ring, each saying whether it was measured; **§11's pull**, which decodes before it writes so a proxy's answer can never overwrite the intent a robot is reconciling against; **§7.6's resolved limits**, the first caller of `resolve_limits` that is a robot — and the block §17's check-in carries to the Hub's device page — the descriptor's envelope, the signed profile's ceilings, §55.2's cell and §6.3's transport clamp composed into the one set the kernel would enforce, at a tier the robot is honest about not having; **§79's upload**, the mirror of §75's fetch — the probe that asks the receiver for an offset the robot cannot read off its own disk, a resumable `PUT` bounded to one twenty-second slice a pass, and a receipt written only against the digest recorded at the seal; **§49.1's warning channel**, declared like a bearer because which output is the klaxon is a property of the machine, sounded before the state is committed, and raising an incident when it cannot be; 515 tests plus an end-to-end run against real systemd |
 | `crates/skynet-blackbox` — the black box (§13, §26) | The preallocated ring, the MCAP writer, sealing, deterministic replay; `no_std`, 31 tests. Record format **2**: a frame now records the capture paths that produced nothing, and an unmeasurable skew rather than a zero one |
 | `crates/skynet-ring` — the SPSC command ring (§25) | The only channel from a policy to the kernel: 4 KiB slots, a seqlock, latest-wins, never blocks. `no_std`, no `alloc`, no `unsafe`; 18 tests including a two-thread torture run |
 | `crates/skynet-ring-shm` — the `memfd` under it | Creates, seals and maps the anonymous file; the consumer's mapping carries no `PROT_WRITE`. 9 tests, one of which re-executes itself so a command crosses two real processes |
 | `crates/skynet-capture` — the capture-side split (§47.4) | A latest-wins slot for the policy and a bounded queue for the black box, which must never be one queue. Moves buffer handles, never pixels; every displaced or refused frame is handed back, and a run of drops is one annotated gap. `no_std`, no `alloc`, no `unsafe`; 17 tests |
+| `crates/skynet-dl` — the driver loader | `dlopen`/`LoadLibraryW`, the vtable check, and a safe wrapper around the four calls a control loop makes. The workspace's only loader `unsafe`, in one crate with two callers |
+| `crates/skynet-kernel-host` — the control loop, and the `skynetk` binary (§25) | The consumer end of the command ring, running: a real driver opened, a cycle turned at a declared rate, the kernel's verdict written, a `Cycle` recorded every pass. A hold is a mask of zeros; a controlled stop ramps at the declared jerk ceiling; a ramp with no rate escalates and says so. 14 tests, plus a run against the mock robot at 200 Hz with no overruns |
 | `corpus/` — the conformance corpus | 1,055 cases, 77 files, of which 73 are the closed vocabularies both editions must spell identically |
 | `crates/skynet-corpus` — the corpus runner | Reproduces all 1,055 byte for byte |
 | `reference/typescript/` — the oracle | Vendored from the Hub; generates the corpus |
@@ -117,13 +119,22 @@ safety MCU, and every driver that talks to real hardware — `ros2_control`, Eth
 vendor SDKs. The realistic figure for a robot moving under this is several engineer-years. §59.5
 states that plainly and this README does not improve on it.
 
+The policy runtime is the one to read carefully now, because half of what that line used to cover
+has moved. §25's command path has two ends, and the **consumer** end exists: `skynet-kernel-host`
+turns the loop, evaluates the guards and writes to a driver. What is unbuilt is the **producer** —
+inference, observation assembly from real sensors, and the sandbox that would hold them. A robot
+running this today is a robot whose kernel is turning and whose ring nobody fills.
+
 OTA is a partial entry rather than either column, and the half that is missing is one nobody can
 close from here. §12's three rules are built and held to a corpus: an apply waits for a declared safe
 state, a boot confirms or condemns its own slot within a budget, and an image that changes the Safety
-Kernel or the envelope is refused without a bench pass bound to its digest. What is **not** built is
-the fetch — §34's inbound half — so a bundle has to be on the robot before it can be staged, and
-`skynetd` says so rather than reporting success for a file nobody delivered. Nor has any of it run
-against real RAUC on a real A/B device; the updater is a trait with a recording implementation, which
+Kernel or the envelope is refused without a bench pass bound to its digest. §75's fetch closed the half this paragraph
+used to name. `stage_image` no longer reports `Unimplemented` for want of bytes: it derives the
+location from the endpoint §10 paired this robot to, moves one bounded slice a pass, resumes from the
+partial's own length, and hashes what arrived before RAUC is shown it. The hole it closed on the way
+is the one worth naming — a bundle placed on the disk by hand, which was the *only* way to update a
+robot before it, went to the updater without anything checking it was the release the manifest named.
+What is left is not software. None of it has run against real RAUC on a real A/B device; the updater is a trait with a recording implementation, which
 is what makes §12's unattended rollback testable at all and is not the same as having watched one.
 
 §10 is built as far as one exchange goes, and the entry is worth splitting because the two halves of
@@ -153,9 +164,13 @@ An **unpaired** robot queues nothing, deliberately. A check-in addressed to nobo
 queue, be collapsed, and eventually be counted in §34.4's drop counters — so a console would show a
 robot discarding its own state for want of a Hub it was never given.
 
-The one class §34.4 names that still has nowhere to go is **telemetry**: it has a priority, a drop
-policy and a counter, and neither §17's eight endpoints nor §57's revised nine gives it a route.
-Nothing here guesses one; the sink refuses it by name and the items are held.
+**Telemetry** used to be the one class §34.4 names with nowhere to go — a priority, a drop policy
+and a counter, and no endpoint on either side of the contract. §74 gave it one. A window is built
+every reconcile pass and queued as the class that is dropped first and aggressively, and all eight of
+§74's counters have a source: three from this loop, five off §13's ring, which is where the kernel's
+verdicts already were. The five that looked like they were waiting for a kernel needed one to
+*happen* and never needed one to be *counted* — and on a robot with no command path the ring says so,
+which is why those five report unmeasured rather than zero.
 
 §11's other half is built too, so the loop closes: a paired robot **pulls** its desired state at the
 top of every reconcile pass, and a fleet can change what a robot is told to run. The rule that half
@@ -171,9 +186,11 @@ generation that has gone **backwards** is followed, because that is a Hub restor
 a robot that refused to follow one would be a fleet nobody could recover without visiting every
 machine. One produces a visible, actionable state; the other produces an invisible wrong one.
 
-The **bundle** is still not fetched. §12's `stage_image` reports `Unimplemented` for want of the
-bytes, and an OS image wants resume, progress and §34.3's metering — it is its own piece of work
-rather than a second call to the function that fetches a JSON document.
+The **bundle** is fetched by the same loop, and it was its own piece of work rather than a second
+call to the function that fetches a JSON document: an OS image wants resume, a slice small enough
+that §33.2's single thread keeps supervising while it moves, and §34.3's metering. The partial's
+length on the disk *is* the progress — there is no counter beside it, because a second record of a
+fact the directory already holds is one that disagrees exactly once, after the crash that matters.
 
 Two things §10 asks for are not built and are reported as unmeasured rather than assumed.
 `security.identity.attested` wants a device key bound to a TPM or secure element, and nothing here
@@ -202,10 +219,28 @@ pinning both editions to the same frame; and §47.4's capture-side split, where 
 latest-wins slot and the black box's bounded queue are separate structures because a single queue in
 front of a policy is latency wearing the costume of reliability.
 
-Not built: the runtime that would sit either side of any of it. No capture backend fills a stream —
-`skynet-capture` moves handles a V4L2 or GenICam backend would produce, and neither exists — no
-policy sandbox receives a descriptor, and nothing turns a frame into an inference and a command. The
-frames the assembler builds are ones the corpus handed it.
+**And, now, the consumer end of it.** `skynet-kernel-host` is the process §3's diagram draws and the
+repository did not have: it opens a real RHAL driver, turns a loop at a declared rate, reads the
+ring, asks the kernel what may be sent, writes the verdict to the driver, and records a `Cycle` for
+every pass. `skynetk run --driver ./mock_robot.so --tier host --velocity-max 2.0 --jerk 0.1
+--watchdog-ms 50` drives the mock robot at 200 Hz with four guards enforcing and four naming the
+input they lack, which is §7.2 on a real machine rather than in a test.
+
+Three of its decisions are worth reading in `cycle.rs` rather than here, because each is a place the
+translation could be quietly wrong: a **hold is a mask of zeros and never a command of zeros** (§24 —
+the other reading slams a position-controlled arm to its origin); a **controlled stop ramps at the
+declared jerk ceiling**, because the bound on acceleration is a bound on deceleration and inventing
+a second number would be inventing a safety figure; and a ramp with **no declared rate escalates to
+Cat 0 and records that it did**, since escalating silently would have an operator read the harder
+stop as the one the guard demanded.
+
+Still not built: the **producer** end. No capture backend fills a stream — `skynet-capture` moves
+handles a V4L2 or GenICam backend would produce, and neither exists — no policy sandbox receives a
+descriptor, and nothing turns a frame into an inference and a command. So the ring the host reads is
+empty on every cycle and the kernel holds on every cycle, which is not a degenerate case being
+tolerated: it is exactly the state §33.1 calls the property that makes the rest of the OS possible,
+and it can now be watched rather than only argued about. The frames the assembler builds are still
+ones the corpus handed it.
 
 The on-robot console has now been opened in a browser, which found two things no test was watching
 for: `GET /plan` answered two different shapes and the reconcile panel had never once rendered, and
@@ -288,10 +323,15 @@ minutes or a week later; a robot that went back and rewrote a queued alarm to fl
 editing evidence after the fact. The Hub joins the two by digest, which is what content addressing
 was for.
 
-The half that is **not** here is the Hub's. Nothing serves that route yet, so a robot with a window
-to send probes, finds nothing, and backs off on §34.4's curve — which leaves the window and the
-incident naming it exactly where they were. `skynet blackbox` and the console say which sealed
-windows the Hub has and which are on this robot and nowhere else, so the state is visible rather
+The Hub's half exists now. `PUT /devices/{id}/recordings/{sha256}` is served, and it has been driven
+end to end against the real route, the real database and the real private bucket: a probe answering
+404 that still carries `bytes: 0`, a slice offered at the wrong offset refused, and — the check worth
+having — the stored object hashing to the digest the robot declared at the seal.
+
+What has **not** happened is the two halves meeting. Each is exercised against a double: this robot
+uploads to a test receiver and the Hub receives from a test client, and no window has yet crossed
+from one into the other. Until one does, `skynet blackbox` and the console say which sealed windows
+the Hub has acknowledged and which are on this robot and nowhere else, so the state is visible rather
 than inferred.
 
 ---
