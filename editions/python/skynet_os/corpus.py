@@ -28,7 +28,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .canonical import canonical
+from . import digest as digest_module
+from . import embodiment as embodiment_module
+from . import kinematics as kinematics_module
+from . import predicate as predicate_module
 from . import roles as roles_module
+from . import watchdog as watchdog_module
 from . import semver as semver_module
 from . import vocabulary as vocabulary_module
 
@@ -139,6 +144,39 @@ def _vocabulary(_label: str, case_input: dict[str, Any]) -> Any:
     return vocabulary_module.closed_set_to_json(case_input.get("set"))
 
 
+def _digest(_label: str, case_input: dict[str, Any]) -> Any:
+    return digest_module.digest_to_json(
+        case_input.get("kind", ""),
+        case_input.get("version", ""),
+        case_input.get("manifest"),
+        case_input.get("files", []),
+    )
+
+
+def _frames(label: str, case_input: dict[str, Any]) -> Any:
+    if "bindings" in label:
+        return embodiment_module.frame_fault_to_json(
+            embodiment_module.validate_frame_bindings(case_input["graph"], case_input.get("joints", []))
+        )
+    if "validate" in label:
+        return embodiment_module.frame_fault_to_json(
+            embodiment_module.validate_frames(case_input["graph"])
+        )
+    raise KeyError(f"no frames handler for `{label}`")
+
+
+def _kinematics(_label: str, case_input: dict[str, Any]) -> Any:
+    return kinematics_module.solved_to_json(
+        case_input.get("frames", {}),
+        case_input.get("joints", []),
+        case_input.get("command", {}),
+    )
+
+
+def _predicate(_label: str, case_input: dict[str, Any]) -> Any:
+    return predicate_module.predicate_to_json(case_input.get("predicate"), case_input.get("context"))
+
+
 def _semver(label: str, case_input: dict[str, Any]) -> Any:
     if "satisfies" in label:
         return semver_module.satisfies_to_json(case_input["version"], case_input["range"])
@@ -147,10 +185,22 @@ def _semver(label: str, case_input: dict[str, Any]) -> Any:
     raise KeyError(f"no semver handler for `{label}`")
 
 
+def _watchdog(_label: str, case_input: dict[str, Any]) -> Any:
+    return watchdog_module.watchdog_to_json(
+        case_input.get("on_command_loss"),
+        case_input.get("windows", {}),
+    )
+
+
 HANDLERS: dict[str, Handler] = {
+    "digest": _digest,
+    "frames": _frames,
+    "kinematics": _kinematics,
+    "predicate": _predicate,
     "roles": _roles,
     "vocabulary": _vocabulary,
     "semver": _semver,
+    "watchdog": _watchdog,
 }
 
 

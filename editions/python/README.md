@@ -2,7 +2,7 @@
 
 > **This is not yet an edition.** §31.4: *"An edition that has not passed the corpus is not an
 > edition. It cannot carry the name, appear in the matrix, or be installed by `skynetd`."* It
-> currently passes **3 of 31 corpora**. The runner prints that number on every run and this file
+> currently passes **8 of 31 corpora**. The runner prints that number on every run and this file
 > will keep saying so until it is 31.
 
 §73's last column has carried one entry against §31 since the table was written: *"The second
@@ -39,13 +39,18 @@ package index is an edition that cannot be checked on the machine it is being re
 
 | Corpus | Cases | |
 |---|---|---|
+| `predicate` | 83 | §54.2's three-valued outcome, and the boolean derived from it |
 | `vocabulary` | 73 | every closed set in the system |
 | `semver` | 61 | version ordering and range satisfaction |
 | `roles` | 38 | the canonical role grammar |
-| | **172** | of 1,055 |
+| `digest` | 19 | §37.1's version identity, framing included |
+| `frames` | 27 | §44.3's graph rules, and the joint names they cannot check |
+| `kinematics` | 14 | forward kinematics, poses to thirty digits |
+| `watchdog` | 13 | §46's chain, the host refusal, and window nesting |
+| | **328** | of 1,055 |
 
-The other 28 corpora have no handler and their 883 cases are counted as such in every run. They are
-not skipped and not hidden: a runner that quietly passed three corpora and printed "OK" would be the
+The other 23 corpora have no handler and their 727 cases are counted as such in every run. They are
+not skipped and not hidden: a runner that quietly passed eight corpora and printed "OK" would be the
 most misleading artifact in this repository.
 
 ## Where the values come from
@@ -78,6 +83,11 @@ skynet_os/
   vocabulary.py    all 73 closed sets
   roles.py         §5's role grammar
   semver.py        §54.2's version ordering and ranges
+  predicate.py     §54.2's evaluator: satisfied, unsatisfied, and unevaluable
+  digest.py        §37.1's version identity
+  embodiment.py    §44.3's frame graph, and the joint names the graph cannot check
+  kinematics.py    forward kinematics, and the sine, cosine and square root it is written on
+  watchdog.py      §46's chain and its window nesting
   corpus.py        the runner and its dispatch
 run_corpus.py      the CLI
 ```
@@ -86,9 +96,32 @@ run_corpus.py      the CLI
 `crates/skynet-json` and `reference/typescript/canonical.ts`, and the duplication is the point: a
 corpus whose expected values were produced by the code that checks them would prove nothing.
 
+## What the second round found
+
+Four transcriptions, and each carried a way for Python to be quietly wrong that the reference gets
+free from its own language. All four are written down where they are handled rather than here.
+
+* **`predicate`** — `True == 1` is true in Python and `true === 1` is false in JavaScript, so
+  `_strict_equal` compares types first. And the comparison operators coerce strings the way
+  `Number()` does, not the way `float()` does: `0x1f` is 31, `1e3` is 1000, a blank string refuses,
+  and `Infinity` parses and is then discarded as non-finite. The corpus carries a case for each.
+* **`digest`** — paths are ordered by **UTF-16 code unit**, which is not Python's code-point order
+  for anything above U+FFFF. A naive edition would hash a file list in a different order and produce
+  a different digest rather than an error.
+* **`kinematics`** — `math.trunc` returns an arbitrary-precision `int` where `Math.trunc` returns a
+  double, so the range reduction converts back immediately. All fourteen poses match to thirty
+  digits, which is what holds two hand-written implementations of sine, cosine and square root to
+  each other.
+* **`watchdog`** — a window declared as `True` is a finite `int` in Python and would nest inside
+  every real window, reporting a chain as sound on the strength of a value that is not a duration.
+
+One of them was a mistake this file had already warned about. `digest`'s separator is a NUL, and the
+reference's own header explains that writing it by eye is how the TypeScript edition came to use a
+space. This edition then wrote a **raw** NUL — correct, and invisible in every editor and terminal.
+It is `_NUL = chr(0)` now, and named, which is the fix the reference's comment was asking for.
+
 ## What is next, in dependency order
 
-`predicate`, `digest`, `kinematics`, `watchdog`, then the four that carry the weight — `cycle`
-(§7's eight guards), `transport` (§6), `admission` (§8) and `certification` (§15). Everything after
-the foundation is mechanical; the foundation is canonical serialisation and a runner that refuses to
-lie about what it has not done.
+The four that carry the weight — `cycle` (§7's eight guards), `transport` (§6), `admission` (§8)
+and `certification` (§15) — and then the rest. Everything after the foundation is mechanical; the
+foundation is canonical serialisation and a runner that refuses to lie about what it has not done.
