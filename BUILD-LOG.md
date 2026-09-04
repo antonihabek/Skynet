@@ -887,3 +887,59 @@ miscounting, it is finding nothing.
 * `node scripts/skynet-verify-embeds.mjs` — 291 selects, 160 distinct, **every one parses**
 * Ten live verifiers now, and the Hub's schema record is the thing that made the offline half
   possible: it was added two rounds ago and this is the second defect class it has caught
+
+---
+
+## 16. The second edition, from 3 corpora to 8 — and what each transcription held
+
+§73's last column has carried *"the second edition, which is what the corpus is for"* against §31
+since the table was written. `editions/python/` went from **172 of 1,055 cases in 3 corpora** to
+**328 in 8**: `predicate`, `digest`, `kinematics`, `watchdog`, and both halves of `frames`, which
+`flatten` needs.
+
+The discipline is unchanged and it is the whole value of the exercise: **every value is transcribed
+from `reference/typescript/`, never from `corpus/`.** An edition generated from the corpus agrees
+with it by construction and proves nothing.
+
+### Four ways Python is quietly not JavaScript
+
+Each of these produces a *different answer*, not a different message, and each is written down in
+the module that handles it.
+
+| | |
+|---|---|
+| `predicate` | **`True == 1`** is true in Python and `true === 1` is false. Equality compares types before values, or a rule reading `eq(state.enabled, 1)` fires here and not in the reference |
+| `predicate` | Comparison coerces strings the way **`Number()`** does, not `float()`: `0x1f` is 31, `1e3` is 1000, a blank string refuses, and `Infinity` parses and is *then* discarded as non-finite. The corpus carries a case for each of the five |
+| `digest` | Paths sort by **UTF-16 code unit**. Python's `sorted` is by code point, and the two disagree above U+FFFF — a surrogate pair begins at 0xD800 and sorts *before* U+E000. A naive edition hashes the file list in a different order and produces a wrong digest rather than an error |
+| `kinematics` | **`math.trunc` returns an arbitrary-precision `int`** where `Math.trunc` returns a double. The range reduction converts back immediately, so nothing downstream is handed an integer Python keeps exactly and a double could not |
+| `watchdog` | A window declared as `True` is a finite `int`, nests inside every real window, and reports a chain as **sound** on the strength of a value that is not a duration |
+
+### The one that proves the arithmetic
+
+All fourteen `kinematics` cases pass, and they are the ones worth having: `irrational-angles`,
+`many-revolutions` and `past-the-exact-reduction` compare **thirty digits of translation**. That is
+a third hand-written sine, cosine and square root — Newton's iteration from a bit-pattern seed, a
+fixed five times; fdlibm's minimax coefficients with fdlibm's own digits; Cody–Waite reduction with
+its second step unconditional — agreeing bit for bit with the other two.
+
+It is also why those three are written out at all rather than taken from a platform library: §7.4's
+certified tier mirrors this kernel on a separate safety processor, and a redundant channel that
+disagrees with the primary about a clamp is precisely the failure the redundancy exists to detect.
+
+### The mistake this file had already warned about
+
+`digest`'s separator between a path and its hash is a **NUL**, and the reference's own header
+records that writing it by eye is how the TypeScript edition came to use a space and found out from
+a digest that did not match. This edition then wrote a **raw NUL** — arithmetically correct, and
+invisible in every editor, terminal and diff. `git` reported the file as binary, which is how it was
+noticed at all.
+
+It is `_NUL = chr(0)` now, declared and named. The reference's comment was asking for exactly that
+and neither edition had done it.
+
+### Verified
+
+* `python editions/python/run_corpus.py` — **328 passed, 0 failed**, 727 in corpora with no handler
+* Complete: `digest`, `frames`, `kinematics`, `predicate`, `roles`, `semver`, `vocabulary`,
+  `watchdog`. The runner still prints the 23 it cannot do on every line of every run
+* `cargo test --workspace` — 1,398 passed, unchanged: nothing outside `editions/` was touched
