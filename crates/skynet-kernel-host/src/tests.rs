@@ -537,6 +537,10 @@ fn a_posted_command_crosses_the_ring_and_reaches_the_body() {
     assert_eq!(
         turn.cycle.desired.len(),
         2,
+        "one entry per channel: the format indexes these by channel and refuses any other width",
+    );
+    assert!(
+        (turn.cycle.desired[0] - 0.4).abs() < 1e-6,
         "the record carries what the policy asked for, not only what was sent",
     );
     assert!((body.position[0] - 0.4).abs() < 1e-6, "and the body moved");
@@ -575,10 +579,17 @@ fn a_masked_channel_is_absent_from_desired_rather_than_zero() {
         None::<&Envelope<'_>>,
     );
 
-    assert_eq!(
-        turn.cycle.desired.len(),
-        1,
-        "one channel was commanded, so one value was desired",
+    // Every per-channel array is the declared width — the format refuses anything else — so the
+    // channel the policy said nothing about is `NaN` rather than absent or zero. A recorded 0.0
+    // would say the policy asked for the zero position, which is the opposite of saying nothing.
+    assert_eq!(turn.cycle.desired.len(), CHANNELS.len());
+    assert!(
+        (turn.cycle.desired[0] - 0.4).abs() < 1e-6,
+        "the shoulder was commanded",
+    );
+    assert!(
+        turn.cycle.desired[1].is_nan(),
+        "and the elbow was not asked for at all, which is not the same as asked for zero",
     );
     assert_eq!(turn.decision.mask[1], 0, "and the elbow is still held");
     assert!(
@@ -722,6 +733,7 @@ fn an_unmeasured_separation_is_nan_and_not_zero() {
         [0u8; 32],
         0,
         skynet_blackbox::record::NO_CAPABILITY,
+        &CHANNELS,
         &observed(&zeros),
         None,
         &decision,
@@ -729,12 +741,174 @@ fn an_unmeasured_separation_is_nan_and_not_zero() {
     );
 
     assert!(cycle.nearest_person_m.is_nan());
+    assert_eq!(cycle.desired.len(), CHANNELS.len());
     assert!(
-        cycle.desired.is_empty(),
-        "nothing was posted, so nothing was desired — not a row of zeros",
+        cycle.desired.iter().all(|value| value.is_nan()),
+        "nothing was posted, so every channel is unmeasured — not a row of zeros",
     );
     assert_eq!(cycle.mask.len(), CHANNELS.len());
     assert_eq!(cycle.clamped.len(), CHANNELS.len());
     assert!(!cycle.intervened(), "no guard tripped");
     assert!(MAX_CHANNELS >= CHANNELS.len());
+}
+
+// ── The black box ───────────────────────────────────────────────────────────
+
+/// A recorder over a scratch directory, with the shape of the two-channel fixture body.
+fn recorder(name: &str) -> (std::path::PathBuf, crate::recorder::Recorder) {
+    let dir = std::env::temp_dir().join(format!("skynet-recorder-{name}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    let shape = skynet_blackbox::record::Shape {
+        joints: CHANNELS.len() as u16,
+        channels: CHANNELS.len() as u16,
+    };
+    let meta = skynet_blackbox::ring::Meta {
+        robot_id: String::new(),
+        embodiment: [0u8; 32],
+        os_image: [0u8; 32],
+        tier: Tier::Host as u8,
+        enforcement: Enforcement::Enforcing as u8,
+        simulator: false,
+        wall_epoch_ns: 0,
+        mono_ns: 0,
+        channels: CHANNELS.iter().map(|name| name.to_string()).collect(),
+    };
+    // Small, so the test writes a file measured in kilobytes rather than in tens of megabytes.
+    let recorder = crate::recorder::Recorder::open(&dir, meta, shape, 64 * 1024)
+        .expect("a fresh directory has no writer");
+    (dir, recorder)
+}
+
+/// Every cycle the loop turns reaches the ring, and reads back as a cycle.
+///
+/// The first recording of control cycles this repository has produced. What it establishes is that
+/// the record survives the round trip — §13's ring holding what §25's loop decided — and not that
+/// anything moved: the ring the loop reads is empty, so all thirty are holds.
+#[test]
+fn every_cycle_the_loop_turns_reaches_the_ring() {
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+    let mut consumer = ring.consumer();
+
+    let mut body = Fake::new(2);
+    let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
+    let mut host = Host::new(&CHANNELS);
+    let (dir, mut recorder) = recorder("cycles");
+
+    let first = recorder.next_sequence();
+    for cycle in 0..30u64 {
+        let turn = host.step(
+            cycle * 5_000_000,
+            &mut body,
+            &mut consumer,
+            &limits,
+            None::<&Envelope<'_>>,
+        );
+        recorder
+            .cycle(cycle * 5_000_000, &turn.cycle)
+            .expect("the ring accepts a cycle");
+    }
+
+    let store = recorder.read().expect("the ring reads back");
+    let opened = skynet_blackbox::ring::Ring::open(&store).expect("the header opens");
+    let tally = skynet_blackbox::tally::tally(&opened, &store, first);
+
+    assert_eq!(tally.cycles, 30, "thirty cycles turned, thirty recorded");
+    assert_eq!(
+        tally.interventions, 0,
+        "and none of them tripped a guard, because nothing was commanded",
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A sealed window is a file, and it holds what the ring held.
+#[test]
+fn the_window_seals_into_a_file() {
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+    let mut consumer = ring.consumer();
+
+    let mut body = Fake::new(2);
+    let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
+    let mut host = Host::new(&CHANNELS);
+    let (dir, mut recorder) = recorder("seal");
+
+    for cycle in 0..5u64 {
+        let turn = host.step(
+            cycle * 5_000_000,
+            &mut body,
+            &mut consumer,
+            &limits,
+            None::<&Envelope<'_>>,
+        );
+        recorder
+            .cycle(cycle * 5_000_000, &turn.cycle)
+            .expect("recorded");
+    }
+
+    let (sealed, path) = recorder
+        .seal(skynet_blackbox::seal::Reason::Shutdown, 1_000)
+        .expect("the window seals");
+
+    assert!(path.exists(), "a sealed window is a file on the disk");
+    assert!(
+        !sealed.bytes.is_empty(),
+        "and the file has the recording in it",
+    );
+    assert!(
+        path.to_string_lossy().ends_with("shutdown.mcap"),
+        "named by the reason it was sealed: {}",
+        path.display(),
+    );
+
+    drop(recorder);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A second writer on one ring is refused, and told who holds it.
+///
+/// The alternative is the failure this whole mechanism exists to prevent. `Ring` keeps its next
+/// sequence in memory, so two writers hand out the same sequence, write two records into one slot,
+/// and produce a recording that looks intact and is not — discovered by an investigator, months
+/// later, in the file that was supposed to answer the question.
+#[test]
+fn a_second_writer_is_refused_rather_than_allowed_to_corrupt_the_ring() {
+    let (dir, first) = recorder("lock");
+
+    let shape = skynet_blackbox::record::Shape {
+        joints: CHANNELS.len() as u16,
+        channels: CHANNELS.len() as u16,
+    };
+    let meta = skynet_blackbox::ring::Meta {
+        robot_id: String::new(),
+        embodiment: [0u8; 32],
+        os_image: [0u8; 32],
+        tier: Tier::Host as u8,
+        enforcement: Enforcement::Enforcing as u8,
+        simulator: false,
+        wall_epoch_ns: 0,
+        mono_ns: 0,
+        channels: CHANNELS.iter().map(|name| name.to_string()).collect(),
+    };
+
+    let second = crate::recorder::Recorder::open(&dir, meta.clone(), shape, 64 * 1024);
+    match second {
+        Err(crate::recorder::RecorderError::Locked { holder, .. }) => {
+            assert!(
+                holder.contains("skynetk"),
+                "the refusal has to name who holds the ring, not just that it is held: {holder}",
+            );
+        }
+        Err(other) => panic!("refused for the wrong reason: {other}"),
+        Ok(_) => panic!("two writers were allowed onto one ring"),
+    }
+
+    // Releasing the first lets a second in, so the lock is a lock and not a permanent refusal.
+    drop(first);
+    let third = crate::recorder::Recorder::open(&dir, meta, shape, 64 * 1024);
+    assert!(third.is_ok(), "the lock is released when its holder goes");
+
+    drop(third);
+    let _ = std::fs::remove_dir_all(&dir);
 }

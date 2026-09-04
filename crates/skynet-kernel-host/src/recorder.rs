@@ -1,0 +1,303 @@
+//! §13's ring, written by the process that sees every cycle.
+//!
+//! [`skynet_blackbox`] is the format and the arithmetic and opens nothing. `skynetd-io`'s recorder
+//! is the half that opens files, and it writes **events and gaps** — because when it was written
+//! there was no control loop, and its own header says so: *"the ring this daemon opens has a shape
+//! of zero joints and zero channels, which is the honest description of a robot that is supervising
+//! packages and not commanding a body."*
+//!
+//! There is a control loop now, and this is the recorder for it: the same format, the same
+//! preallocated ring, the same seal — writing the channel the daemon never could.
+//!
+//! # One ring, one writer, and the lock that makes that true
+//!
+//! Two processes cannot write one ring today, and the reason is worth stating exactly rather than
+//! working around quietly. [`skynet_blackbox::ring::Ring`] keeps its next sequence number **in
+//! memory**. Two `Ring`s over one file would hand out the same sequence twice, write two records to
+//! one slot, and produce a recording that looks intact and is not — which is the single worst
+//! failure mode a black box has, because it is discovered by an investigator months later.
+//!
+//! So this takes an exclusive lock on the directory, and `skynetd`'s recorder must take the same
+//! one. A second writer does not get a corrupted ring; it gets a refusal naming the process that
+//! holds it. **Failing loudly beats corrupting evidence**, and that is the whole of the argument.
+//!
+//! The real fix is a ring whose sequence is an atomic in a mapped header, which is exactly what
+//! `skynet-ring-shm` already does for §25's command ring. It is named as open in §26.2 rather than
+//! half-built here, because a multi-writer ring wants a design and a Linux mapping, and the lock
+//! makes the interim state safe rather than merely tolerable.
+//!
+//! # The shape is the body's, and a ring is recreated when the body changes
+//!
+//! A record's size is a function of the joint and channel counts, so a ring holds one shape. A robot
+//! whose descriptor gains a joint gets its window **sealed and then replaced** — the records that
+//! were there are still true, they are about a different shape of machine.
+
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
+
+use skynet_blackbox::record::{Cycle, CycleView, Entry, Shape};
+use skynet_blackbox::ring::{Geometry, Meta, Ring};
+use skynet_blackbox::seal::{seal, Reason, Sealed};
+
+/// How many bytes the ring is preallocated with.
+///
+/// The same figure `skynetd-io` uses, and for the same reason: §13 asks for "roughly an hour" and
+/// what an hour costs depends entirely on the body. At this size a two-joint arm at 200 Hz gets
+/// hours; a 30-joint humanoid at 1 kHz gets about seventy seconds.
+pub const DEFAULT_BUDGET: usize = 64 * 1024 * 1024;
+
+/// How many distinct policy digests the header table holds.
+pub const DIGESTS: u16 = 16;
+
+/// How many distinct capability tokens it holds.
+pub const CAPABILITIES: u16 = 16;
+
+/// Why a recorder could not be opened.
+#[derive(Debug)]
+pub enum RecorderError {
+    /// Another process holds the writer lock on this directory.
+    Locked {
+        /// The lock file that is held.
+        path: PathBuf,
+        /// What the holder wrote into it.
+        holder: String,
+    },
+    /// The directory could not be created, or the ring could not be written.
+    Io(std::io::Error),
+    /// The geometry the body implies is not one the format can hold.
+    Geometry(String),
+}
+
+impl std::fmt::Display for RecorderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RecorderError::Locked { path, holder } => write!(
+                f,
+                "the black box at {} already has a writer: {holder}\n\
+                 One ring has one writer. Two would hand out the same sequence number twice and \
+                 produce a recording that looks intact and is not, which is the one failure a black \
+                 box must never have. Stop the other writer, or point this one at another \
+                 directory.",
+                path.display()
+            ),
+            RecorderError::Io(error) => write!(f, "{error}"),
+            RecorderError::Geometry(detail) => write!(f, "sizing the black box: {detail}"),
+        }
+    }
+}
+
+impl std::error::Error for RecorderError {}
+
+/// The exclusive writer lock on a black box directory.
+///
+/// Created with `create_new`, which is atomic on every platform this targets, and removed on drop.
+/// A lock left behind by a process that was killed is a real state and it is **not** silently
+/// stolen: it names its holder, and clearing it is a person's decision, because the alternative is
+/// a recorder that helpfully takes over a ring another process is still writing.
+#[derive(Debug)]
+struct WriterLock {
+    path: PathBuf,
+}
+
+impl WriterLock {
+    fn take(dir: &Path) -> Result<WriterLock, RecorderError> {
+        let path = dir.join("writer.lock");
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => {
+                let note = format!(
+                    "skynetk pid {} — the control loop is writing this ring\n",
+                    std::process::id()
+                );
+                let _ = file.write_all(note.as_bytes());
+                Ok(WriterLock { path })
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let holder = fs::read_to_string(&path)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                Err(RecorderError::Locked {
+                    path,
+                    holder: if holder.is_empty() {
+                        "the lock file says nothing about who holds it".to_string()
+                    } else {
+                        holder
+                    },
+                })
+            }
+            Err(error) => Err(RecorderError::Io(error)),
+        }
+    }
+}
+
+impl Drop for WriterLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+/// The ring, the file under it, and the lock that says this process owns it.
+#[derive(Debug)]
+pub struct Recorder {
+    ring: Ring,
+    path: PathBuf,
+    sealed_dir: PathBuf,
+    scratch: Vec<u8>,
+    // Dropped last of the fields it matters against, and only ever after the file handles above are
+    // closed, because releasing the lock is what lets another writer in.
+    _lock: WriterLock,
+}
+
+impl Recorder {
+    /// Open the ring under `dir`, creating and preallocating it if absent or the wrong shape.
+    pub fn open(
+        dir: &Path,
+        meta: Meta,
+        shape: Shape,
+        budget: usize,
+    ) -> Result<Recorder, RecorderError> {
+        fs::create_dir_all(dir).map_err(RecorderError::Io)?;
+        let sealed_dir = dir.join("sealed");
+        fs::create_dir_all(&sealed_dir).map_err(RecorderError::Io)?;
+
+        // Before the ring, because a recorder that read the ring and then failed to lock would have
+        // touched a file another process owns.
+        let lock = WriterLock::take(dir)?;
+
+        let path = dir.join("ring");
+
+        if let Ok(store) = fs::read(&path) {
+            if let Ok(ring) = Ring::open(&store) {
+                if ring.geometry().shape == shape {
+                    let scratch = vec![0u8; ring.geometry().record_size];
+                    return Ok(Recorder {
+                        ring,
+                        path,
+                        sealed_dir,
+                        scratch,
+                        _lock: lock,
+                    });
+                }
+                // The body changed under the recording. What is there is sealed before it is
+                // replaced: those records are still true, they are about a different shape of robot.
+                let closing = seal(&ring, &store, Reason::Shutdown, 0);
+                let _ = write_sealed(&sealed_dir, &closing, 0);
+            }
+        }
+
+        let geometry = Geometry::for_budget(shape, DIGESTS, CAPABILITIES, budget)
+            .map_err(|error| RecorderError::Geometry(format!("{error:?}")))?;
+        let (ring, store) = Ring::create(geometry, meta);
+
+        // Preallocated by writing its whole length, zeroes included. A sparse file reports the same
+        // size and fails at the first write after the disk fills, which is the failure §28 is
+        // written against: a black box that stops recording because something else filled the disk
+        // is a black box that fails exactly when something is going wrong.
+        let mut file = File::create(&path).map_err(RecorderError::Io)?;
+        file.write_all(&store).map_err(RecorderError::Io)?;
+        file.sync_all().map_err(RecorderError::Io)?;
+
+        let scratch = vec![0u8; ring.geometry().record_size];
+        Ok(Recorder {
+            ring,
+            path,
+            sealed_dir,
+            scratch,
+            _lock: lock,
+        })
+    }
+
+    /// The geometry this recording has.
+    pub fn geometry(&self) -> Geometry {
+        self.ring.geometry()
+    }
+
+    /// The sequence the next record will get.
+    pub fn next_sequence(&self) -> u64 {
+        self.ring.next_sequence()
+    }
+
+    /// Append one control cycle.
+    ///
+    /// One positioned write of one record. No flush per cycle: at 200 Hz an `fsync` a cycle is five
+    /// milliseconds of the budget spent proving the last five milliseconds happened, and §28's
+    /// preallocation is what makes the write itself reliable. A power cut loses the page cache, and
+    /// that is the trade §13 already makes by writing to a ring rather than to a journal.
+    pub fn cycle(&mut self, mono_ns: u64, cycle: &Cycle) -> Result<u64, RecorderError> {
+        // `Cycle` owns its vectors and `CycleView` borrows them, and the format takes the view.
+        // Written out rather than derived, because a `From` that silently dropped a field the
+        // format gained would be a recording missing something nobody looked for.
+        let view = CycleView {
+            tick: cycle.tick,
+            observation: cycle.observation,
+            policy: cycle.policy,
+            state_flags: cycle.state_flags,
+            fault_code: cycle.fault_code,
+            rhal_result: cycle.rhal_result,
+            state_seq: cycle.state_seq,
+            state_stamp_ns: cycle.state_stamp_ns,
+            command_stamp_ns: cycle.command_stamp_ns,
+            command_seq: cycle.command_seq,
+            mode: cycle.mode,
+            advisory: cycle.advisory,
+            response: cycle.response,
+            tripped: &cycle.tripped,
+            capability: cycle.capability,
+            nearest_person_m: cycle.nearest_person_m,
+            base_pose: cycle.base_pose,
+            base_twist: cycle.base_twist,
+            desired: &cycle.desired,
+            command: &cycle.command,
+            mask: &cycle.mask,
+            clamped: &cycle.clamped,
+            position: &cycle.position,
+            velocity: &cycle.velocity,
+            effort: &cycle.effort,
+        };
+        self.write(mono_ns, Entry::Cycle(&view))
+    }
+
+    fn write(&mut self, mono_ns: u64, entry: Entry<'_>) -> Result<u64, RecorderError> {
+        let (sequence, offset) = self
+            .ring
+            .stage(&mut self.scratch, mono_ns, entry)
+            .map_err(|error| RecorderError::Geometry(format!("encoding a record: {error:?}")))?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .open(&self.path)
+            .map_err(RecorderError::Io)?;
+        file.seek(SeekFrom::Start(offset as u64))
+            .map_err(RecorderError::Io)?;
+        file.write_all(&self.scratch).map_err(RecorderError::Io)?;
+        Ok(sequence)
+    }
+
+    /// Read the ring back, whole, because sealing produces the whole file.
+    pub fn read(&self) -> Result<Vec<u8>, RecorderError> {
+        let mut file = File::open(&self.path).map_err(RecorderError::Io)?;
+        let mut store = Vec::new();
+        file.read_to_end(&mut store).map_err(RecorderError::Io)?;
+        Ok(store)
+    }
+
+    /// Seal the window into a file, and say what was written and where.
+    pub fn seal(&self, reason: Reason, mono_ns: u64) -> Result<(Sealed, PathBuf), RecorderError> {
+        let store = self.read()?;
+        let sealed = seal(&self.ring, &store, reason, mono_ns);
+        let path = write_sealed(&self.sealed_dir, &sealed, mono_ns).map_err(RecorderError::Io)?;
+        Ok((sealed, path))
+    }
+}
+
+/// Write a sealed window beside the ring, named by the instant it was sealed.
+fn write_sealed(dir: &Path, sealed: &Sealed, mono_ns: u64) -> std::io::Result<PathBuf> {
+    fs::create_dir_all(dir)?;
+    // The same name `skynetd-io` writes, so one reader lists both directories the same way.
+    let name = format!("{:020}-{}.mcap", mono_ns, sealed.reason.as_str());
+    let path = dir.join(name);
+    let mut file = File::create(&path)?;
+    file.write_all(&sealed.bytes)?;
+    file.sync_all()?;
+    Ok(path)
+}

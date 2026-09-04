@@ -28,10 +28,14 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicU32;
 use std::time::{Duration, Instant};
 
+use skynet_blackbox::record::Shape;
+use skynet_blackbox::ring::Meta;
+use skynet_blackbox::seal::Reason;
 use skynet_kernel::{
     resolve_limits, Available, Envelope, OperatorProfile, ResolveLimitsParams, Tier, TransportClamp,
 };
 use skynet_kernel_host::driver::{Actuator, Rhal};
+use skynet_kernel_host::recorder::{Recorder, DEFAULT_BUDGET};
 use skynet_kernel_host::run::Host;
 use skynet_ring::{words_for, Ring};
 
@@ -55,6 +59,10 @@ skynetk run --driver <library> [options]
                         Without it the rate-limit guard reports itself unavailable.
   --watchdog-ms <ms>    command timeout before the controller faults. Without it the
                         watchdog guard reports itself unavailable.
+  --blackbox <dir>      record every cycle into §13's ring under this directory, and
+                        seal the window on exit. Takes an exclusive writer lock: one
+                        ring has one writer, and a second is refused rather than
+                        allowed to corrupt it.
   --quiet               only print the summary.
 
   The ring is private to this process: there is no policy runtime to hand it to, so
@@ -77,6 +85,7 @@ struct Options {
     velocity_max: Option<f64>,
     jerk: Option<f64>,
     watchdog_ms: Option<f64>,
+    blackbox: Option<PathBuf>,
     quiet: bool,
 }
 
@@ -96,6 +105,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         velocity_max: None,
         jerk: None,
         watchdog_ms: None,
+        blackbox: None,
         quiet: false,
     };
 
@@ -171,6 +181,10 @@ fn parse(args: &[String]) -> Result<Options, String> {
                         .parse()
                         .map_err(|_| "--watchdog-ms wants a number".to_string())?,
                 );
+                index += 2;
+            }
+            "--blackbox" => {
+                options.blackbox = Some(PathBuf::from(value()?));
                 index += 2;
             }
             "--quiet" => {
@@ -344,11 +358,57 @@ fn run(args: &[String]) -> i32 {
     };
     let mut consumer = ring.consumer();
 
+    // §13's ring, when one was asked for. The shape is the body's, because a record's size is a
+    // function of the joint and channel counts — a ring sized for a different robot could not hold
+    // this one's cycles.
+    let mut recorder = match options.blackbox.as_ref() {
+        None => None,
+        Some(dir) => {
+            let shape = Shape {
+                joints: joints as u16,
+                channels: channels.len() as u16,
+            };
+            let meta = Meta {
+                // What this process can actually fill. The descriptor digest and the OS image are
+                // the daemon's to know, and a recorder inventing them would put two unverifiable
+                // claims into evidence.
+                robot_id: String::new(),
+                embodiment: [0u8; 32],
+                os_image: [0u8; 32],
+                tier: limits.tier as u8,
+                enforcement: limits.enforcement as u8,
+                simulator: false,
+                wall_epoch_ns: 0,
+                mono_ns: 0,
+                channels: names.clone(),
+            };
+            match Recorder::open(dir, meta, shape, DEFAULT_BUDGET) {
+                Ok(recorder) => {
+                    if !options.quiet {
+                        let geometry = recorder.geometry();
+                        println!(
+                            "blackbox   {} — {} slots of {} bytes, about {:.0} s at {} Hz",
+                            dir.display(),
+                            geometry.capacity,
+                            geometry.record_size,
+                            geometry.capacity as f64 / options.hz,
+                            options.hz,
+                        );
+                        println!();
+                    }
+                    Some(recorder)
+                }
+                Err(error) => return fail(&error.to_string()),
+            }
+        }
+    };
+
     let mut host = Host::new(&channels);
     let period = Duration::from_secs_f64(1.0 / options.hz);
     let origin = Instant::now();
     let mut first_error: Option<String> = None;
     let mut stop_unavailable_seen = false;
+    let mut recorder_failed = false;
 
     let mut cycle = 0u64;
     loop {
@@ -368,6 +428,21 @@ fn run(args: &[String]) -> i32 {
             }
         }
         stop_unavailable_seen |= turn.stop_unavailable;
+
+        // Every cycle, including the idle ones. §15's field conformance is a ratio over cycles, and
+        // a recorder that skipped the uneventful ones would be writing the numerator without the
+        // denominator.
+        if let Some(recorder) = recorder.as_mut() {
+            if let Err(error) = recorder.cycle(now_ns, &turn.cycle) {
+                // A recording that stops is a fault, and a loop that stopped commanding because of
+                // one would be a black box that took the robot down. It is reported once and the
+                // loop keeps turning — which is §13's own priority, in the order it states it.
+                if first_error.is_none() {
+                    first_error = Some(format!("the black box stopped recording: {error}"));
+                }
+                recorder_failed = true;
+            }
+        }
 
         let elapsed = started.elapsed();
         if elapsed > period {
@@ -391,8 +466,22 @@ fn run(args: &[String]) -> i32 {
         period.as_secs_f64() * 1000.0
     );
 
+    // Sealed on the way out, because a window nobody sealed is a ring the next run overwrites.
+    // §13's reason for sealing at shutdown is its reason for sealing at an incident: the records
+    // are only evidence once they are a file.
+    if let Some(recorder) = recorder.as_ref() {
+        match recorder.seal(Reason::Shutdown, origin.elapsed().as_nanos() as u64) {
+            Ok((sealed, path)) => println!(
+                "\nsealed          {} — {} bytes",
+                path.display(),
+                sealed.bytes.len(),
+            ),
+            Err(error) => println!("\nthe window could not be sealed: {error}"),
+        }
+    }
+
     if let Some(error) = first_error {
-        println!("\nfirst read failure: {error}");
+        println!("\nfirst failure: {error}");
     }
     if stop_unavailable_seen {
         println!(
@@ -403,7 +492,7 @@ fn run(args: &[String]) -> i32 {
     }
 
     // A run that could not read the body is not a successful run, however many cycles it turned.
-    if summary.read_failures > 0 {
+    if summary.read_failures > 0 || recorder_failed {
         return 1;
     }
     0

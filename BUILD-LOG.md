@@ -204,3 +204,29 @@ Fixed, with two regression tests, and the module header now argues the rule rath
 
 `cargo test --workspace` — **1,385 passed**. fmt and clippy clean, golden path 48 commands, mirrors
 re-pinned after a second §73 edit.
+
+---
+
+## 5. §13 gets cycles, and the sequence that lives in memory
+
+The loop built the records and dropped them. `skynetk --blackbox <dir>` now writes each one into
+§26's ring and seals the window on exit — **the first recording of control cycles this repository has
+produced**: thirty cycles against the mock robot at 200 Hz, sealed into a 48 KB MCAP.
+
+**The question that could not arise until there were two writers.** `skynetd` records events and gaps;
+the host records cycles; both belong in one recording — and a `Ring` holds its next sequence *in
+memory*, so two over one file encode two records into one slot and produce a recording that passes
+every check a reader applies and is wrong in the interval that matters. §26.2 now states the rule —
+one ring, one writer, an exclusive lock, a refusal that names the holder — records three rejected
+alternatives, and puts the real fix (the sequence as an atomic in a mapped header) in §80.
+
+**What the format refused, and the fix that was not the obvious one.** The first run wrote nothing:
+`Shape { field: "desired", expected: 3, found: 0 }`. Padding with zero would have satisfied it and
+been wrong — a recorded `desired` of 0.0 says the policy asked for the zero position, and on an idle
+cycle nothing asked for anything. The fill is `NaN`, per §74.3's rule that zero and unmeasured are
+different facts.
+
+### Verified
+
+`cargo test --workspace` — **1,388 passed**; `--ignored` 3 passed; fmt and clippy clean; mirrors
+re-pinned after §26.2 and §80.

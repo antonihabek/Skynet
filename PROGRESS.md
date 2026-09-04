@@ -11592,3 +11592,72 @@ reporting is the whole of what the guest tier does. Two regression tests in
      `skynet-kernel-host` resolves at host, because host is where clamps and ramps happen. The
      advisory path had no test and had the bug, and what found it was a suite in another crate whose
      expectations are written against the kernel rather than against the code under test.
+
+---
+
+## 2026-09-04 (fifty-sixth) — §13 gets cycles, and the sequence that lives in memory
+
+The loop turns and throws its records away. `crate::cycle::record` builds a `Cycle` every pass and
+nothing has ever written one, which is the last step between §25's loop and §13's ring.
+
+`crates/skynet-kernel-host/src/recorder.rs` writes them. `skynetk --blackbox <dir>` preallocates the
+ring, appends a record per cycle, and seals the window on exit — **the first recording of control
+cycles this repository has produced.** Thirty cycles against the mock robot at 200 Hz seal into a
+48 KB MCAP.
+
+### The question that could not arise until now
+
+`skynetd` has been the only writer of the ring since it was built. There are two now: the daemon
+records events and gaps — a configuration change, a grant, a dropped frame — and the host records
+cycles. Both are §26 records and both belong in one recording.
+
+They cannot both write one file, and the reason is small and absolute: **a `Ring` holds its next
+sequence number in memory.** Two of them over one file hand out the same sequence twice, encode two
+records into one slot, and produce a recording that is intact by every check a reader applies and
+wrong in the interval that matters. Nothing detects it until an investigator is reading the file to
+answer a question, months later, and the answer is quietly false.
+
+So the rule is written down rather than assumed, as §26.2: **a ring has one writer, and the writer
+takes an exclusive lock on the directory.** A second is refused by name — the refusal says who holds
+it — and releasing the first lets a second in, so it is a lock rather than a permanent refusal. Three
+alternatives are recorded as rejected in the section: two rings joined by timestamp, the host sending
+cycles to the daemon over IPC, and the daemon giving up events. The fix is the sequence as an atomic
+in a mapped header claimed by fetch-add, which `skynet-ring-shm` already does for §25's command ring;
+it is in §80 rather than half-built here.
+
+### What the format refused, and the fix that was not the obvious one
+
+The first run recorded nothing and said why:
+
+```
+Shape { field: "desired", expected: 3, found: 0 }
+```
+
+Every per-channel array in a record is the declared width, because a reader indexes them by channel,
+and an idle cycle was writing an empty `desired`. Padding with **zero** would have satisfied the
+check and been wrong: a recorded `desired` of 0.0 says the policy asked for the zero position, and on
+an idle cycle nothing asked for anything. §74.3's rule that zero and unmeasured are different facts
+applies to a channel exactly as it applies to a counter — so the fill is `NaN`, which is what
+`nearest_person_m` in the same record has always been.
+
+The same rule now covers a masked channel: a policy commanding the shoulder and saying nothing about
+the elbow records `0.4` and `NaN`, not `0.4` and `0.0`.
+
+### Numbers
+
+`cargo test --workspace` — **1,388 passed**, three more than the last session: the ring round trip,
+the seal, and the writer lock. `--ignored` 3 passed. fmt and clippy clean, mirrors re-pinned after
+§26.2 and §80.
+
+### Findings, restated
+
+1-103 as before.
+
+104. **A shared file is a design decision that only appears when the second writer does.** One
+     process wrote the ring for fifty-three sessions and the sequence living in memory was
+     invisible — correct, even — for all of them. The second writer did not reveal a bug; it
+     revealed that a property nobody had needed to state was load-bearing.
+105. **A width check caught a semantic error, and the obvious fix would have passed it.** The format
+     refused an empty array and would have accepted an array of zeros. Zeros are a lie about what a
+     policy asked for, and the difference between the two fixes is invisible to every check in the
+     repository except the one sentence in §74.3.

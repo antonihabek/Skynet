@@ -1433,6 +1433,44 @@ consumes a sequence number of its own, so the numbering stays dense and a reader
 "the ring wrapped past these" — normal; the window moved on — from "these were never written", which
 is not.
 
+### 26.2 One ring, one writer
+
+Written in when the control loop was built, because until then the question could not arise: there
+was one process writing the ring and it was `skynetd`.
+
+There are two now. `skynetd` records **events and gaps** — a configuration change, a grant, a
+dropped frame — and the kernel host records **cycles**. Both are §26 records, both belong in one
+recording, and they cannot both write one file today.
+
+The reason is small and absolute. A `Ring` holds its next sequence number **in memory**. Two of them
+over one file hand out the same sequence twice, encode two records into one slot, and produce a
+recording that is intact by every check a reader applies and wrong in the interval that matters. It
+is the worst failure a black box has, because nothing detects it until an investigator is reading
+the file to answer a question, months later, and the answer is quietly false.
+
+So the rule is stated rather than assumed: **a ring has one writer, and the writer takes an exclusive
+lock on the directory.** A second writer is refused, by name, and the refusal says who holds it.
+Failing loudly beats corrupting evidence, and a robot that cannot record is a robot with a visible
+problem rather than an invisible one.
+
+Three alternatives were considered and are worth recording as rejected:
+
+* **Two rings.** The daemon's and the host's, sealed separately. Rejected: §13 describes *the* black
+  box, an incident review would have to join two files by timestamp, and the join would be the first
+  thing to go wrong under a clock step (§35.4).
+* **The host sends cycles to the daemon.** Rejected outright: it puts an IPC round trip on the one
+  path §33.1 keeps the daemon off, and a supervisor that can stall the control loop is a supervisor
+  inside the safety case.
+* **The daemon stops writing events.** Rejected: §38.3 requires a black box event on every
+  configuration change, and the daemon is the only party that sees one.
+
+**The fix, and it is open.** The sequence belongs in a mapped header as an atomic, and writers claim
+a slot by fetch-add — which is what `skynet-ring-shm` already does for §25's command ring, in the
+same repository, for the same reason. It wants a design pass and a Linux mapping, and until it has
+one the lock makes the interim state safe rather than merely tolerable. Recorded in §80.
+
+---
+
 ---
 
 ## 27. Boot, and what happens when things break
@@ -5568,6 +5606,7 @@ cause — a client asserting something about a route it does not own:
 
 | Open | Why |
 |---|---|
+| **A ring two processes can write** | §26.2. `skynetd` records events and the kernel host records cycles, both belong in one recording, and a `Ring` holds its next sequence in memory — so two writers over one file would encode two records into one slot and produce a recording that passes every check a reader applies and is wrong in the interval that matters. An exclusive directory lock makes the interim safe: the second writer is refused by name rather than allowed to corrupt evidence. The fix is the sequence as an atomic in a mapped header, claimed by fetch-add, which is what `skynet-ring-shm` already does for §25's command ring. |
 | **Retention of sealed windows** | §79.4 keeps every one. A robot that seals daily for a year holds a year of windows, and §28's disk floor does not survive that. Deleting one the Hub has acknowledged is the obvious rule, and it is a decision about evidence rather than about disk: the acknowledgement is another party's word, and §13 exists precisely for the day that party is the one being asked questions. |
 | **`people_detection` in §5's vocabulary** | The seventh of `resolveLimits()`'s inputs, and the only one with no path. It is not a missing delivery — §11's profile delivers six — it is that no body can *declare* a person detector, so `proximity` resolves to a ceiling whose guard is permanently unavailable. Adding it means extending the sensor vocabulary, which §30 says needs a governance process first. |
 | **Refusing to command a body that cannot warn** | §81.3. A transition that demands a tone and cannot produce one is a robot moving with a control missing from somebody's risk assessment, and `skynetd` cannot decline it: §27's state is derived from conditions rather than granted, so there is nothing to withhold. The rule belongs in the kernel's interlock, where the transition is, and putting it anywhere else would be a second definition of §27's machine. |

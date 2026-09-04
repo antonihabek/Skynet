@@ -50,6 +50,7 @@
 
 pub mod cycle;
 pub mod driver;
+pub mod recorder;
 pub mod run;
 
 #[cfg(test)]

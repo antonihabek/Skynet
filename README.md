@@ -104,7 +104,7 @@ it, which says no when the answer is no.
 | `crates/skynet-ring-shm` — the `memfd` under it | Creates, seals and maps the anonymous file; the consumer's mapping carries no `PROT_WRITE`. 9 tests, one of which re-executes itself so a command crosses two real processes |
 | `crates/skynet-capture` — the capture-side split (§47.4) | A latest-wins slot for the policy and a bounded queue for the black box, which must never be one queue. Moves buffer handles, never pixels; every displaced or refused frame is handed back, and a run of drops is one annotated gap. `no_std`, no `alloc`, no `unsafe`; 17 tests |
 | `crates/skynet-dl` — the driver loader | `dlopen`/`LoadLibraryW`, the vtable check, and a safe wrapper around the four calls a control loop makes. The workspace's only loader `unsafe`, in one crate with two callers |
-| `crates/skynet-kernel-host` — the control loop, and the `skynetk` binary (§25) | The consumer end of the command ring, running: a real driver opened, a cycle turned at a declared rate, the kernel's verdict written, a `Cycle` recorded every pass. A hold is a mask of zeros; a controlled stop ramps at the declared jerk ceiling; a ramp with no rate escalates and says so. 14 tests, plus a run against the mock robot at 200 Hz with no overruns |
+| `crates/skynet-kernel-host` — the control loop, and the `skynetk` binary (§25) | The consumer end of the command ring, running: a real driver opened, a cycle turned at a declared rate, the kernel's verdict written, a `Cycle` recorded every pass. A hold is a mask of zeros; a controlled stop ramps at the declared jerk ceiling; a ramp with no rate escalates and says so; an advisory verdict is not enforced. Records every cycle into §13's ring behind an exclusive writer lock (§26.2) and seals the window on exit. 19 tests, plus three against the mock robot at 200 Hz with no overruns |
 | `corpus/` — the conformance corpus | 1,055 cases, 77 files, of which 73 are the closed vocabularies both editions must spell identically |
 | `crates/skynet-corpus` — the corpus runner | Reproduces all 1,055 byte for byte |
 | `reference/typescript/` — the oracle | Vendored from the Hub; generates the corpus |
@@ -226,13 +226,21 @@ every pass. `skynetk run --driver ./mock_robot.so --tier host --velocity-max 2.0
 --watchdog-ms 50` drives the mock robot at 200 Hz with four guards enforcing and four naming the
 input they lack, which is §7.2 on a real machine rather than in a test.
 
-Three of its decisions are worth reading in `cycle.rs` rather than here, because each is a place the
+**And §13 now has cycles in it.** `--blackbox <dir>` records every pass into the ring §26 defines and
+seals it on exit — the first recording of control cycles this repository has produced. The ring has
+**one writer** and takes an exclusive lock, because `Ring` holds its next sequence in memory and two
+writers over one file would encode two records into one slot, producing a recording that passes every
+check a reader applies and is wrong in the interval that matters. §26.2 has the argument and §80 has
+the fix, which is the sequence as an atomic in a mapped header.
+
+Four of its decisions are worth reading in `cycle.rs` rather than here, because each is a place the
 translation could be quietly wrong: a **hold is a mask of zeros and never a command of zeros** (§24 —
 the other reading slams a position-controlled arm to its origin); a **controlled stop ramps at the
 declared jerk ceiling**, because the bound on acceleration is a bound on deceleration and inventing
-a second number would be inventing a safety figure; and a ramp with **no declared rate escalates to
+a second number would be inventing a safety figure; a ramp with **no declared rate escalates to
 Cat 0 and records that it did**, since escalating silently would have an operator read the harder
-stop as the one the guard demanded.
+stop as the one the guard demanded; and an **advisory verdict is not enforced**, because a guest tier
+that withheld a command the kernel said to forward would be enforcing where it has never claimed to.
 
 Still not built: the **producer** end. No capture backend fills a stream — `skynet-capture` moves
 handles a V4L2 or GenICam backend would produce, and neither exists — no policy sandbox receives a

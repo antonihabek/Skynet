@@ -331,6 +331,7 @@ impl<'a> Host<'a> {
             [0u8; 32],
             0,
             skynet_blackbox::record::NO_CAPABILITY,
+            self.channels,
             &observed,
             posted.as_ref(),
             &decision,
