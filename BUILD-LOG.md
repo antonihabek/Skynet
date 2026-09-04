@@ -230,3 +230,46 @@ different facts.
 
 `cargo test --workspace` — **1,388 passed**; `--ignored` 3 passed; fmt and clippy clean; mirrors
 re-pinned after §26.2 and §80.
+
+---
+
+## 6. Phase 9 asks for seven workflows to have a client. One had none.
+
+Phase 9's last bullet is *"CLI, SDK, and API contract tests covering repository, artifact, release,
+pull-request, evaluation, device, and deployment workflows"*. The contract test added in the
+twenty-first session proves every path either client calls **exists**. It says nothing about whether
+a workflow has a client at all, which is the half the sentence is actually about.
+
+Reading it mechanically found one gap, and only one: **device**.
+
+`GET /devices/fleet` and `GET /devices/{id}` have been served, RLS-checked and rendered on the web
+since the ninth session, and **no CLI command and no SDK class addressed either.** It is an easy gap
+to explain — a robot pairs itself, and §10 keeps the device credential on the machine — and it was
+still a gap, because nothing about that stops a fleet operator wanting to see what their robots are
+running.
+
+### Built
+
+| | |
+|---|---|
+| `skynet fleet [--namespace ns]` | Every robot in a namespace and what it last said. A robot that has never reported is **listed**, because that row is usually the one an operator is looking for |
+| `skynet device <id>` | One robot: told to run, says it is running, and the gap. §10's three digests, with an absent one rendered as *unmeasured* rather than as a blank |
+| `skynet.Device`, `skynet.fleet()` | The same two reads from Python |
+
+Deliberately no third command. Neither client can write a device's state, and a test asserts it: a
+client that could post a check-in would turn every field on a fleet page from something a machine
+measured into something anybody could assert.
+
+### Verified
+
+* `lib/__tests__/skynet-client-contract.test.ts` — nine new cases, one per workflow plus two for the
+  asymmetry that would be easiest to reintroduce. A workflow with no client is now a **failure**
+  rather than a sentence in a plan
+* `scripts/skynet-verify-fleet.mjs` — **18 live checks** against a running server and the production
+  database: the fleet answers, a member sees their own and not somebody else's, an unreported robot
+  is listed with a blank state rather than omitted, neither route is public, and the fixtures are
+  removed in a `finally`
+* The last four of those **run the binary**, with the fixture token in `SKYNET_TOKEN`. Driving the
+  routes proves the routes; a command that resolves to a live route and prints `undefined` is
+  exactly what a path-matching contract test cannot see
+* `npx vitest run` — **1,700 passed**, 70 files. `npm run typecheck` clean
