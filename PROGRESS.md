@@ -11512,3 +11512,83 @@ introduced it reported the check as clean.
      --all --check` fails on `main`, on two files whose own session log reports the check as clean.
      Nothing runs it locally; the job that would have caught it runs on push, and the push had not
      happened.
+
+---
+
+## 2026-09-04 (fifty-fifth) — the skip reason that named a path, and the path that now exists
+
+`package.grants.gate` has been skipped for eleven sessions with a reason that was true when it was
+written:
+
+> half of this is built and it is not the half the test measures. Admission refuses a package
+> requesting a capability the operator did not grant, at install (§8). The test is about a package
+> that *commands* one at run time and the `mode_gate` guard refusing it — **which is the Safety
+> Kernel's, through a path §33.1 denies this daemon.**
+
+The last clause names a path. The fifty-fourth session built it. So the test was re-read rather than
+re-skipped, and it turns out to be measurable — with a limit that is more interesting than the
+measurement.
+
+### What it measures
+
+The reach `replay_deterministic` has, and for the same reason. Real: this robot's descriptor, its
+channel names, `crate::limits`' resolved set out of its envelope and signed profile, the grants an
+operator actually made on this machine, and the same `evaluate_cycle` the loop calls. Synthetic: the
+three commands, because no policy has run here.
+
+Three, not two, and the third is §7.2's:
+
+| Command | Expected |
+|---|---|
+| exercising a capability the operator **granted** | admitted |
+| exercising one **nobody** granted | refused, and sends no channel |
+| naming **no** capability | neither — `None` is *the runtime did not say*, which is not *denied* |
+
+A robot with no grants at all is **skipped rather than half-measured**: only the refusing half could
+be shown, and a check that only ever refuses would pass on a kernel whose mode gate said no
+unconditionally, which is the failure it exists to catch.
+
+### And on every robot that exists, it skips — for a better reason
+
+`ROBOT_TIER` is guest, guest derives `Enforcement::Advisory`, and §7.4 is explicit about what that
+means: `evaluate_cycle` forwards the **desired** command whatever the guards said, so a guest-tier
+deployment cannot look enforced in its own logs. The gate trips and the command goes out.
+
+So a guest robot has not passed a test about a gate that refuses, and reporting one would be turning
+guest observation into a safety claim — the one thing §42 forbids. It skips, and the reason it gives
+is now a property this robot has rather than a component it lacks.
+
+### The bug this found in yesterday's code
+
+Writing the expectation *"a refused command sends no channel"* failed against the kernel, and the
+kernel was right.
+
+`skynet-kernel-host`'s `decide` zeroed the mask on **every** `Hold`, advisory ones included. A
+guest-tier robot would have withheld a command the kernel had said to forward, while the record
+beside it said `advisory: true`. That is §7.4 and §42's failure exactly, it was written yesterday,
+and no test in that crate could have caught it: every fixture there resolves at host tier, because
+that is the tier the interesting decisions live at.
+
+`decide` now returns immediately on an advisory verdict, before anything that withholds, cuts power
+or starts a ramp — and still records the trips and the demanded response, because observing and
+reporting is the whole of what the guest tier does. Two regression tests in
+`skynet-kernel-host/src/tests.rs` cover the hold and the stop.
+
+### Numbers
+
+`cargo test --workspace` — **1,385 passed**. `cargo fmt --all --check` and `cargo clippy --workspace
+--all-targets` clean. Golden path 48 commands, mirrors re-pinned after the §73 edit.
+
+### Findings, restated
+
+1-101 as before.
+
+102. **A skip reason that names a missing component expires when the component is built, and nothing
+     re-reads it.** *"Through a path §33.1 denies this daemon"* was correct and became false, and it
+     would have stayed in the suite indefinitely because a skipped test does not fail. The eight
+     runtime tests each carry a sentence like that, and the sentences are the only thing holding
+     them shut.
+103. **A crate whose fixtures all use one tier cannot find a tier bug.** Every fixture in
+     `skynet-kernel-host` resolves at host, because host is where clamps and ramps happen. The
+     advisory path had no test and had the bug, and what found it was a suite in another crate whose
+     expectations are written against the kernel rather than against the code under test.

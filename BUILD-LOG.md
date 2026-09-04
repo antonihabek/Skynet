@@ -169,3 +169,38 @@ Nothing pushed. Both repositories have uncommitted work on `main`.
 **Next:** the OS side's remaining buildable items are §31.3's second language edition and §80's
 `people_detection` vocabulary gap. The Hub's are Phase 9's release gates, `/skynet/os/editions`, and
 the six dead catalogue keys.
+
+---
+
+## 4. A skip reason that named a missing path, and the bug that found
+
+`package.grants.gate` — one of §15's eight runtime tests — had been skipped for eleven sessions
+because the mode gate was *"the Safety Kernel's, through a path §33.1 denies this daemon."* Item 3
+built that path, so the reason had expired and nothing would have noticed: a skipped test does not
+fail.
+
+**Now measured**, against a robot's own grants: one command exercising a granted capability is
+admitted, one exercising an ungranted capability is refused and sends no channel, one naming no
+capability is treated as neither — §7.2's distinction between *absent* and *denied*. A robot with no
+grants is skipped rather than half-measured, because a check that only ever refuses would pass on a
+kernel whose gate said no unconditionally.
+
+**And on every robot that exists it still skips**, for a reason that is now a live property instead
+of a missing component: `ROBOT_TIER` is guest, guest is advisory, and §7.4 forwards the command
+whatever the guards said. A tier that cannot refuse has not passed a test about refusing, and
+reporting one would turn guest observation into a safety claim.
+
+### The bug
+
+Writing that expectation failed against the kernel, and the kernel was right. Item 3's `decide`
+zeroed the mask on **every** hold, advisory ones included — so a guest-tier robot would have withheld
+a command the kernel said to forward, while the record beside it said `advisory: true`. Written
+yesterday; no test in that crate could have caught it, because every fixture there resolves at host
+tier, which is where the interesting decisions are.
+
+Fixed, with two regression tests, and the module header now argues the rule rather than assuming it.
+
+### Verified
+
+`cargo test --workspace` — **1,385 passed**. fmt and clippy clean, golden path 48 commands, mirrors
+re-pinned after a second §73 edit.

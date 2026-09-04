@@ -54,7 +54,7 @@ use skynet_contracts::certification::{
     award_certification, CertificationInput, SctsOutcome, SctsResult,
 };
 use skynet_contracts::ota::{admit_bundle, BundleManifest, UpdateSubject};
-use skynet_contracts::safety::{evaluate_cycle, CommandCycle, Guard};
+use skynet_contracts::safety::{evaluate_cycle, CommandCycle, Enforcement, Guard};
 use skynet_json::Json;
 
 use skynet_blackbox::record::{CycleView, Entry, Shape, NO_CAPABILITY};
@@ -149,7 +149,13 @@ fn skipped(id: &str, detail: impl Into<String>) -> SctsResult {
 /// `at` is an ISO-8601 timestamp from §35.1's correlation clock — the one thing wall time is for
 /// here, because a result is a record a Hub places against other robots' records. Nothing in this
 /// module decides anything with it.
-pub fn run(capacity: &Capacity, body: &Body, limits: &crate::limits::Owned, at: &str) -> Run {
+pub fn run(
+    capacity: &Capacity,
+    body: &Body,
+    limits: &crate::limits::Owned,
+    grants: &[String],
+    at: &str,
+) -> Run {
     let mut results = Vec::with_capacity(RUNTIME_TESTS.len());
 
     results.push(skipped(
@@ -168,13 +174,7 @@ pub fn run(capacity: &Capacity, body: &Body, limits: &crate::limits::Owned, at: 
     ));
 
     results.push(signature_required(capacity, at));
-    results.push(skipped(
-        "package.grants.gate",
-        "half of this is built and it is not the half the test measures. Admission refuses a \
-         package requesting a capability the operator did not grant, at install (§8). The test is \
-         about a package that *commands* one at run time and the `mode_gate` guard refusing it — \
-         which is the Safety Kernel's, through a path §33.1 denies this daemon.",
-    ));
+    results.push(grants_gate(body, limits, grants, at));
 
     results.push(ota_safety_gate(at));
 
@@ -794,6 +794,235 @@ pub fn to_lines(run: &Run, simulator: bool) -> Vec<String> {
     lines
 }
 
+/// `package.grants.gate` — the mode gate, against this robot's own grants.
+///
+/// # Why this stopped being skipped
+///
+/// It was skipped for eleven sessions with a reason that was true when it was written:
+///
+/// > half of this is built and it is not the half the test measures. Admission refuses a package
+/// > requesting a capability the operator did not grant, at install (§8). The test is about a
+/// > package that *commands* one at run time and the `mode_gate` guard refusing it — which is the
+/// > Safety Kernel's, through a path §33.1 denies this daemon.
+///
+/// The last clause named a path that did not exist. `skynet-kernel-host` is that path: a process
+/// that reads §25's ring, calls `evaluate_cycle`, and writes only what comes back. The guard is no
+/// longer the Safety Kernel's *in principle* — it is on a loop that runs.
+///
+/// # What is measured, and what is not
+///
+/// The same reach `replay_deterministic` has and for the same reason. Real: this robot's descriptor,
+/// its channel names, `crate::limits`' resolved set out of its envelope and signed profile, the
+/// grants an operator actually made on this machine, and the same `evaluate_cycle` the loop calls.
+/// Synthetic: the two commands, because no policy has ever run here.
+///
+/// So it establishes that **the gate on this robot's own grants refuses and admits the right
+/// commands**. It does not establish that a sandboxed package was stopped, because nothing on this
+/// edition sandboxes one — that is `safety.policy.isolation`, which stays skipped and whose stated
+/// reason has not gone stale.
+///
+/// # Both halves, because a gate that refuses everything is not a gate
+///
+/// A robot with no grants can only be shown refusing, and a check that only ever refuses would pass
+/// on a kernel whose mode gate returned "no" unconditionally. So the positive half needs a granted
+/// token to admit, and a robot with no grants in force is **skipped** rather than half-measured.
+///
+/// The third case is the one §7.2 is about: a command that names **no** capability. `None` is *the
+/// runtime did not say*, which is not the same as "no capability" — and the kernel treats it as
+/// neither a pass nor a trip, because a guard with no input has not shown the command safe. It is
+/// asserted here so that an edition that quietly made `None` mean "allowed" fails this test rather
+/// than shipping.
+fn grants_gate(
+    body: &Body,
+    limits: &crate::limits::Owned,
+    grants: &[String],
+    at: &str,
+) -> SctsResult {
+    let id = "package.grants.gate";
+
+    let Some(known) = body.known() else {
+        return skipped(
+            id,
+            "this robot has no usable embodiment descriptor, so it has no channel to command. A \
+             mode-gate result over invented channels would be a conformance result about a machine \
+             that does not exist (`GET /embodiment`).",
+        );
+    };
+
+    let mut channels: Vec<String> = known
+        .descriptor
+        .joints
+        .iter()
+        .map(|joint| joint.name.clone())
+        .collect();
+    channels.sort();
+    channels.dedup();
+    let Some(channel) = channels.first().cloned() else {
+        return skipped(
+            id,
+            "this robot's descriptor declares no joints, so there is no command for a capability to \
+             be exercised by.",
+        );
+    };
+
+    let Some(granted) = grants.first() else {
+        return skipped(
+            id,
+            "no capability is granted on this robot, so only the refusing half of the gate could be \
+             measured. A check that only ever refuses would pass on a kernel whose mode gate \
+             returned no unconditionally, which is the failure it exists to catch. Grant a \
+             capability to a package (`skynet grant`) and this runs.",
+        );
+    };
+
+    // A token no operator grants, and not a plausible one: it has to be outside the vocabulary so
+    // that a robot which happens to hold every real capability still exercises the refusal.
+    const UNGRANTED: &str = "scts.capability.never_granted";
+    if grants.iter().any(|held| held == UNGRANTED) {
+        return skipped(
+            id,
+            "this robot holds a grant for the token this check uses as its counter-example, so the \
+             refusing half cannot be measured against it.",
+        );
+    }
+
+    limits.with_resolved(|resolved, envelope| {
+        // §7.4 and §42: an advisory tier observes and enforces nothing, and `evaluate_cycle`
+        // encodes that by forwarding the *desired* command whatever the guards said. So on a
+        // guest-tier robot the gate trips and the command still goes out — by design — and a check
+        // asserting that an ungranted command was withheld would be asserting enforcement this
+        // robot has never claimed.
+        //
+        // Skipped rather than reported as a weaker pass. §15's test is about a gate that refuses;
+        // a tier that cannot refuse has not passed it, and guest observation never becomes a safety
+        // claim.
+        if resolved.enforcement != Enforcement::Enforcing {
+            return skipped(
+                id,
+                format!(
+                    "this robot resolves limits at the {} tier, where enforcement is {} — the mode                      gate trips and the command is forwarded anyway (§7.4). The test is about a                      gate that refuses, and a tier that cannot refuse has not passed it.",
+                    resolved.tier.as_str(),
+                    resolved.enforcement.as_str(),
+                ),
+            );
+        }
+
+        if !resolved.is_active(Guard::ModeGate) {
+            return skipped(
+                id,
+                "the mode gate is not among the guards this robot resolves as active, so there is \
+                 nothing here to measure. §7.2's rule is that an inactive guard reports itself \
+                 rather than being assumed to have passed.",
+            );
+        }
+
+        let with_grants: Vec<&str> = grants.iter().map(String::as_str).collect();
+        let resolved = resolved.clone().with_grants(&with_grants);
+
+        // One channel, well inside every ceiling, so nothing but the mode gate has anything to say.
+        // A command that also tripped the envelope would make the verdict ambiguous about which
+        // guard produced the hold.
+        let desired = [(channel.as_str(), 0.0f64)];
+        let granted_token: &str = granted.as_str();
+
+        // Written out rather than built by a closure. A closure would have to name one lifetime
+        // for `capability`, and the three commands do not share one: two borrow strings with
+        // different extents and the third names none at all.
+        let admitted = evaluate_cycle(
+            &CommandCycle {
+                now_ms: 1000.0,
+                command_ms: 1000.0,
+                sequence: 1,
+                desired: &desired,
+                previous: None,
+                capability: Some(granted_token),
+                nearest_person_m: None,
+            },
+            &resolved,
+            envelope,
+            None,
+        );
+        let refused = evaluate_cycle(
+            &CommandCycle {
+                now_ms: 1000.0,
+                command_ms: 1000.0,
+                sequence: 2,
+                desired: &desired,
+                previous: None,
+                capability: Some(UNGRANTED),
+                nearest_person_m: None,
+            },
+            &resolved,
+            envelope,
+            Some(1),
+        );
+        let unstated = evaluate_cycle(
+            &CommandCycle {
+                now_ms: 1000.0,
+                command_ms: 1000.0,
+                sequence: 3,
+                desired: &desired,
+                previous: None,
+                capability: None,
+                nearest_person_m: None,
+            },
+            &resolved,
+            envelope,
+            Some(2),
+        );
+
+        let admitted_tripped = admitted.tripped.iter().any(|guard| *guard == Guard::ModeGate);
+        let refused_tripped = refused.tripped.iter().any(|guard| *guard == Guard::ModeGate);
+        let unstated_tripped = unstated.tripped.iter().any(|guard| *guard == Guard::ModeGate);
+
+        let mut faults: Vec<String> = Vec::new();
+        if admitted_tripped {
+            faults.push(format!(
+                "a command exercising `{granted_token}`, which this operator granted, was refused \
+                 by the mode gate"
+            ));
+        }
+        if !refused_tripped {
+            faults.push(format!(
+                "a command exercising `{UNGRANTED}`, which nobody granted, was not refused"
+            ));
+        }
+        if !refused.command.is_empty() {
+            faults.push(
+                "the refused command still reached the wire: a mode-gate trip demands a hold, and a \
+                 hold sends no channel"
+                    .to_string(),
+            );
+        }
+        if unstated_tripped {
+            faults.push(
+                "a command naming no capability tripped the mode gate. §7.2 keeps `absent` and \
+                 `denied` apart: the runtime did not say, which is not the same as asking for \
+                 something it was refused"
+                    .to_string(),
+            );
+        }
+
+        if faults.is_empty() {
+            ran(
+                id,
+                SctsOutcome::Pass,
+                at,
+                format!(
+                    "measured against this robot's own grants ({} in force). A command exercising \
+                     `{granted_token}` was admitted; one exercising `{UNGRANTED}` was refused and \
+                     sent no channel; one naming no capability was neither. Synthetic in one \
+                     respect and stated rather than hidden: no policy has run on this edition, so \
+                     the two commands are this runner's, not a package's.",
+                    grants.len()
+                ),
+            )
+        } else {
+            ran(id, SctsOutcome::Fail, at, faults.join("; "))
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -834,6 +1063,7 @@ mod tests {
             &capacity(),
             &Body::Absent,
             &bare_limits(),
+            &[],
             "2026-09-02T00:00:00Z",
         );
         let ids: Vec<&str> = run
@@ -875,6 +1105,7 @@ mod tests {
             &capacity(),
             &Body::Absent,
             &bare_limits(),
+            &[],
             "2026-09-02T00:00:00Z",
         );
         assert_eq!(
@@ -896,6 +1127,7 @@ mod tests {
             &capacity(),
             &Body::Absent,
             &bare_limits(),
+            &[],
             "2026-09-02T00:00:00Z",
         );
         assert_eq!(outcome(&run, "ota.safety_gate"), SctsOutcome::Pass);
@@ -911,6 +1143,7 @@ mod tests {
             &capacity(),
             &Body::Absent,
             &bare_limits(),
+            &[],
             "2026-09-02T00:00:00Z",
         );
         assert_eq!(run.executed, 2);
@@ -933,6 +1166,7 @@ mod tests {
             &capacity(),
             &Body::Absent,
             &bare_limits(),
+            &[],
             "2026-09-02T00:00:00Z",
         );
         for result in &run.results {
@@ -954,6 +1188,7 @@ mod tests {
             },
             &Body::Absent,
             &bare_limits(),
+            &[],
             "2026-09-02T00:00:00Z",
         );
         assert_eq!(
@@ -971,6 +1206,7 @@ mod tests {
             &capacity(),
             &Body::Absent,
             &bare_limits(),
+            &[],
             "2026-09-02T00:00:00Z",
         );
         let verdict = run.attainable(false);
@@ -994,6 +1230,7 @@ mod tests {
             &capacity(),
             &Body::Absent,
             &bare_limits(),
+            &[],
             "2026-09-02T00:00:00Z",
         );
         let document = to_json(&run, false);
@@ -1008,6 +1245,204 @@ mod tests {
         assert_eq!(
             document.arr_or_empty("results")[0].get("ran_at"),
             Some(&Json::Null)
+        );
+    }
+    // ── package.grants.gate ──────────────────────────────────────────────────
+    //
+    // The one runtime test in this module that changed from skipped to measured, and the reason it
+    // could is that the path its skip reason named — the kernel's mode gate, on a loop that runs —
+    // now exists in `skynet-kernel-host`.
+
+    /// A descriptor with two joints, written to a real file, because `Body::Present` is only
+    /// reachable through the reader and a hand-built `Known` would be a fixture of this module's
+    /// own imagination rather than of the parser every robot uses.
+    fn body_with_joints(dir: &std::path::Path) -> Body {
+        let path = dir.join("embodiment.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "schema": "skynet.embodiment/1",
+              "robot_slug": "scts-probe",
+              "base": "fixed",
+              "dof": 2,
+              "joints": [
+                {"name": "elbow", "type": "revolute", "control_modes": ["position"]},
+                {"name": "shoulder", "type": "revolute", "control_modes": ["position"]}
+              ]
+            }"#,
+        )
+        .expect("the fixture is writable");
+        crate::embodiment::read(&path)
+    }
+
+    /// Limits resolved at the tier where the mode gate actually refuses.
+    ///
+    /// `ROBOT_TIER` is guest and `bare_limits` uses it, so on every robot today the gate is
+    /// skipped as advisory. That is the honest live outcome and it is not the thing under test
+    /// here: what these cases check is the gate's arithmetic at the tier it applies to.
+    fn enforcing_limits() -> crate::limits::Owned {
+        crate::limits::read(
+            &crate::layout::Layout::new("does-not-exist"),
+            &Body::Absent,
+            skynet_contracts::safety::Tier::Host,
+        )
+    }
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("skynet-conformance-{name}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a scratch directory");
+        dir
+    }
+
+    /// A robot with no grants is skipped, not passed.
+    ///
+    /// The refusing half would measure fine on its own, and a check that only ever refuses would
+    /// pass on a kernel whose mode gate said no unconditionally — which is the failure it exists to
+    /// catch. So the absence of a granted token is a reason not to report a result.
+    #[test]
+    fn the_grants_gate_is_skipped_when_nothing_is_granted() {
+        let dir = scratch("no-grants");
+        let body = body_with_joints(&dir);
+        let result = grants_gate(&body, &enforcing_limits(), &[], "2026-09-04T00:00:00Z");
+        assert_eq!(result.outcome, SctsOutcome::Skipped);
+        assert_eq!(result.ran_at, "", "a skipped test carries no date (§15)");
+        assert!(
+            result
+                .detail
+                .unwrap_or_default()
+                .contains("only the refusing half"),
+            "the reason has to say which half could not be measured",
+        );
+    }
+
+    /// On a real robot the gate is skipped, because `ROBOT_TIER` is guest.
+    ///
+    /// This is the live outcome and it is worth a test of its own: §7.4 says an advisory tier
+    /// observes and enforces nothing, so the mode gate trips and the command goes out anyway. A
+    /// runner that reported a pass there would be turning guest observation into a safety claim,
+    /// which is the one thing §42 forbids.
+    #[test]
+    fn the_grants_gate_is_skipped_at_the_tier_every_robot_actually_runs() {
+        let dir = scratch("advisory");
+        let body = body_with_joints(&dir);
+        let result = grants_gate(
+            &body,
+            // `bare_limits` resolves at ROBOT_TIER, which is guest.
+            &bare_limits(),
+            &["hri.speech".to_string()],
+            "2026-09-04T00:00:00Z",
+        );
+
+        assert_eq!(result.outcome, SctsOutcome::Skipped);
+        let detail = result.detail.unwrap_or_default();
+        assert!(detail.contains("guest"), "{detail}");
+        assert!(
+            detail.contains("forwarded anyway"),
+            "the reason has to say that the command still goes out, not just that the tier is low:              {detail}",
+        );
+    }
+
+    /// A robot with no descriptor has no channel to command, so there is nothing to measure.
+    #[test]
+    fn the_grants_gate_is_skipped_without_a_body() {
+        let result = grants_gate(
+            &Body::Absent,
+            &bare_limits(),
+            &["hri.speech".to_string()],
+            "2026-09-04T00:00:00Z",
+        );
+        assert_eq!(result.outcome, SctsOutcome::Skipped);
+        assert!(result
+            .detail
+            .unwrap_or_default()
+            .contains("no usable embodiment descriptor"));
+    }
+
+    /// With a body and a grant, both halves are measured and the gate passes.
+    ///
+    /// What this asserts is narrow and deliberate: a command exercising the granted token is
+    /// admitted, one exercising a token nobody granted is refused and sends no channel, and one
+    /// naming no capability is neither — which is §7.2's distinction between *absent* and *denied*.
+    #[test]
+    fn the_grants_gate_measures_both_halves_against_a_real_grant() {
+        let dir = scratch("granted");
+        let body = body_with_joints(&dir);
+        let result = grants_gate(
+            &body,
+            &enforcing_limits(),
+            &["hri.speech".to_string()],
+            "2026-09-04T00:00:00Z",
+        );
+
+        assert_eq!(
+            result.outcome,
+            SctsOutcome::Pass,
+            "{}",
+            result.detail.clone().unwrap_or_default()
+        );
+        assert_eq!(
+            result.ran_at, "2026-09-04T00:00:00Z",
+            "a measured test carries the date it ran",
+        );
+        let detail = result.detail.unwrap_or_default();
+        assert!(detail.contains("hri.speech"), "{detail}");
+        assert!(
+            detail.contains("no policy has run on this edition"),
+            "the reach has to be stated in the result, not only in the module: {detail}",
+        );
+    }
+
+    /// The counter-example token being granted is itself a reason to skip.
+    #[test]
+    fn a_robot_holding_the_counter_example_token_is_skipped() {
+        let dir = scratch("counter-example");
+        let body = body_with_joints(&dir);
+        let result = grants_gate(
+            &body,
+            &enforcing_limits(),
+            &["scts.capability.never_granted".to_string()],
+            "2026-09-04T00:00:00Z",
+        );
+        assert_eq!(result.outcome, SctsOutcome::Skipped);
+        assert!(result
+            .detail
+            .unwrap_or_default()
+            .contains("counter-example"));
+    }
+
+    /// The run carries the gate's result in its place, and a grant changes it from skipped.
+    #[test]
+    fn a_grant_moves_the_gate_from_skipped_to_measured_in_a_whole_run() {
+        let dir = scratch("whole-run");
+        let body = body_with_joints(&dir);
+
+        let without = run(
+            &capacity(),
+            &body,
+            &enforcing_limits(),
+            &[],
+            "2026-09-04T00:00:00Z",
+        );
+        assert_eq!(
+            outcome(&without, "package.grants.gate"),
+            SctsOutcome::Skipped
+        );
+
+        let with = run(
+            &capacity(),
+            &body,
+            &enforcing_limits(),
+            &["hri.speech".to_string()],
+            "2026-09-04T00:00:00Z",
+        );
+        assert_eq!(outcome(&with, "package.grants.gate"), SctsOutcome::Pass);
+
+        // And the count of tests that actually ran goes up by exactly one.
+        assert_eq!(
+            with.executed,
+            without.executed + 1,
+            "one more test executed, and no others changed",
         );
     }
 }

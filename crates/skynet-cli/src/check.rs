@@ -244,7 +244,7 @@ pub const NOT_COVERED: &[(&str, &str)] = &[
     ),
     (
         "package.grants.gate",
-        "a runtime property — `skynet conformance`, where half of it is built",
+        "a runtime property — `skynet conformance`, where it runs and reports the tier",
     ),
     (
         "ota.safety_gate",
