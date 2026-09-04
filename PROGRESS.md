@@ -11466,11 +11466,26 @@ that question.
 sandbox; there is no sandbox, and `skynet-ring-shm` is Linux-only. The binary allocates the ring in
 its own address space and prints that on every run rather than a path nothing can open.
 
+### Made permanent, because a run that happened once did not happen
+
+`crates/skynet-kernel-host/tests/loop.rs` compiles `drivers/mock` and drives `skynetk` against it:
+the loop turns, host tier resolves to enforcing, four guards name the inputs they lack, forty
+cycles with no read or write failure and every one of them idle. `#[ignore]`d because it needs a C
+compiler, following `skynet-cli`'s scaffold test, and run explicitly by the `abi` job — a silent
+skip is the failure §15 spends a rule on, so it panics with the compilers it tried.
+
+Two of the three cases failed on their first run with `LoadLibraryW` error 32. Cargo runs
+integration tests in parallel and all three were compiling the mock to one path, so one test was
+writing the object another had mapped. Each builds into a directory of its own now. On Linux the
+same race is worse than a failure: the loader maps a half-written object.
+
 ### Numbers
 
-`cargo test --workspace` — **1,376 passed**, up from 1,362: fourteen new. `cargo fmt --all --check`
+`cargo test --workspace` — **1,377 passed**, up from 1,362: fifteen new, plus three
+`#[ignore]`d that the `abi` job runs. `cargo fmt --all --check`
 and `cargo clippy --workspace --all-targets` clean. Corpus 77 files and 1,055 cases, golden path 48
-commands, mirrors match and re-pinned after the §73 edit.
+commands, mirrors match and re-pinned after the §73 edit. The `abi` CI job gained a step so the
+200 Hz run repeats on every push.
 
 ### One thing found on the way, unrelated to the loop
 

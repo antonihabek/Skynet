@@ -108,6 +108,15 @@ jobs:
       - name: A fresh scaffold builds, loads and reaches guest tier
         run: cargo test -p skynet-cli -- --ignored --nocapture
 
+      # The control loop, against a driver that is really a shared object (§25). `src/tests.rs`
+      # drives it against arrays, which covers the decisions and none of the ABI: a body reached
+      # through dlopen, a vtable checked at load, three caller-allocated arrays a stranger's C
+      # fills, and a write_command that returns an errno. Same reason as the step above for living
+      # in this job and being `#[ignore]`d — it needs a C compiler, and a silent skip is the
+      # failure §15 spends a rule on.
+      - name: The control loop turns against the mock robot
+        run: cargo test -p skynet-kernel-host -- --ignored --nocapture
+
       # The whole Python path, end to end and on the POSIX side of the host — which is the half that
       # cannot be exercised on the machine it was written on. `skynet driver check` dlopens the C
       # host, which forks an interpreter, which serves the LeRobot bridge over a pipe.

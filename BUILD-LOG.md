@@ -134,11 +134,15 @@ worth repeating anywhere:
 
 ### Verified
 
-* `cargo test --workspace` — **1,376 passed** (1,362 before; fourteen new), `fmt --check` and
+* `cargo test --workspace` — **1,377 passed** (1,362 before), `fmt --check` and
   `clippy --workspace --all-targets` clean
 * `skynetk run --driver drivers/mock/mock_robot.dll --tier host --velocity-max 2.0 --jerk 0.1
   --watchdog-ms 50 --cycles 40 --hz 200` — Enforcing, four guards active, four naming what they
   lack, **zero overruns**
+* `crates/skynet-kernel-host/tests/loop.rs` — three `#[ignore]`d cases that compile the mock robot
+  and drive `skynetk` against it, wired into the `abi` CI job, so the 200 Hz run repeats on every
+  push rather than having happened once. Two of them failed first time on `LoadLibraryW` error 32:
+  three parallel tests were compiling the mock to one path
 * corpus 77 files / 1,055 cases, golden path 48 commands, mirrors re-pinned after the §73 edit
 
 ### One bug it found in its own first run
