@@ -65,6 +65,11 @@ skynetk run --driver <library> [options]
                         allowed to corrupt it.
   --quiet               only print the summary.
 
+skynetk blackbox <dir>
+
+  Read a ring back: its shape, what it holds, and §74's five counters. Needs no
+  daemon and no socket — it opens the file  wrote.
+
   The ring is private to this process: there is no policy runtime to hand it to, so
   every cycle reads an empty ring and the kernel holds. That is the state §33.1
   describes, and it is what this binary can honestly demonstrate today.";
@@ -211,11 +216,16 @@ fn parse(args: &[String]) -> Result<Options, String> {
 fn run(args: &[String]) -> i32 {
     match args.first().map(String::as_str) {
         Some("run") => {}
+        Some("blackbox") => return blackbox(&args[1..]),
         Some("--help") | Some("-h") | None => {
             println!("{USAGE}");
             return 0;
         }
-        Some(other) => return fail(&format!("`{other}` is not a subcommand. It is `run`.")),
+        Some(other) => {
+            return fail(&format!(
+                "`{other}` is not a subcommand. They are `run` and `blackbox`."
+            ))
+        }
     }
 
     let options = match parse(&args[1..]) {
@@ -495,5 +505,154 @@ fn run(args: &[String]) -> i32 {
     if summary.read_failures > 0 || recorder_failed {
         return 1;
     }
+    0
+}
+
+/// `skynetk blackbox <dir>` — what the ring under `dir` holds.
+///
+/// A reader rather than a client. `skynet blackbox` in the workstation CLI asks `skynetd` over its
+/// local socket and gets the **daemon's** ring, which holds events and gaps and no cycles — §26.2
+/// is why there are two rings and why merging them is open. This opens a ring file directly, so the
+/// window a control loop just recorded can be read on the machine that recorded it with nothing
+/// else running.
+///
+/// # §74's five counters, reporting
+///
+/// `Tally::commands` has carried this sentence since it was written:
+///
+/// > the day a control loop opens a ring with channels in it, these counters begin reporting with
+/// > no further change here.
+///
+/// That is what this prints. On a ring with no action channels — every ring this repository could
+/// produce until the control loop existed — `cycles`, `interventions`, `guard_trips`, `clamps` and
+/// `estops` are all zero **because nothing writes them**, which is a different fact from a robot
+/// that commanded a body and tripped nothing. The two are rendered differently here, and the
+/// difference is read off the ring rather than assumed from the edition.
+fn blackbox(args: &[String]) -> i32 {
+    let Some(dir) = args.first() else {
+        eprintln!("skynetk: blackbox <dir> — the directory `--blackbox` was pointed at.");
+        return 1;
+    };
+
+    let path = std::path::Path::new(dir).join("ring");
+    let store = match std::fs::read(&path) {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!(
+                "skynetk: {} could not be read: {error}\n\
+                 A ring is created by `skynetk run --blackbox <dir>`; this is the file it writes.",
+                path.display()
+            );
+            return 1;
+        }
+    };
+
+    let ring = match skynet_blackbox::ring::Ring::open(&store) {
+        Ok(ring) => ring,
+        Err(error) => {
+            eprintln!(
+                "skynetk: {} is not a ring this edition can read: {error:?}",
+                path.display()
+            );
+            return 1;
+        }
+    };
+
+    let geometry = ring.geometry();
+    println!("ring       {}", path.display());
+    println!(
+        "shape      {} joints, {} channels — {} slots of {} bytes",
+        geometry.shape.joints, geometry.shape.channels, geometry.capacity, geometry.record_size,
+    );
+    println!(
+        "written    {} record(s)",
+        ring.next_sequence().saturating_sub(1)
+    );
+    println!();
+
+    // From the first sequence the ring still holds, which is what a window is. Counting from 1 on a
+    // wrapped ring would report a window that includes records the ring overwrote.
+    let tally = skynet_blackbox::tally::tally(&ring, &store, 1);
+
+    if !tally.commands {
+        println!("This ring has no action channels, so it cannot hold a control cycle.");
+        println!(
+            "Every counter below would be zero because nothing writes them — which is not the"
+        );
+        println!("same fact as a robot that commanded a body and tripped nothing (§74.3).");
+        return 0;
+    }
+
+    println!("§74's counters, off this ring:");
+    println!("  cycles          {}", tally.cycles);
+    println!("  interventions   {}", tally.interventions);
+    println!("  guard trips     {}", tally.guard_trips);
+    println!("  clamps          {}", tally.clamps);
+    println!("  estops          {}", tally.estops);
+
+    // How many of those cycles a policy actually commanded. §26 records `command_seq`, and a cycle
+    // that carries zero is one where the ring was empty and the kernel held.
+    //
+    // This is the difference between a conformance figure and a number that looks like one. A robot
+    // whose policy never spoke has an intervention count of zero for the same reason it has a
+    // command count of zero, and the ratio comes out at a perfect 1.0000 — which reads, on any page
+    // that renders it, as a robot that did everything right. It did nothing at all.
+    let commanded = ring
+        .ordered(&store)
+        .into_iter()
+        .filter(|record| match &record.body {
+            skynet_blackbox::record::Body::Cycle(cycle) => cycle.command_seq != 0,
+            _ => false,
+        })
+        .count() as u64;
+
+    if tally.cycles > 0 {
+        println!();
+        if commanded == 0 {
+            println!(
+                "  No policy commanded anything in this window: all {} cycles held, because",
+                tally.cycles
+            );
+            println!(
+                "  §25's ring had nothing in it. §15's field conformance is the ratio of cycles"
+            );
+            println!(
+                "  the kernel did not have to intervene in, and over a window where nothing was"
+            );
+            println!(
+                "  asked for it would be 1.0000 — which is arithmetic rather than a measurement,"
+            );
+            println!("  so it is not printed.");
+        } else {
+            // §15's figure, and this is the first place its numerator and denominator have both
+            // been real numbers on a machine.
+            let conformance = 1.0 - (tally.interventions as f64 / tally.cycles as f64);
+            println!(
+                "  field conformance  {conformance:.4}  ({} of {} cycles uninterrupted, {} commanded)",
+                tally.cycles - tally.interventions,
+                tally.cycles,
+                commanded,
+            );
+            println!(
+                "  — over this window only. A certification figure is a fleet's and is the Hub's"
+            );
+            println!("    to compute; nothing here signs anything (§19).");
+        }
+    }
+
+    if tally.truncated {
+        println!();
+        println!("The window wrapped: records older than the first one here were overwritten.");
+        println!("That is what a ring is, and it is reported rather than left to be inferred.");
+    }
+    if tally.holes > 0 {
+        println!();
+        println!(
+            "{} record(s) are missing from inside the window. A hole is a record that was written",
+            tally.holes
+        );
+        println!("and is not here, which is a defect rather than the window moving on.");
+    }
+
     0
 }

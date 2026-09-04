@@ -273,3 +273,26 @@ measured into something anybody could assert.
   routes proves the routes; a command that resolves to a live route and prints `undefined` is
   exactly what a path-matching contract test cannot see
 * `npx vitest run` — **1,700 passed**, 70 files. `npm run typecheck` clean
+
+---
+
+## 7. The counters report, and the one figure the reader refuses to print
+
+`skynetk blackbox <dir>` reads a ring back and prints §74's five counters off it. Two hundred cycles
+against the mock robot: `cycles 200, interventions 0, guard trips 0, clamps 0, estops 0` — five
+counters that have reported *unmeasured* for the life of this repository, reporting.
+
+**The first version also printed `field conformance 1.0000`, and that line was the problem.** Nothing
+commanded that robot: §25's ring was empty every cycle, so the kernel held every cycle, so it
+intervened in none, and §15's ratio comes out perfect by arithmetic. On any page that rendered it,
+that reads as a robot which did everything right. It did nothing at all.
+
+The reader now counts cycles that carried a command — `command_seq` is in every record — and over a
+window where none did, says so and prints no figure. A test covers the other branch: twenty cycles
+commanding ten times the channel ceiling give 20 interventions and a conformance of **zero**, which
+is §15's figure with a numerator and a denominator that both came from a machine.
+
+### Verified
+
+`cargo test --workspace` — **1,389 passed**, fmt and clippy clean, golden path 48 commands, mirrors
+re-pinned.
