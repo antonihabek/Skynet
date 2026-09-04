@@ -32,7 +32,8 @@ use skynet_blackbox::record::Shape;
 use skynet_blackbox::ring::Meta;
 use skynet_blackbox::seal::Reason;
 use skynet_kernel::{
-    resolve_limits, Available, Envelope, OperatorProfile, ResolveLimitsParams, Tier, TransportClamp,
+    can_start, resolve_limits, Available, Envelope, OperatorProfile, ResolveLimitsParams, Tier,
+    TransportClamp, WarningChannel,
 };
 use skynet_kernel_host::driver::{Actuator, Rhal};
 use skynet_kernel_host::recorder::{Recorder, DEFAULT_BUDGET};
@@ -412,6 +413,26 @@ fn run(args: &[String]) -> i32 {
             }
         }
     };
+
+    // §81.3's interlock, and the first thing in this repository to consult it.
+    //
+    // `can_start` has existed since the kernel was written and had **no production caller** — four
+    // tests asked it and nothing else did, so a loop could open a driver and turn a cycle without
+    // the start gate ever being consulted. That is the same shape as §26.2 being enforced on one
+    // writer: a rule that is correct, tested, and protects nothing.
+    //
+    // `transport_refused` is `false` here because this binary builds its own clamp from the command
+    // line and has no plan that could fail to resolve; on a robot the plan arrives from §6.3's
+    // hand-off and can.
+    //
+    // The warning channel is `Undeclared` because that is what is true: `skynetk` is a bench
+    // harness with no audio device, and §81.1's declaration lives in `state/audio.json`, which
+    // `skynetd` owns. It changes nothing at the tiers this binary can select — the refusal is
+    // certified-only and `--tier certified` is deliberately not selectable — and passing `Ready`
+    // to keep it quiet would be asserting a control this process has never had.
+    if let Err(reason) = can_start(false, &limits, WarningChannel::Undeclared) {
+        return fail(reason);
+    }
 
     let mut host = Host::new(&channels);
     let period = Duration::from_secs_f64(1.0 / options.hz);

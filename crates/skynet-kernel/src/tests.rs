@@ -698,7 +698,7 @@ fn more_channels_than_the_kernel_can_evaluate_is_a_fault_not_a_truncation() {
 
 #[test]
 fn a_refused_transport_plan_cannot_start() {
-    assert!(can_start(true, &host_limits()).is_err());
+    assert!(can_start(true, &host_limits(), WarningChannel::Ready).is_err());
 }
 
 #[test]
@@ -707,7 +707,7 @@ fn a_tier_that_promised_enforcement_and_resolved_to_advisory_cannot_start() {
     // a limit set assembled some other way, which is exactly when it is worth having.
     let mut limits = host_limits();
     limits.enforcement = Enforcement::Advisory;
-    assert!(can_start(false, &limits).is_err());
+    assert!(can_start(false, &limits, WarningChannel::Ready).is_err());
 }
 
 #[test]
@@ -720,7 +720,7 @@ fn a_guest_tier_robot_starts_despite_advisory_enforcement() {
         frames: None,
         available: available(),
     });
-    assert!(can_start(false, &limits).is_ok());
+    assert!(can_start(false, &limits, WarningChannel::Ready).is_ok());
 }
 
 #[test]
@@ -734,9 +734,71 @@ fn notices_and_imperfections_do_not_block_a_start() {
         available: Available::default(),
     });
     assert!(
-        can_start(false, &limits).is_ok(),
+        can_start(false, &limits, WarningChannel::Ready).is_ok(),
         "a system that refuses to start on every imperfection is a system that gets bypassed"
     );
+}
+
+// ── §81.3: the body that cannot warn ──────────────────────────────────────────
+
+/// A certified limit set. `resolve_limits` will not hand one out for a body this sparse, which is
+/// the point: this is the tier claiming its guarantees, assembled directly so the interlock can be
+/// asked about it.
+fn certified_limits() -> ResolvedLimits<'static> {
+    let mut limits = host_limits();
+    limits.tier = Tier::Certified;
+    limits.enforcement = Enforcement::EnforcingRedundant;
+    limits
+}
+
+#[test]
+fn a_certified_robot_with_no_declared_warning_cannot_start() {
+    let error = can_start(false, &certified_limits(), WarningChannel::Undeclared)
+        .expect_err("the certified tier's meaning is that the declared controls are present");
+    assert!(error.contains("no warning channel is declared"));
+}
+
+#[test]
+fn a_certified_robot_whose_warning_failed_cannot_start() {
+    let error = can_start(false, &certified_limits(), WarningChannel::Failed)
+        .expect_err("a declared channel that did not sound is a broken control, not a missing one");
+    // Reported apart from `Undeclared` because the fix is different: a provisioning script that
+    // never finished, versus a speaker that is broken.
+    assert!(error.contains("did not sound"));
+}
+
+#[test]
+fn a_certified_robot_that_can_warn_starts() {
+    assert!(can_start(false, &certified_limits(), WarningChannel::Ready).is_ok());
+}
+
+#[test]
+fn a_host_robot_without_a_warning_channel_still_starts() {
+    // §81.3 scopes the refusal to the certified tier deliberately. At host the incident and the
+    // console line stand, and refusing every bench robot without a speaker is the failure
+    // `notices_and_imperfections_do_not_block_a_start` is about.
+    assert!(can_start(false, &host_limits(), WarningChannel::Undeclared).is_ok());
+    assert!(can_start(false, &host_limits(), WarningChannel::Failed).is_ok());
+}
+
+#[test]
+fn a_guest_robot_without_a_warning_channel_still_starts() {
+    let limits = resolve_limits(&ResolveLimitsParams {
+        tier: Tier::Guest,
+        envelope: Some(envelope()),
+        transport: Some(clamp()),
+        profile: Some(profile()),
+        frames: None,
+        available: available(),
+    });
+    assert!(can_start(false, &limits, WarningChannel::Undeclared).is_ok());
+}
+
+#[test]
+fn the_warning_channel_spellings_are_the_wire_ones() {
+    assert_eq!(WarningChannel::Ready.as_str(), "ready");
+    assert_eq!(WarningChannel::Failed.as_str(), "failed");
+    assert_eq!(WarningChannel::Undeclared.as_str(), "undeclared");
 }
 
 // ── Determinism ──────────────────────────────────────────────────────────────

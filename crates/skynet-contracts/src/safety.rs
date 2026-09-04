@@ -19,8 +19,8 @@ pub use skynet_kernel::{
     can_start, evaluate_cycle, evaluate_cycle_with_body, kinematics, resolve_limits, Available,
     Body, Clamped, CommandCycle, CycleVerdict, Enforcement, Envelope, FaultResponse, Guard,
     NoticeCode, OperatorProfile, PoseOutcome, PoseTrip, Proximity, ResolveLimitsParams,
-    ResolvedLimits, SafetyNotice, Tier, TransportClamp, UnavailableGuard, GUARDS, MAX_CHANNELS,
-    SAFETY_CLAIM_RULE,
+    ResolvedLimits, SafetyNotice, Tier, TransportClamp, UnavailableGuard, WarningChannel, GUARDS,
+    MAX_CHANNELS, SAFETY_CLAIM_RULE,
 };
 
 /// The English for a notice, given its code and what it names.
