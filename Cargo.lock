@@ -82,6 +82,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "skynet-lock"
+version = "0.1.0"
+
+[[package]]
 name = "skynet-rhal"
 version = "0.1.0"
 

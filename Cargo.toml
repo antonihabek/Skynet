@@ -15,6 +15,7 @@ members = [
   "crates/skynet-ed25519",
   "crates/skynet-rhal",
   "crates/skynet-dl",
+  "crates/skynet-lock",
   "crates/skynet-ring",
   "crates/skynet-ring-shm",
   "crates/skynet-capture",
