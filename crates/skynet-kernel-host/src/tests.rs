@@ -912,3 +912,85 @@ fn a_second_writer_is_refused_rather_than_allowed_to_corrupt_the_ring() {
     drop(third);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A window where a policy commanded, and a guard tripped, and both are counted off the ring.
+///
+/// The other black box test records thirty holds; this is the one that matters, because §74's five
+/// counters and §15's field conformance have never had a numerator that came from a machine. The
+/// policy asks for a velocity outside the channel ceiling on every cycle, the envelope guard clamps
+/// it, and `tally` counts the clamps off the records rather than off anything this test kept.
+#[test]
+fn a_commanded_window_counts_its_own_trips() {
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+    let mut producer = ring.producer();
+    let mut consumer = Ring::open(&words).expect("the same ring").consumer();
+
+    let mut body = Fake::new(2);
+    // A ceiling of 0.5 against a command of 5.0: the envelope guard clamps, every cycle.
+    let ceilings = [("shoulder", 0.5), ("elbow", 0.5)];
+    let limits = limits(&ceilings, &[Guard::Envelope], Some(1.0), &[]);
+    let mut host = Host::new(&CHANNELS);
+    let (dir, mut recorder) = recorder("commanded");
+
+    let first = recorder.next_sequence();
+    for cycle in 0..20u64 {
+        // A new sequence every cycle, or the watchdog would trip as well and the count would be
+        // about two guards rather than the one under test.
+        let mut command = Command {
+            stamp_ns: cycle * 5_000_000,
+            seq: cycle + 1,
+            mode: mode::VELOCITY,
+            channels: 2,
+            ..Command::default()
+        };
+        command.values[0] = 5.0;
+        command.values[1] = 5.0;
+        command.mask[0] = 1;
+        command.mask[1] = 1;
+        producer.publish(&command).expect("the ring accepts it");
+
+        let turn = host.step(
+            cycle * 5_000_000,
+            &mut body,
+            &mut consumer,
+            &limits,
+            None::<&Envelope<'_>>,
+        );
+        recorder
+            .cycle(cycle * 5_000_000, &turn.cycle)
+            .expect("recorded");
+    }
+
+    let store = recorder.read().expect("the ring reads back");
+    let opened = skynet_blackbox::ring::Ring::open(&store).expect("the header opens");
+    let tally = skynet_blackbox::tally::tally(&opened, &store, first);
+
+    assert!(tally.commands, "a ring with channels can hold a cycle");
+    assert_eq!(tally.cycles, 20);
+    assert_eq!(
+        tally.interventions, 20,
+        "every cycle asked for ten times the ceiling, so the kernel intervened in every one",
+    );
+    assert!(
+        tally.guard_trips >= 20,
+        "and the trips are counted off the records: {}",
+        tally.guard_trips,
+    );
+    assert!(
+        tally.clamps >= 20,
+        "two channels clamped on each of twenty cycles: {}",
+        tally.clamps,
+    );
+
+    // §15's figure, with a numerator and a denominator that both came from a machine. Zero here,
+    // and that is the correct answer for a policy that spent the whole window outside the envelope.
+    let conformance = 1.0 - (tally.interventions as f64 / tally.cycles as f64);
+    assert!(
+        conformance.abs() < 1e-9,
+        "field conformance over a window the kernel intervened in every cycle is zero, not one",
+    );
+
+    drop(recorder);
+    let _ = std::fs::remove_dir_all(&dir);
+}

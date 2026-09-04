@@ -11661,3 +11661,74 @@ the seal, and the writer lock. `--ignored` 3 passed. fmt and clippy clean, mirro
      refused an empty array and would have accepted an array of zeros. Zeros are a lie about what a
      policy asked for, and the difference between the two fixes is invisible to every check in the
      repository except the one sentence in §74.3.
+
+---
+
+## 2026-09-04 (fifty-seventh) — the day the sentence in `Tally::commands` was about
+
+`skynet_blackbox::tally::Tally::commands` has carried this since it was written:
+
+> the day a control loop opens a ring with channels in it, these counters begin reporting with no
+> further change here.
+
+`skynetk blackbox <dir>` is the reader that shows it. Not a client — `skynet blackbox` in the
+workstation CLI asks `skynetd` over its socket and gets the **daemon's** ring, which holds events and
+no cycles, and §26.2 is why there are two. This opens a ring file directly, so a window a control
+loop just recorded can be read on the machine that recorded it with nothing else running.
+
+Two hundred cycles against the mock robot at 200 Hz:
+
+```
+shape      3 joints, 3 channels — 262128 slots of 256 bytes
+written    200 record(s)
+
+§74's counters, off this ring:
+  cycles          200
+  interventions   0
+  guard trips     0
+  clamps          0
+  estops          0
+```
+
+Five counters that have reported *unmeasured* for the life of this repository, reporting.
+
+### The number it refuses to print
+
+The first version printed `field conformance 1.0000 (200 of 200 cycles uninterrupted)` and that
+line was the problem, not the achievement.
+
+Nothing commanded that robot. §25's ring was empty on all two hundred cycles, so the kernel held on
+all two hundred, so it intervened in none — and §15's ratio comes out at a **perfect score** by
+arithmetic. On any page that rendered it, that is a robot which did everything right. It did nothing
+at all.
+
+So the reader counts how many cycles carried a command — `command_seq` is in every record, and zero
+means the ring was empty — and over a window where none did, it says so and prints no figure. The
+distinction is read off the records rather than assumed from the edition, which means it stops being
+true on its own the day a policy runs.
+
+### And the branch that is not refused
+
+`a_commanded_window_counts_its_own_trips` publishes a velocity ten times the channel ceiling on
+twenty consecutive cycles. The envelope guard clamps every one, and the tally reports 20 cycles, 20
+interventions, ≥20 guard trips and ≥20 clamps — counted off the records rather than off anything the
+test kept. Field conformance over that window is **zero**, which is the correct answer for a policy
+that spent it outside the envelope.
+
+That is §15's figure with a numerator and a denominator that both came from a machine, for the first
+time.
+
+### Numbers
+
+`cargo test --workspace` — **1,389 passed**. fmt and clippy clean, golden path 48 commands, mirrors
+re-pinned after the §73 edit.
+
+### Findings, restated
+
+1-105 as before.
+
+106. **A ratio over an empty denominator's cousin: a perfect score nobody earned.** Field conformance
+     is intervention-free cycles over total cycles, and a robot that was never asked to do anything
+     scores 1.0000 on it. Every part of that arithmetic is correct and the number is meaningless, and
+     nothing in the formula says so — the guard has to come from a fact beside it, which is whether
+     anything was commanded at all.
