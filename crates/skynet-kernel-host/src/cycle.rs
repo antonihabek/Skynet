@@ -454,6 +454,7 @@ pub fn record(
     observation: [u8; 32],
     policy: u16,
     capability: u16,
+    channels: &[&str],
     observed: &Observed<'_>,
     posted: Option<&Posted<'_, '_>>,
     decision: &Decision,
@@ -461,17 +462,34 @@ pub fn record(
 ) -> Cycle {
     let width = decision.channels;
 
-    // What the policy asked for, before anything reduced it. A cycle with nothing posted records an
-    // empty desired rather than zeros: the policy did not ask for zero, it did not ask.
-    let desired: Vec<f32> = posted
-        .map(|posted| {
-            posted
-                .desired
-                .iter()
-                .map(|(_, value)| *value as f32)
-                .collect()
-        })
-        .unwrap_or_default();
+    // Every per-channel array in a record is the **declared width**, because a reader indexes them
+    // by channel. `encode` refuses anything else, and the first version of this function found that
+    // out the hard way: an idle cycle wrote an empty `desired` and the format answered
+    // `Shape { field: "desired", expected: 3, found: 0 }`.
+    //
+    // Padding with zero would have satisfied the check and been the wrong fix. A recorded `desired`
+    // of 0.0 says the policy asked for the zero position; on an idle cycle nothing asked for
+    // anything. §74.3's rule that zero and unmeasured are different facts applies to a channel
+    // exactly as it applies to a counter, and `nearest_person_m` in this same record is `NaN` for
+    // the same reason.
+    fn to_width(values: &[f32], width: usize) -> Vec<f32> {
+        let mut out = vec![f32::NAN; width];
+        for (slot, value) in out.iter_mut().zip(values.iter()) {
+            *slot = *value;
+        }
+        out
+    }
+
+    // What the policy asked for, before anything reduced it — placed by channel, because the
+    // posted list carries only the channels the policy actually commanded (§24's mask).
+    let mut desired = vec![f32::NAN; width];
+    if let Some(posted) = posted {
+        for (index, channel) in channels.iter().take(width).enumerate() {
+            if let Some((_, value)) = posted.desired.iter().find(|(name, _)| name == channel) {
+                desired[index] = *value as f32;
+            }
+        }
+    }
 
     Cycle {
         tick,
@@ -503,8 +521,12 @@ pub fn record(
             .collect(),
         mask: decision.mask[..width].to_vec(),
         clamped: decision.clamped[..width].to_vec(),
-        position: observed.position.to_vec(),
-        velocity: observed.velocity.to_vec(),
-        effort: observed.effort.to_vec(),
+        // The joint arrays are the driver's and the channel arrays are the plan's, and the format
+        // sizes them separately. They are the same width on every body this binary drives today;
+        // `to_width` is what keeps a disagreement from being a refused record rather than a short
+        // one, and the padding is `NaN` for the reason above.
+        position: to_width(observed.position, width),
+        velocity: to_width(observed.velocity, width),
+        effort: to_width(observed.effort, width),
     }
 }
