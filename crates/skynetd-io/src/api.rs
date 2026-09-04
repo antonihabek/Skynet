@@ -785,7 +785,13 @@ fn conformance<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     // The same composition `GET /limits` serves, so a conformance result and the limits panel
     // beside it can never be about two different limit sets.
     let limits = crate::limits::read(&layout, &body, crate::limits::ROBOT_TIER);
-    let run = crate::conformance::run(&capacity, &body, &limits, &at);
+    // The grants an operator actually made on this machine, not a set this route invents. The mode
+    // gate is measured against them, so a robot with none is skipped rather than half-measured.
+    let grants: Vec<String> = crate::observe::read_grants(&layout)
+        .into_iter()
+        .map(|(_package, token)| token)
+        .collect();
+    let run = crate::conformance::run(&capacity, &body, &limits, &grants, &at);
     crate::conformance::to_json(
         &run,
         body.known().is_some_and(|known| known.descriptor.simulator),

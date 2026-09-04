@@ -16,7 +16,8 @@
 //!
 //! ## A hold is a mask of zeros, never a command of zeros
 //!
-//! [`skynet_kernel::CycleVerdict::command`] is **empty** under a hold or a stop. The RHAL wire has
+//! [`skynet_kernel::CycleVerdict::command`] is **empty** under a hold or a stop — unless the
+//! verdict is advisory, and that exception is the whole of the second rule below. The RHAL wire has
 //! no way to say "nothing": it has `values` and a `mask`, and §24 defines a zero mask entry as
 //! *hold this joint at its current setpoint*. So a hold is written as a full command frame whose
 //! mask is all zeros, and the values are irrelevant.
@@ -29,6 +30,24 @@
 //! Not writing at all is a third thing, and also wrong: the driver's own `on_command_loss` timeout
 //! would eventually fire, which is a *different* response from the one the guard chose, arriving at
 //! a time nobody selected.
+//!
+//! ## An advisory verdict is not enforced, and that includes by this module
+//!
+//! [`skynet_kernel::Tier::enforcement`] derives *advisory* from a tier that cannot promise a clamp,
+//! and `evaluate_cycle` already encodes what that means: under `advisory` the verdict's command is
+//! the **desired** command rather than the clamped one, so that a guest-tier deployment does not
+//! look enforced in its own logs.
+//!
+//! Everything this module does after reading the verdict — withholding a mask, cutting power,
+//! starting a ramp — is enforcement, and on an advisory verdict none of it runs. Getting this wrong
+//! is not a small bug: a robot would withhold a command the kernel had said to forward, while the
+//! record beside it said `advisory: true`. It **was** wrong here for an afternoon, and what found it
+//! was `package.grants.gate` in the other repository half — a conformance test whose expectations
+//! are written against the kernel rather than against this file.
+//!
+//! What still happens on an advisory verdict is the recording. The guards' trips and the demanded
+//! response are carried into the black box unchanged, because observing and reporting is the whole
+//! of what the guest tier does.
 //!
 //! ## The deceleration bound is the acceleration bound
 //!
@@ -293,6 +312,25 @@ pub fn decide<'a>(
             .clamped
             .iter()
             .any(|entry| entry.channel == *channel);
+    }
+
+    // **An advisory verdict is not enforced, and that includes here.**
+    //
+    // `Tier::enforcement` derives advisory from a tier that cannot promise a clamp, and
+    // `evaluate_cycle` already encodes what that means: under `advisory` the verdict's command is
+    // the *desired* command rather than the clamped one, precisely so a guest-tier deployment does
+    // not look enforced in its own logs. The loop above has already written it.
+    //
+    // Everything below this line is enforcement — withholding a mask, cutting power, starting a
+    // ramp — and running it on an advisory verdict would enforce at guest tier while the record
+    // beside it said `advisory: true`. That is the failure §7.4 and §42 both exist to prevent, and
+    // it was in this file for an afternoon: the `Hold` arm zeroed the mask on every verdict, so a
+    // guest-tier robot withheld a command the kernel had said to forward.
+    //
+    // The trips and the response are still recorded. Observing and reporting is the whole of what
+    // the guest tier does, and it does it here too.
+    if verdict.advisory {
+        return decision;
     }
 
     match verdict.response {

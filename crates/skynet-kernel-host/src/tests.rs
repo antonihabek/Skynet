@@ -56,6 +56,22 @@ fn limits<'a>(
     }
 }
 
+/// The same limits at the tier that cannot enforce.
+///
+/// `Tier::Guest` derives `Enforcement::Advisory`, and nothing may pass an enforcement in: the
+/// kernel derives it so that a tier which cannot promise a clamp cannot be configured to claim one.
+fn advisory_limits<'a>(
+    per_channel: &'a [(&'a str, f64)],
+    guards: &[Guard],
+    jerk: Option<f64>,
+    grants: &'a [&'a str],
+) -> ResolvedLimits<'a> {
+    let mut limits = limits(per_channel, guards, jerk, grants);
+    limits.tier = Tier::Guest;
+    limits.enforcement = Tier::Guest.enforcement();
+    limits
+}
+
 fn observed(zeros: &[f32]) -> Observed<'_> {
     Observed {
         stamp_ns: 1_000_000,
@@ -178,6 +194,93 @@ fn a_command_over_its_ceiling_is_clamped_and_still_sent() {
         "and the shoulder is recorded as clamped"
     );
     assert!(!decision.clamped[1], "while the elbow was inside its own");
+}
+
+// ── Advisory, which is every robot today ────────────────────────────────────
+
+/// An advisory verdict is forwarded, not withheld.
+///
+/// **Regression.** This module's `decide` zeroed the mask on every `Hold`, including advisory ones,
+/// so a guest-tier robot withheld a command the kernel had said to forward while the record beside
+/// it said `advisory: true`. §7.4 and §42 both exist to stop exactly that, and what found it was a
+/// conformance test in `skynetd-io` whose expectations are written against the kernel.
+#[test]
+fn an_advisory_hold_forwards_the_command_it_would_have_withheld() {
+    let zeros = [0.0f32; 2];
+    let limits = advisory_limits(&CEILINGS, &[Guard::ModeGate], Some(0.1), &[]);
+
+    let desired = [("elbow", 0.5), ("shoulder", 0.5)];
+    let posted = Posted {
+        desired: &desired,
+        command_ms: 1.0,
+        sequence: 8,
+        mode: mode::POSITION,
+        capability: Some("actuation.arm"),
+    };
+
+    let decision = decide(
+        1.0,
+        &observed(&zeros),
+        Some(&posted),
+        &CHANNELS,
+        &limits,
+        None,
+        None,
+        Some(7),
+        Stopping::No,
+        None,
+    );
+
+    assert!(decision.advisory, "guest tier cannot enforce");
+    assert_eq!(
+        decision.response,
+        Some(FaultResponse::Hold),
+        "the guard still trips and the trip is still recorded",
+    );
+    assert!(
+        decision.mask[..2].iter().any(|entry| *entry != 0),
+        "an advisory hold must forward the command: withholding it enforces at a tier that has          never claimed to enforce",
+    );
+    assert!(!decision.cut_power);
+}
+
+/// An advisory stop starts no ramp and cuts no power.
+#[test]
+fn an_advisory_stop_enforces_nothing() {
+    let zeros = [0.0f32; 2];
+    let limits = advisory_limits(&CEILINGS, &[Guard::Watchdog], Some(0.25), &[]);
+    let previous = [("shoulder", 1.0), ("elbow", -0.5)];
+
+    let desired = [("elbow", 0.5), ("shoulder", 0.5)];
+    let posted = Posted {
+        desired: &desired,
+        command_ms: 1.0,
+        sequence: 7,
+        mode: mode::VELOCITY,
+        capability: None,
+    };
+
+    let decision = decide(
+        1.0,
+        &observed(&zeros),
+        Some(&posted),
+        &CHANNELS,
+        &limits,
+        None,
+        Some(&previous),
+        Some(7),
+        Stopping::No,
+        None,
+    );
+
+    assert_eq!(decision.response, Some(FaultResponse::StopCat2));
+    assert_eq!(
+        decision.stopping,
+        Stopping::No,
+        "an advisory verdict starts no ramp",
+    );
+    assert!(!decision.cut_power, "and removes no power");
+    assert!(decision.escalated.is_none());
 }
 
 // ── The ramp, and the machine that cannot perform one ───────────────────────
