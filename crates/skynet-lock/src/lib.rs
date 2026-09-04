@@ -105,7 +105,10 @@ impl WriterLock {
                 Ok(WriterLock { path })
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                let holder = fs::read_to_string(&path).unwrap_or_default().trim().to_string();
+                let holder = fs::read_to_string(&path)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
                 Err(LockError::Held {
                     path,
                     holder: if holder.is_empty() {

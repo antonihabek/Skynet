@@ -39,6 +39,7 @@ use std::path::{Path, PathBuf};
 use skynet_blackbox::record::{Cycle, CycleView, Entry, Shape};
 use skynet_blackbox::ring::{Geometry, Meta, Ring};
 use skynet_blackbox::seal::{seal, Reason, Sealed};
+use skynet_lock::WriterLock;
 
 /// How many bytes the ring is preallocated with.
 ///
@@ -56,13 +57,8 @@ pub const CAPABILITIES: u16 = 16;
 /// Why a recorder could not be opened.
 #[derive(Debug)]
 pub enum RecorderError {
-    /// Another process holds the writer lock on this directory.
-    Locked {
-        /// The lock file that is held.
-        path: PathBuf,
-        /// What the holder wrote into it.
-        holder: String,
-    },
+    /// Another process holds the writer lock on this directory (§26.2).
+    Locked(skynet_lock::LockError),
     /// The directory could not be created, or the ring could not be written.
     Io(std::io::Error),
     /// The geometry the body implies is not one the format can hold.
@@ -72,15 +68,7 @@ pub enum RecorderError {
 impl std::fmt::Display for RecorderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RecorderError::Locked { path, holder } => write!(
-                f,
-                "the black box at {} already has a writer: {holder}\n\
-                 One ring has one writer. Two would hand out the same sequence number twice and \
-                 produce a recording that looks intact and is not, which is the one failure a black \
-                 box must never have. Stop the other writer, or point this one at another \
-                 directory.",
-                path.display()
-            ),
+            RecorderError::Locked(error) => write!(f, "{error}"),
             RecorderError::Io(error) => write!(f, "{error}"),
             RecorderError::Geometry(detail) => write!(f, "sizing the black box: {detail}"),
         }
@@ -88,54 +76,6 @@ impl std::fmt::Display for RecorderError {
 }
 
 impl std::error::Error for RecorderError {}
-
-/// The exclusive writer lock on a black box directory.
-///
-/// Created with `create_new`, which is atomic on every platform this targets, and removed on drop.
-/// A lock left behind by a process that was killed is a real state and it is **not** silently
-/// stolen: it names its holder, and clearing it is a person's decision, because the alternative is
-/// a recorder that helpfully takes over a ring another process is still writing.
-#[derive(Debug)]
-struct WriterLock {
-    path: PathBuf,
-}
-
-impl WriterLock {
-    fn take(dir: &Path) -> Result<WriterLock, RecorderError> {
-        let path = dir.join("writer.lock");
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(mut file) => {
-                let note = format!(
-                    "skynetk pid {} — the control loop is writing this ring\n",
-                    std::process::id()
-                );
-                let _ = file.write_all(note.as_bytes());
-                Ok(WriterLock { path })
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                let holder = fs::read_to_string(&path)
-                    .unwrap_or_default()
-                    .trim()
-                    .to_string();
-                Err(RecorderError::Locked {
-                    path,
-                    holder: if holder.is_empty() {
-                        "the lock file says nothing about who holds it".to_string()
-                    } else {
-                        holder
-                    },
-                })
-            }
-            Err(error) => Err(RecorderError::Io(error)),
-        }
-    }
-}
-
-impl Drop for WriterLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
-}
 
 /// The ring, the file under it, and the lock that says this process owns it.
 #[derive(Debug)]
@@ -163,7 +103,7 @@ impl Recorder {
 
         // Before the ring, because a recorder that read the ring and then failed to lock would have
         // touched a file another process owns.
-        let lock = WriterLock::take(dir)?;
+        let lock = WriterLock::take(dir, "skynetk").map_err(RecorderError::Locked)?;
 
         let path = dir.join("ring");
 

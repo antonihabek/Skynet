@@ -11732,3 +11732,48 @@ re-pinned after the §73 edit.
      scores 1.0000 on it. Every part of that arithmetic is correct and the number is meaningless, and
      nothing in the formula says so — the guard has to come from a fact beside it, which is whether
      anything was commanded at all.
+
+---
+
+## 2026-09-04 (fifty-eighth) — the rule that was stated and half-enforced
+
+§26.2 was written in the fifty-sixth session and says both writers take the lock. One did.
+`skynet-kernel-host` had a `WriterLock` of its own and `skynetd`'s recorder had none, so the rule
+held on the side that had just been written and not on the side it was written about — which is a
+rule that protects nothing, because the daemon is the writer that has been there all along.
+
+`crates/skynet-lock` is the one implementation, and the justification is the same one `skynet-dl`
+has: two callers, and neither may depend on the other. The daemon must not link the kernel host
+(§33.1 keeps it off that path) and the host must not link the daemon — it would put an HTTP server on
+a real-time process. `skynet-blackbox` would be the natural home and cannot be: it is `#![no_std]`,
+argued as such in its own header, and a lock is a file.
+
+### The two callers refuse differently, and that is the design
+
+`skynetd` starts **without a recorder** and says so. The path already existed and already had the
+right comment on it — *"Reported, not fatal. A robot that cannot open one at all still needs to serve
+`POST /stop`"* — which is §33.1: a supervisor that cannot record is not a robot that cannot stop.
+
+`skynetk` refuses to run. A control loop whose cycles go nowhere is the one case where the recording
+is the point.
+
+### A stale lock is named, not stolen
+
+A process killed with `SIGKILL` leaves its lock. Clearing it automatically would mean a recorder that
+takes over a directory another process is still writing, on the day the first one was slow rather
+than dead — so the refusal names the holder and says the file is safe to delete, which is the
+sentence that keeps this from being a robot nobody can restart.
+
+### Numbers
+
+`cargo test --workspace` — **1,392 passed**, three more than the last session, all in the new crate.
+fmt and clippy clean, golden path 48 commands.
+
+### Findings, restated
+
+1-106 as before.
+
+107. **A rule written down while building one side of it is enforced on that side.** §26.2 was
+     correct, complete and half-applied within one session of being written, and the half it did not
+     reach was the one that had been writing the ring for fifty-three sessions. Writing a rule down
+     is not the same as applying it, and the gap is invisible because the new code obeys it.

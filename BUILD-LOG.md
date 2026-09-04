@@ -296,3 +296,84 @@ is §15's figure with a numerator and a denominator that both came from a machin
 
 `cargo test --workspace` — **1,389 passed**, fmt and clippy clean, golden path 48 commands, mirrors
 re-pinned.
+
+---
+
+## 8. §26.2 was stated and half-enforced
+
+The rule — one ring, one writer — was written in item 5 and applied only to the writer that was being
+written. `skynet-kernel-host` had a lock; `skynetd`'s recorder, which has been writing the ring for
+fifty-three sessions, had none.
+
+`crates/skynet-lock` is the single implementation, with the same justification `skynet-dl` has: two
+callers, and neither may depend on the other. The two refuse differently and that is the design —
+`skynetd` starts **without a recorder** and says so (§33.1: a supervisor that cannot record is not a
+robot that cannot stop), and `skynetk` refuses to run, because a control loop whose cycles go nowhere
+is the one case where the recording is the point.
+
+A stale lock is named rather than stolen, and the message says it is safe to delete — otherwise it is
+a robot nobody can restart.
+
+**Verified:** `cargo test --workspace` — **1,392 passed**, fmt and clippy clean, golden path 48
+commands.
+
+---
+
+## 9. The baseline migration is withdrawn from the plan
+
+At the owner's direction, and the plan now records it as withdrawn rather than open.
+
+It had been added to *Still not built* by the twenty-first session (fourth) as *"a baseline for the
+marketplace schema and the Skynet schema in dependency order"*. It was attempted early in this
+session — `pg_dump` of `public` and `skynet_private` behind a generated prerequisites file, applied
+to a throwaway Postgres container and dumped back for a byte-for-byte round trip — and dropped before
+it landed, on the grounds that it is scaffolding rather than product: a file that exists so that a
+database nobody is standing up could be.
+
+**The judgement holds, and the distinction it draws is worth keeping.** What the tree needed was not
+a way to *build* the schema but a record of the schema it *has*, so code can be held to it — which is
+what `supabase/skynet-schema.json` and `supabase/schema/skynet.sql` are, and what the `follows`
+defect happened for want of. That those two were described in the log and present in no commit is the
+finding that mattered.
+
+A fresh environment still cannot be built from `supabase/` alone. That is a **stated property** of
+the repository now rather than an open task in it.
+
+Nothing baseline-related remains in either tree: no `supabase/baseline/`, no `skynet-baseline-*.mjs`.
+
+---
+
+## Round state — stopping here
+
+Nothing pushed. Both repositories have their work committed locally on `main`.
+
+| | Start of session | Now |
+|---|---|---|
+| Skynet OS | 1,362 tests | **1,392**, plus 3 driver tests the `abi` job runs |
+| Skynet Hub | 1,665 — **suite red** | **1,700**, typecheck clean |
+| Live verifier scripts | 8 | **9**, 18 new live checks |
+| Crates | 15 | **18** — `skynet-dl`, `skynet-kernel-host`, `skynet-lock` |
+
+### What was built
+
+1. **The control loop (§25)** — the process §3's stack diagram draws and the repository did not
+   have. Opens a real RHAL driver, turns a cycle at a declared rate, reads the ring, asks the eight
+   guards, writes the verdict, records the cycle. 200 Hz against the mock robot, zero overruns.
+2. **§13's ring, with cycles in it** — the first recording of control cycles this repository has
+   produced, sealed into a real MCAP; and `skynetk blackbox` reads it back and reports §74's five
+   counters, which have said *unmeasured* for the life of the repository.
+3. **`package.grants.gate`** — moved from skipped to measured, because its skip reason named a path
+   that item 1 built.
+4. **`skynet fleet` / `skynet device` / `skynet.fleet()`** — the one Phase 9 workflow with no client.
+
+### What was found
+
+Six things the logs recorded as fine and were not: a red Hub suite, a `main` that would have failed
+CI's fmt job, a `--jerk` flag wired nowhere, advisory enforcement in a day-old file, an empty
+`desired` whose obvious fix would have been a lie, and a workflow with no client. Each is written up
+where it was found.
+
+### Two decisions recorded rather than assumed
+
+§26.2 — one ring, one writer — and the refusal to print a field-conformance figure over a window
+nothing commanded.
