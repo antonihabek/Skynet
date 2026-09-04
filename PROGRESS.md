@@ -11132,3 +11132,229 @@ the forty-ninth; 83–86 from the fiftieth.
     `battery_percent` was an oversight, `guards_unavailable` was an oversight, and `tier` is a rule
     that another module documents in as many words. A sweep that filled all three would have made
     this robot award itself a safety tier.
+
+
+## 2026-09-04 (fifty-second) — the other end of §79, and the request nobody had given a size
+
+§79.6 has ended with the same sentence since it was written: **"The Hub half is not built here."**
+This session wrote it, and writing it found two things about *this* half that no amount of reading
+this half was ever going to find.
+
+That is the shape worth naming first, because it is the third time this repository has hit it. §74
+found a producer with no consumer. §77 found a consumer with no producer. This found **a client
+asserting things about a route it does not own** — and neither end can see one of those alone,
+because from here everything looks correct and from there nothing arrives.
+
+### The first one is not about §79 at all
+
+`crates/skynetd-io/src/connectivity.rs` ran `curl` without `--location`.
+
+§17 gives every route as a path — `/devices/{id}/checkin` and its five siblings — and the Hub this
+OS is built against sets `trailingSlash: true`, so it answers `308` to exactly the spelling §17
+prints. Reproduced against the running Hub before anything was changed:
+
+```
+POST /api/skynet/v1/devices/nobody/checkin      -> 308  .../checkin/
+POST /api/skynet/v1/devices/nobody/incidents    -> 308  .../incidents/
+POST /api/skynet/v1/devices/nobody/telemetry    -> 308  .../telemetry/
+POST /api/skynet/v1/devices/nobody/checkin/     -> 401
+```
+
+So **every check-in, every incident, every telemetry window and every episode this edition has ever
+produced** was addressed at a redirect, was not followed, and went back onto §34.4's curve as a
+delivery that did not happen.
+
+The fix is one flag. The reason it is worth a section is that the argument for it was already
+written in this repository, one module over. `crates/skynetd-io/src/bundle.rs` has carried
+`--location` since the fetch was written, with a comment saying credentials are dropped on a
+cross-host redirect and that this is the behaviour we want. The outbound queue never got the same
+line — and the asymmetry between two modules doing the same kind of thing is exactly what finding 89
+described two sessions ago, in the other direction:
+
+> Two editions can be equally correct and unequally safe. […] an argument for reading the two
+> implementations side by side rather than trusting that identical bytes mean identical strength.
+
+Here it is two *modules* rather than two editions, and the stronger one had the comment.
+
+### The second one is about §79, and it is a rule rather than a bug
+
+**A slice bounded only by time is a request body bounded only by link speed.**
+
+`SLICE_SECONDS` is twenty and it always has been. It is a promise to §33.2's single thread: while a
+transfer runs, nothing serves the local API, nothing pings the watchdog and nothing observes the
+machine, so a pass has to end. It promises the *receiver* nothing whatsoever.
+
+A robot on a warehouse link offering a hundred-megabyte window inside twenty seconds is offering a
+hundred-megabyte request body. There is no receiver anywhere that takes one of those, and the Hub
+this specification is built against refuses a body over four and a half megabytes **before any of
+its own code runs** — an opaque status, no sentence, and a robot that backs off for ever.
+
+§79.2 already had the right rule for this and had applied it to one field only:
+
+> §75's fetch has a rule that makes progress free: *"the partial's length is the progress."* An
+> upload cannot have that rule, because **the partial is on the other machine.**
+
+The size of a request is the same kind of fact for the same kind of reason. It is a property of what
+the receiver is deployed on, and a sender cannot derive it from anything it can see. So it is
+**answered** rather than guessed — `max_slice_bytes`, on the probe, and on the `404` especially,
+because that is the first thing any sender ever sees and a limit stated only on rows that exist is a
+limit stated only after it has been exceeded.
+
+Three properties, and the third is what keeps this an addition rather than a change:
+
+* **A sender that does not read it still completes**, one four-mebibyte slice at a time.
+  `SLICE_BYTES` is a floor for an unknown receiver, not a preference.
+* **A receiver's number is clamped rather than obeyed** — `SLICE_BYTES_CEILING`. It sizes a scratch
+  file on a disk §28 reserves for recordings, so a Hub answering ten gigabytes gets sixty-four
+  mebibytes.
+* **The range is written out rather than delegated.** `--continue-at` sets an offset *and* sends the
+  rest of the file. A bounded slice has an end that is not the window's end and there is no curl
+  flag for one on an upload, so `curl_push` now extracts `[from, from+len)` and writes
+  `Content-Range: bytes <from>-<to>/<total>` itself. That is the header `--continue-at` was
+  generating, so the wire is unchanged for a receiver that was already reading it.
+
+### The extraction costs a file, and the alternative costs more
+
+`Layout::upload_slice` — one path, overwritten every pass, deleted after the request whether or not
+it worked.
+
+The tempting alternative is `--upload-file -` with the bytes fed to curl's stdin: no disk at all.
+It sends a **chunked** body, because a stream has no length, and a receiver then has to buffer an
+unknown quantity before it can place a byte — which is the shape §79.2 is written against. A slice
+that costs one read and one write of at most four mebibytes is the cheaper of the two.
+
+One path rather than one per window, and that is deliberate too: keying the scratch file to the
+digest reads as more careful and is not. Nothing ever resumes from it — the resume offset is the
+receiver's (§79.2) — so a slice is worthless the moment its request ends, and a directory of
+abandoned ones on the disk §28 preallocated for recordings would cost the black box the space it was
+preallocated to have, to hold copies of bytes already on the same disk.
+
+### The push goes where the probe ended
+
+`Answer::effective_url`, off `%{url_effective}`.
+
+`--location` is on both the probe and the push, but the push should never use it: following a
+redirect on an upload means re-sending the body. The probe runs on every pass before any bytes move,
+so the discovery is a round trip already paid for, and `advance` sends the slice to the address the
+probe ended at. The flag stays on the push as the fallback for a Hub that redirects a `PUT` and not
+a `GET`, which is a shape nobody has met and which would otherwise be silent.
+
+### What the Hub half turned out to need, stated here because it constrains this half
+
+Two things, and both are now in §79.7 of the specification rather than only in the other
+repository's log:
+
+* **The receiver cannot ask whether it has the whole window.** It never learns the true length from
+  anything it can check, so it asks whether what it holds hashes to the name it arrived under.
+  *Complete* and *verified* are therefore one event over there, which is what makes this side's
+  `check_upload` reachable in all four of its outcomes rather than three.
+* **404 is an answer.** `advance` has read it as a measured zero since it was written — *"it was
+  asked and it answered"* — and that comment has stopped being a claim about a route nobody had
+  built. It is now the shape the route has, with `{"bytes": 0}` in the body as well, so an edition
+  that reads the number and one that reads the status agree.
+
+### Numbers
+
+Rust: **1,362** tests run here, 5 new, of **1,392** (4 ignored, 26 POSIX-gated).
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets` clean. Corpus unchanged at
+77 files and 1,055 cases; regeneration is a no-op. Golden path 48 commands. Contract mirrors match.
+
+The corpus is unchanged **and that is the answer rather than an omission**: everything this session
+changed is transport. `plan_upload` and `check_upload` decide what to do and what an answer means,
+and neither learned a new input — a slice's size is not a decision either of them makes, and
+`SLICE_SECONDS` has never been in the contract either. An edition that reproduces the corpus
+byte-identically and sends unbounded request bodies is still a conforming edition, which is a real
+limit of what a corpus can hold and is worth writing down rather than fixing by moving transport
+into it.
+
+Hub side, in the other repository: 1,564 -> **1,594** tests, `tsc` clean, one migration written and
+**not applied**.
+
+### Findings, restated
+
+1-28 as before; 29-51 from the sessions above; 52-56 from the forty-first; 57-58 from the
+forty-second; 59-61 from the forty-third; 62-63 from the forty-fourth; 64-67 from the forty-fifth;
+68-71 from the forty-sixth; 72-73 from the forty-seventh; 74-76 from the forty-eighth; 77-82 from
+the forty-ninth; 83-86 from the fiftieth; 87-91 from the fifty-first.
+
+92. **A client makes assertions about a route, and nothing on either end can check them.** The
+    outbound queue asserted that §17's paths are the addresses. They are the *names*; a Hub
+    canonicalises them. Both repositories' suites passed for twenty-five sessions either side of
+    that, because a test double answers the URL it is handed.
+93. **A bound that protects one party protects nobody else.** `SLICE_SECONDS` is a promise to a
+    supervisor and was read for two sessions as though it were a promise to a receiver. The question
+    that separates them is *whose failure does this prevent* — and a limit with only one answer to
+    that needs a second limit beside it, not a larger value.
+94. **The first refusal is the only one worth stating a limit on.** `max_slice_bytes` goes on the
+    `404` because that is what a sender sees before it has sent anything. A limit published only
+    where a record already exists is published only to senders that have already exceeded it.
+95. **A corpus compares decisions, so it cannot see transport.** Every change in this session is
+    invisible to 1,055 cases, and two of them were the difference between a robot that delivers and
+    one that does not. The corpus is right to be scoped this way and the conclusion is that
+    conformance is not deliverability — which nothing in §15 currently says.
+96. **Building the other end is a different act from reading it.** §79 was specified, reviewed,
+    implemented and tested on this side, and the two defects above survived all of it. They took
+    about an hour to find once something was listening on the other end of a socket.
+
+
+## 2026-09-04 (fifty-third) — a decision on this side read as a limit for two sessions
+
+No Rust changed in this one. It is here because a paragraph in `runtime.rs` had been read as a
+statement about what an incident *can* be traced to, and it was a statement about what the incident
+path *should do* — and the two are not the same, which took building the other end to notice.
+
+The paragraph:
+
+> §10's attestation needs a trust store, a release manifest and a descriptor read, and an incident
+> path that did all three would be doing work on the one code path §34.4 says is never dropped.
+
+Correct, and it stays. What was wrong was the sentence that grew up beside it in the other
+repository's outstanding list — *"an incident names its generation, not its policy"* — filed as a
+gap on this side for eleven sessions.
+
+**A generation identifies the code, because §11's document lists the packages.** Id and version
+digest, per package, in a document the Hub itself wrote. The trace was one join away and the missing
+link was on the Hub: it kept only the *current* desired state, on a row whose comment says it is not
+a history table. That comment is right about check-ins — §34.4 collapses them here for exactly the
+reason it gives — and it had been extended to **instructions**, which are the opposite kind of
+document. §11 gives an instruction a monotonic counter so that other documents can name one; a
+counter nobody keeps the documents for names nothing.
+
+So `skynet_incidents.generation` pointed at bytes that had been overwritten, and this side's
+decision looked like the cause.
+
+### §77.4, written
+
+The specification gained a subsection rather than the fix living only in a Hub session log, because
+two of the rules are about how a **robot's** document is read and belong where the document is
+defined:
+
+* the version digest is the join and the package id is a cross-check — a digest survives a rename, a
+  transfer and a fork, and a name plus a version string can match two repositories;
+* a trace says what the robot was **told** to run, never what it was measured running, and §10's
+  three digests are the second question. `context_at` already says whether even the generation is a
+  fact this robot stated or an upper bound the Hub filled in at receipt.
+
+### What it does not close
+
+*Which code was running.* The honest shape of that answer is a history of attestations beside the
+history of instructions — not a third digest on §34.4's never-dropped path, which would undo the
+decision this session started by agreeing with.
+
+### Numbers
+
+Unchanged: **1,362** tests run here, `cargo fmt --all --check` and `cargo clippy` clean, corpus 77
+files and 1,055 cases with regeneration a no-op, golden path 48 commands, mirrors match. Hub side:
+1,604 tests, two migrations written and neither applied.
+
+### Findings, restated
+
+1-91 as before; 92-96 from the fifty-second.
+
+97. **A decision recorded in one repository becomes a limit in the other.** *"An incident names its
+    generation, not its policy"* was true, was a good decision, and sat in a list of gaps for eleven
+    sessions because the list was kept where the decision was not. A design note travels; the
+    reasoning behind it does not, unless somebody carries it.
+98. **The comment that was right about one document was applied to two.** *"Not a history table"* is
+    correct about a check-in and wrong about an instruction, and the two live in one row. A sentence
+    scoped to a column and stored beside a table is a sentence that will be read about the table.

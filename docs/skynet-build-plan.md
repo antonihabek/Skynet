@@ -5602,3 +5602,2400 @@ benchmark field are correctly Hub-only: none of them is installed on a robot.
 
 * `npx vitest run` — **1478 passed**. `npx tsc --noEmit` clean.
 * `node tools/check-contract-mirrors.mjs` — the episode fixture resynced and matching.
+
+---
+
+## Session — 2026-09-03 (twelfth): the counters that were never waiting on a kernel, and the mirror that had gone unlogged
+
+Two things: a round of §7.6 work that was sitting uncommitted and unlogged, and then the item it made
+reachable.
+
+### First, what was already here
+
+The working tree held a complete §7.6 round — §17's check-in carrying the robot's resolved limits and
+guard partition, `GuardReportView` in [fleet-types.ts](components/skynet/fleet-types.ts), the device
+page rendering all three states, a re-frozen `wire/checkin` fixture — and none of it was in this
+document. It was verified before anything was changed: **1,485 tests, 56 files, typecheck clean**,
+against the 1,478 the nineteenth session recorded. The seven-test delta is that round.
+
+The architecture doc in this repository was byte-identical to the OS repository's committed copy, so
+the mirror was in sync and only the log was missing. It is recorded here rather than re-derived next
+session.
+
+### Then the item: §74's five counters
+
+§74 gives telemetry eight counters and five have been unmeasured since it was written — `cycles`,
+`interventions`, `guard_trips`, `clamps`, `estops` — because four *"need a kernel"* and one *"needs
+teleoperation"*.
+
+They need a kernel to **happen**. Not to be counted. §13's ring is the record of what the kernel did,
+and `skynetd` holds that ring. The full argument is §74.6, new in the architecture doc and mirrored
+here; the OS repository's forty-fifth session log has the robot half.
+
+The one worth restating on this side is the second error: **`interventions` was recorded as needing
+teleoperation.** §15 defines field conformance as *"the ratio of cycles the kernel did not have to
+intervene in"* — a kernel intervention.
+
+> **Corrected in the fifteenth session.** This paragraph originally went on to say that a human
+> taking over is §54.4's `intervention_count` on an episode, *"a different number on a different
+> route"*. Nothing in the specification says that, and this repository's own
+> [devices.ts](lib/skynet/devices.ts) contradicts it — its comment reads *"a robot with no kernel
+> channel cannot count interventions"*. §54.4's count is the same kernel number over a narrower
+> window.
+
+### What changed here
+
+Almost nothing, and that is the finding. This Hub's telemetry ingestion was **already complete**:
+[telemetry.ts](lib/skynet/telemetry.ts) validates windows through the mirrored `assessWindow`, writes
+all eight counters as nullable columns, computes coverage over the union of windows, and
+`fieldConformanceOf` is called from the device state route, the certification builder and the fleet
+sweep. It has been waiting for a robot to send a number.
+
+Two changes:
+
+**`columnsFor` was split out of `recordWindows`.** The projection from a window to a row is where
+§74.3's rule actually crosses into a schema — a measured zero has to arrive as `0` and an unmeasured
+counter as `null` — and it lived inside a function that needs Supabase. So the only test of it was one
+that could not run, which is to say there was none. It is exported now, `recordWindows` spreads it,
+and the wire test exercises it against a document a robot produced.
+
+**A second wire fixture.** `wire/telemetry-counted.json` is what a robot that commands a body sends,
+mirrored by digest like the other four. `wire/telemetry.json` is unchanged byte for byte — the
+shipping robot produces exactly what it produced before — and the pair is deliberate:
+
+| Fixture | What it is | What it would cost to have only this one |
+|---|---|---|
+| `telemetry` | every robot alive: no command path, five counters absent | the guard-trip column and §15's field figure exercised against nulls forever |
+| `telemetry-counted` | a robot that commands a body | a frozen document no robot can currently produce |
+
+[skynet-wire.test.ts](lib/__tests__/skynet-wire.test.ts) now puts the second one through
+`assessWindow`, `columnsFor` and `fieldConformanceOf` and gets **0.8** — two interventions in ten
+cycles, far under §15's 0.999 floor, which is what a robot whose guards fire on a fifth of its cycles
+should read as. That is the first time §15's third suite has produced a figure from a document a
+producer made.
+
+### Verification
+
+* `npx vitest run` — **1,490 passed**, 56 files. `npm run typecheck` clean.
+* `node tools/check-contract-mirrors.mjs "../Robot Overflow"` from the OS repository — every contract
+  and all five fixtures match, `wire/telemetry-counted` included.
+* The architecture doc is byte-identical to the OS repository's copy.
+
+### Still not built
+
+| Item | Why not |
+|---|---|
+| **A field-conformance figure that is not null on a real robot** | Changed shape rather than closed. It is no longer "`cycles` is a counter nothing measures" — the counting exists and is tested. It is now the same wait as every other row: no robot runs a control cycle. |
+| A robot that signs a conformance result | Unchanged — §19 makes this a rule, not a gap (§15.1). |
+| A robot that produces a run bundle | Unchanged. |
+| The sealed black box itself crossing §17 | Unchanged, and still an owner's decision: §75.2's resumable-upload question has three designs with materially different infrastructure costs. |
+| The `required_extensions` vs `embodiment.extensions` publish-time check | Unchanged, from the nineteenth session. Still the sharpest unclaimed piece of work on this side: both documents are in hand at publish time and nothing compares them. |
+| `/skynet/os/editions` | Unchanged — still one edition. |
+
+---
+
+## Session — 2026-09-03 (thirteenth): the item filed as tidy-up, which was an admission gate that checked nothing
+
+The nineteenth session left this open and called it *"a piece of work rather than a line"*:
+
+> `required_extensions` is consumed here by the compatibility engine; the robot consumes the
+> *package manifest's* `embodiment.extensions`. Two documents from the same publisher, two
+> consumers, and nothing compares them.
+
+Every clause is true except **"two documents"**, and that word is what made it read as tidy-up.
+
+### They are one document
+
+The OS repository's store pins the on-disk shape of a staged package, and has since it was written:
+`manifest.json` at the package root **is** this Hub's `manifest` column. [digest.ts](lib/skynet/digest.ts)
+depends on it — `computeVersionDigest` hashes the manifest as a *value* and the files as a *list*,
+so a manifest that also appeared in the file list would be hashed twice and nothing this Hub
+published would verify on a robot.
+
+So one JSON object carries **two places a publisher can declare what a package needs**, each with
+exactly one consumer:
+
+| Spelling | Consumer | What it decides |
+|---|---|---|
+| `embodiment.capabilities` / `embodiment.extensions` | the robot's `admitPackage` | §8.2's entire admission gate — unmet capabilities, over-request, reserved tokens |
+| `required_capabilities` / `required_extensions` | this Hub's compatibility engine | "can this policy run on that robot" |
+
+A publisher who fills in **this Hub's** fields — the ones its schema validates and its forms present
+— and leaves `embodiment` empty publishes a package a robot admits with every check passing and
+nothing checked. No unmet capability, because the required set is empty; no over-request, because
+`requests` is a subset of nothing only when it is empty too. A clean install report for a package
+whose requirements were never looked at.
+
+The full argument is §78, new in the architecture doc and mirrored here.
+
+### What changed here
+
+**`requiredCapabilities` and `requiredExtensions` read the field a robot enforces from**, unioned
+with the card's. The union rather than a precedence: the failure on this side is *under*-reporting —
+saying compatible where a robot refuses — and a union cannot under-report.
+
+**`buildContext` was the actual consumer, and it was not calling them.** This is worth writing down
+because it wasted a step: [manifests.ts](lib/skynet/manifests.ts)' two resolvers had **no production
+callers at all** — only tests — while [engine.ts](lib/skynet/compatibility/engine.ts) built its own
+inline projection off `manifest.required_capabilities`. Fixing the resolvers first fixed nothing. The
+engine now goes through them, which both closes the hole and gives the helpers a real caller.
+
+**`embodimentAgreementIssues` refuses the disagreement at publish**, in
+[versions.ts](lib/skynet/versions.ts), beside `runtimeContractIssues` and for the same reason: a
+draft is edited in any order, so the two declarations disagreeing mid-edit is ordinary and
+disagreeing at publish is not. One direction only — a card declaring *less* than `embodiment` is a
+package enforced correctly and described incompletely, which the union above already fixes.
+
+**§55.1's environments are read at last.** *"Its `required_capabilities` are still checked at
+admission, since an environment that needs a gripper is not runnable by a robot without one in sim
+either."* `ENVIRONMENT_SCHEMA` has accepted the field all along; the resolver returned `[]` for
+environments, because it was written for models and skills and that sentence lives in the section
+about simulated worlds.
+
+### The robot half, in the OS repository
+
+`embodiment_undeclared` — the seventeenth rejection code — refuses the same shape at install. Not
+redundant with the publish gate: that one protects versions published from now on, and every version
+already published carries whatever it carries. Three corpus cases hold both editions to it, and the
+first of them used to produce `{"admitted":true,"findings":[]}`.
+
+### Verification
+
+* `npx vitest run` — **1,498 passed**, 56 files (1,490 at the start of this session). `npm run
+  typecheck` clean.
+* The new engine test was **confirmed to fail with the fix removed** — it reported `compatible` for
+  a package declaring a vendor extension the adapter does not expose.
+* Mirrors match, architecture doc byte-identical to the reference.
+
+### Still not built
+
+| Item | Why not |
+|---|---|
+| **One spelling of a package's requirements** | §78.2: neither field can simply be deleted. `embodiment.capabilities` is normative; `required_capabilities` is on every card ever stored and in every compatibility rule, and rewriting published manifests would rewrite documents whose digests benchmark results cite. The duplication is now *checked* rather than *removed*, and that is the honest state. |
+| A field-conformance figure that is not null on a real robot | Unchanged from the twelfth session: the counting exists, no robot runs a cycle. |
+| A robot that signs a conformance result | Unchanged — §19 makes this a rule, not a gap. |
+| A robot that produces a run bundle | Unchanged. |
+| The sealed black box crossing §17 | Unchanged, and still an owner's decision (§75.2). |
+| `/skynet/os/editions` | Unchanged — still one edition. |
+
+---
+
+## Session — 2026-09-03 (fourteenth): the margin reaches the page, and the one number on it that runs the other way
+
+The OS repository's forty-seventh session gave §7.6's two undeliverable profile fields a delivery
+path: `self_collision_margin_m` and `proximity` now ride §11's profile beside its four ceilings. The
+full argument is §7.6, rewritten and mirrored here. This is the Hub's half.
+
+### What arrives
+
+`self_collision_margin_m` crosses §17 on the check-in's `GuardReport` and renders in the device
+page's **Ceilings in force** table, beside the four that were already there. Same table on purpose:
+an operator reading that panel is asking one question — *what is in force* — and a page showing four
+numbers while a fifth applied silently would read as complete.
+
+No new translation string. The table renders each field's name verbatim in monospace, which turned
+out to be the right call made earlier for a different reason.
+
+### The one number on the page where larger is stricter
+
+Every other figure in that table is a **ceiling**: how fast the robot may go, and a smaller number is
+the stricter setting. A collision margin is a **floor**: how close two bodies may come, and a larger
+number keeps them further apart.
+
+That is documented beside the field in [fleet-types.ts](components/skynet/fleet-types.ts) rather than
+left to be inferred, because the failure mode is specific and quiet — a page that sorted these by
+magnitude, or coloured them on a scale, would get exactly one of the five backwards and look
+entirely reasonable doing it.
+
+On the robot side the same distinction was not cosmetic: §33.4's *narrowings apply immediately,
+widenings wait* is computed by a classifier that assumed smaller-is-stricter, and a margin run
+through it would have had "halve the collision margin" applied under a running policy.
+
+### The fixture freezes the null, and that is the right freeze
+
+`wire/checkin.json` carries `self_collision_margin_m: null` with a `no_collision_margin` notice
+beside it, because the fixture's profile sets no margin — which is what every robot sends until
+somebody writes one into a profile.
+
+That is not a missed opportunity, and it is worth saying why given the last two sessions both moved a
+fixture to catch the interesting case: **the null is the interesting case here.** It exercises the
+three-state distinction a consumer actually gets wrong — the field absent (an older agent), the field
+null with a code saying why (no margin set), and a number — and the test asserts all three
+properties. The *number* is exercised cross-edition by the corpus case, which both editions
+reproduce.
+
+### Verification
+
+* `npx vitest run` — **1,499 passed**, 56 files. `npm run typecheck` clean.
+* Mirrors match, including the re-frozen `wire/checkin`; architecture doc byte-identical.
+
+### Still not built
+
+Unchanged from the thirteenth session, with one row retired:
+
+| Item | Why not |
+|---|---|
+| ~~`proximity` and `self_collision_margin_m` have no delivery path~~ | **Closed.** Both delivered. `proximity`'s guard is still unavailable, and now names the sensor rather than the profile — six of `resolveLimits()`'s seven inputs have a path, and the seventh is `people_detection`, which §5 gives no body a way to declare. |
+| One spelling of a package's requirements | §78.2 — neither field can simply be deleted. |
+| A field-conformance figure that is not null on a real robot | The counting exists; no robot runs a cycle. |
+| A robot that signs a conformance result | §19 makes this a rule, not a gap. |
+| A robot that produces a run bundle | Unchanged. |
+| The sealed black box crossing §17 | Owner's decision (§75.2). |
+| `/skynet/os/editions` | Still one edition. |
+
+---
+
+## Session — 2026-09-03 (fifteenth): a sweep, a producer, and a sentence this document had to take back
+
+The OS repository's forty-eighth session ran the sweep its own forty-fifth session's finding asked
+for — every *"no source"* and *"nothing carries this"* claim in the tree, read against what is
+actually available — and found the same wrong claim one file over from where it had just been fixed.
+§54.4's episode `intervention_count` was recorded as having no source *"because this edition has no
+kernel channel"*. §13's ring is the source; the daemon holds it.
+
+Nothing changed in this repository's code. It is logged here because two things in it are this
+repository's business.
+
+### The sentence taken back
+
+The twelfth session above — written earlier today — said §54.4's `intervention_count` is a **human
+takeover**, "a different number on a different route", and cited §76.3 as three sessions of care
+about the distinction.
+
+There is no such distinction. §54.4 lists *"intervention count"* with no qualifier; the only sentence
+anywhere asserting a takeover meaning was the one written in that session. And this repository
+contradicts it in its own code: [devices.ts](lib/skynet/devices.ts)'s comment on the column reads
+*"a robot with no kernel channel cannot count interventions and says so"* — the kernel reading,
+written long before today.
+
+The entry is corrected in place rather than edited away, and §74.6 in the architecture doc with it.
+A build log that quietly rewrites its own mistakes is not evidence of anything, and this one is the
+kind worth leaving visible: a correction that was right about the defect and invented an explanation
+for it, which then landed in the specification.
+
+### What this repository now receives
+
+`POST /episodes`' `interventions` column starts getting numbers the moment a robot has a recording
+with cycles in it — and **zeroes**, which is the half that was unreachable. A skill that ran and
+tripped nothing is a measured zero, and it is the number a marketplace is entitled to quote;
+[§76.3](docs/skynet-os-architecture.md) is the reason this Hub's column is nullable and its
+aggregates carry `interventions_measured`.
+
+One limit worth knowing on this side, because it shapes what the column means: the count is
+attributed only while **one** invocation is in `running`. The ring counts an interval and an episode
+wants an invocation, and with two skills running the recording knows which policy was commanding by
+digest — which nothing reads yet. So a fleet running concurrent skills will produce episodes with
+`interventions` null and `interventions_measured: false`, and that is the honest report rather than a
+gap in the pipeline.
+
+### Verification
+
+* `npx vitest run` — **1,499 passed**, 56 files. `npm run typecheck` clean.
+* Mirrors match; architecture doc byte-identical to the reference.
+
+### Still not built
+
+Unchanged from the fourteenth session.
+
+---
+
+## Session — 2026-09-03 (sixteenth): a verifier that could not see the migration it was pending on, and the ceiling nothing had
+
+Two items, and the first one is the reason the second is now reported honestly.
+
+### The verifier reported "not checkable" and it meant "not checked"
+
+`20260902320000_skynet_episode_interventions.sql` has been logged as unapplied since the sixteenth
+session of the eleventh. `scripts/skynet-verify-migrations.mjs` had been reporting it as
+**NOT CHECKABLE — nothing observable over REST** the whole time, and that verdict is
+indistinguishable from the one a migration gets when it genuinely has nothing to check. So the
+build log said pending, the tool said nothing, and neither was reading the database.
+
+The migration consists entirely of `ALTER COLUMN`. The parser looked for `CREATE TABLE` and
+`ADD COLUMN`; a column that already exists answers "present" to the column probe whatever its
+constraints are, so the file produced zero checks.
+
+**It was observable all along.** PostgREST serves an OpenAPI document at the schema root, and two of
+its facts are exactly the ones an `ALTER COLUMN` migration is about: a column appears in a
+definition's `required` array iff it is `NOT NULL`, and `properties[column].default` is present iff
+it has a default. Both directions were checked against columns known to be each way before relying
+on it — `skynet_incidents.context_at` is NOT NULL *with* a default and is required; `occurred_at`
+is nullable and is not.
+
+The run now says:
+
+```
+NOT APPLIED    20260902320000_skynet_episode_interventions.sql  (0/1 checks)
+    MISSING  column skynet_episodes.interventions nullable and no default — still NOT NULL
+```
+
+Which is what was true yesterday and the day before.
+
+### The probe has a positive control, because its failure mode is the inverse of the others
+
+The existing self-test asks each probe about a name no migration will ever create and aborts if it
+comes back present. That is the right test for a probe whose failure is *reporting absence as
+presence*.
+
+The constraint probe fails the other way. If the schema document does not arrive, `required` is
+empty for everything, every column reads as nullable, and **every `DROP NOT NULL` migration reports
+as applied** — a clean bill of health for a database that has run none of them. So it also takes a
+column the database itself says is NOT NULL, claims it should be nullable, and aborts unless that is
+refused. The column is found in the document rather than hardcoded, so the control does not rot when
+a table is renamed.
+
+### The parser moved out so it could be tested, and the test is a drift guard
+
+`declaredArtifacts` now lives in [scripts/lib/migration-artifacts.mjs](scripts/lib/migration-artifacts.mjs),
+imported by the verifier and by [a test](lib/__tests__/skynet-migration-artifacts.test.ts). The
+probes need a live database; the parsing is a pure function over a string, and it is the half with
+the failure that actually bit.
+
+The last test in that file is not an example. It reads every migration in the repository, extracts
+every `ALTER COLUMN` action, and fails if any is one the parser neither handles nor has explicitly
+listed as unhandled with a reason. `ALTER COLUMN … TYPE` is on the unhandled list and says why: the
+document publishes a `format` string, `bigint` and `int8` name one type and only one spelling
+appears, and a probe comparing two spellings of the same type reports a false MISSING — worse than
+reporting nothing. A shape nobody has considered now fails a test rather than quietly producing a
+clean verdict.
+
+`ADD CONSTRAINT` is counted as unobservable for the reason it always should have been: a CHECK is
+enforced by the database and invisible to it.
+
+### Then the item: storage quotas (§31 Phase 14), filed as needing a policy decision
+
+`MAX_ARTIFACT_BYTES` bounds one file at 50 GB and `MAX_FILES_PER_VERSION` bounds one version at ten
+thousand of them. Nothing bounded the account. The storage reachable by one signed-up namespace was
+50 GB × 10,000 × unlimited versions, and the only thing between the artifact bucket and that number
+was that nobody had tried.
+
+### The decision the eighth session said had to come first
+
+Artifacts are content-addressed and shared platform-wide behind a reference count, so "how much
+storage does this namespace use" has three defensible answers that disagree by orders of magnitude.
+The one taken: **the sum of the distinct artifacts reachable from that namespace's repositories.**
+
+*Distinct*, so two versions of one repository referencing the same 40 GB checkpoint cost 40 GB and
+not 80. Versioning is the product; a per-reference measure prices publishing v2 exactly like
+publishing v1, which is a pricing model that tells people to stop cutting releases.
+
+*Per namespace rather than globally distinct*, so a namespace's figure never moves because an
+unrelated namespace deleted a repository. The alternative has a specific failure worth naming: under
+global attribution the first uploader of a popular checkpoint carries its whole cost and everyone
+after carries nothing, so the account that seeds the ecosystem is the one that gets throttled.
+Deduplication is a saving for the platform, not a discount for the second tenant.
+
+The ceilings — 100 GB for a person, 1 TB for an organisation — are in
+[constants.ts](lib/skynet/constants.ts) rather than a column default, because they are product
+numbers expected to be revised and a column default has to be migrated to revise it. A namespace may
+be given its own in `skynet_namespaces.storage_quota_bytes`, which wins outright, `0` included.
+
+### The second figure, which is the whole reason it is a quota and not a speed bump
+
+A check against committed usage alone lets fifty parallel `upload-init` calls each read the same
+total and each pass. So `skynet_namespace_storage` returns **reserved bytes** beside used bytes, in
+one snapshot: live upload sessions that have claimed room and not yet delivered.
+
+Reservations are an upper bound by construction — an abandoned session releases its claim when it
+expires, an hour later, rather than when the client gives up. That direction is deliberate and is
+the one worth having: a quota that over-counts refuses slightly early and an operator raises a
+number, and a quota that under-counts is discovered from a storage bill.
+
+Two refinements are in the SQL rather than left as slop. A pending upload of bytes the namespace
+already holds reserves nothing, because it will deduplicate on completion. Two pending sessions
+uploading the same digest reserve once, because they will register one artifact.
+
+### Three cases in the arithmetic that nobody reaches by hand
+
+`decideStorage()` takes four numbers and returns a verdict with no database in it, which is what
+makes these testable at all:
+
+* **Exactly at the ceiling is allowed; one byte past is not.** A quota is what a namespace may hold,
+  not what it must stay under.
+* **An upload of bytes the namespace already holds is free even when it is over its ceiling.**
+  Lowering an operator override must not strand the files an account already has — under the other
+  reading, a namespace over its limit cannot re-point one of its own files at bytes sitting in the
+  same namespace, which is a refusal with no storage consequence whatsoever.
+* **`0` is an override and not an unset.** `??` rather than `||`, and the test says so, because a
+  suspended namespace silently restored to 100 GB is the one failure of that function nobody would
+  see from the UI.
+
+### Forks are priced, and it was the alternative that did not survive
+
+`forkRepo` copies rows, not bytes, and its docstring said a fork "costs metadata only". True about
+the bucket, and not true about this quota: those artifacts become reachable from a second namespace,
+and a namespace pays for what its repositories reach.
+
+Leaving forks unpriced makes the whole quota bypassable by anyone willing to fork a large public
+dataset a few times. Charging them keeps one rule instead of a rule with an exception big enough to
+drive the product through. `skynet_repo_fork_bytes` prices only what the target does not already
+hold, so forking your own repository — the ordinary case — is still zero, and still free at the
+ceiling.
+
+The check runs **before** the `skynet_repos` insert. A refusal after the row exists leaves an empty
+repository behind, which is worse than the refusal.
+
+### The column is stripped from the public profile — and that was not enough, see the nineteenth session
+
+`skynet_namespaces` is a public profile and two API routes return the row wholesale, which was fine
+while every column on it was public. `storage_quota_bytes` is a commercial fact — *this account was
+given ten terabytes* — and nothing is served by publishing it.
+
+`publicNamespace()` omits it rather than allow-listing what may pass, because the two failure modes
+are not symmetrical: a new public column missing from an allow-list is a visible bug somebody
+reports, and a new private column missing from a deny-list is a leak nobody sees.
+
+### Enforced where it cannot be forgotten, and failing closed both ways
+
+The check is inside `initUpload`, not in the route handler: every upload path — the web uploader,
+the CLI, the SDK, whatever calls it next — goes through that function, and a limit enforced one
+layer up is a limit the next caller forgets. The namespace is resolved from the version rather than
+passed in, for the same reason: a parameter is something a caller can get wrong.
+
+It runs before any signed URL is minted. A signed URL is permission to write bytes, so issuing one
+and refusing at `complete` would leave the object in the bucket and the quota exceeded in fact if
+not in the table.
+
+**Both failure modes refuse.** A quota that reads an unreadable usage figure as "nothing used"
+switches itself off exactly when the database is unwell. A quota that reads an *unapplied migration*
+as "not enforced yet" is one an operator can forget about permanently, because nothing in the
+running system would say it is off. The message still tells them apart — a missing function names
+the migration file rather than reading as an outage — but the verdict is the same.
+
+### The surface
+
+`GET /api/skynet/v1/namespaces/{handle}/storage` and a `StoragePanel` on the namespace page, both
+gated on `namespace.write` rather than `namespace.admin`. The audit log next door is owner-only
+because reading it is a supervisory act; remaining storage is the opposite — its whole purpose is to
+be read *before* a forty-gigabyte transfer, and a writer who cannot see it discovers the limit by
+hitting it an hour into an upload.
+
+Used and reserved render as separate segments of the bar. Collapsed into one, a namespace holding
+10 GB could not be told why an 11 GB upload is refused against a 30 GB limit, the answer being an
+upload started an hour ago that is still holding room.
+
+### Verification
+
+* `npx vitest run` — **1,540 passed**, 58 files (was 1,499 / 56). `npm run typecheck` clean.
+* `node scripts/skynet-verify-migrations.mjs` — 10 applied, **2 not applied**, 1 not checkable,
+  exit 1. Both pending migrations are now named with the specific artifact that is missing.
+* Live probe: still 0 namespaces, 0 repos, 0 versions, 0 artifacts, 0 devices, 0 episodes. Nothing
+  to grandfather and no account that becomes retroactively over quota.
+* `node scripts/i18n-catalog.mjs sync` — 14 new English keys, 476 locale values added.
+* `npx eslint` could not be run at all: `typescript-eslint` in this repository refuses TS 7.0.
+  Pre-existing, unrelated to these files, and worth its own session.
+
+### ⚠ Two migrations are pending, and one of them stops uploads
+
+1. `20260902320000_skynet_episode_interventions.sql` — unchanged, and now **verified** unapplied
+   rather than asserted. Until it runs, an episode that measured no interventions is stored as a
+   clean `0`.
+2. `20260903120000_skynet_storage_quotas.sql` — **new, and load-bearing.** Until it runs,
+   `POST /artifacts/upload-init` and forking both refuse with a 409 naming the migration file. That
+   is the fail-closed choice above, taken deliberately; it costs nothing today because Skynet is in
+   shadow mode with zero repositories, and it must be applied before anything is seeded.
+
+### Still not built
+
+Unchanged from the fifteenth session, minus one row and plus three that were true and unlisted:
+
+| Item | Why not |
+|---|---|
+| ~~Storage quotas~~ | **Closed**, pending the migration. |
+| One spelling of a package's requirements | §78.2 — neither field can simply be deleted. |
+| A field-conformance figure that is not null on a real robot | The counting exists; no robot runs a cycle. |
+| A robot that signs a conformance result | §19 makes this a rule, not a gap. |
+| A robot that produces a run bundle | Unchanged. |
+| The sealed black box crossing §17 | Owner's decision (§75.2). |
+| `/skynet/os/editions` | Still one edition. |
+| Collections | Curated cross-repo sets. A product decision, deferred six times now. |
+| Retention, deletion and export | Phase 14's other half. Zero occurrences of `retention` or `takedown` in `lib/skynet/`. |
+| Incident → repository traceability | An incident names its generation, not its policy. §10's attestation wants a trust-store read on the one queue class §34.4 never drops. |
+
+### One thing found and not changed
+
+The audit route's docblock says a non-owner gets 404. `requireNamespaceCapability` throws **403**.
+The comment is wrong rather than the code — `GET /namespaces/{handle}` is public, so the namespace's
+existence is not a secret and a 404 would be theatre. Left alone because changing a status code is a
+client-visible change and this session was not about that; the new storage route documents its 403
+accurately.
+
+---
+
+## Session — 2026-09-03 (seventeenth): `ref_count` is not a reference count, and the reaper that would have eaten the OS image
+
+The quota above charges a namespace for the artifacts **reachable from its repositories**. That
+makes a new class of storage interesting for the first time: bytes nothing can reach are billed to
+nobody and grow forever. Two kinds exist today and nothing frees either.
+
+1. An artifact whose last referring row was deleted. `skynet_artifacts.ref_count` is maintained for
+   exactly this purpose, and `bumpRefCount`'s own comment says the undercount matters *"until
+   something starts reclaiming unreferenced blobs"*. Nothing ever did.
+2. An upload session that wrote its bytes and never called `complete`. The queue cron marks the
+   session `expired`; the object it left in the bucket is recorded on that row and nowhere else,
+   and nothing deletes it.
+
+### The finding, which changed the shape of the work
+
+The obvious reaper is `delete where ref_count = 0`. It would have been a data-loss bug on its first
+run, and a quiet one.
+
+Six columns in this schema point at `skynet_artifacts`. `ref_count` counts **one**:
+
+| Column | On delete | Counted |
+|---|---|---|
+| `skynet_version_files.artifact_id` | RESTRICT | yes |
+| `skynet_os_releases.artifact_id` | SET NULL | no |
+| `skynet_incidents.artifact_id` | SET NULL | no |
+| `skynet_episodes.artifact_id` | SET NULL | no |
+| `skynet_evaluations.results_artifact_id` | SET NULL | no |
+| `skynet_downloads.artifact_id` | SET NULL | no |
+
+An **OS release bundle is never a version file**, so its `ref_count` is `0` for its entire life.
+`ref_count = 0` would have deleted the image §12 gates a fleet on obtaining — and because the
+constraint is `SET NULL` rather than `RESTRICT`, it would have done it *silently*: the release row
+survives with a null `artifact_id`, `GET /os/releases/{version}/bundle` starts answering with the
+`bundleSource` absence the fifteenth-session work built, and the fleet simply stops being able to
+update. The same shape holds for an episode's recording, an evaluation's results and an incident's
+black box.
+
+So `ref_count` is now documented on the type as what it is — a version-file counter and a display
+figure — and reachability is computed from `ARTIFACT_REFERRERS` in
+[reclaim.ts](lib/skynet/reclaim.ts): all six columns, each with `retains` and a reason.
+
+`skynet_downloads` is the one that says **no**, and it is worth stating why rather than leaving it
+to look like an oversight. A download log is an event record; the download still happened after the
+bytes are gone. Having been fetched once is not a reason to store something forever, and `SET NULL`
+is the right constraint for it.
+
+### Held to the schema, because a seventh referrer is a matter of time
+
+[The test](lib/__tests__/skynet-reclaim.test.ts) reads `db/01.09.2026.sql` and every migration,
+extracts every foreign key to `skynet_artifacts`, and fails if one is not classified. It finds all
+six today — four from the `pg_dump` spelling, two from the hand-written `REFERENCES` inside a
+`CREATE TABLE` — and asserts both patterns are pulling their weight, because a drift guard that
+silently matches nothing passes forever.
+
+It checks the other direction too. A referrer *removed* from the schema leaves
+`isArtifactReachable` querying a column that no longer exists, and a failed query counts as
+reachable — so the sweeper would quietly stop reclaiming anything at all, which is the failure that
+looks like everything working.
+
+### Two passes, because deleting races and reading does not
+
+Between "this artifact is unreachable" and "delete its bytes", a deduplicating upload can adopt it:
+`findArtifactBySha` matches a blob platform-wide and attaches it with no transfer. Re-checking
+immediately before the delete narrows that window without closing it, and the window is precisely
+the one deduplication is fastest in.
+
+So: `reclaim_marked_at` on the artifact row, and **a marked artifact is not adopted**. Pass one
+marks what nothing can reach; pass two deletes what has been marked for a day and is still
+unreachable. Somebody uploading those bytes again is not handed the doomed row — they upload
+afresh to the same content-addressed path, which costs one transfer and is correct.
+
+`RECLAIM_MARK_AGE_MS` is longer than `UPLOAD_TTL_SECONDS`, and the test says so: that inequality is
+the entire argument for why the mark makes the delete safe rather than merely unlikely to race.
+
+`registerArtifact` is the exception and had to be. It looks up **including** marked rows and clears
+the mark, because it runs after a client has finished transferring those exact bytes to that exact
+path — proof the artifact is wanted. Without it the unique index on `sha256` turns a marked
+artifact into a permanent refusal: the lookup reports nothing, the insert collides, and re-uploading
+the file fails for a day with a conflict nobody can explain.
+
+A window does remain — a sweeper between `remove()` and its row delete can hand back an artifact
+whose bytes are gone, and the next `attachFile` then fails on the foreign key. Noisy, recoverable
+by retrying, and reachable only for bytes nothing referenced for a full day that two clients touch
+in the same second. Named here rather than papered over.
+
+### The guard on abandoned uploads, which is the one that would have been missed
+
+Storage paths are content-addressed. An abandoned session's path is byte-for-byte the path a
+*successful* upload of the same content uses. Deleting an abandoned session's object without
+checking would delete the blob behind every live artifact with that digest — a fork of a popular
+checkpoint made unusable by somebody else's cancelled upload.
+
+So an object is removed only when no artifact row holds that digest **and** no upload session is
+still live for it. Both checked by digest rather than by path, because the digest is what the path
+is made of.
+
+### Delete order, and why it is the one that self-heals
+
+Object first, then row. A failure after the bytes are gone leaves a row pointing at nothing —
+visible, harmless (the artifact is unreachable, so nothing will ask for it), and retried next run.
+The other order leaves an object in the bucket that no row records: invisible and permanent, which
+is the thing this module exists to end.
+
+A row delete refused by `skynet_version_files`' `RESTRICT` after the bytes are gone is logged as an
+error and not counted as reclaimed. It is the one outcome that damages a live version, and it must
+never be quiet.
+
+### A swallowed error, found on the way
+
+`findArtifactBySha` discarded its error and returned `null`, which reads as "no such artifact".
+That is the wrong default for this question: deduplication silently switches off, every upload
+transfers bytes the platform already holds, and the second one collides on the unique digest and
+fails with a conflict that has no visible cause. It now throws.
+
+The failure it catches in practice is a `reclaim_marked_at` column that does not exist yet — a
+migration that has not run rather than a database that is unwell, which is the same distinction the
+quota work needed one section earlier.
+
+### Verification
+
+* `npx vitest run` — **1,552 passed**, 59 files. `npm run typecheck` clean.
+* The drift guard was checked against reality rather than trusted: it reports all six referrers,
+  four via the dump pattern and two via the inline one.
+* `node scripts/skynet-verify-migrations.mjs` — 10 applied, **3 not applied**, exit 1. The new
+  migration is named with the specific missing column, which is the verifier improvement from the
+  previous section working on a migration written after it.
+* `node scripts/i18n-catalog.mjs sync` — one further key, 34 locale values.
+
+### ⚠ The upload path is inoperative until three migrations are applied, in order
+
+This is the state being handed over, and it is deliberate rather than accidental — but it must not
+be discovered in production.
+
+1. `20260902320000_skynet_episode_interventions.sql` — an episode that measured nothing is stored
+   as a clean `0` until it runs.
+2. `20260903120000_skynet_storage_quotas.sql` — `POST /artifacts/upload-init` and forking refuse
+   with a 409 naming the file.
+3. `20260903140000_skynet_artifact_reclaim.sql` — `findArtifactBySha` throws, so uploads refuse,
+   and the reclaim cron cannot mark anything.
+
+Skynet is in shadow mode with **0 repositories and 0 artifacts**, so nothing is affected today.
+All three must be applied before anything is seeded. `node scripts/skynet-verify-migrations.mjs`
+now names each one and exits non-zero, which is how this should be checked rather than by reading
+this paragraph.
+
+### Still not built
+
+Unchanged from the sixteenth section, minus one row:
+
+| Item | Why not |
+|---|---|
+| ~~Retention and reclamation of unreachable artifacts~~ | **Closed**, pending the migration. Deletion *on request* — a person asking for their data to be removed — is not this and is still open. |
+| Export and right-to-erasure | Phase 14. Reclaiming what nothing references is not the same as deleting what somebody asks you to delete. |
+| Collections | A product decision, deferred six times. |
+| Incident → repository traceability | An incident names its generation, not its policy. |
+| One spelling of a package's requirements | §78.2. |
+| A field-conformance figure that is not null on a real robot | No robot runs a cycle. |
+| A robot that signs a conformance result | §19 makes this a rule, not a gap. |
+| A robot that produces a run bundle | Unchanged. |
+| The sealed black box crossing §17 | Owner's decision (§75.2). |
+| `/skynet/os/editions` | Still one edition. |
+
+### Then the hole in the section above, found while looking for the next item
+
+The reclaimer shortlists candidates with `ref_count = 0`. Written up two paragraphs ago as a
+prefilter whose error runs in the safe direction. It does — and the size of that error was wrong by
+a lot, in a way that would have made the whole sweeper inert.
+
+```
+skynet_repo_versions.repo_id     → skynet_repos          ON DELETE CASCADE
+skynet_version_files.version_id  → skynet_repo_versions  ON DELETE CASCADE
+```
+
+Deleting a repository deletes its versions and their file rows **inside the database**, with no
+TypeScript involved and therefore no decrement. `bumpRefCount` never sees it. Every artifact that
+repository referenced keeps a positive count for ever while nothing references it.
+
+That is not drift to be tolerated at the margins. It is the *primary* way an artifact becomes
+orphaned, so a sweeper prefiltering on the hand-maintained counter would never have examined the
+one case it exists for — and would have reported clean runs for ever while reclaiming nothing,
+which is the failure that looks exactly like success.
+
+There is no repository-delete route today, which is the only reason this has not already happened.
+Phase 14 asks for one.
+
+### The counter moved into the database
+
+[20260903160000_skynet_ref_count_trigger.sql](supabase/migrations/20260903160000_skynet_ref_count_trigger.sql)
+maintains `ref_count` with an `AFTER INSERT OR DELETE OR UPDATE OF artifact_id … FOR EACH ROW`
+trigger on `skynet_version_files`, and `bumpRefCount` is gone from
+[artifacts.ts](lib/skynet/artifacts.ts) so the two cannot both count.
+
+Three things it fixes and one it deliberately does not:
+
+* **A cascade fires row-level triggers on the child table.** That is the entire point, and it is
+  what no amount of care in TypeScript could have achieved.
+* **`UPDATE OF artifact_id` is not optional.** `attachFile` upserts on `(version_id, path)`, so
+  re-uploading a file at an existing path moves the row between artifacts. A trigger firing only
+  on insert and delete would leave the old artifact overcounted for ever — and an overcounted
+  artifact is one the sweeper never shortlists.
+* **`ref_count = ref_count + 1` cannot lose an increment.** The read-modify-write it replaces
+  could: two requests attaching to the same artifact both read `4` and both write `5`. The
+  direction of that error is the dangerous one — it makes an artifact look *less* referenced than
+  it is, which is precisely what a reclaimer acts on.
+* **It is still only a version-file counter.** The other five referrers still do not touch it, on
+  purpose. This makes the counter correct about what it counts; it does not promote it to a
+  reachability answer, which remains `isArtifactReachable()` asking all six.
+
+The migration ends with a repair — set every `ref_count` to the count of rows actually pointing at
+it — which is a no-op today and correct whenever it is not.
+
+### A comment that had already predicted this
+
+The docstring on `copyVersionFiles` warned about reference counts that undercount, and about *"a
+difference nothing notices until something starts reclaiming unreferenced blobs, at which point it
+deletes weights that three repositories are using."*
+
+Something reclaims them now. The comment was right, it was about the wrong mechanism — the danger
+was never a caller who forgot to bump, it was a cascade no caller could see — and it is rewritten
+in place to say what actually happened rather than being deleted.
+
+### The guard against undoing it
+
+A test asserts the trigger and its function are in the schema, that it covers the update case, and
+that `lib/skynet/artifacts.ts` contains no `bumpRefCount` and no manual `ref_count` write.
+Reintroducing application-side counting alongside the trigger would double every attach, no
+artifact would ever reach zero, and the reclaimer would silently stop finding anything — a failure
+indistinguishable from "there is nothing to reclaim".
+
+### Verification, after the fix
+
+* `npx vitest run` — **1,555 passed**, 59 files. `npm run typecheck` clean.
+* `node scripts/skynet-verify-migrations.mjs` — 10 applied, 3 not applied, **2 not checkable**. The
+  trigger migration is one of the two, honestly: PostgREST publishes tables, columns, nullability
+  and defaults, and a trigger is none of those.
+
+### The pending list is now four
+
+In order, and all four are prerequisites for the upload path working at all:
+
+1. `20260902320000_skynet_episode_interventions.sql`
+2. `20260903120000_skynet_storage_quotas.sql`
+3. `20260903140000_skynet_artifact_reclaim.sql`
+4. `20260903160000_skynet_ref_count_trigger.sql` — least urgent of the four for correctness today
+   (nothing has ever attached a file), and the one whose absence would be least visible later.
+
+Skynet is in shadow mode with 0 repositories and 0 artifacts. `node scripts/skynet-verify-migrations.mjs`
+exits non-zero and names the first three; the fourth is not observable over REST and has to be
+tracked from this list.
+
+---
+
+## Session — 2026-09-03 (eighteenth): deletion, and the constraint that meant it could not be written yet
+
+Phase 14 asks for deletion. There was no repository-delete route — repositories could only be
+archived — and the survey that should have preceded writing one found why there should not have
+been one.
+
+### A vendor could have erased the benchmark result by deleting the repository
+
+`skynet_repo_versions.repo_id → skynet_repos` is `ON DELETE CASCADE`. And so were both of these:
+
+```
+skynet_evaluations.subject_version_id    → skynet_repo_versions   CASCADE
+skynet_evaluations.benchmark_version_id  → skynet_repo_versions   CASCADE
+```
+
+So deleting a repository would have deleted its versions, and deleting a version would have deleted
+**every evaluation it is the subject of**. Not hidden, not disputed — removed, along with everyone
+else's ability to see that the run happened.
+
+The second column is worse and is the one that makes this a platform problem rather than an owner's
+own affair: deleting a *benchmark* repository would have taken every third party's results against
+it, submitted by people with no relationship to the benchmark's author. §12 makes a leaderboard row
+evidence and §56.6 goes to real trouble over who attested what. None of that survives a constraint
+that lets the measured party delete the measurement.
+
+This was reachable only because no delete route existed. Writing one first would have shipped it.
+
+### RESTRICT, because SET NULL was never on the table
+
+Both columns are `NOT NULL`. An evaluation whose subject is null is not a weaker claim — nothing on
+the row says what was measured, so it is not a claim at all.
+
+[20260903180000_skynet_evidence_constraints.sql](supabase/migrations/20260903180000_skynet_evidence_constraints.sql)
+makes both RESTRICT: **a version that has been measured cannot be deleted.** The tools for that case
+already exist and are the right ones — archive the repository, yank the version — and both leave
+every digest resolvable, which is what a registry owes anyone who depended on it.
+
+The cost is real and is named in the migration rather than glossed: publish a version by mistake,
+have it evaluated, and it cannot be made to go away. It gets yanked. For anything already
+distributed that is the only honest answer a registry has ever had.
+
+Scope was checked rather than assumed. The other CASCADEs from a version are correct and stay:
+version files, signatures, benchmark tasks and robot-support declarations all *belong to* the
+version and mean nothing without it. An evaluation does not belong to it — it is somebody else's
+statement about it, and that is the whole distinction.
+
+`skynet_deployments.version_id` was already RESTRICT, which is the same rule for a blunter reason:
+you may not delete a version a robot is running.
+
+### Then the route, with the refusals named
+
+`DELETE /repos/{ns}/{name}` ([route](app/api/skynet/v1/repos/[handle]/[name]/route.ts),
+[deleteRepo](lib/skynet/repos.ts)). Three gates, each for a different failure:
+
+1. **`namespace.admin`, not `repo.admin`.** Every other administrative act on a repository —
+   visibility, archival, gating — is a maintainer's. This one destroys the object, so it is the
+   namespace owner's; in an organisation that means the owner and not an admin.
+2. **The name typed back**, exactly as `namespace/name`. The failure that guards against is not
+   malice, it is a script iterating the wrong list.
+3. **The four blockers, refused by name and count.** Deployed, evaluated, benchmarked, or the
+   source of an open pull request. Three are RESTRICT so the database would refuse anyway — with
+   `23503` and a constraint name, which is not something a caller can act on.
+
+A test holds that list to the schema: every `ON DELETE RESTRICT` foreign key reaching
+`skynet_repo_versions` must be a column the blocker check looks at. A new one otherwise becomes a
+new way for a delete to fail with an unexplained error.
+
+### What the delete does not do
+
+It does not touch artifacts. Version files go by cascade, the trigger from the previous section
+decrements `ref_count`, and the reclaim cron marks them a day later and sweeps them a day after
+that with all six referrers checked. A test asserts `deleteRepo` contains no artifact store and no
+artifact query.
+
+That is not laziness about latency. Reachability is a six-table question, and the request handler
+is the one place where the caller is in a hurry and the consequence is permanent. Two days of delay
+buys the check being done properly.
+
+Forks survive with `forked_from_id` cleared. Content addressing means a fork never depended on its
+parent for anything but a name.
+
+### The audit row is written before the delete
+
+Once the repository is gone, that line is the only record it existed — so it carries the full name,
+the kind and the version count, and it is written first. Logging afterwards would leave the one
+outcome an audit log cannot have: a deletion nobody can account for.
+
+### An existing guard did its job
+
+Adding `repo.delete` to `AUDIT_ACTIONS` failed `skynet-audit.test.ts`, which requires every
+namespace action to have a translated label. Exactly the intended behaviour — a new action would
+otherwise have rendered in the audit panel as the raw string `repo.delete` for every locale.
+
+### API-only, and deliberately
+
+There is no UI control for this, because there is none for archival or visibility either — the
+repository page renders an `archived` badge and nothing sets it. A delete button on a page with no
+archive button would push people towards the irreversible option. A repository settings panel is
+its own piece of work and both belong in it.
+
+### Verification
+
+* `npx vitest run` — **1,564 passed**, 60 files. `npm run typecheck` clean.
+* The blocker guard was checked against reality: four RESTRICT foreign keys reach a version
+  (`skynet_deployments`, `skynet_pull_requests.source_version_id`, and the two evaluation columns),
+  and all four are checked by name.
+* The constraint test reads the **last** definition in file order, not the first — the base dump
+  defines these as CASCADE and the migration redefines them, and a first-match reader would have
+  passed while production did the opposite. That the base file really does say CASCADE is asserted
+  too, so the RESTRICT checks cannot pass by matching a misspelled constraint name.
+* `node scripts/i18n-catalog.mjs sync` — 5 further keys.
+
+### The pending list is six, and the last two are not observable over REST
+
+| # | Migration | Verifier sees it |
+|---|---|---|
+| 1 | `20260902320000_skynet_episode_interventions.sql` | yes — NOT APPLIED |
+| 2 | `20260903120000_skynet_storage_quotas.sql` | yes — NOT APPLIED |
+| 3 | `20260903140000_skynet_artifact_reclaim.sql` | yes — NOT APPLIED |
+| 4 | `20260903160000_skynet_ref_count_trigger.sql` | no — a trigger and a function |
+| 5 | `20260903180000_skynet_evidence_constraints.sql` | no — two constraints |
+
+Five, not six. The first three block the upload path; 4 and 5 are silent until something is
+deleted, which is the worse kind. `skynet-verify-migrations.mjs` exits non-zero and names the first
+three; 4 and 5 have to be tracked from this table, and that limit is stated in the script's own
+output rather than left to be discovered.
+
+### Still not built
+
+| Item | Why not |
+|---|---|
+| ~~Repository deletion~~ | **Closed**, pending migration 5. |
+| Account erasure and data export | The other half of Phase 14's privacy line, and a different problem: deleting *a person's* data crosses namespaces, org membership, audit rows that must survive, and evaluations submitted by them about other people's work. Needs the owner. |
+| Takedown and abuse reporting | Phase 14. Nothing exists. |
+| ~~A repository settings panel~~ | **Closed.** Visibility, gating, archival and deletion all have a surface now. |
+| Collections | A product decision, deferred six times. |
+| Incident → repository traceability | An incident names its generation, not its policy. |
+| One spelling of a package's requirements | §78.2. |
+| A field-conformance figure that is not null on a real robot | No robot runs a cycle. |
+| A robot that signs a conformance result | §19 makes this a rule, not a gap. |
+| A robot that produces a run bundle | Unchanged. |
+| The sealed black box crossing §17 | Owner's decision (§75.2). |
+| `/skynet/os/editions` | Still one edition. |
+
+### And the panel, because "API-only" was a description of a hole rather than a decision
+
+The section above said deletion is API-only *"because there is none for archival or visibility
+either"*. That is a reason not to add a delete button on its own. It is not a reason for the state
+of affairs, and re-reading it made that obvious: the repository page renders an `archived` badge
+and **nothing on the site can set it**, so the person who most needs to archive a repository — its
+owner — could not without writing a `curl`.
+
+[RepoSettingsPanel](components/skynet/RepoSettingsPanel.tsx) gives all four a surface: visibility,
+access gating, archival, deletion.
+
+A client component rather than a tab, and the reason is the one already written twice in this
+codebase: the repository page is cached for every viewer, `RepositoryView` takes no viewer at all,
+and a server-rendered admin tab would put one owner's controls into a cache served to everybody. It
+returns null for anyone the API refuses, so a reader who cannot administer the repository sees no
+heading hinting at a section they cannot open.
+
+### The ordering is the design
+
+Archival first, described as the reversible one, because it almost always is the right answer.
+Deletion below a separator, saying what it destroys and what survives, with the full
+`namespace/name` typed back before the button enables — the **same string the API requires**, so
+the confirmation is the real gate rather than something the component invented to look careful.
+
+`data-variant="danger"` is outlined rather than filled. A solid red button is the most prominent
+thing on the panel it sits in, and the most prominent control should not be the destructive one; it
+fills in on hover, once the pointer is already there.
+
+### The four refusals are rendered, not collapsed
+
+When the API refuses, it says which of deployed / evaluated / benchmarked / open-proposal is in the
+way and how many. The panel prints each, because they have different answers — a deployment can be
+moved off the version, an open proposal can be closed, and a benchmark result belonging to somebody
+else cannot be dealt with at all, which is the point of the constraint.
+
+They go through a `switch` rather than a `skynet_settings_blocker_${reason}` template. A computed
+key is invisible to anything scanning for keys, and the day a fifth blocker is added the useful
+failure is a compile error, not silence. An unrecognised reason falls back to the raw string:
+legible, obviously untranslated, right for a list expected to grow.
+
+### Verification, against the running application
+
+`npx vitest run` — 1,564 passed, 60 files; `npm run typecheck` clean. Neither of those compiles a
+client/server boundary, so the routes were exercised against the dev server already running on
+:3000:
+
+| Request | Answer | What it shows |
+|---|---|---|
+| `GET /en/skynet/models/nobody/nothing/` | 404 | `RepositoryView` → `RepoSettingsPanel` compiles; a missing repo 404s rather than 500s |
+| `GET /en/skynet/orgs/nobody/` | 404 | the namespace page with `StoragePanel` compiles |
+| `GET /api/skynet/v1/namespaces/nobody/storage/` | 401 | the new route exists and `requireActor` runs before anything else |
+| `DELETE /api/skynet/v1/repos/nobody/nothing/` | 401 | same, and the confirmation is not reachable without a session |
+| `GET /api/cron/skynet/reclaim/` | `{"error":"Unauthorized"}` | the reclaim cron refuses without `CRON_SECRET` |
+
+Not verified in a browser, and worth saying why rather than leaving it implied: there are **0
+repositories**, so no repository page exists to open, and the panel renders nothing without an
+admin session. A screenshot of an empty state would be evidence of nothing.
+
+---
+
+## Session — 2026-09-03 (nineteenth): the migrations are applied, and applying them found a leak the log had already claimed was closed
+
+Every migration in `supabase/migrations` is now applied to the production database. **13 applied, 0
+pending.** Six went in this session, five of them written earlier today.
+
+### Getting a connection, which took longer than the migrations did
+
+Worth recording because the next person will hit it and the error message points the wrong way.
+
+`db.efyazkprfdpligccotwc.supabase.co` resolves to an **AAAA record only** —
+`2600:1f18:…`, which is AWS us-east-1. This machine has no IPv6 route, so `psql` reported
+*"could not translate host name … Name or service not known"*, which reads as a DNS failure and is
+in fact a reachability one. The name resolves; the address is unreachable.
+
+The route that works is the session pooler, and the host is **`aws-1-us-east-1.pooler.supabase.com`**
+with user `postgres.<project-ref>` — not `aws-0-`, which answers
+`FATAL: (ENOTFOUND) tenant/user … not found` and reads as a bad password.
+
+Credentials came from `.env.local` (`POSTGRES_HOST`, `POSTGRES_USER`, `POSTGRES_DATABASE`,
+`SUPABASE_DB_PASSWORD`) and the file holding them was deleted afterwards.
+
+### Applied, in order, each in its own transaction
+
+Pre-flight first: all five confirmed unapplied by querying `information_schema` and `pg_trigger`
+and `pg_constraint` directly, and every affected table confirmed empty — 0 namespaces, 0 repos, 0
+versions, 0 artifacts, 0 version files, 0 episodes, 0 evaluations. Nothing to grandfather.
+
+| Migration | Result |
+|---|---|
+| `20260902320000_skynet_episode_interventions` | applied |
+| `20260903120000_skynet_storage_quotas` | applied |
+| `20260903140000_skynet_artifact_reclaim` | applied |
+| `20260903160000_skynet_ref_count_trigger` | applied |
+| `20260903180000_skynet_evidence_constraints` | applied |
+
+### Verified, including the two the REST verifier cannot see
+
+The eighteenth session ended with the two unobservable migrations *"tracked from this table"*.
+A direct connection can see them, so they were checked rather than assumed:
+
+* `skynet_episodes.interventions` — nullable, no default, CHECK present.
+* `skynet_namespaces.storage_quota_bytes` — `bigint`, nullable.
+* `skynet_artifacts.reclaim_marked_at` — `timestamptz`, both indexes present.
+* `skynet_version_files_ref_count` — fires on insert, delete **and** update, `FOR EACH ROW`.
+* Both evaluation foreign keys — `confdeltype = 'r'`, and `skynet_version_files_version_id_fkey`
+  still `'c'`, confirming the change was surgical rather than broad.
+
+Then behaviourally, inside a transaction that was rolled back:
+
+```
+start                              a=0  b=0
+INSERT a version file          →   a=1  b=0
+UPDATE OF artifact_id (a→b)    →   a=0  b=1     the case a trigger without UPDATE OF gets wrong
+DELETE the repository          →   a=0  b=0     the cascade the TypeScript counter never saw
+```
+
+That last line is the one the trigger exists for, and it is now observed rather than argued.
+`skynet_namespace_storage` was called in the same transaction and answered
+`used_bytes 2000, artifact_count 1, holds_sha true` for the one reachable artifact.
+
+RESTRICT was tested the same way: with an evaluation naming a version, `DELETE FROM skynet_repos`
+is refused with *"violates foreign key constraint skynet_evaluations_subject_version_id_fkey"*.
+Before this morning that statement silently deleted the evaluation.
+
+And over **PostgREST**, which is what the application actually calls — a function can exist in
+Postgres and be unreachable through the API:
+
+| Call | Answer |
+|---|---|
+| service_role `skynet_namespace_storage` | `[{used_bytes:0, reserved_bytes:0, artifact_count:0, holds_sha:false}]` |
+| service_role `skynet_repo_fork_bytes` | `0` |
+| anon `skynet_namespace_storage` | refused, `42501` |
+
+The two shapes matter: the first returns an **array of one row** and the second a **bare scalar**,
+which is exactly what `measureNamespaceStorage` and `assertForkStorageAvailable` were written to
+unwrap. That was a guess when they were written and is now a fact.
+
+### The leak, which this session's own log had already claimed was closed
+
+The sixteenth session added `storage_quota_bytes` and said, under a heading reading *"The column is
+stripped from the public profile"*, that `publicNamespace()` removes it from the two routes that
+return the row wholesale.
+
+It does. And it protects the route and nothing else.
+
+`skynet_namespaces` carries one policy — `SELECT true` for `public` — because it is a profile and
+is meant to be readable. The anon key ships in the browser bundle by design. So
+
+```
+GET /rest/v1/skynet_namespaces?select=storage_quota_bytes
+```
+
+answered the question directly, straight past the route that had been carefully written not to.
+Confirmed against the live database: anon could read the column.
+
+This is the failure mode worth naming, because the reasoning that produced it was not lazy. The
+strip was written deliberately, with an argument about deny-lists versus allow-lists that is
+correct at the layer it is about. It simply was not the layer that decides.
+
+### The fix is grants, because RLS is row-level
+
+[20260903200000_skynet_quota_column_privilege.sql](supabase/migrations/20260903200000_skynet_quota_column_privilege.sql).
+Postgres offers exactly one mechanism for "everyone may read this row but not this column of it".
+
+One trap on the way, and it is the inviting way to write this migration: a **column-level REVOKE
+against a role holding the table-level SELECT does nothing at all**. It has to revoke the table
+grant and grant the public columns back.
+
+An allow-list here and a deny-list in TypeScript, and both are right, because the directions
+reverse between the layers. In `publicNamespace()` a new public column missing from an allow-list
+is a visible bug and a new private column missing from a deny-list is a silent leak, so it omits.
+Here a column not named is simply unreadable by anon, which surfaces as a permission error on the
+first client that wants it — fail closed is available at this layer, so it is taken here.
+
+One behaviour change, stated rather than discovered later: `select=*` as anon on that table now
+fails, because `*` expands to the ungranted column. Nothing in this repository does it — every read
+goes through `sk()`, the service role, and no browser component touches the table.
+
+### It is a check now, not an observation
+
+`scripts/skynet-verify-rls.mjs` gained the pair, and it is a pair on purpose:
+
+* anon cannot read `storage_quota_bytes`;
+* anon **can** still read the profile columns — because revoking the table grant and forgetting to
+  grant the columns back would pass the first check while making every namespace profile
+  unreadable, which is a worse outcome than the leak.
+
+It is the only invariant in that file RLS cannot express, and therefore the one a policy review
+would not have caught.
+
+### Verification
+
+* `node scripts/skynet-verify-migrations.mjs` — **13 applied, 0 not applied**, exit 0.
+* `node scripts/skynet-verify-rls.mjs` — **all RLS invariants hold**, including the two new ones.
+* `npx vitest run` — 1,564 passed, 60 files. `npm run typecheck` clean.
+* Database back to 0 namespaces / 0 repos / 0 versions / 0 artifacts / 0 evaluations after both
+  scripts cleaned up their probe rows.
+
+### What the verifier still cannot see
+
+Four migrations report NOT CHECKABLE, and the count went up rather than down because this session
+added one. Triggers, functions, CHECK expressions, foreign-key delete rules and **grants** are all
+invisible over REST. The script's closing note now says so in as many words.
+
+The grants are the exception with a real answer: `skynet-verify-rls.mjs` speaks to PostgREST as
+anon, so it verifies the *effect* of the grant even though nothing can read the grant. The trigger
+and the two delete rules have no equivalent — they were verified by hand today, and a run of that
+verification is written out above so it can be repeated rather than re-derived.
+
+### Still not built
+
+Unchanged from the eighteenth session. Nothing on that list was blocked on a migration, and nothing
+on it is now unblocked — the difference this session makes is that the upload path, the reclaim
+cron, the quota, the trigger and the deletion refusals are all live rather than waiting.
+
+---
+
+## Session — 2026-09-04 (twentieth): the route a robot had been probing for nothing
+
+`skynet_incidents.artifact_id` has been NULL on every row this platform could hold since the fleet
+schema was written, and the column's own comment said why:
+
+> The sealed recording itself, once there is an upload path for one. Always NULL today: §13's
+> seal-and-upload produces bytes, `POST /devices/{id}/incidents` accepts a document, and the two
+> have not been joined. Named here rather than left out so the gap is visible in the schema rather
+> than only in a session log.
+
+§79 of the OS specification closed the robot's half of that a session and a half ago — probe,
+resume, receipt, backoff, all of it — and ended with a sentence this session is written against:
+**"The Hub half is not built here."** So a robot that sealed a hundred megabytes of the worst thirty
+seconds of its life asked an address, found nothing, backed off on §34.4's curve, and kept the
+evidence.
+
+### What was built
+
+| | |
+|---|---|
+| [20260904120000_skynet_device_recordings.sql](supabase/migrations/20260904120000_skynet_device_recordings.sql) | `skynet_device_recordings` — one row per (device, digest), the slice index, and the CHECK that makes *complete* mean *verified* |
+| [lib/skynet/recordings.ts](lib/skynet/recordings.ts) | The decisions, the storage, the assembly, the verification, the join onto incidents, the reclaim pass |
+| `app/api/skynet/v1/devices/[id]/recordings/[sha256]/route.ts` | §79.1's `GET` and `PUT` |
+| `app/api/skynet/v1/devices/[id]/recordings/route.ts` | The operator's list — *"the incident said there is a recording; where is it?"* |
+| [lib/skynet/storage/store.ts](lib/skynet/storage/store.ts) | `putObject` and `readObject`, the first two methods on that interface that move bytes through this process |
+| [lib/skynet/reclaim.ts](lib/skynet/reclaim.ts) | The seventh artifact referrer, classified, and a fourth sweep pass |
+| [lib/skynet/webhooks.ts](lib/skynet/webhooks.ts) | `recording.received` |
+
+### The one design decision everything else follows from
+
+**The Hub cannot know how long a window is, so it never asks whether it has all of it.**
+
+It never learns the true size from anything it can check — the robot declares one in a
+`Content-Range` and a declaration is a claim. So after every slice it asks a different question:
+*do the bytes I hold hash to the name they arrived under?* §77.1 is why that is the better question:
+the digest was recorded at the seal, by the party that produced the bytes, before the transfer
+existed. It is the only piece of evidence in the whole exchange.
+
+Which means **complete and verified are one event**, and the database holds that rather than the
+code path: `complete = true` requires `computed_sha256 = sha256`, as a CHECK.
+
+The consequence is that a transfer ending at exactly the right length with the wrong bytes gets a
+count and no digest — and §79's own contract reads that as *restart at zero*: "a complete object
+nobody will name is not evidence this window arrived."
+
+### 404 is an answer on this route, which decides several other things
+
+§79's client reads a 404 from the probe as a **measured zero** — *it was asked and it answered* —
+because the first probe of every window in the world hits an address holding nothing. Two rules fall
+out and both are in the code:
+
+* the 404 carries `{"bytes": 0, "digest": null, "max_slice_bytes": ...}` in its body as well as in
+  its status, so a client reading the number and one reading the status agree;
+* **nothing else on this route may answer 404.** A device credential that does not match the device
+  in the path gets a **403**, unlike every sibling route under `/devices/{id}`, which 404s. A 404
+  there would tell a robot to send a hundred megabytes into a route that had just refused it.
+
+### Object storage cannot be appended to, so a window arrives as slices
+
+Each accepted slice is its own object and the row's `parts` array is the index of them. The two
+alternatives were considered and written down in the migration:
+
+* read the prefix back and rewrite it whole each time — one object, no index, and quadratic: a
+  128 MiB window in 4 MiB slices moves about two gigabytes through this process to receive one
+  hundred and twenty-eight megabytes;
+* list the bucket prefix — no column, and it makes the probe (the cheapest and most frequent call on
+  this route) a storage listing rather than one row read.
+
+The index is also what makes a rewind exact. The route accepts an offset **only where it can name
+the boundary** — zero, the end of what it holds, or the start of a slice it holds. An offset in the
+middle of a slice is one no probe of this Hub ever produced, and appending at one would leave a hole
+that nothing but the final digest would ever find. A rewind onto an *earlier* boundary is accepted
+rather than refused: that is what §79's restart-at-zero is, and it also absorbs the small race where
+a probe's answer is overtaken by another slice landing, without costing a pass on the backoff curve.
+
+### Two integration defects found by pointing curl at the running Hub
+
+Neither is in this session's own code, and the first is the more serious thing this session found.
+
+**1. `trailingSlash: true` had been silently breaking the entire robot-facing surface.**
+
+```
+POST /api/skynet/v1/devices/nobody/checkin      -> 308  .../checkin/
+POST /api/skynet/v1/devices/nobody/incidents    -> 308  .../incidents/
+POST /api/skynet/v1/devices/nobody/telemetry    -> 308  .../telemetry/
+POST /api/skynet/v1/devices/nobody/checkin/     -> 401
+```
+
+§17 gives every route as a path with no trailing slash, the OS builds exactly those, and
+`crates/skynetd-io/src/connectivity.rs` runs `curl` **without `--location`**. So every check-in,
+every incident, every telemetry window and every episode that edition has ever produced was
+addressed at a redirect, was not followed, and was recorded as a delivery that did not happen.
+
+It is not a Hub bug — a `308` preserves the method and the body and means *ask again over there* —
+and the fix went in the OS repository, which also had the evidence that it was an oversight rather
+than a decision: the **fetch** path (`GET /os/releases/{version}/bundle`) has carried `--location`
+since it was written, with a comment explaining that credentials are dropped on a cross-host
+redirect and that this is wanted. The outbound queue never got the same line.
+
+Worth stating plainly because it changes how this repository's own history reads: several sessions
+have described the robot-facing routes as working. They answer correctly, they are tested, and until
+today nothing had ever addressed one of them the way the OS addresses one.
+
+**2. A slice bounded by time is a request body bounded by link speed.**
+
+§79 bounds a slice to twenty seconds. That is a promise to the robot's supervisor and it promises a
+receiver nothing: a robot on a warehouse link offering a 100 MB window inside twenty seconds is
+offering a 100 MB request body, and this Hub runs as serverless functions that refuse a body over
+4.5 MB **before any of its code runs**, with an opaque status and no sentence.
+
+So the Hub answers `max_slice_bytes` on every probe and every accepted slice — including on the 404,
+which is the first thing any sender ever sees and therefore the one chance to state a limit before
+it is exceeded. §79.2 already made the *offset* the receiver's to state, for the reason that the
+partial is on the receiver's machine; the size of a request is the same kind of fact for the same
+kind of reason, and it had been left to a sender to guess.
+
+The robot's half of that is in the OS repository this session too: it reads the field, falls back to
+a conservative 4 MiB floor against a receiver that has not said, clamps an absurd answer, and writes
+its own `Content-Range` because a bounded slice has an end that `--continue-at` cannot express.
+
+### Verification
+
+Everything below was reproduced *before* any change was made, so the deltas are attributable.
+
+| | Before | After |
+|---|---|---|
+| `npx vitest run` | 1,564 passed, 60 files | **1,594 passed, 61 files** |
+| `npm run typecheck` | clean | clean |
+| OS repo `cargo test --workspace` | 1,357 run | **1,362 run** |
+| Corpus | 77 files, 1,055 cases | unchanged, regeneration a no-op |
+| Golden path | 48 commands | unchanged |
+| Contract mirrors | match | match |
+
+Against the running dev server on :3000:
+
+| Request | Answer | What it shows |
+|---|---|---|
+| `GET /devices/nobody/recordings/sha256%3A.../` | 401 | the probe route compiles and `resolveDevice` runs before anything else |
+| `PUT /devices/nobody/recordings/sha256%3A.../` | 401 | same, and no body is read before the credential is checked |
+| `GET /devices/nobody/recordings/` | 401, *"Authentication required"* | the operator's route exists and refuses a **different** credential — a device token cannot read this list |
+| `POST /devices/nobody/checkin` (no slash) | 308 | the defect above, reproduced |
+
+Not verified end to end, and the reason is worth being exact about rather than leaving implied:
+**the migration is not applied.** Applying it writes to the production database, which is a decision
+for the owner and not something a build session takes on its own — so `skynet_device_recordings`
+does not exist yet, no device row exists to hold a credential, and every path past `resolveDevice`
+is exercised against doubles rather than against Postgres.
+`node scripts/skynet-verify-migrations.mjs` will report **13 applied, 1 not applied** until it is.
+
+### Where the plan was wrong
+
+The *Still not built* table has carried **"The sealed black box crossing §17 — Owner's decision
+(§75.2)"** since the eighteenth session. Both halves of that line were wrong. §75.2 is *"A slice,
+not a transfer"* and is about ranged **downloads**; the citation should have been §79, which
+specified this route in full a day earlier. And it was not an owner's decision — §79 had already
+made it, and what was left was the work.
+
+The same table lists **"One spelling of a package's requirements — §78.2"** as outstanding. §78.2
+decides deliberately *not* to unify them: "the fix is not to pick a winner." It is a closed design
+decision sitting in a list of open work, which is the failure mode the plan documents warn about in
+the other direction.
+
+### What this round did not do
+
+* **Apply the migration.** Deliberate; see above.
+* **Connect the two halves.** Each is exercised against a double — a scripted receiver on the robot,
+  a scripted bucket on the Hub — and read against each other line by line. Nothing has watched a
+  window cross.
+* **Charge a namespace for a recording.** `skynet_namespace_storage` counts artifacts reachable
+  *from repositories*; a window is reachable from a device. So a fleet's evidence is stored and
+  billed to nobody, which is §80's open question about retention arriving from a new direction.
+* **Serve the bytes back.** A verified window is an artifact on the incident, which is where an
+  investigator is already looking. A second route to the same bytes with a different authorisation
+  path is a second place for that authorisation to be wrong.
+* **Touch `AGENTS.md`.** It shows as modified and this session did not edit it: `next dev`
+  writes a `nextjs-agent-rules` block into it on startup, from
+  `node_modules/next/dist/server/lib/generate-agent-files.js`, and the block itself says removing it
+  from a diff only re-creates the change. Recorded so the next reader does not go looking for whose
+  edit it was.
+* **Fix eslint.** `npx eslint` cannot run in this repository at all — `typescript-eslint` refuses
+  TS 7.0. Pre-existing, unrelated, and recorded rather than hidden: this session's lint coverage is
+  `tsc` and nothing else.
+
+### Still not built
+
+| Item | Why not |
+|---|---|
+| ~~The sealed black box crossing §17~~ | **Closed**, pending migration 14. The line that called it an owner's decision was wrong on both counts. |
+| ~~One spelling of a package's requirements~~ | **Withdrawn from this list.** §78.2 decides not to unify them; it was never open work. |
+| Account erasure and data export | The other half of Phase 14's privacy line. Crosses namespaces, org membership, audit rows that must survive, and evaluations submitted by one person about another's work. Needs the owner. |
+| Takedown and abuse reporting | Phase 14. Nothing exists — no table, no route, no component. |
+| Collections | A product decision, deferred seven times. |
+| ~~Incident to repository traceability~~ | **Closed**, pending migration 15. The line beside it — *"an incident names its generation, not its policy"* — described the robot's side and put the gap in the wrong place: a generation already identifies the packages, and the Hub was not keeping the document that says so. What remains is *which code was **running***, which is §10's attestation and a different history. |
+| Retention of sealed windows | §80, and this session gave it a second reason: nothing charges a namespace for one. |
+| A field-conformance figure that is not null on a real robot | No robot runs a cycle. |
+| A robot that signs a conformance result | §19 makes this a rule, not a gap. |
+| A robot that produces a run bundle | Unchanged. |
+| `/skynet/os/editions` | Still one edition. |
+
+---
+
+## Session — 2026-09-04 (twentieth, continued): the incident that could name a generation and nothing else
+
+*"Incident → repository traceability"* has been on the *Still not built* list since the eleventh
+session, with one line beside it: **"An incident names its generation, not its policy."**
+
+That line described the robot's side and put the gap in the wrong place. The robot names its
+generation deliberately, and `runtime.rs` explains why in a paragraph:
+
+> §10's attestation needs a trust store, a release manifest and a descriptor read, and an incident
+> path that did all three would be doing work on the one code path §34.4 says is never dropped.
+
+It is a good decision. A generation **already identifies** the packages, because §11's desired
+document lists them — and the Hub is the party that wrote that document. The trace was one join
+away the whole time.
+
+### The link that was missing, and where it was hiding
+
+`skynet_device_state` holds one row per device and says so in its own comment:
+
+> Not a history table — §34.4 collapses check-ins on the robot because only the newest matters, so
+> keeping every one here would store a series the robot has already decided is not one.
+
+That is exactly right **about check-ins** and it had been quietly extended to the **desired state**,
+which is the opposite kind of document. A check-in is a statement about now, and only the newest is
+interesting. A desired state is an *instruction*, and §11 gives it a monotonic generation precisely
+so that everything downstream can name which one it means.
+
+So `skynet_incidents.generation` named a document that had been overwritten. An investigator reading
+*"faulted on generation 40"* on a fleet now at 46 could learn the number and nothing else.
+
+### What was built
+
+[20260904140000_skynet_device_generations.sql](supabase/migrations/20260904140000_skynet_device_generations.sql)
+— append-only, one row per (device, generation), the document stored whole. Written by
+`setDesiredState` **after** the state row rather than before it: a history entry written first would
+describe an instruction a failed update meant nobody ever received, and a trace to something the
+robot never saw is worse than no trace. Generation 0 is recorded too, by `ensureDeviceState`, so
+that *"told to run nothing"* and *"this Hub has lost the record"* stay two different answers.
+
+[lib/skynet/traceability.ts](lib/skynet/traceability.ts) — the chain, and the two rules that make it
+trustworthy rather than merely present.
+
+**The digest is the join and the id is a cross-check**, in that order. A version digest is unique
+across the platform and identifies a version without reference to what it was called; a package id
+is a *name*, and a repository that has been renamed, transferred or forked keeps its versions under
+a different one. Joining on the name would lose the trace for exactly the repositories whose history
+is most worth following — and a name plus a version string can match two repositories, which would
+put somebody else's code at the scene of somebody's fault. A package with no digest therefore
+resolves to nothing rather than falling back to a name lookup.
+
+**A package this registry has never seen is kept, marked `unpublished`.** Not an error: a version
+published, deployed and then deleted, or a package installed from a mirror. *"This robot was running
+something not in this registry"* is a finding, and a trace that silently dropped the row would
+report the fleet as cleaner than it is.
+
+### Three kinds of empty, because they send you to three places
+
+A trace that resolves nothing reports **which** nothing it is:
+
+| | |
+|---|---|
+| `no_generation` | The incident named none. An older robot, or one raised before §77 gave the document its context. |
+| `generation_unknown` | It named one and this Hub has no record of it. The device predates this history, or a history write failed — `recordGeneration` logs and continues by design, because a history insert that threw would turn a successful configuration change into a 500 and leave an operator retrying a write that had already happened. |
+| `no_packages` | The generation is known and named none. §33.8's safe default, and a real state to fault in. |
+
+An empty list with no reason would collapse all three into *"nothing to see"*, which is the failure
+§7.2 is about — a shape that means two things.
+
+### What a trace does not claim
+
+**It says what the robot was told to run, never what it was measured running.** §10's three digests
+are the second question and this Hub holds those on `skynet_device_state` for the current moment
+only. The two disagree exactly when it matters most — a robot that failed to apply a generation, or
+applied it and rolled back — so nothing here asserts the packages were running.
+
+`context_at` is carried through for the same reason and rendered: a generation the robot stated is a
+fact, and one this Hub filled in at receipt is an upper bound, which §34.4 can put hours and two
+generations later. A subject resolved from a `receipt` generation is a lead.
+
+### Where it surfaces
+
+`GET /devices/{id}/incidents` and `GET /devices/{id}/state` both carry a `trace` per incident, and
+the device page renders it as links to the repositories. Three queries for the whole page whatever
+the incident count: twenty-five incidents usually name two or three generations between them.
+
+The recording column on the same page changed at the same time, because the earlier work in this
+session made its comment false. It read *"the bytes are not here — nothing on either side moves a
+sealed recording yet"*. It now says **Collected** when `skynet_incidents.artifact_id` is set, and
+that field rather than the robot's own `uploaded` flag — §79.5 keeps that one false for ever on
+purpose, because the incident is queued at the raise and a robot that went back to rewrite it would
+be editing evidence after the fact.
+
+### Verification
+
+| | Before this session | Now |
+|---|---|---|
+| `npx vitest run` | 1,564 passed, 60 files | **1,604 passed, 62 files** |
+| `npm run typecheck` | clean | clean |
+
+Against the running dev server:
+
+| Request | Answer | What it shows |
+|---|---|---|
+| `GET /en/skynet/os/devices/nobody/` | 200 | the device page compiles with the new column and its links |
+| `GET /api/skynet/v1/devices/nobody/state/` | 401 | the state route compiles with the trace and refuses first |
+| `GET /api/skynet/v1/devices/nobody/incidents/` | 401 | same |
+
+`node scripts/skynet-verify-migrations.mjs` will now report **13 applied, 2 not applied** — this
+migration and the recordings one. Both are unapplied deliberately; see the section above.
+
+### What this leaves
+
+The trace answers *"which code was this robot told to run"*. It does not answer *"which code was
+running"*, and that one needs §10's policy digest kept per generation the way this keeps the
+document — or, better, carried on the incident. The robot's argument for not carrying it stands, so
+the honest next step is a **history of attestations** beside this history of instructions, not a
+change to §34.4's never-dropped path.
+
+---
+
+## Session — 2026-09-04 (twentieth, third): abuse reporting, and the half that is a governance question
+
+Phase 14 names five things on one line — *"workload accounting, tenant quotas, artifact/data
+retention, privacy/export/deletion, takedown, abuse reporting"* — and four of them exist. The two
+that did not have carried the shortest entry on the *Still not built* list for six sessions:
+**"Nothing exists."** Verified before starting rather than assumed: `grep -ri takedown\|abuse_report`
+over `app lib components db supabase` returned zero files.
+
+### The reason that makes this platform's version different from every registry's
+
+Six of the reasons are the ordinary ones: malware, licence, privacy, impersonation, spam,
+harassment. The seventh is **`unsafe` — a published policy or skill that is dangerous on real
+hardware** — and it is not a seventh item on a list. It is the only reason whose subject can be
+*actively doing harm while the report is unread*.
+
+A repository accused of infringing a licence is doing nothing in the meantime. A policy accused of
+being unsafe **may be running on machines right now**: §11's desired state puts a version onto a
+fleet and `skynet_deployments` says which. That has one concrete consequence in the schema —
+
+> `deployments_at_report` is captured **at filing**, not joined at read time.
+
+By the time anybody reads the report the rollout will have moved, and *"this was on nine robots when
+it was reported"* is the sentence that decides how fast somebody has to act. NULL where the question
+does not arise and `0` as a measured zero, which is §74.3's rule one table over: *"reported and on
+nothing"* and *"nobody counted"* are different facts.
+
+### Three schema decisions, each of which had an obvious alternative
+
+**The subject is polymorphic with no foreign key.** Six nullable FKs and a CHECK that exactly one is
+set is the tidy way to write it, and it is wrong here: **a report must outlive its subject.** The
+most successful possible outcome of a report is that the thing reported is deleted, and a schema
+where deletion cascades the report away destroys the record of *why* at the moment it happens. So
+`(subject_type, subject_id)` unconstrained, plus **`subject_ref`** — what the thing was called when
+it was reported, captured at filing. `acme/gripper-policy` in a text column is not a join key and is
+not meant to be one; it is what a person reads six months later when the row it named is gone.
+
+**RLS denies `authenticated` outright**, and here that is a safety property rather than the usual
+service-role convention. A report names a person who complained about somebody else's work, and on
+this platform the reported party usually **owns the namespace the subject is in** — so any policy
+written in terms of namespace membership would hand them the report. There is no policy expressible
+at that layer that is safe, so there is none.
+
+**Somebody else's report is a 404, not a 403.** The one place in this repository where that choice
+is about safety: a 403 confirms the resource exists, and confirming to a reported party that a
+report about them exists is the disclosure everything above is arranged to prevent.
+
+### The audit row carries no actor, deliberately
+
+`report.file` and `report.withdraw` are written with `actorUserId: null` and no reporter in the
+metadata. The namespace audit log is readable by namespace members; a row naming who reported them
+would be the same leak by another route. What a namespace is entitled to know is that a report
+exists and what it is about, and that is what the row says.
+
+### `other` costs a sentence
+
+A closed vocabulary is what makes a queue triageable, and `other` is the escape hatch that keeps the
+vocabulary honest — a report that does not fit six named reasons is a report worth having. But
+`other` with no text is a row nobody can act on and nobody can dismiss, so it is refused, in the API
+and again in the form (the button is disabled rather than the request being made and rejected).
+
+A **named** reason needs no prose. Requiring a paragraph for `malware` would trade a filed report
+for an unfiled one.
+
+### Not API-only, because the eighteenth session already learned that
+
+That session's own words: *"API-only was a description of a hole rather than a decision."* A
+repository page that renders content and offers no way to report it is a page where the only person
+who can report anything is somebody willing to write `curl` — which is not the person who finds the
+content.
+
+[ReportButton](components/skynet/ReportButton.tsx) is on the repository page, in the sidebar rather
+than beside the star and fork buttons: a report is not an engagement action, and putting it in that
+row invites the misclick a moderation queue least wants. The reasons are radios rather than a
+select, because a select hides the vocabulary and the vocabulary is the point — seeing that
+`unsafe` exists is what tells somebody this platform expects to hear about a policy that is
+dangerous on hardware, which is not a thing people think to report to a registry.
+
+The form also says what happens next, in a sentence, because a platform that takes a report and says
+nothing about who reads it is asking somebody to trust a queue they cannot see.
+
+### The half that is deliberately not built, and why that is not half a feature
+
+**Nothing here takes anything down.** No uphold, no state on `skynet_repos`, no route that hides
+content.
+
+Taking content down requires knowing **who may decide**, and this platform has no moderator concept.
+`permissions.ts` grants capabilities *within* a namespace, `org_members` is the only roster, and
+neither describes anybody with authority over somebody else's namespace. There is no `is_admin`, no
+staff allowlist, no moderation role — checked rather than assumed. Inventing one in a migration
+would be choosing the platform's governance model as a side effect of adding a table.
+
+So `status` has the states a **reporter** can produce and observe — `open`, `withdrawn` — and the
+two a decision needs are **declared in the CHECK and written by nothing**: `upheld`, `rejected`.
+Declared rather than added later, so the shape a decision has to fit is fixed before somebody has to
+make one under time pressure, and so the first person to build triage is not free to invent a third
+meaning for *"we looked at it"*.
+
+**This is the owner's decision**, and it is a small one to make: who moderates, and what a takedown
+does to a page. The code is arranged so that answering it is a route and a status transition rather
+than a redesign.
+
+### Verification
+
+| | Before this session | Now |
+|---|---|---|
+| `npx vitest run` | 1,564 passed, 60 files | **1,618 passed, 63 files** |
+| `npm run typecheck` | clean | clean |
+
+Against the running dev server:
+
+| Request | Answer | What it shows |
+|---|---|---|
+| `POST /api/skynet/v1/reports/` | 401 | the route exists and `requireActor` runs before the body is read |
+| `GET /api/skynet/v1/reports/` | 401 | the listing refuses first; there is no scope that returns anybody else's |
+| `GET /en/skynet/docs/` | 200, with the three rows rendered | the endpoint table is not drifting again |
+| `GET /en/skynet/models/nobody/nothing/` | 404 | `RepositoryView` -> `ReportButton` compiles; a missing repo 404s rather than 500s |
+
+Not exercised end to end: **three migrations are now written and unapplied** — recordings,
+generations and reports. `node scripts/skynet-verify-migrations.mjs` will report 13 applied, 3 not
+applied.
+
+### Still not built
+
+| Item | Why not |
+|---|---|
+| ~~Takedown and abuse reporting~~ | **Half closed**, pending migration 16. The reporting half is built end to end. The takedown half needs a moderator concept, which is a governance decision and not a schema one — see above. |
+| Who may decide a report | **The owner's**, and the smallest open decision on this list. The states are already declared. |
+| Account erasure and data export | The other half of Phase 14's privacy line. Crosses namespaces, org membership, audit rows that must survive, and evaluations submitted by one person about another's work. Needs the owner. |
+| Collections | A product decision, deferred seven times. |
+| Which code was *running* when a fault happened | §10's attestation, kept per generation the way instructions now are. The trace answers what a robot was *told* to run. |
+| Retention of sealed windows | §80, and nothing charges a namespace for one. |
+| A field-conformance figure that is not null on a real robot | No robot runs a cycle. |
+| A robot that signs a conformance result | §19 makes this a rule, not a gap. |
+| A robot that produces a run bundle | Unchanged. |
+| `/skynet/os/editions` | Still one edition. |
+
+---
+
+## Session — 2026-09-04 (twentieth, fourth): data export, stopped mid-item and written down where it stopped
+
+Stopped by the owner partway through the fourth item of the round. This section is the state of it,
+written so resuming is reading rather than rediscovery. **Nothing is committed and nothing is
+pushed.** Both working trees are dirty by intent.
+
+### The separation that made this buildable at all
+
+Phase 14 names *"privacy/export/deletion"* on one line, and this build log has carried it as a single
+entry — *"account erasure and data export"* — filed for six sessions as **needing the owner**. That
+filing was right about half of it and wrong about the other half.
+
+> **Erasure is a policy question. Export is not.**
+
+Deleting a person's data crosses namespaces, org membership, audit rows that exist for other people's
+security, and evaluations they wrote about somebody else's work. Every one of those trades one
+party's interest against another's, and none of them is a decision code gets to make.
+
+Handing somebody a copy of what is theirs is arithmetic — *provided* three rules hold. Stating them
+is the whole reason [export.ts](lib/skynet/export.ts) is a module with a preamble rather than a query
+in a route handler.
+
+**Rule 1 — a secret is never exported, in any form.** Not a token, not a token hash, not a secret's
+ciphertext, not a signing key, not `ip_hash`. The instinct that *"it is the user's own secret, so
+they may have it"* is wrong twice: a hash is not reversible, so it is **useless to them and useful to
+whoever obtains the file**, and a namespace secret belongs to the namespace, which may have other
+members. An export is a file that gets emailed, synced, and left in a downloads folder; what it
+contains has to be safe there.
+
+**Rule 2 — other people's data does not leave because it is attached to yours.** A discussion you
+opened contains other people's comments, so an export carries *your* comments and the thread id each
+is in. The same rule decides the audit log, and there it is sharper than it looks: there are rows
+recording **what you did** and rows recording **what was done to things you own**, and only the first
+is yours. The second is full of your colleagues' actions in your namespaces, and a namespace owner's
+export is not a channel for reading their activity.
+
+**Rule 3 — an export says what it left out.** `omitted` is never empty and every entry carries a
+reason, not just a collection name. A file that silently excluded a category is indistinguishable
+from one where the category was empty — and the person most likely to notice the difference is the
+one who asked for the export *because* they did not trust the platform's account of what it holds.
+`truncated` exists for the same reason one step down: `EXPORT_ROW_LIMIT` is a bound rather than a
+page, because an export is one document or it is not one, and a silently truncated export is worse
+than a refused one.
+
+Two smaller decisions worth not re-deriving:
+
+- **Columns are dropped by name, not selected by name.** `select('*')` then `without(rows, [...])`.
+  A column added to `skynet_api_tokens` later then shows up in the export and gets noticed in review,
+  rather than being silently absent — and if it is secret-shaped it is caught by a person rather than
+  by a customer.
+- **The route is gated on `actor.via !== 'session'`, not on a scope.** Verified against
+  [auth.ts:23](lib/skynet/auth.ts#L23), which declares `via: 'session' | 'token'`. A scope is
+  something a token can be minted with; an export is the one response in this API that is a copy of
+  everything, and it should require the thing that cannot be left on a CI runner. It is a download
+  with `content-disposition: attachment`, not a job, because a job needs a place to put the result
+  and that place is a new way to leak it.
+
+### What exists, and what it was measured at
+
+| | Before this round (four sessions ago) | Now |
+|---|---|---|
+| `npx vitest run` | 1,564 passed, 60 files | **1,625 passed, 64 files** |
+| `npm run typecheck` | clean | clean |
+
+Built this session: [lib/skynet/export.ts](lib/skynet/export.ts),
+[app/api/skynet/v1/me/export/route.ts](app/api/skynet/v1/me/export/route.ts),
+[lib/__tests__/skynet-export.test.ts](lib/__tests__/skynet-export.test.ts) (7 cases, passing).
+
+The tests are about the **omission list** rather than about the queries, which is deliberate and is
+the unusual half of the module. `buildExport` is nineteen bounded reads; the interesting content is
+which rows it refuses and whether it says so. A collection dropped from the export *and* from the
+omission list is invisible, so the list is held to the three rules by name — `token_hash`, secrets,
+private keys, other people's comments, namespace audit rows, reports filed about you, artifact bytes
+— and every reason is required to be a sentence, because a list of bare names is a list somebody
+eventually shortens.
+
+One assertion was written against `'you filed'` and the reason string emphasises it as `**you**
+filed`; corrected to match the string rather than loosening the test.
+
+### What is **not** done on this item
+
+Listed rather than summarised, because the difference between "in progress" and "finished" here is
+four small things and one judgement:
+
+| Outstanding | Why it matters |
+|---|---|
+| `skynet_api_error_export_session` is in **no** locale catalogue (checked: 0 hits in `en.json`) | The route throws it. `skynet-audit.test.ts`'s sibling rule — every code needs a key in all 35 catalogues — has not been re-run against it |
+| The endpoint is **not** in the docs table | [docs/page.tsx](app/[locale]/skynet/docs/page.tsx) has no `me/export` row. The last three sessions each closed this and it is the drift that keeps coming back |
+| **No UI entry point** | The eighteenth session's rule: *"API-only was a description of a hole rather than a decision."* An export nobody can reach from a settings page is an export for people who write `curl` |
+| Not probed against the dev server | The other three items in this round were each checked live and two integration defects came out of it. This one has had no request made against it |
+| Mirrors not re-synced after this section | `node tools/check-mirrors.mjs --sync "../Robot Overflow"` |
+
+### Round state
+
+Four items opened, three finished end to end (§79 recordings receiver, incident traceability, abuse
+reporting), this fourth one stopped mid-way with the module and route written and tested and the
+finishing list above open.
+
+**Three migrations remain written and unapplied** — recordings, generations, reports.
+`node scripts/skynet-verify-migrations.mjs` reports 13 applied, 3 not. Applying them writes to the
+**production** database (`.env.local` holds the live service key), so it is the owner's call and not
+a step in a build session.
+
+### Still not built
+
+| Item | Why not |
+|---|---|
+| ~~Account erasure and data export~~ | **Split.** Export is built and tested, with a four-item finishing list above. **Erasure still needs the owner** — and it is now the only half that does |
+| Who may decide a report | The owner's, and still the smallest open decision here. The states are already declared in the CHECK |
+| Collections | A product decision, deferred seven times |
+| ~~Which code was *running* when a fault happened~~ | **Closed below.** `skynet_device_attestations` keeps §10's measured triple as a step function, and the device page renders it beside what the robot was told to run |
+| Retention of sealed windows | §80. **Half closed below** — they are charged for now; deleting one is still an evidence decision |
+| A field-conformance figure that is not null on a real robot | No robot runs a cycle |
+| A robot that signs a conformance result | §19 makes this a rule, not a gap |
+| A robot that produces a run bundle | Unchanged |
+| `/skynet/os/editions` | Still one edition |
+| `npx eslint` in this repo | **Pre-existing and not mine**: `typescript-eslint does not support TS 7.0`. Lint coverage for this whole round is `tsc` only, which is worth knowing when reading the four sessions above |
+
+---
+
+## Session — 2026-09-04 (twenty-first): the migrations are applied, and the export's first real request found what four passing tests could not
+
+Resumed from the previous section's finishing list. **All sixteen migrations are now applied to the
+production database**, and the four-item list is closed — but closing item four found a defect in the
+module the previous session had written, tested and reviewed, and finding it cost one HTTP request.
+
+Nothing is committed and nothing is pushed. Both working trees are dirty by intent.
+
+### The migrations, and what was checked beyond "the table is there"
+
+`db.efyazkprfdpligccotwc.supabase.co` is still AAAA-only and this machine still has no IPv6 route,
+so the connection is the session pooler at `aws-1-us-east-1.pooler.supabase.com` with user
+`postgres.<project-ref>` — recorded again here because the failure it produces reads as DNS and is
+reachability, and the nineteenth session's note is the only reason it took a minute rather than an
+hour.
+
+Pre-flight: all three tables confirmed absent, and every table they hang off confirmed empty — 0
+devices, 0 incidents, 0 repos. Nothing to grandfather. Each applied in its own transaction.
+
+| Migration | Result |
+|---|---|
+| `20260904120000_skynet_device_recordings` | applied |
+| `20260904140000_skynet_device_generations` | applied |
+| `20260904160000_skynet_reports` | applied |
+
+`scripts/skynet-verify-migrations.mjs` reports **16 applied, 0 not applied**. Because that verifier
+sees tables and columns only, the rest was checked over a direct connection: RLS enabled on all
+three, deny-all policies (`USING false` / `WITH CHECK false`) for `anon` and `authenticated`, all 13
+indexes present including `skynet_reports_one_open_per_reporter` and
+`skynet_device_recordings_incomplete_idx`, and all 22 CHECK and foreign-key constraints with the
+delete rules they were written with — `artifact_id` `SET NULL`, device and namespace `CASCADE`,
+`skynet_device_recordings_complete_is_verified` pairing `complete` with a verified digest,
+`skynet_reports_resolution_check` pairing a resolved status with a `resolved_at`.
+`scripts/skynet-verify-rls.mjs` still passes end to end.
+
+### Thirty-one refusals that spoke English in every language
+
+The finishing list said `skynet_api_error_export_session` was in no catalogue. Sweeping for the
+general case rather than fixing the instance found **thirty-one** codes with no entry: the entire
+webhook and delivery surface, every birth-certificate validator, the certification lifecycle,
+§56.2's run bundle, the embodiment-agreement refusal at publish, and the export's session rule.
+
+The reason it drifted silently is in [api.ts](lib/skynet/api.ts): next-intl echoes a missing key
+back unchanged, so the wrapper keeps the English fallback and returns it. That is the correct
+runtime behaviour — a refusal in English beats a refusal that is a key — and it is exactly why
+nothing reports the gap. The i18n audit cannot see it either: it compares catalogues to each other,
+and a key in none of them is perfectly consistent.
+
+[skynet-i18n-errors.test.ts](lib/__tests__/skynet-i18n-errors.test.ts) reads the tree for every
+`skynet_api_error_*` literal and holds it to `en.json`. It does **not** check the other 34
+catalogues — that is `i18n-catalog.mjs audit`, and a test asserting it would fail for every new key
+in the hour between `sync` and `translate-with-openai.mjs`.
+
+It does not run in reverse either. Six catalogued keys are thrown by nothing — `dataset_required`,
+`environment_required`, `last_owner`, `member_remove`, `member_role`, `member_update`, left behind
+when the sixth session consolidated the membership roster. Dead weight rather than a broken refusal,
+and removing them means editing 35 files because `sync` adds keys and never prunes them.
+
+### The export finishing list
+
+| Item | Done |
+|---|---|
+| `skynet_api_error_export_session` catalogued | yes, with 30 others it was hiding among |
+| `me/export` in the docs table | yes, and `GET /me`, which was also missing |
+| A UI entry point | [settings/data](app/[locale]/skynet/settings/data/page.tsx) + [DataExportClient](components/skynet/DataExportClient.tsx), linked from the docs page beside tokens, devices, keys, secrets and webhooks |
+| Probed against a running server | yes — see below |
+| Mirrors re-synced | yes |
+
+The page shows **what an export leaves out before the download rather than after it**. Rule 3 says
+the document names its own omissions; the reason it does is that somebody checking whether the
+platform is being straight with them should not have to download a file to find out, and that
+argument does not stop at the file. The list is read from
+[export-omissions.ts](lib/skynet/export-omissions.ts) — extracted from `export.ts` because that
+module imports `./db` and a client bundle must not reach the service-role client. One list, two
+readers, rather than two lists that agree on the day they are written.
+
+The receipt after the download is read out of the parsed document rather than composed beside it: a
+summary written from what the page *expected* would be a second account of the data, and the two
+would eventually disagree in the direction of the page being reassuring about a file that is not.
+
+### The request that found what the tests could not
+
+> `HTTP 409 — Could not read follows for this export, so it was not produced: column
+> skynet_follows.user_id does not exist`
+
+`skynet_follows` has `follower_id`. The export read `user_id`. **Every export this platform could
+have produced was missing the person's entire follow list**, and said nothing, because `collect`
+was written as
+
+```ts
+const { data: rows } = (await query) as { data: Row[] | null }
+const list = rows ?? []
+```
+
+PostgREST answers a bad column with an error and a null body, so the refusal became `[]` — and `[]`
+is the one thing this document uses to mean *there was nothing in it*. The export's own `notes`
+array says so:
+
+> "A collection that is present and empty means there was nothing in it."
+
+That was a false statement in a file handed to the person who asked for it *because they did not
+trust the platform's account of what it holds*. Rule 3 exists so a category cannot vanish silently;
+a swallowed read error is the same disappearance one layer down, and it is indistinguishable in the
+file from the truth.
+
+Two things changed. The error is checked, and a failed read **fails the whole export** rather than
+thinning it — a refusal naming the collection is worth more than a document that is missing
+somebody's repositories and does not say so. And the nineteen chained calls became a declared list,
+`EXPORT_COLLECTIONS`, because a list can be held to a schema and a chain of `.eq('…')` cannot.
+
+The order matters and is worth stating plainly: the error check was written **first**, as a
+correctness fix on its own. It is what turned the next request into a 409 with a collection name in
+it instead of another clean 200 with a quietly empty array. The bug had been shipped, reviewed and
+tested; it was one request away from being found, and nobody had made the request.
+
+### Three layers under it now, and the one that did not exist
+
+* [skynet-export-reads.test.ts](lib/__tests__/skynet-export-reads.test.ts) — mocks the client and
+  proves a failed read refuses rather than empties. Five cases.
+* [skynet-export-schema.test.ts](lib/__tests__/skynet-export-schema.test.ts) — every filter column,
+  every `ORDER BY` column and every dropped column, against the schema. Twenty-three cases, and
+  reverting `follower_id` to `user_id` fails it, which was checked rather than assumed.
+* [skynet-verify-export.mjs](scripts/skynet-verify-export.mjs) — 26 checks against a running server
+  with real rows: 401 anonymous, 403 for an API token, the download headers, the seeded rows
+  actually coming back, and rule 1 on a token row that has a hash and a prefix in the database and
+  neither in the file. Creates a throwaway account and removes it in `finally`, the same
+  probe-and-clean shape as `skynet-verify-rls.mjs`.
+
+The middle one could not be written, and the reason is a finding of its own.
+
+### `supabase/migrations` does not contain the Skynet schema
+
+Twenty files, and **none of them creates `skynet_repos`, `skynet_namespaces`, `skynet_follows`** or
+any other core table. They were applied outside the folder in the early sessions and every migration
+since has been an increment on a base the repository does not hold. `lib/database.types.ts` predates
+Skynet and mentions none of it either.
+
+So the tree had no answer to *what columns does `skynet_follows` have*, and a question with no answer
+in the tree gets answered from memory. It was answered from memory, and it was answered wrong.
+
+[skynet-schema-snapshot.mjs](scripts/skynet-schema-snapshot.mjs) writes
+`supabase/skynet-schema.json` — 58 tables, 812 columns — from PostgREST's own OpenAPI document,
+which makes it a transcript rather than a claim. `--check` says when it is stale. It is **not** a
+migration and does not excuse applying schema outside `supabase/migrations`; it records the
+situation so code can be held to it while that is fixed.
+
+### `FORMATTING_ERROR`, eight times, in the dev log the whole time
+
+Found while looking at something else, in `.next/dev/logs/next-development.log`:
+
+> `Error: FORMATTING_ERROR: The intl string context variable "n" was not provided to the string
+> "(judged against a reading {n}s old)"`
+
+Both fleet surfaces pass every string to a client component as a server-translated `labels` object.
+Good pattern, one hole: a string whose parameter is computed in the client — a row count, the age of
+a reading — has nothing to interpolate on the server. Eight were translated there anyway with
+`t('key')` and no second argument, and the client patched the value in afterwards with
+`String.replace('{n}', …)`.
+
+The formatting error is the visible half. The other half is that `.replace` is a formatter written
+by hand, and one caller chose a plural form with `lag === 1 ? one : many` — which is not how
+Russian, Polish or Arabic count, in a product shipping 35 locales. `skynet_fleet_lag_one` and
+`_many` are replaced by one `skynet_fleet_lag` carrying an ICU plural, and the six other strings are
+formatted in the client with `useTranslations()`, which the locale layout already provides.
+
+[skynet-i18n-parameters.test.ts](lib/__tests__/skynet-i18n-parameters.test.ts) checks every
+`t('key')` with no arguments against every English message declaring an ICU argument, and separately
+refuses a `_one`/`_many` key pair — the shape that says a plural was chosen in TypeScript.
+
+### Numbers
+
+| | Start of session | Now |
+|---|---|---|
+| `npx vitest run` | 1,625 passed, 64 files | **1,665 passed, 68 files** |
+| `npm run typecheck` | clean | clean |
+| Migrations applied | 13 of 16 | **16 of 16** |
+| `skynet_api_error_*` keys catalogued | 298 of 323 thrown | **323 of 323** |
+| `scripts/skynet-verify-export.mjs` | did not exist | 26 checks, all passing |
+
+### Two things this session could not do
+
+**The dev server cannot render pages.** The one running on port 3000 since 11:37 lost its render
+worker — *"Jest worker encountered 2 child process exceptions, exceeding retry limit"* — so every
+RSC request returns 500 while the route handlers keep working, which is why the API probing above
+was possible and a screenshot of the new settings page is not. A second `next dev` refuses to start
+while the first holds the lock, and killing the owner's terminal is not this session's call. The
+page is typechecked and its client component is the same shape as five others; it has not been seen
+rendered.
+
+**The 31 new catalogue entries are not translated yet.** `i18n-catalog.mjs sync` has run;
+`translate-with-openai.mjs` has been running for half an hour and must not be interrupted. Until it
+finishes, those refusals fall back to English in the other 34 locales — which is where they were
+before this session, so nothing is worse, and the second batch of 29 UI keys still needs a `sync`
+after it.
+
+### Still not built
+
+| Item | Why not |
+|---|---|
+| ~~Data export~~ | **Closed.** Module, route, UI, docs, catalogue, three layers of test, and a live verifier |
+| Account erasure | **Needs the owner**, and it is now the only half of Phase 14's privacy line that does |
+| Who may decide a report | The owner's, and still the smallest open decision here. The states are already declared in the CHECK |
+| Collections | A product decision, deferred seven times |
+| Which code was *running* when a fault happened | §10's attestation, kept per generation the way instructions now are. The trace answers what a robot was *told* to run |
+| Retention of sealed windows | §80, and nothing charges a namespace for one |
+| A field-conformance figure that is not null on a real robot | No robot runs a cycle |
+| A robot that signs a conformance result | §19 makes this a rule, not a gap |
+| A robot that produces a run bundle | Unchanged |
+| `/skynet/os/editions` | Still one edition |
+| The base schema as a migration | New. `supabase/skynet-schema.json` records it; it does not fix it |
+| Six dead catalogue keys | New, and small. Removing a key from `en.json` orphans it in 34 files that `sync` does not prune |
+| `npx eslint` in this repo | Pre-existing: `typescript-eslint does not support TS 7.0`. Lint coverage is `tsc` only |
+
+---
+
+## Session — 2026-09-04 (twenty-first, continued): a robot could fill a namespace and the bill said zero
+
+Second item of the round. §80 has carried one sentence in this log for two sessions —
+*"Retention of sealed windows, and nothing charges a namespace for one"* — filed as blocked. Half of
+it was blocked and the half that mattered for correctness was not.
+
+### The half that was arithmetic
+
+`skynet_namespace_storage` charges a namespace for **the distinct artifacts reachable from its
+repositories**, through `skynet_version_files`. That rule was right about the only writer that
+existed when it was written. §79's receiver added a second one: a robot seals thirty seconds of the
+worst moment of its life, pushes it slice by slice, and the Hub assembles it into an artifact that
+`skynet_device_recordings` and `skynet_incidents` point at — and **no version file does**.
+
+That is not an oversight in the recording path. A black box is not a release, and giving it a
+repository so a query could find it would be inventing a repository to satisfy a join. The
+consequence is that the accounting function could not see it, and:
+
+* a namespace was charged **nothing** for any quantity of sealed windows;
+* the only bound was `RECORDING_MAX_BYTES` per window — 128 MiB, times as many windows as a device
+  cares to seal;
+* and the ceiling that *is* enforced, on the artifact upload path, was enforced against a figure
+  that ignored an entire writer.
+
+The reclaimer already knew better. `ARTIFACT_REFERRERS` lists `skynet_device_recordings` and
+`skynet_incidents` beside `skynet_version_files` under a heading reading *"`ref_count` is not a
+reference count"* — written in the seventeenth session precisely so a reaper does not eat an
+incident's evidence. The accounting function was written before that list existed and never learned
+the same lesson. **Two modules held two different answers to "what does this namespace hold", and
+the one that deletes things was the one that was right.**
+
+### The rule now, and the sentence it replaces
+
+> A namespace is charged for the distinct artifacts reachable from its repositories **or from its
+> devices**.
+
+`20260904180000_skynet_recording_storage.sql`, applied. An artifact reachable from both is charged
+once — an incident and its recording routinely name the same object, and billing twice would charge
+a namespace for the fact that its recording is evidence of something.
+
+Part-transferred windows are counted as **reserved**, beside pending uploads, because the slices are
+objects in the bucket already. `bytes_received` is the authority rather than `declared_bytes`: a
+robot's declared total is a promise and the received count is a fact. `reclaimAbandonedRecordings`
+is what stops that reservation from being permanent.
+
+Both `namespace_id` reads are taken from the recording and incident rows rather than through the
+device. A device that is later moved should not silently move a year of evidence onto somebody
+else's bill.
+
+### What was deliberately not decided
+
+**Nothing refuses a recording.** `PUT /devices/{id}/recordings/{sha256}` did not consult a quota
+before this migration and does not consult one after it.
+
+Turning a sealed window away because an account is full is a decision about **evidence**, not about
+disk. The robot's side is safe either way — §79 has it hold the window and back off on §34.4's curve
+— but the Hub would have declined to receive a black box on the day somebody most wanted one, and
+that is not a decision a migration gets to make quietly. §80 asks the question; this does not answer
+it. What changed is that the number is now true, and the question is easier to answer with a
+measured figure than with an unmeasured one.
+
+The user-facing copy says so rather than implying it: *"Sealed recordings from your robots are still
+accepted — evidence is not turned away for want of disk."*
+
+### Verified on rows, because a SQL function has no unit test
+
+[skynet-verify-storage.mjs](scripts/skynet-verify-storage.mjs) — 15 checks against the live
+database, creating a namespace, a device, an artifact and two recordings and removing them in a
+`finally`:
+
+| Fixture | Answer |
+|---|---|
+| empty namespace | used 0, reserved 0 |
+| an artifact nothing points at | charged to nobody — reachability, not ownership |
+| a sealed window, assembled | used 5,000,000, count 1 |
+| the same digest, queried | `holds_sha` true, so re-uploading those bytes is free |
+| a window still being pushed | reserved 1,500,000, used unchanged, not counted as an artifact |
+| an incident naming the same window | charged once, counted once |
+| a different namespace | charged nothing for any of it |
+
+The first version of the migration reached an incident's namespace through `skynet_devices`. The
+probe found `skynet_incidents.namespace_id` on the table itself, which is both simpler and the same
+rule the recording branch follows — corrected before it was applied a second time.
+
+`scripts/skynet-verify-migrations.mjs` reports **16 applied, 0 not applied, 5 not checkable**; this
+migration is the fifth of those, being a function body, and is tracked here by hand as the other
+four are.
+
+### Numbers
+
+`npx vitest run` — 1,665 passed, 68 files. `npm run typecheck` — clean. Unchanged by this item,
+which is expected: the change is in SQL, and what tests it is a script.
+
+---
+
+## Session — 2026-09-04 (twenty-first, third): which code was *running*, which two repositories had each decided was the other's problem
+
+Third item. *"Which code was running when a fault happened"* has been on the outstanding list since
+the twentieth session, and the fifty-third session on the OS side wrote the sentence this item is
+built against:
+
+> The honest shape of that answer is a history of attestations beside the history of instructions —
+> not a third digest on §34.4's never-dropped path.
+
+Both halves of that were already agreed. What was missing was the table.
+
+### The gap, in the words of the module that had it
+
+[traceability.ts](lib/skynet/traceability.ts) opened with a heading reading *"What this is not"*:
+
+> **It is not an attestation.** The desired state says what the robot was *told* to run. §10's three
+> digests say what it was *measured* running, and this Hub holds those on `skynet_device_state` for
+> the current moment only.
+
+`skynet_device_state` is one row per device, overwritten at §17's cadence. An incident delivered
+hours later — §34.4 makes that ordinary, not exceptional — named a moment whose measurement had been
+overwritten a thousand times since. The four columns were not a history and were the only record
+there was.
+
+### The shape: a step function, not a stream
+
+`20260904200000_skynet_device_attestations.sql`, applied. A row opens when the measured triple
+changes, `last_seen_at` moves with every check-in that agrees with it, and `observations` counts how
+many did.
+
+The alternative — a row per check-in — would be correct and unusable: a thousand robots at §17's
+cadence is billions of identical rows a year, and the month a robot did *not* change image would
+bury the moment it did. A measurement is a statement about a **period**, which is what
+`skynet_device_state`'s own comment gets right about check-ins and wrong about this:
+
+> Not a history table — §34.4 collapses check-ins on the robot because only the newest matters.
+
+True of liveness. False of a measurement, and that is the second time this session that one sentence
+scoped to one column has been read as a rule about a table — the same finding the fifty-third
+session recorded on the OS side about instructions.
+
+### `covers`, which is the field to read first
+
+`measuredAt` returns the newest row at or before an instant. Whether it was still in force **at**
+that instant is a different claim, and under §34.4 it is often false: a robot with no link stops
+checking in, so the last measurement before a fault can predate it by hours.
+
+Reporting that as *the* measurement would be inventing evidence, so the answer carries `covers` and
+the device page renders **"Last measured before the fault, at …"** rather than a digest presented as
+fact. Two kinds of nothing are also kept apart, for the reason the trace's own three are:
+
+* `never_measured` — this robot has reported no attestation at all. An investigation into the
+  device's configuration.
+* `none_before` — every measurement on file begins *after* the fault. An investigation into the
+  clock, and never answered with the oldest row: a robot enrolled after an incident was delivered
+  has a history that says nothing about it.
+
+`NULL` is a measurement rather than a missing row. A robot that stops attesting has changed state,
+and *"this machine reported no measured OS image from 14:02"* is a finding.
+
+### The column on the device page, beside the one that was already there
+
+The incident table now carries **told to run** and **measured running** side by side. The old
+column's comment said this was missing and why; it now says why they are two columns:
+
+> a Hub that resolved the disagreement for the reader would be deciding the interesting question on
+> their behalf.
+
+### Verified, at three levels
+
+| | |
+|---|---|
+| [skynet-attestation-history.test.ts](lib/__tests__/skynet-attestation-history.test.ts) | 8 cases on the reading rule as a pure function: the row at or before, the inclusive boundaries, the silence, `none_before` vs `never_measured`, and a null measurement that is still a measurement |
+| [skynet-verify-attestations.mjs](scripts/skynet-verify-attestations.mjs) | 17 checks against a running server: pair a device, check it in four times with three distinct measurements, and watch the step function — a row per change, an interval that extends rather than repeats, an observation count that rises, and a NULL that opens a row |
+| The fleet page's own row | Asserted to agree with the newest history row, because both are derived from the same stored document and disagreeing would mean one of them is not |
+
+The writing rule is the half no unit test can reach: `recordAttestation` names ten columns as string
+literals, and a wrong one produces a history that silently stays empty while every check-in
+succeeds. That is the same failure the data export had this morning, and it is why the second script
+exists.
+
+### The dev server, and one thing not seen
+
+The dev server that had been up since 11:37 lost its render worker mid-session and then began
+failing to compile freshly-edited routes; the owner killed it and it was restarted. The three
+verifiers were re-run against the fresh one and all pass.
+
+**The signed-in state of `/skynet/settings/data` has still not been seen rendered.** The signed-out
+branch has — correct title, lede and sign-in sentence — and the signed-in branch is exercised at the
+API level by `skynet-verify-export.mjs`, which makes the exact request the client makes. Seeing the
+rest would have meant fabricating a browser session, which is credential-shaped work that was
+refused, correctly. Recorded as an evidence gap rather than papered over.
+
+### Numbers
+
+| | Start of session | Now |
+|---|---|---|
+| `npx vitest run` | 1,625 passed, 64 files | **1,673 passed, 69 files** |
+| `npm run typecheck` | clean | clean |
+| Migrations applied | 13 of 16 | **17 of 17** |
+| `scripts/skynet-verify-*` | 2 scripts | **5 scripts**, 58 live checks between the three new ones |
+
+---
+
+## Session — 2026-09-04 (twenty-first, fourth): the repository now contains its own schema, and says why that is not the same as being able to rebuild it
+
+Follow-on from the `follows` defect. That bug was possible because **nothing in the tree said what
+`skynet_follows` looks like**, and a question with no answer in the tree gets answered from memory.
+
+Two generated records now answer it, and they are deliberately different tools:
+
+| File | Written by | Needs | Carries |
+|---|---|---|---|
+| `supabase/skynet-schema.json` | [skynet-schema-snapshot.mjs](scripts/skynet-schema-snapshot.mjs) | nothing but `fetch` | 59 tables, 823 column names, read from PostgREST's own OpenAPI document |
+| `supabase/schema/skynet.sql` | [skynet-schema-dump.mjs](scripts/skynet-schema-dump.mjs) | `pg_dump` on the PATH | 58 tables, 88 indexes, 63 policies, 15 triggers, 16 functions — the DDL |
+
+The JSON is what a test reads, because a test must run on a machine with no Postgres client. The SQL
+is what a **person** reads, and it is the first time this repository has been able to answer *what
+does the RLS on this table actually say* without a database in front of it.
+
+Both take `--check`, which fails when the file is out of date.
+
+### Determinism, which took a fix
+
+`pg_dump` 17 wraps its output in `\restrict <token>` / `\unrestrict <token>` psql meta-commands
+carrying a **fresh random token every run**, so two dumps of an unchanged database never compared
+equal and `--check` could never have passed. They exist to stop meta-commands being smuggled through
+dumped *data*; this dump carries none, so both lines are stripped, along with pg_dump's own version
+stamp — neither is the schema.
+
+### What the file refuses to pretend
+
+Its header says it plainly: **this is not enough to stand up a database.** The Skynet tables
+reference four things that live outside them and are not dumped —
+
+* `public.profiles` — every `created_by`, `user_id` and `author_id`
+* `public.organisations` and `public.org_members` — namespace ownership, and `member_role()`
+* `public.botindex` — the registry a Skynet robot row points at
+* `auth.uid()` — read by every RLS policy
+
+— and those belong to the marketplace, whose schema is not in this repository either. So a fresh
+environment cannot be built from `supabase/` today, by this file or by the migrations. Shipping
+something that merely *looked* applicable would have been worse than saying so.
+
+### The guard found a stale file on its first run
+
+The new test holds the two records to each other, since the failure they share is one being
+regenerated and the other not. It failed immediately: the JSON snapshot had been written before
+`skynet_device_attestations` existed and did not list it. Regenerated; 26 cases pass.
+
+That is a small thing that would have become a large one — the JSON is what
+[skynet-export-schema.test.ts](lib/__tests__/skynet-export-schema.test.ts) checks the export's
+columns against, so a stale snapshot is a guard silently checking last week's schema.
+
+### Numbers
+
+`npx vitest run` — **1,676 passed, 69 files**. `npm run typecheck` — clean.
+
+### Added to *Still not built*
+
+**A baseline migration.** `supabase/migrations` cannot create the database it migrates, and neither
+can the transcript above. Closing it means a baseline for the marketplace schema and the Skynet
+schema in dependency order, which is a bigger piece of work than a session should start at its end
+and is now at least *visible* rather than merely true.
+
+---
+
+## Session — 2026-09-04 (twenty-first, fifth): the CLI and the SDK had no tests of any kind
+
+Phase 9 asks for *"CLI, SDK, and API contract tests covering repository, artifact, release,
+pull-request, evaluation, device, and deployment workflows"*. `cli/skynet` has forty-odd commands,
+`sdk/python` a dozen resource classes, and between them **there was not one test**.
+
+Both address the API with string literals — `request(\`/repos/${'${ref.repo}'}/versions/\`)` — so a
+route renamed or removed breaks both silently and the first person to notice is a user with a
+broken script. That is the same class of mistake that emptied every export's follow list this
+morning: a name in a string argument, checked by nothing.
+
+### What the contract test does
+
+[skynet-client-contract.test.ts](lib/__tests__/skynet-client-contract.test.ts) reads both clients,
+reduces every literal to a route shape, and requires a route file on disk. **44 CLI literals and 43
+SDK literals; 39 and 42 readable respectively, all of them resolving.**
+
+Mutation-checked rather than assumed: adding `request(\`/repos/${'${ref.repo}'}/gone/\`)` to the CLI
+fails it with the offending path named, and removing it passes again.
+
+### Three normalisation rules, written down because each is a place it could be wrong
+
+1. **A `ref` placeholder is two path segments.** `parseRef()` returns `repo` as `namespace/name`, so
+   `/repos/{ref.repo}/versions/` is `/repos/{}/{}/versions` on disk. Getting this wrong reports
+   every repository route as missing — the failure most likely to be answered by weakening the test
+   rather than fixing it, so the rule has its own three cases.
+2. **A placeholder named `query` or `params` is a query string**, not a segment.
+3. **A template too complex to read by reading it is skipped and named.** Two exist — a ternary
+   inside `${…}` in the CLI's secrets command, and an f-string subscript in the SDK's artifact
+   download. They are listed by name rather than counted, so a third has to be a deliberate edit.
+
+### What it does not do
+
+Methods are not asserted: a route exporting `POST` and a command sending `GET` passes here. Going
+further means running both clients against a server, which is what `scripts/skynet-verify-*.mjs`
+does and needs a database. The reverse direction is not checked either — a route no client calls is
+normal, since the web UI is a client too.
+
+### One thing the contract confirms by its absence
+
+There is no `skynet export` command, and there should not be. `GET /me/export` refuses
+`actor.via !== 'session'` on purpose: an export is the most concentrated document this platform can
+produce about one person, and a CLI credential lives in a CI configuration. A command that could
+only ever print a 403 would be worse than no command.
+
+### Numbers
+
+`npx vitest run` — **1,685 passed, 70 files**. `npm run typecheck` — clean.
+
+---
+
+## Session — 2026-09-04 (twenty-first, sixth): "not checkable" was a property of the tools, not of the migrations
+
+Sixth item, and it closes a sentence that has appeared in five separate sessions of this log:
+
+> Policies, indexes, triggers, functions, CHECK expressions and foreign-key delete rules are not
+> visible over REST — a migration that only changes one of those reports NOT CHECKABLE **and has to
+> be tracked by hand**.
+
+Tracked by hand meant: written in a build-log paragraph, and believed. Five migrations were in that
+state at the start of today, including the trigger that keeps `ref_count` honest and the constraints
+that stop an evaluation being deleted with the repository it judges.
+
+That was true while the only source of truth was a live database reached over PostgREST, which
+publishes types, nullability and defaults and nothing else. It stopped being true the moment
+`supabase/schema/skynet.sql` landed in the tree three items ago — a name a migration declares can be
+looked for in `pg_dump`'s account of the same database.
+
+### The result
+
+| | Before | After |
+|---|---|---|
+| applied | 16 | **22** |
+| partial | 0 | 0 |
+| not applied | 0 | 0 |
+| **not checkable** | **5** | **0** |
+
+Every migration in the repository is verified. That has not been true before.
+
+The two sources are counted apart in every line — `18/18 checks — 8 live, 10 from the recorded
+schema` — because they are different claims. A name found in the dump means *the schema this
+repository recorded contains this object*; only the REST probes mean *the database has it now*. The
+closing note says so rather than letting the number imply otherwise.
+
+### The bug this grew, and the fix that is the interesting part
+
+The first version reported `org_members_user_idx` as **not in the recorded schema**. The index is in
+the database. The dump covers `skynet_*` tables and `org_members` is not one, so the name was absent
+from a file that could never have contained it.
+
+> Absent is not missing, and **a verifier that cries wolf is read as noise** — which is worse than
+> one that says it cannot tell.
+
+So `namedArtifacts` returns the **table** each declaration belongs to, not just its name, and
+anything on a table outside the dump's scope is reported as *not checked* with the reason, rather
+than as missing. A function has no table and the dump carries `public` and `skynet_private` both, so
+those are always in scope.
+
+Two of the seven new cases in
+[skynet-migration-artifacts.test.ts](lib/__tests__/skynet-migration-artifacts.test.ts) exist for
+this specifically: every table-bound declaration must have a table, because an entry whose `ON`
+clause the parser failed to read would be treated as in scope and checked against a dump that cannot
+contain it — the same bug, arriving the other way round.
+
+### The last one, which had to be checked backwards
+
+`20260903200000_skynet_quota_column_privilege` declares no object at all. Its entire content is a
+GRANT: the sixteenth session added `storage_quota_bytes`, the nineteenth found that **RLS does not
+hide a column** because RLS is row-level, and the fix was to revoke table-level `SELECT` on
+`skynet_namespaces` and grant it back column by column with that one left out.
+
+So the dump is now taken with privileges — `--no-privileges` was dropped, and 212 GRANT lines are
+the security posture rather than noise — and the check is **negative**: not *is there a grant*, but
+*is the quota column absent from the ones there are*. It fails loudly if the grants vanish entirely,
+which is the other way that fix could rot.
+
+It is filed in `EXTRA_SCHEMA_CHECKS` rather than `EXTRA_CHECKS`, so the tally cannot report a dump
+read as a live probe. That distinction is the whole reason the two are counted separately, and a
+check in the wrong list would quietly undo it.
+
+### Mutation-checked, both directions
+
+* Renaming a policy in a migration file → `PARTIAL`, with `policy … — not in the recorded schema`.
+* Restoring it → `applied`, 22 of 22.
+
+### Numbers
+
+`npx vitest run` — **1,691 passed, 70 files**. `npm run typecheck` — clean.
+`scripts/skynet-verify-rls.mjs` — all invariants hold.
+
+---
+
+## Session — 2026-09-04 (twenty-first, seventh): three features that had never once run
+
+The recordings receiver, the reports surface and the incident traceability chain were all written in
+the twentieth session **against a database where their tables did not exist**. The migrations were
+written the same day and applied this morning. So all three had been reasoned about carefully,
+covered by unit tests, reviewed — and not one of them had ever inserted a row.
+
+The export proved this morning what that is worth: a column named in a string literal, a discarded
+error, and a whole collection missing from every document the feature produced. Unit tests cover
+arithmetic. The schema, the bucket and the order of the writes are exactly what they cannot reach.
+
+### The measurement history, finished
+
+[skynet-verify-attestations.mjs](scripts/skynet-verify-attestations.mjs) — 17 checks — and the
+device page now carries the step function as its own section, not only per incident: **what it was
+measured running**, a row per change with the interval and the number of check-ins that agreed. The
+newest row shows *Still reported* rather than an end time, because an end time on it would be a
+claim that the robot has stopped saying it.
+
+### §79's receiver, run for the first time
+
+[skynet-verify-recordings.mjs](scripts/skynet-verify-recordings.mjs) — **27 checks**, and it pushes
+a real two-slice window through the real route into the real private bucket:
+
+| | |
+|---|---|
+| the probe before anything is sent | 404 **carrying `bytes: 0`** — §79.2's rule that a probe must never answer with something that parses to nothing |
+| the first slice | accepted, receipt says what is held, no digest yet |
+| the probe a resuming robot makes | 200 with the offset to continue from |
+| a slice at the wrong offset | refused — bytes are only ever appended to the contiguous prefix, which is what makes the digest mean anything |
+| the last slice | accepted, receipt covers the window, digest returned: complete and verified are one event |
+| the row | complete, `bytes_received` right, **two PUTs counted**, computed digest matching the declared one, artifact attached |
+| the artifact | right digest, right size, in the private bucket |
+| **the stored bytes** | **hash to the digest the robot declared** |
+| the namespace | charged for the window, through this morning's accounting change |
+
+The last two are the ones worth having. Everything above them can be true while the object in the
+bucket is something else.
+
+### Reporting, run for the first time
+
+[skynet-verify-reports.mjs](scripts/skynet-verify-reports.mjs) — 13 checks. The interesting parts of
+that feature are all in the schema and none of them is reachable from a unit test:
+
+* the **partial unique index** refuses the same person filing the same complaint twice — 409;
+* `other` costs a sentence, and an empty one is refused — 422;
+* a reason outside the vocabulary is refused — 422;
+* withdrawing keeps the row and leaves `resolved_at` null, because the CHECK pairs a resolution time
+  with a **decision** and withdrawing is not one;
+* and through the anon key the reported party sees **nothing** — RLS denies `anon` and
+  `authenticated` outright, since the reported party usually owns the namespace the subject is in
+  and any membership-based policy would hand them the report.
+
+### Where the evidence stands now
+
+Eight verifier scripts, and between the five written today **95 live checks** against a running
+server and the production database, every fixture removed in a `finally`:
+
+| Script | Checks | Covers |
+|---|---|---|
+| `skynet-verify-migrations.mjs` | 22 migrations | every one now verified — see the sixth section |
+| `skynet-verify-rls.mjs` | pre-existing | the policies' behaviour |
+| `skynet-verify-certification.mjs` | pre-existing | §15 |
+| `skynet-verify-export.mjs` | 26 | the export, rule 1 on real rows |
+| `skynet-verify-storage.mjs` | 15 | what a namespace is charged for |
+| `skynet-verify-attestations.mjs` | 17 | §10's step function |
+| `skynet-verify-recordings.mjs` | 27 | §79 end to end, bytes included |
+| `skynet-verify-reports.mjs` | 13 | the reporting half of takedown |
+
+Phase 8's rule was: *"Do not call a repository, artifact, worker, or security feature operational
+only because its schema, route, or UI exists. Require deploy-path integration evidence."* Three
+features stopped being described and started being demonstrated.
+
+### Numbers
+
+`npx vitest run` — **1,691 passed, 70 files**. `npm run typecheck` — clean.

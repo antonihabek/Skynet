@@ -67,6 +67,35 @@ pub const SLICE_SECONDS: u32 = 20;
 /// whose recorder had become its busiest network client.
 pub const PROBE_SECONDS: u32 = 10;
 
+/// How many bytes one request may carry when the receiver has not said (§79.2).
+///
+/// **A slice bounded only by time is a request body bounded only by link speed**, and that is the
+/// defect this constant closes. [`SLICE_SECONDS`] bounds the pass, which is a promise to the
+/// *supervisor*; it promises the receiver nothing at all. A robot on a warehouse link offering a
+/// hundred-megabyte window inside twenty seconds is offering a hundred-megabyte request body, and
+/// there is no receiver anywhere that takes one — the Hub this OS is built against runs as
+/// serverless functions and refuses a body over four and a half megabytes before any of its own
+/// code runs, with a status and no sentence.
+///
+/// Four mebibytes is therefore a floor rather than a preference: it is what an unknown receiver can
+/// be assumed to take. A receiver that can take more says so, in `max_slice_bytes` on its probe
+/// answer, and [`Answer::max_slice`] is where that arrives — so this number governs the first
+/// transfer to a Hub that has never been asked, and nothing after it.
+///
+/// The window is not bounded by this. §79 is resumable, and a slice that ends is one the next pass
+/// continues past; a *window* refused for being large is evidence lost, which is why the ceiling
+/// lives on the request and not on the recording.
+pub const SLICE_BYTES: u64 = 4 * 1024 * 1024;
+
+/// The largest slice this robot will send however large a receiver says it can take.
+///
+/// A receiver's declared limit is a claim from the other end of a link, and this one is used to
+/// decide how much of a robot's disk to copy and how much of its bearer to spend in one request.
+/// A Hub answering `max_slice_bytes: 10000000000` would otherwise get a slice extraction the size
+/// of the disk. Sixty-four mebibytes is well above anything a receiver plausibly wants and well
+/// below anything that hurts.
+pub const SLICE_BYTES_CEILING: u64 = 64 * 1024 * 1024;
+
 // ── One request ──────────────────────────────────────────────────────────────
 
 /// What one probe should do.
@@ -89,8 +118,14 @@ pub struct Push {
     pub credential: Option<String>,
     /// The offset to send from. Zero starts the object again.
     pub from: u64,
+    /// How many bytes to send from there, and never more than the window has left.
+    pub len: u64,
+    /// The whole window's length, for the `Content-Range` this slice carries.
+    pub total: u64,
     /// The sealed window on this robot's disk.
     pub file: PathBuf,
+    /// Where a slice may be extracted to, for the length of this request.
+    pub scratch: PathBuf,
     /// How long this attempt may take.
     pub budget_s: u32,
 }
@@ -109,8 +144,29 @@ pub struct Answer {
     pub bytes: Option<u64>,
     /// What it says they hash to.
     pub digest: Option<String>,
+    /// The largest slice it says it will take, when it says.
+    ///
+    /// §79.2 already makes the *offset* the receiver's to state, for the reason that the partial is
+    /// on the receiver's disk. The size of a request is the same kind of fact for the same reason —
+    /// it is a property of the machine being written to — and a sender that guesses it is a sender
+    /// whose transfers work or do not depending on which Hub it was pointed at.
+    ///
+    /// Absent is not zero. A receiver that has not said gets [`SLICE_BYTES`], which is the
+    /// conservative floor; a receiver that says something absurd is clamped by
+    /// [`SLICE_BYTES_CEILING`], because this number decides how much of this robot's disk gets
+    /// copied.
+    pub max_slice: Option<u64>,
     /// Why the attempt did not finish, when it did not.
     pub error: Option<String>,
+    /// The address the request actually ended at, where that is known.
+    ///
+    /// §79.1 gives the route as a path and a Hub is entitled to canonicalise one — the Hub this
+    /// robot pairs to appends a trailing slash and answers `308` to the spelling the specification
+    /// prints. Following that is [`curl_probe`]'s job and costs a round trip; doing it **twice** is
+    /// what this field prevents. The probe happens on every pass before any bytes move, so it is
+    /// already paying for the discovery, and a push that reused the redirected address sends tens
+    /// of megabytes once rather than offering them at an address that will answer *"over there"*.
+    pub effective_url: Option<String>,
 }
 
 /// Something that can ask a receiver what it holds and give it more.
@@ -190,13 +246,17 @@ fn curl_probe(ask: &Probe) -> Answer {
         return refusal;
     }
     let mut command = std::process::Command::new("curl");
-    command.args(["--silent", "--show-error", "--request", "GET", "--max-time"]);
+    command.args(["--silent", "--show-error", "--request", "GET"]);
+    // A redirect is an address, not a refusal. See [`Answer::effective_url`] and the same flag on
+    // [`crate::bundle`]'s fetch: credentials are dropped on a cross-host redirect because
+    // `--location-trusted` is deliberately not used.
+    command.args(["--location", "--max-time"]);
     command.arg(ask.budget_s.to_string());
     // A 404 is an answer, not a failure: it is the receiver saying it holds nothing under this
     // digest, which is the ordinary state for a window nobody has sent yet. `--fail` would turn
     // that into an error and a backoff, so the first upload of every window would wait out a curve
     // before it started.
-    command.args(["--write-out", "\n%{http_code}"]);
+    command.args(["--write-out", "\n%{http_code} %{url_effective}"]);
     if ask.credential.is_some() {
         command.args(["--config", "-"]);
     }
@@ -204,33 +264,128 @@ fn curl_probe(ask: &Probe) -> Answer {
     interpret(command, ask.credential.as_deref(), &ask.url, "probing")
 }
 
+/// Copy `[from, from + len)` of the window into the scratch file, and say how many bytes landed.
+///
+/// The extraction is the price of a bounded request and it is worth naming what it costs: one
+/// slice-sized read and one slice-sized write per pass, on the disk §28 reserves for recordings.
+/// The alternative — `--upload-file -` with the bytes fed to `curl`'s stdin — spends no disk and
+/// sends a *chunked* body, because a stream has no length; a receiver then has to buffer an unknown
+/// quantity before it can place a byte, which is the shape §79.2 is written against.
+///
+/// The file is truncated rather than appended to and is overwritten every pass. Nothing resumes
+/// from it: the resume offset is the receiver's (§79.2), so a slice is worthless the moment its
+/// request ends.
+pub fn extract(ask: &Push) -> Result<u64, String> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+
+    if let Some(parent) = ask.scratch.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("{} could not be created: {error}", parent.display()))?;
+    }
+
+    let mut source = std::fs::File::open(&ask.file)
+        .map_err(|error| format!("{} could not be opened: {error}", ask.file.display()))?;
+    source
+        .seek(SeekFrom::Start(ask.from))
+        .map_err(|error| format!("{} could not be sought to {}: {error}", ask.file.display(), ask.from))?;
+
+    let mut sink = std::fs::File::create(&ask.scratch)
+        .map_err(|error| format!("{} could not be written: {error}", ask.scratch.display()))?;
+
+    let mut left = ask.len;
+    let mut buffer = [0u8; 64 * 1024];
+    let mut written = 0u64;
+    while left > 0 {
+        let want = std::cmp::min(left as usize, buffer.len());
+        let read = source
+            .read(&mut buffer[..want])
+            .map_err(|error| format!("{} could not be read: {error}", ask.file.display()))?;
+        // The window is shorter than the plan believed — a file truncated under this daemon. Sent
+        // as what is actually there rather than padded, and the digest is what notices.
+        if read == 0 {
+            break;
+        }
+        sink.write_all(&buffer[..read])
+            .map_err(|error| format!("{} could not be written: {error}", ask.scratch.display()))?;
+        written += read as u64;
+        left -= read as u64;
+    }
+    sink.flush()
+        .map_err(|error| format!("{} could not be flushed: {error}", ask.scratch.display()))?;
+
+    Ok(written)
+}
+
 fn curl_push(ask: &Push) -> Answer {
     if let Some(refusal) = unusable(ask.credential.as_deref()) {
         return refusal;
     }
+
+    let written = match extract(ask) {
+        Ok(0) => {
+            return Answer {
+                error: Some(format!(
+                    "no bytes could be read from {} at offset {}. Nothing was sent.",
+                    ask.file.display(),
+                    ask.from
+                )),
+                ..Answer::default()
+            }
+        }
+        Ok(written) => written,
+        Err(reason) => {
+            return Answer {
+                error: Some(reason),
+                ..Answer::default()
+            }
+        }
+    };
+
     let mut command = std::process::Command::new("curl");
-    command.args(["--silent", "--show-error", "--fail", "--max-time"]);
+    command.args(["--silent", "--show-error", "--fail"]);
+    // Present here as well as on the probe, and it should almost never fire: [`advance`] pushes to
+    // the address the probe ended at. It is the fallback for the case the probe cannot cover — a
+    // Hub that redirects a `PUT` and not a `GET` — and following one costs a re-send of the body,
+    // which is why the probe is the mechanism and this is the safety net.
+    command.args(["--location", "--max-time"]);
     command.arg(ask.budget_s.to_string());
     command.args([
         "--speed-limit",
         &crate::bundle::STALL_BYTES_PER_SECOND.to_string(),
     ]);
     command.args(["--speed-time", &crate::bundle::STALL_SECONDS.to_string()]);
-    command.args(["--write-out", "\n%{http_code}"]);
-    if ask.from > 0 {
-        // The mirror of the fetch's `--continue-at`, and the same flag: on an upload curl turns it
-        // into a `Content-Range` and sends the tail. A receiver that ignores the range is caught by
-        // the digest rather than trusted — which is the rule that lets this be one flag rather than
-        // a protocol.
-        command.args(["--continue-at", &ask.from.to_string()]);
-    }
+    command.args(["--write-out", "\n%{http_code} %{url_effective}"]);
+    // The header `--continue-at` used to generate, written out rather than delegated.
+    //
+    // `--continue-at` sets the offset *and* sends the rest of the file, and the second half is what
+    // had to go: a slice is bounded now, so the range has an end that is not the window's end and
+    // curl has no flag that expresses one on an upload. The spelling is the one curl produces, so
+    // the wire is unchanged for a receiver that was already reading it — what changed is that the
+    // end of the range is now the end of *this request* rather than the end of the recording.
+    //
+    // The total is still the window's, because that is what `Content-Range` means. A receiver that
+    // ignores the header is caught by the digest rather than trusted, which is the rule that lets
+    // this be a header rather than a negotiation.
+    command.args([
+        "--header",
+        &format!(
+            "Content-Range: bytes {}-{}/{}",
+            ask.from,
+            ask.from + written - 1,
+            ask.total
+        ),
+    ]);
     command.arg("--upload-file");
-    command.arg(&ask.file);
+    command.arg(&ask.scratch);
     if ask.credential.is_some() {
         command.args(["--config", "-"]);
     }
     command.arg(&ask.url);
-    interpret(command, ask.credential.as_deref(), &ask.url, "sending")
+    let answer = interpret(command, ask.credential.as_deref(), &ask.url, "sending");
+    // The slice has done its job whether or not the request worked, and a copy of a recording left
+    // on the disk §28 reserves for recordings is the one thing this file must not become.
+    let _ = std::fs::remove_file(&ask.scratch);
+    answer
 }
 
 /// Run one curl, and read what came back.
@@ -280,9 +435,18 @@ fn interpret(
     };
 
     let combined = String::from_utf8_lossy(&output.stdout).to_string();
-    let (payload, status) = match combined.rsplit_once('\n') {
-        Some((payload, status)) => (payload.to_string(), status.trim().to_string()),
+    let (payload, trailer) = match combined.rsplit_once('\n') {
+        Some((payload, trailer)) => (payload.to_string(), trailer.trim().to_string()),
         None => (String::new(), combined.trim().to_string()),
+    };
+    // `%{http_code} %{url_effective}`. Split on the first space rather than the last: a status has
+    // no space in it and a URL is percent-encoded, so this is unambiguous in both directions.
+    let (status, effective_url) = match trailer.split_once(' ') {
+        Some((status, url)) => (status.trim().to_string(), {
+            let url = url.trim();
+            (!url.is_empty()).then(|| url.to_string())
+        }),
+        None => (trailer, None),
     };
     let status: u16 = status.parse().unwrap_or(0);
 
@@ -317,13 +481,39 @@ fn interpret(
         .and_then(Json::as_str)
         .filter(|text| !text.is_empty())
         .map(str::to_string);
+    // Read with the same suspicion as `bytes`, and for a sharper reason: this number decides how
+    // much of this robot's disk gets copied into a scratch file. A receiver that answers zero, a
+    // fraction, or something that does not fit a `u64` has said nothing usable, and the absence is
+    // what [`SLICE_BYTES`] is the answer to.
+    let max_slice = document
+        .as_ref()
+        .and_then(|d| d.get_present("max_slice_bytes"))
+        .and_then(Json::as_f64)
+        .filter(|value| *value >= 1.0 && *value <= u64::MAX as f64)
+        .filter(|value| (*value as u64) as f64 == *value)
+        .map(|value| value as u64);
 
     Answer {
         status,
         bytes,
         digest,
+        max_slice,
         error,
+        effective_url,
     }
+}
+
+/// How many bytes to offer this pass (§79.2).
+///
+/// Three inputs and one rule: never more than the window has left, never more than the receiver
+/// says it takes, and never more than [`SLICE_BYTES_CEILING`] whatever it says. A receiver that has
+/// not been asked, or that answered with nothing usable, gets [`SLICE_BYTES`] — the floor an
+/// unknown receiver can be assumed to accept.
+pub fn slice_len(remaining: u64, receiver_says: Option<u64>) -> u64 {
+    let allowed = receiver_says
+        .unwrap_or(SLICE_BYTES)
+        .clamp(1, SLICE_BYTES_CEILING);
+    std::cmp::min(remaining, allowed)
 }
 
 // ── The receipt (§79.4) ──────────────────────────────────────────────────────
@@ -702,10 +892,19 @@ pub fn advance(
     }
 
     let answer = uploader.push(&Push {
-        url,
+        // The address the probe ended at, which is the same one unless a Hub canonicalises the
+        // path. Reusing it is what keeps a redirect from costing a re-send of the window: the probe
+        // is a round trip this pass has already made, so the discovery is free and the push is not.
+        url: probed.effective_url.clone().unwrap_or(url),
         credential: credential.map(str::to_string),
         from: placed.from,
+        // Bounded by what the receiver says it takes, which is a fact about the receiver in exactly
+        // the way §79.2's offset is. A slice bounded only by `SLICE_SECONDS` is a request body
+        // bounded only by link speed, and no receiver accepts one of those.
+        len: slice_len(window.size.saturating_sub(placed.from), probed.max_slice),
+        total: window.size,
         file: layout.blackbox().join("sealed").join(&window.name),
+        scratch: layout.upload_slice(),
         budget_s: SLICE_SECONDS,
     });
 

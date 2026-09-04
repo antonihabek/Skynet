@@ -505,6 +505,22 @@ impl Layout {
         self.blackbox().join("upload.json")
     }
 
+    /// One slice of a window, extracted for the length of one request (§79.2).
+    ///
+    /// A file rather than a pipe, because `curl` uploads a *file* and needs a length: an upload
+    /// from stdin is chunked, and a receiver that has to buffer an unknown length is the receiver
+    /// this whole path exists not to need.
+    ///
+    /// One path rather than one per window, and it is overwritten every pass. The alternative
+    /// keyed the slice to the digest, which reads as more careful and is not: a directory of
+    /// abandoned slices on a disk §28 reserves for recordings would cost the black box the space
+    /// it was preallocated to have, to hold copies of bytes that are already on the same disk.
+    /// Nothing resumes from it — the resume offset comes from the receiver (§79.2), so a slice is
+    /// worthless the moment its request ends.
+    pub fn upload_slice(&self) -> PathBuf {
+        self.blackbox().join("upload.slice")
+    }
+
     /// The receipt for one sealed window, beside the window (§79.4).
     ///
     /// Named from the recording rather than from the digest, so that `ls` in the sealed directory

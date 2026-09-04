@@ -4121,17 +4121,23 @@ New tables follow the `skynet_*` convention: `skynet_embodiments`, `skynet_devic
 `skynet_calibration_records`, `skynet_conformance_results`, `skynet_certifications`,
 `skynet_incidents`, `skynet_os_releases`, `skynet_os_editions`, `skynet_attestations`.
 
-### 57.1 All of them exist, except the last
+### 57.1 All of them exist
+
+*Retitled. It read "except the last" for as long as one of them did not.*
 
 Thirteen endpoints, not ten: the count above was written before §74 gave telemetry a route, §75 gave
-the bundle one and §79 gave the sealed window one. Twelve are written across seven sessions on the
-Hub side.
+the bundle one and §79 gave the sealed window one. All thirteen are written on the Hub side, across
+eight sessions.
 
-**The thirteenth is the exception and it is named rather than counted in.** §79's recordings route
-is built on the robot and not on the Hub, so a robot that has a window to send finds nothing at the
-address. That is a worse-looking state than it is: the probe answers, the transfer backs off on
-§34.4's curve, no bytes move, and the window and the incident naming it are exactly where they were.
+**The thirteenth was the exception and is now counted in.** §79's recordings route was built on the
+robot and not on the Hub, so a robot with a window to send found nothing at the address — a
+worse-looking state than it was, because the probe answered, the transfer backed off on §34.4's
+curve, no bytes moved, and the window and the incident naming it stayed exactly where they were.
 The failure mode of half a route is a robot that keeps its evidence.
+
+Both halves exist now (§79.7), and the paragraph is left rather than deleted because the thing it
+describes is worth being able to recognise again: a route that answers is not a route that works,
+and the way to tell the difference from the sending side is that nothing ever stops being pending.
 
 Recorded here rather than only in a build log, because the useful fact about this table is no
 longer what it asks for — it is **which of the eleven carry evidence and which carry assertions**,
@@ -4151,7 +4157,7 @@ and that distinction is invisible from a list of routes that all return 200.
 | `POST /devices/{id}/telemetry` | Counted windows, with the denominator being what was **observed**. Evidence about the interval it covers and nothing about the intervals it does not. |
 | `POST /robots/{slug}/attestations` | Evidence, and the only one on this list where a *vendor* is the attesting party. |
 | `GET /os/releases/{version}/bundle` | Bytes, and the only row on this list that is neither. What makes them evidence is the digest in the signed manifest they are checked against — which is why the route needs no signature of its own (§75.1). |
-| `GET\|PUT /devices/{id}/recordings/{sha256}` | Bytes, in the other direction, and evidence for the same reason: the digest was recorded at the seal by the party that produced them (§77.1), so what arrives is checked against a name that existed before the transfer did. The `GET` is the exception — an offset is the receiver's claim and is never treated as more (§79.2). **Not built on the Hub.** |
+| `GET\|PUT /devices/{id}/recordings/{sha256}` | Bytes, in the other direction, and evidence for the same reason: the digest was recorded at the seal by the party that produced them (§77.1), so what arrives is checked against a name that existed before the transfer did. The `GET` is the exception — an offset is the receiver's claim and is never treated as more (§79.2). **Built on both sides**, and the Hub's half is where the strongest form of that rule lives: it never states a digest it has not computed, so *complete* and *verified* are one event rather than two (§79.7). |
 
 Two rows are the ones to read together. Conformance is asserted and certification is
 computed from it, which means §12's gate — the one deciding whether an OS update may change the
@@ -4810,15 +4816,15 @@ miniature, and currently trivial to fix.
 | skynetd — reconciliation, supervision, health | §9, §33 | **Built** — level-triggered, six ordered stages | — |
 | Identity, pairing, attestation, factory provisioning | §10, §50 | **Built on both sides** | `security.identity.attested` needs a TPM; no key is generated on a robot |
 | Desired state, fleet, OTA | §11–12, §14, §33.3 | **Built on both sides** — including §75's bundle fetch | No robot has yet applied an image from this Hub |
-| Black box, telemetry, replay | §13, §26, §41 | **Built** — ring, MCAP, sealing, deterministic replay, and a robot now replays a window against its own resolved limits (`telemetry.replay.deterministic`); §74's telemetry on both sides, with all eight counters sourced — the five that looked like they needed a kernel are counted off this ring (§74.6); §79's upload, so a sealed window's *bytes* now have a route and a receipt, and every one on the disk says whether the Hub has it | No recording of a *policy* has ever been replayed, because none has run — and the same absence is why the five counters report unmeasured on a shipping robot rather than zero: a ring with no action channels has no cycles to count, which the window says rather than implies |
+| Black box, telemetry, replay | §13, §26, §41 | **Built** — ring, MCAP, sealing, deterministic replay, and a robot now replays a window against its own resolved limits (`telemetry.replay.deterministic`); §74's telemetry on both sides, with all eight counters sourced — the five that looked like they needed a kernel are counted off this ring (§74.6); §79's upload **on both sides**, so a sealed window's bytes have a route, a receiver, a receipt and an artifact — `skynet_incidents.artifact_id`, NULL on every row the platform could hold since the fleet schema was written, is filled by the digest the incident named (§79.7) | No recording of a *policy* has ever been replayed, because none has run — and the same absence is why the five counters report unmeasured on a shipping robot rather than zero: a ring with no action channels has no cycles to count, which the window says rather than implies. Nor have the two halves of §79 been connected: each is exercised against a double, and neither has met the other |
 | Conformance and certification | §15, §31.4, §56 | **Built on both sides** — and a robot now runs §15's eight runtime tests on itself (`GET /conformance`); §15's third suite has its numerator and denominator, counted off §13's ring (§74.6) | Three of the eight execute; the other five name what they wait for. Nothing signs a result and nothing will on a robot — §19 makes that a rule rather than a gap (§15.1). The `field` figure is measurable rather than measured: it needs a robot that runs cycles |
 | LeRobot | §16, §67 | **Built** — the bridge and its self-test | — |
-| Hub contract | §17, §57 | **Built** — twelve endpoints, no breaking change; four of them frozen as wire fixtures produced by the real producer (§31.6) | Two of them carry assertions rather than evidence (§57.1) |
+| Hub contract | §17, §57 | **Built** — all thirteen endpoints, no breaking change; four of them frozen as wire fixtures produced by the real producer (§31.6), and the thirteenth stopped being half a route when the Hub's side of §79 was written (§79.7) | Two of them carry assertions rather than evidence (§57.1) |
 | Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 48 CLI commands, the golden path checked mechanically | — |
 | Security, local access control | §19, §39 | **Built** — Ed25519, the trust store, five signature states, four roles; §38.3's two records now written for a capability grant, which had left neither (§81.4) | — |
 | Distribution and business model | §20, §72 | Designed | — |
 | Languages, editions, levels | §23, §31, §42 | **Built** — one edition, held to a corpus of 77 files and 1,055 cases | The second edition, which is what the corpus is for |
-| IPC, observation assembly, arbitration | §25 | **Built** — the shared-memory ring and the command frame | — |
+| IPC, observation assembly, arbitration | §25 | **Built** — the shared-memory ring, its layout and the command frame: the *mechanism* by which an observation is published and a command is posted | **The em dash here was wrong**, and §74.6 said so from the other direction: *"the policy runtime and observation assembly (§25) are unwritten."* Both sentences are about different halves of one section, and a table with one word per row could not hold that. The ring exists and **nothing fills it**: no process assembles a set of sensor readings into an observation and no process arbitrates commands into it, because both are the policy runtime's and §33.1 keeps the daemon off that path. It is why the ring has no action channels, which is why five of §74's counters report unmeasured on a shipping robot |
 | Boot, faults, POST, homing | §27, §48 | **Built** — §27's machine, POST's eight checks | Five of the eight are the kernel's, through a path §33.1 denies the daemon |
 | Networking and time | §34–35 | **Built** — bearers, metering, the outbound queue, backoff, two clocks kept apart | — |
 | Power and thermal | §36 | **Built** — the four states plus `unmetered`, the reserve, §36.3's ladder, §36.4's override; the gauge and the thermal zones read from `/sys`; enforced at §54.4's `acquiring`; `GET /power` and `skynet power` | §36.4's override has no input: the RHAL flag and its fault code reach this daemon through a path §33.1 denies it, so no robot can report a brownout. §36.1's `reserve` and `critical` rows ask for a controlled stop, and nothing performs one — the stop path is the kernel's |
@@ -5235,6 +5241,41 @@ one class that is never dropped, and a robot that suppressed an alarm because it
 broken would be losing the report and the recording together — which are precisely the two things
 that fail at the same moment.
 
+### 77.4 The generation is enough, and the Hub is the party that has to keep it
+
+An incident names a **generation** and does not name a policy. `runtime.rs` gives the reason and it
+is a good one:
+
+> §10's attestation needs a trust store, a release manifest and a descriptor read, and an incident
+> path that did all three would be doing work on the one code path §34.4 says is never dropped.
+
+That decision was read for several sessions as a limit on what an incident can be traced to, and it
+is not one. §11's desired document **lists the packages**, by id and by version digest, and the Hub
+is the party that wrote it. A generation identifies the code by identifying the instruction.
+
+What made it look like a limit was on the other side: the Hub kept only the *current* desired state,
+on a row whose own comment explains — correctly, about check-ins — that it is not a history table.
+A check-in is a statement about now and only the newest is interesting. **An instruction is not**,
+and §11 gives it a monotonic counter precisely so that other documents can name one. So the number
+on an incident pointed at bytes that had been overwritten, and an investigator could read the
+generation and learn nothing from it.
+
+The Hub keeps the history now, and two rules about reading it belong here rather than only there:
+
+* **The version digest is the join; the package id is a cross-check.** A digest is unique across a
+  registry and survives a repository being renamed, transferred or forked. A name plus a version
+  string can match two repositories, and a trace that guessed between them would put somebody
+  else's code at the scene of a fault.
+* **It says what the robot was *told* to run.** §10's three digests say what it was *measured*
+  running, and the two disagree exactly when it matters most — a generation that failed to apply, or
+  applied and rolled back. So the trace is evidence about an instruction, and the incident's own
+  `context_at` says whether even the generation is a fact the robot stated or an upper bound the Hub
+  filled in at receipt.
+
+What is still not answerable is *which code was running*, and the honest shape of that answer is a
+history of **attestations** beside the history of instructions — not a third digest on §34.4's
+never-dropped path.
+
 ---
 
 ## 78. Amendment to §8 — one document, two spellings, and an admission gate that checked nothing
@@ -5359,7 +5400,11 @@ out of using it as the address, and each is worth more than the tidiness of a ne
   object arrives under it. Nothing has to match on time, on order, or on a robot's word about which
   file went with which fault.
 
-### 79.2 The offset belongs to the receiver, which is the whole of the asymmetry
+### 79.2 The offset belongs to the receiver, which is most of the asymmetry
+
+> *Amended: "the whole" was one field too confident.* §79.7 found a second fact of exactly this
+> shape — how large a request may be — for exactly this reason, and it had been left to a sender to
+> guess.
 
 §75's fetch has a rule that makes progress free: *"The partial's length is the progress. No counter,
 no percentage written anywhere."* The bytes are on the robot's own disk and the disk is the record.
@@ -5440,14 +5485,82 @@ the incident named. That is what content addressing was for.
 
 ### 79.6 What this does not do
 
-The Hub half is not built here. No robot has run this against a real receiver, and until one has,
-the honest summary is that §12's fetch and §13's upload are now the same shape with the same failure
-modes, tested against the same kind of recording implementation — which is what made §75's rollback
+*Amended.* This section read **"The Hub half is not built here"** for as long as that was true.
+It is built: the route, the store, the assembly, the verification and the join onto
+`skynet_incidents.artifact_id` — the column whose own comment had been documenting its absence since
+the fleet schema was written. §79.7 is what building it found.
+
+What remains true is the rest of the paragraph. **No robot has run this against a real receiver.**
+Both halves are exercised against doubles — a scripted receiver on the robot, a scripted bucket on
+the Hub — and the two have been read against each other rather than connected. §12's fetch and
+§13's upload are now the same shape with the same failure modes, which is what made §75's rollback
 testable and is not the same as having watched one.
 
 Nor does it produce more windows. A window still comes from a raise or an operator's seal, and a
 robot with no ring has nothing to send, which the upload path reports as the named absence §77.2
 already gives it.
+
+### 79.7 A slice has a size, and the receiver is the party that knows it
+
+Building the other half found the same shape §79.2 is written about, one field over, and it is worth
+stating as a rule rather than as a fix.
+
+§79.2 makes the **offset** the receiver's to state, and gives the reason: *"the partial is on the
+other machine."* The **size of a request** is the same kind of fact for the same kind of reason. It
+is a property of what the receiver is deployed on, and a sender cannot derive it from anything it
+can see.
+
+The original bounded a slice by **time** — twenty seconds, on both sides of the transfer. That is a
+promise to the *supervisor* (§33.2's single thread must not stop supervising while megabytes move)
+and it promises a receiver nothing at all. A robot on a warehouse link offering a hundred-megabyte
+window inside twenty seconds is offering a hundred-megabyte **request body**, and there is no
+receiver anywhere that takes one. The Hub this specification is built against runs as serverless
+functions and refuses a body over four and a half megabytes before any of its own code runs — with a
+status and no sentence, which is the worst way to learn a limit.
+
+So there is a third field on the answer, and it is present on the `404` as well:
+
+```
+GET /devices/{id}/recordings/{sha256}
+  → { "bytes": <contiguous prefix held>, "digest": "sha256:…" | null, "max_slice_bytes": <n> }
+```
+
+On the `404` **especially**. That is the first thing any sender ever sees, and a limit stated only
+on rows that already exist is a limit stated only after it has been exceeded.
+
+Three consequences, and the third is the one that keeps this from being a negotiation:
+
+* **A sender that does not read it still completes.** It falls back to a conservative floor — four
+  mebibytes on the reference edition — and delivers the window one small slice at a time. An
+  extension that made an old sender fail would be a change to the protocol rather than an addition
+  to it.
+* **A receiver's number is clamped, not obeyed.** It sizes a scratch file on a robot's disk, and
+  §28 reserves that disk for recordings. A Hub answering ten gigabytes gets sixty-four mebibytes.
+* **The range is written out rather than delegated.** `--continue-at` sets an offset *and* sends the
+  rest of the file; a bounded slice has an end that is not the window's end, and no client flag
+  expresses one on an upload. The header is the one such a client already generates —
+  `Content-Range: bytes <from>-<to>/<total>` — so the wire is unchanged for a receiver that was
+  already reading it. What changed is that the end of the range is the end of *this request* rather
+  than the end of the recording.
+
+And one thing that is not a consequence but was found in the same hour, because it has the same
+cause — a client asserting something about a route it does not own:
+
+> **A redirect is an address, not a refusal.** §17 and §79.1 give every route as a *path*, and a Hub
+> is entitled to canonicalise one. The Hub this OS pairs to appends a trailing slash and answers
+> `308` to the spelling this document prints. The fetch (§75) has followed redirects since it was
+> written — it has to, because an image is behind one — and the **outbound queue never did**. Every
+> check-in, incident, telemetry window and episode this edition has ever produced was addressed at a
+> redirect, was not followed, and was recorded as a delivery that did not happen.
+>
+> Credentials are not carried across hosts, which is the reason the fetch gives and is unchanged: a
+> client drops its `Authorization` header on a cross-host redirect unless explicitly told not to,
+> and nothing here tells it not to. A trailing-slash redirect is same-host, so the credential
+> survives it and only it.
+>
+> The upload follows one too, and once: the probe runs on every pass before any bytes move, so it
+> is already paying for the discovery, and the push is sent to the address the probe ended at. A
+> redirect that cost a re-send would be a redirect paid for in megabytes.
 
 ---
 

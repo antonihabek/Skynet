@@ -9800,8 +9800,8 @@ mod cell {
 mod upload {
     use super::*;
     use crate::upload::{
-        advance, next_pending, report, sealed, url_for, Answer, Probe, Push, Receipt, Step,
-        Uploader,
+        advance, extract, next_pending, report, sealed, slice_len, url_for, Answer, Probe, Push,
+        Receipt, Step, Uploader, SLICE_BYTES, SLICE_BYTES_CEILING,
     };
 
     /// What a scripted receiver does about one request.
@@ -9813,6 +9813,10 @@ mod upload {
         Silent(u16),
         /// Fail without answering.
         Fail(&'static str),
+        /// "I hold this many bytes, and my address is over there" — a canonicalising Hub.
+        Redirected(u64, &'static str),
+        /// "I hold this many bytes, and I take slices of at most this many."
+        Limits(u64, u64),
     }
 
     impl Reply {
@@ -9822,7 +9826,25 @@ mod upload {
                     status: 200,
                     bytes: Some(*bytes),
                     digest: digest.map(str::to_string),
+                    max_slice: None,
                     error: None,
+                    effective_url: None,
+                },
+                Reply::Redirected(bytes, url) => Answer {
+                    status: 200,
+                    bytes: Some(*bytes),
+                    digest: None,
+                    max_slice: None,
+                    error: None,
+                    effective_url: Some((*url).to_string()),
+                },
+                Reply::Limits(bytes, max_slice) => Answer {
+                    status: 200,
+                    bytes: Some(*bytes),
+                    digest: None,
+                    max_slice: Some(*max_slice),
+                    error: None,
+                    effective_url: None,
                 },
                 Reply::Silent(status) => Answer {
                     status: *status,
@@ -9847,6 +9869,8 @@ mod upload {
         pushes: std::collections::VecDeque<Reply>,
         probed: Vec<String>,
         pushed: Vec<(u64, String)>,
+        /// `(from, len, total)` per push — what a receiver's `Content-Range` would have said.
+        ranges: Vec<(u64, u64, u64)>,
     }
 
     impl Scripted {
@@ -9856,6 +9880,7 @@ mod upload {
                 pushes: pushes.into_iter().collect(),
                 probed: Vec::new(),
                 pushed: Vec::new(),
+                ranges: Vec::new(),
             }
         }
     }
@@ -9871,6 +9896,7 @@ mod upload {
 
         fn push(&mut self, ask: &Push) -> Answer {
             self.pushed.push((ask.from, ask.url.clone()));
+            self.ranges.push((ask.from, ask.len, ask.total));
             self.pushes
                 .pop_front()
                 .unwrap_or(Reply::Fail("the script ran out of pushes"))
@@ -10001,6 +10027,178 @@ mod upload {
         // And the window itself is still here. §79.4: the operator standing next to the robot is
         // frequently the one who cannot reach the Hub.
         assert!(layout.blackbox().join("sealed").join(name).is_file());
+    }
+
+    #[test]
+    fn the_push_goes_to_the_address_the_probe_ended_at() {
+        // §79.1 gives the route as a *path*, and a Hub is entitled to canonicalise one. The Hub
+        // this OS is built against does: `trailingSlash` is on, so `…/recordings/sha256%3A…`
+        // answers `308` and the address is the same path with a slash. Reproduced against the
+        // running Hub before this test was written — every robot-facing route on it behaves the
+        // same way, which is why `--location` went on the outbound queue in the same commit.
+        //
+        // Following it is `curl`'s job. Following it **once** is this function's: the probe runs on
+        // every pass before any bytes move, so the discovery is a round trip already paid for, and
+        // a push that started again from the original address would pay for the redirect in
+        // megabytes rather than in one small request.
+        let root = TempRoot::new("upload-redirect");
+        let layout = root.layout();
+        let name = "00000000000000000001-fault.mcap";
+        seal_bare(&layout, name, WINDOW);
+        let table = bearers(&layout, false);
+        let digest = digest_of(WINDOW);
+
+        let canonical = "https://hub.example/api/skynet/v1/devices/dev_1/recordings/x/";
+        let mut server = Scripted::new(
+            vec![Reply::Redirected(0, canonical)],
+            vec![Reply::Holds(
+                WINDOW.len() as u64,
+                Some(Box::leak(digest.clone().into_boxed_str())),
+            )],
+        );
+
+        match send(&layout, &mut server, &table, 1_000) {
+            Step::Collected { .. } => {}
+            other => panic!("{other:?}"),
+        }
+
+        // The probe asked at the address §79.1 prints…
+        assert_eq!(server.probed.len(), 1);
+        assert!(server.probed[0].contains("/recordings/sha256%3A"));
+        // …and the bytes went to the one it ended at.
+        assert_eq!(server.pushed, vec![(0, canonical.to_string())]);
+    }
+
+    #[test]
+    fn a_slice_is_bounded_by_bytes_and_not_only_by_seconds() {
+        // The defect this closes, stated as an assertion: `SLICE_SECONDS` bounds the *pass*, which
+        // is a promise to the supervisor, and it promises a receiver nothing. A robot on a fast
+        // link offering a hundred-megabyte window inside twenty seconds is offering a
+        // hundred-megabyte request body, and no receiver takes one — the Hub this OS is built
+        // against refuses a body over four and a half megabytes before its own code runs.
+        //
+        // The window here is short, so `remaining` is the binding constraint and the receiver's
+        // limit is not. That is the ordinary case and it is worth pinning too: the bound must never
+        // make a robot send *more* than the window has left.
+        assert_eq!(slice_len(10, None), 10);
+        // Longer than the floor, and nobody has said otherwise.
+        assert_eq!(slice_len(SLICE_BYTES * 3, None), SLICE_BYTES);
+        // The receiver said, so the receiver decides.
+        assert_eq!(slice_len(SLICE_BYTES * 3, Some(1_000)), 1_000);
+        assert_eq!(slice_len(SLICE_BYTES * 3, Some(SLICE_BYTES * 2)), SLICE_BYTES * 2);
+        // …up to the point where what it said would decide how much of this disk to copy.
+        assert_eq!(
+            slice_len(u64::MAX, Some(u64::MAX)),
+            SLICE_BYTES_CEILING,
+            "a receiver's claim is clamped: this number sizes a scratch file on the robot's disk",
+        );
+        // Nonsense from the far side does not produce a zero-length request, which would be a
+        // transfer that never advances and never fails.
+        assert!(slice_len(100, Some(0)) >= 1);
+    }
+
+    #[test]
+    fn the_push_carries_the_window_s_length_and_this_request_s_share_of_it() {
+        // `Content-Range: bytes <from>-<from+len-1>/<total>` — the header curl used to generate
+        // from `--continue-at`, now written out, because a bounded slice has an end that is not the
+        // window's end and there is no curl flag for one on an upload.
+        let root = TempRoot::new("upload-bounded");
+        let layout = root.layout();
+        let name = "00000000000000000001-fault.mcap";
+        seal_bare(&layout, name, WINDOW);
+        let table = bearers(&layout, false);
+        let digest = digest_of(WINDOW);
+
+        // A receiver that takes four bytes at a time, which is smaller than the window.
+        let mut server = Scripted::new(
+            vec![Reply::Limits(0, 4)],
+            vec![Reply::Holds(4, None)],
+        );
+        match send(&layout, &mut server, &table, 1_000) {
+            Step::Moved { held, .. } => assert_eq!(held, Some(4)),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(server.ranges, vec![(0, 4, WINDOW.len() as u64)]);
+
+        // And the next pass resumes where it said it stopped, still four at a time.
+        let mut server = Scripted::new(
+            vec![Reply::Limits(4, 4)],
+            vec![Reply::Holds(
+                WINDOW.len() as u64,
+                Some(Box::leak(digest.clone().into_boxed_str())),
+            )],
+        );
+        match send(&layout, &mut server, &table, 2_000) {
+            Step::Collected { .. } => {}
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(server.ranges, vec![(4, 4, WINDOW.len() as u64)]);
+    }
+
+    #[test]
+    fn a_slice_is_the_window_s_bytes_at_the_offset_and_no_others() {
+        // `extract` is the one piece of this path that touches both files, and getting it wrong
+        // produces bytes that hash to nothing — a transfer that completes, fails its digest, and
+        // restarts for ever. Checked directly rather than through a receiver, because a receiver
+        // that saw the wrong bytes would report exactly what a receiver seeing the right ones does.
+        let root = TempRoot::new("upload-extract");
+        let layout = root.layout();
+        let name = "00000000000000000001-fault.mcap";
+        seal_bare(&layout, name, WINDOW);
+
+        let ask = Push {
+            url: "https://hub.example/x".to_string(),
+            credential: None,
+            from: 3,
+            len: 5,
+            total: WINDOW.len() as u64,
+            file: layout.blackbox().join("sealed").join(name),
+            scratch: layout.upload_slice(),
+            budget_s: 20,
+        };
+        assert_eq!(extract(&ask).expect("extracted"), 5);
+        assert_eq!(std::fs::read(&ask.scratch).expect("slice"), &WINDOW[3..8]);
+
+        // Asking for more than the window has left copies what is there rather than padding. The
+        // digest is what notices a window that changed under this daemon; `extract` does not
+        // pretend to know.
+        let tail = Push {
+            from: WINDOW.len() as u64 - 2,
+            len: 1_000,
+            ..ask
+        };
+        assert_eq!(extract(&tail).expect("extracted"), 2);
+        assert_eq!(
+            std::fs::read(&tail.scratch).expect("slice"),
+            &WINDOW[WINDOW.len() - 2..]
+        );
+    }
+
+    #[test]
+    fn a_receiver_that_does_not_redirect_is_pushed_to_where_it_was_probed() {
+        // The other half of the pair, and the one that would break silently if `effective_url` were
+        // ever defaulted to something rather than left absent: a Hub that serves the path §79.1
+        // prints must keep being addressed at it.
+        let root = TempRoot::new("upload-no-redirect");
+        let layout = root.layout();
+        let name = "00000000000000000001-fault.mcap";
+        seal_bare(&layout, name, WINDOW);
+        let table = bearers(&layout, false);
+        let digest = digest_of(WINDOW);
+
+        let mut server = Scripted::new(
+            vec![Reply::Holds(0, None)],
+            vec![Reply::Holds(
+                WINDOW.len() as u64,
+                Some(Box::leak(digest.clone().into_boxed_str())),
+            )],
+        );
+
+        match send(&layout, &mut server, &table, 1_000) {
+            Step::Collected { .. } => {}
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(server.pushed, vec![(0, server.probed[0].clone())]);
     }
 
     #[test]
