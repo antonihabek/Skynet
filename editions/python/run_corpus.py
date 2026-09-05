@@ -4,10 +4,11 @@
     python editions/python/run_corpus.py [--corpus-root corpus] [--verbose]
 
 Exit code 0 only when every case in every corpus **that has a handler** passed, and the summary
-always says how many cases are in corpora with no handler at all. Those two facts together are the
-honest sentence about this edition, and neither is useful without the other: §31.4 says an edition
-that has not passed the corpus is not an edition, so "4 of 31 corpora, all passing" has to be as
-visible as the zero failures.
+always says how many cases are not implemented — split into the corpora with no handler at all and
+the individual files a handler declined. Those facts together are the honest sentence about this
+edition, and none of them is useful without the others: §31.4 says an edition that has not passed
+the corpus is not an edition, so "8 of 31 corpora, all passing" has to be as visible as the zero
+failures, and a corpus this edition answers *part* of has to be visibly neither.
 """
 
 from __future__ import annotations
@@ -48,6 +49,12 @@ def main() -> int:
         print(f"complete   {', '.join(report.complete)}")
     if report.missing_handlers:
         print(f"no handler {', '.join(sorted(report.missing_handlers))}")
+    if report.declined_files:
+        print(f"declined   {', '.join(sorted(report.declined_files))}")
+    if report.partial:
+        # Named separately from `complete` on purpose: these are corpora this edition answers part
+        # of, and a reader who saw only the passing files would take them for finished ones.
+        print(f"partial    {', '.join(sorted(report.partial))}")
 
     if report.failures:
         print()
