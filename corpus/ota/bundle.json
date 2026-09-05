@@ -187,6 +187,32 @@
       "expected": "{\"admitted\":false,\"faults\":[{\"code\":\"certification_required\",\"message\":\"This update changes rt-core, and §12 refuses one that changes the safety kernel or the envelope without a fresh bench pass for these exact bytes. rt-core is not a component this edition recognises, and an unrecognised component is gated for the same reason the two named ones are: nobody has established what it changes. This robot holds no bench pass at all.\",\"severity\":\"error\",\"subjects\":[\"rt-core\"]}],\"gated_components\":[\"rt-core\"]}"
     },
     {
+      "id": "several-gated-changes-at-once",
+      "note": "Three gated components declared out of order, one of them a name this edition does not recognise. They are reported sorted, because `gated_components` is both a sentence an operator reads before booking bench time and a fault's subjects — and an edition that emitted them in declaration order would agree about every verdict and disagree about every list.",
+      "input": {
+        "bundle": {
+          "version": "1.4.0",
+          "channel": "stable",
+          "digest": "sha256:aaaa",
+          "compatible": [
+            "bench-arm-v1"
+          ],
+          "changes": [
+            "safety_kernel",
+            "zzz_unknown",
+            "envelope"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "verified"
+        }
+      },
+      "expected": "{\"admitted\":false,\"faults\":[{\"code\":\"certification_required\",\"message\":\"This update changes envelope, safety_kernel, zzz_unknown, and §12 refuses one that changes the safety kernel or the envelope without a fresh bench pass for these exact bytes. zzz_unknown is not a component this edition recognises, and an unrecognised component is gated for the same reason the two named ones are: nobody has established what it changes. This robot holds no bench pass at all.\",\"severity\":\"error\",\"subjects\":[\"envelope\",\"safety_kernel\",\"zzz_unknown\"]}],\"gated_components\":[\"envelope\",\"safety_kernel\",\"zzz_unknown\"]}"
+    },
+    {
       "id": "a-gated-change-with-nothing-to-bind-a-pass-to",
       "note": "A bundle with no digest cannot be the subject of evidence, so a kernel change in one is refused twice over and the two refusals are separate findings. An operator who fixed only the missing digest would still not be able to apply it, and being told both at once is the point.",
       "input": {

@@ -1481,3 +1481,60 @@ pass can reach them — **31 checks → 34**:
 * `node tools/corpus-gen/generate.ts` — regenerating is a no-op
 * `docs/skynet-os-architecture.md` byte-identical in both repositories
 * **Eighteen of thirty-one corpora complete.** Thirteen remain, 254 cases
+
+---
+
+## 24. `transfer`, `power` and `ota` — the boundaries nothing stood on
+
+Three modules, **87 cases, 815 → 902 passed**, all three first run. Twenty-one corpora complete.
+Twenty-five mutations; **twenty-three caught**, and both survivors were the same shape: a comparison
+whose boundary no case sat exactly on.
+
+### `partial >= size`, and the case that was never the equals
+
+Every fetch case in the corpus had a partial well under the declared size or well over it. The
+boundary — a partial that is **exactly** the whole length — was untested, and it is the interesting
+one: either the transfer finished and nothing recorded it, or these are somebody else's bytes of the
+same length. Both are answered by discarding and starting again. An edition testing `>` alone
+resumes from the end of a file and sends nothing at all.
+
+`a-partial-exactly-the-size-of-the-image` is that case.
+
+### Two gated components, and the order nobody pinned
+
+`gated_components` is reported twice over: as a sentence an operator reads before booking bench
+time, and as a fault's `subjects`. It is sorted. No bundle in the corpus declared **more than one**
+gated change, so an edition emitting them in declaration order agreed about every verdict and
+disagreed about every list. `several-gated-changes-at-once` declares three out of order, one of them
+a name this edition does not recognise — because §12's rule is that an unrecognised component is
+gated too.
+
+**1,069 → 1,071 cases**, and Rust reproduces both without a change.
+
+### The mutation that broke twenty-one cases
+
+Treating a temperature with no declared threshold as `critical` rather than `nominal`. The rule
+exists because 85 °C is right for a CPU package and fifty degrees wrong for a harmonic drive, so a
+body that has not said what hot is gets a **fault** and nothing shed — and the corpus holds it
+hard, which is what a rule that decides whether a robot gives up its own sensors deserves.
+
+### The four traps this batch added
+
+* **`Array.prototype.includes` is `SameValueZero`**, so `[1, 2].includes(true)` is false where
+  `True in [1, 2]` is true. It guards two things: §36.4's brownout override — *the one rule that
+  ignores the gauge and stops the robot immediately* — and §12's compatible-board list.
+* **`Math.trunc` truncates toward zero** and Python's `//` floors. Every use here is clamped at zero
+  afterwards, so the two agree on every input that reaches the file, which is exactly the kind of
+  agreement that stops being true when somebody moves the clamp.
+* **`new Set(…)` then `.sort()`** is insertion order then UTF-16 order; a Python `set` is neither.
+* **`String(600000)`** is `"600000"` and `str(600000.0)` is `"600000.0"`, in a sentence the corpus
+  compares byte for byte.
+
+### Verified
+
+* `python editions/python/run_corpus.py` — **904 passed, 0 failed**, 167 not implemented, of 1,071
+* `cargo test -p skynet-corpus --test corpus` — **1,071 cases across 77 files, byte for byte**
+* 25 of 25 mutations caught, cache cleared before each
+* **Twenty-one of thirty-one corpora complete.** Ten remain, 167 cases: `cell` 26, `checkin` 23,
+  `blackbox` 18, `calibration` 18, `provenance` 17, `telemetry` 16, `live` 15, `readiness` 12,
+  `birth` 11, `intent` 11

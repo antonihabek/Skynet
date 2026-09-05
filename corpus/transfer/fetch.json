@@ -142,6 +142,24 @@
       "expected": "{\"decision\":\"discard_and_fetch\",\"detail\":\"There are 140000 bytes here for a bundle the manifest says is 100000. A partial cannot be larger than what it is part of, so this is left over from something else. It is discarded and the transfer starts again.\",\"from\":0}"
     },
     {
+      "id": "a-partial-exactly-the-size-of-the-image",
+      "note": "The test is `partial >= size`, and this is the equals. A partial that is exactly the whole length is not a partial: either the transfer finished and nothing recorded it, or these are somebody else's bytes of the same length. Both are answered by discarding and starting again, and an edition testing `>` alone resumes from the end of a file and sends nothing.",
+      "input": {
+        "subject": {
+          "digest": "sha256:aaaa",
+          "size": 100000,
+          "have": false,
+          "partial": 100000,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"discard_and_fetch\",\"detail\":\"There are 100000 bytes here for a bundle the manifest says is 100000. A partial cannot be larger than what it is part of, so this is left over from something else. It is discarded and the transfer starts again.\",\"from\":0}"
+    },
+    {
       "id": "a-partial-of-a-manifest-that-declares-no-size",
       "note": "Every manifest a Hub serves today. The \"cannot be larger than what it is part of\" branch is unreachable without a declared size, so a resume is the only honest answer and the sentence says how far it got without claiming a total.",
       "input": {

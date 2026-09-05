@@ -44,12 +44,15 @@ from . import identity as identity_module
 from . import kinematics as kinematics_module
 from . import observation as observation_module
 from . import opstate as opstate_module
+from . import ota as ota_module
+from . import power as power_module
 from . import predicate as predicate_module
 from . import roles as roles_module
 from . import watchdog as watchdog_module
 from . import safety as safety_module
 from . import semver as semver_module
 from . import skill as skill_module
+from . import transfer as transfer_module
 from . import transport as transport_module
 from . import vocabulary as vocabulary_module
 
@@ -257,6 +260,20 @@ def _opstate(label: str, case_input: dict[str, Any]) -> Any:
     raise Unimplemented("opstate", label)
 
 
+def _ota(label: str, case_input: dict[str, Any]) -> Any:
+    """Two of §12's three rules: may this image be installed, and is the slot it booted into good."""
+    if label == "bundle":
+        return ota_module.bundle_to_json(case_input)
+    if label == "boot":
+        return ota_module.boot_to_json(case_input)
+    raise Unimplemented("ota", label)
+
+
+def _power(_label: str, case_input: dict[str, Any]) -> Any:
+    """Five files, one shape: §36's assessment plus every predicate a caller reads off it."""
+    return power_module.power_to_json(case_input)
+
+
 def _predicate(_label: str, case_input: dict[str, Any]) -> Any:
     return predicate_module.predicate_to_json(case_input.get("predicate"), case_input.get("context"))
 
@@ -327,6 +344,19 @@ def _skill(label: str, case_input: dict[str, Any]) -> Any:
     raise Unimplemented("skill", label)
 
 
+def _transfer(label: str, case_input: dict[str, Any]) -> Any:
+    """Four files: a fetch and its arrival, an upload and its receipt. Mirrors, not duplicates."""
+    if label == "fetch":
+        return transfer_module.fetch_to_json(case_input)
+    if label == "arrival":
+        return transfer_module.arrival_to_json(case_input)
+    if label == "upload":
+        return transfer_module.upload_to_json(case_input)
+    if label == "receipt":
+        return transfer_module.receipt_to_json(case_input)
+    raise Unimplemented("transfer", label)
+
+
 def _transport(_label: str, case_input: dict[str, Any]) -> Any:
     """Seven files, one input shape: a source policy, a target body, and the caller's options."""
     return transport_module.plan_to_json(case_input)
@@ -348,6 +378,8 @@ HANDLERS: dict[str, Handler] = {
     "limits": _limits,
     "observation": _observation,
     "opstate": _opstate,
+    "ota": _ota,
+    "power": _power,
     "frames": _frames,
     "identity": _identity,
     "kinematics": _kinematics,
@@ -356,6 +388,7 @@ HANDLERS: dict[str, Handler] = {
     "vocabulary": _vocabulary,
     "semver": _semver,
     "skill": _skill,
+    "transfer": _transfer,
     "transport": _transport,
     "watchdog": _watchdog,
 }
