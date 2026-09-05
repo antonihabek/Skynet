@@ -41,6 +41,7 @@ from . import cell as cell_module
 from . import certification as certification_module
 from . import checkin as checkin_module
 from . import birth as birth_module
+from . import blackbox as blackbox_module
 from . import digest as digest_module
 from . import embodiment as embodiment_module
 from . import identity as identity_module
@@ -255,6 +256,25 @@ def _identity(label: str, case_input: dict[str, Any]) -> Any:
     raise Unimplemented("identity", label)
 
 
+def _blackbox(label: str, case_input: dict[str, Any]) -> Any:
+    """Four files, and each holds a different kind of thing.
+
+    `schemas` pins the six MCAP channel schemas — §31.2 keeps them single-source across editions —
+    `records` pins the ring's record layout, `header` pins the ring header and its two tables, and
+    `seal` pins the framing of a whole file by its digest. This is the one corpus whose subject is
+    bytes rather than a verdict.
+    """
+    if label == "schemas":
+        return blackbox_module.schemas_to_json(case_input)
+    if label == "records":
+        return blackbox_module.records_to_json(case_input)
+    if label == "header":
+        return blackbox_module.header_to_json(case_input)
+    if label == "seal":
+        return blackbox_module.seal_to_json(case_input)
+    raise Unimplemented("blackbox", label)
+
+
 def _cell(label: str, case_input: dict[str, Any]) -> Any:
     """Two files, because the document has two consumers and an edition could agree about one while
     disagreeing about the other: `validate` is what an operator sees when they save it, `context` is
@@ -423,6 +443,7 @@ def _watchdog(_label: str, case_input: dict[str, Any]) -> Any:
 HANDLERS: dict[str, Handler] = {
     "admission": _admission,
     "birth": _birth,
+    "blackbox": _blackbox,
     "cell": _cell,
     "certification": _certification,
     "checkin": _checkin,
