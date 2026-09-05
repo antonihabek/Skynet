@@ -1,12 +1,22 @@
 # The Python edition
 
-> **This is not yet an edition.** §31.4: *"An edition that has not passed the corpus is not an
-> edition. It cannot carry the name, appear in the matrix, or be installed by `skynetd`."* It
-> currently passes **30 of 31 corpora**. The runner prints that number on every run and this
-> file will keep saying so until it is 31.
+> **It passes the corpus: 1,109 of 1,109 cases, 31 of 31 corpora.** §31.4: *"An edition that has
+> not passed the corpus is not an edition. It cannot carry the name, appear in the matrix, or be
+> installed by `skynetd`."* This one does, and the runner prints the figure on every run.
+>
+> **What that is, exactly.** §42 decomposes "edition" into four levels, and this is **L2 —
+> Contracts**: transport, admission, certification, readiness and everything else in `corpus/`,
+> computed natively and corpus-verified. It is **not** L3 (`skynetd` and the policy runtime, ~35k
+> lines) and **not** L4 (the Safety Kernel). Its §31.3 ceiling is **guest** and it hosts no kernel,
+> which is a property of a garbage-collected runtime rather than a judgement about Python.
+>
+> This file used to say "not yet an edition" and count upwards. What it counts now is what is
+> missing above it, which is L3 and L4 and neither is planned.
 
 §73's last column has carried one entry against §31 since the table was written: *"The second
-edition, which is what the corpus is for."* This is the start of it.
+edition, which is what the corpus is for."* That entry is now satisfied at L2, and §73 is a
+**mirrored** document — edited in both repositories or in neither — so the amendment is recorded in
+`BUILD-LOG.md` rather than made here.
 
 ## What a Python edition is, and the ceiling it declares
 
@@ -72,11 +82,13 @@ package index is an edition that cannot be checked on the machine it is being re
 | `calibration` | 31 | §45's validity, the guards a set feeds, and which sets a body can hold |
 | `telemetry` | 25 | §74's windows, the coverage they tile, and §15's field conformance |
 | `provenance` | 21 | §56's three classes, the order that makes them ungameable, and §56.5's tolerance |
-| | **1,089** | of 1,104 |
+| `live` | 20 | §54.2's precondition context, and the rule that absent is not null |
+| | **1,109** | of 1,109 |
 
-The one remaining corpus has no handler at all — 15 cases, counted in every run. They are not
-skipped and not hidden: a runner that quietly passed most corpora and printed "OK" would be the
-most misleading artifact in this repository.
+**Every corpus has a handler and every case passes.** The runner still reports the four buckets on
+every run, and it will go straight back to reporting a gap the moment the corpus grows — which it
+will, because §31.5 says plainly that the corpus is permanent work and a feature without corpus
+coverage is a feature where editions may already disagree.
 
 ### `partial` is a state, and `fuzz` was in it
 
@@ -86,7 +98,7 @@ without it, implementing one file of three would have counted the other 108 case
 answers* rather than as *untranscribed*, and the number would have got worse precisely as the
 edition improved. A corpus is complete or it is not, however many of its files are done.
 
-`self_check.py` holds the runner to this against synthetic corpora with known answers: **41
+`self_check.py` holds the runner to this against synthetic corpora with known answers: **44
 checks**, of which four test the detector and the rest test the language traps below.
 
 Both editions run on every commit. §31.4 asks for differential checking in CI and until the
@@ -151,6 +163,7 @@ skynet_os/
   calibration.py   §45's validity, expiry and the guards a parameter set feeds
   telemetry.py     §74's windows, what a set of them covers, and §15's ratio
   provenance.py    §56's classes, and whether two roll-ups of one run agree
+  live.py          §54.2's precondition context, assembled from what the OS knows
   js.py            the four JavaScript expressions Python has no equivalent for
   corpus.py        the runner and its dispatch
 run_corpus.py      the CLI
@@ -619,8 +632,67 @@ Fifteen of seventeen mutations caught, up from ten; both survivors are no-ops �
 already blocks `field` through the reasons list, and `abs(NaN − NaN) <= 1e-9` is false however the
 guard above it is written.
 
-## What is next, in dependency order
+## What the fourteenth round found: a corpus that tested one side of its own rule
 
-`live` (15 cases). One corpus, and none of them is a foundation any of the others needs. Everything after the
-foundation is mechanical; the foundation is canonical serialisation and a runner that refuses to lie
-about what it has not done.
+`live` — §54.2's precondition context, 15 cases, first run, and **1,104 → 1,109 with the corpus
+complete**.
+
+Then thirteen of twenty mutations, and the seven survivors had one shape between them. `live.ts`'s
+own header states the rule the whole file exists for:
+
+> **The rule that decides every field: absent is not null.** A fact this robot does not know must be
+> **absent** from the context, never present as `null` and never present as a plausible zero.
+
+**Zero of the fifteen cases carried an explicit null.** Every optional field was either missing or a
+real value, so an edition that published `null` for a declared-and-unmeasured gripper agreed about
+all fifteen and broke the rule the module is named for.
+
+`declared-and-not-measured` carries four of them at once — a gripper the body has and cannot read, a
+battery sensor that answered nothing, a pose the driver did not report, a state nobody observed —
+and every one omits its path, exactly as an absent key does. That identity **is** the case: an
+edition publishing null gives a predicate something to compare against, and
+`robot.state.battery_percent > 20` is *false* on a null and *unresolvable* on an absence. Only the
+second refuses the skill.
+
+Four more: a calibration age declared and null, a tier of `''` — which **is** published, because the
+test is `typeof === 'string'` and an empty string is a value somebody supplied — a joint with no
+name at all, and a frame fault whose subjects arrive unsorted and duplicated.
+
+**Eighteen of twenty caught.** The last two are one trap and it is unwritable: `battery_percent` and
+`age_s` are typed `number | null`, tested with `Number.isFinite`, and the two readings differ only
+on a **non-finite number** — which `JSON.stringify` writes as `null`, and which
+`corpus/README.md` now says means *null* in a field whose type admits one. Three checks in
+`self_check.py` instead, and they matter for a reason worth stating: a battery published as `NaN`
+makes every comparison against it false, so a robot whose sensor failed reads as *"the battery is
+low"* rather than producing the refusal §54.2 asks for.
+
+## Where this edition stands
+
+**Complete at L2.** 31 of 31 corpora, 1,109 of 1,109 cases, 44 self-checks, and both editions run on
+every commit with a ratchet under the Python one.
+
+What the seven rounds that finished it actually produced is worth separating from the transcription,
+because the transcription was the cheap half:
+
+| | |
+|---|---|
+| Cases added to the corpus | **38** |
+| Defects found in the Rust edition | **1** (a digest published from a slot nobody read) |
+| Defects found in this edition by its own mutation runs | 0 — every module passed its corpus first run |
+| Notes found claiming what their input does not reach | **5** |
+| Functions found that no case measured | **1** (`setsFor`, whose output was frozen as an input) |
+| Format conventions found undocumented | **1** (`null` in a numeric field), now in `corpus/README.md` |
+| Duplicated implementations of one rule, consolidated | **2** (`toFixed`, and the JS helpers into `js.py`) |
+
+The single sentence the whole set comes down to is in `BUILD-LOG.md` §30 and is worth repeating
+here: **a case that demonstrates a rule and a case that pins it are different cases, and a corpus
+needs both.** Thirty-one of the thirty-eight are the second kind and seven are coverage of a
+function nothing measured, and a corpus written to be read had almost none of either.
+
+## What is next
+
+Nothing, for this edition, at this level. L3 is `skynetd` and the policy runtime — Part IV, roughly
+thirty-five thousand lines — and §42 is explicit that **almost everyone asking for their language
+wants L1**, not this and certainly not that. §31.5 names the standing cost that does apply: the
+corpus is permanent work, every new case is a case this edition must reproduce, and a feature that
+lands without one is a feature where the editions may already disagree.

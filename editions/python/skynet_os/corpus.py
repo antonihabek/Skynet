@@ -48,6 +48,7 @@ from . import embodiment as embodiment_module
 from . import identity as identity_module
 from . import intent as intent_module
 from . import kinematics as kinematics_module
+from . import live as live_module
 from . import observation as observation_module
 from . import opstate as opstate_module
 from . import ota as ota_module
@@ -372,6 +373,16 @@ def _semver(label: str, case_input: dict[str, Any]) -> Any:
     raise Unimplemented("semver", label)
 
 
+def _live(_label: str, case_input: dict[str, Any]) -> Any:
+    """§54.2's live context. One file, because there is one function.
+
+    Every case in it is really a case about a single rule: a fact the robot does not know is
+    *absent* rather than defaulted, because §54.2 refuses a precondition it cannot evaluate and
+    "assume true" is what free-text preconditions do by construction.
+    """
+    return live_module.context_to_json(case_input)
+
+
 def _observation(label: str, case_input: dict[str, Any]) -> Any:
     """Two files with different inputs: a frame to assemble, and the instant to assemble it at."""
     if label == "frames":
@@ -484,6 +495,7 @@ HANDLERS: dict[str, Handler] = {
     "digest": _digest,
     "fuzz": _fuzz,
     "limits": _limits,
+    "live": _live,
     "observation": _observation,
     "opstate": _opstate,
     "ota": _ota,

@@ -2075,3 +2075,102 @@ test changes nothing, and `abs(NaN − NaN) <= 1e-9` is false however the guard 
 * `python3 editions/python/self_check.py` — 41 checks; CI ratchet raised to 1,089
 
 **Thirty of thirty-one corpora complete. One remains, 15 cases:** `live`.
+
+---
+
+## 32. `live`, and a corpus that tested one side of its own rule — the edition is complete
+
+`live` is §54.2's precondition context: the seven branches a skill's preconditions may read, and the
+rule that decides every field in them. **15 cases, 1,089 → 1,104, first run.**
+
+**That is 31 of 31 corpora and 1,104 of 1,104 cases.** With the five cases this round then added,
+the Python edition reproduces **1,109 of 1,109** and the runner's *not implemented* line reads zero
+for the first time since it was written.
+
+### Thirteen of twenty, and the seven survivors were one shape
+
+`live.ts`'s header states the rule the whole file exists for, in bold, as its first section:
+
+> **The rule that decides every field: absent is not null.** A fact this robot does not know must be
+> **absent** from the context, never present as `null` and never present as a plausible zero.
+
+**Zero of the fifteen cases carried an explicit null.** Every optional field in every case was either
+missing entirely or held a real value — so an edition that published `null` for a
+declared-and-unmeasured gripper reproduced all fifteen and broke the rule the module is named for.
+
+That is the sharpest instance of this session's pattern, and it is worth separating from the others:
+the earlier gaps were boundaries nobody had sat on, which is an oversight. This is a corpus for a
+module about a **distinction** that exercises only one side of it, which is closer to a category
+error — and it survived because the side it tests is the side a reader needs to see.
+
+`declared-and-not-measured` carries four at once: a gripper the body has and cannot read, a battery
+sensor that answered nothing, a pose the driver did not report, a state nobody observed. Every one
+omits its path, exactly as an absent key does — and that identity is the case. An edition publishing
+`null` gives a predicate something to compare against, and `robot.state.battery_percent > 20` is
+**false** on a null and **unresolvable** on an absence. Only the second refuses the skill, which is
+§54.2's first rule in one comparison.
+
+Four more, each a branch nothing had reached: an `age_s` declared and null; a tier of `''`, which
+**is** published because the test is `typeof === 'string'` and an empty string is a value somebody
+supplied; a joint with no name at all, beside the dotted one that had a case; and a frame fault
+whose subjects arrive unsorted and duplicated, where the one existing fault case carries a single
+subject and the sort was therefore free.
+
+**Eighteen of twenty caught.** The last two are one trap and it cannot be written: `battery_percent`
+and `age_s` are typed `number | null` and tested with `Number.isFinite`, so the two readings differ
+only on a **non-finite number** — which `JSON.stringify` writes as `null`, and which
+`corpus/README.md` now says means *null* in a field whose type admits one. Three checks in
+`self_check.py` instead, both directions, and the reason they earn their place: a battery published
+as `NaN` makes every comparison against it false, so a robot whose sensor has failed reads as *"the
+battery is low"* rather than producing a refusal.
+
+### §73 needs an amendment this session cannot make
+
+§73's last column has said this against the Languages row since the table was written:
+
+> **Built** — one edition, held to a corpus of 77 files and 1,055 cases | *The second edition, which
+> is what the corpus is for*
+
+That entry is now satisfied at **L2**. §73 is a **mirrored** document — `docs/README.md`: *"A shared
+document is edited in both repositories or in neither. It never diverges."* — and this session was
+instructed not to touch the Hub repository, so the edit is not made rather than made on one side.
+
+The amendment, when somebody makes it in both: the row's last column becomes L3 and L4, which is
+what is actually missing, and §42 is already explicit that neither is planned and that *almost
+everyone asking for their language wants L1*. The mirror pin stays where it is until then, and
+`check-mirrors.mjs` stays green because nothing diverged.
+
+### What the seven rounds produced, separated from the transcription
+
+The transcription was the cheap half. Seven modules passed their corpora on the first run and not
+one mutation run found a defect in this edition. What the rounds found was in the corpus and in the
+other two editions:
+
+| | |
+|---|---|
+| Cases added | **38** (1,071 → 1,109) |
+| Defects fixed in the Rust edition | **1** — a digest published from a slot nobody read |
+| Defects found in this edition | **0** |
+| Case notes claiming what their own input does not reach | **5** |
+| Functions no case measured | **1** — `setsFor`, whose output was frozen as an input |
+| Format conventions undocumented | **1** — `null` in a numeric field, now in `corpus/README.md` |
+| Duplicated implementations of one rule | **2** — `toFixed`, and the JS helpers into `js.py` |
+| CI jobs this edition was in | **0 → 1**, with a ratchet |
+
+Thirty-one of the thirty-eight cases are boundaries: a value exactly at a threshold, a comparison's
+other side, a sort's other order, an absence's other spelling. Seven are coverage of a function
+nothing measured. None of the thirty-eight is a Python trap, and none pins behaviour that was wrong
+in any edition — every one pins behaviour that was already right in both and protected in neither.
+
+### Verified
+
+* `python3 editions/python/run_corpus.py --min-passed 1109` — **1,109 passed, 0 failed, 0 not
+  implemented**, 31 of 31 corpora complete
+* `cargo test -p skynet-corpus --test corpus` — 1,109 cases, byte for byte
+* `cargo test --workspace` — **1,431 passed**, 0 failed, 7 ignored; fmt and clippy clean
+* `python3 editions/python/self_check.py` — **44 checks**, three of them new, both new-trap
+  mutations confirmed red
+* 18 of 20 `live` mutations caught by the corpus; the two survivors are the `self_check.py` trap,
+  confirmed red on both
+* `check-golden-path.mjs`, `check-mirrors.mjs`, `check-contract-mirrors.mjs` all clean
+* CI ratchet raised to 1,109
