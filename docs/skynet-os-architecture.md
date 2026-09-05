@@ -1464,10 +1464,45 @@ Three alternatives were considered and are worth recording as rejected:
 * **The daemon stops writing events.** Rejected: §38.3 requires a black box event on every
   configuration change, and the daemon is the only party that sees one.
 
-**The fix, and it is open.** The sequence belongs in a mapped header as an atomic, and writers claim
-a slot by fetch-add — which is what `skynet-ring-shm` already does for §25's command ring, in the
-same repository, for the same reason. It wants a design pass and a Linux mapping, and until it has
-one the lock makes the interim state safe rather than merely tolerable. Recorded in §80.
+**The fix.** Writers claim a slot by fetch-add on a shared atomic — which is what `skynet-ring-shm`
+already does for §25's command ring, in the same repository, for the same reason.
+
+An earlier draft of this paragraph said the atomic *"belongs in a mapped header"*, and the design
+pass it asked for found that it does not. `Ring::open` rejects a next-sequence field in the header
+by name, and its argument is sound:
+
+> Recovery is a scan, and it is a scan on purpose. The alternative is a "next sequence" field in the
+> header, updated on every append — which turns one positioned write per record into two, and makes
+> the header the thing most likely to be torn by a power cut. The scan is `O(capacity)`, happens
+> once at start, and is the only way to be right after a crash: the highest sequence number actually
+> on disk is the truth, whatever any counter claims.
+
+Both arguments hold, because they are about **two different counters**. `Ring::open`'s subject is
+crash recovery, where a counter is ahead of or behind the disk after a power cut and there is no way
+to tell which. §26.2's subject is concurrent claiming, where two live writers must agree about who
+gets which slot and two in-memory counters cannot.
+
+So the claim counter is **seeded from the scan at open and never consulted after a restart**, which
+satisfies both. Three consequences follow, and the third is why this is a smaller change than it
+looked:
+
+* **It is not in the header.** `encode_header` computes a CRC over the whole header, and a field
+  mutated on every append invalidates it — so `Ring::open`'s "torn by a power cut" objection lands
+  on it directly.
+* **It is not durable.** It is rebuilt from the scan at every open, so nothing about it has to
+  survive a restart.
+* **The on-disk format therefore does not change.** `FORMAT_VERSION` stays at 2, the conformance
+  corpus is untouched, and no language edition moves. §31.2 keeps the black box format single-source
+  across editions precisely so that a change here would be expensive; this is not one.
+
+The shape is a small `MAP_SHARED` mapping beside the ring holding one `AtomicU64`, created by
+whichever writer opens the recording first, seeded from the scan, and claimed by fetch-add. The
+directory lock stays and its meaning narrows: from *one writer* to *one creator of the claim
+mapping*, with every writer thereafter attaching to it.
+
+One property §25's ring needs and this one does not: **no seqlock**. `skynet-ring` runs one because
+a reader may race a writer mid-slot; sealing takes the lock, so a black box slot is written by
+exactly one writer and read by nobody until that writer has finished with it.
 
 ---
 
@@ -5611,7 +5646,7 @@ cause — a client asserting something about a route it does not own:
 
 | Open | Why |
 |---|---|
-| **A ring two processes can write** | §26.2. `skynetd` records events and the kernel host records cycles, both belong in one recording, and a `Ring` holds its next sequence in memory — so two writers over one file would encode two records into one slot and produce a recording that passes every check a reader applies and is wrong in the interval that matters. An exclusive directory lock makes the interim safe: the second writer is refused by name rather than allowed to corrupt evidence. The fix is the sequence as an atomic in a mapped header, claimed by fetch-add, which is what `skynet-ring-shm` already does for §25's command ring. |
+| **A ring two processes can write** — *designed 2026-09-05* | §26.2. `skynetd` records events and the kernel host records cycles, both belong in one recording, and a `Ring` holds its next sequence in memory — so two writers over one file would encode two records into one slot and produce a recording that passes every check a reader applies and is wrong in the interval that matters. An exclusive directory lock makes the interim safe: the second writer is refused by name rather than allowed to corrupt evidence. §26.2 now carries the design: a shared `AtomicU64` beside the ring, seeded from `Ring::open`'s scan and claimed by fetch-add, **not** a field in the CRC'd header — which is what the design pass overturned, and why the on-disk format, the corpus and every language edition are untouched by it. |
 | **Retention of sealed windows** — *decided 2026-09-04, unbuilt* | §79.4 keeps every one, and a robot that seals daily for a year does not survive §28's disk floor. The owner's rule, and the reasoning it answers: the Hub's acknowledgement is **another party's word**, and §13 exists precisely for the day that party is the one being asked questions — so acknowledgement alone never authorises a deletion. A window an **incident names is never reclaimed**. A routine window may be reclaimed only when a receipt exists, the receipt's digest **is** the window's digest, and the disk is under the floor — oldest first. A reclaim writes a **tombstone**: digest, seal time, byte count, reason. The chain of custody is therefore complete for ever and only the bytes are ever freed, which is the difference between a robot that cannot account for a window and one that can say what it held and when it let it go. |
 | **`people_detection` in §5's vocabulary** | The seventh of `resolveLimits()`'s inputs, and the only one with no path. It is not a missing delivery — §11's profile delivers six — it is that no body can *declare* a person detector, so `proximity` resolves to a ceiling whose guard is permanently unavailable. Adding it means extending the sensor vocabulary, which §30 says needs a governance process first. |
 | **Refusing to command a body that cannot warn** | §81.3. A transition that demands a tone and cannot produce one is a robot moving with a control missing from somebody's risk assessment, and `skynetd` cannot decline it: §27's state is derived from conditions rather than granted, so there is nothing to withhold. The rule belongs in the kernel's interlock, where the transition is, and putting it anywhere else would be a second definition of §27's machine. |

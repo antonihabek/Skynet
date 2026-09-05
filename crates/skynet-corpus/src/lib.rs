@@ -23,6 +23,8 @@
 //! diverged and never of the others. [`Failure`] therefore reports both strings in full and points
 //! at the first differing byte, because the useful question is which of the two is right.
 
+#![forbid(unsafe_code)]
+
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};

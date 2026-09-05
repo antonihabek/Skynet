@@ -5,11 +5,12 @@
 //! the step. It creates an anonymous file in memory, sizes it, seals it, maps it, and hands back the
 //! slice the protocol runs on.
 //!
-//! # This is the only `unsafe` in the workspace outside the ABI and the loader
+//! # One of the two mappings that carry `unsafe`, outside the ABI and the loader
 //!
 //! `skynet-rhal` declares a C vtable of raw function pointers and `skynet-cli` loads arbitrary
 //! native code; those two cannot be safe by construction and CI asserts every other crate is. This
-//! is the third, and it is deliberately as small as a crate can be: four `extern "C"` declarations,
+//! is the third, and `skynet-claim` — §26.2's shared sequence — is the fourth. Both are
+//! deliberately as small as a crate can be; this one is four `extern "C"` declarations,
 //! one `mmap`, and one `slice::from_raw_parts`. Everything about the ring that could move a robot
 //! wrongly — the seqlock, the wrap, the tear detection, the layout — is in `skynet-ring`, where the
 //! compiler checks it.
