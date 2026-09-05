@@ -38,15 +38,18 @@ from typing import Any, Callable
 from .canonical import canonical
 from . import admission as admission_module
 from . import certification as certification_module
+from . import birth as birth_module
 from . import digest as digest_module
 from . import embodiment as embodiment_module
 from . import identity as identity_module
+from . import intent as intent_module
 from . import kinematics as kinematics_module
 from . import observation as observation_module
 from . import opstate as opstate_module
 from . import ota as ota_module
 from . import power as power_module
 from . import predicate as predicate_module
+from . import readiness as readiness_module
 from . import roles as roles_module
 from . import watchdog as watchdog_module
 from . import safety as safety_module
@@ -201,6 +204,15 @@ def load_corpus(root: Path) -> list[CorpusFile]:
 Handler = Callable[[str, dict[str, Any]], Any]
 
 
+def _readiness(label: str, case_input: dict[str, Any]) -> Any:
+    """One robot, and the registry it sits in."""
+    if label == "robot":
+        return readiness_module.readiness_to_json(case_input)
+    if label == "fleet":
+        return readiness_module.fleet_to_json(case_input)
+    raise Unimplemented("readiness", label)
+
+
 def _roles(_label: str, case_input: dict[str, Any]) -> Any:
     return roles_module.role_to_json(roles_module.parse_role(case_input.get("role")))
 
@@ -239,6 +251,10 @@ def _identity(label: str, case_input: dict[str, Any]) -> Any:
     if label == "attestation":
         return identity_module.attestation_to_json(case_input)
     raise Unimplemented("identity", label)
+
+
+def _intent(_label: str, case_input: dict[str, Any]) -> Any:
+    return intent_module.offer_to_json(case_input)
 
 
 def _kinematics(_label: str, case_input: dict[str, Any]) -> Any:
@@ -301,6 +317,10 @@ def _limits(_label: str, case_input: dict[str, Any]) -> Any:
 
 def _admission(_label: str, case_input: dict[str, Any]) -> Any:
     return admission_module.admission_to_json(case_input)
+
+
+def _birth(_label: str, case_input: dict[str, Any]) -> Any:
+    return birth_module.attested_to_json(case_input)
 
 
 def _certification(_label: str, case_input: dict[str, Any]) -> Any:
@@ -371,6 +391,7 @@ def _watchdog(_label: str, case_input: dict[str, Any]) -> Any:
 
 HANDLERS: dict[str, Handler] = {
     "admission": _admission,
+    "birth": _birth,
     "certification": _certification,
     "cycle": _cycle,
     "digest": _digest,
@@ -382,8 +403,10 @@ HANDLERS: dict[str, Handler] = {
     "power": _power,
     "frames": _frames,
     "identity": _identity,
+    "intent": _intent,
     "kinematics": _kinematics,
     "predicate": _predicate,
+    "readiness": _readiness,
     "roles": _roles,
     "vocabulary": _vocabulary,
     "semver": _semver,
