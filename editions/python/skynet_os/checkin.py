@@ -68,7 +68,8 @@ from __future__ import annotations
 import math
 from typing import Any, Final
 
-from .identity import attestation_block, attest
+from .identity import attest, attestation_block
+from .js import js_number as _js_number, js_trim as _js_trim, utf16_key as _utf16_key
 
 __all__ = [
     "CLAIMS",
@@ -105,18 +106,6 @@ HEALTH_FIELDS: Final = (
     "temperature_c",
 )
 
-#: ECMAScript's ``WhiteSpace`` plus ``LineTerminator``. Python's ``strip()`` removes more.
-_JS_WHITESPACE: Final = (
-    "\t\n\v\f\r             "
-    "     　﻿"
-)
-
-
-def _js_trim(value: str) -> str:
-    """``String.prototype.trim`` — the specification's set, not Python's larger one."""
-    return value.strip(_JS_WHITESPACE)
-
-
 def _text(value: Any) -> str:
     """``(value ?? '').trim()`` over a field a decoder may find is not a string at all."""
     return _js_trim(value) if isinstance(value, str) else ""
@@ -143,17 +132,6 @@ def _number(value: Any) -> float | None:
         return None
     number = float(value)
     return None if math.isnan(number) or math.isinf(number) else number
-
-
-def _js_number(value: float) -> str:
-    """A number inside a template literal."""
-    if value != value:
-        return "NaN"
-    if value in (math.inf, -math.inf):
-        return "Infinity" if value > 0 else "-Infinity"
-    if float(value).is_integer() and abs(value) < 1e21:
-        return str(int(value))
-    return repr(float(value))
 
 
 def _generation(value: Any) -> float:

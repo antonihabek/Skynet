@@ -943,6 +943,118 @@
       "expected": "{\"faults\":[{\"code\":\"volume_shape_invalid\",\"detail\":\"This fixture has been given a volume with no usable geometry. A fixture may be named without being measured; it may not be measured wrongly.\",\"subjects\":[\"bin\"]}]}"
     },
     {
+      "id": "a-fixture-named-and-not-measured",
+      "note": "A fixture whose `volume` is written out and left null. §55.2 permits it — *a fixture may be named without being measured* — and the check that follows is truthy rather than a key test for exactly this document: an edition asking whether the key is present reports a fixture the operator honestly said nothing about as one they measured wrongly, which is a fault against somebody for being careful.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "bin",
+              "volume": null
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[]}"
+    },
+    {
+      "id": "a-duplicate-fixture-measured-wrongly",
+      "note": "One fault, not two. The duplicate is reported and the walk **stops** — the second `jig-a` is not the fixture any precondition will reach, so measuring it wrongly is not a second thing to tell the operator about. An edition that fell through would report geometry against a name that already had a fault of its own, and the operator would fix the volume on the copy that is about to be deleted.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "jig-a",
+              "volume": {
+                "frame": "base",
+                "shape": {
+                  "kind": "sphere",
+                  "centre": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "radius_m": -1
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"duplicate_fixture\",\"detail\":\"Two fixtures with one name: a precondition asking for it would be asking about whichever the reader happened to reach.\",\"subjects\":[\"jig-a\"]}]}"
+    },
+    {
       "id": "a-parking-entry-with-no-channel",
       "note": "A parking pose is a command, and a command names its channel.",
       "input": {

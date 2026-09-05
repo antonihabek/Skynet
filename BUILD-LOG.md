@@ -1643,3 +1643,104 @@ specification as changed-without-repinning since. Re-pinned from the two agreein
 
 **Twenty-five of thirty-one corpora complete. Six remain, 110 cases:** `cell` 26, `blackbox` 18,
 `calibration` 18, `provenance` 17, `telemetry` 16, `live` 15.
+
+---
+
+## 27. `cell`, and this edition running in no CI job at all
+
+`cell` is §55.2's descriptor and **26 cases in two files**, split because the document has two
+consumers that could be got right independently: `validate` is what an operator sees when they save
+it, `context` is what a precondition and the workspace guard read out of it afterwards.
+
+**963 → 989, first run.** Twenty-six corpora complete.
+
+### Nineteen mutations, and three kinds of survivor
+
+Five survived, and sorting them was most of the round:
+
+| Survivor | What it turned out to be |
+|---|---|
+| A non-finite box corner | **The corpus structurally cannot carry it** — and this repository already wrote that down |
+| An unknown shape kind decoding as a sphere | A **no-op mutation**: `cylinder` never enters the sphere branch. The sharper version is caught |
+| A shadowing fact winning | **Redundant by construction**: the filter and the overwrite order are two guards, and the filter is caught |
+| `volume: null` on a fixture | A real gap. Well-typed |
+| The stop after a duplicate fixture | A real gap. Well-typed |
+
+Two of those are worth the paragraph they cost, because both look like corpus gaps and neither is.
+A mutation that survives is not a finding until it has been shown to change an answer, and two of
+these five changed nothing — one because the branch it edited is unreachable for the only input
+that exercises it, one because a second guard already covers it. Re-mutating sharper is what
+separated them.
+
+### The one the generator cannot express, and the note that already said so
+
+`tools/corpus-gen/generate.ts` has carried this since the frame-bindings rule was written:
+
+> The non-finite coefficient rule has **no case here, and cannot have one.** This generator writes
+> every input through `JSON.stringify`, which renders infinity as `null`, so the frozen input would
+> be a *different* body from the one the expectation was computed from — worse than no case at all,
+> because it would fail an edition for reading the file correctly.
+
+Exactly the same applies to a box corner, so the check went to `self_check.py` with a coordinate of
+`true` beside it — which JSON *can* carry and no typed edition can produce. Both matter because
+Python collapses them by accident: `isinstance(x, float)` is true of `NaN` and of both infinities,
+and `isinstance(True, int)` is true of a boolean, so the obvious coordinate check admits an infinite
+box and a corner at `true`.
+
+### The two that were real, and what each is about
+
+`a-fixture-named-and-not-measured` pins a `volume` written out and left `null`. §55.2 permits it —
+*a fixture may be named without being measured* — and the check that follows is truthy for exactly
+this document. An edition testing for the key reports an operator who was careful enough to write
+the field as one who measured it wrongly.
+
+`a-duplicate-fixture-measured-wrongly` pins that the walk **stops** at the duplicate. The second
+`jig-a` is not the fixture any precondition will reach, so its geometry is not a second thing to
+tell the operator about — an edition that fell through would have somebody fixing the volume on the
+copy that is about to be deleted. Rust reproduces both without a change.
+
+### Then the finding that was not in any transcription
+
+**The Python edition was in no CI job.** The `corpus` job's own comment said so without meaning to:
+
+> Every edition sits the same exam. **One row today.**
+
+That was written when it was true. Eight rounds later a second edition existed, at 991 of 1,075
+cases, and it ran nowhere but on the machine of whoever last touched it — so a change to
+`reference/typescript/`, to the corpus, or to a shared module would have broken it silently. §31.4
+asks for differential checking on every commit and this was half of it.
+
+Both editions run now. The Python row is not a smaller copy of the Rust one, and the difference is
+what makes it safe to gate on: the runner passes when every case it *answers* is byte-identical and
+reports the rest as not implemented, so the step goes red on a divergence and stays green on a gap.
+
+### `--min-passed`, because every other check here has a floor of zero
+
+One regression the runner's own design cannot see: an edition whose handler was deleted answers
+nothing, fails nothing, and exits 0 — the cases move from *passed* into *not implemented*, which is
+the bucket that exists to read as honest progress. The ratchet is a number in the workflow rather
+than a default in the runner, because it is a fact about history rather than about the code, and
+lowering it is then a decision somebody makes in a diff. Verified both ways: `--min-passed 991`
+green, `--min-passed 992` red with the sentence explaining why nothing above it went red.
+
+### One refactor, and the corpus caught it immediately
+
+`js_trim` and `utf16_key` were about to have a third copy, so they moved to
+`editions/python/skynet_os/js.py` — the four JavaScript expressions Python has no equivalent for,
+in one place, because a divergence helper that exists twice is one that will eventually disagree
+with itself. The move dropped `utf16_at` on the way past and eleven `identity` cases went red on
+the next run. That is the corpus doing the job it exists for on a change that touched no rule.
+
+### Verified
+
+* `python3 editions/python/run_corpus.py --min-passed 991` — **991 passed, 0 failed**, 84 not
+  implemented, of 1,075
+* `python3 editions/python/self_check.py` — **41 checks**, three of them new
+* 16 of 19 cell mutations caught by the corpus; of the three survivors, one is covered by
+  `self_check.py` (confirmed red on the mutation) and two were shown to change no answer
+* `cargo test --workspace` — **1,431 passed**, 0 failed, 7 ignored
+* `cargo fmt --check` clean; `tsc -p .` clean; the generator reproduces all 77 files
+* `check-golden-path.mjs` and `check-mirrors.mjs` clean; the CI workflow parses
+
+**Twenty-six of thirty-one corpora complete. Five remain, 84 cases:** `blackbox` 18, `calibration`
+18, `provenance` 17, `telemetry` 16, `live` 15.

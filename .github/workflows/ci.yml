@@ -2,8 +2,9 @@
 #
 # Four jobs, and the third is the one that matters. §31.4 requires differential checking in CI:
 # every edition runs the corpus on every commit, and a divergence blocks the release of the edition
-# that diverged and never of the others. Today there is one edition, so `corpus` is the whole of
-# that mechanism; when a second lands it becomes a matrix over editions and nothing else changes.
+# that diverged and never of the others. There are two editions now, and `corpus` runs both — the
+# reference and the Python edition §31.3's matrix puts at the guest ceiling. The second is
+# incomplete and its runner reports that as a number, which is what makes it safe to gate on.
 
 name: ci
 
@@ -161,9 +162,31 @@ jobs:
             exit 1
           }
 
-      # Every edition sits the same exam. One row today.
+      # Every edition sits the same exam. Two rows now, and the second is not a smaller version
+      # of the first: the Python edition is **incomplete**, and the whole design of its runner is
+      # about saying so in a number rather than in a comment. It passes when every case it answers
+      # is byte-identical and reports the rest as not implemented — so this step goes red on a
+      # divergence and stays green on a gap, which is the only arrangement under which a partial
+      # edition can be in CI at all.
       - name: Rust edition reproduces the corpus
         run: cargo test -p skynet-corpus -- --nocapture
+
+      # `--min-passed` is the ratchet, and it is here rather than in the runner's default because
+      # the number is a fact about history rather than about the code. Everything else this runner
+      # checks has a floor of zero: an edition whose handler was deleted answers nothing, fails
+      # nothing, and exits 0, because the cases move into the *not implemented* bucket — the one
+      # that reads as honest progress. Raise it when the edition grows; lowering it is a decision
+      # somebody makes in a diff rather than something that happens quietly.
+      - name: Python edition reproduces the corpus
+        run: python3 editions/python/run_corpus.py --min-passed 991
+
+      # The traps the corpus structurally cannot reach, and the checks on the runner itself.
+      # Two kinds in one script, and both are here for the same reason: a case carrying a `1` where
+      # the reference declares a boolean is a case no typed edition can represent, and a corpus
+      # generator that writes through `JSON.stringify` cannot write an infinity at all. Neither
+      # absence is a gap in the corpus, and neither is a reason to leave the branch unchecked.
+      - name: The Python edition's own checks
+        run: python3 editions/python/self_check.py
 
   # Claims this repository makes about itself, checked mechanically. Each of these is a sentence
   # somewhere in the specification that would otherwise decay quietly.
