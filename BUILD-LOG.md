@@ -2308,3 +2308,80 @@ that says so.
 * `python3 editions/python/run_corpus.py --min-passed 1109` — 1,109 of 1,109, unchanged
 * `check-golden-path.mjs`, `check-mirrors.mjs`, `check-contract-mirrors.mjs` clean
 * Nothing in the Hub repository was touched; `git status` there is empty
+
+---
+
+## 34. §26.2's multi-writer ring: the design pass, and a conflict between two arguments in this repository
+
+§80 lists *"a ring two processes can write"* and §26.2 names the fix:
+
+> **The fix, and it is open.** The sequence belongs in a mapped header as an atomic, and writers
+> claim a slot by fetch-add — which is what `skynet-ring-shm` already does for §25's command ring,
+> in the same repository, for the same reason. **It wants a design pass** and a Linux mapping.
+
+This is that design pass, and the first thing it found is that the repository already argues the
+other way. `Ring::open`, in `crates/skynet-blackbox/src/ring.rs`:
+
+> Recovery is a scan, and it is a scan on purpose. **The alternative is a "next sequence" field in
+> the header, updated on every append** — which turns one positioned write per record into two, and
+> makes the header the thing most likely to be torn by a power cut. The scan is `O(capacity)`,
+> happens once at start, and is the only way to be right after a crash: the highest sequence number
+> actually on disk is the truth, whatever any counter claims.
+
+§26.2 proposes, by name, the thing `Ring::open` rejects by name. Neither cites the other, and both
+are right — which is the shape of a divergence rather than a disagreement, and it is the second one
+this session has found between two correct arguments in one codebase.
+
+### They are two different counters, and saying so resolves it
+
+* `Ring::open`'s subject is **crash recovery**. After a power cut a counter is ahead of or behind
+  the disk and there is no way to tell which, so the disk is the truth.
+* §26.2's subject is **concurrent claiming**. Two live writers must agree about who gets which slot,
+  and two in-memory counters cannot.
+
+A claim counter that is *initialised from the scan* and never consulted after a restart satisfies
+both: recovery stays a scan, so `Ring::open`'s rule is untouched, and the claim is a fetch-add, so
+§26.2's property holds while both writers are up.
+
+### Which settles the placement, and it is not the header
+
+Three consequences fall out, and each removes a reason this item looked expensive:
+
+1. **Not in the CRC'd header.** `encode_header` computes a CRC over the whole header; a field
+   mutated on every append invalidates it immediately, and `Ring::open`'s "torn by a power cut"
+   objection lands squarely on it.
+2. **Not durable at all.** It is rebuilt from the scan at every open, so it need not survive a
+   restart — which means it is not part of the on-disk format.
+3. **Therefore the format does not change.** `FORMAT_VERSION` stays 2, `corpus/blackbox/header`
+   stays as it is, and neither edition moves. §31.2 lists the black box format as single-source
+   across editions, and this was the reason the item read as a format break.
+
+The shape is a small `MAP_SHARED` mapping beside the ring holding one `AtomicU64`, created by
+whichever writer opens first, seeded from `Ring::next_sequence()`, and claimed by `fetch_add`. The
+directory lock stays and changes meaning: from *one writer* to *one creator of the claim mapping*.
+
+### What that leaves, stated as a cost rather than as a plan
+
+| | |
+|---|---|
+| A fourth `unsafe` crate | `skynet-ring-shm`'s header says it is *"the only `unsafe` in the workspace outside the ABI and the loader"*, and CI asserts every other crate is safe. A file mapping is a fourth, and it needs the same treatment: as small as a crate can be, with the argument in its header |
+| A specification amendment | §26.2's last paragraph and §80's row both describe an open item whose fix is *"in a mapped header"*. Both are in `docs/skynet-os-architecture.md`, which is **mirrored** |
+| A tear question the command ring does not have | `skynet-ring` runs a seqlock because a *reader* may race a writer mid-slot. The black box has no concurrent reader — sealing takes the lock — so a claimed slot is written by exactly one writer and read by nobody until the process that claimed it has finished. That is a smaller problem than §25's and worth stating so nobody imports the seqlock with the mapping |
+
+### Not built here, and why that is the honest stopping point
+
+The design is settled and the code is not, for one reason that is not about effort: the amendment
+this makes to §26.2 and §80 belongs in `docs/skynet-os-architecture.md`, and that file is edited **in
+both repositories or in neither** (`docs/README.md`). This session was told not to touch the Hub
+repository, so building the mechanism while leaving the specification saying *"the sequence belongs
+in a mapped header"* would ship code that contradicts the document on the one point the document is
+currently open about — which is worse than the interim state §26.2 already calls safe rather than
+merely tolerable.
+
+The interim remains what it was: `skynet-lock` refuses the second writer by name, `skynetd` starts
+without a recorder and says so, `skynetk` refuses to run. Failing loudly beats corrupting evidence.
+
+**What a session that can touch both repositories should do**, in order: amend §26.2's last
+paragraph and §80's row to the counter described above, mirror and re-pin, then write the mapping
+crate and move the lock's meaning. The corpus and both editions are not involved, which is the part
+of this that was not previously known.
