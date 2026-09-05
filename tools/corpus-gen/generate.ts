@@ -5968,6 +5968,29 @@ provenanceCase('attested-and-unreplayable',
 
 // §56.5's roll-up comparison.
 
+provenanceCase('a-segment-recorded-as-empty',
+  'An empty string is a segment somebody wrote down as empty, not a missing one. §56.4\u2019s check is '
+  + 'against null and undefined and nothing else — a falsy test would report `not_replayable` '
+  + 'against a run whose recording exists and is zero-length, which sends an investigator looking '
+  + 'for a segment the robot already told them about.',
+  { ...FIELD_RUN, blackbox_segment: '' })
+
+provenanceCase('a-simulator-whose-birth-certificate-attests-nothing',
+  'A declared simulator is `simulated` and its attestation is **not** examined: §50 is about a real '
+  + 'robot being the model it claims, and a simulator is not claiming to be one. Every simulator '
+  + 'case so far was otherwise perfect, so the branch that skips those two checks was doing nothing '
+  + 'observable — an edition that ran them anyway would put `birth_unattested` in front of a '
+  + 'publisher who cannot act on it.',
+  { ...FIELD_RUN, simulator: true, birth_attested: false, image_attested: false })
+
+provenanceCase('fewer-seeds-than-the-benchmark-supplies',
+  'Two of the three. Every seed case so far used three against three, so the two counts in '
+  + '`seeds_not_supplied` were equal and an edition reporting them the wrong way round said the '
+  + 'same sentence — while `birth`\u2019s ordering rule, **what was expected then what was supplied**, '
+  + 'is the whole reason the subjects are a pair. It also reaches the `length` half of the seed '
+  + 'comparison, which the equal-length cases never did.',
+  { ...FIELD_RUN, seeds: ['1', '2'] })
+
 function scoresCase(id: string, note: string, onRobot: number, onHub: number): void {
   add('provenance', 'scores', {
     id,
@@ -5992,9 +6015,17 @@ scoresCase('a-real-disagreement',
   0.875, 0.8751)
 
 scoresCase('a-difference-just-outside-the-tolerance',
-  'The boundary, frozen. A caller tempted to widen `1e-9` is a caller papering over the divergence '
-  + 'this comparison exists to surface.',
+  'Ten times the tolerance, refused. A caller tempted to widen `1e-9` is a caller papering over the '
+  + 'divergence this comparison exists to surface — and this case is the one such a caller would '
+  + 'reach for, because a single order of magnitude buys it.',
   1, 1 + 1e-8)
+
+scoresCase('a-difference-of-exactly-the-tolerance',
+  'The boundary itself, which the case above claimed to be and is not. `1e-9` apart is **agreement**: '
+  + 'the comparison is `<=`, because the tolerance exists for the representation and a difference '
+  + 'that lands exactly on it is the largest one two spellings of a number can be. Nothing in this '
+  + 'corpus sat on it, so `<` and `<=` were the same function.',
+  0, 1e-9)
 
 scoresCase('two-robots-that-computed-nothing',
   'A non-finite score is not a score, and two of them are not an agreement. Returning true here '

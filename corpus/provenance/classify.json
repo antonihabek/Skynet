@@ -385,6 +385,101 @@
         ]
       },
       "expected": "{\"class\":\"field\",\"rankable\":true,\"ranked_separately\":false,\"reasons\":[{\"blocks_field\":false,\"code\":\"not_replayable\",\"message\":\"No black box segment accompanies this run, so a disputed result cannot be replayed (§56.4). The class is unaffected — a result can be perfectly attested and unreplayable — but a number with a recording behind it is a different class of claim from a number in a table.\",\"subjects\":[]}],\"replayable\":false}"
+    },
+    {
+      "id": "a-segment-recorded-as-empty",
+      "note": "An empty string is a segment somebody wrote down as empty, not a missing one. §56.4’s check is against null and undefined and nothing else — a falsy test would report `not_replayable` against a run whose recording exists and is zero-length, which sends an investigator looking for a segment the robot already told them about.",
+      "input": {
+        "bundle": {
+          "benchmark_digest": "sha256:bench",
+          "policy_digest": "sha256:policy",
+          "embodiment_digest": "sha256:body",
+          "os_image_digest": "sha256:image",
+          "seeds": [
+            "1",
+            "2",
+            "3"
+          ],
+          "blackbox_segment": "",
+          "tier": "certified",
+          "enforcement": "kernel",
+          "simulator": false,
+          "device_signature": "verified",
+          "device_known": true,
+          "birth_attested": true,
+          "image_attested": true
+        },
+        "expected_benchmark": "sha256:bench",
+        "expected_seeds": [
+          "1",
+          "2",
+          "3"
+        ]
+      },
+      "expected": "{\"class\":\"field\",\"rankable\":true,\"ranked_separately\":false,\"reasons\":[],\"replayable\":true}"
+    },
+    {
+      "id": "a-simulator-whose-birth-certificate-attests-nothing",
+      "note": "A declared simulator is `simulated` and its attestation is **not** examined: §50 is about a real robot being the model it claims, and a simulator is not claiming to be one. Every simulator case so far was otherwise perfect, so the branch that skips those two checks was doing nothing observable — an edition that ran them anyway would put `birth_unattested` in front of a publisher who cannot act on it.",
+      "input": {
+        "bundle": {
+          "benchmark_digest": "sha256:bench",
+          "policy_digest": "sha256:policy",
+          "embodiment_digest": "sha256:body",
+          "os_image_digest": "sha256:image",
+          "seeds": [
+            "1",
+            "2",
+            "3"
+          ],
+          "blackbox_segment": "sha256:segment",
+          "tier": "certified",
+          "enforcement": "kernel",
+          "simulator": true,
+          "device_signature": "verified",
+          "device_known": true,
+          "birth_attested": false,
+          "image_attested": false
+        },
+        "expected_benchmark": "sha256:bench",
+        "expected_seeds": [
+          "1",
+          "2",
+          "3"
+        ]
+      },
+      "expected": "{\"class\":\"simulated\",\"rankable\":true,\"ranked_separately\":true,\"reasons\":[{\"blocks_field\":true,\"code\":\"simulator_declared\",\"message\":\"The RHAL driver declared itself a simulator (§35.3), so this is a simulated result and is ranked on the simulated table. This is the driver meeting its obligation rather than a fault — and a simulated run and a field run are not comparable numbers, which is why the tables are separate.\",\"subjects\":[]}],\"replayable\":true}"
+    },
+    {
+      "id": "fewer-seeds-than-the-benchmark-supplies",
+      "note": "Two of the three. Every seed case so far used three against three, so the two counts in `seeds_not_supplied` were equal and an edition reporting them the wrong way round said the same sentence — while `birth`’s ordering rule, **what was expected then what was supplied**, is the whole reason the subjects are a pair. It also reaches the `length` half of the seed comparison, which the equal-length cases never did.",
+      "input": {
+        "bundle": {
+          "benchmark_digest": "sha256:bench",
+          "policy_digest": "sha256:policy",
+          "embodiment_digest": "sha256:body",
+          "os_image_digest": "sha256:image",
+          "seeds": [
+            "1",
+            "2"
+          ],
+          "blackbox_segment": "sha256:segment",
+          "tier": "certified",
+          "enforcement": "kernel",
+          "simulator": false,
+          "device_signature": "verified",
+          "device_known": true,
+          "birth_attested": true,
+          "image_attested": true
+        },
+        "expected_benchmark": "sha256:bench",
+        "expected_seeds": [
+          "1",
+          "2",
+          "3"
+        ]
+      },
+      "expected": "{\"class\":\"unattested\",\"rankable\":false,\"ranked_separately\":false,\"reasons\":[{\"blocks_field\":true,\"code\":\"seeds_not_supplied\",\"message\":\"This run used seeds the benchmark did not supply (3 given, 2 used). §56.3: seeds come from the benchmark and are never generated by the robot, because a robot that picks its own seeds picks easy ones — and it need not do so dishonestly for the number to be worthless. This is not a run of that benchmark.\",\"subjects\":[\"3\",\"2\"]}],\"replayable\":true}"
     }
   ]
 }

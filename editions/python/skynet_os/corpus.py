@@ -53,6 +53,7 @@ from . import opstate as opstate_module
 from . import ota as ota_module
 from . import power as power_module
 from . import predicate as predicate_module
+from . import provenance as provenance_module
 from . import readiness as readiness_module
 from . import roles as roles_module
 from . import watchdog as watchdog_module
@@ -207,6 +208,15 @@ def load_corpus(root: Path) -> list[CorpusFile]:
 # them. Every entry here says which files it is for.
 
 Handler = Callable[[str, dict[str, Any]], Any]
+
+
+def _provenance(label: str, case_input: dict[str, Any]) -> Any:
+    """§56's two questions: what a run is worth, and whether two roll-ups of it agree."""
+    if label == "classify":
+        return provenance_module.classify_to_json(case_input)
+    if label == "scores":
+        return provenance_module.scores_to_json(case_input)
+    raise Unimplemented("provenance", label)
 
 
 def _readiness(label: str, case_input: dict[str, Any]) -> Any:
@@ -483,6 +493,7 @@ HANDLERS: dict[str, Handler] = {
     "intent": _intent,
     "kinematics": _kinematics,
     "predicate": _predicate,
+    "provenance": _provenance,
     "readiness": _readiness,
     "roles": _roles,
     "vocabulary": _vocabulary,
