@@ -2989,6 +2989,35 @@ observationCase('frames', 'sub-millisecond-latency',
     stream('imu', 'imu', 0.15, 5, [T + 150_000]),
   ])
 
+// Two cases added because a mutation run on the Python edition showed the corpus could not tell
+// the difference. Neither is exotic, and both are behaviours the reference documents in prose and
+// nothing was holding it to.
+
+observationCase('frames', 'exactly-half-a-microsecond',
+  'Three instants 0, 500 ns and 2500 ns behind the target, so `age_us` and `worst_skew_us` each '
+  + 'land on an *exact* half. Round-half-away-from-zero gives 1 and 3; round-half-to-even, which is '
+  + 'what a Python edition gets from its built-in `round`, gives 0 and 2. Every other rounding in '
+  + 'this corpus falls short of a half, so replacing the rule with the wrong one changed no '
+  + 'expected byte before this case existed — including in `sub-millisecond-latency`, whose note '
+  + 'claims to pin exactly this and whose 0.35 ms lands on 350000.00000000006.',
+  T, [
+    stream('joints', 'joint_state', 0, 5, [T]),
+    stream('imu', 'imu', 0, 5, [T - 500]),
+    stream('wrist_ft', 'force_torque', 0, 5, [T - 2500]),
+  ])
+
+observationCase('frames', 'future-sample-past-its-budget',
+  'The only sample is 4 ms *after* the target and the budget is 2 ms. The budget is one-sided by '
+  + 'design, so this is deliverable and not stale: a sample from ahead of the frame\'s instant is a '
+  + 'clock fault rather than a stale one, it is already visible in the signed age, and reporting it '
+  + 'as staleness would send somebody to look at a capture pipeline that is working. '
+  + '`a-sample-from-the-future` cannot pin this — its negative age is inside its budget, so a '
+  + 'two-sided reading of the rule agrees with the one-sided one on every case it covers.',
+  T, [
+    stream('joints', 'joint_state', 0, 2, [T + 4 * MS]),
+    stream('imu', 'imu', 0, 20, [T - 1 * MS]),
+  ])
+
 targetCase('every-stream-can-answer',
   'The slowest stream decides. The camera describes 0.972 s and the joints describe 1.019 s, so the '
   + 'most recent frame everybody can answer for is at 0.972 s — and aiming at now instead would '
