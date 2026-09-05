@@ -23,6 +23,8 @@
 //! diverged and never of the others. [`Failure`] therefore reports both strings in full and points
 //! at the first differing byte, because the useful question is which of the two is right.
 
+#![forbid(unsafe_code)]
+
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1047,6 +1049,27 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
                 .and_then(Json::as_f64)
                 .ok_or("no `target_ns`")? as u64;
             skynet_contracts::observation::assemble(target, &streams).to_json()
+        }
+
+        // §45.2's applicability, which had no case of its own until the Python edition's
+        // mutation run said so: the two `events` cases call `sets_for` and freeze its *output*
+        // into their `applicable` field, so two editions could disagree about which sets a body
+        // can hold and the corpus would be comparing them on the answer one of them had already
+        // given.
+        "calibration" if label.contains("sets") => {
+            let capabilities = input.str_arr("capabilities");
+            let base = input.get_present("base").and_then(Json::as_str);
+            let mut out = Json::obj();
+            out.set(
+                "sets",
+                Json::Arr(
+                    skynet_contracts::calibration::sets_for(&capabilities, base)
+                        .iter()
+                        .map(|set| Json::Str((*set).to_string()))
+                        .collect(),
+                ),
+            );
+            out
         }
 
         "calibration" => {

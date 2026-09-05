@@ -900,11 +900,33 @@ pub fn attestation_report_to_json(report: &AttestationReport) -> Json {
 /// [`crate::checkin::health_report_to_json`] keeps all five of §33.6's fields: a consumer that has
 /// to discover which keys this robot happened to fill in is a consumer that will get it wrong on
 /// the robot that filled in none.
+///
+/// # The digest is gated on the state
+///
+/// A measure that says `unmeasured` and carries a digest is one report contradicting itself: the
+/// state says nobody read the slot and the field beside it carries a reading of it. This edition
+/// passed the digest through until the Python edition was written against
+/// `reference/typescript/shape.ts`, which does not — a divergence no case could see, because none
+/// had ever put the two well-typed fields together.
+///
+/// The reference is right, and the reason is the query. §32.1 puts a fleet column on *"which robots
+/// are running image `sha256:…`"*, which is the question an incident is run through; a robot whose
+/// slot was never read must not appear in that answer. The prose half of the same document already
+/// says `an unmeasured OS image` — so passing the digest through makes the machine-readable half
+/// contradict the half a person reads, on the side nobody is reading English to catch.
+///
+/// `corpus/checkin/document.json :: a-digest-on-a-slot-nobody-read` is the case.
 fn measure_to_json(measure: &Measure) -> Json {
     let mut out = Json::obj();
-    out.set("digest", text_or_null(&measure.digest))
-        .set("state", Json::Str(measure.state.as_str().to_string()))
-        .set("why", text_or_null(&measure.why));
+    out.set(
+        "digest",
+        match measure.state {
+            MeasureState::Known => text_or_null(&measure.digest),
+            _ => Json::Null,
+        },
+    )
+    .set("state", Json::Str(measure.state.as_str().to_string()))
+    .set("why", text_or_null(&measure.why));
     out
 }
 

@@ -37,7 +37,7 @@
     },
     {
       "id": "a-difference-just-outside-the-tolerance",
-      "note": "The boundary, frozen. A caller tempted to widen `1e-9` is a caller papering over the divergence this comparison exists to surface.",
+      "note": "Ten times the tolerance, refused. A caller tempted to widen `1e-9` is a caller papering over the divergence this comparison exists to surface — and this case is the one such a caller would reach for, because a single order of magnitude buys it.",
       "input": {
         "scores": {
           "on_robot": 1,
@@ -45,6 +45,17 @@
         }
       },
       "expected": "{\"agree\":false,\"detail\":\"The robot rolled this run up to 1 and the Hub to 1.00000001. The Hub's number is authoritative, and the difference is a defect rather than a rounding artefact: both sides run the same scoring contract over the same per-episode outcomes, so they disagreeing means the implementations diverged — which is precisely what the conformance corpus (§31.4) exists to catch.\"}"
+    },
+    {
+      "id": "a-difference-of-exactly-the-tolerance",
+      "note": "The boundary itself, which the case above claimed to be and is not. `1e-9` apart is **agreement**: the comparison is `<=`, because the tolerance exists for the representation and a difference that lands exactly on it is the largest one two spellings of a number can be. Nothing in this corpus sat on it, so `<` and `<=` were the same function.",
+      "input": {
+        "scores": {
+          "on_robot": 0,
+          "on_hub": 1e-9
+        }
+      },
+      "expected": "{\"agree\":true,\"detail\":null}"
     },
     {
       "id": "two-robots-that-computed-nothing",

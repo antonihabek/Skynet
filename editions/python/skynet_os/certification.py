@@ -38,8 +38,9 @@ strict ``undefined``
 from __future__ import annotations
 
 import math
-from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Final
+
+from .js import to_fixed as _to_fixed
 
 __all__ = [
     "BENCH_VALIDITY_DAYS",
@@ -133,23 +134,6 @@ def _field(obj: Any, key: str) -> Any:
     if not isinstance(obj, dict):
         return _ABSENT
     return obj[key] if key in obj else _ABSENT
-
-
-def _to_fixed(value: float, digits: int) -> str:
-    """``Number.prototype.toFixed(digits)``.
-
-    ECMAScript takes the sign off first and then picks the integer nearest ``x × 10ⁿ``, the larger
-    on a tie — ties **away from zero** once the sign is restored. It also decides on the *exact*
-    binary value of the double, which is why this goes through ``Decimal(value)`` rather than
-    through a decimal string: ``Decimal(0.1)`` is the number the machine holds, and ``Decimal('0.1')``
-    is not.
-    """
-    if not math.isfinite(value):
-        return "NaN" if value != value else ("Infinity" if value > 0 else "-Infinity")
-    sign = "-" if value < 0 else ""
-    exact = Decimal(abs(value))
-    quantum = Decimal(1).scaleb(-digits)
-    return sign + str(exact.quantize(quantum, rounding=ROUND_HALF_UP))
 
 
 def tests_required_for(tier: str) -> list[str]:

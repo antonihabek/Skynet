@@ -16,6 +16,10 @@ name = "skynet-capture"
 version = "0.1.0"
 
 [[package]]
+name = "skynet-claim"
+version = "0.1.0"
+
+[[package]]
 name = "skynet-cli"
 version = "0.1.0"
 dependencies = [

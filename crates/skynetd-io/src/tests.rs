@@ -11034,3 +11034,383 @@ mod live_context_inputs {
         assert_eq!(fixture.daemon.live_inputs(None, None).tier, None);
     }
 }
+
+// ── §80's retention of sealed windows ────────────────────────────────────────
+//
+// The three conditions are tested against **each other** rather than one at a time, because the
+// rule is a conjunction and every interesting failure is one term being sufficient on its own. A
+// suite that checked "a cited window is kept" and "an uncollected window is kept" separately would
+// pass against an implementation that reclaimed whenever *either* held.
+
+mod retention {
+    use super::TempRoot;
+    use crate::retention::{self, Candidate, Free, Kept};
+
+    fn window(name: &str, size: u64, receipted: bool, cited: bool) -> Candidate {
+        Candidate {
+            name: name.to_string(),
+            size_bytes: size,
+            sealed_at_ns: 1,
+            reason: "operator".to_string(),
+            digest: format!("sha256:{name}"),
+            receipted,
+            cited,
+        }
+    }
+
+    #[test]
+    fn nothing_is_reclaimed_above_the_floor_however_collectable_it_is() {
+        // The condition that makes a deletion *necessary* rather than tidy. Every window here is
+        // receipted and uncited — the state that authorises a reclaim — and none is taken, because
+        // there is no benefit to weigh against losing local evidence.
+        let windows = [
+            window("a.mcap", 1_000, true, false),
+            window("b.mcap", 1_000, true, false),
+        ];
+        let plan = retention::plan(&windows, Free::Bytes(10_000), 5_000);
+        assert!(plan.reclaim.is_empty());
+        assert!(plan.reaches_floor);
+        assert_eq!(plan.freed_bytes, 0);
+        assert!(plan.kept.iter().all(|(_, why)| *why == Kept::NotNeeded));
+    }
+
+    #[test]
+    fn an_unmeasured_disk_reclaims_nothing() {
+        // The direction a rule whose failure mode is destroying evidence has to fail in. Nothing on
+        // this robot measures free disk, so this is the state the daemon is actually in.
+        let windows = [window("a.mcap", 1_000, true, false)];
+        let plan = retention::plan(&windows, Free::Unmeasured, 5_000);
+        assert!(plan.reclaim.is_empty());
+        assert!(!plan.reaches_floor);
+        assert_eq!(plan.kept, vec![("a.mcap".to_string(), Kept::Unmeasured)]);
+    }
+
+    #[test]
+    fn a_receipt_alone_does_not_authorise_a_reclaim_and_neither_does_the_floor() {
+        // Both halves of the conjunction, in one test, because either alone is the bug. Under the
+        // floor with no receipt: kept. Receipted above the floor: kept. Only both reclaim.
+        let uncollected = [window("a.mcap", 4_000, false, false)];
+        let under = retention::plan(&uncollected, Free::Bytes(1_000), 5_000);
+        assert!(under.reclaim.is_empty());
+        assert_eq!(under.kept, vec![("a.mcap".to_string(), Kept::Uncollected)]);
+        assert!(!under.reaches_floor, "it freed nothing and is still under");
+
+        let collected = [window("a.mcap", 4_000, true, false)];
+        let over = retention::plan(&collected, Free::Bytes(9_000), 5_000);
+        assert!(over.reclaim.is_empty());
+
+        let both = retention::plan(&collected, Free::Bytes(1_000), 5_000);
+        assert_eq!(both.reclaim.len(), 1);
+        assert!(both.reaches_floor);
+    }
+
+    #[test]
+    fn a_cited_window_is_never_reclaimed_and_the_disk_pressure_does_not_matter() {
+        // The absolute term. This window is receipted, it is the oldest, the disk is at zero, and
+        // freeing it is the only way to reach the floor — and it stays, which is the whole of §80's
+        // first sentence about incidents. The pass reports that it could not reach the floor rather
+        // than reaching it.
+        let windows = [window("a.mcap", 9_000, true, true)];
+        let plan = retention::plan(&windows, Free::Bytes(0), 5_000);
+        assert!(plan.reclaim.is_empty());
+        assert_eq!(plan.kept, vec![("a.mcap".to_string(), Kept::Cited)]);
+        assert!(
+            !plan.reaches_floor,
+            "a robot that freed what it could and is still under has to say so"
+        );
+    }
+
+    #[test]
+    fn oldest_first_and_only_as_far_as_the_floor() {
+        // Two properties in one arrangement, because the second is what stops a pass from emptying
+        // a disk it only needed to clear. `a` and `b` reach the floor; `c` is left, and it is left
+        // as `NotNeeded` rather than as a failure — an operator who reclaimed to reach a floor
+        // should not be told the survivors were collectable.
+        let windows = [
+            window("a.mcap", 2_000, true, false),
+            window("b.mcap", 2_000, true, false),
+            window("c.mcap", 2_000, true, false),
+        ];
+        let plan = retention::plan(&windows, Free::Bytes(1_000), 5_000);
+        assert_eq!(
+            plan.reclaim
+                .iter()
+                .map(|w| w.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a.mcap", "b.mcap"]
+        );
+        assert_eq!(plan.freed_bytes, 4_000);
+        assert!(plan.reaches_floor);
+        assert_eq!(plan.kept, vec![("c.mcap".to_string(), Kept::NotNeeded)]);
+    }
+
+    #[test]
+    fn a_cited_window_is_skipped_and_the_next_one_is_taken() {
+        // The interaction that a per-condition suite misses entirely: the protected window is the
+        // *oldest*, so an implementation that stopped at the first ineligible candidate rather than
+        // skipping it would free nothing and report the disk as unrecoverable.
+        let windows = [
+            window("a.mcap", 4_000, true, true),
+            window("b.mcap", 4_000, true, false),
+        ];
+        let plan = retention::plan(&windows, Free::Bytes(1_000), 5_000);
+        assert_eq!(
+            plan.reclaim
+                .iter()
+                .map(|w| w.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b.mcap"]
+        );
+        assert!(plan.kept.contains(&("a.mcap".to_string(), Kept::Cited)));
+    }
+
+    #[test]
+    fn the_floor_boundary_is_reached_rather_than_crossed() {
+        // Exactly at the floor is *at* it, and the pass is over: `free >= floor` is the test, so a
+        // robot sitting on the number reclaims nothing. The corpus rounds this session found four
+        // of these; this is the one in this module.
+        let windows = [window("a.mcap", 1_000, true, false)];
+        assert!(retention::plan(&windows, Free::Bytes(5_000), 5_000)
+            .reclaim
+            .is_empty());
+        assert_eq!(
+            retention::plan(&windows, Free::Bytes(4_999), 5_000)
+                .reclaim
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_tombstone_is_written_before_the_bytes_are_freed_and_survives_the_window() {
+        let root = TempRoot::new("retention-tombstone");
+        let layout = root.layout();
+        let dir = layout.blackbox().join("sealed");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("00000000000000001234-operator.mcap"),
+            b"window bytes",
+        )
+        .unwrap();
+
+        let scanned = retention::scan(&layout);
+        assert_eq!(scanned.len(), 1);
+        // The name is parsed, not guessed: §13's zero-padded instant and the reason are both in it.
+        assert_eq!(scanned[0].sealed_at_ns, 1234);
+        assert_eq!(scanned[0].reason, "operator");
+        assert!(!scanned[0].receipted, "nothing wrote a receipt");
+
+        // Receipt it, and reclaim under the floor.
+        crate::upload::Receipt {
+            digest: scanned[0].digest.clone(),
+            bytes: scanned[0].size_bytes,
+            at_ms: 5,
+        }
+        .write(&layout, &scanned[0].name)
+        .unwrap();
+
+        let (plan, failures) = retention::run(&layout, Free::Bytes(0), 1_000_000);
+        assert!(failures.is_empty(), "{failures:?}");
+        assert_eq!(plan.reclaim.len(), 1);
+        assert!(!dir.join("00000000000000001234-operator.mcap").exists());
+
+        let stones = retention::tombstones(&layout);
+        assert_eq!(stones.len(), 1);
+        assert_eq!(stones[0].digest, scanned[0].digest);
+        assert_eq!(stones[0].sealed_at_ns, 1234);
+        assert_eq!(stones[0].bytes, "window bytes".len() as u64);
+        assert_eq!(stones[0].reason, "operator");
+        // The sidecars go with the bytes they describe.
+        assert!(!layout.receipt(&scanned[0].name).exists());
+    }
+
+    #[test]
+    fn a_citation_is_about_bytes_rather_than_about_a_name() {
+        // §13 names a window for a monotonic instant and a reboot restarts that clock, so a
+        // citation believed on its filename would protect whichever window took the name next —
+        // and leave the one it was actually about looking routine.
+        let root = TempRoot::new("retention-citation");
+        let layout = root.layout();
+        let dir = layout.blackbox().join("sealed");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        retention::cite(&layout, "w.mcap", "sha256:aaaa", "guard_tripped").unwrap();
+        assert!(retention::cited(&layout, "w.mcap", "sha256:aaaa"));
+        assert!(
+            !retention::cited(&layout, "w.mcap", "sha256:bbbb"),
+            "a citation for other bytes is not this window's"
+        );
+        assert!(!retention::cited(&layout, "other.mcap", "sha256:aaaa"));
+    }
+
+    #[test]
+    fn a_cited_window_on_the_disk_survives_a_pass_that_would_otherwise_take_it() {
+        // The whole rule, end to end, against real files: the oldest window is receipted and cited,
+        // the second is receipted and not, the disk is empty, and only the second goes.
+        let root = TempRoot::new("retention-end-to-end");
+        let layout = root.layout();
+        let dir = layout.blackbox().join("sealed");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("00000000000000000001-fault.mcap"), b"the incident").unwrap();
+        std::fs::write(dir.join("00000000000000000002-operator.mcap"), b"routine").unwrap();
+
+        for window in retention::scan(&layout) {
+            crate::upload::Receipt {
+                digest: window.digest.clone(),
+                bytes: window.size_bytes,
+                at_ms: 1,
+            }
+            .write(&layout, &window.name)
+            .unwrap();
+            if window.reason == "fault" {
+                retention::cite(&layout, &window.name, &window.digest, "guard_tripped").unwrap();
+            }
+        }
+
+        let (plan, failures) = retention::run(&layout, Free::Bytes(0), 1_000_000);
+        assert!(failures.is_empty(), "{failures:?}");
+        assert_eq!(
+            plan.reclaim
+                .iter()
+                .map(|w| w.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["00000000000000000002-operator.mcap"]
+        );
+        assert!(
+            dir.join("00000000000000000001-fault.mcap").exists(),
+            "the window an incident names is never reclaimed"
+        );
+        assert!(!dir.join("00000000000000000002-operator.mcap").exists());
+        assert!(
+            !plan.reaches_floor,
+            "it could not reach a megabyte and says so rather than taking the incident's window"
+        );
+    }
+
+    #[test]
+    fn a_manifest_naming_another_windows_digest_does_not_get_a_window_deleted() {
+        // The reason `scan` hashes rather than reading manifests. `blackbox::write_manifest`'s own
+        // comment calls the sidecar "a cache in the sense that it can be rebuilt, and not a second
+        // source of truth" — and §13's names repeat, so a manifest can outlive the bytes it
+        // described. A pass that believed one would receipt-match the wrong digest and free a
+        // window nothing has collected.
+        let root = TempRoot::new("retention-stale-manifest");
+        let layout = root.layout();
+        let dir = layout.blackbox().join("sealed");
+        std::fs::create_dir_all(&dir).unwrap();
+        let name = "00000000000000000001-operator.mcap";
+        std::fs::write(dir.join(name), b"these bytes").unwrap();
+
+        // A manifest and a receipt that agree with each other and not with the file.
+        std::fs::write(
+            crate::blackbox::manifest_path(&dir, name),
+            br#"{"digest":"sha256:deadbeef","size_bytes":11}"#,
+        )
+        .unwrap();
+        crate::upload::Receipt {
+            digest: "sha256:deadbeef".to_string(),
+            bytes: 11,
+            at_ms: 1,
+        }
+        .write(&layout, name)
+        .unwrap();
+
+        let scanned = retention::scan(&layout);
+        assert_eq!(scanned.len(), 1);
+        assert_ne!(scanned[0].digest, "sha256:deadbeef");
+        assert!(
+            !scanned[0].receipted,
+            "the receipt is for other bytes, so this window has none"
+        );
+
+        let (plan, _) = retention::run(&layout, Free::Bytes(0), 1_000_000);
+        assert!(plan.reclaim.is_empty());
+        assert!(dir.join(name).exists());
+    }
+
+    #[test]
+    fn the_scan_is_oldest_first_whatever_order_the_directory_reports() {
+        // §80 reclaims oldest first, and the ordering comes from §13's zero-padded monotonic
+        // instant rather than from `read_dir`, which has no order worth relying on. Written in
+        // reverse so a scan that returned directory order would have to be lucky to agree.
+        let root = TempRoot::new("retention-order");
+        let layout = root.layout();
+        let dir = layout.blackbox().join("sealed");
+        std::fs::create_dir_all(&dir).unwrap();
+        for n in [30u64, 10, 20] {
+            std::fs::write(
+                dir.join(format!("{n:020}-operator.mcap")),
+                format!("window {n}").as_bytes(),
+            )
+            .unwrap();
+        }
+        let scanned = retention::scan(&layout);
+        assert_eq!(
+            scanned.iter().map(|w| w.sealed_at_ns).collect::<Vec<_>>(),
+            vec![10, 20, 30]
+        );
+    }
+
+    #[test]
+    fn a_tombstone_that_cannot_be_written_stops_the_delete() {
+        // The ordering guarantee, forced. A reclaim that freed bytes it could not account for is
+        // exactly the state §80 exists to make impossible, so the write is `?` rather than best
+        // effort — and the window survives to be reclaimed on a later pass, which is the direction
+        // that loses nothing.
+        let root = TempRoot::new("retention-unwritable");
+        let layout = root.layout();
+        let dir = layout.blackbox().join("sealed");
+        std::fs::create_dir_all(&dir).unwrap();
+        let name = "00000000000000000001-operator.mcap";
+        std::fs::write(dir.join(name), b"bytes").unwrap();
+
+        // A directory where the log wants a file: the append fails and nothing else does.
+        std::fs::create_dir_all(retention::tombstones_path(&layout)).unwrap();
+
+        let scanned = retention::scan(&layout);
+        crate::upload::Receipt {
+            digest: scanned[0].digest.clone(),
+            bytes: scanned[0].size_bytes,
+            at_ms: 1,
+        }
+        .write(&layout, name)
+        .unwrap();
+
+        let (plan, failures) = retention::run(&layout, Free::Bytes(0), 1_000_000);
+        assert_eq!(plan.reclaim.len(), 1, "the plan named it");
+        assert_eq!(failures.len(), 1, "and the reclaim refused");
+        assert!(
+            dir.join(name).exists(),
+            "the bytes are still there, because nothing could account for freeing them"
+        );
+    }
+
+    #[test]
+    fn tombstones_accumulate_and_a_truncated_line_costs_that_line() {
+        // §38.3's degradation argument, which this file inherits along with the JSON Lines shape.
+        let root = TempRoot::new("retention-tombstone-log");
+        let layout = root.layout();
+        for n in 1..=3u64 {
+            retention::record(
+                &layout,
+                &retention::Tombstone {
+                    digest: format!("sha256:{n}"),
+                    sealed_at_ns: n,
+                    bytes: n * 10,
+                    reason: "operator".to_string(),
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(retention::tombstones(&layout).len(), 3);
+
+        // A power cut mid-append.
+        let path = retention::tombstones_path(&layout);
+        let mut text = std::fs::read_to_string(&path).unwrap();
+        text.push_str("{\"digest\":\"sha256:4\",\"byt");
+        std::fs::write(&path, text).unwrap();
+        let read = retention::tombstones(&layout);
+        assert_eq!(read.len(), 3, "the three before it still parse");
+        assert_eq!(read[2].digest, "sha256:3");
+    }
+}

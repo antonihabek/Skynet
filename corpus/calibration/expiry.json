@@ -209,6 +209,143 @@
       "expected": "{\"records\":[{\"checked\":[],\"detail\":\"this record expires with temperature and no reading is available, so how far this robot has drifted from its calibration conditions cannot be established\",\"guards\":[\"envelope\"],\"reason\":\"temperature\",\"set\":\"force_torque_bias\",\"state\":\"expired\"}],\"unavailable\":[{\"detail\":\"the `force_torque_bias` calibration is expired — this record expires with temperature and no reading is available, so how far this robot has drifted from its calibration conditions cannot be established\",\"guard\":\"envelope\",\"set\":\"force_torque_bias\",\"state\":\"expired\"}]}"
     },
     {
+      "id": "an-age-exactly-at-the-limit",
+      "note": "The other boundary. Measured 3,600 s ago against a validity of exactly 3,600 s: still valid, and the checked list says so. Every age case was well inside or well outside, so `>` versus `>=` was free — and on a fleet recalibrating on a schedule, the two disagree about every robot on the day its policy comes due.",
+      "input": {
+        "now": {
+          "at_s": 1700003600,
+          "temperature_c": 22,
+          "joint_travel_rad": 1000
+        },
+        "records": [
+          {
+            "set": "camera_extrinsics",
+            "method": "charuco-12x9, 40 poses",
+            "residual": 0.4,
+            "residual_threshold": 1,
+            "conditions": {
+              "at_s": 1700000000,
+              "temperature_c": 22,
+              "joint_travel_rad": 1000,
+              "tool": "gripper-2f85",
+              "payload_kg": 0
+            },
+            "operator": "alice",
+            "policy": {
+              "max_age_s": 3600
+            },
+            "events_since": []
+          }
+        ],
+        "applicable": [
+          "camera_extrinsics"
+        ]
+      },
+      "expected": "{\"records\":[{\"checked\":[\"age 3600s of 3600s\"],\"detail\":\"\",\"guards\":[\"proximity\",\"workspace\"],\"reason\":null,\"set\":\"camera_extrinsics\",\"state\":\"valid\"}],\"unavailable\":[]}"
+    },
+    {
+      "id": "an-age-on-a-rounding-tie",
+      "note": "Half a second, rendered. `toFixed` takes the larger on a tie and Python’s formatting rounds to even, so this age is `3601` in one reading and `3600` in the other — in a sentence an operator reads and a corpus compares byte for byte. Nothing else in this corpus lands on a half.",
+      "input": {
+        "now": {
+          "at_s": 1700003600,
+          "temperature_c": 22,
+          "joint_travel_rad": 1000
+        },
+        "records": [
+          {
+            "set": "camera_extrinsics",
+            "method": "charuco-12x9, 40 poses",
+            "residual": 0.4,
+            "residual_threshold": 1,
+            "conditions": {
+              "at_s": 1699999999.5,
+              "temperature_c": 22,
+              "joint_travel_rad": 1000,
+              "tool": "gripper-2f85",
+              "payload_kg": 0
+            },
+            "operator": "alice",
+            "policy": {
+              "max_age_s": 86400
+            },
+            "events_since": []
+          }
+        ],
+        "applicable": [
+          "camera_extrinsics"
+        ]
+      },
+      "expected": "{\"records\":[{\"checked\":[\"age 3601s of 86400s\"],\"detail\":\"\",\"guards\":[\"proximity\",\"workspace\"],\"reason\":null,\"set\":\"camera_extrinsics\",\"state\":\"valid\"}],\"unavailable\":[]}"
+    },
+    {
+      "id": "a-robot-that-got-colder",
+      "note": "The direction `temperature-delta`’s note claims does not matter, and which no case tested: every temperature case ran warmer than the calibration. An edition without the absolute value reads −18 °C as comfortably inside a 5 °C budget, so a bias measured in a heated cell and used in a cold store is trusted exactly where it drifts most.",
+      "input": {
+        "now": {
+          "at_s": 1700003600,
+          "temperature_c": 4,
+          "joint_travel_rad": 1000
+        },
+        "records": [
+          {
+            "set": "force_torque_bias",
+            "method": "charuco-12x9, 40 poses",
+            "residual": 0.4,
+            "residual_threshold": 1,
+            "conditions": {
+              "at_s": 1700000000,
+              "temperature_c": 22,
+              "joint_travel_rad": 1000,
+              "tool": "gripper-2f85",
+              "payload_kg": 0
+            },
+            "operator": "alice",
+            "policy": {
+              "max_temperature_delta_c": 5
+            },
+            "events_since": []
+          }
+        ],
+        "applicable": [
+          "force_torque_bias"
+        ]
+      },
+      "expected": "{\"records\":[{\"checked\":[],\"detail\":\"18.0 °C from the 22.0 °C it was measured at, against a validity of 5.0 °C\",\"guards\":[\"envelope\"],\"reason\":\"temperature\",\"set\":\"force_torque_bias\",\"state\":\"expired\"}],\"unavailable\":[{\"detail\":\"the `force_torque_bias` calibration is expired — 18.0 °C from the 22.0 °C it was measured at, against a validity of 5.0 °C\",\"guard\":\"envelope\",\"set\":\"force_torque_bias\",\"state\":\"expired\"}]}"
+    },
+    {
+      "id": "a-policy-with-no-timestamp",
+      "note": "A record that expires with time and cannot say when it was taken. §45’s rule is that a missing reading never extends validity — the alternative is a policy that switches itself off on the record least able to account for itself. `temperature-unreadable` pins this for the *current* reading; nothing pinned it for the *taken* one.",
+      "input": {
+        "now": {
+          "at_s": 1700003600,
+          "temperature_c": 22,
+          "joint_travel_rad": 1000
+        },
+        "records": [
+          {
+            "set": "camera_extrinsics",
+            "method": "charuco-12x9, 40 poses",
+            "residual": 0.4,
+            "residual_threshold": 1,
+            "conditions": {
+              "temperature_c": 22,
+              "joint_travel_rad": 1000
+            },
+            "operator": "alice",
+            "policy": {
+              "max_age_s": 86400
+            },
+            "events_since": []
+          }
+        ],
+        "applicable": [
+          "camera_extrinsics"
+        ]
+      },
+      "expected": "{\"records\":[{\"checked\":[],\"detail\":\"this record expires with time and either it or this robot cannot say when it was taken, so its age cannot be established\",\"guards\":[\"proximity\",\"workspace\"],\"reason\":\"age\",\"set\":\"camera_extrinsics\",\"state\":\"expired\"}],\"unavailable\":[{\"detail\":\"the `camera_extrinsics` calibration is expired — this record expires with time and either it or this robot cannot say when it was taken, so its age cannot be established\",\"guard\":\"proximity\",\"set\":\"camera_extrinsics\",\"state\":\"expired\"},{\"detail\":\"the `camera_extrinsics` calibration is expired — this record expires with time and either it or this robot cannot say when it was taken, so its age cannot be established\",\"guard\":\"workspace\",\"set\":\"camera_extrinsics\",\"state\":\"expired\"}]}"
+    },
+    {
       "id": "two-sets-one-guard",
       "note": "Workspace starved by expired joint zeros and an expired tool offset is two measurements somebody has to take, so it is two lines.",
       "input": {
