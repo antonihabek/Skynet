@@ -4991,6 +4991,15 @@ bundleCase('a-gated-change-renamed',
   + 'an unknown word as harmless.',
   { ...SIGNED_BUNDLE, changes: ['rt-core'] }, HEALTHY_SUBJECT)
 
+// Added for the same reason: no bundle declared more than one gated component, so nothing pinned
+// the order they are reported in.
+bundleCase('several-gated-changes-at-once',
+  'Three gated components declared out of order, one of them a name this edition does not '
+  + 'recognise. They are reported sorted, because `gated_components` is both a sentence an operator '
+  + 'reads before booking bench time and a fault\'s subjects — and an edition that emitted them in '
+  + 'declaration order would agree about every verdict and disagree about every list.',
+  { ...SIGNED_BUNDLE, changes: ['safety_kernel', 'zzz_unknown', 'envelope'] }, HEALTHY_SUBJECT)
+
 bundleCase('a-gated-change-with-nothing-to-bind-a-pass-to',
   'A bundle with no digest cannot be the subject of evidence, so a kernel change in one is refused '
   + 'twice over and the two refusals are separate findings. An operator who fixed only the missing '
@@ -6469,6 +6478,15 @@ fetchCase('a-partial-larger-than-the-image',
   'Not a partial of this bundle at all. Resuming would append this image’s tail to something '
   + 'else’s and the mismatch would surface after the whole transfer, which on a poor link is hours.',
   { ...IMAGE, partial: 140000 })
+
+// Added because a mutation run on the Python edition showed the corpus survived it: every existing
+// partial is either well under the declared size or well over it, so the boundary was never tested.
+fetchCase('a-partial-exactly-the-size-of-the-image',
+  'The test is `partial >= size`, and this is the equals. A partial that is exactly the whole '
+  + 'length is not a partial: either the transfer finished and nothing recorded it, or these are '
+  + 'somebody else\'s bytes of the same length. Both are answered by discarding and starting '
+  + 'again, and an edition testing `>` alone resumes from the end of a file and sends nothing.',
+  { ...IMAGE, partial: 100000 })
 
 fetchCase('a-partial-of-a-manifest-that-declares-no-size',
   'Every manifest a Hub serves today. The "cannot be larger than what it is part of" branch is '

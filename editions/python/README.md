@@ -2,7 +2,7 @@
 
 > **This is not yet an edition.** §31.4: *"An edition that has not passed the corpus is not an
 > edition. It cannot carry the name, appear in the matrix, or be installed by `skynetd`."* It
-> currently passes **18 of 31 corpora**. The runner prints that number on every run and this
+> currently passes **21 of 31 corpora**. The runner prints that number on every run and this
 > file will keep saying so until it is 31.
 
 §73's last column has carried one entry against §31 since the table was written: *"The second
@@ -60,9 +60,12 @@ package index is an edition that cannot be checked on the machine it is being re
 | `skill` | 86 | §54.2–54.5: preconditions, success, timeout, composition and the lifecycle |
 | `opstate` | 37 | §27's machine, and the two predicate tables it is read through |
 | `identity` | 42 | §10, §19 and §50: pairing codes, credentials and what is running |
-| | **815** | of 1,069 |
+| `transfer` | 32 | §12 and §79's four decisions: fetch, arrival, upload, receipt |
+| `power` | 28 | §36's four states plus the fifth, and the faults beside them |
+| `ota` | 29 | §12's second and third rules: the install gate and health-gated rollback |
+| | **904** | of 1,071 |
 
-The other 13 corpora have no handler at all — 254 cases, counted in every run. They are not
+The other 10 corpora have no handler at all — 167 cases, counted in every run. They are not
 skipped and not hidden: a runner that quietly passed ten corpora and printed "OK" would be the
 most misleading artifact in this repository.
 
@@ -120,6 +123,9 @@ skynet_os/
   skill.py         §54's five sections: preconditions, success, timeout, composition, lifecycle
   opstate.py       §27's machine, which four callers described in prose before it was declared
   identity.py      pairing codes, device credentials, and §10's attestation sentence
+  transfer.py      §12's fetch and §79's upload, and what each check means
+  power.py         §36's states, reserve, thermal ladder and faults
+  ota.py           §12's install gate and its health-gated rollback
   corpus.py        the runner and its dispatch
 run_corpus.py      the CLI
 self_check.py      the runner's own accounting, and the traps the corpus cannot reach
@@ -335,10 +341,24 @@ unsafe is shipping; what is wrong is that one operator gets two sentences about 
 reference's is false as English. Recorded in §80, and the probe case **withdrawn** rather than
 left red — pinning either answer would settle it by whichever edition was easier to edit.
 
+## What the eighth round found: two boundaries nothing stood on
+
+`transfer`, `power` and `ota` — 87 cases, all first run. Twenty-five mutations, twenty-three
+caught, and both survivors were the same shape: a comparison whose boundary no case sat exactly
+on.
+
+Every fetch case had a partial well under the declared size or well over it, so `partial >= size`
+was never tested at the equals — where the answer matters, because a partial that is exactly the
+whole length is either a finished transfer nobody recorded or somebody else's bytes, and an
+edition testing `>` alone resumes from the end of a file and sends nothing. And no bundle
+declared more than one gated component, so the **order** `gated_components` is reported in — a
+sentence an operator reads, and a fault's subjects — was unpinned.
+
+1,069 → **1,071**, and Rust reproduces both without a change.
+
 ## What is next, in dependency order
 
-`transfer` (31 cases), `ota` (28), `power` (28), `cell` (26), `checkin` (23), `blackbox` (18),
-`calibration` (18), `provenance` (17), `telemetry` (16), `live` (15), `readiness` (12),
-`birth` (11), `intent` (11). Thirteen corpora, 254 cases, and none of them is a foundation any
-of the others needs. Everything after the foundation is mechanical; the foundation is canonical
+`cell` (26 cases), `checkin` (23), `blackbox` (18), `calibration` (18), `provenance` (17),
+`telemetry` (16), `live` (15), `readiness` (12), `birth` (11), `intent` (11). Ten corpora, 167
+cases, and none of them is a foundation any of the others needs. Everything after the foundation is mechanical; the foundation is canonical
 serialisation and a runner that refuses to lie about what it has not done.
