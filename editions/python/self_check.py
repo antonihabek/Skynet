@@ -245,9 +245,10 @@ def main() -> int:
     state_and_identity_divergences()
     checkin_divergences()
     cell_divergences()
+    live_divergences()
 
     print()
-    total = 15 + 8 + 4 + 2 + 2 + 3 + 4 + 3
+    total = 15 + 8 + 4 + 2 + 2 + 3 + 4 + 3 + 3
     if FAILURES:
         print(f"self-check FAILED — {len(FAILURES)} of {total}")
         return 1
@@ -831,6 +832,49 @@ def cell_divergences() -> None:
         "a coordinate of `true` is not a coordinate of 1",
         cell._shape_is_usable(boolean) is False,
         f"usable={cell._shape_is_usable(boolean)}",
+    )
+
+
+def live_divergences() -> None:
+    """The last two survivors of `live.py`'s mutation run, and they are one trap.
+
+    ``battery_percent`` and ``age_s`` are both typed ``number | null`` in the reference, and
+    :func:`skynet_os.live.live_context` tests them with ``Number.isFinite`` rather than against
+    null. The two readings differ on exactly one input — a **non-finite number** — and that is a
+    value this corpus cannot carry: `JSON.stringify` writes it as ``null``, and per
+    ``corpus/README.md`` a null in a field whose type *admits* one means null rather than NaN. So
+    the case would say something other than what it was written to say.
+
+    It matters because the two answers are not equally safe. A battery published as ``NaN`` gives a
+    precondition a value to compare against, and every comparison against it is **false** — so
+    ``robot.state.battery_percent > 20`` reads as "the battery is low" on a robot whose sensor
+    failed, rather than as the refusal §54.2's first rule asks for.
+    """
+    from skynet_os import live
+
+    print()
+    print("the live trap the corpus cannot carry")
+
+    unreadable = live.live_context({"battery_percent": float("nan"), "gripper": float("inf")})
+    check(
+        "a non-finite battery and gripper are absent, not published",
+        "state" not in unreadable["context"]["robot"],
+        f"robot={unreadable['context']['robot']}",
+    )
+    readable = live.live_context({"battery_percent": 62, "gripper": 0.8})
+    check(
+        "...and finite ones are published, so the check above is not passing by finding nothing",
+        readable["context"]["robot"]["state"] == {"battery_percent": 62, "gripper": 0.8},
+        f"state={readable['context']['robot'].get('state')}",
+    )
+
+    aged = live.live_context(
+        {"calibration": [{"set": "joint_zeros", "validity": {"state": "valid"}, "age_s": float("nan")}]}
+    )
+    check(
+        "a non-finite age omits `age_s` rather than publishing it",
+        aged["context"]["robot"]["calibration"]["joint_zeros"] == {"state": "valid", "valid": True},
+        f"row={aged['context']['robot']['calibration']['joint_zeros']}",
     )
 
 

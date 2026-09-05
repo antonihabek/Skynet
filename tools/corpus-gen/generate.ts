@@ -5097,6 +5097,66 @@ liveCase('an-unobserved-operating-state',
   + 'precondition reading it would get an answer rather than a refusal.',
   { battery_percent: 90 })
 
+// Every case above this line reaches §54.2's rule from **one** side: a fact the robot does not
+// know is a key that is not there. The rule is `absent is not null`, and until these cases nothing
+// in this corpus carried a null at all — so an edition that published `null` for a declared-and-
+// unmeasured field agreed about all fifteen and broke the rule the file is named for.
+
+liveCase('declared-and-not-measured',
+  'Four optional fields present and **null**: a body that has a gripper and cannot read it, a '
+  + 'battery sensor that answered nothing, a pose the driver did not report, and a state nobody '
+  + 'observed. Every one omits its path, exactly as an absent key does — which is the point. §54.2 '
+  + 'refuses a precondition naming a path that is not there, and publishing `null` instead would '
+  + 'give a predicate a value to compare against: `robot.state.battery_percent > 20` is **false** '
+  + 'on a null and *unresolvable* on an absence, and only the second refuses the skill.',
+  {
+    gripper: null,
+    battery_percent: null,
+    base_pose: null,
+    operating_state: null,
+    tier: null,
+    env: null,
+    grants: ['arm.left'],
+  })
+
+liveCase('a-calibration-age-declared-and-not-known',
+  'The same rule one level down. The set is reported with its state and **no** `age_s`, because a '
+  + 'robot with no clock does not know the age of anything — and a precondition asking whether the '
+  + 'joint zeros were measured this week should be refused rather than answered with a zero. '
+  + '`a-calibration-set-with-no-clock` omits the field; this one declares it null, which is the '
+  + 'shape a serialiser produces and the shape nothing had.',
+  { calibration: [{ set: 'joint_zeros', validity: { state: 'valid', checked: [] }, age_s: null }] })
+
+liveCase('a-tier-that-is-an-empty-string',
+  'A tier of `\'\'` is **published**. The test is `typeof === \'string\'` rather than a truthiness '
+  + 'test, and the distinction is §54.2\'s: an empty string is a value somebody supplied, and the '
+  + 'rule is about facts nobody knows. A precondition comparing against it gets a clean false '
+  + 'rather than a refusal, which is the right answer for a robot whose tier was reported as '
+  + 'nothing rather than not reported.',
+  { tier: '' })
+
+liveCase('a-joint-with-no-name-at-all',
+  'The other end of the addressability rule. A dotted name has a case; an **empty** one did not, '
+  + 'and `robot.state.joints.` is not a path either. It joins `unaddressable` with the dotted ones, '
+  + 'and the empty string is what a console will render — which is worse than useless unless it is '
+  + 'there, because a joint missing from the branch with no line beside it is a joint an operator '
+  + 'can see on the console and not in a refusal.',
+  { joints: [{ name: '', position: 0.5 }, { name: 'elbow', position: -1.5 }] })
+
+liveCase('a-fault-whose-subjects-arrive-unsorted',
+  'The frame fault\u2019s `subjects` go through the same sort as every other list here, and the one '
+  + 'fault case carries a single subject — so the sort was free. Two editions agreeing about which '
+  + 'frames are broken and disagreeing about the order would produce different bytes for the same '
+  + 'robot, which is the whole reason `strList` exists.',
+  {
+    frames_resolved: [],
+    frames_fault: {
+      code: 'parent_missing',
+      subjects: ['tool0', 'base_link', 'tool0'],
+      detail: 'two frames name a parent nothing declares.',
+    },
+  })
+
 liveCase('duplicated-and-unsorted-lists',
   'Every list is sorted and de-duplicated on the way in, because two editions that agreed about the '
   + 'contents and disagreed about the order would produce different bytes for the same robot — and '
