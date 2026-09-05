@@ -6092,6 +6092,48 @@ documentCase('a-robot-that-resolves-no-limits',
   + 'whose numbers are all null and whose notices say `no_envelope`.',
   { ...CONVERGED, limits: undefined })
 
+documentCase('two-stages-left-and-the-order-nobody-pinned',
+  'Two pending actions declared out of order, which no case had. `blocking` was sorted from the '
+  + 'first day and `pending` is a **second** list of the same facts, sorted separately — so an '
+  + 'edition emitting it in declaration order agreed about every claim in this corpus and '
+  + 'disagreed about the bytes of every check-in carrying more than one action. The reason it has '
+  + 'to be sorted rather than merely stable: §34.4 collapses check-ins, and two documents that '
+  + 'differ only in the order of a list are two documents a queue cannot tell are duplicates.',
+  {
+    ...CONVERGED,
+    state: 'hold',
+    progress: {
+      observed_generation: 40,
+      desired_generation: 41,
+      pending: [
+        { stage: 'policy', deferred: false, reason: 'the package is staged and not started' },
+        { stage: 'os_image', deferred: false, reason: 'the slot is being written' },
+      ],
+    },
+  })
+
+documentCase('a-digest-on-a-slot-nobody-read',
+  '§10’s contradiction: a measure that says `unmeasured` and carries a digest anyway. Both fields '
+  + 'are well-typed and no case had ever put them together, which left the whole question of what '
+  + 'a consumer sees unpinned. The digest is **dropped**, and the reason is the query it would '
+  + 'otherwise answer: §32.1 puts a fleet column on "which robots are running image `sha256:…`", '
+  + 'and a robot whose slot was never read must not appear in that answer. The sentence already '
+  + 'says `an unmeasured OS image`; a digest beside it would be the same report contradicting '
+  + 'itself in the machine-readable half, where nobody is reading English to catch it.',
+  {
+    ...CONVERGED,
+    attestation: {
+      device_id: 'dev_7',
+      os_image: {
+        state: 'unmeasured',
+        digest: 'sha256:aaaa',
+        why: 'the slot could not be read',
+      },
+      policy: { state: 'nothing', digest: 'sha256:bbbb' },
+      embodiment: { state: 'known', digest: 'sha256:cccc' },
+    },
+  })
+
 documentCase('a-stalled-policy-on-a-converged-robot',
   'Applied, and degraded. The two are independent and a document that collapsed them would hide '
   + 'the case §33.6 spends a paragraph on: a robot that reconciled perfectly and is standing still.',

@@ -243,9 +243,10 @@ def main() -> int:
     admission_divergences()
     skill_divergences()
     state_and_identity_divergences()
+    checkin_divergences()
 
     print()
-    total = 15 + 8 + 4 + 2 + 2 + 3
+    total = 15 + 8 + 4 + 2 + 2 + 3 + 4
     if FAILURES:
         print(f"self-check FAILED — {len(FAILURES)} of {total}")
         return 1
@@ -732,6 +733,53 @@ def state_and_identity_divergences() -> None:
         and any(f["code"] == "not_paired" for f in truthy_credential["findings"]),
         f"paired={truthy_credential['paired']}, "
         f"findings={[f['code'] for f in truthy_credential['findings']]}",
+    )
+
+
+def checkin_divergences() -> None:
+    """Two survivors of `checkin.py`'s mutation run, both unreachable from a typed corpus.
+
+    ``deferred?: boolean`` and ``readiness?: ReadinessState`` are what the reference declares, so a
+    corpus case carrying a ``1`` or an unrecognised word would be a case no typed edition could
+    represent. Rust decodes both at the boundary and cannot reach the branch either. The rule stands
+    where it always does: a corpus case where one exists, a check here where none can.
+    """
+    from skynet_os import checkin
+
+    print()
+    print("the check-in traps the corpus cannot reach")
+
+    truthy = checkin.claim_for(
+        {
+            "observed_generation": 40,
+            "desired_generation": 41,
+            # Truthy, and not `true`. A reconciler that reports a deferred action as 1.
+            "pending": [{"stage": "os_image", "deferred": 1, "reason": "applying an image reboots"}],
+        }
+    )
+    check(
+        "a truthy-but-not-true `deferred` is not deferred: the claim is `converging`",
+        truthy["claim"] == "converging",
+        f"claim={truthy['claim']}",
+    )
+    check(
+        "...which is the difference between a robot that needs a minute and one that needs a person",
+        "waiting for a safe state" not in truthy["detail"],
+        f"detail={truthy['detail']}",
+    )
+
+    unrecognised = checkin.summarize(
+        {"packages": [{"id": "acme/grasp", "live": True, "readiness": "degraded", "age_ms": 5}]}
+    )
+    check(
+        "an unrecognised readiness word is `unknown`, never `ready`",
+        unrecognised["packages"][0]["readiness"] == "unknown",
+        f"readiness={unrecognised['packages'][0]['readiness']}",
+    )
+    check(
+        "...and it is not a stall either, so the robot reads as unclassified rather than as broken",
+        unrecognised["degraded"] is False and unrecognised["stalled"] == [],
+        f"degraded={unrecognised['degraded']}, stalled={unrecognised['stalled']}",
     )
 
 
