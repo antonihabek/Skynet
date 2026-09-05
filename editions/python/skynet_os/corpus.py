@@ -37,6 +37,7 @@ from typing import Any, Callable
 
 from .canonical import canonical
 from . import admission as admission_module
+from . import calibration as calibration_module
 from . import cell as cell_module
 from . import certification as certification_module
 from . import checkin as checkin_module
@@ -275,6 +276,13 @@ def _blackbox(label: str, case_input: dict[str, Any]) -> Any:
     raise Unimplemented("blackbox", label)
 
 
+def _calibration(label: str, case_input: dict[str, Any]) -> Any:
+    """§45's validity, over whatever a robot has measured and whatever its body can hold."""
+    if label == "sets":
+        return calibration_module.sets_to_json(case_input)
+    return calibration_module.calibration_to_json(case_input)
+
+
 def _cell(label: str, case_input: dict[str, Any]) -> Any:
     """Two files, because the document has two consumers and an edition could agree about one while
     disagreeing about the other: `validate` is what an operator sees when they save it, `context` is
@@ -444,6 +452,7 @@ HANDLERS: dict[str, Handler] = {
     "admission": _admission,
     "birth": _birth,
     "blackbox": _blackbox,
+    "calibration": _calibration,
     "cell": _cell,
     "certification": _certification,
     "checkin": _checkin,
