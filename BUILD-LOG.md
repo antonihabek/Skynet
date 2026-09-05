@@ -1538,3 +1538,108 @@ hard, which is what a rule that decides whether a robot gives up its own sensors
 * **Twenty-one of thirty-one corpora complete.** Ten remain, 167 cases: `cell` 26, `checkin` 23,
   `blackbox` 18, `calibration` 18, `provenance` 17, `telemetry` 16, `live` 15, `readiness` 12,
   `birth` 11, `intent` 11
+
+---
+
+## 25. `birth`, `intent` and `readiness` — logged after the fact
+
+Committed as `versions` before this session and never written up, so the record is completed here
+rather than left as a commit message. Three modules, **34 cases, 904 → 938 passed**, twenty-four
+corpora complete. Nothing in them needed a decision; they are the three smallest files left and they
+went through first run.
+
+---
+
+## 26. `checkin` — the document §17's whole rule rests on, and a defect it found in Rust
+
+`checkin` is three files and **23 cases**, and it is the one corpus where the three files are three
+different ways for an edition to be wrong rather than three parts of one answer. `claim` is the
+field §17's rule lives on — *the platform never claims a robot is running something it has not
+heard from* — `health` is §33.6's age rule, and `document` is the bytes that actually cross to the
+Hub. An edition can reproduce the first two and assemble them differently, which is the case only
+the third catches.
+
+**938 → 961, first run, no case needing a second look.** Twenty-five corpora complete.
+
+### Then the mutation run, which is where the round actually started
+
+Nineteen mutations, **fifteen caught**. The four survivors were not noise, and they split cleanly
+into two kinds:
+
+| Survivor | Kind |
+|---|---|
+| `deferred === true` becomes truthy | The corpus cannot express it — `deferred?: boolean` |
+| An unrecognised readiness word defaults to `ready` | Same — `readiness?: ReadinessState` |
+| `pending` emitted unsorted | **A corpus gap.** Every input is well-typed |
+| A digest survives a slot nobody read | **A corpus gap**, and a defect |
+
+The first two are the class §31.4 leaves to `self_check.py`: a case carrying a `1` where the
+reference declares a boolean is a case no typed edition can represent, and Rust decodes it at the
+boundary before the branch is reachable. Four checks were added there, each with the positive
+control beside it so a check that passes by finding nothing shows up as one.
+
+The other two became corpus cases, which is the order §31.4 asks for — **a new case lands in the
+corpus before the fix lands in any edition**.
+
+### `pending` was sorted and nothing had ever proved it
+
+`blocking` is sorted, and it has been pinned since the first check-in case. `pending` is a **second**
+list of the same facts, sorted separately in the builder — and no document case had ever carried
+more than one entry, so an edition emitting it in declaration order agreed about every claim in the
+corpus and disagreed about the bytes of every real check-in from a robot with two things left to do.
+
+The reason it has to be sorted rather than merely stable is §34.4: check-ins are **collapsed**, and
+two documents differing only in the order of a list are two documents a queue cannot tell are
+duplicates. `two-stages-left-and-the-order-nobody-pinned` declares two out of order. Rust already
+sorted, and reproduces it without a change.
+
+### The digest on a slot nobody read — a divergence, and the reference was right
+
+A measure carries a `state` and a `digest`, and both are well-typed independently. `{ state:
+'unmeasured', digest: 'sha256:aaaa' }` is a document that says nobody read the slot and carries a
+reading of it in the next field, and **no case had ever put the two together** — so what a consumer
+sees was unpinned, and the two editions had quietly answered it differently for as long as the field
+has existed:
+
+* `reference/typescript/shape.ts` gates the digest on the state. `unmeasured` emits `null`.
+* `crates/skynet-contracts/src/identity.rs` emitted whatever was in the field.
+
+This is not a coin toss, and the argument is the query rather than the tidiness. §32.1 puts a fleet
+column on *"which robots are running image `sha256:…`"* — the question an incident is run through —
+and Rust's answer puts a robot whose image slot was **never read** into that result. The prose half
+of the same document already says `an unmeasured OS image (the slot could not be read)`, so passing
+the digest through has one report contradicting itself, in the machine-readable half, on the side
+where nobody is reading English to catch it.
+
+`a-digest-on-a-slot-nobody-read` is the case. It went in first, the Rust corpus test went red on it
+alone, and `measure_to_json` now gates the digest on the state with the reasoning in its doc comment
+and the case named there. **1,073 cases, both editions, byte for byte.**
+
+### One thing deliberately not done
+
+`shapeMeasure` and Rust also disagree about an *unrecognised* state word, and the Python edition
+normalises it to `unmeasured` at the boundary as Rust does. No case pins it and none was added: an
+unrecognised `MeasureState` is not a well-typed input either, so it belongs with the first two
+survivors rather than with these — and `_measure_block` says so where it makes the choice.
+
+### A stale mirror pin, found by running the check rather than by reading it
+
+`docs/skynet-os-architecture.md` was byte-identical in both repositories and pinned at digest
+`1a5d70bb…` while both trees held `c44f772b…`. The §80 rows added in `b39c6d5` and `a78595b` were
+mirrored correctly and the pin was never moved, so `check-mirrors.mjs` had been reporting the
+specification as changed-without-repinning since. Re-pinned from the two agreeing copies with
+`--pin`, which moves no file. Nothing in the Hub was touched.
+
+### Verified
+
+* `python3 editions/python/run_corpus.py` — **963 passed, 0 failed**, 110 not implemented, of 1,073
+* `python3 editions/python/self_check.py` — **38 checks**, four of them new
+* Both new self-checks confirmed against the mutation they exist for: 2 of 38 and 3 of 38 red
+* 17 of 19 mutations caught by the corpus; the two survivors are the two `self_check.py` covers
+* `cargo test --workspace` — **1,431 passed**, 0 failed, 7 ignored (four need a C compiler)
+* `cargo fmt --check` and `cargo clippy --workspace --all-targets` clean
+* `tsc -p .` clean; the generator reproduces all 77 files byte-identically
+* `check-golden-path.mjs`, `check-contract-mirrors.mjs`, `check-mirrors.mjs` all clean
+
+**Twenty-five of thirty-one corpora complete. Six remain, 110 cases:** `cell` 26, `blackbox` 18,
+`calibration` 18, `provenance` 17, `telemetry` 16, `live` 15.

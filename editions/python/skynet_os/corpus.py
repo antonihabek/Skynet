@@ -38,6 +38,7 @@ from typing import Any, Callable
 from .canonical import canonical
 from . import admission as admission_module
 from . import certification as certification_module
+from . import checkin as checkin_module
 from . import birth as birth_module
 from . import digest as digest_module
 from . import embodiment as embodiment_module
@@ -253,6 +254,23 @@ def _identity(label: str, case_input: dict[str, Any]) -> Any:
     raise Unimplemented("identity", label)
 
 
+def _checkin(label: str, case_input: dict[str, Any]) -> Any:
+    """Three files, because a check-in has three separable ways to be wrong.
+
+    `claim` is the field §17's rule lives on — the platform never claims a robot is running
+    something it has not heard from — `health` is §33.6's age rule, and `document` is the bytes that
+    actually cross to the Hub. An edition could reproduce the first two and still assemble them
+    differently, which is the case only the third one catches.
+    """
+    if label == "claim":
+        return checkin_module.claim_to_json(case_input)
+    if label == "health":
+        return checkin_module.health_to_json(case_input)
+    if label == "document":
+        return checkin_module.document_to_json(case_input)
+    raise Unimplemented("checkin", label)
+
+
 def _intent(_label: str, case_input: dict[str, Any]) -> Any:
     return intent_module.offer_to_json(case_input)
 
@@ -393,6 +411,7 @@ HANDLERS: dict[str, Handler] = {
     "admission": _admission,
     "birth": _birth,
     "certification": _certification,
+    "checkin": _checkin,
     "cycle": _cycle,
     "digest": _digest,
     "fuzz": _fuzz,

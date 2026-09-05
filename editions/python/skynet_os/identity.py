@@ -49,6 +49,7 @@ __all__ = [
     "PAIRING_CODE_GROUP",
     "PAIRING_CODE_LENGTH",
     "attest",
+    "attestation_block",
     "attestation_to_json",
     "check_identity",
     "code_to_json",
@@ -493,4 +494,54 @@ def attestation_to_json(case_input: dict[str, Any]) -> Any:
         "complete": report["complete"],
         "sentence": report["sentence"],
         "unmeasured": list(report["unmeasured"]),
+    }
+
+
+def _measure_block(measure: dict[str, Any]) -> dict[str, Any]:
+    """One measure, with the digest kept rather than rendered away.
+
+    ``digest`` and ``why`` are present-and-null rather than omitted, for the same reason
+    :func:`skynet_os.checkin.summarize` keeps all five of §33.6's fields: a consumer that has to
+    discover which keys this robot happened to fill in is a consumer that will get it wrong on the
+    robot that filled in none.
+
+    **The digest is gated on the state**, which is the line worth reading twice. A measure that says
+    ``unmeasured`` and carries a digest is a contradiction — the state says nobody read the slot and
+    the field carries a reading of it — and §32.1 puts a fleet column on exactly this question:
+    *which robots are running image ``sha256:aa``*. Passing the digest through would answer that
+    query with a robot whose image was never measured, which is a false positive on the one query an
+    incident is run through. So a digest survives only on a ``known`` measure.
+    """
+    state = measure.get("state")
+    if state not in MEASURE_STATES:
+        # An unrecognised word is `unmeasured`, never `known`. Every default in this edition points
+        # the same way: a document that did not say has not established that a slot was read.
+        state = "unmeasured"
+    digest = _js_trim(measure["digest"]) if isinstance(measure.get("digest"), str) else ""
+    why = _js_trim(measure["why"]) if isinstance(measure.get("why"), str) else ""
+    return {
+        "digest": (digest or None) if state == "known" else None,
+        "state": state,
+        "why": why or None,
+    }
+
+
+def attestation_block(attestation: dict[str, Any]) -> dict[str, Any]:
+    """The attestation as §10 asks for it: the sentence **and** the three digests it is made of.
+
+    A sentence is not a record. §10 asks the Hub to record *"robot X is running image ``sha256:…``,
+    policy ``sha256:…``, against body ``sha256:…``"*, and :func:`attest` produces exactly that — but
+    ask a fleet *"which robots are running image ``sha256:aa``"*, the question §32.1 puts a column
+    on, and the only way to answer it from the sentence is to parse English back out of prose that
+    is deliberately not machine-readable: ``no policy``, ``an unmeasured OS image (the slot could
+    not be read)``, ``an unnamed body``.
+
+    So both go on the wire. The sentence, because it is what somebody reads at 3 a.m.; the measures,
+    because they are what somebody queries at 3 a.m.
+    """
+    return {
+        **attestation_to_json(attestation),
+        "embodiment": _measure_block(attestation.get("embodiment") or {}),
+        "os_image": _measure_block(attestation.get("os_image") or {}),
+        "policy": _measure_block(attestation.get("policy") or {}),
     }
