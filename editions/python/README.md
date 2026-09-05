@@ -2,7 +2,7 @@
 
 > **This is not yet an edition.** §31.4: *"An edition that has not passed the corpus is not an
 > edition. It cannot carry the name, appear in the matrix, or be installed by `skynetd`."* It
-> currently passes **21 of 31 corpora**. The runner prints that number on every run and this
+> currently passes **26 of 31 corpora**. The runner prints that number on every run and this
 > file will keep saying so until it is 31.
 
 §73's last column has carried one entry against §31 since the table was written: *"The second
@@ -59,14 +59,19 @@ package index is an edition that cannot be checked on the machine it is being re
 | `certification` | 20 | §15's award: absence is not a pass, and the evidence caps the claim |
 | `skill` | 86 | §54.2–54.5: preconditions, success, timeout, composition and the lifecycle |
 | `opstate` | 37 | §27's machine, and the two predicate tables it is read through |
-| `identity` | 42 | §10, §19 and §50: pairing codes, credentials and what is running |
+| `identity` | 44 | §10, §19 and §50: pairing codes, credentials and what is running |
 | `transfer` | 32 | §12 and §79's four decisions: fetch, arrival, upload, receipt |
 | `power` | 28 | §36's four states plus the fifth, and the faults beside them |
 | `ota` | 29 | §12's second and third rules: the install gate and health-gated rollback |
-| | **904** | of 1,071 |
+| `birth` | 11 | §50's vendor certificate, and the key it is about |
+| `intent` | 11 | §11's pull, and the two refusals that are not symmetric |
+| `readiness` | 12 | the tier a registry subject can attain, and what blocks the next one |
+| `checkin` | 25 | §17's claim, §33.6's age rule, and the document that crosses the boundary |
+| `cell` | 28 | §55.2's descriptor: every fault in it, and the two projections read out of it |
+| | **991** | of 1,075 |
 
-The other 10 corpora have no handler at all — 167 cases, counted in every run. They are not
-skipped and not hidden: a runner that quietly passed ten corpora and printed "OK" would be the
+The other 5 corpora have no handler at all — 84 cases, counted in every run. They are not
+skipped and not hidden: a runner that quietly passed most corpora and printed "OK" would be the
 most misleading artifact in this repository.
 
 ### `partial` is a state, and `fuzz` was in it
@@ -77,8 +82,15 @@ without it, implementing one file of three would have counted the other 108 case
 answers* rather than as *untranscribed*, and the number would have got worse precisely as the
 edition improved. A corpus is complete or it is not, however many of its files are done.
 
-`self_check.py` holds the runner to this against synthetic corpora with known answers: **34
-checks**, of which four test the detector and nineteen test the language traps below.
+`self_check.py` holds the runner to this against synthetic corpora with known answers: **41
+checks**, of which four test the detector and the rest test the language traps below.
+
+Both editions run on every commit. §31.4 asks for differential checking in CI and until the
+ninth round the `corpus` job had one row — this edition passed nowhere but on the machine of
+whoever last touched it. It has two rows now, and the second carries `--min-passed`, because
+every other check here has a floor of zero: an edition whose handler was deleted answers
+nothing, fails nothing, and exits 0, since the cases move into the bucket that reads as honest
+progress.
 
 ## Where the values come from
 
@@ -126,6 +138,12 @@ skynet_os/
   transfer.py      §12's fetch and §79's upload, and what each check means
   power.py         §36's states, reserve, thermal ladder and faults
   ota.py           §12's install gate and its health-gated rollback
+  birth.py         §50's vendor certificate, and what a robot may conclude from one
+  intent.py        §11's pull: may this response become the desired state
+  readiness.py     the tier a subject can attain, and the blockers between it and the next
+  checkin.py       §17's claim, §33.6's health, and the document that crosses to the Hub
+  cell.py          §55.2's descriptor, its faults, and the two projections a robot reads
+  js.py            the four JavaScript expressions Python has no equivalent for
   corpus.py        the runner and its dispatch
 run_corpus.py      the CLI
 self_check.py      the runner's own accounting, and the traps the corpus cannot reach
@@ -356,9 +374,60 @@ sentence an operator reads, and a fault's subjects — was unpinned.
 
 1,069 → **1,071**, and Rust reproduces both without a change.
 
+## What the ninth round found: a defect in Rust, and this edition running nowhere
+
+`checkin` and `cell` — 51 cases, both first run. Thirty-eight mutations, **thirty caught**, and the
+survivors split into the two kinds this file has been sorting them into since the third round: the
+ones a typed corpus cannot express, and the ones it simply had not looked at.
+
+Four became corpus cases. **1,071 → 1,075**, and one of them went red in Rust.
+
+### A digest on a slot nobody read
+
+A measure carries a `state` and a `digest`, and both are well-typed independently. Nothing had ever
+put `{ state: 'unmeasured', digest: 'sha256:aaaa' }` together — a document saying nobody read the
+slot and carrying a reading of it in the next field — so what a consumer sees was unpinned, and the
+two editions had answered it differently for as long as the field has existed. `shape.ts` gates the
+digest on the state; `skynet-contracts` passed it through.
+
+The reference is right, and the argument is the query rather than the tidiness. §32.1 puts a fleet
+column on *"which robots are running image `sha256:…`"* — the question an incident is run through —
+and Rust's answer put a robot whose image slot was **never read** into that result. The prose half of
+the same document already says `an unmeasured OS image (the slot could not be read)`, so passing the
+digest through had one report contradicting itself in the machine-readable half, where nobody is
+reading English to catch it. Fixed in `crates/skynet-contracts/src/identity.rs`.
+
+### Three more, each a list nobody had made long enough
+
+| New case | The rule it pins |
+|---|---|
+| `two-stages-left-and-the-order-nobody-pinned` | `pending` is a **second** list of `blocking`'s facts, sorted separately, and no document case had two entries. §34.4 collapses check-ins, so two documents differing only in a list's order are two a queue cannot tell are duplicates |
+| `a-fixture-named-and-not-measured` | `volume: null` is a fixture nobody measured. The check is truthy for exactly this document; a key test reports an operator who wrote the field out and left it empty as one who measured it wrongly |
+| `a-duplicate-fixture-measured-wrongly` | One fault, not two. The duplicate is reported and the walk **stops** — the copy that is about to be deleted is not a second thing to tell the operator about |
+
+### And the two the corpus structurally cannot carry
+
+A `deferred` of `1` and an unrecognised readiness word are inputs no typed edition can produce, so
+they went to `self_check.py` with the rest. The cell trap is the more interesting one, because this
+repository had already written down why it cannot be a case: `generate.ts` says at the frame-bindings
+rule that it writes every input through `JSON.stringify`, which renders an infinity as `null` — so a
+frozen case would hold a *different* document from the one its expectation was computed against,
+which is worse than no case at all. A box with an infinite corner is checked here instead, beside a
+coordinate of `true`, which JSON can carry and no typed edition can produce.
+
+### The finding that was not in any transcription
+
+**This edition was in no CI job.** §31.4 asks for differential checking on every commit and the
+`corpus` job's own comment said *"One row today"* — written when that was true, and left standing
+through eight rounds in which a second edition was built. A change to `reference/typescript/`, to the
+corpus, or to a shared module would have broken it silently until somebody next ran it by hand. Both
+editions run now, and the Python row carries a ratchet for the regression the runner's own design
+cannot see: cases that stop being answered are counted as *not implemented*, which is the bucket that
+reads as progress.
+
 ## What is next, in dependency order
 
-`cell` (26 cases), `checkin` (23), `blackbox` (18), `calibration` (18), `provenance` (17),
-`telemetry` (16), `live` (15), `readiness` (12), `birth` (11), `intent` (11). Ten corpora, 167
-cases, and none of them is a foundation any of the others needs. Everything after the foundation is mechanical; the foundation is canonical
-serialisation and a runner that refuses to lie about what it has not done.
+`blackbox` (18 cases), `calibration` (18), `provenance` (17), `telemetry` (16), `live` (15). Five
+corpora, 84 cases, and none of them is a foundation any of the others needs. Everything after the
+foundation is mechanical; the foundation is canonical serialisation and a runner that refuses to lie
+about what it has not done.

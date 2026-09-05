@@ -4160,6 +4160,27 @@ cellCase('a-fixture-measured-wrongly',
   'A fixture may be named without being measured; it may not be measured wrongly.',
   cell({ fixtures: [{ name: 'bin', volume: { frame: 'base', shape: { kind: 'sphere', centre: [0, 0, 0], radius_m: -1 } } }] }))
 
+cellCase('a-fixture-named-and-not-measured',
+  'A fixture whose `volume` is written out and left null. §55.2 permits it — *a fixture may be '
+  + 'named without being measured* — and the check that follows is truthy rather than a key test '
+  + 'for exactly this document: an edition asking whether the key is present reports a fixture the '
+  + 'operator honestly said nothing about as one they measured wrongly, which is a fault against '
+  + 'somebody for being careful.',
+  cell({ fixtures: [{ name: 'bin', volume: null }] }))
+
+cellCase('a-duplicate-fixture-measured-wrongly',
+  'One fault, not two. The duplicate is reported and the walk **stops** — the second `jig-a` is '
+  + 'not the fixture any precondition will reach, so measuring it wrongly is not a second thing to '
+  + 'tell the operator about. An edition that fell through would report geometry against a name '
+  + 'that already had a fault of its own, and the operator would fix the volume on the copy that '
+  + 'is about to be deleted.',
+  cell({
+    fixtures: [
+      { name: 'jig-a' },
+      { name: 'jig-a', volume: { frame: 'base', shape: { kind: 'sphere', centre: [0, 0, 0], radius_m: -1 } } },
+    ],
+  }))
+
 cellCase('a-parking-entry-with-no-channel',
   'A parking pose is a command, and a command names its channel.',
   cell({ parking_pose: [{ channel: '', position: 0 }] }))

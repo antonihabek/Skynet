@@ -38,6 +38,13 @@ from __future__ import annotations
 
 from typing import Any, Final
 
+from .js import (
+    js_trim as _js_trim,
+    utf16_at as _utf16_at,
+    utf16_key as _utf16_key,
+    utf16_length as _utf16_length,
+)
+
 __all__ = [
     "CODE_FAULTS",
     "DEVICE_SCOPES",
@@ -111,40 +118,6 @@ IDENTITY_FINDINGS: Final = (
 #: running and its digest could not be read" are two facts with two different people at the end of
 #: them, and collapsing them would report a robot running unknown software as one running none.
 MEASURE_STATES: Final = ("known", "nothing", "unmeasured")
-
-#: ECMAScript's ``WhiteSpace`` plus ``LineTerminator``. Python's ``strip()`` removes more.
-_JS_WHITESPACE: Final = (
-    "\t\n\v\f\r             "
-    "     　﻿"
-)
-
-
-def _js_trim(value: str) -> str:
-    """``String.prototype.trim`` — the specification's set, not Python's larger one."""
-    return value.strip(_JS_WHITESPACE)
-
-
-def _utf16_units(value: str) -> list[int]:
-    """The string as UTF-16 code units, which is what JavaScript indexes and measures."""
-    encoded = value.encode("utf-16-be", errors="surrogatepass")
-    return [(encoded[i] << 8) | encoded[i + 1] for i in range(0, len(encoded), 2)]
-
-
-def _utf16_length(value: str) -> int:
-    """``value.length``. Eight emoji are sixteen of these."""
-    return len(_utf16_units(value))
-
-
-def _utf16_at(value: str, index: int) -> str:
-    """``value[index]`` — one code unit, which for an astral character is half of one."""
-    unit = _utf16_units(value)[index]
-    return chr(unit) if not 0xD800 <= unit <= 0xDFFF else "�"
-
-
-def _utf16_key(value: str) -> tuple[int, ...]:
-    """A sort key ordering by UTF-16 code unit, which is what JavaScript's ``<`` does."""
-    return tuple(_utf16_units(value))
-
 
 def _fold(character: str) -> str:
     """Crockford's folding: the letters excluded from the alphabet map to the digits they resemble."""

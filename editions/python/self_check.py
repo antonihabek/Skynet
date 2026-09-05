@@ -244,9 +244,10 @@ def main() -> int:
     skill_divergences()
     state_and_identity_divergences()
     checkin_divergences()
+    cell_divergences()
 
     print()
-    total = 15 + 8 + 4 + 2 + 2 + 3 + 4
+    total = 15 + 8 + 4 + 2 + 2 + 3 + 4 + 3
     if FAILURES:
         print(f"self-check FAILED — {len(FAILURES)} of {total}")
         return 1
@@ -780,6 +781,56 @@ def checkin_divergences() -> None:
         "...and it is not a stall either, so the robot reads as unclassified rather than as broken",
         unrecognised["degraded"] is False and unrecognised["stalled"] == [],
         f"degraded={unrecognised['degraded']}, stalled={unrecognised['stalled']}",
+    )
+
+
+def cell_divergences() -> None:
+    """The cell trap no corpus file can carry, for a reason this repository already wrote down.
+
+    `tools/corpus-gen/generate.ts` says it at the frame-bindings rule: the generator writes every
+    input through ``JSON.stringify``, which renders an infinity as ``null``, so a frozen case would
+    hold a *different* document from the one its expectation was computed against — worse than no
+    case, because it would fail an edition for reading the file correctly. The same applies here,
+    and a ``true`` in a coordinate array is the second half of it: JSON can carry that one, and no
+    typed edition can produce it.
+
+    Both matter because Python collapses them by accident. ``isinstance(x, float)`` is true of
+    ``NaN`` and of both infinities, and ``isinstance(True, int)`` is true of a boolean — so a
+    coordinate check written the obvious way admits an infinite box and a corner at ``true``.
+    """
+    from skynet_os import cell
+
+    print()
+    print("the cell trap the corpus cannot carry")
+
+    infinite = {
+        "frame": "base",
+        "shape": {"kind": "box", "min": [float("-inf"), 0, 0], "max": [1, 1, 1]},
+    }
+    check(
+        "a box with an infinite corner has no usable geometry",
+        cell._shape_is_usable(infinite) is False,
+        f"usable={cell._shape_is_usable(infinite)}",
+    )
+    finite = {
+        "frame": "base",
+        "shape": {"kind": "box", "min": [-1, 0, 0], "max": [1, 1, 1]},
+    }
+    check(
+        "...and the same box with numbers is usable, so the check above is not passing by finding "
+        "nothing",
+        cell._shape_is_usable(finite) is True,
+        f"usable={cell._shape_is_usable(finite)}",
+    )
+
+    boolean = {
+        "frame": "base",
+        "shape": {"kind": "sphere", "centre": [True, 0, 0], "radius_m": 1},
+    }
+    check(
+        "a coordinate of `true` is not a coordinate of 1",
+        cell._shape_is_usable(boolean) is False,
+        f"usable={cell._shape_is_usable(boolean)}",
     )
 
 

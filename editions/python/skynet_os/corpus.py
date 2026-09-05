@@ -37,6 +37,7 @@ from typing import Any, Callable
 
 from .canonical import canonical
 from . import admission as admission_module
+from . import cell as cell_module
 from . import certification as certification_module
 from . import checkin as checkin_module
 from . import birth as birth_module
@@ -254,6 +255,18 @@ def _identity(label: str, case_input: dict[str, Any]) -> Any:
     raise Unimplemented("identity", label)
 
 
+def _cell(label: str, case_input: dict[str, Any]) -> Any:
+    """Two files, because the document has two consumers and an edition could agree about one while
+    disagreeing about the other: `validate` is what an operator sees when they save it, `context` is
+    what a precondition and the workspace guard read out of it afterwards.
+    """
+    if label == "validate":
+        return cell_module.validate_to_json(case_input)
+    if label == "context":
+        return cell_module.context_to_json(case_input)
+    raise Unimplemented("cell", label)
+
+
 def _checkin(label: str, case_input: dict[str, Any]) -> Any:
     """Three files, because a check-in has three separable ways to be wrong.
 
@@ -410,6 +423,7 @@ def _watchdog(_label: str, case_input: dict[str, Any]) -> Any:
 HANDLERS: dict[str, Handler] = {
     "admission": _admission,
     "birth": _birth,
+    "cell": _cell,
     "certification": _certification,
     "checkin": _checkin,
     "cycle": _cycle,
