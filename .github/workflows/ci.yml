@@ -310,14 +310,14 @@ jobs:
       # genuinely needs it — turning an `mmap` into that slice — is one call, and it belongs to the
       # mapping layer rather than to the protocol. The protocol is the part where a mistake is a
       # moving robot, and it is the part the compiler checks.
-      - name: Everything but the ABI, the loader and the mapping forbids unsafe
+      - name: Everything but the ABI, the two loaders and the two mappings forbids unsafe
         run: |
-          # An allow-list of the three, and every *other* crate in the workspace is required to
+          # An allow-list of the five, and every *other* crate in the workspace is required to
           # forbid it — enumerated from the directory rather than from a list kept beside it, so the
           # check covers the next crate somebody adds instead of the ones somebody remembered. The
           # previous version listed the crates that must forbid it, which is the same check with the
           # default pointing the wrong way: a new crate joined the workspace unwatched.
-          allowed="skynet-rhal skynet-cli skynet-ring-shm"
+          allowed="skynet-rhal skynet-cli skynet-dl skynet-ring-shm skynet-claim"
           for path in crates/*/; do
             crate=$(basename "$path")
             case " $allowed " in *" $crate "*) continue ;; esac
@@ -328,11 +328,17 @@ jobs:
             }
           done
 
-          # And the three are each allowed for one stated reason, so the reason has to still be
-          # written down. `skynet-ring-shm` is the newest and the smallest: four `extern "C"`
+          # And the five are each allowed for one stated reason, so the reason has to still be
+          # written down. The two mappings are the smallest: `skynet-ring-shm` is four `extern "C"`
           # declarations, one mmap and one `from_raw_parts`, deliberately split from the protocol in
           # `skynet-ring` so that a reviewer asking whether the command path is memory-safe reads a
-          # short file.
+          # short file — and `skynet-claim` is §26.2's shared sequence, five declarations and one
+          # `AtomicU64::from_ptr`, split from `skynet-lock` for the same reason.
+          #
+          # `skynet-dl` joined this list late, and the reason is worth keeping: it was added to the
+          # workspace after this check was written and the check has never run, so nothing caught
+          # it. §73 already calls it "the loader `unsafe`, extracted so it has one home and two
+          # callers" — the same argument `skynet-cli` is here for, in the crate that now holds it.
           for crate in $allowed; do
             grep -q 'unsafe' "crates/$crate/src/lib.rs" || {
               echo "::error::crates/$crate is on the unsafe allow-list and contains no unsafe."

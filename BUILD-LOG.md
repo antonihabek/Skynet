@@ -2385,3 +2385,96 @@ without a recorder and says so, `skynetk` refuses to run. Failing loudly beats c
 paragraph and §80's row to the counter described above, mirror and re-pin, then write the mapping
 crate and move the lock's meaning. The corpus and both editions are not involved, which is the part
 of this that was not previously known.
+
+---
+
+## 35. §26.2 amended in both repositories, `skynet-claim` written, and the allow-list that had never run
+
+The owner authorised editing the mirrored specification, so §34's design pass became an amendment
+rather than a note. Three things happened; the third was not planned.
+
+### The amendment, in both copies
+
+§26.2's closing paragraph said *"the sequence belongs in a mapped header as an atomic"* and *"it
+wants a design pass"*. It now carries the design pass instead: the two arguments that conflicted
+(§26.2's and `Ring::open`'s), why both hold, and the conclusion that the counter is **seeded from the
+scan and never consulted after a restart** — which puts it outside the header, outside the CRC, and
+outside the on-disk format entirely.
+
+The consequence worth repeating is the one that shrank the item: **`FORMAT_VERSION` stays at 2, the
+conformance corpus is untouched, and no language edition moves.** §31.2 keeps the black box format
+single-source across editions precisely so a change here is expensive, and this is not one.
+
+§80's row moves from an open question to *"designed 2026-09-05"*, naming the placement the design
+pass overturned so the next reader does not re-derive it.
+
+Edited in `Skynet`, copied to `Robot Overflow`, byte-equality verified, and re-pinned with
+`--pin` — which is the rule `docs/README.md` states and the first time this session has exercised
+the whole of it.
+
+### `crates/skynet-claim` — written and tested, deliberately not wired
+
+Five `extern "C"` declarations, one `mmap`, one `AtomicU64::from_ptr`, and six tests. It is the
+**fourth** `unsafe` crate in the workspace and takes the same treatment as the third: as small as a
+crate can be, with the argument in its header, so a reviewer asking whether this is memory-safe
+reads one short file.
+
+The tests are arranged around the property rather than the API. `two_mappings_of_one_file_never_
+hand_out_the_same_number` is §26.2 in one assertion — two `Claim`s are two independent mappings, the
+same relationship two *processes* have, and a counter held per-mapping would give each of them
+1, 2, 3 and encode two records into one slot. `threads_racing_the_counter_take_every_number_exactly_
+once` runs sixteen claimants over four mappings and asserts the union is exactly `1..=1000`: unique
+**and** dense, because a black box's numbering has no holes it did not record as gaps.
+
+One test exists to make a hazard meet the reader rather than be inferred:
+`seeding_again_resets_it_which_is_why_the_caller_holds_the_lock`. `Claim::seed` is unconditional —
+it has to be, because a file left by a previous run holds a sequence that was true for a ring
+`Recorder::open` may since have recreated at a different shape — so a second seed while a writer is
+claiming resets the counter under it. That is exactly why §26.2 narrows the directory lock's meaning
+to *one creator*, and the test is where somebody meets it.
+
+**What is not done**, precisely: nothing calls it. `skynet-lock` still refuses the second writer
+rather than serialising creation and letting both attach, and neither `skynetd` nor
+`skynet-kernel-host` claims through it. The interim §26.2 describes is therefore unchanged and still
+safe — the daemon starts without a recorder and says so, `skynetk` refuses to run. Stopped here on
+request, at a crate boundary rather than mid-wiring.
+
+### And the check that had never run
+
+Adding a crate to the workspace ran the `unsafe` allow-list check locally for the first time, and it
+was **already failing on three crates that were not mine**:
+
+| Crate | State |
+|---|---|
+| `skynet-capture` | No `unsafe` anywhere, no `forbid(unsafe_code)` |
+| `skynet-corpus` | The same |
+| `skynet-dl` | **27 `unsafe` occurrences**, and not on the allow-list |
+
+The check's own comment explains why this is the interesting kind of failure. It was rewritten once
+already, and the rewrite's stated purpose was to make it enumerate the directory rather than a list:
+
+> The previous version listed the crates that must forbid it, which is the same check with the
+> default pointing the wrong way: a new crate joined the workspace unwatched.
+
+The default now points the right way and three crates still joined unwatched — because **nothing in
+this repository has been pushed**, so the workflow has never executed. A check whose logic is
+correct and whose runs are zero is worth exactly as much as the one it replaced, and that is the
+finding rather than the three crates.
+
+Fixed: the two with no `unsafe` gained the attribute, and `skynet-dl` joined the allow-list, where
+§73's own words already put it — *"the loader `unsafe`, extracted so it has one home and two
+callers"*. The allow-list is five now, each with its reason written beside it, and `skynet-dl`'s
+records that it arrived late and why nothing caught it.
+
+`skynet-ring-shm`'s header said it was *"the only `unsafe` in the workspace outside the ABI and the
+loader"*. It is not, since this round; the sentence now names both mappings.
+
+### Verified
+
+* `cargo test --workspace` — **1,451 passed**, 0 failed, 7 ignored, up 6
+* The allow-list check's own shell reproduced locally: passes, for the first time
+* `cargo fmt --check` and `cargo clippy --workspace --all-targets` clean
+* `python3 editions/python/run_corpus.py --min-passed 1109` — 1,109 of 1,109, unchanged
+* `python3 editions/python/self_check.py` — 44 checks
+* `check-mirrors.mjs` — all shared documents match, re-pinned; `check-contract-mirrors.mjs` and
+  `check-golden-path.mjs` clean
