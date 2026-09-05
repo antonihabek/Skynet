@@ -2,7 +2,7 @@
 
 > **This is not yet an edition.** §31.4: *"An edition that has not passed the corpus is not an
 > edition. It cannot carry the name, appear in the matrix, or be installed by `skynetd`."* It
-> currently passes **27 of 31 corpora**. The runner prints that number on every run and this
+> currently passes **28 of 31 corpora**. The runner prints that number on every run and this
 > file will keep saying so until it is 31.
 
 §73's last column has carried one entry against §31 since the table was written: *"The second
@@ -69,9 +69,10 @@ package index is an edition that cannot be checked on the machine it is being re
 | `checkin` | 25 | §17's claim, §33.6's age rule, and the document that crosses the boundary |
 | `cell` | 28 | §55.2's descriptor: every fault in it, and the two projections read out of it |
 | `blackbox` | 21 | §26's record layout, the ring header, the six schemas, and a sealed file |
-| | **1,012** | of 1,078 |
+| `calibration` | 31 | §45's validity, the guards a set feeds, and which sets a body can hold |
+| | **1,043** | of 1,091 |
 
-The other 4 corpora have no handler at all — 66 cases, counted in every run. They are not
+The other 3 corpora have no handler at all — 48 cases, counted in every run. They are not
 skipped and not hidden: a runner that quietly passed most corpora and printed "OK" would be the
 most misleading artifact in this repository.
 
@@ -145,6 +146,7 @@ skynet_os/
   checkin.py       §17's claim, §33.6's health, and the document that crosses to the Hub
   cell.py          §55.2's descriptor, its faults, and the two projections a robot reads
   blackbox.py      §26's bytes: the ring record, the header, the schemas and the MCAP file
+  calibration.py   §45's validity, expiry and the guards a parameter set feeds
   js.py            the four JavaScript expressions Python has no equivalent for
   corpus.py        the runner and its dispatch
 run_corpus.py      the CLI
@@ -475,8 +477,62 @@ cycle — when the answer the other seven arrays give is a refusal. That is a qu
 format rather than a gap in an edition, so it is written down here and in `BUILD-LOG.md` rather than
 settled by whichever behaviour was easier to transcribe.
 
+## What the eleventh round found: nine of nineteen, and the function nothing was measuring
+
+`calibration` — 18 cases, first run, and then the **weakest mutation run of the project**: nine of
+nineteen caught. Ten survivors, eight of them real, and they say something about how this corpus was
+written rather than about this transcription. Every case sits comfortably inside or comfortably
+outside its rule; nothing sits **on** one.
+
+**1,078 → 1,091.** Thirteen new cases, and Rust reproduces all of them without a change.
+
+### `setsFor` had no case at all
+
+The two `events` cases call `setsFor(…)` and freeze its **output** into their `applicable` field.
+So the function that decides which parameter sets a body can hold — the one that keeps a bolted-down
+arm from reporting `balance` unavailable for want of an IMU it will never have — was measured by
+nothing: two editions could disagree about it and the corpus would compare them on the answer one of
+them had already given.
+
+That is `corpus/README.md`'s own diagnosis, pointed at a function instead of a field:
+
+> a corpus grows a blind spot wherever an *input* field is missing, not only where an
+> implementation is.
+
+`calibration/sets.json` is seven cases against it directly, and four of them reach branches nothing
+had: `sensing.depth` and `sensing.force` on their own, an IMU on a fixed base, and a declared
+capability that matches none of the sensing rules. The Rust adapter gained the same branch.
+
+### Four boundaries, and two notes that claimed what their inputs did not reach
+
+| New case | The rule it pins |
+|---|---|
+| `a-residual-exactly-at-its-threshold` | 1.0 against 1.0 is **valid**. `>=` fails every calibration that hit its target precisely |
+| `an-age-exactly-at-the-limit` | 3,600 s against 3,600 s is valid. On a fleet recalibrating on a schedule, `>` and `>=` disagree about every robot on the day its policy comes due |
+| `a-robot-that-got-colder` | `temperature-delta`'s note says *"the direction does not matter"* and every temperature case ran **warmer**. Without the absolute value, −18 °C reads as inside a 5 °C budget |
+| `a-policy-with-no-timestamp` | §45's rule that a missing reading never extends validity, for the **taken** reading. `temperature-unreadable` pins it for the current one |
+
+Two more: `an-empty-method` — §45.3's check is falsy, not a null test, and no record had ever carried
+`""`, which is the shape of every form somebody tabbed past — and `an-age-on-a-rounding-tie`, half a
+second, where `toFixed` takes the larger and Python's formatting takes the even one.
+
+And `arm-without-an-imu`'s note said *"seven sets exist, four apply"*. Five apply. Corrected.
+
+### One consolidation, and it was a latent fix
+
+`toFixed` existed **twice** in this edition — `certification.py` through `Decimal`, and
+`transport.py` as `floor(x + 0.5)` with a comment arguing the domain made it safe. It is not the
+same rule: at `0.49999999999999994` the sum rounds up to exactly `1.0` in binary and the shortcut
+answers `1` where the nearest integer to the value itself is `0`. That is the identical input on
+which `roundHalfAway` is defined twice and two ways in `reference/typescript`, which this file has
+been recording since the fourth round.
+
+One `to_fixed` now, in `js.py`, on the `Decimal` rule. The corpus was green before and after, so
+nothing reachable moved — which is exactly what makes it worth doing now rather than after somebody
+finds the input.
+
 ## What is next, in dependency order
 
-`calibration` (18 cases), `provenance` (17), `telemetry` (16), `live` (15). Four corpora, 66 cases, and none of them is a foundation any of the others needs. Everything after the
+`provenance` (17 cases), `telemetry` (16), `live` (15). Three corpora, 48 cases, and none of them is a foundation any of the others needs. Everything after the
 foundation is mechanical; the foundation is canonical serialisation and a runner that refuses to lie
 about what it has not done.

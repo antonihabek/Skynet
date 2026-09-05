@@ -40,6 +40,7 @@ import math
 from typing import Any, Final
 
 from .canonical import OMIT
+from .js import to_fixed as _to_fixed
 from .roles import parse_role, role_key
 
 __all__ = [
@@ -117,23 +118,6 @@ def _ordered_keys(seen: dict[str, Any]) -> list[str]:
     shuffled, differently between runs of the same input.
     """
     return list(seen.keys())
-
-
-def _to_fixed_zero(value: float) -> str:
-    """``Number.prototype.toFixed(0)``.
-
-    The specification picks the integer ``n`` for which ``n - x`` is closest to zero and, **when
-    two are equally close, the larger** — so 62.5 renders as ``63``. Python's ``format`` rounds
-    half to **even** and renders it ``62``. The only caller is the percentage in a `scaled_down`
-    warning, and that string is compared byte for byte.
-    """
-    if not math.isfinite(value):
-        return "NaN" if value != value else ("Infinity" if value > 0 else "-Infinity")
-    # `floor(x + 0.5)` is exactly "nearest, ties to the larger" for a non-negative x, which is the
-    # whole domain here: a scale is in [0, 1] and the percentage in [0, 100].
-    if value >= 0:
-        return str(math.floor(value + 0.5))
-    return str(-math.floor(-value + 0.5))
 
 
 def _js_number(value: Any) -> str:
@@ -597,7 +581,7 @@ def _finish_joint_binding(
                 "code": "scaled_down",
                 "message": (
                     f'Commands to "{joint["name"]}" are scaled to '
-                    f"{_to_fixed_zero(scale * 100)}% because the policy was trained on a stronger "
+                    f"{_to_fixed(scale * 100, 0)}% because the policy was trained on a stronger "
                     "joint."
                 ),
                 "subjects": [joint["name"]],

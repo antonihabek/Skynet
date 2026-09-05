@@ -22,14 +22,26 @@ basic plane, and *not* what Python's ``sorted()`` does.
 
 **A number in a template literal** is not ``str(x)``: an integral float renders without its ``.0``,
 and the exponent threshold is ``1e21`` rather than Python's ``1e16``.
+
+**``toFixed``** rounds ties **away from zero** where Python's ``format`` rounds them to **even**, so
+``(62.5).toFixed(0)`` is ``63`` and ``f"{62.5:.0f}"`` is ``62``.
 """
 
 from __future__ import annotations
 
 import math
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Final
 
-__all__ = ["js_number", "js_trim", "utf16_at", "utf16_key", "utf16_length", "utf16_units"]
+__all__ = [
+    "js_number",
+    "js_trim",
+    "to_fixed",
+    "utf16_at",
+    "utf16_key",
+    "utf16_length",
+    "utf16_units",
+]
 
 #: ECMAScript's ``WhiteSpace`` plus ``LineTerminator``. Python's ``strip()`` removes more.
 _JS_WHITESPACE: Final = (
@@ -79,3 +91,33 @@ def js_number(value: Any) -> str:
         if value.is_integer() and abs(value) < 1e21:
             return str(int(value))
     return str(value)
+
+
+def to_fixed(value: Any, digits: int) -> str:
+    """``Number.prototype.toFixed(digits)``.
+
+    ECMAScript takes the sign off first and then picks the integer ``n`` for which ``n / 10**digits``
+    is nearest ``x``, **the larger on a tie** — so ties are away from zero once the sign is restored,
+    where Python's ``format`` rounds them to even.
+
+    Two details make the obvious shortcuts wrong, and both have a caller in this edition:
+
+    * It decides on the **exact binary value** of the double, which is why this goes through
+      ``Decimal(value)`` rather than a decimal string: ``Decimal(0.1)`` is the number the machine
+      holds and ``Decimal("0.1")`` is not.
+    * ``floor(x + 0.5)`` is not the same rule. At ``0.49999999999999994`` the sum rounds up to
+      exactly ``1.0`` in binary and the shortcut answers ``1``, where the nearest integer to the
+      value itself is ``0``. That is the same input on which ``roundHalfAway`` is defined twice and
+      two ways in ``reference/typescript``, and it is why there is one of these rather than two.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "NaN"
+    number = float(value)
+    if number != number:
+        return "NaN"
+    if math.isinf(number):
+        return "Infinity" if number > 0 else "-Infinity"
+    sign = "-" if number < 0 else ""
+    exact = Decimal(abs(number))
+    quantum = Decimal(1).scaleb(-digits)
+    return sign + str(exact.quantize(quantum, rounding=ROUND_HALF_UP))

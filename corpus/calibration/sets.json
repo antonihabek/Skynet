@@ -1,0 +1,82 @@
+{
+  "corpus": "calibration",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "a-fixed-arm-with-a-camera",
+      "note": "Five of seven. `balance` is meaningless on a bolted-down arm, so an IMU bias and a gravity vector are not measurements it is missing — they are measurements it will never take, and reporting them unavailable is a permanent red mark nobody can clear.",
+      "input": {
+        "capabilities": [
+          "manipulation.grasp",
+          "sensing.rgb"
+        ],
+        "base": "fixed"
+      },
+      "expected": "{\"sets\":[\"joint_zeros\",\"camera_intrinsics\",\"camera_extrinsics\",\"force_torque_bias\",\"tool_offset\"]}"
+    },
+    {
+      "id": "a-body-that-declares-nothing",
+      "note": "All seven. Undeclared capabilities mean nobody said what this body senses, and over-reporting what is missing is the conservative direction.",
+      "input": {
+        "capabilities": [],
+        "base": null
+      },
+      "expected": "{\"sets\":[\"joint_zeros\",\"camera_intrinsics\",\"camera_extrinsics\",\"force_torque_bias\",\"tool_offset\",\"imu_bias\",\"gravity_vector\"]}"
+    },
+    {
+      "id": "an-unknown-base-is-mobile",
+      "note": "The absence going the other way: a body that declares capabilities but not a base keeps the two balance sets, because a base nobody described is not a base somebody called fixed.",
+      "input": {
+        "capabilities": [
+          "manipulation.grasp"
+        ],
+        "base": null
+      },
+      "expected": "{\"sets\":[\"joint_zeros\",\"force_torque_bias\",\"tool_offset\",\"imu_bias\",\"gravity_vector\"]}"
+    },
+    {
+      "id": "a-fixed-base-that-declares-an-imu",
+      "note": "And the exception to the exception. A body with an IMU keeps both sets whatever its base, since it evidently has one — the fixed-base rule is about what a body cannot do, not about what it has been given.",
+      "input": {
+        "capabilities": [
+          "sensing.imu"
+        ],
+        "base": "fixed"
+      },
+      "expected": "{\"sets\":[\"joint_zeros\",\"imu_bias\",\"gravity_vector\"]}"
+    },
+    {
+      "id": "depth-alone-is-a-camera",
+      "note": "Three prefixes reach the camera sets and only `sensing.rgb` had ever been written. A depth sensor has intrinsics and extrinsics exactly as an RGB camera does.",
+      "input": {
+        "capabilities": [
+          "sensing.depth"
+        ],
+        "base": "fixed"
+      },
+      "expected": "{\"sets\":[\"joint_zeros\",\"camera_intrinsics\",\"camera_extrinsics\"]}"
+    },
+    {
+      "id": "force-sensing-without-manipulation",
+      "note": "The other half of the same `or`: a force sensor earns the F/T bias and the tool offset without any manipulation capability. Only the manipulation side had a case.",
+      "input": {
+        "capabilities": [
+          "sensing.force"
+        ],
+        "base": "fixed"
+      },
+      "expected": "{\"sets\":[\"joint_zeros\",\"force_torque_bias\",\"tool_offset\"]}"
+    },
+    {
+      "id": "a-mobile-base-with-nothing-else-declared",
+      "note": "One declared capability that reaches none of the sensing rules, on a mobile base: joint zeros and the two balance sets, and no cameras. The case that says `declared` gates the sensing sets rather than the whole table.",
+      "input": {
+        "capabilities": [
+          "locomotion.walk"
+        ],
+        "base": "wheeled"
+      },
+      "expected": "{\"sets\":[\"joint_zeros\",\"imu_bias\",\"gravity_vector\"]}"
+    }
+  ]
+}

@@ -2966,6 +2966,55 @@ calibrationCase('expiry', 'temperature-unreadable',
   + 'has failed is precisely the robot whose bias should not be trusted.',
   [calibrationRecord('force_torque_bias', { policy: { max_temperature_delta_c: 5 } })],
   { at_s: CALIBRATION_LATER.at_s }, ['force_torque_bias'])
+calibrationCase('provenance', 'an-empty-method',
+  'A method of `\'\'` is not a method somebody recorded. §45.3\u2019s check is falsy rather than a '
+  + 'null test, and until this case no record carried an empty one — so an edition testing for '
+  + 'null accepted a field that had been written out and left blank, which is the shape of every '
+  + 'form somebody tabbed past.',
+  [calibrationRecord('camera_extrinsics', { method: '' })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+calibrationCase('provenance', 'a-residual-exactly-at-its-threshold',
+  'The boundary, which no case sat on: 1.0 against a threshold of 1.0 is **valid**. A method that '
+  + 'reports exactly the error it declared acceptable has met its own standard, and `>=` here '
+  + 'would fail every calibration that hit its target precisely.',
+  [calibrationRecord('camera_extrinsics', { residual: 1, residual_threshold: 1 })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+
+calibrationCase('expiry', 'an-age-exactly-at-the-limit',
+  'The other boundary. Measured 3,600 s ago against a validity of exactly 3,600 s: still valid, '
+  + 'and the checked list says so. Every age case was well inside or well outside, so `>` versus '
+  + '`>=` was free — and on a fleet recalibrating on a schedule, the two disagree about every '
+  + 'robot on the day its policy comes due.',
+  [calibrationRecord('camera_extrinsics', { policy: { max_age_s: 3_600 } })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+calibrationCase('expiry', 'an-age-on-a-rounding-tie',
+  'Half a second, rendered. `toFixed` takes the larger on a tie and Python\u2019s formatting rounds '
+  + 'to even, so this age is `3601` in one reading and `3600` in the other — in a sentence an '
+  + 'operator reads and a corpus compares byte for byte. Nothing else in this corpus lands on a '
+  + 'half.',
+  [calibrationRecord('camera_extrinsics', {
+    conditions: { ...CALIBRATION_TAKEN, at_s: CALIBRATION_TAKEN.at_s! - 0.5 },
+    policy: { max_age_s: 86_400 },
+  })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+calibrationCase('expiry', 'a-robot-that-got-colder',
+  'The direction `temperature-delta`\u2019s note claims does not matter, and which no case tested: '
+  + 'every temperature case ran warmer than the calibration. An edition without the absolute value '
+  + 'reads \u221218 \u00b0C as comfortably inside a 5 \u00b0C budget, so a bias measured in a heated cell and '
+  + 'used in a cold store is trusted exactly where it drifts most.',
+  [calibrationRecord('force_torque_bias', { policy: { max_temperature_delta_c: 5 } })],
+  { ...CALIBRATION_LATER, temperature_c: 4 }, ['force_torque_bias'])
+calibrationCase('expiry', 'a-policy-with-no-timestamp',
+  'A record that expires with time and cannot say when it was taken. §45\u2019s rule is that a '
+  + 'missing reading never extends validity — the alternative is a policy that switches itself off '
+  + 'on the record least able to account for itself. `temperature-unreadable` pins this for the '
+  + '*current* reading; nothing pinned it for the *taken* one.',
+  [calibrationRecord('camera_extrinsics', {
+    conditions: { temperature_c: 22, joint_travel_rad: 1_000 },
+    policy: { max_age_s: 86_400 },
+  })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+
 calibrationCase('expiry', 'two-sets-one-guard',
   'Workspace starved by expired joint zeros and an expired tool offset is two measurements '
   + 'somebody has to take, so it is two lines.',
@@ -3012,11 +3061,60 @@ calibrationCase('events', 'collision-beats-freshness',
 // The body decides which sets are applicable at all. A fixed-base arm reporting `balance`
 // unavailable for want of an IMU bias it can never hold is a page of guards nobody can restore.
 calibrationCase('events', 'arm-without-an-imu',
-  'A manipulator with a camera: seven sets exist, four apply, and `balance` is not among them.',
+  'A manipulator with a camera: seven sets exist, five apply, and `balance` is not among them.',
   [], CALIBRATION_LATER, setsFor(['manipulation.grasp', 'sensing.rgb'], 'fixed'))
 calibrationCase('events', 'a-body-that-declares-nothing',
   'Every set applies, because over-reporting what is missing is the conservative direction.',
   [], CALIBRATION_LATER, setsFor([], null))
+
+// `calibration/sets` — §45.2's applicability, computed rather than frozen as an input.
+//
+// `setsFor` had no case of its own: the two `events` cases above call it and freeze its *output*
+// into their `applicable` field, so two editions could disagree about which sets a body can hold
+// and the corpus would compare them on the answer one of them had already given. That is the
+// blind spot `corpus/README.md` describes — a corpus grows one wherever an input is missing, not
+// only where an implementation is — pointed at a function rather than at a field.
+
+function setsCase(id: string, note: string, capabilities: string[], base: string | null): void {
+  add('calibration', 'sets', {
+    id,
+    note,
+    input: { capabilities, base },
+    expected: canonical({ sets: setsFor(capabilities, base) }),
+  })
+}
+
+setsCase('a-fixed-arm-with-a-camera',
+  'Five of seven. `balance` is meaningless on a bolted-down arm, so an IMU bias and a gravity '
+  + 'vector are not measurements it is missing — they are measurements it will never take, and '
+  + 'reporting them unavailable is a permanent red mark nobody can clear.',
+  ['manipulation.grasp', 'sensing.rgb'], 'fixed')
+setsCase('a-body-that-declares-nothing',
+  'All seven. Undeclared capabilities mean nobody said what this body senses, and over-reporting '
+  + 'what is missing is the conservative direction.',
+  [], null)
+setsCase('an-unknown-base-is-mobile',
+  'The absence going the other way: a body that declares capabilities but not a base keeps the '
+  + 'two balance sets, because a base nobody described is not a base somebody called fixed.',
+  ['manipulation.grasp'], null)
+setsCase('a-fixed-base-that-declares-an-imu',
+  'And the exception to the exception. A body with an IMU keeps both sets whatever its base, since '
+  + 'it evidently has one — the fixed-base rule is about what a body cannot do, not about what it '
+  + 'has been given.',
+  ['sensing.imu'], 'fixed')
+setsCase('depth-alone-is-a-camera',
+  'Three prefixes reach the camera sets and only `sensing.rgb` had ever been written. A depth '
+  + 'sensor has intrinsics and extrinsics exactly as an RGB camera does.',
+  ['sensing.depth'], 'fixed')
+setsCase('force-sensing-without-manipulation',
+  'The other half of the same `or`: a force sensor earns the F/T bias and the tool offset without '
+  + 'any manipulation capability. Only the manipulation side had a case.',
+  ['sensing.force'], 'fixed')
+setsCase('a-mobile-base-with-nothing-else-declared',
+  'One declared capability that reaches none of the sensing rules, on a mobile base: joint zeros '
+  + 'and the two balance sets, and no cameras. The case that says `declared` gates the sensing '
+  + 'sets rather than the whole table.',
+  ['locomotion.walk'], 'wheeled')
 
 // ── observation (§25.1) ────────────────────────────────────────────
 //

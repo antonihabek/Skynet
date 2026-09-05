@@ -1830,3 +1830,96 @@ has found in the reference (the first being `roundHalfAway`, defined twice in `k
 
 **Twenty-seven of thirty-one corpora complete. Four remain, 66 cases:** `calibration` 18,
 `provenance` 17, `telemetry` 16, `live` 15.
+
+---
+
+## 29. `calibration` — nine of nineteen, and a function the corpus was measuring against itself
+
+`calibration` is §45: whether a stored measurement is still believed, and which guards lose their
+input when it is not. **18 cases, 1,012 → 1,030, first run.**
+
+Then the mutation run, which is the **weakest of the project so far: nine of nineteen caught.** Ten
+survivors, eight of them real. That number is not about this transcription — it is about how the
+corpus was written, and the pattern is one sentence: every case sits comfortably inside or
+comfortably outside its rule, and nothing sits **on** one.
+
+**1,078 → 1,091.** Thirteen new cases; Rust reproduces every one without a change.
+
+### `setsFor` was measured by nothing
+
+`calibration/events` has two cases whose `applicable` field is written as `setsFor(…)` — the
+generator calls the function and freezes its **output into the input**. So the function that decides
+which parameter sets a body can hold, the one that keeps a bolted-down arm from reporting `balance`
+unavailable for want of an IMU it will never have, had no case: two editions could disagree about it
+and the corpus would be comparing them on an answer one of them had already supplied.
+
+`corpus/README.md` diagnosed this shape three rounds before it happened:
+
+> a corpus grows a blind spot wherever an *input* field is missing, not only where an
+> implementation is.
+
+This is that, pointed at a function rather than at a field, and it is worth distinguishing from an
+ordinary gap: a missing case is visible to anyone reading the file list, and a case that *calls the
+function it is meant to test* looks like coverage.
+
+`corpus/calibration/sets.json` is seven cases against `setsFor` directly, and four reach branches
+nothing had: `sensing.depth` alone, `sensing.force` alone, an IMU on a fixed base, and a declared
+capability matching none of the sensing rules. `crates/skynet-corpus` gained the matching branch;
+both editions agreed on all seven first time, which is the outcome to want — the function was
+correct in both and simply unchecked.
+
+### Four boundaries nobody had sat on
+
+| New case | Why it matters |
+|---|---|
+| `a-residual-exactly-at-its-threshold` | 1.0 against 1.0 is **valid**. A method reporting exactly the error it declared acceptable has met its own standard, and `>=` fails every calibration that hit its target precisely |
+| `an-age-exactly-at-the-limit` | 3,600 s against 3,600 s. On a fleet recalibrating on a schedule, `>` and `>=` disagree about **every robot on the day its policy comes due** — which is the day they are all checked |
+| `a-robot-that-got-colder` | Every temperature case ran warmer. Without `Math.abs`, −18 °C reads as inside a 5 °C budget: a bias measured in a heated cell is trusted in a cold store, which is where it drifts most |
+| `a-policy-with-no-timestamp` | §45's rule that a missing reading never extends validity, for the **taken** reading. `temperature-unreadable` pins it for the current one and nothing pinned the other half |
+
+Plus `an-empty-method` — §45.3's check is falsy rather than a null test, and no record had carried
+`""`, which is the shape of every form somebody tabbed past — and `an-age-on-a-rounding-tie`, at
+half a second, where `toFixed` takes the larger and Python's formatting takes the even one.
+
+### Two notes that claimed what their own inputs did not reach
+
+`temperature-delta`'s note says *"the delta is the rule and the direction does not matter"* and its
+input only goes one direction. `arm-without-an-imu`'s note says *"seven sets exist, four apply"* and
+five apply.
+
+That is the **third and fourth** instance this session of a note asserting a property its input does
+not exercise, after `frame-astral-stream-name` and the `pending` ordering. It is a distinct failure
+from a missing case and worth naming as one: nobody adds a case for a rule that already has a case
+claiming to cover it, so these are the gaps with the longest half-life. The count is now the only
+one of the four that was wrong as English rather than as coverage, and it is corrected.
+
+### One consolidation, and it was a latent fix
+
+`toFixed` existed **twice** in this edition. `certification.py` implemented it through `Decimal`;
+`transport.py` implemented it as `floor(x + 0.5)`, with a comment arguing that its domain — a
+percentage in [0, 100] — made the shortcut safe.
+
+They are not the same rule. At `0.49999999999999994` the sum rounds up to exactly `1.0` in binary
+and the shortcut answers `1`, where the nearest integer to the value itself is `0`. That is the
+*identical input* on which `roundHalfAway` is defined twice and two ways in `reference/typescript`,
+recorded in this repository since the fourth round — the same trap, caught the second time by
+noticing the duplication rather than by hitting the value.
+
+There is one `to_fixed` now, in `js.py`, on the `Decimal` rule. The corpus was green before and
+after: nothing reachable moved, which is what makes this the right moment for it rather than the
+morning after somebody finds the input.
+
+### Verified
+
+* `python3 editions/python/run_corpus.py --min-passed 1043` — **1,043 passed, 0 failed**, 48 not
+  implemented, of 1,091
+* `cargo test -p skynet-corpus --test corpus` — 1,091 cases, byte for byte, including the seven
+  `sets` cases neither edition had been measured on
+* 16 of 19 mutations caught, up from 9; of the three survivors one is a partial edit that is caught
+  when applied to every call site, and two are equivalent by construction (no non-expired validity
+  carries a `reason` or a `checked`)
+* `cargo test --workspace` — **1,431 passed**, 0 failed, 7 ignored; fmt and clippy clean
+* `python3 editions/python/self_check.py` — 41 checks; CI ratchet raised to 1,043
+
+**Twenty-eight of thirty-one corpora complete. Three remain, 48 cases:** `provenance` 17,
+`telemetry` 16, `live` 15.
