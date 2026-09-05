@@ -310,6 +310,110 @@
       "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":true,\"attestation\":{\"complete\":true,\"embodiment\":{\"digest\":\"sha256:cccc\",\"state\":\"known\",\"why\":null},\"os_image\":{\"digest\":\"sha256:aaaa\",\"state\":\"known\",\"why\":null},\"policy\":{\"digest\":\"sha256:bbbb\",\"state\":\"known\",\"why\":null},\"sentence\":\"dev_7 is running image `sha256:aaaa`, policy `sha256:bbbb`, against body `sha256:cccc`.\",\"unmeasured\":[]},\"blocking\":[],\"claim\":\"applied\",\"contracts\":\"1.0.0\",\"desired_digest\":\"sha256:dddd\",\"detail\":\"Generation 41 is applied and the plan is empty.\",\"device_id\":\"dev_7\",\"generation\":41,\"health\":{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":{\"age_ms\":900,\"value\":0.42},\"temperature_c\":null},\"packages\":[{\"age_ms\":12,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"ready\"}],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"temperature_c\"]},\"limits\":null,\"pending\":[],\"state\":\"running\"}"
     },
     {
+      "id": "two-stages-left-and-the-order-nobody-pinned",
+      "note": "Two pending actions declared out of order, which no case had. `blocking` was sorted from the first day and `pending` is a **second** list of the same facts, sorted separately — so an edition emitting it in declaration order agreed about every claim in this corpus and disagreed about the bytes of every check-in carrying more than one action. The reason it has to be sorted rather than merely stable: §34.4 collapses check-ins, and two documents that differ only in the order of a list are two documents a queue cannot tell are duplicates.",
+      "input": {
+        "device_id": "dev_7",
+        "agent": "skynetd/0.1.0",
+        "contracts": "1.0.0",
+        "state": "hold",
+        "desired_digest": "sha256:dddd",
+        "progress": {
+          "observed_generation": 40,
+          "desired_generation": 41,
+          "pending": [
+            {
+              "stage": "policy",
+              "deferred": false,
+              "reason": "the package is staged and not started"
+            },
+            {
+              "stage": "os_image",
+              "deferred": false,
+              "reason": "the slot is being written"
+            }
+          ]
+        },
+        "health": {
+          "packages": [
+            {
+              "id": "acme/grasp",
+              "live": true,
+              "readiness": "ready",
+              "age_ms": 12
+            }
+          ],
+          "storage_headroom": {
+            "value": 0.42,
+            "age_ms": 900
+          }
+        },
+        "attestation": {
+          "device_id": "dev_7",
+          "os_image": {
+            "state": "known",
+            "digest": "sha256:aaaa"
+          },
+          "policy": {
+            "state": "known",
+            "digest": "sha256:bbbb"
+          },
+          "embodiment": {
+            "state": "known",
+            "digest": "sha256:cccc"
+          }
+        }
+      },
+      "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":false,\"attestation\":{\"complete\":true,\"embodiment\":{\"digest\":\"sha256:cccc\",\"state\":\"known\",\"why\":null},\"os_image\":{\"digest\":\"sha256:aaaa\",\"state\":\"known\",\"why\":null},\"policy\":{\"digest\":\"sha256:bbbb\",\"state\":\"known\",\"why\":null},\"sentence\":\"dev_7 is running image `sha256:aaaa`, policy `sha256:bbbb`, against body `sha256:cccc`.\",\"unmeasured\":[]},\"blocking\":[\"os_image\",\"policy\"],\"claim\":\"converging\",\"contracts\":\"1.0.0\",\"desired_digest\":\"sha256:dddd\",\"detail\":\"Still reconciling generation 41, with work left at os_image, policy. This robot is running generation 40.\",\"device_id\":\"dev_7\",\"generation\":40,\"health\":{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":{\"age_ms\":900,\"value\":0.42},\"temperature_c\":null},\"packages\":[{\"age_ms\":12,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"ready\"}],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"temperature_c\"]},\"limits\":null,\"pending\":[{\"deferred\":false,\"reason\":\"the slot is being written\",\"stage\":\"os_image\"},{\"deferred\":false,\"reason\":\"the package is staged and not started\",\"stage\":\"policy\"}],\"state\":\"hold\"}"
+    },
+    {
+      "id": "a-digest-on-a-slot-nobody-read",
+      "note": "§10’s contradiction: a measure that says `unmeasured` and carries a digest anyway. Both fields are well-typed and no case had ever put them together, which left the whole question of what a consumer sees unpinned. The digest is **dropped**, and the reason is the query it would otherwise answer: §32.1 puts a fleet column on \"which robots are running image `sha256:…`\", and a robot whose slot was never read must not appear in that answer. The sentence already says `an unmeasured OS image`; a digest beside it would be the same report contradicting itself in the machine-readable half, where nobody is reading English to catch it.",
+      "input": {
+        "device_id": "dev_7",
+        "agent": "skynetd/0.1.0",
+        "contracts": "1.0.0",
+        "state": "running",
+        "desired_digest": "sha256:dddd",
+        "progress": {
+          "observed_generation": 41,
+          "desired_generation": 41,
+          "pending": []
+        },
+        "health": {
+          "packages": [
+            {
+              "id": "acme/grasp",
+              "live": true,
+              "readiness": "ready",
+              "age_ms": 12
+            }
+          ],
+          "storage_headroom": {
+            "value": 0.42,
+            "age_ms": 900
+          }
+        },
+        "attestation": {
+          "device_id": "dev_7",
+          "os_image": {
+            "state": "unmeasured",
+            "digest": "sha256:aaaa",
+            "why": "the slot could not be read"
+          },
+          "policy": {
+            "state": "nothing",
+            "digest": "sha256:bbbb"
+          },
+          "embodiment": {
+            "state": "known",
+            "digest": "sha256:cccc"
+          }
+        }
+      },
+      "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":true,\"attestation\":{\"complete\":false,\"embodiment\":{\"digest\":\"sha256:cccc\",\"state\":\"known\",\"why\":null},\"os_image\":{\"digest\":null,\"state\":\"unmeasured\",\"why\":\"the slot could not be read\"},\"policy\":{\"digest\":null,\"state\":\"nothing\",\"why\":null},\"sentence\":\"dev_7 is running an unmeasured OS image (the slot could not be read), no policy, against body `sha256:cccc`.\",\"unmeasured\":[\"os_image\"]},\"blocking\":[],\"claim\":\"applied\",\"contracts\":\"1.0.0\",\"desired_digest\":\"sha256:dddd\",\"detail\":\"Generation 41 is applied and the plan is empty.\",\"device_id\":\"dev_7\",\"generation\":41,\"health\":{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":{\"age_ms\":900,\"value\":0.42},\"temperature_c\":null},\"packages\":[{\"age_ms\":12,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"ready\"}],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"temperature_c\"]},\"limits\":null,\"pending\":[],\"state\":\"running\"}"
+    },
+    {
       "id": "a-stalled-policy-on-a-converged-robot",
       "note": "Applied, and degraded. The two are independent and a document that collapsed them would hide the case §33.6 spends a paragraph on: a robot that reconciled perfectly and is standing still.",
       "input": {

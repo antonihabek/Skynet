@@ -1,12 +1,22 @@
 # The Python edition
 
-> **This is not yet an edition.** §31.4: *"An edition that has not passed the corpus is not an
-> edition. It cannot carry the name, appear in the matrix, or be installed by `skynetd`."* It
-> currently passes **21 of 31 corpora**. The runner prints that number on every run and this
-> file will keep saying so until it is 31.
+> **It passes the corpus: 1,109 of 1,109 cases, 31 of 31 corpora.** §31.4: *"An edition that has
+> not passed the corpus is not an edition. It cannot carry the name, appear in the matrix, or be
+> installed by `skynetd`."* This one does, and the runner prints the figure on every run.
+>
+> **What that is, exactly.** §42 decomposes "edition" into four levels, and this is **L2 —
+> Contracts**: transport, admission, certification, readiness and everything else in `corpus/`,
+> computed natively and corpus-verified. It is **not** L3 (`skynetd` and the policy runtime, ~35k
+> lines) and **not** L4 (the Safety Kernel). Its §31.3 ceiling is **guest** and it hosts no kernel,
+> which is a property of a garbage-collected runtime rather than a judgement about Python.
+>
+> This file used to say "not yet an edition" and count upwards. What it counts now is what is
+> missing above it, which is L3 and L4 and neither is planned.
 
 §73's last column has carried one entry against §31 since the table was written: *"The second
-edition, which is what the corpus is for."* This is the start of it.
+edition, which is what the corpus is for."* That entry is now satisfied at L2, and §73 is a
+**mirrored** document — edited in both repositories or in neither — so the amendment is recorded in
+`BUILD-LOG.md` rather than made here.
 
 ## What a Python edition is, and the ceiling it declares
 
@@ -59,15 +69,26 @@ package index is an edition that cannot be checked on the machine it is being re
 | `certification` | 20 | §15's award: absence is not a pass, and the evidence caps the claim |
 | `skill` | 86 | §54.2–54.5: preconditions, success, timeout, composition and the lifecycle |
 | `opstate` | 37 | §27's machine, and the two predicate tables it is read through |
-| `identity` | 42 | §10, §19 and §50: pairing codes, credentials and what is running |
+| `identity` | 44 | §10, §19 and §50: pairing codes, credentials and what is running |
 | `transfer` | 32 | §12 and §79's four decisions: fetch, arrival, upload, receipt |
 | `power` | 28 | §36's four states plus the fifth, and the faults beside them |
 | `ota` | 29 | §12's second and third rules: the install gate and health-gated rollback |
-| | **904** | of 1,071 |
+| `birth` | 11 | §50's vendor certificate, and the key it is about |
+| `intent` | 11 | §11's pull, and the two refusals that are not symmetric |
+| `readiness` | 12 | the tier a registry subject can attain, and what blocks the next one |
+| `checkin` | 25 | §17's claim, §33.6's age rule, and the document that crosses the boundary |
+| `cell` | 28 | §55.2's descriptor: every fault in it, and the two projections read out of it |
+| `blackbox` | 21 | §26's record layout, the ring header, the six schemas, and a sealed file |
+| `calibration` | 31 | §45's validity, the guards a set feeds, and which sets a body can hold |
+| `telemetry` | 25 | §74's windows, the coverage they tile, and §15's field conformance |
+| `provenance` | 21 | §56's three classes, the order that makes them ungameable, and §56.5's tolerance |
+| `live` | 20 | §54.2's precondition context, and the rule that absent is not null |
+| | **1,109** | of 1,109 |
 
-The other 10 corpora have no handler at all — 167 cases, counted in every run. They are not
-skipped and not hidden: a runner that quietly passed ten corpora and printed "OK" would be the
-most misleading artifact in this repository.
+**Every corpus has a handler and every case passes.** The runner still reports the four buckets on
+every run, and it will go straight back to reporting a gap the moment the corpus grows — which it
+will, because §31.5 says plainly that the corpus is permanent work and a feature without corpus
+coverage is a feature where editions may already disagree.
 
 ### `partial` is a state, and `fuzz` was in it
 
@@ -77,8 +98,15 @@ without it, implementing one file of three would have counted the other 108 case
 answers* rather than as *untranscribed*, and the number would have got worse precisely as the
 edition improved. A corpus is complete or it is not, however many of its files are done.
 
-`self_check.py` holds the runner to this against synthetic corpora with known answers: **34
-checks**, of which four test the detector and nineteen test the language traps below.
+`self_check.py` holds the runner to this against synthetic corpora with known answers: **44
+checks**, of which four test the detector and the rest test the language traps below.
+
+Both editions run on every commit. §31.4 asks for differential checking in CI and until the
+ninth round the `corpus` job had one row — this edition passed nowhere but on the machine of
+whoever last touched it. It has two rows now, and the second carries `--min-passed`, because
+every other check here has a floor of zero: an edition whose handler was deleted answers
+nothing, fails nothing, and exits 0, since the cases move into the bucket that reads as honest
+progress.
 
 ## Where the values come from
 
@@ -126,6 +154,17 @@ skynet_os/
   transfer.py      §12's fetch and §79's upload, and what each check means
   power.py         §36's states, reserve, thermal ladder and faults
   ota.py           §12's install gate and its health-gated rollback
+  birth.py         §50's vendor certificate, and what a robot may conclude from one
+  intent.py        §11's pull: may this response become the desired state
+  readiness.py     the tier a subject can attain, and the blockers between it and the next
+  checkin.py       §17's claim, §33.6's health, and the document that crosses to the Hub
+  cell.py          §55.2's descriptor, its faults, and the two projections a robot reads
+  blackbox.py      §26's bytes: the ring record, the header, the schemas and the MCAP file
+  calibration.py   §45's validity, expiry and the guards a parameter set feeds
+  telemetry.py     §74's windows, what a set of them covers, and §15's ratio
+  provenance.py    §56's classes, and whether two roll-ups of one run agree
+  live.py          §54.2's precondition context, assembled from what the OS knows
+  js.py            the four JavaScript expressions Python has no equivalent for
   corpus.py        the runner and its dispatch
 run_corpus.py      the CLI
 self_check.py      the runner's own accounting, and the traps the corpus cannot reach
@@ -356,9 +395,304 @@ sentence an operator reads, and a fault's subjects — was unpinned.
 
 1,069 → **1,071**, and Rust reproduces both without a change.
 
-## What is next, in dependency order
+## What the ninth round found: a defect in Rust, and this edition running nowhere
 
-`cell` (26 cases), `checkin` (23), `blackbox` (18), `calibration` (18), `provenance` (17),
-`telemetry` (16), `live` (15), `readiness` (12), `birth` (11), `intent` (11). Ten corpora, 167
-cases, and none of them is a foundation any of the others needs. Everything after the foundation is mechanical; the foundation is canonical
-serialisation and a runner that refuses to lie about what it has not done.
+`checkin` and `cell` — 51 cases, both first run. Thirty-eight mutations, **thirty caught**, and the
+survivors split into the two kinds this file has been sorting them into since the third round: the
+ones a typed corpus cannot express, and the ones it simply had not looked at.
+
+Four became corpus cases. **1,071 → 1,075**, and one of them went red in Rust.
+
+### A digest on a slot nobody read
+
+A measure carries a `state` and a `digest`, and both are well-typed independently. Nothing had ever
+put `{ state: 'unmeasured', digest: 'sha256:aaaa' }` together — a document saying nobody read the
+slot and carrying a reading of it in the next field — so what a consumer sees was unpinned, and the
+two editions had answered it differently for as long as the field has existed. `shape.ts` gates the
+digest on the state; `skynet-contracts` passed it through.
+
+The reference is right, and the argument is the query rather than the tidiness. §32.1 puts a fleet
+column on *"which robots are running image `sha256:…`"* — the question an incident is run through —
+and Rust's answer put a robot whose image slot was **never read** into that result. The prose half of
+the same document already says `an unmeasured OS image (the slot could not be read)`, so passing the
+digest through had one report contradicting itself in the machine-readable half, where nobody is
+reading English to catch it. Fixed in `crates/skynet-contracts/src/identity.rs`.
+
+### Three more, each a list nobody had made long enough
+
+| New case | The rule it pins |
+|---|---|
+| `two-stages-left-and-the-order-nobody-pinned` | `pending` is a **second** list of `blocking`'s facts, sorted separately, and no document case had two entries. §34.4 collapses check-ins, so two documents differing only in a list's order are two a queue cannot tell are duplicates |
+| `a-fixture-named-and-not-measured` | `volume: null` is a fixture nobody measured. The check is truthy for exactly this document; a key test reports an operator who wrote the field out and left it empty as one who measured it wrongly |
+| `a-duplicate-fixture-measured-wrongly` | One fault, not two. The duplicate is reported and the walk **stops** — the copy that is about to be deleted is not a second thing to tell the operator about |
+
+### And the two the corpus structurally cannot carry
+
+A `deferred` of `1` and an unrecognised readiness word are inputs no typed edition can produce, so
+they went to `self_check.py` with the rest. The cell trap is the more interesting one, because this
+repository had already written down why it cannot be a case: `generate.ts` says at the frame-bindings
+rule that it writes every input through `JSON.stringify`, which renders an infinity as `null` — so a
+frozen case would hold a *different* document from the one its expectation was computed against,
+which is worse than no case at all. A box with an infinite corner is checked here instead, beside a
+coordinate of `true`, which JSON can carry and no typed edition can produce.
+
+### The finding that was not in any transcription
+
+**This edition was in no CI job.** §31.4 asks for differential checking on every commit and the
+`corpus` job's own comment said *"One row today"* — written when that was true, and left standing
+through eight rounds in which a second edition was built. A change to `reference/typescript/`, to the
+corpus, or to a shared module would have broken it silently until somebody next ran it by hand. Both
+editions run now, and the Python row carries a ratchet for the regression the runner's own design
+cannot see: cases that stop being answered are counted as *not implemented*, which is the bucket that
+reads as progress.
+
+## What the tenth round found: a case that did not reach the rule it is named for
+
+`blackbox` — 18 cases, first run, and it is the one corpus whose subject is **bytes**. A third
+implementation of the ring record, the header, the six MCAP schemas and the sealed file produced the
+identical SHA-256 for a 19,805-byte file on the first attempt, which is the strongest single piece of
+evidence in this repository that §31.2's single-source list is actually single-source.
+
+Twenty-two mutations, nineteen caught. Three survivors, and the first is the finding:
+
+### `frame-astral-stream-name` never cuts inside a character
+
+Its note says a cut inside a multi-byte sequence *"would put invalid UTF-8 in the ring and every
+reader would have to guess"*, and the case is nine **two-byte** characters in a sixteen-byte field.
+Sixteen is even, so the boundary lands exactly between the eighth and the ninth: the back-off loop
+looks at a lead byte, exits without doing anything, and an edition that had never written one agreed
+about every byte of the record. Deleting the loop entirely broke nothing.
+
+`frame-a-stream-name-cut-inside-a-character` is six **three-byte** characters. The boundary falls
+inside the sixth, the cut walks back to fifteen, and the field holds five characters and a NUL —
+one byte shorter than it could be, which is exactly the point.
+
+### Two more boundaries nobody had sat on
+
+`cycle-every-guard-tripped` is all eight. `MAX_TRIPPED` is eight, the guard table is eight bytes at
+offsets 104–111, and `capability` is at 112 — so the count byte reads `08`, the table reads
+`0102030405060708`, and the next two bytes are `ffff`. No case had gone past **one** tripped guard.
+
+`three-messages-on-one-channel` writes three messages to channel 6 where the existing seal case
+writes one each to two channels, so the per-channel sequence was 1 on every message and a constant
+produced the same file. A reader uses that number to detect a message it did not receive. The third
+message is also out of order in time — 3000 ns then 2000 ns, which is what writing from a ring looks
+like — so the summary's `message_start_time` is pinned as the minimum rather than the first seen.
+
+**1,075 → 1,078**, and Rust reproduces all three without a change.
+
+### And one inconsistency in the format, recorded rather than pinned
+
+The last survivor cannot be closed with a case, and the reason is worth more than the mutation.
+`encodeCycle` checks seven arrays against the ring's shape — `desired`, `command`, `mask`,
+`clamped`, `position`, `velocity`, `effort` — and **throws** when one does not match. `tripped` is
+the eighth array and is silently truncated to eight instead.
+
+A ninth guard is not something a producer emits, so the clamp is defensive rather than reachable,
+and a corpus case carrying one would freeze *truncation* as the specified answer for a malformed
+cycle — when the answer the other seven arrays give is a refusal. That is a question about the
+format rather than a gap in an edition, so it is written down here and in `BUILD-LOG.md` rather than
+settled by whichever behaviour was easier to transcribe.
+
+## What the eleventh round found: nine of nineteen, and the function nothing was measuring
+
+`calibration` — 18 cases, first run, and then the **weakest mutation run of the project**: nine of
+nineteen caught. Ten survivors, eight of them real, and they say something about how this corpus was
+written rather than about this transcription. Every case sits comfortably inside or comfortably
+outside its rule; nothing sits **on** one.
+
+**1,078 → 1,091.** Thirteen new cases, and Rust reproduces all of them without a change.
+
+### `setsFor` had no case at all
+
+The two `events` cases call `setsFor(…)` and freeze its **output** into their `applicable` field.
+So the function that decides which parameter sets a body can hold — the one that keeps a bolted-down
+arm from reporting `balance` unavailable for want of an IMU it will never have — was measured by
+nothing: two editions could disagree about it and the corpus would compare them on the answer one of
+them had already given.
+
+That is `corpus/README.md`'s own diagnosis, pointed at a function instead of a field:
+
+> a corpus grows a blind spot wherever an *input* field is missing, not only where an
+> implementation is.
+
+`calibration/sets.json` is seven cases against it directly, and four of them reach branches nothing
+had: `sensing.depth` and `sensing.force` on their own, an IMU on a fixed base, and a declared
+capability that matches none of the sensing rules. The Rust adapter gained the same branch.
+
+### Four boundaries, and two notes that claimed what their inputs did not reach
+
+| New case | The rule it pins |
+|---|---|
+| `a-residual-exactly-at-its-threshold` | 1.0 against 1.0 is **valid**. `>=` fails every calibration that hit its target precisely |
+| `an-age-exactly-at-the-limit` | 3,600 s against 3,600 s is valid. On a fleet recalibrating on a schedule, `>` and `>=` disagree about every robot on the day its policy comes due |
+| `a-robot-that-got-colder` | `temperature-delta`'s note says *"the direction does not matter"* and every temperature case ran **warmer**. Without the absolute value, −18 °C reads as inside a 5 °C budget |
+| `a-policy-with-no-timestamp` | §45's rule that a missing reading never extends validity, for the **taken** reading. `temperature-unreadable` pins it for the current one |
+
+Two more: `an-empty-method` — §45.3's check is falsy, not a null test, and no record had ever carried
+`""`, which is the shape of every form somebody tabbed past — and `an-age-on-a-rounding-tie`, half a
+second, where `toFixed` takes the larger and Python's formatting takes the even one.
+
+And `arm-without-an-imu`'s note said *"seven sets exist, four apply"*. Five apply. Corrected.
+
+### One consolidation, and it was a latent fix
+
+`toFixed` existed **twice** in this edition — `certification.py` through `Decimal`, and
+`transport.py` as `floor(x + 0.5)` with a comment arguing the domain made it safe. It is not the
+same rule: at `0.49999999999999994` the sum rounds up to exactly `1.0` in binary and the shortcut
+answers `1` where the nearest integer to the value itself is `0`. That is the identical input on
+which `roundHalfAway` is defined twice and two ways in `reference/typescript`, which this file has
+been recording since the fourth round.
+
+One `to_fixed` now, in `js.py`, on the `Decimal` rule. The corpus was green before and after, so
+nothing reachable moved — which is exactly what makes it worth doing now rather than after somebody
+finds the input.
+
+## What the twelfth round found: eight of nineteen, and nine boundaries
+
+`telemetry` — 16 cases, first run, and then **eight of nineteen** mutations caught, which is worse
+than `calibration`'s nine. Nine new cases later it is seventeen, and the two remaining survivors are
+no-ops: one edits a line after the `continue` that makes it unreachable, and the other removes a
+guard that `field_conformance` repeats immediately below.
+
+**1,091 → 1,100.** Rust reproduces every new case without a change.
+
+The shape of what was missing is worth reading as a list, because it is the same shape nine times:
+
+| New case | The boundary |
+|---|---|
+| `a-clock-that-stepped-back-part-of-a-second` | Every skew here was a whole number of seconds, so `Math.trunc` and a floor agreed. −90.5 s truncates to −90 and floors to −91 — and truncation is what the reference *chose*, in a comment naming this exact disagreement |
+| `a-counter-that-went-backwards` | The `< 0` arm of a three-way test, unreached. A wrapped counter would have produced a negative rate on a fleet page |
+| `a-duration-that-is-negative` | `elapsed_ms: 0` had a case and a negative one did not, and they take different paths once a report decides what to put in `elapsed_ms` |
+| `a-window-of-no-wall-duration-at-all` | `to === from` is **not** inverted: a coarse clock, not a backwards one |
+| `a-clock-corrected-by-one-millisecond` | And `to === from - 1` is. The rule is `<` rather than a tolerance, because no size of backwards step makes an interval nameable |
+| `a-skew-of-exactly-one-minute` | Strictly greater. Every skew was zero or an hour |
+| `a-skew-of-exactly-minus-one-minute` | The same value the other way, because the test is two comparisons rather than one over an absolute value |
+| `a-window-wholly-inside-another` | Every overlap ran forwards, where "the later end" and "the latest end" are the same number. A contained window is a robot that restarted and re-reported a slice |
+| `windows-reported-out-of-order` | Every case arrived sorted, so the sort was free. A robot writing from a ring does not write in wall-clock order |
+
+None of these is a Python trap and none is a defect in any edition. They are nine places where two
+correct editions were being compared on inputs that could not tell them apart, and the pattern
+across `calibration` and `telemetry` together is one sentence: **this corpus is very good at the
+middle of a rule and had almost nothing on the edges of one.** Fifteen of the twenty-two cases added
+across the two rounds are boundaries.
+
+## What the thirteenth round found: a case that fails an edition for reading its input
+
+`provenance` — 17 cases, and **one failed on the first run**, which is the first time that has
+happened to a transcription in this edition rather than to a mutation of one.
+
+`provenance/scores :: two-robots-that-computed-nothing` has an input of
+`{"on_robot": null, "on_hub": null}` and an expectation computed from `NaN`:
+
+    "The robot rolled this run up to NaN and the Hub to NaN…"
+
+JSON cannot spell `NaN`, and the generator writes every input through `JSON.stringify`. So the
+frozen input is a *different document* from the one its expectation was computed against — which is
+the exact hazard `tools/corpus-gen/generate.ts` names at the frame-bindings rule and **refuses to
+create there**:
+
+> the frozen input would be a *different* body from the one the expectation was computed from —
+> worse than no case at all, because it would fail an edition for reading the file correctly.
+
+It failed this edition for reading the file correctly.
+
+### The convention was real; it was written down in one adapter
+
+`crates/skynet-corpus/src/blackbox.rs` states it — *"`null` is how the oracle spells NaN, which is
+how §24 spells 'this is not measured'"* — and the provenance dispatch applies the same
+`unwrap_or(f64::NAN)` without a word. Two editions therefore agreed, and a third had to rediscover
+the rule from a failing case.
+
+It is also **not a blanket rule**, which is why it needed care rather than a `?? NaN` everywhere.
+The reference's own type decides:
+
+* type admits null — `Frame.worstSkewUs: number | null` — then the null **is** the value;
+* type is a bare `number` — `scoresAgree(onRobot: number, onHub: number)` — then no caller could
+  have supplied one, and it can only be a non-finite value the format cannot write.
+
+An edition picking one reading for every null would be wrong on half of them, in opposite
+directions. `corpus/README.md` now says this where the format is described, because it is a property
+of the format rather than of any one corpus.
+
+### Then ten of seventeen, and four more cases
+
+| New case | The gap |
+|---|---|
+| `a-segment-recorded-as-empty` | `""` is a segment written down as empty, not a missing one. A falsy test reports `not_replayable` against a run whose recording exists |
+| `a-simulator-whose-birth-certificate-attests-nothing` | Every simulator case was otherwise perfect, so the branch that **skips** §50's checks for a simulator was doing nothing observable |
+| `fewer-seeds-than-the-benchmark-supplies` | Every seed case was three against three, so the two counts in `seeds_not_supplied` were equal and reporting them the wrong way round said the same sentence |
+| `a-difference-of-exactly-the-tolerance` | `1e-9` apart is **agreement**. Nothing sat on the boundary, so `<` and `<=` were the same function |
+
+And `a-difference-just-outside-the-tolerance`'s note said *"The boundary, frozen"* at ten times the
+tolerance. That is the **fifth** note this session claiming a property its own input does not reach.
+Its note now says what it is, and the boundary has a case of its own.
+
+Fifteen of seventeen mutations caught, up from ten; both survivors are no-ops — `device_unknown`
+already blocks `field` through the reasons list, and `abs(NaN − NaN) <= 1e-9` is false however the
+guard above it is written.
+
+## What the fourteenth round found: a corpus that tested one side of its own rule
+
+`live` — §54.2's precondition context, 15 cases, first run, and **1,104 → 1,109 with the corpus
+complete**.
+
+Then thirteen of twenty mutations, and the seven survivors had one shape between them. `live.ts`'s
+own header states the rule the whole file exists for:
+
+> **The rule that decides every field: absent is not null.** A fact this robot does not know must be
+> **absent** from the context, never present as `null` and never present as a plausible zero.
+
+**Zero of the fifteen cases carried an explicit null.** Every optional field was either missing or a
+real value, so an edition that published `null` for a declared-and-unmeasured gripper agreed about
+all fifteen and broke the rule the module is named for.
+
+`declared-and-not-measured` carries four of them at once — a gripper the body has and cannot read, a
+battery sensor that answered nothing, a pose the driver did not report, a state nobody observed —
+and every one omits its path, exactly as an absent key does. That identity **is** the case: an
+edition publishing null gives a predicate something to compare against, and
+`robot.state.battery_percent > 20` is *false* on a null and *unresolvable* on an absence. Only the
+second refuses the skill.
+
+Four more: a calibration age declared and null, a tier of `''` — which **is** published, because the
+test is `typeof === 'string'` and an empty string is a value somebody supplied — a joint with no
+name at all, and a frame fault whose subjects arrive unsorted and duplicated.
+
+**Eighteen of twenty caught.** The last two are one trap and it is unwritable: `battery_percent` and
+`age_s` are typed `number | null`, tested with `Number.isFinite`, and the two readings differ only
+on a **non-finite number** — which `JSON.stringify` writes as `null`, and which
+`corpus/README.md` now says means *null* in a field whose type admits one. Three checks in
+`self_check.py` instead, and they matter for a reason worth stating: a battery published as `NaN`
+makes every comparison against it false, so a robot whose sensor failed reads as *"the battery is
+low"* rather than producing the refusal §54.2 asks for.
+
+## Where this edition stands
+
+**Complete at L2.** 31 of 31 corpora, 1,109 of 1,109 cases, 44 self-checks, and both editions run on
+every commit with a ratchet under the Python one.
+
+What the seven rounds that finished it actually produced is worth separating from the transcription,
+because the transcription was the cheap half:
+
+| | |
+|---|---|
+| Cases added to the corpus | **38** |
+| Defects found in the Rust edition | **1** (a digest published from a slot nobody read) |
+| Defects found in this edition by its own mutation runs | 0 — every module passed its corpus first run |
+| Notes found claiming what their input does not reach | **5** |
+| Functions found that no case measured | **1** (`setsFor`, whose output was frozen as an input) |
+| Format conventions found undocumented | **1** (`null` in a numeric field), now in `corpus/README.md` |
+| Duplicated implementations of one rule, consolidated | **2** (`toFixed`, and the JS helpers into `js.py`) |
+
+The single sentence the whole set comes down to is in `BUILD-LOG.md` §30 and is worth repeating
+here: **a case that demonstrates a rule and a case that pins it are different cases, and a corpus
+needs both.** Thirty-one of the thirty-eight are the second kind and seven are coverage of a
+function nothing measured, and a corpus written to be read had almost none of either.
+
+## What is next
+
+Nothing, for this edition, at this level. L3 is `skynetd` and the policy runtime — Part IV, roughly
+thirty-five thousand lines — and §42 is explicit that **almost everyone asking for their language
+wants L1**, not this and certainly not that. §31.5 names the standing cost that does apply: the
+corpus is permanent work, every new case is a case this edition must reproduce, and a feature that
+lands without one is a feature where the editions may already disagree.

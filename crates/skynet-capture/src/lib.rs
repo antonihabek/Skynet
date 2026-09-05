@@ -1,4 +1,5 @@
 #![no_std]
+#![forbid(unsafe_code)]
 //! The capture-side split (§47.4).
 //!
 //! §47.4 is titled *"Two consumers, and they must not share a queue"*, and it calls itself **the

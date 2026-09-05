@@ -37,24 +37,31 @@ from typing import Any, Callable
 
 from .canonical import canonical
 from . import admission as admission_module
+from . import calibration as calibration_module
+from . import cell as cell_module
 from . import certification as certification_module
+from . import checkin as checkin_module
 from . import birth as birth_module
+from . import blackbox as blackbox_module
 from . import digest as digest_module
 from . import embodiment as embodiment_module
 from . import identity as identity_module
 from . import intent as intent_module
 from . import kinematics as kinematics_module
+from . import live as live_module
 from . import observation as observation_module
 from . import opstate as opstate_module
 from . import ota as ota_module
 from . import power as power_module
 from . import predicate as predicate_module
+from . import provenance as provenance_module
 from . import readiness as readiness_module
 from . import roles as roles_module
 from . import watchdog as watchdog_module
 from . import safety as safety_module
 from . import semver as semver_module
 from . import skill as skill_module
+from . import telemetry as telemetry_module
 from . import transfer as transfer_module
 from . import transport as transport_module
 from . import vocabulary as vocabulary_module
@@ -204,6 +211,15 @@ def load_corpus(root: Path) -> list[CorpusFile]:
 Handler = Callable[[str, dict[str, Any]], Any]
 
 
+def _provenance(label: str, case_input: dict[str, Any]) -> Any:
+    """§56's two questions: what a run is worth, and whether two roll-ups of it agree."""
+    if label == "classify":
+        return provenance_module.classify_to_json(case_input)
+    if label == "scores":
+        return provenance_module.scores_to_json(case_input)
+    raise Unimplemented("provenance", label)
+
+
 def _readiness(label: str, case_input: dict[str, Any]) -> Any:
     """One robot, and the registry it sits in."""
     if label == "robot":
@@ -253,6 +269,61 @@ def _identity(label: str, case_input: dict[str, Any]) -> Any:
     raise Unimplemented("identity", label)
 
 
+def _blackbox(label: str, case_input: dict[str, Any]) -> Any:
+    """Four files, and each holds a different kind of thing.
+
+    `schemas` pins the six MCAP channel schemas — §31.2 keeps them single-source across editions —
+    `records` pins the ring's record layout, `header` pins the ring header and its two tables, and
+    `seal` pins the framing of a whole file by its digest. This is the one corpus whose subject is
+    bytes rather than a verdict.
+    """
+    if label == "schemas":
+        return blackbox_module.schemas_to_json(case_input)
+    if label == "records":
+        return blackbox_module.records_to_json(case_input)
+    if label == "header":
+        return blackbox_module.header_to_json(case_input)
+    if label == "seal":
+        return blackbox_module.seal_to_json(case_input)
+    raise Unimplemented("blackbox", label)
+
+
+def _calibration(label: str, case_input: dict[str, Any]) -> Any:
+    """§45's validity, over whatever a robot has measured and whatever its body can hold."""
+    if label == "sets":
+        return calibration_module.sets_to_json(case_input)
+    return calibration_module.calibration_to_json(case_input)
+
+
+def _cell(label: str, case_input: dict[str, Any]) -> Any:
+    """Two files, because the document has two consumers and an edition could agree about one while
+    disagreeing about the other: `validate` is what an operator sees when they save it, `context` is
+    what a precondition and the workspace guard read out of it afterwards.
+    """
+    if label == "validate":
+        return cell_module.validate_to_json(case_input)
+    if label == "context":
+        return cell_module.context_to_json(case_input)
+    raise Unimplemented("cell", label)
+
+
+def _checkin(label: str, case_input: dict[str, Any]) -> Any:
+    """Three files, because a check-in has three separable ways to be wrong.
+
+    `claim` is the field §17's rule lives on — the platform never claims a robot is running
+    something it has not heard from — `health` is §33.6's age rule, and `document` is the bytes that
+    actually cross to the Hub. An edition could reproduce the first two and still assemble them
+    differently, which is the case only the third one catches.
+    """
+    if label == "claim":
+        return checkin_module.claim_to_json(case_input)
+    if label == "health":
+        return checkin_module.health_to_json(case_input)
+    if label == "document":
+        return checkin_module.document_to_json(case_input)
+    raise Unimplemented("checkin", label)
+
+
 def _intent(_label: str, case_input: dict[str, Any]) -> Any:
     return intent_module.offer_to_json(case_input)
 
@@ -300,6 +371,16 @@ def _semver(label: str, case_input: dict[str, Any]) -> Any:
     if "compare" in label:
         return semver_module.compare_to_json(case_input["a"], case_input["b"])
     raise Unimplemented("semver", label)
+
+
+def _live(_label: str, case_input: dict[str, Any]) -> Any:
+    """§54.2's live context. One file, because there is one function.
+
+    Every case in it is really a case about a single rule: a fact the robot does not know is
+    *absent* rather than defaulted, because §54.2 refuses a precondition it cannot evaluate and
+    "assume true" is what free-text preconditions do by construction.
+    """
+    return live_module.context_to_json(case_input)
 
 
 def _observation(label: str, case_input: dict[str, Any]) -> Any:
@@ -364,6 +445,19 @@ def _skill(label: str, case_input: dict[str, Any]) -> Any:
     raise Unimplemented("skill", label)
 
 
+def _telemetry(label: str, case_input: dict[str, Any]) -> Any:
+    """§74's telemetry. Two files, because a window and a set of them are two questions.
+
+    An edition could agree about the first while disagreeing about the second — and the second is
+    the one §15's field conformance divides by, which is where a gap becomes visible.
+    """
+    if label == "window":
+        return telemetry_module.window_to_json(case_input)
+    if label == "coverage":
+        return telemetry_module.coverage_to_json(case_input)
+    raise Unimplemented("telemetry", label)
+
+
 def _transfer(label: str, case_input: dict[str, Any]) -> Any:
     """Four files: a fetch and its arrival, an upload and its receipt. Mirrors, not duplicates."""
     if label == "fetch":
@@ -392,11 +486,16 @@ def _watchdog(_label: str, case_input: dict[str, Any]) -> Any:
 HANDLERS: dict[str, Handler] = {
     "admission": _admission,
     "birth": _birth,
+    "blackbox": _blackbox,
+    "calibration": _calibration,
+    "cell": _cell,
     "certification": _certification,
+    "checkin": _checkin,
     "cycle": _cycle,
     "digest": _digest,
     "fuzz": _fuzz,
     "limits": _limits,
+    "live": _live,
     "observation": _observation,
     "opstate": _opstate,
     "ota": _ota,
@@ -406,11 +505,13 @@ HANDLERS: dict[str, Handler] = {
     "intent": _intent,
     "kinematics": _kinematics,
     "predicate": _predicate,
+    "provenance": _provenance,
     "readiness": _readiness,
     "roles": _roles,
     "vocabulary": _vocabulary,
     "semver": _semver,
     "skill": _skill,
+    "telemetry": _telemetry,
     "transfer": _transfer,
     "transport": _transport,
     "watchdog": _watchdog,

@@ -1538,3 +1538,943 @@ hard, which is what a rule that decides whether a robot gives up its own sensors
 * **Twenty-one of thirty-one corpora complete.** Ten remain, 167 cases: `cell` 26, `checkin` 23,
   `blackbox` 18, `calibration` 18, `provenance` 17, `telemetry` 16, `live` 15, `readiness` 12,
   `birth` 11, `intent` 11
+
+---
+
+## 25. `birth`, `intent` and `readiness` — logged after the fact
+
+Committed as `versions` before this session and never written up, so the record is completed here
+rather than left as a commit message. Three modules, **34 cases, 904 → 938 passed**, twenty-four
+corpora complete. Nothing in them needed a decision; they are the three smallest files left and they
+went through first run.
+
+---
+
+## 26. `checkin` — the document §17's whole rule rests on, and a defect it found in Rust
+
+`checkin` is three files and **23 cases**, and it is the one corpus where the three files are three
+different ways for an edition to be wrong rather than three parts of one answer. `claim` is the
+field §17's rule lives on — *the platform never claims a robot is running something it has not
+heard from* — `health` is §33.6's age rule, and `document` is the bytes that actually cross to the
+Hub. An edition can reproduce the first two and assemble them differently, which is the case only
+the third catches.
+
+**938 → 961, first run, no case needing a second look.** Twenty-five corpora complete.
+
+### Then the mutation run, which is where the round actually started
+
+Nineteen mutations, **fifteen caught**. The four survivors were not noise, and they split cleanly
+into two kinds:
+
+| Survivor | Kind |
+|---|---|
+| `deferred === true` becomes truthy | The corpus cannot express it — `deferred?: boolean` |
+| An unrecognised readiness word defaults to `ready` | Same — `readiness?: ReadinessState` |
+| `pending` emitted unsorted | **A corpus gap.** Every input is well-typed |
+| A digest survives a slot nobody read | **A corpus gap**, and a defect |
+
+The first two are the class §31.4 leaves to `self_check.py`: a case carrying a `1` where the
+reference declares a boolean is a case no typed edition can represent, and Rust decodes it at the
+boundary before the branch is reachable. Four checks were added there, each with the positive
+control beside it so a check that passes by finding nothing shows up as one.
+
+The other two became corpus cases, which is the order §31.4 asks for — **a new case lands in the
+corpus before the fix lands in any edition**.
+
+### `pending` was sorted and nothing had ever proved it
+
+`blocking` is sorted, and it has been pinned since the first check-in case. `pending` is a **second**
+list of the same facts, sorted separately in the builder — and no document case had ever carried
+more than one entry, so an edition emitting it in declaration order agreed about every claim in the
+corpus and disagreed about the bytes of every real check-in from a robot with two things left to do.
+
+The reason it has to be sorted rather than merely stable is §34.4: check-ins are **collapsed**, and
+two documents differing only in the order of a list are two documents a queue cannot tell are
+duplicates. `two-stages-left-and-the-order-nobody-pinned` declares two out of order. Rust already
+sorted, and reproduces it without a change.
+
+### The digest on a slot nobody read — a divergence, and the reference was right
+
+A measure carries a `state` and a `digest`, and both are well-typed independently. `{ state:
+'unmeasured', digest: 'sha256:aaaa' }` is a document that says nobody read the slot and carries a
+reading of it in the next field, and **no case had ever put the two together** — so what a consumer
+sees was unpinned, and the two editions had quietly answered it differently for as long as the field
+has existed:
+
+* `reference/typescript/shape.ts` gates the digest on the state. `unmeasured` emits `null`.
+* `crates/skynet-contracts/src/identity.rs` emitted whatever was in the field.
+
+This is not a coin toss, and the argument is the query rather than the tidiness. §32.1 puts a fleet
+column on *"which robots are running image `sha256:…`"* — the question an incident is run through —
+and Rust's answer puts a robot whose image slot was **never read** into that result. The prose half
+of the same document already says `an unmeasured OS image (the slot could not be read)`, so passing
+the digest through has one report contradicting itself, in the machine-readable half, on the side
+where nobody is reading English to catch it.
+
+`a-digest-on-a-slot-nobody-read` is the case. It went in first, the Rust corpus test went red on it
+alone, and `measure_to_json` now gates the digest on the state with the reasoning in its doc comment
+and the case named there. **1,073 cases, both editions, byte for byte.**
+
+### One thing deliberately not done
+
+`shapeMeasure` and Rust also disagree about an *unrecognised* state word, and the Python edition
+normalises it to `unmeasured` at the boundary as Rust does. No case pins it and none was added: an
+unrecognised `MeasureState` is not a well-typed input either, so it belongs with the first two
+survivors rather than with these — and `_measure_block` says so where it makes the choice.
+
+### A stale mirror pin, found by running the check rather than by reading it
+
+`docs/skynet-os-architecture.md` was byte-identical in both repositories and pinned at digest
+`1a5d70bb…` while both trees held `c44f772b…`. The §80 rows added in `b39c6d5` and `a78595b` were
+mirrored correctly and the pin was never moved, so `check-mirrors.mjs` had been reporting the
+specification as changed-without-repinning since. Re-pinned from the two agreeing copies with
+`--pin`, which moves no file. Nothing in the Hub was touched.
+
+### Verified
+
+* `python3 editions/python/run_corpus.py` — **963 passed, 0 failed**, 110 not implemented, of 1,073
+* `python3 editions/python/self_check.py` — **38 checks**, four of them new
+* Both new self-checks confirmed against the mutation they exist for: 2 of 38 and 3 of 38 red
+* 17 of 19 mutations caught by the corpus; the two survivors are the two `self_check.py` covers
+* `cargo test --workspace` — **1,431 passed**, 0 failed, 7 ignored (four need a C compiler)
+* `cargo fmt --check` and `cargo clippy --workspace --all-targets` clean
+* `tsc -p .` clean; the generator reproduces all 77 files byte-identically
+* `check-golden-path.mjs`, `check-contract-mirrors.mjs`, `check-mirrors.mjs` all clean
+
+**Twenty-five of thirty-one corpora complete. Six remain, 110 cases:** `cell` 26, `blackbox` 18,
+`calibration` 18, `provenance` 17, `telemetry` 16, `live` 15.
+
+---
+
+## 27. `cell`, and this edition running in no CI job at all
+
+`cell` is §55.2's descriptor and **26 cases in two files**, split because the document has two
+consumers that could be got right independently: `validate` is what an operator sees when they save
+it, `context` is what a precondition and the workspace guard read out of it afterwards.
+
+**963 → 989, first run.** Twenty-six corpora complete.
+
+### Nineteen mutations, and three kinds of survivor
+
+Five survived, and sorting them was most of the round:
+
+| Survivor | What it turned out to be |
+|---|---|
+| A non-finite box corner | **The corpus structurally cannot carry it** — and this repository already wrote that down |
+| An unknown shape kind decoding as a sphere | A **no-op mutation**: `cylinder` never enters the sphere branch. The sharper version is caught |
+| A shadowing fact winning | **Redundant by construction**: the filter and the overwrite order are two guards, and the filter is caught |
+| `volume: null` on a fixture | A real gap. Well-typed |
+| The stop after a duplicate fixture | A real gap. Well-typed |
+
+Two of those are worth the paragraph they cost, because both look like corpus gaps and neither is.
+A mutation that survives is not a finding until it has been shown to change an answer, and two of
+these five changed nothing — one because the branch it edited is unreachable for the only input
+that exercises it, one because a second guard already covers it. Re-mutating sharper is what
+separated them.
+
+### The one the generator cannot express, and the note that already said so
+
+`tools/corpus-gen/generate.ts` has carried this since the frame-bindings rule was written:
+
+> The non-finite coefficient rule has **no case here, and cannot have one.** This generator writes
+> every input through `JSON.stringify`, which renders infinity as `null`, so the frozen input would
+> be a *different* body from the one the expectation was computed from — worse than no case at all,
+> because it would fail an edition for reading the file correctly.
+
+Exactly the same applies to a box corner, so the check went to `self_check.py` with a coordinate of
+`true` beside it — which JSON *can* carry and no typed edition can produce. Both matter because
+Python collapses them by accident: `isinstance(x, float)` is true of `NaN` and of both infinities,
+and `isinstance(True, int)` is true of a boolean, so the obvious coordinate check admits an infinite
+box and a corner at `true`.
+
+### The two that were real, and what each is about
+
+`a-fixture-named-and-not-measured` pins a `volume` written out and left `null`. §55.2 permits it —
+*a fixture may be named without being measured* — and the check that follows is truthy for exactly
+this document. An edition testing for the key reports an operator who was careful enough to write
+the field as one who measured it wrongly.
+
+`a-duplicate-fixture-measured-wrongly` pins that the walk **stops** at the duplicate. The second
+`jig-a` is not the fixture any precondition will reach, so its geometry is not a second thing to
+tell the operator about — an edition that fell through would have somebody fixing the volume on the
+copy that is about to be deleted. Rust reproduces both without a change.
+
+### Then the finding that was not in any transcription
+
+**The Python edition was in no CI job.** The `corpus` job's own comment said so without meaning to:
+
+> Every edition sits the same exam. **One row today.**
+
+That was written when it was true. Eight rounds later a second edition existed, at 991 of 1,075
+cases, and it ran nowhere but on the machine of whoever last touched it — so a change to
+`reference/typescript/`, to the corpus, or to a shared module would have broken it silently. §31.4
+asks for differential checking on every commit and this was half of it.
+
+Both editions run now. The Python row is not a smaller copy of the Rust one, and the difference is
+what makes it safe to gate on: the runner passes when every case it *answers* is byte-identical and
+reports the rest as not implemented, so the step goes red on a divergence and stays green on a gap.
+
+### `--min-passed`, because every other check here has a floor of zero
+
+One regression the runner's own design cannot see: an edition whose handler was deleted answers
+nothing, fails nothing, and exits 0 — the cases move from *passed* into *not implemented*, which is
+the bucket that exists to read as honest progress. The ratchet is a number in the workflow rather
+than a default in the runner, because it is a fact about history rather than about the code, and
+lowering it is then a decision somebody makes in a diff. Verified both ways: `--min-passed 991`
+green, `--min-passed 992` red with the sentence explaining why nothing above it went red.
+
+### One refactor, and the corpus caught it immediately
+
+`js_trim` and `utf16_key` were about to have a third copy, so they moved to
+`editions/python/skynet_os/js.py` — the four JavaScript expressions Python has no equivalent for,
+in one place, because a divergence helper that exists twice is one that will eventually disagree
+with itself. The move dropped `utf16_at` on the way past and eleven `identity` cases went red on
+the next run. That is the corpus doing the job it exists for on a change that touched no rule.
+
+### Verified
+
+* `python3 editions/python/run_corpus.py --min-passed 991` — **991 passed, 0 failed**, 84 not
+  implemented, of 1,075
+* `python3 editions/python/self_check.py` — **41 checks**, three of them new
+* 16 of 19 cell mutations caught by the corpus; of the three survivors, one is covered by
+  `self_check.py` (confirmed red on the mutation) and two were shown to change no answer
+* `cargo test --workspace` — **1,431 passed**, 0 failed, 7 ignored
+* `cargo fmt --check` clean; `tsc -p .` clean; the generator reproduces all 77 files
+* `check-golden-path.mjs` and `check-mirrors.mjs` clean; the CI workflow parses
+
+**Twenty-six of thirty-one corpora complete. Five remain, 84 cases:** `blackbox` 18, `calibration`
+18, `provenance` 17, `telemetry` 16, `live` 15.
+
+---
+
+## 28. `blackbox` — the corpus whose subject is bytes, and a case that never reached its own rule
+
+`blackbox` is §26's ring record, the ring header, the six MCAP channel schemas and a whole sealed
+file. **18 cases, 991 → 1,009, first run** — including the SHA-256 of a 19,805-byte MCAP file
+written by a third independent implementation of the framing, and all six schema documents
+byte-for-byte.
+
+That last part is worth stating plainly, because §31.2 puts these on the short list of things that
+stay single-source across editions on the grounds that *a black box sealed by one edition must be
+readable by every other*. Until this round that was two implementations agreeing. It is three now,
+and the third was written from the specification without ever opening the corpus.
+
+### Twenty-two mutations, nineteen caught, and the first survivor is the round
+
+`frame-astral-stream-name` exists to pin the truncation rule. Its note says a cut inside a
+multi-byte sequence *"would put invalid UTF-8 in the ring and every reader would have to guess"*,
+and its name is nine **two-byte** characters in a sixteen-byte field.
+
+Sixteen is even. The boundary falls exactly between the eighth character and the ninth, the back-off
+loop looks at a lead byte, and it exits having done nothing. **Deleting the loop entirely broke no
+case.** The one case written for this rule does not reach it, and has not since it was added.
+
+`frame-a-stream-name-cut-inside-a-character` is six **three-byte** characters. The boundary lands
+inside the sixth, the cut walks back to fifteen, and the field holds `e38182` five times and a NUL.
+Without the loop it would hold sixteen bytes ending in a bare `e3` — invalid UTF-8 in a recording
+every later reader has to interpret.
+
+This is the second time this session a case's *note* has been the thing that was true and its
+*input* the thing that was not. It is a different failure from a missing case: nobody adds a case
+for a rule that already has one.
+
+### Two more boundaries nothing had sat on
+
+**`cycle-every-guard-tripped`.** `MAX_TRIPPED` is 8, the guard table is 8 bytes at offsets 104–111,
+and `capability` is at 112. No case had gone past **one** tripped guard, so neither the clamp on the
+count nor the slice on the table had ever been exercised at the edge they exist for. The record now
+reads `08`, then `0102030405060708`, then `ffff` — which says in one line that the count field, the
+table and the field after it are the sizes the format claims.
+
+**`three-messages-on-one-channel`.** The existing seal case writes one message to channel 6 and one
+to channel 1, so the per-channel sequence is 1 on both and an edition writing a constant produces
+the same file. A reader uses that number to detect a message it did not receive, so a constant is a
+recording that can never report a hole in itself. The third message is also **out of order in
+time** — 3000 ns then 2000 ns, which is what writing from a ring looks like — which pins the
+summary's `message_start_time` as the minimum rather than the first one seen.
+
+**1,075 → 1,078.** Rust reproduces all three without a change; each pins behaviour that was already
+correct in both editions and unprotected in both.
+
+### The last survivor is a question about the format, and is not closed with a case
+
+`encodeCycle` checks seven arrays against the ring's shape — `desired`, `command`, `mask`,
+`clamped`, `position`, `velocity`, `effort` — and **throws** when one does not match:
+
+> `black box: desired holds 3 values, and the ring's shape says 2`
+
+`tripped` is the eighth array in the same function and is **silently truncated** to eight instead.
+
+A ninth guard is not something a producer emits, so the clamp is defensive rather than reachable.
+But that is the whole difficulty: a corpus case carrying one would freeze *truncation* as the
+specified answer for a malformed cycle, when the answer the other seven arrays give to the same
+question is a refusal. The two are not obviously reconcilable in the encoder's favour either — a
+record is written on the control path, and a throw there is a cycle that goes unrecorded.
+
+So it is written down rather than settled by whichever behaviour was easier to transcribe. It is not
+an edition disagreeing with another; it is one function answering the same question two ways, which
+is the shape §7.4's redundant channel exists to catch, and the second instance of it this repository
+has found in the reference (the first being `roundHalfAway`, defined twice in `kinematics.ts` and
+`observation.ts`).
+
+### Verified
+
+* `python3 editions/python/run_corpus.py --min-passed 1012` — **1,012 passed, 0 failed**, 66 not
+  implemented, of 1,078
+* `cargo test -p skynet-corpus --test corpus` — 1,078 cases, byte for byte
+* 21 of 22 mutations caught after the three new cases, up from 19; the survivor is the item above
+* `cargo test --workspace` — **1,431 passed**, 0 failed, 7 ignored
+* `python3 editions/python/self_check.py` — 41 checks; `tsc -p .` clean; the generator reproduces
+  all 77 files
+* The CI ratchet raised to 1,012
+
+**Twenty-seven of thirty-one corpora complete. Four remain, 66 cases:** `calibration` 18,
+`provenance` 17, `telemetry` 16, `live` 15.
+
+---
+
+## 29. `calibration` — nine of nineteen, and a function the corpus was measuring against itself
+
+`calibration` is §45: whether a stored measurement is still believed, and which guards lose their
+input when it is not. **18 cases, 1,012 → 1,030, first run.**
+
+Then the mutation run, which is the **weakest of the project so far: nine of nineteen caught.** Ten
+survivors, eight of them real. That number is not about this transcription — it is about how the
+corpus was written, and the pattern is one sentence: every case sits comfortably inside or
+comfortably outside its rule, and nothing sits **on** one.
+
+**1,078 → 1,091.** Thirteen new cases; Rust reproduces every one without a change.
+
+### `setsFor` was measured by nothing
+
+`calibration/events` has two cases whose `applicable` field is written as `setsFor(…)` — the
+generator calls the function and freezes its **output into the input**. So the function that decides
+which parameter sets a body can hold, the one that keeps a bolted-down arm from reporting `balance`
+unavailable for want of an IMU it will never have, had no case: two editions could disagree about it
+and the corpus would be comparing them on an answer one of them had already supplied.
+
+`corpus/README.md` diagnosed this shape three rounds before it happened:
+
+> a corpus grows a blind spot wherever an *input* field is missing, not only where an
+> implementation is.
+
+This is that, pointed at a function rather than at a field, and it is worth distinguishing from an
+ordinary gap: a missing case is visible to anyone reading the file list, and a case that *calls the
+function it is meant to test* looks like coverage.
+
+`corpus/calibration/sets.json` is seven cases against `setsFor` directly, and four reach branches
+nothing had: `sensing.depth` alone, `sensing.force` alone, an IMU on a fixed base, and a declared
+capability matching none of the sensing rules. `crates/skynet-corpus` gained the matching branch;
+both editions agreed on all seven first time, which is the outcome to want — the function was
+correct in both and simply unchecked.
+
+### Four boundaries nobody had sat on
+
+| New case | Why it matters |
+|---|---|
+| `a-residual-exactly-at-its-threshold` | 1.0 against 1.0 is **valid**. A method reporting exactly the error it declared acceptable has met its own standard, and `>=` fails every calibration that hit its target precisely |
+| `an-age-exactly-at-the-limit` | 3,600 s against 3,600 s. On a fleet recalibrating on a schedule, `>` and `>=` disagree about **every robot on the day its policy comes due** — which is the day they are all checked |
+| `a-robot-that-got-colder` | Every temperature case ran warmer. Without `Math.abs`, −18 °C reads as inside a 5 °C budget: a bias measured in a heated cell is trusted in a cold store, which is where it drifts most |
+| `a-policy-with-no-timestamp` | §45's rule that a missing reading never extends validity, for the **taken** reading. `temperature-unreadable` pins it for the current one and nothing pinned the other half |
+
+Plus `an-empty-method` — §45.3's check is falsy rather than a null test, and no record had carried
+`""`, which is the shape of every form somebody tabbed past — and `an-age-on-a-rounding-tie`, at
+half a second, where `toFixed` takes the larger and Python's formatting takes the even one.
+
+### Two notes that claimed what their own inputs did not reach
+
+`temperature-delta`'s note says *"the delta is the rule and the direction does not matter"* and its
+input only goes one direction. `arm-without-an-imu`'s note says *"seven sets exist, four apply"* and
+five apply.
+
+That is the **third and fourth** instance this session of a note asserting a property its input does
+not exercise, after `frame-astral-stream-name` and the `pending` ordering. It is a distinct failure
+from a missing case and worth naming as one: nobody adds a case for a rule that already has a case
+claiming to cover it, so these are the gaps with the longest half-life. The count is now the only
+one of the four that was wrong as English rather than as coverage, and it is corrected.
+
+### One consolidation, and it was a latent fix
+
+`toFixed` existed **twice** in this edition. `certification.py` implemented it through `Decimal`;
+`transport.py` implemented it as `floor(x + 0.5)`, with a comment arguing that its domain — a
+percentage in [0, 100] — made the shortcut safe.
+
+They are not the same rule. At `0.49999999999999994` the sum rounds up to exactly `1.0` in binary
+and the shortcut answers `1`, where the nearest integer to the value itself is `0`. That is the
+*identical input* on which `roundHalfAway` is defined twice and two ways in `reference/typescript`,
+recorded in this repository since the fourth round — the same trap, caught the second time by
+noticing the duplication rather than by hitting the value.
+
+There is one `to_fixed` now, in `js.py`, on the `Decimal` rule. The corpus was green before and
+after: nothing reachable moved, which is what makes this the right moment for it rather than the
+morning after somebody finds the input.
+
+### Verified
+
+* `python3 editions/python/run_corpus.py --min-passed 1043` — **1,043 passed, 0 failed**, 48 not
+  implemented, of 1,091
+* `cargo test -p skynet-corpus --test corpus` — 1,091 cases, byte for byte, including the seven
+  `sets` cases neither edition had been measured on
+* 16 of 19 mutations caught, up from 9; of the three survivors one is a partial edit that is caught
+  when applied to every call site, and two are equivalent by construction (no non-expired validity
+  carries a `reason` or a `checked`)
+* `cargo test --workspace` — **1,431 passed**, 0 failed, 7 ignored; fmt and clippy clean
+* `python3 editions/python/self_check.py` — 41 checks; CI ratchet raised to 1,043
+
+**Twenty-eight of thirty-one corpora complete. Three remain, 48 cases:** `provenance` 17,
+`telemetry` 16, `live` 15.
+
+---
+
+## 30. `telemetry` — eight of nineteen, and nine boundaries
+
+`telemetry` is §74: counts over a self-describing half-open window, and what a set of them covers.
+**16 cases, 1,043 → 1,059, first run.**
+
+Then **eight of nineteen** mutations caught, which is worse than the round before it. Nine new cases
+later it is seventeen, and both remaining survivors are no-ops — one edits a line the `continue`
+above it makes unreachable for the differing case, the other removes a guard `field_conformance`
+repeats two lines down.
+
+**1,091 → 1,100.** Rust reproduces all nine without a change.
+
+### The nine, and the one sentence they share
+
+| New case | The boundary |
+|---|---|
+| `a-clock-that-stepped-back-part-of-a-second` | Every skew in the corpus was a whole number of seconds, so `Math.trunc` and a floor agreed |
+| `a-counter-that-went-backwards` | The `< 0` arm of a three-way test |
+| `a-duration-that-is-negative` | `elapsed_ms: 0` had a case; a negative one did not |
+| `a-window-of-no-wall-duration-at-all` | `to === from` is **not** inverted |
+| `a-clock-corrected-by-one-millisecond` | And `to === from - 1` is |
+| `a-skew-of-exactly-one-minute` | Strictly greater; every skew was zero or an hour |
+| `a-skew-of-exactly-minus-one-minute` | And the same value the other way |
+| `a-window-wholly-inside-another` | Every overlap ran forwards |
+| `windows-reported-out-of-order` | Every case arrived sorted |
+
+The first is the one the reference had already argued about. Its own comment says truncation was
+chosen over rounding because *"`Math.round` is half toward positive infinity and the Rust edition's
+helper is half away from zero, and the two disagree on exactly the negative halves a backwards clock
+produces"* — and then no case carried a skew that was not a whole number of seconds, so the
+disagreement it was written to prevent was invisible. −90.5 s truncates to −90 and floors to −91.
+
+None of the nine is a Python trap and none is a defect in any edition. They are nine places where
+two correct editions were being compared on inputs that could not tell them apart.
+
+### The pattern across two rounds, which is the finding
+
+`calibration` caught 9 of 19 and `telemetry` 8 of 19 — the two weakest runs of the project, back to
+back — and **fifteen of the twenty-two cases added across them are boundaries**: a value exactly at
+a threshold, a comparison's other side, a sort's other order, an absolute value's other sign.
+
+That is a property of how this corpus was written rather than of these two modules. A case is
+written to demonstrate a rule, so it is given an input that demonstrates it clearly — an age well
+past its limit, a skew of exactly an hour, windows that tile in order. Every one of those choices is
+the right one for a reader and the wrong one for a differential test, and the two purposes have been
+pulling in opposite directions since the first case was written.
+
+It is worth stating as a rule for the corpus rather than as an observation about two files: **a case
+that demonstrates a rule and a case that pins it are different cases, and a corpus needs both.** The
+first is what somebody reads to understand the specification; the second is what stops two editions
+drifting. Fifteen of the twenty-two are the second kind, and none of them existed.
+
+### Verified
+
+* `python3 editions/python/run_corpus.py --min-passed 1068` — **1,068 passed, 0 failed**, 32 not
+  implemented, of 1,100
+* `cargo test -p skynet-corpus --test corpus` — 1,100 cases, byte for byte
+* 17 of 19 mutations caught, up from 8; both survivors shown equivalent by construction
+* `cargo test --workspace` — **1,431 passed**, 0 failed, 7 ignored
+* `python3 editions/python/self_check.py` — 41 checks; CI ratchet raised to 1,068
+
+**Twenty-nine of thirty-one corpora complete. Two remain, 32 cases:** `provenance` 17, `live` 15.
+
+---
+
+## 31. `provenance` — the first case to fail an edition for reading its input correctly
+
+`provenance` is §56: what an on-robot evaluation result is worth, given who signed it. **17 cases,
+1,068 → 1,084 on the first run, and one failure** — which is the first time a transcription in this
+edition has gone red on a case rather than on a mutation of one.
+
+### The case, and why it was the corpus rather than the edition
+
+`provenance/scores :: two-robots-that-computed-nothing` carries an input of
+`{"on_robot": null, "on_hub": null}` and an expectation computed from `NaN`:
+
+> "The robot rolled this run up to **NaN** and the Hub to **NaN**…"
+
+JSON cannot spell `NaN`, and the generator writes every input through `JSON.stringify`. The frozen
+input is therefore a different document from the one its expectation was computed against — which is
+precisely the hazard `tools/corpus-gen/generate.ts` names, at the frame-bindings rule, and **refuses
+to create there**:
+
+> The non-finite coefficient rule has **no case here, and cannot have one.** This generator writes
+> every input through `JSON.stringify`, which renders infinity as `null`, so the frozen input would
+> be a *different* body from the one the expectation was computed from — worse than no case at all,
+> because it would fail an edition for reading the file correctly.
+
+That sentence was written about a rule with no case. This is the same shape with a case, and it did
+exactly what the sentence predicts.
+
+### It is a real convention, stated in one adapter and applied silently in another
+
+`crates/skynet-corpus/src/blackbox.rs` says it in its own header — *"`null` is how the oracle spells
+NaN, which is how §24 spells 'this is not measured'"* — and the provenance dispatch does the same
+thing with `unwrap_or(f64::NAN)` and no comment. So the two editions agreed, the convention was
+never written where a reader of the corpus would find it, and a third edition rediscovered it from a
+failing case.
+
+The reading is **forced rather than chosen**, and that is what makes the convention sound: the field
+is typed `number` in the reference, not `number | null`, so no caller could have supplied a null and
+the only thing it can be is a value the format cannot write.
+
+It is also emphatically **not a blanket rule**, which is why a `?? NaN` on every null would be
+wrong:
+
+* the reference's type **admits** null — `Frame.worstSkewUs: number | null`,
+  `CalibrationRecord.method?: string | null` — and the null is the value;
+* the reference's type is a **bare `number`** — `scoresAgree(onRobot: number, onHub: number)`,
+  `Cycle.basePose: number[]` — and the null is a non-finite value.
+
+An edition picking one reading for all nulls is wrong on half of them in opposite directions:
+reading the first kind as NaN discards a declared absence, and reading the second kind as an absence
+answers a different question from the one the expectation was computed against.
+
+`corpus/README.md` carries this now, in the section describing the format, with both halves and the
+generator's refusal quoted beside them. It is a property of the format and belonged there rather
+than in one adapter's doc comment.
+
+### Then the mutation run: ten of seventeen, and four more cases
+
+| New case | The gap |
+|---|---|
+| `a-segment-recorded-as-empty` | `""` is a segment somebody wrote down as empty, not a missing one. §56.4's check is against null and undefined and nothing else, and a falsy test reports `not_replayable` against a run whose recording exists |
+| `a-simulator-whose-birth-certificate-attests-nothing` | Every simulator case was otherwise perfect, so the branch that **skips** §50's two checks for a declared simulator was doing nothing observable. An edition running them anyway puts `birth_unattested` in front of a publisher who cannot act on it |
+| `fewer-seeds-than-the-benchmark-supplies` | Every seed case was three against three, so `seeds_not_supplied`'s two counts were equal and an edition reporting them the wrong way round said the same sentence — while the ordering rule, *expected then supplied*, is the reason they are a pair |
+| `a-difference-of-exactly-the-tolerance` | `1e-9` apart is **agreement**, because the comparison is `<=`. Nothing sat on the boundary, so `<` and `<=` were the same function |
+
+**1,100 → 1,104.** Rust reproduces all four without a change.
+
+And `a-difference-just-outside-the-tolerance`'s note read *"The boundary, frozen"* — at `1e-8`, which
+is ten times the tolerance. That is the **fifth** instance this session of a note claiming a property
+its own input does not reach, after `frame-astral-stream-name`, `temperature-delta`, the `pending`
+ordering and `arm-without-an-imu`'s count. The note now says what the case is, and the boundary has
+a case of its own.
+
+Fifteen of seventeen mutations caught, up from ten. Both survivors are no-ops: `device_unknown`
+already blocks `field` through the reasons list, so dropping `device_known` from the attribution
+test changes nothing, and `abs(NaN − NaN) <= 1e-9` is false however the guard above it is written.
+
+### Verified
+
+* `python3 editions/python/run_corpus.py --min-passed 1089` — **1,089 passed, 0 failed**, 15 not
+  implemented, of 1,104
+* `cargo test -p skynet-corpus --test corpus` — 1,104 cases, byte for byte
+* `cargo test --workspace` — **1,431 passed**, 0 failed, 7 ignored
+* `python3 editions/python/self_check.py` — 41 checks; CI ratchet raised to 1,089
+
+**Thirty of thirty-one corpora complete. One remains, 15 cases:** `live`.
+
+---
+
+## 32. `live`, and a corpus that tested one side of its own rule — the edition is complete
+
+`live` is §54.2's precondition context: the seven branches a skill's preconditions may read, and the
+rule that decides every field in them. **15 cases, 1,089 → 1,104, first run.**
+
+**That is 31 of 31 corpora and 1,104 of 1,104 cases.** With the five cases this round then added,
+the Python edition reproduces **1,109 of 1,109** and the runner's *not implemented* line reads zero
+for the first time since it was written.
+
+### Thirteen of twenty, and the seven survivors were one shape
+
+`live.ts`'s header states the rule the whole file exists for, in bold, as its first section:
+
+> **The rule that decides every field: absent is not null.** A fact this robot does not know must be
+> **absent** from the context, never present as `null` and never present as a plausible zero.
+
+**Zero of the fifteen cases carried an explicit null.** Every optional field in every case was either
+missing entirely or held a real value — so an edition that published `null` for a
+declared-and-unmeasured gripper reproduced all fifteen and broke the rule the module is named for.
+
+That is the sharpest instance of this session's pattern, and it is worth separating from the others:
+the earlier gaps were boundaries nobody had sat on, which is an oversight. This is a corpus for a
+module about a **distinction** that exercises only one side of it, which is closer to a category
+error — and it survived because the side it tests is the side a reader needs to see.
+
+`declared-and-not-measured` carries four at once: a gripper the body has and cannot read, a battery
+sensor that answered nothing, a pose the driver did not report, a state nobody observed. Every one
+omits its path, exactly as an absent key does — and that identity is the case. An edition publishing
+`null` gives a predicate something to compare against, and `robot.state.battery_percent > 20` is
+**false** on a null and **unresolvable** on an absence. Only the second refuses the skill, which is
+§54.2's first rule in one comparison.
+
+Four more, each a branch nothing had reached: an `age_s` declared and null; a tier of `''`, which
+**is** published because the test is `typeof === 'string'` and an empty string is a value somebody
+supplied; a joint with no name at all, beside the dotted one that had a case; and a frame fault
+whose subjects arrive unsorted and duplicated, where the one existing fault case carries a single
+subject and the sort was therefore free.
+
+**Eighteen of twenty caught.** The last two are one trap and it cannot be written: `battery_percent`
+and `age_s` are typed `number | null` and tested with `Number.isFinite`, so the two readings differ
+only on a **non-finite number** — which `JSON.stringify` writes as `null`, and which
+`corpus/README.md` now says means *null* in a field whose type admits one. Three checks in
+`self_check.py` instead, both directions, and the reason they earn their place: a battery published
+as `NaN` makes every comparison against it false, so a robot whose sensor has failed reads as *"the
+battery is low"* rather than producing a refusal.
+
+### §73 needs an amendment this session cannot make
+
+§73's last column has said this against the Languages row since the table was written:
+
+> **Built** — one edition, held to a corpus of 77 files and 1,055 cases | *The second edition, which
+> is what the corpus is for*
+
+That entry is now satisfied at **L2**. §73 is a **mirrored** document — `docs/README.md`: *"A shared
+document is edited in both repositories or in neither. It never diverges."* — and this session was
+instructed not to touch the Hub repository, so the edit is not made rather than made on one side.
+
+The amendment, when somebody makes it in both: the row's last column becomes L3 and L4, which is
+what is actually missing, and §42 is already explicit that neither is planned and that *almost
+everyone asking for their language wants L1*. The mirror pin stays where it is until then, and
+`check-mirrors.mjs` stays green because nothing diverged.
+
+### What the seven rounds produced, separated from the transcription
+
+The transcription was the cheap half. Seven modules passed their corpora on the first run and not
+one mutation run found a defect in this edition. What the rounds found was in the corpus and in the
+other two editions:
+
+| | |
+|---|---|
+| Cases added | **38** (1,071 → 1,109) |
+| Defects fixed in the Rust edition | **1** — a digest published from a slot nobody read |
+| Defects found in this edition | **0** |
+| Case notes claiming what their own input does not reach | **5** |
+| Functions no case measured | **1** — `setsFor`, whose output was frozen as an input |
+| Format conventions undocumented | **1** — `null` in a numeric field, now in `corpus/README.md` |
+| Duplicated implementations of one rule | **2** — `toFixed`, and the JS helpers into `js.py` |
+| CI jobs this edition was in | **0 → 1**, with a ratchet |
+
+Thirty-one of the thirty-eight cases are boundaries: a value exactly at a threshold, a comparison's
+other side, a sort's other order, an absence's other spelling. Seven are coverage of a function
+nothing measured. None of the thirty-eight is a Python trap, and none pins behaviour that was wrong
+in any edition — every one pins behaviour that was already right in both and protected in neither.
+
+### Verified
+
+* `python3 editions/python/run_corpus.py --min-passed 1109` — **1,109 passed, 0 failed, 0 not
+  implemented**, 31 of 31 corpora complete
+* `cargo test -p skynet-corpus --test corpus` — 1,109 cases, byte for byte
+* `cargo test --workspace` — **1,431 passed**, 0 failed, 7 ignored; fmt and clippy clean
+* `python3 editions/python/self_check.py` — **44 checks**, three of them new, both new-trap
+  mutations confirmed red
+* 18 of 20 `live` mutations caught by the corpus; the two survivors are the `self_check.py` trap,
+  confirmed red on both
+* `check-golden-path.mjs`, `check-mirrors.mjs`, `check-contract-mirrors.mjs` all clean
+* CI ratchet raised to 1,109
+
+---
+
+## 33. §80's retention of sealed windows — decided 2026-09-04, built
+
+The §80 row read *"decided 2026-09-04, **unbuilt**"*, and `grep -rn "reclaim\|tombstone" crates/`
+returned nothing. §79.4 says plainly what the state was:
+
+> **The sealed file is not deleted.** … Retention of sealed windows is a real question and this
+> amendment does not answer it; it is listed in §80 rather than settled in passing.
+
+`crates/skynetd-io/src/retention.rs` is that answer, and the owner's rule went in unchanged: a
+window an incident names is never reclaimed; a routine window may be reclaimed only when a receipt
+exists, the receipt's digest **is** the window's digest, and the disk is under the floor, oldest
+first; a reclaim writes a tombstone.
+
+### The measurement it waits on, and why that is a parameter rather than a blocker
+
+**Nothing on this robot measures free disk.** `crate::checkin` says so in its own header — §33.6's
+`storage_headroom` *"needs a `statvfs` nothing here calls"* — and `capacity` and `api` repeat it.
+So the third condition of §80's rule has no input.
+
+That did not stop the item, and the shape it took is the repository's own: `plan()` takes
+`free_bytes` and `floor_bytes` as arguments, for §45's reason and the kernel's — *the clock and the
+conditions are supplied*. The policy is decided in a test rather than on a machine whose disk
+happens to be full, and the missing measurement is a `Free::Unmeasured` the caller passes today.
+
+The syscall was deliberately **not** written here. `skynetd-io` carries `#![forbid(unsafe_code)]`,
+and this workspace's precedent for a necessary `unsafe` is a crate of its own with the argument in
+its header — `skynet-dl` exists exactly because *"the loader `unsafe`, extracted so it has one home
+and two callers"*. Putting a hand-rolled `statvfs` binding into the daemon would spend that property
+on a status field, and a `struct statvfs` whose layout differs between glibc and musl is not a thing
+to get wrong quietly. It is now a gap that blocks **two** named things instead of one, which is a
+better place for it to sit than in a doc comment.
+
+### Three conditions, tested against each other
+
+The rule is a conjunction, and every interesting failure is one term being sufficient alone. A suite
+that checked *"a cited window is kept"* and *"an uncollected window is kept"* separately would pass
+against an implementation that reclaimed whenever **either** held — so the fourteen tests are
+arranged as interactions:
+
+* the receipt alone and the floor alone, in one test, because either alone is the bug;
+* a cited window at zero free disk, where freeing it is the only way to reach the floor, and it
+  stays — the pass reports it **could not** reach the floor rather than reaching it;
+* a cited window that is also the **oldest**, so an implementation stopping at the first ineligible
+  candidate rather than skipping it frees nothing;
+* the floor boundary, where exactly at the floor is at it.
+
+### The citation is recorded, not inferred
+
+Every incident this daemon raises seals with `Reason::Fault`, so `reason == "fault"` answers *"does
+an incident name this window"* today. It answers it by **inference**, and it is one new incident
+path away from being wrong: a raise that sealed for `Estop` or `Operator` would produce a window an
+incident names and the reason does not, and the reclaim would free it. Silent, irreversible, and
+landing on exactly the window somebody is about to ask about.
+
+So `runtime.rs` writes `<name>.mcap.cited.json` at the raise, by the process that just put the
+window's name into the incident, and the citation carries the **digest**: §13 names a window for a
+monotonic instant and a reboot restarts that clock, so a citation believed on its filename would
+protect whichever window took the name next and leave the one it was about looking routine.
+
+### The scan hashes, and that is the expensive decision on purpose
+
+`upload::sealed` reads manifests, because it is cheap enough for a status route and nothing it feeds
+destroys anything. `retention::scan` hashes every window, because the manifest's own doc comment
+says what it is — *"a cache in the sense that it can be rebuilt, and it is not a second source of
+truth"* — and a window deleted because a sidecar carried another window's digest is the worst
+outcome this module can produce. There is a test for exactly that: a manifest and a receipt that
+agree with each other and not with the file, and the window survives.
+
+It costs one pass over a directory that is only read when the disk is already under the floor, and
+`run` refuses to scan at all without a measurement — so the state the daemon is in today costs one
+`matches!`.
+
+### Tombstone first, then the bytes
+
+A crash between the two leaves a tombstone for a window that still exists: visible, recoverable, and
+wrong in the direction that loses nothing. The reverse leaves freed bytes nothing accounts for,
+which is the state §80 exists to make impossible. It is a `?` rather than best effort, and a test
+forces the failure by putting a directory where the log wants a file.
+
+`reclaimed.jsonl` is **not** the audit log, and the reason is the subject rather than the shape.
+§38.3's log is *"small, append-only, and kept for the life of the machine"* — right in every
+respect — and every entry carries an actor and a previous value. A reclaim has neither: it is not a
+decision somebody made, it is a consequence of a disk. Writing one there would put a digest into a
+`detail` string, where it is prose rather than a field, which is the mistake §10's attestation spent
+a session undoing.
+
+### The mutation run found a rule written twice
+
+Twelve mutations, eight caught. Two of the four survivors were the same finding: `plan` had an early
+return for a disk already above the floor, and the loop's first test is `free + freed >= floor`,
+which on the first iteration is exactly `free >= floor`. The early exit produced an identical plan
+through a **second copy of the rule**, and breaking the copy broke no test. It is removed, the floor
+is expressed once, and the boundary test now reaches the surviving copy.
+
+The other two were a missing ordering test — `read_dir` has no order worth relying on, and the
+fixture happened to create files in sorted order — and a bad mutation of mine that left the `?` in
+place. **Eleven of eleven caught** after the two new tests.
+
+### What is on the board that was not
+
+`GET /blackbox` carries a `retention` block beside §79's `collection`, because they are two halves
+of one question: whether the Hub has a window, and whether this robot still does. It reports
+`free_bytes: null` with a sentence saying why, which is §33.6's treatment one level up — a route
+that omitted the field would leave an operator unable to tell a robot with plenty of room from one
+whose disk nothing can see. It does **not** scan.
+
+`DEFAULT_FLOOR_BYTES` is one gigabyte and is a placeholder with the reasoning attached rather than a
+decided number: enough for a preallocated ring plus an OTA slot on the smallest machine §28's table
+admits. It sits in code rather than in §38's configuration deliberately — a floor an operator can
+lower to zero is a floor that authorises deleting everything, and that is the owner's decision.
+
+### What this leaves open, precisely
+
+| Open | Blocked on |
+|---|---|
+| A `statvfs`, and with it §33.6's `storage_headroom` and §80's third condition | A crate to hold the `unsafe`, and the struct layout across libcs |
+| The floor as a number | The owner. One gigabyte is a placeholder that says so |
+
+§80's row can move from *"decided, unbuilt"* to *"built, waiting on a disk measurement"* — but §80
+is in `docs/skynet-os-architecture.md`, which is **mirrored**, and this session was told not to
+touch the Hub repository. The edit is not made rather than made on one side, and this is the note
+that says so.
+
+### Verified
+
+* `cargo test --workspace` — **1,445 passed**, 0 failed, 7 ignored, up 14
+* 11 of 11 mutations of the policy caught, after two tests the first run asked for
+* `cargo fmt --check` and `cargo clippy --workspace --all-targets` clean
+* `python3 editions/python/run_corpus.py --min-passed 1109` — 1,109 of 1,109, unchanged
+* `check-golden-path.mjs`, `check-mirrors.mjs`, `check-contract-mirrors.mjs` clean
+* Nothing in the Hub repository was touched; `git status` there is empty
+
+---
+
+## 34. §26.2's multi-writer ring: the design pass, and a conflict between two arguments in this repository
+
+§80 lists *"a ring two processes can write"* and §26.2 names the fix:
+
+> **The fix, and it is open.** The sequence belongs in a mapped header as an atomic, and writers
+> claim a slot by fetch-add — which is what `skynet-ring-shm` already does for §25's command ring,
+> in the same repository, for the same reason. **It wants a design pass** and a Linux mapping.
+
+This is that design pass, and the first thing it found is that the repository already argues the
+other way. `Ring::open`, in `crates/skynet-blackbox/src/ring.rs`:
+
+> Recovery is a scan, and it is a scan on purpose. **The alternative is a "next sequence" field in
+> the header, updated on every append** — which turns one positioned write per record into two, and
+> makes the header the thing most likely to be torn by a power cut. The scan is `O(capacity)`,
+> happens once at start, and is the only way to be right after a crash: the highest sequence number
+> actually on disk is the truth, whatever any counter claims.
+
+§26.2 proposes, by name, the thing `Ring::open` rejects by name. Neither cites the other, and both
+are right — which is the shape of a divergence rather than a disagreement, and it is the second one
+this session has found between two correct arguments in one codebase.
+
+### They are two different counters, and saying so resolves it
+
+* `Ring::open`'s subject is **crash recovery**. After a power cut a counter is ahead of or behind
+  the disk and there is no way to tell which, so the disk is the truth.
+* §26.2's subject is **concurrent claiming**. Two live writers must agree about who gets which slot,
+  and two in-memory counters cannot.
+
+A claim counter that is *initialised from the scan* and never consulted after a restart satisfies
+both: recovery stays a scan, so `Ring::open`'s rule is untouched, and the claim is a fetch-add, so
+§26.2's property holds while both writers are up.
+
+### Which settles the placement, and it is not the header
+
+Three consequences fall out, and each removes a reason this item looked expensive:
+
+1. **Not in the CRC'd header.** `encode_header` computes a CRC over the whole header; a field
+   mutated on every append invalidates it immediately, and `Ring::open`'s "torn by a power cut"
+   objection lands squarely on it.
+2. **Not durable at all.** It is rebuilt from the scan at every open, so it need not survive a
+   restart — which means it is not part of the on-disk format.
+3. **Therefore the format does not change.** `FORMAT_VERSION` stays 2, `corpus/blackbox/header`
+   stays as it is, and neither edition moves. §31.2 lists the black box format as single-source
+   across editions, and this was the reason the item read as a format break.
+
+The shape is a small `MAP_SHARED` mapping beside the ring holding one `AtomicU64`, created by
+whichever writer opens first, seeded from `Ring::next_sequence()`, and claimed by `fetch_add`. The
+directory lock stays and changes meaning: from *one writer* to *one creator of the claim mapping*.
+
+### What that leaves, stated as a cost rather than as a plan
+
+| | |
+|---|---|
+| A fourth `unsafe` crate | `skynet-ring-shm`'s header says it is *"the only `unsafe` in the workspace outside the ABI and the loader"*, and CI asserts every other crate is safe. A file mapping is a fourth, and it needs the same treatment: as small as a crate can be, with the argument in its header |
+| A specification amendment | §26.2's last paragraph and §80's row both describe an open item whose fix is *"in a mapped header"*. Both are in `docs/skynet-os-architecture.md`, which is **mirrored** |
+| A tear question the command ring does not have | `skynet-ring` runs a seqlock because a *reader* may race a writer mid-slot. The black box has no concurrent reader — sealing takes the lock — so a claimed slot is written by exactly one writer and read by nobody until the process that claimed it has finished. That is a smaller problem than §25's and worth stating so nobody imports the seqlock with the mapping |
+
+### Not built here, and why that is the honest stopping point
+
+The design is settled and the code is not, for one reason that is not about effort: the amendment
+this makes to §26.2 and §80 belongs in `docs/skynet-os-architecture.md`, and that file is edited **in
+both repositories or in neither** (`docs/README.md`). This session was told not to touch the Hub
+repository, so building the mechanism while leaving the specification saying *"the sequence belongs
+in a mapped header"* would ship code that contradicts the document on the one point the document is
+currently open about — which is worse than the interim state §26.2 already calls safe rather than
+merely tolerable.
+
+The interim remains what it was: `skynet-lock` refuses the second writer by name, `skynetd` starts
+without a recorder and says so, `skynetk` refuses to run. Failing loudly beats corrupting evidence.
+
+**What a session that can touch both repositories should do**, in order: amend §26.2's last
+paragraph and §80's row to the counter described above, mirror and re-pin, then write the mapping
+crate and move the lock's meaning. The corpus and both editions are not involved, which is the part
+of this that was not previously known.
+
+---
+
+## 35. §26.2 amended in both repositories, `skynet-claim` written, and the allow-list that had never run
+
+The owner authorised editing the mirrored specification, so §34's design pass became an amendment
+rather than a note. Three things happened; the third was not planned.
+
+### The amendment, in both copies
+
+§26.2's closing paragraph said *"the sequence belongs in a mapped header as an atomic"* and *"it
+wants a design pass"*. It now carries the design pass instead: the two arguments that conflicted
+(§26.2's and `Ring::open`'s), why both hold, and the conclusion that the counter is **seeded from the
+scan and never consulted after a restart** — which puts it outside the header, outside the CRC, and
+outside the on-disk format entirely.
+
+The consequence worth repeating is the one that shrank the item: **`FORMAT_VERSION` stays at 2, the
+conformance corpus is untouched, and no language edition moves.** §31.2 keeps the black box format
+single-source across editions precisely so a change here is expensive, and this is not one.
+
+§80's row moves from an open question to *"designed 2026-09-05"*, naming the placement the design
+pass overturned so the next reader does not re-derive it.
+
+Edited in `Skynet`, copied to `Robot Overflow`, byte-equality verified, and re-pinned with
+`--pin` — which is the rule `docs/README.md` states and the first time this session has exercised
+the whole of it.
+
+### `crates/skynet-claim` — written and tested, deliberately not wired
+
+Five `extern "C"` declarations, one `mmap`, one `AtomicU64::from_ptr`, and six tests. It is the
+**fourth** `unsafe` crate in the workspace and takes the same treatment as the third: as small as a
+crate can be, with the argument in its header, so a reviewer asking whether this is memory-safe
+reads one short file.
+
+The tests are arranged around the property rather than the API. `two_mappings_of_one_file_never_
+hand_out_the_same_number` is §26.2 in one assertion — two `Claim`s are two independent mappings, the
+same relationship two *processes* have, and a counter held per-mapping would give each of them
+1, 2, 3 and encode two records into one slot. `threads_racing_the_counter_take_every_number_exactly_
+once` runs sixteen claimants over four mappings and asserts the union is exactly `1..=1000`: unique
+**and** dense, because a black box's numbering has no holes it did not record as gaps.
+
+One test exists to make a hazard meet the reader rather than be inferred:
+`seeding_again_resets_it_which_is_why_the_caller_holds_the_lock`. `Claim::seed` is unconditional —
+it has to be, because a file left by a previous run holds a sequence that was true for a ring
+`Recorder::open` may since have recreated at a different shape — so a second seed while a writer is
+claiming resets the counter under it. That is exactly why §26.2 narrows the directory lock's meaning
+to *one creator*, and the test is where somebody meets it.
+
+**What is not done**, precisely: nothing calls it. `skynet-lock` still refuses the second writer
+rather than serialising creation and letting both attach, and neither `skynetd` nor
+`skynet-kernel-host` claims through it. The interim §26.2 describes is therefore unchanged and still
+safe — the daemon starts without a recorder and says so, `skynetk` refuses to run. Stopped here on
+request, at a crate boundary rather than mid-wiring.
+
+### And the check that had never run
+
+Adding a crate to the workspace ran the `unsafe` allow-list check locally for the first time, and it
+was **already failing on three crates that were not mine**:
+
+| Crate | State |
+|---|---|
+| `skynet-capture` | No `unsafe` anywhere, no `forbid(unsafe_code)` |
+| `skynet-corpus` | The same |
+| `skynet-dl` | **27 `unsafe` occurrences**, and not on the allow-list |
+
+The check's own comment explains why this is the interesting kind of failure. It was rewritten once
+already, and the rewrite's stated purpose was to make it enumerate the directory rather than a list:
+
+> The previous version listed the crates that must forbid it, which is the same check with the
+> default pointing the wrong way: a new crate joined the workspace unwatched.
+
+The default now points the right way and three crates still joined unwatched — because **nothing in
+this repository has been pushed**, so the workflow has never executed. A check whose logic is
+correct and whose runs are zero is worth exactly as much as the one it replaced, and that is the
+finding rather than the three crates.
+
+Fixed: the two with no `unsafe` gained the attribute, and `skynet-dl` joined the allow-list, where
+§73's own words already put it — *"the loader `unsafe`, extracted so it has one home and two
+callers"*. The allow-list is five now, each with its reason written beside it, and `skynet-dl`'s
+records that it arrived late and why nothing caught it.
+
+`skynet-ring-shm`'s header said it was *"the only `unsafe` in the workspace outside the ABI and the
+loader"*. It is not, since this round; the sentence now names both mappings.
+
+### Verified
+
+* `cargo test --workspace` — **1,451 passed**, 0 failed, 7 ignored, up 6
+* The allow-list check's own shell reproduced locally: passes, for the first time
+* `cargo fmt --check` and `cargo clippy --workspace --all-targets` clean
+* `python3 editions/python/run_corpus.py --min-passed 1109` — 1,109 of 1,109, unchanged
+* `python3 editions/python/self_check.py` — 44 checks
+* `check-mirrors.mjs` — all shared documents match, re-pinned; `check-contract-mirrors.mjs` and
+  `check-golden-path.mjs` clean

@@ -728,6 +728,24 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         // unknown rather than as a plausible timestamp.
         match crate::blackbox::seal_existing(layout, skynet_blackbox::seal::Reason::Fault, 0) {
             Ok(Some(recording)) => {
+                // §80: a window an incident names is never reclaimed. The link is recorded here,
+                // by the process that just put the name into the document, rather than inferred
+                // later from the seal reason — every raise on this path seals for `Fault` today,
+                // so the inference would agree today and be one new incident path away from
+                // freeing the evidence for an incident that names it.
+                //
+                // Best effort. A citation that cannot be written is a window the reclaim may take
+                // once the disk is under the floor, which is bad; refusing to raise the incident
+                // over it would be worse, and it is the same trade `write_manifest` makes.
+                if let Err(error) =
+                    crate::retention::cite(layout, &recording.name, &recording.digest, kind)
+                {
+                    eprintln!(
+                        "skynetd: `{kind}` sealed {} and its citation could not be written \
+                         ({error}); §80's reclaim may treat that window as routine",
+                        recording.name
+                    );
+                }
                 incident.set("recording", recording.to_json());
             }
             Ok(None) => {

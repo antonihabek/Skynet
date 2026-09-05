@@ -1980,6 +1980,14 @@ fn blackbox_index<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Res
     // stopped opening, and those are exactly the ones somebody is looking for — so a 503 that
     // withheld the collection state would hide the recordings of the fault that broke the recorder.
     let collection = crate::upload::report(context.daemon.store.layout());
+    // §80's retention beside §79's collection, because they are two halves of one
+    // question — whether the Hub has a window, and whether this robot still does.
+    let layout = context.daemon.store.layout();
+    let retention = crate::retention::report(
+        layout,
+        crate::retention::free_of(layout),
+        crate::retention::DEFAULT_FLOOR_BYTES,
+    );
 
     let Some(recorder) = context.blackbox.as_ref() else {
         // The ordinary 503, with one field added rather than a different shape: `error` and
@@ -1988,6 +1996,7 @@ fn blackbox_index<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Res
         let mut refusal = error(503, UNAVAILABLE);
         if let Ok(mut body) = Json::parse(&String::from_utf8_lossy(&refusal.body)) {
             body.set("collection", collection);
+            body.set("retention", retention);
             refusal.body = encode(&body);
         }
         return refusal;
@@ -1996,6 +2005,7 @@ fn blackbox_index<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Res
     // honest denominator is the reconcile period rather than a joint rate nothing is producing.
     let mut document = recorder.index(1.0);
     document.set("collection", collection);
+    document.set("retention", retention);
     ok(document)
 }
 

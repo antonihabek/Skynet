@@ -151,6 +151,72 @@
         ]
       },
       "expected": "{\"records\":[],\"unavailable\":[{\"detail\":\"the `imu_bias` calibration is absent — nobody has ever measured it on this robot\",\"guard\":\"balance\",\"set\":\"imu_bias\",\"state\":\"absent\"}]}"
+    },
+    {
+      "id": "an-empty-method",
+      "note": "A method of `''` is not a method somebody recorded. §45.3’s check is falsy rather than a null test, and until this case no record carried an empty one — so an edition testing for null accepted a field that had been written out and left blank, which is the shape of every form somebody tabbed past.",
+      "input": {
+        "now": {
+          "at_s": 1700003600,
+          "temperature_c": 22,
+          "joint_travel_rad": 1000
+        },
+        "records": [
+          {
+            "set": "camera_extrinsics",
+            "method": "",
+            "residual": 0.4,
+            "residual_threshold": 1,
+            "conditions": {
+              "at_s": 1700000000,
+              "temperature_c": 22,
+              "joint_travel_rad": 1000,
+              "tool": "gripper-2f85",
+              "payload_kg": 0
+            },
+            "operator": "alice",
+            "policy": {},
+            "events_since": []
+          }
+        ],
+        "applicable": [
+          "camera_extrinsics"
+        ]
+      },
+      "expected": "{\"records\":[{\"checked\":[],\"detail\":\"§45.3 makes provenance mandatory and this record has no method. A calibration whose method nobody recorded is a rumour with six decimal places\",\"guards\":[\"proximity\",\"workspace\"],\"reason\":null,\"set\":\"camera_extrinsics\",\"state\":\"unusable\"}],\"unavailable\":[{\"detail\":\"the `camera_extrinsics` calibration is unusable — §45.3 makes provenance mandatory and this record has no method. A calibration whose method nobody recorded is a rumour with six decimal places\",\"guard\":\"proximity\",\"set\":\"camera_extrinsics\",\"state\":\"unusable\"},{\"detail\":\"the `camera_extrinsics` calibration is unusable — §45.3 makes provenance mandatory and this record has no method. A calibration whose method nobody recorded is a rumour with six decimal places\",\"guard\":\"workspace\",\"set\":\"camera_extrinsics\",\"state\":\"unusable\"}]}"
+    },
+    {
+      "id": "a-residual-exactly-at-its-threshold",
+      "note": "The boundary, which no case sat on: 1.0 against a threshold of 1.0 is **valid**. A method that reports exactly the error it declared acceptable has met its own standard, and `>=` here would fail every calibration that hit its target precisely.",
+      "input": {
+        "now": {
+          "at_s": 1700003600,
+          "temperature_c": 22,
+          "joint_travel_rad": 1000
+        },
+        "records": [
+          {
+            "set": "camera_extrinsics",
+            "method": "charuco-12x9, 40 poses",
+            "residual": 1,
+            "residual_threshold": 1,
+            "conditions": {
+              "at_s": 1700000000,
+              "temperature_c": 22,
+              "joint_travel_rad": 1000,
+              "tool": "gripper-2f85",
+              "payload_kg": 0
+            },
+            "operator": "alice",
+            "policy": {},
+            "events_since": []
+          }
+        ],
+        "applicable": [
+          "camera_extrinsics"
+        ]
+      },
+      "expected": "{\"records\":[{\"checked\":[],\"detail\":\"\",\"guards\":[\"proximity\",\"workspace\"],\"reason\":null,\"set\":\"camera_extrinsics\",\"state\":\"valid\"}],\"unavailable\":[]}"
     }
   ]
 }

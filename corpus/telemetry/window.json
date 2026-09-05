@@ -92,6 +92,96 @@
         }
       },
       "expected": "{\"elapsed_ms\":300000,\"faults\":[{\"code\":\"implausible_duration\",\"message\":\"Wall time and the monotonic clock disagree by 3600 s over this window. The counts are kept and the rates are computed from the monotonic duration (§35.1); the disagreement is worth one line on a fleet page, because it is what a suspended machine and a corrected clock both look like.\",\"severity\":\"warning\"}],\"rates\":{\"cycles\":100,\"guard_trips\":0.006666666666666667,\"interventions\":0.0033333333333333335},\"skew_ms\":3600000,\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":true}"
+    },
+    {
+      "id": "a-clock-that-stepped-back-part-of-a-second",
+      "note": "The skew rendered, at a value that is not a whole number of seconds. Every skew in this corpus was an exact multiple of a thousand, so `Math.trunc` and a floor agreed — and they disagree on exactly the negative fractions a backwards clock produces, which is the case the reference chose truncation for in the first place. −90.5 s truncates to −90 and floors to −91, in a sentence a fleet page renders.",
+      "input": {
+        "from_ms": 1760000000000,
+        "to_ms": 1760000209500,
+        "elapsed_ms": 300000,
+        "counters": {}
+      },
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[{\"code\":\"implausible_duration\",\"message\":\"Wall time and the monotonic clock disagree by -90 s over this window. The counts are kept and the rates are computed from the monotonic duration (§35.1); the disagreement is worth one line on a fleet page, because it is what a suspended machine and a corrected clock both look like.\",\"severity\":\"warning\"}],\"rates\":{},\"skew_ms\":-90500,\"unmeasured\":[\"clamps\",\"cycles\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":true}"
+    },
+    {
+      "id": "a-clock-corrected-by-one-millisecond",
+      "note": "The other side of the inversion boundary, one millisecond over. `to === from` is a coarse clock and `to === from - 1` is a clock that moved backwards, and the rule is `<` rather than a tolerance — because there is no size of backwards step that makes an interval nameable, and a tolerance here would be somebody deciding how much of a clock correction is acceptable to count over.",
+      "input": {
+        "from_ms": 1760000000000,
+        "to_ms": 1759999999999,
+        "elapsed_ms": 300000,
+        "counters": {
+          "cycles": 30000
+        }
+      },
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[{\"code\":\"inverted\",\"message\":\"This window ends before it starts. That is a clock that stepped backwards mid-window rather than a counting error, and the counts in it are over an interval nobody can name.\",\"severity\":\"error\"},{\"code\":\"implausible_duration\",\"message\":\"Wall time and the monotonic clock disagree by -300 s over this window. The counts are kept and the rates are computed from the monotonic duration (§35.1); the disagreement is worth one line on a fleet page, because it is what a suspended machine and a corrected clock both look like.\",\"severity\":\"warning\"}],\"rates\":{\"cycles\":100},\"skew_ms\":-300001,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":false}"
+    },
+    {
+      "id": "a-skew-of-exactly-one-minute",
+      "note": "Exactly 60,000 ms of disagreement, which is **not** implausible: the test is strictly greater, and every skew in this corpus was either zero or an hour. A robot whose clock is corrected by exactly a minute is at the value an operator will read as the threshold, so this is the case that says which side of it the threshold falls on.",
+      "input": {
+        "from_ms": 1760000000000,
+        "to_ms": 1760000360000,
+        "elapsed_ms": 300000,
+        "counters": {
+          "cycles": 30000
+        }
+      },
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[],\"rates\":{\"cycles\":100},\"skew_ms\":60000,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":true}"
+    },
+    {
+      "id": "a-skew-of-exactly-minus-one-minute",
+      "note": "And the same value the other way, because the test is two comparisons rather than one over an absolute value. An edition writing `Math.abs(skew) >= 60_000` agrees with this one everywhere except on the two boundaries themselves.",
+      "input": {
+        "from_ms": 1760000000000,
+        "to_ms": 1760000240000,
+        "elapsed_ms": 300000,
+        "counters": {
+          "cycles": 30000
+        }
+      },
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[],\"rates\":{\"cycles\":100},\"skew_ms\":-60000,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":true}"
+    },
+    {
+      "id": "a-counter-that-went-backwards",
+      "note": "A negative count is not a count. It is a counter that wrapped, or a field somebody defaulted to −1, and it lands in `unmeasured` rather than producing a negative rate on a fleet page — which is a number nobody can read and which would drag a total below the counts that are real. The `< 0` arm of the three-way test had no case.",
+      "input": {
+        "from_ms": 1760000000000,
+        "to_ms": 1760000300000,
+        "elapsed_ms": 300000,
+        "counters": {
+          "cycles": 30000,
+          "guard_trips": -1
+        }
+      },
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[],\"rates\":{\"cycles\":100},\"skew_ms\":0,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":true}"
+    },
+    {
+      "id": "a-duration-that-is-negative",
+      "note": "The other side of the same guard. `elapsed_ms: 0` is refused by a case above; a **negative** duration was not, and the two are different code paths once a report has to decide what to put in `elapsed_ms`. It is zero, because a window that reports a negative duration has reported no duration — passing it through would put a negative denominator into `observed_ms`.",
+      "input": {
+        "from_ms": 1760000000000,
+        "to_ms": 1760000300000,
+        "elapsed_ms": -300000,
+        "counters": {
+          "cycles": 30000
+        }
+      },
+      "expected": "{\"elapsed_ms\":0,\"faults\":[{\"code\":\"unmeasured_duration\",\"message\":\"This window carries no monotonic duration, so there is nothing to divide the counts by. §35.1 keeps rates off wall time on purpose: an NTP step would otherwise turn four hundred guard trips into a plausible number and nothing would look wrong.\",\"severity\":\"error\"}],\"rates\":{},\"skew_ms\":0,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":false}"
+    },
+    {
+      "id": "a-window-of-no-wall-duration-at-all",
+      "note": "The inversion boundary: `to` equal to `from` is **not** inverted. A robot that reported two windows in the same millisecond has a coarse clock rather than one that went backwards, and refusing it would discard counts over a real interval — the monotonic duration says the interval was five minutes and it is the monotonic duration the rates come from.",
+      "input": {
+        "from_ms": 1760000000000,
+        "to_ms": 1760000000000,
+        "elapsed_ms": 300000,
+        "counters": {
+          "cycles": 30000
+        }
+      },
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[{\"code\":\"implausible_duration\",\"message\":\"Wall time and the monotonic clock disagree by -300 s over this window. The counts are kept and the rates are computed from the monotonic duration (§35.1); the disagreement is worth one line on a fleet page, because it is what a suspended machine and a corrected clock both look like.\",\"severity\":\"warning\"}],\"rates\":{\"cycles\":100},\"skew_ms\":-300000,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":true}"
     }
   ]
 }

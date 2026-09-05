@@ -2338,6 +2338,26 @@ recordCase(
   )
 }
 
+{
+  const everything = bbCycle({
+    response: 'stop_cat0',
+    tripped: [...GUARDS],
+    desired: [2.5, -0.5],
+    command: [0, 0],
+    clamped: [true, true],
+  })
+  recordCase(
+    'cycle-every-guard-tripped',
+    'All eight, which is the boundary the count field sits exactly on: `MAX_TRIPPED` is eight, the '
+    + 'guard table is eight, and the byte after the last code is `capability`. No case had gone '
+    + 'past one tripped guard, so the clamp on that count and the slice on the table were both '
+    + 'unexercised — and an edition that dropped either writes a ninth code over a field a cycle '
+    + 'is read through. It also pins the strongest response, which nothing else here reaches.',
+    BB_SHAPE, 13n, 3234n,
+    { kind: 'cycle', cycle: everything }, cycleInput(everything),
+  )
+}
+
 recordCase(
   'frame-two-streams',
   'An assembled observation frame. The worst skew and the per-stream ages are what make "the frame it was given was 80 ms skewed" checkable months later (§25.1).',
@@ -2419,6 +2439,37 @@ recordCase(
     streams_omitted: 0,
     streams_absent: 0,
     streams: [{ name: 'ααααααααα', age_us: 1, stale: false }],
+  },
+)
+
+recordCase(
+  'frame-a-stream-name-cut-inside-a-character',
+  'The cut the case above is *named* for and does not reach. Nine two-byte characters land the '
+  + 'sixteen-byte boundary exactly between two of them, so the back-off loop exits without doing '
+  + 'anything and an edition that never wrote one would agree about every byte. Six three-byte '
+  + 'characters put the boundary **inside** the sixth: the cut walks back to fifteen and the '
+  + 'record is one byte shorter than it could be, which is the whole point — sixteen bytes here '
+  + 'would be invalid UTF-8 in the ring, and every reader from then on has to guess.',
+  BB_SHAPE, 13n, 6434n,
+  {
+    kind: 'frame',
+    frame: {
+      observation: BB_OBSERVATION,
+      targetNs: 6430n,
+      worstSkewUs: 0,
+      streamsOmitted: 0,
+      streamsAbsent: 0,
+      streams: [{ name: '\u3042\u3042\u3042\u3042\u3042\u3042', ageUs: 1, stale: false }],
+    },
+  },
+  {
+    kind: 'frame',
+    observation: hex(BB_OBSERVATION),
+    target_ns: '6430',
+    worst_skew_us: 0,
+    streams_omitted: 0,
+    streams_absent: 0,
+    streams: [{ name: '\u3042\u3042\u3042\u3042\u3042\u3042', age_us: 1, stale: false }],
   },
 )
 
@@ -2557,6 +2608,44 @@ headerCase(
     },
     canonical({ size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), opcodes: opcodes(bytes) }))
 }
+
+{
+  const channels = wire()
+  // Two messages on **one** channel, which the case above does not have: it writes one message to
+  // channel 6 and one to channel 1, so the per-channel sequence number is 1 on both and an edition
+  // that wrote a constant would produce the same file. A reader uses that number to detect a
+  // message it did not receive, so a constant is a recording that can never report a hole in
+  // itself.
+  const messages = [
+    { channelId: 6, logTime: 1700000000000001000n, payload: canonical({ mono_ns: 1000, event: 'recording_started', subject: 'dev-0001', detail: 'the ring was opened' }) },
+    { channelId: 6, logTime: 1700000000000003000n, payload: canonical({ mono_ns: 3000, event: 'estop', subject: 'operator', detail: 'the button on the chassis' }) },
+    { channelId: 6, logTime: 1700000000000002000n, payload: canonical({ mono_ns: 2000, event: 'estop_cleared', subject: 'operator', detail: 'released' }) },
+  ]
+  const bytes = writeMcap(
+    'skynet-blackbox rust-edition 0.1.0',
+    channels.map(channel => ({ id: channel.id, name: channel.name, definition: channel.definition })),
+    channels.map(channel => ({ id: channel.id, schemaId: channel.id, topic: channel.topic })),
+    [{ name: 'skynet.blackbox', pairs: [['robot_id', 'dev-0001'], ['sealed_reason', 'operator']] }],
+    messages,
+  )
+  blackboxCase('seal', 'three-messages-on-one-channel',
+    'The per-channel sequence advances 1, 2, 3 and the statistics carry the count. The third '
+    + 'message is also **out of order in time** — 3000 ns then 2000 ns — because a robot writing '
+    + 'from a ring is not writing in log-time order, and the summary\u2019s `message_start_time` is '
+    + 'therefore the minimum rather than the first one seen. An edition taking the first would '
+    + 'agree with this one on every file whose messages happen to be sorted.',
+    {
+      library: 'skynet-blackbox rust-edition 0.1.0',
+      metadata: { name: 'skynet.blackbox', pairs: [['robot_id', 'dev-0001'], ['sealed_reason', 'operator']] },
+      messages: messages.map(message => ({
+        channel_id: message.channelId,
+        log_time: String(message.logTime),
+        payload: message.payload,
+      })),
+    },
+    canonical({ size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), opcodes: opcodes(bytes) }))
+}
+
 
 // ── watchdog (§46) ───────────────────────────────────────────────────────────
 //
@@ -2877,6 +2966,55 @@ calibrationCase('expiry', 'temperature-unreadable',
   + 'has failed is precisely the robot whose bias should not be trusted.',
   [calibrationRecord('force_torque_bias', { policy: { max_temperature_delta_c: 5 } })],
   { at_s: CALIBRATION_LATER.at_s }, ['force_torque_bias'])
+calibrationCase('provenance', 'an-empty-method',
+  'A method of `\'\'` is not a method somebody recorded. §45.3\u2019s check is falsy rather than a '
+  + 'null test, and until this case no record carried an empty one — so an edition testing for '
+  + 'null accepted a field that had been written out and left blank, which is the shape of every '
+  + 'form somebody tabbed past.',
+  [calibrationRecord('camera_extrinsics', { method: '' })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+calibrationCase('provenance', 'a-residual-exactly-at-its-threshold',
+  'The boundary, which no case sat on: 1.0 against a threshold of 1.0 is **valid**. A method that '
+  + 'reports exactly the error it declared acceptable has met its own standard, and `>=` here '
+  + 'would fail every calibration that hit its target precisely.',
+  [calibrationRecord('camera_extrinsics', { residual: 1, residual_threshold: 1 })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+
+calibrationCase('expiry', 'an-age-exactly-at-the-limit',
+  'The other boundary. Measured 3,600 s ago against a validity of exactly 3,600 s: still valid, '
+  + 'and the checked list says so. Every age case was well inside or well outside, so `>` versus '
+  + '`>=` was free — and on a fleet recalibrating on a schedule, the two disagree about every '
+  + 'robot on the day its policy comes due.',
+  [calibrationRecord('camera_extrinsics', { policy: { max_age_s: 3_600 } })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+calibrationCase('expiry', 'an-age-on-a-rounding-tie',
+  'Half a second, rendered. `toFixed` takes the larger on a tie and Python\u2019s formatting rounds '
+  + 'to even, so this age is `3601` in one reading and `3600` in the other — in a sentence an '
+  + 'operator reads and a corpus compares byte for byte. Nothing else in this corpus lands on a '
+  + 'half.',
+  [calibrationRecord('camera_extrinsics', {
+    conditions: { ...CALIBRATION_TAKEN, at_s: CALIBRATION_TAKEN.at_s! - 0.5 },
+    policy: { max_age_s: 86_400 },
+  })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+calibrationCase('expiry', 'a-robot-that-got-colder',
+  'The direction `temperature-delta`\u2019s note claims does not matter, and which no case tested: '
+  + 'every temperature case ran warmer than the calibration. An edition without the absolute value '
+  + 'reads \u221218 \u00b0C as comfortably inside a 5 \u00b0C budget, so a bias measured in a heated cell and '
+  + 'used in a cold store is trusted exactly where it drifts most.',
+  [calibrationRecord('force_torque_bias', { policy: { max_temperature_delta_c: 5 } })],
+  { ...CALIBRATION_LATER, temperature_c: 4 }, ['force_torque_bias'])
+calibrationCase('expiry', 'a-policy-with-no-timestamp',
+  'A record that expires with time and cannot say when it was taken. §45\u2019s rule is that a '
+  + 'missing reading never extends validity — the alternative is a policy that switches itself off '
+  + 'on the record least able to account for itself. `temperature-unreadable` pins this for the '
+  + '*current* reading; nothing pinned it for the *taken* one.',
+  [calibrationRecord('camera_extrinsics', {
+    conditions: { temperature_c: 22, joint_travel_rad: 1_000 },
+    policy: { max_age_s: 86_400 },
+  })],
+  CALIBRATION_LATER, ['camera_extrinsics'])
+
 calibrationCase('expiry', 'two-sets-one-guard',
   'Workspace starved by expired joint zeros and an expired tool offset is two measurements '
   + 'somebody has to take, so it is two lines.',
@@ -2923,11 +3061,60 @@ calibrationCase('events', 'collision-beats-freshness',
 // The body decides which sets are applicable at all. A fixed-base arm reporting `balance`
 // unavailable for want of an IMU bias it can never hold is a page of guards nobody can restore.
 calibrationCase('events', 'arm-without-an-imu',
-  'A manipulator with a camera: seven sets exist, four apply, and `balance` is not among them.',
+  'A manipulator with a camera: seven sets exist, five apply, and `balance` is not among them.',
   [], CALIBRATION_LATER, setsFor(['manipulation.grasp', 'sensing.rgb'], 'fixed'))
 calibrationCase('events', 'a-body-that-declares-nothing',
   'Every set applies, because over-reporting what is missing is the conservative direction.',
   [], CALIBRATION_LATER, setsFor([], null))
+
+// `calibration/sets` — §45.2's applicability, computed rather than frozen as an input.
+//
+// `setsFor` had no case of its own: the two `events` cases above call it and freeze its *output*
+// into their `applicable` field, so two editions could disagree about which sets a body can hold
+// and the corpus would compare them on the answer one of them had already given. That is the
+// blind spot `corpus/README.md` describes — a corpus grows one wherever an input is missing, not
+// only where an implementation is — pointed at a function rather than at a field.
+
+function setsCase(id: string, note: string, capabilities: string[], base: string | null): void {
+  add('calibration', 'sets', {
+    id,
+    note,
+    input: { capabilities, base },
+    expected: canonical({ sets: setsFor(capabilities, base) }),
+  })
+}
+
+setsCase('a-fixed-arm-with-a-camera',
+  'Five of seven. `balance` is meaningless on a bolted-down arm, so an IMU bias and a gravity '
+  + 'vector are not measurements it is missing — they are measurements it will never take, and '
+  + 'reporting them unavailable is a permanent red mark nobody can clear.',
+  ['manipulation.grasp', 'sensing.rgb'], 'fixed')
+setsCase('a-body-that-declares-nothing',
+  'All seven. Undeclared capabilities mean nobody said what this body senses, and over-reporting '
+  + 'what is missing is the conservative direction.',
+  [], null)
+setsCase('an-unknown-base-is-mobile',
+  'The absence going the other way: a body that declares capabilities but not a base keeps the '
+  + 'two balance sets, because a base nobody described is not a base somebody called fixed.',
+  ['manipulation.grasp'], null)
+setsCase('a-fixed-base-that-declares-an-imu',
+  'And the exception to the exception. A body with an IMU keeps both sets whatever its base, since '
+  + 'it evidently has one — the fixed-base rule is about what a body cannot do, not about what it '
+  + 'has been given.',
+  ['sensing.imu'], 'fixed')
+setsCase('depth-alone-is-a-camera',
+  'Three prefixes reach the camera sets and only `sensing.rgb` had ever been written. A depth '
+  + 'sensor has intrinsics and extrinsics exactly as an RGB camera does.',
+  ['sensing.depth'], 'fixed')
+setsCase('force-sensing-without-manipulation',
+  'The other half of the same `or`: a force sensor earns the F/T bias and the tool offset without '
+  + 'any manipulation capability. Only the manipulation side had a case.',
+  ['sensing.force'], 'fixed')
+setsCase('a-mobile-base-with-nothing-else-declared',
+  'One declared capability that reaches none of the sensing rules, on a mobile base: joint zeros '
+  + 'and the two balance sets, and no cameras. The case that says `declared` gates the sensing '
+  + 'sets rather than the whole table.',
+  ['locomotion.walk'], 'wheeled')
 
 // ── observation (§25.1) ────────────────────────────────────────────
 //
@@ -4160,6 +4347,27 @@ cellCase('a-fixture-measured-wrongly',
   'A fixture may be named without being measured; it may not be measured wrongly.',
   cell({ fixtures: [{ name: 'bin', volume: { frame: 'base', shape: { kind: 'sphere', centre: [0, 0, 0], radius_m: -1 } } }] }))
 
+cellCase('a-fixture-named-and-not-measured',
+  'A fixture whose `volume` is written out and left null. §55.2 permits it — *a fixture may be '
+  + 'named without being measured* — and the check that follows is truthy rather than a key test '
+  + 'for exactly this document: an edition asking whether the key is present reports a fixture the '
+  + 'operator honestly said nothing about as one they measured wrongly, which is a fault against '
+  + 'somebody for being careful.',
+  cell({ fixtures: [{ name: 'bin', volume: null }] }))
+
+cellCase('a-duplicate-fixture-measured-wrongly',
+  'One fault, not two. The duplicate is reported and the walk **stops** — the second `jig-a` is '
+  + 'not the fixture any precondition will reach, so measuring it wrongly is not a second thing to '
+  + 'tell the operator about. An edition that fell through would report geometry against a name '
+  + 'that already had a fault of its own, and the operator would fix the volume on the copy that '
+  + 'is about to be deleted.',
+  cell({
+    fixtures: [
+      { name: 'jig-a' },
+      { name: 'jig-a', volume: { frame: 'base', shape: { kind: 'sphere', centre: [0, 0, 0], radius_m: -1 } } },
+    ],
+  }))
+
 cellCase('a-parking-entry-with-no-channel',
   'A parking pose is a command, and a command names its channel.',
   cell({ parking_pose: [{ channel: '', position: 0 }] }))
@@ -4888,6 +5096,66 @@ liveCase('an-unobserved-operating-state',
   + 'is; a *context* that defaulted to it would be stating a state nobody measured, and a '
   + 'precondition reading it would get an answer rather than a refusal.',
   { battery_percent: 90 })
+
+// Every case above this line reaches §54.2's rule from **one** side: a fact the robot does not
+// know is a key that is not there. The rule is `absent is not null`, and until these cases nothing
+// in this corpus carried a null at all — so an edition that published `null` for a declared-and-
+// unmeasured field agreed about all fifteen and broke the rule the file is named for.
+
+liveCase('declared-and-not-measured',
+  'Four optional fields present and **null**: a body that has a gripper and cannot read it, a '
+  + 'battery sensor that answered nothing, a pose the driver did not report, and a state nobody '
+  + 'observed. Every one omits its path, exactly as an absent key does — which is the point. §54.2 '
+  + 'refuses a precondition naming a path that is not there, and publishing `null` instead would '
+  + 'give a predicate a value to compare against: `robot.state.battery_percent > 20` is **false** '
+  + 'on a null and *unresolvable* on an absence, and only the second refuses the skill.',
+  {
+    gripper: null,
+    battery_percent: null,
+    base_pose: null,
+    operating_state: null,
+    tier: null,
+    env: null,
+    grants: ['arm.left'],
+  })
+
+liveCase('a-calibration-age-declared-and-not-known',
+  'The same rule one level down. The set is reported with its state and **no** `age_s`, because a '
+  + 'robot with no clock does not know the age of anything — and a precondition asking whether the '
+  + 'joint zeros were measured this week should be refused rather than answered with a zero. '
+  + '`a-calibration-set-with-no-clock` omits the field; this one declares it null, which is the '
+  + 'shape a serialiser produces and the shape nothing had.',
+  { calibration: [{ set: 'joint_zeros', validity: { state: 'valid', checked: [] }, age_s: null }] })
+
+liveCase('a-tier-that-is-an-empty-string',
+  'A tier of `\'\'` is **published**. The test is `typeof === \'string\'` rather than a truthiness '
+  + 'test, and the distinction is §54.2\'s: an empty string is a value somebody supplied, and the '
+  + 'rule is about facts nobody knows. A precondition comparing against it gets a clean false '
+  + 'rather than a refusal, which is the right answer for a robot whose tier was reported as '
+  + 'nothing rather than not reported.',
+  { tier: '' })
+
+liveCase('a-joint-with-no-name-at-all',
+  'The other end of the addressability rule. A dotted name has a case; an **empty** one did not, '
+  + 'and `robot.state.joints.` is not a path either. It joins `unaddressable` with the dotted ones, '
+  + 'and the empty string is what a console will render — which is worse than useless unless it is '
+  + 'there, because a joint missing from the branch with no line beside it is a joint an operator '
+  + 'can see on the console and not in a refusal.',
+  { joints: [{ name: '', position: 0.5 }, { name: 'elbow', position: -1.5 }] })
+
+liveCase('a-fault-whose-subjects-arrive-unsorted',
+  'The frame fault\u2019s `subjects` go through the same sort as every other list here, and the one '
+  + 'fault case carries a single subject — so the sort was free. Two editions agreeing about which '
+  + 'frames are broken and disagreeing about the order would produce different bytes for the same '
+  + 'robot, which is the whole reason `strList` exists.',
+  {
+    frames_resolved: [],
+    frames_fault: {
+      code: 'parent_missing',
+      subjects: ['tool0', 'base_link', 'tool0'],
+      detail: 'two frames name a parent nothing declares.',
+    },
+  })
 
 liveCase('duplicated-and-unsorted-lists',
   'Every list is sorted and de-duplicated on the way in, because two editions that agreed about the '
@@ -5760,6 +6028,29 @@ provenanceCase('attested-and-unreplayable',
 
 // §56.5's roll-up comparison.
 
+provenanceCase('a-segment-recorded-as-empty',
+  'An empty string is a segment somebody wrote down as empty, not a missing one. §56.4\u2019s check is '
+  + 'against null and undefined and nothing else — a falsy test would report `not_replayable` '
+  + 'against a run whose recording exists and is zero-length, which sends an investigator looking '
+  + 'for a segment the robot already told them about.',
+  { ...FIELD_RUN, blackbox_segment: '' })
+
+provenanceCase('a-simulator-whose-birth-certificate-attests-nothing',
+  'A declared simulator is `simulated` and its attestation is **not** examined: §50 is about a real '
+  + 'robot being the model it claims, and a simulator is not claiming to be one. Every simulator '
+  + 'case so far was otherwise perfect, so the branch that skips those two checks was doing nothing '
+  + 'observable — an edition that ran them anyway would put `birth_unattested` in front of a '
+  + 'publisher who cannot act on it.',
+  { ...FIELD_RUN, simulator: true, birth_attested: false, image_attested: false })
+
+provenanceCase('fewer-seeds-than-the-benchmark-supplies',
+  'Two of the three. Every seed case so far used three against three, so the two counts in '
+  + '`seeds_not_supplied` were equal and an edition reporting them the wrong way round said the '
+  + 'same sentence — while `birth`\u2019s ordering rule, **what was expected then what was supplied**, '
+  + 'is the whole reason the subjects are a pair. It also reaches the `length` half of the seed '
+  + 'comparison, which the equal-length cases never did.',
+  { ...FIELD_RUN, seeds: ['1', '2'] })
+
 function scoresCase(id: string, note: string, onRobot: number, onHub: number): void {
   add('provenance', 'scores', {
     id,
@@ -5784,9 +6075,17 @@ scoresCase('a-real-disagreement',
   0.875, 0.8751)
 
 scoresCase('a-difference-just-outside-the-tolerance',
-  'The boundary, frozen. A caller tempted to widen `1e-9` is a caller papering over the divergence '
-  + 'this comparison exists to surface.',
+  'Ten times the tolerance, refused. A caller tempted to widen `1e-9` is a caller papering over the '
+  + 'divergence this comparison exists to surface — and this case is the one such a caller would '
+  + 'reach for, because a single order of magnitude buys it.',
   1, 1 + 1e-8)
+
+scoresCase('a-difference-of-exactly-the-tolerance',
+  'The boundary itself, which the case above claimed to be and is not. `1e-9` apart is **agreement**: '
+  + 'the comparison is `<=`, because the tolerance exists for the representation and a difference '
+  + 'that lands exactly on it is the largest one two spellings of a number can be. Nothing in this '
+  + 'corpus sat on it, so `<` and `<=` were the same function.',
+  0, 1e-9)
 
 scoresCase('two-robots-that-computed-nothing',
   'A non-finite score is not a score, and two of them are not an agreement. Returning true here '
@@ -6092,6 +6391,48 @@ documentCase('a-robot-that-resolves-no-limits',
   + 'whose numbers are all null and whose notices say `no_envelope`.',
   { ...CONVERGED, limits: undefined })
 
+documentCase('two-stages-left-and-the-order-nobody-pinned',
+  'Two pending actions declared out of order, which no case had. `blocking` was sorted from the '
+  + 'first day and `pending` is a **second** list of the same facts, sorted separately — so an '
+  + 'edition emitting it in declaration order agreed about every claim in this corpus and '
+  + 'disagreed about the bytes of every check-in carrying more than one action. The reason it has '
+  + 'to be sorted rather than merely stable: §34.4 collapses check-ins, and two documents that '
+  + 'differ only in the order of a list are two documents a queue cannot tell are duplicates.',
+  {
+    ...CONVERGED,
+    state: 'hold',
+    progress: {
+      observed_generation: 40,
+      desired_generation: 41,
+      pending: [
+        { stage: 'policy', deferred: false, reason: 'the package is staged and not started' },
+        { stage: 'os_image', deferred: false, reason: 'the slot is being written' },
+      ],
+    },
+  })
+
+documentCase('a-digest-on-a-slot-nobody-read',
+  '§10’s contradiction: a measure that says `unmeasured` and carries a digest anyway. Both fields '
+  + 'are well-typed and no case had ever put them together, which left the whole question of what '
+  + 'a consumer sees unpinned. The digest is **dropped**, and the reason is the query it would '
+  + 'otherwise answer: §32.1 puts a fleet column on "which robots are running image `sha256:…`", '
+  + 'and a robot whose slot was never read must not appear in that answer. The sentence already '
+  + 'says `an unmeasured OS image`; a digest beside it would be the same report contradicting '
+  + 'itself in the machine-readable half, where nobody is reading English to catch it.',
+  {
+    ...CONVERGED,
+    attestation: {
+      device_id: 'dev_7',
+      os_image: {
+        state: 'unmeasured',
+        digest: 'sha256:aaaa',
+        why: 'the slot could not be read',
+      },
+      policy: { state: 'nothing', digest: 'sha256:bbbb' },
+      embodiment: { state: 'known', digest: 'sha256:cccc' },
+    },
+  })
+
 documentCase('a-stalled-policy-on-a-converged-robot',
   'Applied, and degraded. The two are independent and a document that collapsed them would hide '
   + 'the case §33.6 spends a paragraph on: a robot that reconciled perfectly and is standing still.',
@@ -6278,6 +6619,74 @@ windowCase('a-machine-that-was-suspended',
   + 'neither is a reason to throw a measurement away.',
   { ...FIVE_MINUTES, to_ms: 1_760_003_900_000 })
 
+windowCase('a-clock-that-stepped-back-part-of-a-second',
+  'The skew rendered, at a value that is not a whole number of seconds. Every skew in this corpus '
+  + 'was an exact multiple of a thousand, so `Math.trunc` and a floor agreed — and they disagree on '
+  + 'exactly the negative fractions a backwards clock produces, which is the case the reference '
+  + 'chose truncation for in the first place. \u221290.5 s truncates to \u221290 and floors to \u221291, in a '
+  + 'sentence a fleet page renders.',
+  { from_ms: 1_760_000_000_000, to_ms: 1_760_000_209_500, elapsed_ms: 300_000, counters: {} })
+
+windowCase('a-clock-corrected-by-one-millisecond',
+  'The other side of the inversion boundary, one millisecond over. `to === from` is a coarse clock '
+  + 'and `to === from - 1` is a clock that moved backwards, and the rule is `<` rather than a '
+  + 'tolerance — because there is no size of backwards step that makes an interval nameable, and a '
+  + 'tolerance here would be somebody deciding how much of a clock correction is acceptable to '
+  + 'count over.',
+  {
+    from_ms: 1_760_000_000_000, to_ms: 1_759_999_999_999, elapsed_ms: 300_000,
+    counters: { cycles: 30_000 },
+  })
+
+windowCase('a-skew-of-exactly-one-minute',
+  'Exactly 60,000 ms of disagreement, which is **not** implausible: the test is strictly greater, '
+  + 'and every skew in this corpus was either zero or an hour. A robot whose clock is corrected by '
+  + 'exactly a minute is at the value an operator will read as the threshold, so this is the case '
+  + 'that says which side of it the threshold falls on.',
+  {
+    from_ms: 1_760_000_000_000, to_ms: 1_760_000_360_000, elapsed_ms: 300_000,
+    counters: { cycles: 30_000 },
+  })
+
+windowCase('a-skew-of-exactly-minus-one-minute',
+  'And the same value the other way, because the test is two comparisons rather than one over an '
+  + 'absolute value. An edition writing `Math.abs(skew) >= 60_000` agrees with this one everywhere '
+  + 'except on the two boundaries themselves.',
+  {
+    from_ms: 1_760_000_000_000, to_ms: 1_760_000_240_000, elapsed_ms: 300_000,
+    counters: { cycles: 30_000 },
+  })
+
+windowCase('a-counter-that-went-backwards',
+  'A negative count is not a count. It is a counter that wrapped, or a field somebody defaulted to '
+  + '\u22121, and it lands in `unmeasured` rather than producing a negative rate on a fleet page — '
+  + 'which is a number nobody can read and which would drag a total below the counts that are real. '
+  + 'The `< 0` arm of the three-way test had no case.',
+  {
+    from_ms: 1_760_000_000_000, to_ms: 1_760_000_300_000, elapsed_ms: 300_000,
+    counters: { cycles: 30_000, guard_trips: -1 },
+  })
+
+windowCase('a-duration-that-is-negative',
+  'The other side of the same guard. `elapsed_ms: 0` is refused by a case above; a **negative** '
+  + 'duration was not, and the two are different code paths once a report has to decide what to put '
+  + 'in `elapsed_ms`. It is zero, because a window that reports a negative duration has reported no '
+  + 'duration — passing it through would put a negative denominator into `observed_ms`.',
+  {
+    from_ms: 1_760_000_000_000, to_ms: 1_760_000_300_000, elapsed_ms: -300_000,
+    counters: { cycles: 30_000 },
+  })
+
+windowCase('a-window-of-no-wall-duration-at-all',
+  'The inversion boundary: `to` equal to `from` is **not** inverted. A robot that reported two '
+  + 'windows in the same millisecond has a coarse clock rather than one that went backwards, and '
+  + 'refusing it would discard counts over a real interval — the monotonic duration says the '
+  + 'interval was five minutes and it is the monotonic duration the rates come from.',
+  {
+    from_ms: 1_760_000_000_000, to_ms: 1_760_000_000_000, elapsed_ms: 300_000,
+    counters: { cycles: 30_000 },
+  })
+
 coverageCase('two-windows-that-tile',
   'Contiguous, so there is nothing missing and the span equals what was observed.',
   [
@@ -6313,6 +6722,25 @@ coverageCase('overlapping-windows-are-merged-for-the-span-and-summed-for-the-cou
 // §15's floor, from both sides. Every case above sits comfortably over 0.999, so none of them
 // discriminates the number the third suite exists to produce — an edition could compute
 // conformance differently and reproduce all four. These four are the ones that pin it.
+
+coverageCase('a-window-wholly-inside-another',
+  'A five-minute window and a one-minute window inside it. The span is the outer one and the reach '
+  + 'must not go **backwards** onto the inner window\u2019s end — every overlap in this corpus so far '
+  + 'ran forwards, where taking the later end and taking the latest end are the same number. This '
+  + 'is a robot that restarted and re-reported a slice, which is the case the merge exists for.',
+  [
+    { from_ms: 1_760_000_000_000, to_ms: 1_760_000_300_000, elapsed_ms: 300_000, counters: { cycles: 30_000 } },
+    { from_ms: 1_760_000_060_000, to_ms: 1_760_000_120_000, elapsed_ms: 60_000, counters: { cycles: 6_000 } },
+  ])
+
+coverageCase('windows-reported-out-of-order',
+  'The same two tiling windows, sent latest first. A robot writing from a ring is not writing in '
+  + 'wall-clock order, and every case here had been sorted already — so the sort was free and an '
+  + 'edition that dropped it reported a gap where the windows tile and a span running backwards.',
+  [
+    { from_ms: 1_760_000_300_000, to_ms: 1_760_000_600_000, elapsed_ms: 300_000, counters: { cycles: 30_000 } },
+    { from_ms: 1_760_000_000_000, to_ms: 1_760_000_300_000, elapsed_ms: 300_000, counters: { cycles: 30_000 } },
+  ])
 
 coverageCase('conformance-under-the-floor',
   '§15 suspends below 0.999, "because a robot whose commands have been leaving its envelope is not '

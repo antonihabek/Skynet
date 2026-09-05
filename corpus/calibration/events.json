@@ -165,7 +165,7 @@
     },
     {
       "id": "arm-without-an-imu",
-      "note": "A manipulator with a camera: seven sets exist, four apply, and `balance` is not among them.",
+      "note": "A manipulator with a camera: seven sets exist, five apply, and `balance` is not among them.",
       "input": {
         "now": {
           "at_s": 1700003600,

@@ -115,6 +115,56 @@
       "expected": "{\"conformance\":0.9999777777777777,\"gaps\":[],\"observed_ms\":600000,\"spanned_ms\":450000,\"totals\":{\"cycles\":45000,\"guard_trips\":2,\"interventions\":1},\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
     },
     {
+      "id": "a-window-wholly-inside-another",
+      "note": "A five-minute window and a one-minute window inside it. The span is the outer one and the reach must not go **backwards** onto the inner window’s end — every overlap in this corpus so far ran forwards, where taking the later end and taking the latest end are the same number. This is a robot that restarted and re-reported a slice, which is the case the merge exists for.",
+      "input": {
+        "windows": [
+          {
+            "from_ms": 1760000000000,
+            "to_ms": 1760000300000,
+            "elapsed_ms": 300000,
+            "counters": {
+              "cycles": 30000
+            }
+          },
+          {
+            "from_ms": 1760000060000,
+            "to_ms": 1760000120000,
+            "elapsed_ms": 60000,
+            "counters": {
+              "cycles": 6000
+            }
+          }
+        ]
+      },
+      "expected": "{\"conformance\":1,\"gaps\":[],\"observed_ms\":360000,\"spanned_ms\":300000,\"totals\":{\"cycles\":36000},\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
+    },
+    {
+      "id": "windows-reported-out-of-order",
+      "note": "The same two tiling windows, sent latest first. A robot writing from a ring is not writing in wall-clock order, and every case here had been sorted already — so the sort was free and an edition that dropped it reported a gap where the windows tile and a span running backwards.",
+      "input": {
+        "windows": [
+          {
+            "from_ms": 1760000300000,
+            "to_ms": 1760000600000,
+            "elapsed_ms": 300000,
+            "counters": {
+              "cycles": 30000
+            }
+          },
+          {
+            "from_ms": 1760000000000,
+            "to_ms": 1760000300000,
+            "elapsed_ms": 300000,
+            "counters": {
+              "cycles": 30000
+            }
+          }
+        ]
+      },
+      "expected": "{\"conformance\":1,\"gaps\":[],\"observed_ms\":600000,\"spanned_ms\":600000,\"totals\":{\"cycles\":60000},\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"unusable\":0}"
+    },
+    {
       "id": "conformance-under-the-floor",
       "note": "§15 suspends below 0.999, \"because a robot whose commands have been leaving its envelope is not a lower-tier robot — it is one whose certificate no longer describes it.\" Thirty thousand cycles and forty interventions is 0.99867, and this is the case the third suite exists for.",
       "input": {

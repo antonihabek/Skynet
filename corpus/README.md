@@ -44,6 +44,44 @@ Four properties, each load-bearing:
    `tools/corpus-gen/generate.ts`, so regenerating produces byte-identical files and a diff means a
    behaviour change rather than a reshuffle.
 
+## A `null` in an input is whatever the reference's type says it is
+
+JSON cannot spell `NaN` or `Infinity`, and `tools/corpus-gen/generate.ts` writes every input through
+`JSON.stringify`, which renders both as `null`. So a `null` in a case's input has two possible
+origins and they are not the same fact:
+
+* The reference's own type **admits null** — `Frame.worstSkewUs: number | null`,
+  `CalibrationRecord.method?: string | null`. Then the null is the value, and it means what the
+  reference says it means.
+* The reference's type is a **bare `number`** — `scoresAgree(onRobot: number, onHub: number)`,
+  `Cycle.basePose: number[]`. Then no caller could have supplied a null, and the only thing it can
+  be is a non-finite value the format cannot write. It reads as `NaN`.
+
+The type is what decides, and an edition that picked one reading for every null would be wrong on
+half of them in opposite directions: reading the first kind as NaN discards a declared absence, and
+reading the second kind as an absence answers a different question from the one the expectation was
+computed against.
+
+This is written down here because it was rediscovered rather than read. `crates/skynet-corpus/src/blackbox.rs`
+states it for its own corpus — *"`null` is how the oracle spells NaN, which is how §24 spells 'this
+is not measured'"* — and the same convention is applied without a word in the provenance dispatch,
+so `provenance/scores :: two-robots-that-computed-nothing` failed a third edition for reading its
+input exactly as the file wrote it. The rule is a property of the **format**, not of any one corpus,
+and it belongs where the format is described.
+
+There is a limit worth naming beside it. A case whose *input* was a non-finite value and whose
+*expectation* was computed from one is sound only because the two agree about what the null means;
+the generator refuses to write such a case where they would not, and says so at the frame-bindings
+rule:
+
+> The non-finite coefficient rule has **no case here, and cannot have one.** This generator writes
+> every input through `JSON.stringify`, which renders infinity as `null`, so the frozen input would
+> be a *different* body from the one the expectation was computed from — worse than no case at all,
+> because it would fail an edition for reading the file correctly.
+
+Both sentences are the same rule seen from two sides: `null` is readable when the reference's type
+makes its origin unambiguous, and unwritable when it does not.
+
 ## What is here
 
 | Corpus | Input | Expected output |

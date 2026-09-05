@@ -9,6 +9,12 @@ the individual files a handler declined. Those facts together are the honest sen
 edition, and none of them is useful without the others: §31.4 says an edition that has not passed
 the corpus is not an edition, so "8 of 31 corpora, all passing" has to be as visible as the zero
 failures, and a corpus this edition answers *part* of has to be visibly neither.
+
+``--min-passed`` is the ratchet, and it exists because everything above is a **floor of zero**. An
+edition whose handler was deleted answers nothing, fails nothing, and exits 0: the cases move from
+*passed* into *not implemented*, which is the bucket that reads as honest progress. That is the one
+regression this runner's own design cannot see, so the number a CI step passes here is the number
+this edition has reached, and lowering it is a decision somebody makes in a diff.
 """
 
 from __future__ import annotations
@@ -30,6 +36,12 @@ def main() -> int:
         help="Directory holding the corpus (default: `corpus/` beside the repository root).",
     )
     parser.add_argument("--verbose", action="store_true", help="Print every failure in full.")
+    parser.add_argument(
+        "--min-passed",
+        type=int,
+        default=None,
+        help="Fail if fewer than this many cases passed. The ratchet — see the module docstring.",
+    )
     args = parser.parse_args()
 
     root = (
@@ -64,6 +76,16 @@ def main() -> int:
             print()
         if len(shown) < len(report.failures):
             print(f"... and {len(report.failures) - len(shown)} more (pass --verbose)")
+
+    if args.min_passed is not None and report.passed < args.min_passed:
+        print()
+        print(
+            f"regression: {report.passed} passed, and this edition had reached "
+            f"{args.min_passed}. Cases that stop being answered are counted as *not implemented* "
+            "rather than as failures, so nothing above this line went red — which is why the "
+            "floor is checked separately from the failures."
+        )
+        return 1
 
     return 1 if report.failed else 0
 

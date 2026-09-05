@@ -78,6 +78,7 @@ pub mod outbound;
 pub mod post;
 pub mod power;
 pub mod releases;
+pub mod retention;
 pub mod runtime;
 pub mod skill;
 pub mod store;

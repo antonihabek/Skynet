@@ -34,6 +34,44 @@
         ]
       },
       "expected": "{\"opcodes\":\"01,03,03,03,03,03,03,04,04,04,04,04,04,0c,05,05,0f,03,03,03,03,03,03,04,04,04,04,04,04,0b,0e,0e,0e,02\",\"sha256\":\"023c7878f1078732a0a136bb253c938a42f0c0c3ef5ab1f90fb0ee4d29e078f1\",\"size\":19805}"
+    },
+    {
+      "id": "three-messages-on-one-channel",
+      "note": "The per-channel sequence advances 1, 2, 3 and the statistics carry the count. The third message is also **out of order in time** — 3000 ns then 2000 ns — because a robot writing from a ring is not writing in log-time order, and the summary’s `message_start_time` is therefore the minimum rather than the first one seen. An edition taking the first would agree with this one on every file whose messages happen to be sorted.",
+      "input": {
+        "library": "skynet-blackbox rust-edition 0.1.0",
+        "metadata": {
+          "name": "skynet.blackbox",
+          "pairs": [
+            [
+              "robot_id",
+              "dev-0001"
+            ],
+            [
+              "sealed_reason",
+              "operator"
+            ]
+          ]
+        },
+        "messages": [
+          {
+            "channel_id": 6,
+            "log_time": "1700000000000001000",
+            "payload": "{\"detail\":\"the ring was opened\",\"event\":\"recording_started\",\"mono_ns\":1000,\"subject\":\"dev-0001\"}"
+          },
+          {
+            "channel_id": 6,
+            "log_time": "1700000000000003000",
+            "payload": "{\"detail\":\"the button on the chassis\",\"event\":\"estop\",\"mono_ns\":3000,\"subject\":\"operator\"}"
+          },
+          {
+            "channel_id": 6,
+            "log_time": "1700000000000002000",
+            "payload": "{\"detail\":\"released\",\"event\":\"estop_cleared\",\"mono_ns\":2000,\"subject\":\"operator\"}"
+          }
+        ]
+      },
+      "expected": "{\"opcodes\":\"01,03,03,03,03,03,03,04,04,04,04,04,04,0c,05,05,05,0f,03,03,03,03,03,03,04,04,04,04,04,04,0b,0e,0e,0e,02\",\"sha256\":\"1b3edddb458f856130dd5ceebbdbc776e0dd62618ea95a839b2fb6f843e8ff74\",\"size\":19793}"
     }
   ]
 }
