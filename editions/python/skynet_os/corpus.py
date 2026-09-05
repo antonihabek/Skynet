@@ -39,6 +39,7 @@ from .canonical import canonical
 from . import digest as digest_module
 from . import embodiment as embodiment_module
 from . import kinematics as kinematics_module
+from . import observation as observation_module
 from . import predicate as predicate_module
 from . import roles as roles_module
 from . import watchdog as watchdog_module
@@ -240,6 +241,15 @@ def _semver(label: str, case_input: dict[str, Any]) -> Any:
     raise Unimplemented("semver", label)
 
 
+def _observation(label: str, case_input: dict[str, Any]) -> Any:
+    """Two files with different inputs: a frame to assemble, and the instant to assemble it at."""
+    if label == "frames":
+        return observation_module.frame_to_json(case_input)
+    if label == "target":
+        return observation_module.target_to_json(case_input)
+    raise Unimplemented("observation", label)
+
+
 def _limits(_label: str, case_input: dict[str, Any]) -> Any:
     return safety_module.limits_to_json(case_input)
 
@@ -249,14 +259,16 @@ def _cycle(_label: str, case_input: dict[str, Any]) -> Any:
 
 
 def _fuzz(label: str, case_input: dict[str, Any]) -> Any:
-    """One corpus, three files, and only one of them written.
+    """One corpus, three files, and not all of them written.
 
-    `observation` and `transport` decline by name rather than raising, so their 108 cases are
-    counted as *not implemented* instead of as 108 wrong answers. The corpus is reported `partial`
-    for exactly as long as that is true.
+    A file with no handler declines by name rather than raising, so its cases are counted as *not
+    implemented* instead of as wrong answers. The corpus is reported `partial` for exactly as long
+    as that is true of any of the three.
     """
     if label == "cycle":
         return safety_module.verdict_to_json(case_input)
+    if label == "observation":
+        return observation_module.frame_to_json(case_input)
     raise Unimplemented("fuzz", label)
 
 
@@ -272,6 +284,7 @@ HANDLERS: dict[str, Handler] = {
     "digest": _digest,
     "fuzz": _fuzz,
     "limits": _limits,
+    "observation": _observation,
     "frames": _frames,
     "kinematics": _kinematics,
     "predicate": _predicate,

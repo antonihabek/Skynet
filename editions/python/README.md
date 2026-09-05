@@ -2,7 +2,7 @@
 
 > **This is not yet an edition.** §31.4: *"An edition that has not passed the corpus is not an
 > edition. It cannot carry the name, appear in the matrix, or be installed by `skynetd`."* It
-> currently passes **10 of 31 corpora**, and answers part of an eleventh. The runner prints
+> currently passes **11 of 31 corpora**, and answers part of a twelfth. The runner prints
 > those numbers on every run and this file will keep saying so until it is 31.
 
 §73's last column has carried one entry against §31 since the table was written: *"The second
@@ -51,18 +51,20 @@ package index is an edition that cannot be checked on the machine it is being re
 | `limits` | 19 | §7.6's three composition rules, and the guards a body cannot run |
 | `cycle` | 35 | the eight guards in evaluation order, pose guards included |
 | `fuzz/cycle` | 40 | seeded vectors through the same path |
-| | **422** | of 1,055 |
+| `observation` | 18 | §25.1's frame assembly, its target instant, and §26's record |
+| `fuzz/observation` | 48 | seeded vectors through the same path |
+| | **488** | of 1,057 |
 
-The other 20 corpora have no handler at all (525 cases), and 108 more sit in two files of `fuzz`
-that a handler exists for and **declines by name**. Both are counted in every run. They are not
+The other 19 corpora have no handler at all (509 cases), and 60 more sit in the one file of
+`fuzz` that a handler exists for and **declines by name**. Both are counted in every run. They are not
 skipped and not hidden: a runner that quietly passed ten corpora and printed "OK" would be the
 most misleading artifact in this repository.
 
 ### `partial` is a state, and `fuzz` is in it
 
-`fuzz` is one corpus over three files. All forty cases of `fuzz/cycle` pass and the corpus is
-still **not** `complete`, because `observation` and `transport` are declined — a corpus is
-complete or it is not, however many of its files are done. Without that rule, implementing one
+`fuzz` is one corpus over three files. Two of them pass in full and the corpus is still **not**
+`complete`, because `transport` is declined — a corpus is complete or it is not, however many
+of its files are done. Without that rule, implementing one
 file of three would have counted the other 108 cases as *wrong answers* rather than as
 *untranscribed*, and the number would have got worse precisely as the edition improved.
 
@@ -105,6 +107,7 @@ skynet_os/
   kinematics.py    forward kinematics, and the sine, cosine and square root it is written on
   watchdog.py      §46's chain and its window nesting
   safety.py        §7's eight guards, §7.6's limit resolution, and the per-cycle verdict
+  observation.py   §25.1's frame assembly, and the record §26 keeps of it
   corpus.py        the runner and its dispatch
 run_corpus.py      the CLI
 self_check.py      the runner's own accounting, and the traps the corpus cannot reach
@@ -162,9 +165,54 @@ edition, so they live in `self_check.py`, with expectations read from `safety.ts
 | `Math.sign` | Returns `-0` for `-0` and `NaN` for `NaN`. `copysign` maps `NaN` onto `±1`, turning an unrepresentable command into a confident clamp |
 | `null > number` | Coerced to `0 > number`. Transcribed rather than tidied — a sensible reading of the specification is a divergence from it |
 
+## What the fourth round found: two gaps in the corpus itself
+
+`observation.py` also passed all 64 of its cases on the first run, and mutating it found
+something better than a bug in the transcription — **two behaviours the reference documents in
+prose and the corpus could not tell apart**. Neither is a Python-only trap; both are
+expressible in every edition, so both became corpus cases rather than notes.
+
+| Mutation | Before | After |
+|---|---|---|
+| half-away-from-zero replaced with Python's half-to-even `round` | **0 cases** | 1 |
+| the staleness budget made two-sided | **0 cases** | 1 |
+
+The first is the sharper one. The reference's own comment says two editions rounding a
+half-nanosecond differently is *"a different chosen sample the day two candidates are
+equidistant"* — and no case in the corpus had a value that landed on a half, including
+`sub-millisecond-latency`, whose note claims to pin exactly this and whose 0.35 ms multiplies
+out to 350000.00000000006. `exactly-half-a-microsecond` lands on 0.5 and 2.5 µs, where
+half-away gives 1 and 3 and half-to-even gives 0 and 2.
+
+The second: the budget bounds how far *behind* the target a sample may be, and a sample from
+ahead of it is a clock fault rather than a stale one. Every existing case with a negative age
+had one *inside* its budget, so a two-sided reading agreed with the one-sided one everywhere.
+
+The corpus is 1,055 cases → **1,057**, and the Rust edition reproduces both new ones byte for
+byte without a change: they pin behaviour that was already correct in both editions and
+unprotected in both.
+
+### And one divergence in the reference, left alone deliberately
+
+`roundHalfAway` is defined **twice** in `reference/typescript/` — in `kinematics.ts` as
+`Math.trunc(v ± 0.5)` and in `observation.ts` as a fraction test — and the two disagree at the
+largest double below a half, where the sum rounds up to exactly `1.0`:
+
+| input | `kinematics.ts` | `observation.ts` |
+|---|---|---|
+| `0.49999999999999994` | 1 | 0 |
+| `-0.49999999999999994` | −1 | 0 |
+| `NaN`, `±Infinity` | `NaN`, `±Inf` | 0 |
+
+This edition transcribes **each file's own version**, because a transcription that quietly
+unified them would be an edition disagreeing with the reference in order to be right. Neither
+input is reachable from a real latency, and it is still one function with two behaviours —
+the shape of defect §7.4's redundant channel exists to catch. Unifying it is a change to the
+TypeScript, the Rust and the corpus together, and belongs in its own round.
+
 ## What is next, in dependency order
 
-`observation` (16 cases, plus 48 in `fuzz/observation`), then `transport` (40, plus 60), then
-`admission` (34) and `certification` (18) — the four §31.3 calls the ones that carry the weight,
-with `cycle` now done. Everything after the foundation is mechanical; the foundation is canonical
+`transport` (40 cases, plus 60 in `fuzz/transport`), then `admission` (34) and `certification`
+(18) — the rest of the four §31.3 calls the ones that carry the weight, with `cycle` and
+`observation` now done. Everything after the foundation is mechanical; the foundation is canonical
 serialisation and a runner that refuses to lie about what it has not done.

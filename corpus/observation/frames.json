@@ -384,6 +384,86 @@
         ]
       },
       "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":0,\"name\":\"joints\",\"stale\":false},{\"age_us\":0,\"name\":\"imu\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":0},\"skew_ms\":0,\"skew_upper_ms\":0,\"streams\":[{\"age_ms\":0,\"budget_ms\":5,\"considered\":1,\"latency_ms\":0.35,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1000350000,\"uncertainty_ms\":null},{\"age_ms\":0,\"budget_ms\":5,\"considered\":1,\"latency_ms\":0.15,\"modality\":\"imu\",\"name\":\"imu\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1000150000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "exactly-half-a-microsecond",
+      "note": "Three instants 0, 500 ns and 2500 ns behind the target, so `age_us` and `worst_skew_us` each land on an *exact* half. Round-half-away-from-zero gives 1 and 3; round-half-to-even, which is what a Python edition gets from its built-in `round`, gives 0 and 2. Every other rounding in this corpus falls short of a half, so replacing the rule with the wrong one changed no expected byte before this case existed — including in `sub-millisecond-latency`, whose note claims to pin exactly this and whose 0.35 ms lands on 350000.00000000006.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 0,
+            "budget_ms": 5,
+            "samples": [
+              {
+                "stamp_ns": 1000000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "imu",
+            "modality": "imu",
+            "latency_ms": 0,
+            "budget_ms": 5,
+            "samples": [
+              {
+                "stamp_ns": 999999500,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "wrist_ft",
+            "modality": "force_torque",
+            "latency_ms": 0,
+            "budget_ms": 5,
+            "samples": [
+              {
+                "stamp_ns": 999997500,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":0,\"name\":\"joints\",\"stale\":false},{\"age_us\":1,\"name\":\"imu\",\"stale\":false},{\"age_us\":3,\"name\":\"wrist_ft\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":3},\"skew_ms\":0.0025,\"skew_upper_ms\":0.0025,\"streams\":[{\"age_ms\":0,\"budget_ms\":5,\"considered\":1,\"latency_ms\":0,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1000000000,\"uncertainty_ms\":null},{\"age_ms\":0.0005,\"budget_ms\":5,\"considered\":1,\"latency_ms\":0,\"modality\":\"imu\",\"name\":\"imu\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":999999500,\"uncertainty_ms\":null},{\"age_ms\":0.0025,\"budget_ms\":5,\"considered\":1,\"latency_ms\":0,\"modality\":\"force_torque\",\"name\":\"wrist_ft\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":999997500,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
+    },
+    {
+      "id": "future-sample-past-its-budget",
+      "note": "The only sample is 4 ms *after* the target and the budget is 2 ms. The budget is one-sided by design, so this is deliverable and not stale: a sample from ahead of the frame's instant is a clock fault rather than a stale one, it is already visible in the signed age, and reporting it as staleness would send somebody to look at a capture pipeline that is working. `a-sample-from-the-future` cannot pin this — its negative age is inside its budget, so a two-sided reading of the rule agrees with the one-sided one on every case it covers.",
+      "input": {
+        "target_ns": 1000000000,
+        "streams": [
+          {
+            "name": "joints",
+            "modality": "joint_state",
+            "latency_ms": 0,
+            "budget_ms": 2,
+            "samples": [
+              {
+                "stamp_ns": 1004000000,
+                "seq": 1
+              }
+            ]
+          },
+          {
+            "name": "imu",
+            "modality": "imu",
+            "latency_ms": 0,
+            "budget_ms": 20,
+            "samples": [
+              {
+                "stamp_ns": 999000000,
+                "seq": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"deliverable\":true,\"holds\":[],\"record\":{\"streams\":[{\"age_us\":0,\"name\":\"joints\",\"stale\":false},{\"age_us\":1000,\"name\":\"imu\",\"stale\":false}],\"streams_absent\":0,\"target_ns\":1000000000,\"worst_skew_us\":5000},\"skew_ms\":5,\"skew_upper_ms\":5,\"streams\":[{\"age_ms\":-4,\"budget_ms\":2,\"considered\":1,\"latency_ms\":0,\"modality\":\"joint_state\",\"name\":\"joints\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":1004000000,\"uncertainty_ms\":null},{\"age_ms\":1,\"budget_ms\":20,\"considered\":1,\"latency_ms\":0,\"modality\":\"imu\",\"name\":\"imu\",\"over_budget\":false,\"seq\":1,\"stamp_ns\":999000000,\"uncertainty_ms\":null}],\"target_ns\":1000000000,\"undeclared_budget\":[],\"undeclared_latency\":[],\"verdict\":\"ok\"}"
     }
   ]
 }

@@ -1117,3 +1117,89 @@ specification is a divergence from it.
 * `cargo test --workspace` — **1,398 passed**, unchanged: nothing outside `editions/` was touched
 * Complete: `cycle`, `digest`, `frames`, `kinematics`, `limits`, `predicate`, `roles`, `semver`,
   `vocabulary`, `watchdog` — ten of thirty-one. `fuzz` is `partial` and says so
+
+---
+
+## 20. `observation.py`, and the two things the corpus could not tell apart
+
+§25.1's frame assembly — **64 cases, 422 → 486 passed**, first run, zero failures. Then the same
+discipline as §19: seven mutations, to show the suite could go red.
+
+Four were caught (11, 13, 22 and 10 cases). **Three were not**, and two of those turned out to be
+gaps in the corpus rather than in the transcription.
+
+### The rounding the reference's own comment is about
+
+`roundHalfAway` exists because §31.2 forbids taking a rounding from a platform library, and its
+comment says why in the sharpest possible terms:
+
+> two editions rounding a half-nanosecond differently is a one-nanosecond disagreement today and a
+> **different chosen sample** the day two candidates are equidistant
+
+Replacing it with Python's built-in `round` — which is half-to-**even** — broke **no case**. Nothing
+in the corpus landed on a half. Including `sub-millisecond-latency`, whose note claims to pin
+exactly this and whose 0.35 ms multiplies out to `350000.00000000006`.
+
+### The budget that is one-sided on purpose
+
+The staleness budget bounds how far *behind* the target a sample may be. A sample from *ahead* of it
+is a clock fault rather than a stale one — visible in the signed age, and "reporting it as staleness
+would send somebody to look at a capture pipeline that is working". Making the check two-sided broke
+**no case**: every existing negative age was *inside* its budget, so the wrong reading agreed with
+the right one everywhere.
+
+### Both are now cases, because neither is a Python problem
+
+Unlike §19's boolean trap, these are expressible in every edition — Rust holds `latency_ms` as an
+`f64` and can represent a half — so they belong in the corpus, and the TypeScript changed first:
+
+| New case | What it pins |
+|---|---|
+| `exactly-half-a-microsecond` | Instants 0, 500 ns and 2500 ns behind the target, so `age_us` and `worst_skew_us` land on **exact** halves. Half-away gives 0, 1, 3 and a skew of 3; half-to-even gives 0, 0, 2 and a skew of 2 |
+| `future-sample-past-its-budget` | The only sample is 4 ms *after* the target with a 2 ms budget. Deliverable and not stale — a two-sided reading holds the frame |
+
+**1,055 cases → 1,057.** Both mutations now fail. The Rust edition reproduces both new cases byte
+for byte **without a change**: they pin behaviour that was already right in both editions and
+protected in neither.
+
+### The third uncaught mutation is a divergence in the reference
+
+`roundHalfAway` is defined **twice** — `kinematics.ts` computes `Math.trunc(v ± 0.5)`, this file
+tests the fraction — under one name and one stated contract. They disagree:
+
+| input | `kinematics.ts` | `observation.ts` |
+|---|---|---|
+| `0.49999999999999994` | **1** | **0** |
+| `-0.49999999999999994` | **−1** | **0** |
+| `NaN`, `±Infinity` | `NaN`, `±Inf` | **0** |
+
+`v + 0.5` rounds up to exactly `1.0` at the largest double below a half. Substituting the
+`kinematics.ts` version into `observation.py` breaks nothing, which is the honest measurement:
+**unreachable from any real latency, and still one function with two behaviours** — the shape of
+defect §7.4's redundant channel exists to catch, in the module that argues for writing the rounding
+out by hand in the first place.
+
+Left alone deliberately. This edition transcribes each file's own version, because a transcription
+that quietly unified them would be an edition disagreeing with the reference in order to be right.
+Unifying them is a change to the TypeScript, the Rust kernel and the corpus in one commit, and it is
+its own item rather than a drive-by inside a transcription round.
+
+### Two more traps handled, both new to this module
+
+* **`String(n)`.** A hold's detail interpolates the age with a template literal, and `String(13)` is
+  `"13"` where `str(13.0)` is `"13.0"`. `_js_number_string` reproduces `Number::toString`, including
+  its switch to exponential form outside `1e-7 … 1e21` — which `canonical.format_number`
+  deliberately does *not* do, so the canonical writer is the wrong tool for this one job. Mutating
+  it to `str` breaks **13 cases**.
+* **`Number.isFinite`.** False for a boolean, where `math.isfinite` takes one as 0 or 1.
+
+### Verified
+
+* `python editions/python/run_corpus.py` — **488 passed, 0 failed**, 569 not implemented, of 1,057
+* `python editions/python/self_check.py` — 23 checks
+* `node tools/corpus-gen/generate.ts` — regenerating is a no-op after the two additions
+* `cargo test -p skynet-corpus --test corpus` — **1,057 cases across 77 files, all reproduced byte
+  for byte**
+* `cargo test --workspace` — **1,398 passed, 0 failed**
+* `node tools/check-contract-mirrors.mjs "../Robot Overflow"` — every mirrored contract matches
+* Complete: eleven of thirty-one corpora. `fuzz` is `partial` with one file left
