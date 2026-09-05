@@ -2174,3 +2174,137 @@ in any edition — every one pins behaviour that was already right in both and p
   confirmed red on both
 * `check-golden-path.mjs`, `check-mirrors.mjs`, `check-contract-mirrors.mjs` all clean
 * CI ratchet raised to 1,109
+
+---
+
+## 33. §80's retention of sealed windows — decided 2026-09-04, built
+
+The §80 row read *"decided 2026-09-04, **unbuilt**"*, and `grep -rn "reclaim\|tombstone" crates/`
+returned nothing. §79.4 says plainly what the state was:
+
+> **The sealed file is not deleted.** … Retention of sealed windows is a real question and this
+> amendment does not answer it; it is listed in §80 rather than settled in passing.
+
+`crates/skynetd-io/src/retention.rs` is that answer, and the owner's rule went in unchanged: a
+window an incident names is never reclaimed; a routine window may be reclaimed only when a receipt
+exists, the receipt's digest **is** the window's digest, and the disk is under the floor, oldest
+first; a reclaim writes a tombstone.
+
+### The measurement it waits on, and why that is a parameter rather than a blocker
+
+**Nothing on this robot measures free disk.** `crate::checkin` says so in its own header — §33.6's
+`storage_headroom` *"needs a `statvfs` nothing here calls"* — and `capacity` and `api` repeat it.
+So the third condition of §80's rule has no input.
+
+That did not stop the item, and the shape it took is the repository's own: `plan()` takes
+`free_bytes` and `floor_bytes` as arguments, for §45's reason and the kernel's — *the clock and the
+conditions are supplied*. The policy is decided in a test rather than on a machine whose disk
+happens to be full, and the missing measurement is a `Free::Unmeasured` the caller passes today.
+
+The syscall was deliberately **not** written here. `skynetd-io` carries `#![forbid(unsafe_code)]`,
+and this workspace's precedent for a necessary `unsafe` is a crate of its own with the argument in
+its header — `skynet-dl` exists exactly because *"the loader `unsafe`, extracted so it has one home
+and two callers"*. Putting a hand-rolled `statvfs` binding into the daemon would spend that property
+on a status field, and a `struct statvfs` whose layout differs between glibc and musl is not a thing
+to get wrong quietly. It is now a gap that blocks **two** named things instead of one, which is a
+better place for it to sit than in a doc comment.
+
+### Three conditions, tested against each other
+
+The rule is a conjunction, and every interesting failure is one term being sufficient alone. A suite
+that checked *"a cited window is kept"* and *"an uncollected window is kept"* separately would pass
+against an implementation that reclaimed whenever **either** held — so the fourteen tests are
+arranged as interactions:
+
+* the receipt alone and the floor alone, in one test, because either alone is the bug;
+* a cited window at zero free disk, where freeing it is the only way to reach the floor, and it
+  stays — the pass reports it **could not** reach the floor rather than reaching it;
+* a cited window that is also the **oldest**, so an implementation stopping at the first ineligible
+  candidate rather than skipping it frees nothing;
+* the floor boundary, where exactly at the floor is at it.
+
+### The citation is recorded, not inferred
+
+Every incident this daemon raises seals with `Reason::Fault`, so `reason == "fault"` answers *"does
+an incident name this window"* today. It answers it by **inference**, and it is one new incident
+path away from being wrong: a raise that sealed for `Estop` or `Operator` would produce a window an
+incident names and the reason does not, and the reclaim would free it. Silent, irreversible, and
+landing on exactly the window somebody is about to ask about.
+
+So `runtime.rs` writes `<name>.mcap.cited.json` at the raise, by the process that just put the
+window's name into the incident, and the citation carries the **digest**: §13 names a window for a
+monotonic instant and a reboot restarts that clock, so a citation believed on its filename would
+protect whichever window took the name next and leave the one it was about looking routine.
+
+### The scan hashes, and that is the expensive decision on purpose
+
+`upload::sealed` reads manifests, because it is cheap enough for a status route and nothing it feeds
+destroys anything. `retention::scan` hashes every window, because the manifest's own doc comment
+says what it is — *"a cache in the sense that it can be rebuilt, and it is not a second source of
+truth"* — and a window deleted because a sidecar carried another window's digest is the worst
+outcome this module can produce. There is a test for exactly that: a manifest and a receipt that
+agree with each other and not with the file, and the window survives.
+
+It costs one pass over a directory that is only read when the disk is already under the floor, and
+`run` refuses to scan at all without a measurement — so the state the daemon is in today costs one
+`matches!`.
+
+### Tombstone first, then the bytes
+
+A crash between the two leaves a tombstone for a window that still exists: visible, recoverable, and
+wrong in the direction that loses nothing. The reverse leaves freed bytes nothing accounts for,
+which is the state §80 exists to make impossible. It is a `?` rather than best effort, and a test
+forces the failure by putting a directory where the log wants a file.
+
+`reclaimed.jsonl` is **not** the audit log, and the reason is the subject rather than the shape.
+§38.3's log is *"small, append-only, and kept for the life of the machine"* — right in every
+respect — and every entry carries an actor and a previous value. A reclaim has neither: it is not a
+decision somebody made, it is a consequence of a disk. Writing one there would put a digest into a
+`detail` string, where it is prose rather than a field, which is the mistake §10's attestation spent
+a session undoing.
+
+### The mutation run found a rule written twice
+
+Twelve mutations, eight caught. Two of the four survivors were the same finding: `plan` had an early
+return for a disk already above the floor, and the loop's first test is `free + freed >= floor`,
+which on the first iteration is exactly `free >= floor`. The early exit produced an identical plan
+through a **second copy of the rule**, and breaking the copy broke no test. It is removed, the floor
+is expressed once, and the boundary test now reaches the surviving copy.
+
+The other two were a missing ordering test — `read_dir` has no order worth relying on, and the
+fixture happened to create files in sorted order — and a bad mutation of mine that left the `?` in
+place. **Eleven of eleven caught** after the two new tests.
+
+### What is on the board that was not
+
+`GET /blackbox` carries a `retention` block beside §79's `collection`, because they are two halves
+of one question: whether the Hub has a window, and whether this robot still does. It reports
+`free_bytes: null` with a sentence saying why, which is §33.6's treatment one level up — a route
+that omitted the field would leave an operator unable to tell a robot with plenty of room from one
+whose disk nothing can see. It does **not** scan.
+
+`DEFAULT_FLOOR_BYTES` is one gigabyte and is a placeholder with the reasoning attached rather than a
+decided number: enough for a preallocated ring plus an OTA slot on the smallest machine §28's table
+admits. It sits in code rather than in §38's configuration deliberately — a floor an operator can
+lower to zero is a floor that authorises deleting everything, and that is the owner's decision.
+
+### What this leaves open, precisely
+
+| Open | Blocked on |
+|---|---|
+| A `statvfs`, and with it §33.6's `storage_headroom` and §80's third condition | A crate to hold the `unsafe`, and the struct layout across libcs |
+| The floor as a number | The owner. One gigabyte is a placeholder that says so |
+
+§80's row can move from *"decided, unbuilt"* to *"built, waiting on a disk measurement"* — but §80
+is in `docs/skynet-os-architecture.md`, which is **mirrored**, and this session was told not to
+touch the Hub repository. The edit is not made rather than made on one side, and this is the note
+that says so.
+
+### Verified
+
+* `cargo test --workspace` — **1,445 passed**, 0 failed, 7 ignored, up 14
+* 11 of 11 mutations of the policy caught, after two tests the first run asked for
+* `cargo fmt --check` and `cargo clippy --workspace --all-targets` clean
+* `python3 editions/python/run_corpus.py --min-passed 1109` — 1,109 of 1,109, unchanged
+* `check-golden-path.mjs`, `check-mirrors.mjs`, `check-contract-mirrors.mjs` clean
+* Nothing in the Hub repository was touched; `git status` there is empty

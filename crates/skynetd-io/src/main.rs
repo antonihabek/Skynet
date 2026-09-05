@@ -1333,6 +1333,36 @@ fn report_upload(
         }
         skynetd_io::upload::Step::Idle { .. } | skynetd_io::upload::Step::Waiting { .. } => {}
     }
+
+    // §80's reclaim, after the collection pass rather than before it: a window that has just
+    // gained a receipt is a window that may now be reclaimable, and running the two in the other
+    // order would leave every reclaim a pass behind.
+    //
+    // It does nothing today, and the call is here rather than deferred so that the day
+    // `free_of` returns a number there is no wiring left to remember. `run` refuses to scan
+    // without a measurement, so this costs one `matches!`.
+    let free = skynetd_io::retention::free_of(layout);
+    let (plan, failures) =
+        skynetd_io::retention::run(layout, free, skynetd_io::retention::DEFAULT_FLOOR_BYTES);
+    for window in &plan.reclaim {
+        eprintln!(
+            "skynetd: black box — {} was reclaimed under §80's floor; its tombstone holds \
+             {} bytes at {}",
+            window.name, window.size_bytes, window.digest
+        );
+    }
+    for failure in &failures {
+        eprintln!("skynetd: black box — a window could not be reclaimed: {failure}");
+    }
+    if !plan.reclaim.is_empty() && !plan.reaches_floor {
+        // The sentence that sends somebody to look somewhere else. Everything reclaimable is gone
+        // and the disk is still under the floor, so what is left is either incidents — which are
+        // never reclaimed — or something that is not the black box at all.
+        eprintln!(
+            "skynetd: black box — everything reclaimable is gone and the disk is still under \
+             §80's floor. What remains is cited by an incident or uncollected; see GET /blackbox"
+        );
+    }
 }
 
 fn report_drain(
