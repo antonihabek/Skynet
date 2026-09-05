@@ -1335,6 +1335,132 @@
         "bench_age_days": 400
       },
       "expected": "{\"awarded\":\"none\",\"expires_in_days\":0,\"failures\":[],\"missing\":[],\"reasons\":[\"The body is simulated (§35.3), so the award is capped at guest; the evidence supports host.\",\"Bench results are older than a year; the award has lapsed.\"]}"
+    },
+    {
+      "id": "field-conformance-on-a-rounding-tie",
+      "note": "A conformance of 0.998125 is 99.8125% exactly — a double, not an approximation — so the third decimal is a tie. `toFixed(3)` takes the larger and prints 99.813; round-half-to-even prints 99.812. Every other field value in this corpus rounds nowhere near a half, so the suspension notice an operator reads was unprotected against a formatter that looked equivalent.",
+      "input": {
+        "claimed": "guest",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ],
+        "field_conformance": 0.998125
+      },
+      "expected": "{\"awarded\":\"none\",\"expires_in_days\":null,\"failures\":[],\"missing\":[],\"reasons\":[\"Field conformance 99.813% is below the 99.9% floor; the award is suspended pending re-measurement.\"]}"
+    },
+    {
+      "id": "duplicate-results-keep-the-last",
+      "note": "Two results for one test id. `new Map(entries)` keeps the last, so the failing re-run governs and the award is refused — first-wins would award guest on a stale pass. Nothing else in this corpus reports a test twice, so the rule held by luck rather than by test.",
+      "input": {
+        "claimed": "guest",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "fail",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ]
+      },
+      "expected": "{\"awarded\":\"none\",\"expires_in_days\":null,\"failures\":[\"rhal.abi.version\"],\"missing\":[],\"reasons\":[\"guest: 1 failing, 0 unmeasured.\"]}"
     }
   ]
 }

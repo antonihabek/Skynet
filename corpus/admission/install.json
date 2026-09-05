@@ -1708,6 +1708,106 @@
         "observed_digest": "sha256:other"
       },
       "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"signature_failed\",\"message\":\"A release signature was present and did not verify. The bytes are not the ones the signer attested to — treat this as tampering until somebody proves otherwise.\",\"severity\":\"error\"},{\"code\":\"digest_mismatch\",\"message\":\"The package contents do not hash to the digest in its manifest.\",\"severity\":\"error\",\"subjects\":[\"sha256:pkg\",\"sha256:other\"]},{\"code\":\"isolation_violation\",\"message\":\"A policy package may not run unsandboxed. Only drivers touch hardware directly.\",\"severity\":\"error\"},{\"code\":\"budget_exceeded\",\"message\":\"This robot cannot supply the resources the package declares it needs.\",\"severity\":\"error\",\"subjects\":[\"RAM: needs 512 MB, has 64 MB\"]},{\"code\":\"over_request\",\"message\":\"The package requests permissions it never declared a need for.\",\"severity\":\"error\",\"subjects\":[\"locomotion.walk\"]}]}"
+    },
+    {
+      "id": "os-version-with-an-empty-segment",
+      "note": "A malformed version both editions already agree about. `Number(\"\")` is 0 and a failed Rust parse falls back to 0, so \"1..0\" is exactly \"1.0.0\" and the package installs. This pins the agreement; it deliberately does *not* pin the neighbouring case where the two disagree — a segment like \"0-rc1\" is NaN to the reference and 0 to the Rust edition, which is a specification question rather than a defect, and it is recorded in §80 rather than settled here by whichever edition was easier to change.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "min_os_version": "1.0.0"
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1..0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[]}"
+    },
+    {
+      "id": "reserved-and-denied",
+      "note": "The warning channel requested *and* withheld by the operator profile. §49.1 is checked before the denials on purpose — a reserved token is not something an operator declined, it is something nobody can grant — so `capability_reserved` is reported first and the operator is told the one they can never give. No other case has a token that is both.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "hri.warning"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "hri.warning"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "hri.warning"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": [],
+          "denied": [
+            "hri.warning"
+          ]
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"capability_reserved\",\"message\":\"The audible warning before autonomous motion is a system function and no grant confers it. A package that could claim this channel could silence its own warning, which removes a control the operator's risk assessment relied on (§49.1).\",\"severity\":\"error\",\"subjects\":[\"hri.warning\"]},{\"code\":\"capability_denied\",\"message\":\"The operator profile withholds capabilities this package requires.\",\"severity\":\"error\",\"subjects\":[\"hri.warning\"]}]}"
     }
   ]
 }

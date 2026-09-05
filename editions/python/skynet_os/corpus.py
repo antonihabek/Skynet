@@ -36,6 +36,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .canonical import canonical
+from . import admission as admission_module
+from . import certification as certification_module
 from . import digest as digest_module
 from . import embodiment as embodiment_module
 from . import kinematics as kinematics_module
@@ -255,6 +257,14 @@ def _limits(_label: str, case_input: dict[str, Any]) -> Any:
     return safety_module.limits_to_json(case_input)
 
 
+def _admission(_label: str, case_input: dict[str, Any]) -> Any:
+    return admission_module.admission_to_json(case_input)
+
+
+def _certification(_label: str, case_input: dict[str, Any]) -> Any:
+    return certification_module.certification_to_json(case_input)
+
+
 def _cycle(_label: str, case_input: dict[str, Any]) -> Any:
     return safety_module.verdict_to_json(case_input)
 
@@ -288,6 +298,8 @@ def _watchdog(_label: str, case_input: dict[str, Any]) -> Any:
 
 
 HANDLERS: dict[str, Handler] = {
+    "admission": _admission,
+    "certification": _certification,
     "cycle": _cycle,
     "digest": _digest,
     "fuzz": _fuzz,
