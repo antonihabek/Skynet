@@ -2,7 +2,7 @@
 
 > **This is not yet an edition.** §31.4: *"An edition that has not passed the corpus is not an
 > edition. It cannot carry the name, appear in the matrix, or be installed by `skynetd`."* It
-> currently passes **29 of 31 corpora**. The runner prints that number on every run and this
+> currently passes **30 of 31 corpora**. The runner prints that number on every run and this
 > file will keep saying so until it is 31.
 
 §73's last column has carried one entry against §31 since the table was written: *"The second
@@ -71,9 +71,10 @@ package index is an edition that cannot be checked on the machine it is being re
 | `blackbox` | 21 | §26's record layout, the ring header, the six schemas, and a sealed file |
 | `calibration` | 31 | §45's validity, the guards a set feeds, and which sets a body can hold |
 | `telemetry` | 25 | §74's windows, the coverage they tile, and §15's field conformance |
-| | **1,068** | of 1,100 |
+| `provenance` | 21 | §56's three classes, the order that makes them ungameable, and §56.5's tolerance |
+| | **1,089** | of 1,104 |
 
-The other 2 corpora have no handler at all — 32 cases, counted in every run. They are not
+The one remaining corpus has no handler at all — 15 cases, counted in every run. They are not
 skipped and not hidden: a runner that quietly passed most corpora and printed "OK" would be the
 most misleading artifact in this repository.
 
@@ -149,6 +150,7 @@ skynet_os/
   blackbox.py      §26's bytes: the ring record, the header, the schemas and the MCAP file
   calibration.py   §45's validity, expiry and the guards a parameter set feeds
   telemetry.py     §74's windows, what a set of them covers, and §15's ratio
+  provenance.py    §56's classes, and whether two roll-ups of one run agree
   js.py            the four JavaScript expressions Python has no equivalent for
   corpus.py        the runner and its dispatch
 run_corpus.py      the CLI
@@ -562,8 +564,63 @@ across `calibration` and `telemetry` together is one sentence: **this corpus is 
 middle of a rule and had almost nothing on the edges of one.** Fifteen of the twenty-two cases added
 across the two rounds are boundaries.
 
+## What the thirteenth round found: a case that fails an edition for reading its input
+
+`provenance` — 17 cases, and **one failed on the first run**, which is the first time that has
+happened to a transcription in this edition rather than to a mutation of one.
+
+`provenance/scores :: two-robots-that-computed-nothing` has an input of
+`{"on_robot": null, "on_hub": null}` and an expectation computed from `NaN`:
+
+    "The robot rolled this run up to NaN and the Hub to NaN…"
+
+JSON cannot spell `NaN`, and the generator writes every input through `JSON.stringify`. So the
+frozen input is a *different document* from the one its expectation was computed against — which is
+the exact hazard `tools/corpus-gen/generate.ts` names at the frame-bindings rule and **refuses to
+create there**:
+
+> the frozen input would be a *different* body from the one the expectation was computed from —
+> worse than no case at all, because it would fail an edition for reading the file correctly.
+
+It failed this edition for reading the file correctly.
+
+### The convention was real; it was written down in one adapter
+
+`crates/skynet-corpus/src/blackbox.rs` states it — *"`null` is how the oracle spells NaN, which is
+how §24 spells 'this is not measured'"* — and the provenance dispatch applies the same
+`unwrap_or(f64::NAN)` without a word. Two editions therefore agreed, and a third had to rediscover
+the rule from a failing case.
+
+It is also **not a blanket rule**, which is why it needed care rather than a `?? NaN` everywhere.
+The reference's own type decides:
+
+* type admits null — `Frame.worstSkewUs: number | null` — then the null **is** the value;
+* type is a bare `number` — `scoresAgree(onRobot: number, onHub: number)` — then no caller could
+  have supplied one, and it can only be a non-finite value the format cannot write.
+
+An edition picking one reading for every null would be wrong on half of them, in opposite
+directions. `corpus/README.md` now says this where the format is described, because it is a property
+of the format rather than of any one corpus.
+
+### Then ten of seventeen, and four more cases
+
+| New case | The gap |
+|---|---|
+| `a-segment-recorded-as-empty` | `""` is a segment written down as empty, not a missing one. A falsy test reports `not_replayable` against a run whose recording exists |
+| `a-simulator-whose-birth-certificate-attests-nothing` | Every simulator case was otherwise perfect, so the branch that **skips** §50's checks for a simulator was doing nothing observable |
+| `fewer-seeds-than-the-benchmark-supplies` | Every seed case was three against three, so the two counts in `seeds_not_supplied` were equal and reporting them the wrong way round said the same sentence |
+| `a-difference-of-exactly-the-tolerance` | `1e-9` apart is **agreement**. Nothing sat on the boundary, so `<` and `<=` were the same function |
+
+And `a-difference-just-outside-the-tolerance`'s note said *"The boundary, frozen"* at ten times the
+tolerance. That is the **fifth** note this session claiming a property its own input does not reach.
+Its note now says what it is, and the boundary has a case of its own.
+
+Fifteen of seventeen mutations caught, up from ten; both survivors are no-ops — `device_unknown`
+already blocks `field` through the reasons list, and `abs(NaN − NaN) <= 1e-9` is false however the
+guard above it is written.
+
 ## What is next, in dependency order
 
-`provenance` (17 cases), `live` (15). Two corpora, 32 cases, and none of them is a foundation any of the others needs. Everything after the
+`live` (15 cases). One corpus, and none of them is a foundation any of the others needs. Everything after the
 foundation is mechanical; the foundation is canonical serialisation and a runner that refuses to lie
 about what it has not done.

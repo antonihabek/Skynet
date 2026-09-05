@@ -1988,3 +1988,90 @@ drifting. Fifteen of the twenty-two are the second kind, and none of them existe
 * `python3 editions/python/self_check.py` — 41 checks; CI ratchet raised to 1,068
 
 **Twenty-nine of thirty-one corpora complete. Two remain, 32 cases:** `provenance` 17, `live` 15.
+
+---
+
+## 31. `provenance` — the first case to fail an edition for reading its input correctly
+
+`provenance` is §56: what an on-robot evaluation result is worth, given who signed it. **17 cases,
+1,068 → 1,084 on the first run, and one failure** — which is the first time a transcription in this
+edition has gone red on a case rather than on a mutation of one.
+
+### The case, and why it was the corpus rather than the edition
+
+`provenance/scores :: two-robots-that-computed-nothing` carries an input of
+`{"on_robot": null, "on_hub": null}` and an expectation computed from `NaN`:
+
+> "The robot rolled this run up to **NaN** and the Hub to **NaN**…"
+
+JSON cannot spell `NaN`, and the generator writes every input through `JSON.stringify`. The frozen
+input is therefore a different document from the one its expectation was computed against — which is
+precisely the hazard `tools/corpus-gen/generate.ts` names, at the frame-bindings rule, and **refuses
+to create there**:
+
+> The non-finite coefficient rule has **no case here, and cannot have one.** This generator writes
+> every input through `JSON.stringify`, which renders infinity as `null`, so the frozen input would
+> be a *different* body from the one the expectation was computed from — worse than no case at all,
+> because it would fail an edition for reading the file correctly.
+
+That sentence was written about a rule with no case. This is the same shape with a case, and it did
+exactly what the sentence predicts.
+
+### It is a real convention, stated in one adapter and applied silently in another
+
+`crates/skynet-corpus/src/blackbox.rs` says it in its own header — *"`null` is how the oracle spells
+NaN, which is how §24 spells 'this is not measured'"* — and the provenance dispatch does the same
+thing with `unwrap_or(f64::NAN)` and no comment. So the two editions agreed, the convention was
+never written where a reader of the corpus would find it, and a third edition rediscovered it from a
+failing case.
+
+The reading is **forced rather than chosen**, and that is what makes the convention sound: the field
+is typed `number` in the reference, not `number | null`, so no caller could have supplied a null and
+the only thing it can be is a value the format cannot write.
+
+It is also emphatically **not a blanket rule**, which is why a `?? NaN` on every null would be
+wrong:
+
+* the reference's type **admits** null — `Frame.worstSkewUs: number | null`,
+  `CalibrationRecord.method?: string | null` — and the null is the value;
+* the reference's type is a **bare `number`** — `scoresAgree(onRobot: number, onHub: number)`,
+  `Cycle.basePose: number[]` — and the null is a non-finite value.
+
+An edition picking one reading for all nulls is wrong on half of them in opposite directions:
+reading the first kind as NaN discards a declared absence, and reading the second kind as an absence
+answers a different question from the one the expectation was computed against.
+
+`corpus/README.md` carries this now, in the section describing the format, with both halves and the
+generator's refusal quoted beside them. It is a property of the format and belonged there rather
+than in one adapter's doc comment.
+
+### Then the mutation run: ten of seventeen, and four more cases
+
+| New case | The gap |
+|---|---|
+| `a-segment-recorded-as-empty` | `""` is a segment somebody wrote down as empty, not a missing one. §56.4's check is against null and undefined and nothing else, and a falsy test reports `not_replayable` against a run whose recording exists |
+| `a-simulator-whose-birth-certificate-attests-nothing` | Every simulator case was otherwise perfect, so the branch that **skips** §50's two checks for a declared simulator was doing nothing observable. An edition running them anyway puts `birth_unattested` in front of a publisher who cannot act on it |
+| `fewer-seeds-than-the-benchmark-supplies` | Every seed case was three against three, so `seeds_not_supplied`'s two counts were equal and an edition reporting them the wrong way round said the same sentence — while the ordering rule, *expected then supplied*, is the reason they are a pair |
+| `a-difference-of-exactly-the-tolerance` | `1e-9` apart is **agreement**, because the comparison is `<=`. Nothing sat on the boundary, so `<` and `<=` were the same function |
+
+**1,100 → 1,104.** Rust reproduces all four without a change.
+
+And `a-difference-just-outside-the-tolerance`'s note read *"The boundary, frozen"* — at `1e-8`, which
+is ten times the tolerance. That is the **fifth** instance this session of a note claiming a property
+its own input does not reach, after `frame-astral-stream-name`, `temperature-delta`, the `pending`
+ordering and `arm-without-an-imu`'s count. The note now says what the case is, and the boundary has
+a case of its own.
+
+Fifteen of seventeen mutations caught, up from ten. Both survivors are no-ops: `device_unknown`
+already blocks `field` through the reasons list, so dropping `device_known` from the attribution
+test changes nothing, and `abs(NaN − NaN) <= 1e-9` is false however the guard above it is written.
+
+### Verified
+
+* `python3 editions/python/run_corpus.py --min-passed 1089` — **1,089 passed, 0 failed**, 15 not
+  implemented, of 1,104
+* `cargo test -p skynet-corpus --test corpus` — 1,104 cases, byte for byte
+* `cargo test --workspace` — **1,431 passed**, 0 failed, 7 ignored
+* `python3 editions/python/self_check.py` — 41 checks; CI ratchet raised to 1,089
+
+**Thirty of thirty-one corpora complete. One remains, 15 cases:** `live`.
