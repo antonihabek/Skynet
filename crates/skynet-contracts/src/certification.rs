@@ -344,7 +344,13 @@ pub fn award_certification(input: &CertificationInput) -> CertificationVerdict {
             let mut tier_missing: Vec<String> = Vec::new();
 
             for test in &required {
-                let result = input.results.iter().find(|r| r.test_id == test.id);
+                // **Last wins**, not first. The reference builds a `Map` from the results and a
+                // later entry overwrites an earlier one, so a re-run supersedes what it re-ran.
+                // This was `.find(..)` — first wins — which is the same answer on every input
+                // where a test is reported once, and awards a tier on a *stale pass* when a
+                // vendor reports a failing re-run alongside the pass it replaced.
+                // `certification/award.json :: duplicate-results-keep-the-last` is that input.
+                let result = input.results.iter().rev().find(|r| r.test_id == test.id);
                 match result {
                     None
                     | Some(SctsResult {

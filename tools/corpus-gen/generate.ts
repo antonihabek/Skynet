@@ -1183,6 +1183,31 @@ admissionCase('every-finding-at-once',
     capacity: capacity({ ram_mb: 64 }),
   })
 
+admissionCase('os-version-with-an-empty-segment',
+  'A malformed version both editions already agree about. `Number("")` is 0 and a failed Rust '
+  + 'parse falls back to 0, so "1..0" is exactly "1.0.0" and the package installs. This pins the '
+  + 'agreement; it deliberately does *not* pin the neighbouring case where the two disagree — a '
+  + 'segment like "0-rc1" is NaN to the reference and 0 to the Rust edition, which is a '
+  + 'specification question rather than a defect, and it is recorded in §80 rather than settled '
+  + 'here by whichever edition was easier to change.',
+  {
+    manifest: manifest({ min_os_version: '1.0.0' }),
+    capacity: capacity({ os_version: '1..0' }),
+  })
+
+admissionCase('reserved-and-denied',
+  'The warning channel requested *and* withheld by the operator profile. §49.1 is checked before '
+  + 'the denials on purpose — a reserved token is not something an operator declined, it is '
+  + 'something nobody can grant — so `capability_reserved` is reported first and the operator is '
+  + 'told the one they can never give. No other case has a token that is both.',
+  {
+    manifest: manifest({
+      requests: ['hri.warning'],
+      embodiment: { capabilities: ['hri.warning'], control_mode: 'torque' },
+    }),
+    capacity: capacity({ denied: ['hri.warning'], capabilities: ['hri.warning'] }),
+  })
+
 // ── vocabulary ───────────────────────────────────────────────────────────────
 //
 // The closed string sets both editions must agree on, frozen as data.
@@ -1386,6 +1411,24 @@ certificationCase('simulated-no-evidence',
 certificationCase('simulated-and-lapsed',
   'The cap runs before expiry, so a simulated body with year-old bench results still lapses to none rather than resting at guest.',
   { claimed: 'host', results: results(HOST_TESTS), simulator: true, bench_age_days: 400 })
+
+// Two more, added because a mutation run on the Python edition showed the corpus survived them.
+
+certificationCase('field-conformance-on-a-rounding-tie',
+  'A conformance of 0.998125 is 99.8125% exactly — a double, not an approximation — so the third '
+  + 'decimal is a tie. `toFixed(3)` takes the larger and prints 99.813; round-half-to-even prints '
+  + '99.812. Every other field value in this corpus rounds nowhere near a half, so the suspension '
+  + 'notice an operator reads was unprotected against a formatter that looked equivalent.',
+  { claimed: 'guest', results: results(GUEST_TESTS), field_conformance: 0.998125 })
+
+certificationCase('duplicate-results-keep-the-last',
+  'Two results for one test id. `new Map(entries)` keeps the last, so the failing re-run governs '
+  + 'and the award is refused — first-wins would award guest on a stale pass. Nothing else in this '
+  + 'corpus reports a test twice, so the rule held by luck rather than by test.',
+  { claimed: 'guest', results: [
+    ...results(GUEST_TESTS),
+    ...results([GUEST_TESTS[0]], 'fail'),
+  ] })
 
 // ── frames, §44.3 ────────────────────────────────────────────────────────────
 //

@@ -2,7 +2,7 @@
 
 > **This is not yet an edition.** §31.4: *"An edition that has not passed the corpus is not an
 > edition. It cannot carry the name, appear in the matrix, or be installed by `skynetd`."* It
-> currently passes **13 of 31 corpora**. The runner prints that number on every run and this
+> currently passes **15 of 31 corpora**. The runner prints that number on every run and this
 > file will keep saying so until it is 31.
 
 §73's last column has carried one entry against §31 since the table was written: *"The second
@@ -55,9 +55,11 @@ package index is an edition that cannot be checked on the machine it is being re
 | `fuzz/observation` | 48 | seeded vectors through the same path |
 | `transport` | 44 | §6's planner: binding, scaling, retargeting, rate and observations |
 | `fuzz/transport` | 60 | seeded vectors through the same path |
-| | **592** | of 1,061 |
+| `admission` | 36 | §8's install gate: signatures, budgets, grants and §49.1's reserved token |
+| `certification` | 20 | §15's award: absence is not a pass, and the evidence caps the claim |
+| | **648** | of 1,065 |
 
-The other 18 corpora have no handler at all — 469 cases, counted in every run. They are not
+The other 16 corpora have no handler at all — 417 cases, counted in every run. They are not
 skipped and not hidden: a runner that quietly passed ten corpora and printed "OK" would be the
 most misleading artifact in this repository.
 
@@ -69,8 +71,8 @@ without it, implementing one file of three would have counted the other 108 case
 answers* rather than as *untranscribed*, and the number would have got worse precisely as the
 edition improved. A corpus is complete or it is not, however many of its files are done.
 
-`self_check.py` holds the runner to this against synthetic corpora with known answers: **27
-checks**, of which four test the detector and twelve test the language traps below.
+`self_check.py` holds the runner to this against synthetic corpora with known answers: **29
+checks**, of which four test the detector and fourteen test the language traps below.
 
 ## Where the values come from
 
@@ -110,6 +112,8 @@ skynet_os/
   safety.py        §7's eight guards, §7.6's limit resolution, and the per-cycle verdict
   observation.py   §25.1's frame assembly, and the record §26 keeps of it
   transport.py     §6's planner: how a policy's action space reaches a body
+  admission.py     §8's install gate, and §49.1's one reserved capability
+  certification.py §15's award, and the evidence that caps it
   corpus.py        the runner and its dispatch
 run_corpus.py      the CLI
 self_check.py      the runner's own accounting, and the traps the corpus cannot reach
@@ -215,10 +219,19 @@ TypeScript, the Rust and the corpus together, and belongs in its own round.
 ## What the fifth round found: six more gaps, and a defect all three editions shared
 
 `transport.py` passed all 100 of its cases first run. Ten mutations; **four caught, six not**.
-The largest catch is worth stating on its own: walking a warning's `subjects` as a Python
-`set` instead of in insertion order breaks **51 cases**. A Python `set` has no promised order
-at all, so that edition would produce correct plans whose warnings are shuffled *differently
-between runs of the same input*.
+
+The largest catch is worth stating on its own, because the *number* is the finding. Walking a
+warning's `subjects` as a Python `set` rather than in insertion order breaks — six identical
+runs of the identical mutated code:
+
+```
+41, 44, 48, 52, 58, 69 cases
+```
+
+CPython randomises string hashing per process, so a `set` there does not merely order the
+warnings wrongly: it orders them **differently on every start**. An edition that reached for
+the obvious type would produce entirely correct plans whose warnings shuffle between runs,
+and a suite that happened to pass once would fail the next time nobody changed anything.
 
 Four of the six became corpus cases, because every edition can express them:
 
@@ -246,8 +259,51 @@ editions disagreeing; it is structurally unable to detect them agreeing about so
 Fixed in all three — the reference first, then the Rust, then this edition — and the corpus
 regenerated, which is the only reason the change is visible at all.
 
+## What the sixth round found: a bug in the Rust edition, and a question for the owner
+
+`admission.py` and `certification.py` completed the four §31.3 calls *the ones that carry the
+weight*. Both passed first run; sixteen mutations between them, and three of the survivors
+became corpus cases. Two of those three found something bigger than a gap.
+
+### The Rust edition awarded a tier on a stale pass
+
+`duplicate-results-keep-the-last` reports one test twice — a pass, then the failing re-run that
+replaced it. The reference builds a `Map`, so the **last** wins and the award is refused.
+`skynet-contracts` used `.iter().find(..)`, which is **first** wins, and awarded `guest` on the
+stale pass.
+
+That is the same answer on every input where a test is reported once, which is every input the
+corpus had. A vendor re-running a failed conformance test and submitting both results would have
+been certified by the edition that runs **on the robot**. Fixed in
+`crates/skynet-contracts/src/certification.rs`.
+
+### A version comparison the two editions answer differently — left open
+
+§8.2's `min_os_version` gate splits on `.` and compares segments as numbers. The reference maps
+`Number`, so `"0-rc1"` is **NaN** — and `NaN < 0` is false, so the robot reads as *newer* and the
+package installs. `skynet-contracts` parses with a fallback of **0**, so the same robot reads as
+*older* and it is refused. A robot on `1.2.0-rc1` is told by the Hub that a package needing
+`1.2.1` will install, and refused it by the robot.
+
+This one is **not** fixed, and deliberately. The two answers are not equally safe: the reference
+**fails open**, so any robot with a non-numeric segment satisfies *every* `min_os_version` —
+which is the one thing that field exists to prevent. Making the Rust edition agree would ship
+that permissiveness to the robot; making the reference agree is a specification change that the
+Hub's mirrored copy inherits. It is recorded in §80 as an owner's decision, and
+`os-version-with-an-empty-segment` pins the neighbouring case the two **do** agree on, so the
+agreement cannot rot while the disagreement is open.
+
+### And a hazard in the mutation harness itself
+
+A mutation whose replacement has the *same byte length* as the original can leave a stale
+`__pycache__` after the revert — CPython keys the cache on `(mtime, size)`, and a revert inside
+the same second changes neither. It produced one false failure here, against code that was no
+longer on disk. Every mutation figure in this file was re-measured with the cache cleared before
+each run: **34 of 34 caught**.
+
 ## What is next, in dependency order
 
-`admission` (34) and `certification` (18) — the last two of the four §31.3 calls the ones that
-carry the weight. Then `skill` (85), `identity` (42), `opstate` (36) and the rest. Everything after the foundation is mechanical; the foundation is canonical
+`skill` (85 cases), `identity` (42), `opstate` (36), `transfer` (31), `ota` (28), `power` (28),
+`cell` (26), `checkin` (23) — and then the eight smaller ones. The four that carry the weight are
+done. Everything after the foundation is mechanical; the foundation is canonical
 serialisation and a runner that refuses to lie about what it has not done.

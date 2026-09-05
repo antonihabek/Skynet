@@ -240,9 +240,10 @@ def main() -> int:
 
     divergences()
     transport_divergences()
+    admission_divergences()
 
     print()
-    total = 15 + 8 + 4
+    total = 15 + 8 + 4 + 2
     if FAILURES:
         print(f"self-check FAILED — {len(FAILURES)} of {total}")
         return 1
@@ -553,6 +554,70 @@ def transport_divergences() -> None:
         "a peak present and null does raise it -- `!== undefined` is strict, and `.get` is not",
         any(w["code"] == "unscalable_channel" for w in null_peak["warnings"]),
         f"warnings={[w['code'] for w in null_peak['warnings']]}",
+    )
+
+
+# -- The admission trap ---------------------------------------------------------------------------
+#
+# `capacity.simulator !== true` is strict, and Rust's field is an `Option<bool>` which cannot hold a
+# truthy non-boolean at all -- so the corpus cannot reach the difference between a strict test and a
+# truthy one. §55.1's whole point is that an environment package installed against a robot with no
+# simulator driver is inert, and the warning is the only thing that says so.
+
+MANIFEST = {
+    "schema_version": 1,
+    "id": "acme/world",
+    "version": "1.0.0",
+    "kind": "environment",
+    "digest": "sha256:pkg",
+    "isolation": "sandboxed",
+    "budget": {"ram_mb": 512, "vram_mb": 2048, "cpu_cores": 2, "disk_mb": 4096},
+    "embodiment": {"capabilities": [], "control_mode": "torque"},
+    "requests": [],
+}
+
+CAPACITY = {
+    "ram_mb": 8192,
+    "vram_mb": 8192,
+    "cpu_cores": 6,
+    "disk_mb": 65536,
+    "os_version": "1.0.0",
+    "capabilities": [],
+    "granted": [],
+    "installed": [],
+}
+
+
+def admit(**capacity_overrides: Any) -> dict[str, Any]:
+    from skynet_os import admission
+
+    capacity = dict(CAPACITY)
+    capacity.update(capacity_overrides)
+    return admission.admit_package(
+        {
+            "manifest": MANIFEST,
+            "capacity": capacity,
+            "signature": "verified",
+            "observed_digest": "sha256:pkg",
+        }
+    )
+
+
+def admission_divergences() -> None:
+    print()
+    print("the admission trap the corpus cannot reach")
+
+    truthy = admit(simulator=1)
+    check(
+        "a truthy-but-not-true `simulator` is not a simulator: the environment is still inert",
+        any(f["code"] == "environment_inert" for f in truthy["findings"]),
+        f"findings={[f['code'] for f in truthy['findings']]}",
+    )
+    real = admit(simulator=True)
+    check(
+        "...and a declared simulator raises no such warning",
+        not any(f["code"] == "environment_inert" for f in real["findings"]),
+        f"findings={[f['code'] for f in real['findings']]}",
     )
 
 

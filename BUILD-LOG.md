@@ -1217,11 +1217,12 @@ Ten mutations. **Four caught, six not**, and the six split cleanly into two kind
 
 ### The largest catch, worth stating on its own
 
-Walking a warning's `subjects` as a Python `set` instead of in insertion order breaks **51 cases**.
-A JavaScript `Set` iterates in insertion order and a Python `set` has *no promised order at all* —
-so an edition that reached for the obvious type would produce entirely correct plans whose warnings
-are shuffled, **differently between runs of the same input**. Two lists are built this way: the
-unmapped roles, and the chains that need retargeting.
+Walking a warning's `subjects` as a Python `set` instead of in insertion order breaks **51 cases**
+— *and that number is not stable*, which item 22 measures and which is the real finding. A
+JavaScript `Set` iterates in insertion order and a Python `set` has *no promised order at all*, so
+an edition that reached for the obvious type would produce entirely correct plans whose warnings are
+shuffled, **differently between runs of the same input**. Two lists are built this way: the unmapped
+roles, and the chains that need retargeting.
 
 ### Four of the six were gaps in the corpus
 
@@ -1284,3 +1285,106 @@ Three commits on `main` in the OS repository and one in the Hub, **none pushed**
 | Python edition | 328 / 1,055 in 8 corpora | **592 / 1,061 in 13** |
 | Corpus | 1,055 cases | **1,061** — six added, each closing a mutation the suite survived |
 | Editions holding a shared defect | 3 | 0, for the one that was found |
+
+---
+
+## 22. `admission.py` and `certification.py` — a bug in the Rust edition, and a question that is not mine
+
+The last two of the four §31.3 calls *the ones that carry the weight*. **52 cases, 592 → 644
+passed**, both first run, zero failures. Sixteen mutations between them; three survivors became
+corpus cases, and two of those found something larger than a gap.
+
+### The Rust edition certified a robot on a stale pass
+
+`certification/award.json :: duplicate-results-keep-the-last` reports one test twice — a pass, and
+then the failing re-run that replaced it. The reference builds a `Map` from the results, so a later
+entry overwrites an earlier one and the **failing** result governs: award refused.
+
+`crates/skynet-contracts/src/certification.rs` used `input.results.iter().find(..)`. **First wins.**
+It awarded `guest` on the stale pass.
+
+```
+expected: {"awarded":"none", "failures":["rhal.abi.version"], …}
+actual:   {"awarded":"guest","failures":[],                   …}
+```
+
+That is the same answer on every input where a test is reported once, which is every input the
+corpus had held for as long as it has existed. A vendor re-running a failed conformance test and
+submitting both results would have been certified — by the edition that runs **on the robot**, which
+is the one §12's kernel gate reads. Fixed, with the reason and the case named at the line.
+
+### A version comparison the editions answer differently, and why it is still open
+
+§8.2's `min_os_version` gate splits both versions on `.` and compares the segments as numbers, and
+the two editions disagree about a segment that is not one:
+
+| | robot on `1.2.0-rc1`, package needs `1.2.1` |
+|---|---|
+| reference, and the Hub that mirrors it | **admits** — `Number("0-rc1")` is `NaN`, `NaN < 0` is false, so the robot reads as *newer* |
+| `skynet-contracts`, on the robot | **refuses** — an unparseable segment falls back to `0`, so the robot reads as *older* |
+
+The Hub tells an operator the package will install and the robot refuses it: the §17 disagreement
+this whole corpus exists to prevent, invisible because no case carried a malformed version.
+
+**Not fixed, and that is the decision.** Making the Rust edition agree would ship the reference's
+answer to the robot, and the reference **fails open**: a robot whose version has any non-numeric
+segment satisfies *every* `min_os_version`, which is precisely what that field exists to prevent.
+Making the reference agree is a change to the specification, which the Hub's mirrored `package.ts`
+inherits. Neither is a transcription's call, so it is written into **§80** as an owner's decision
+with both consequences stated — and `os-version-with-an-empty-segment` pins the neighbouring case
+they *do* agree on (`Number("")` and a failed Rust parse are both `0`), so the agreement cannot rot
+while the disagreement is open.
+
+### The other case: §49.1 is checked before the operator's denials
+
+`admission/install.json :: reserved-and-denied` requests the warning channel *and* has it withheld
+by the profile. The reference checks the reserved token first on purpose — a reserved token is not
+something an operator declined, it is something nobody can grant — so `capability_reserved` is
+reported before `capability_denied`. No case had a token that was both, so the ordering held by
+luck; moving the block now fails.
+
+### A hazard in the mutation harness, and every figure re-measured
+
+One mutation reported a failure against code that was no longer on disk. A mutation whose
+replacement has the **same byte length** as the original can leave a stale `__pycache__` after the
+revert: CPython keys the cache on `(mtime, size)`, and a revert inside the same second changes
+neither. The reordering mutations are exactly the same-length kind.
+
+Every mutation figure across all five modules was re-measured with the cache cleared before each
+run — **34 of 34 caught**, baseline zero — and one figure changed meaningfully.
+
+### The number that is not a number
+
+Item 21 recorded the `set`-ordering mutation as breaking 51 cases. It does not break 51 cases. Six
+identical runs of the identical mutated code:
+
+```
+41, 44, 48, 52, 58, 69
+```
+
+CPython randomises string hashing per process, so a `set` there does not merely order the warnings
+wrongly — it orders them **differently on every start**. An edition that reached for the obvious
+type would produce entirely correct plans whose warnings shuffle between runs, and a suite that
+happened to pass once would fail the next time nobody changed anything. The variance is a better
+statement of the hazard than any single figure, and item 21's is annotated rather than silently
+replaced.
+
+### Verified
+
+* `python editions/python/run_corpus.py` — **648 passed, 0 failed**, 417 not implemented, of 1,065
+* `python editions/python/self_check.py` — **29 checks**
+* `cargo test -p skynet-corpus --test corpus` — **1,065 cases across 77 files, byte for byte**
+* `cargo test --workspace` — **1,398 passed, 0 failed**
+* 34 of 34 mutations caught, cache cleared before each
+* `docs/skynet-os-architecture.md` byte-identical in both repositories after the §80 edit
+* **Fifteen of thirty-one corpora complete**, and all four §31.3 calls the load-bearing ones
+
+### Round state
+
+| | At §17 | Now |
+|---|---|---|
+| Python edition | 328 / 1,055 in 8 corpora | **648 / 1,065 in 15** |
+| Corpus | 1,055 cases | **1,065** — ten added, every one closing a mutation the suite survived |
+| Defects found in another edition | 0 | **2** — one fixed, one referred to §80 |
+
+Four commits on `main` in the OS repository and one in the Hub. **Nothing pushed.**
