@@ -992,3 +992,128 @@ because it is the property that keeps the number on every run true.
   every one parses
 * `node tools/check-contract-mirrors.mjs "../Robot Overflow"` — every mirrored contract matches;
   `docs/skynet-os-architecture.md` byte-identical in both repositories
+
+---
+
+# Round two — 2026-09-05
+
+Resumed from §17's stopping point, in the order it named. Baselines reproduced **before** anything
+was changed, so every number below is a delta rather than a claim:
+
+| | At §17 | Reproduced today |
+|---|---|---|
+| `cargo test --workspace` | 1,398 | **1,398 passed, 0 failed** |
+| `npx vitest run` | 1,735 / 72 files | **1,735 passed, 72 files** |
+| `python editions/python/run_corpus.py` | 328 / 1,055 | **328 passed, 727 unimplemented** |
+
+---
+
+## 18. The runner's fourth bucket, and the check that it counts
+
+§17 named this first and said why: `fuzz` is **one corpus spanning three files** — `cycle`,
+`observation` and `transport` — and the dispatch is keyed on the corpus. Implementing one of the
+three would send the other two into a handler never written for them, where they would raise and be
+counted as **failures**. 108 cases nobody has transcribed would have been reported as 108 wrong
+answers, and the number would have got worse exactly as the edition made progress.
+
+`Unimplemented` is the signal. A handler declines a **file** by name; the runner counts those cases
+in the same bucket as a corpus with no handler at all, keeps the two numbers separate, and refuses
+to call a corpus `complete` while it holds a declined file:
+
+```
+result   422 passed, 0 failed, 633 not implemented (525 in corpora with no handler,
+                                                    108 in files a handler declined), 1055 total
+complete cycle, digest, frames, kinematics, limits, predicate, roles, semver, vocabulary, watchdog
+declined fuzz/observation, fuzz/transport
+partial  fuzz
+```
+
+`partial` is the line that matters. All forty of `fuzz/cycle` pass, and `fuzz` is still **not**
+complete — which is the property the next four items depend on.
+
+### Declining is a property of a file, and the runner enforces that
+
+A handler that declines *some* of a file's cases and answers others is a defect in the edition
+rather than a gap in it, so the whole file is evaluated before anything is recorded and a mixed
+result is reported as failures. A number that read an inconsistency as honest progress is the one
+thing this runner exists to prevent.
+
+### The check found the rule, by disagreeing with it
+
+`self_check.py` runs the runner against **synthetic** corpora with known answers and a swapped
+dispatch table — 15 checks, four of which test the *detector* rather than the happy path. One of
+them was written asserting that every case of a partially-declined file fails, "including the ones
+that answered correctly", and it failed against the code.
+
+The code was right. A sibling case that produced the right bytes **did** produce them, and failing
+it to punish the handler would be a false claim in the opposite direction — the same error as the
+one being guarded against, pointing the other way. Nothing can be hidden either way, because the
+declined case is already a failure and the run is red regardless. The rule is written down in the
+module now because writing the check the wrong way round is what found it.
+
+The last check deletes the declining file and asserts the same corpus **becomes** complete, so an
+exclusion that happened for some other reason would show up.
+
+---
+
+## 19. §31.3's second edition: `safety.py`, and the guards the corpus cannot reach
+
+The largest single lever §17 identified, and it landed as predicted: `limits` 19, `cycle` 35 and
+`fuzz/cycle` 40 — **94 cases, 328 → 422 passed, 0 failed**, on the first run.
+
+966 lines of `reference/typescript/safety.ts` transcribed. Every value read from the reference,
+never from `corpus/`, which is the discipline that makes the exercise worth anything: an edition
+generated from the corpus agrees with it by construction and proves nothing.
+
+### Passing first time is a claim that has to be earned
+
+A suite that goes green on the first run has told you nothing until you have shown it can go red.
+Five mutations, each reverted:
+
+| Mutation | Cases it broke |
+|---|---|
+| the sign dropped from the magnitude clamp | 16 |
+| the rate limiter removed (it runs *after* clamping, because clamping makes step changes) | 13 |
+| a `hold` forwards the clamped command anyway | 17 |
+| the `no_collision_margin` notice not emitted | 1 |
+| proximity scaling removed | 6 |
+
+### The sixth mutation broke nothing, and that is the finding
+
+`_finite_number` rejects `bool` by name, because `typeof true === 'number'` is **false** in
+JavaScript and `isinstance(True, int)` is **true** in Python. An envelope declaring
+`joint_torque_max_nm: true` clamps every joint to **1 Nm** in a naive transcription and is discarded
+outright by the reference. Deleting that guard changed **no case's answer**: the corpus does not
+reach it.
+
+That is not a gap in the corpus, and the fix is not to add a case. Every edition must pass the
+corpus, and **Rust cannot represent the input at all** — `joint_torque_max_nm` is an `Option<f64>`
+and serde refuses `true` before any rule runs. These are properties of a *dynamically typed*
+transcription, so they belong to this edition, and `self_check.py` gained eight of them (23 checks
+total), with expectations read from `safety.ts` rather than from `safety.py`:
+
+| Trap | What the reference does, and what a naive transcription does instead |
+|---|---|
+| a boolean limit | Discarded; 80 comes from the transport clamp. Naively: **1 Nm on every joint** |
+| `self_collision_margin_m === undefined` | Strict. Present-and-null emits **no** notice and still clamps at zero clearance; `.get` collapses the two |
+| `capability !== undefined` | Absent means the runtime did not say and the gate **does not evaluate**. Present-and-null means it said null, which is not a granted token — so the gate **trips** |
+| `Object.entries` order | Array-index keys first, ascending, *then* insertion order. A channel named `"2"` clamps before one named `"10"`, and `"09"` is not an index at all |
+
+Three further mutations confirm those checks fail when the guards are removed (1, 2 and 2 checks
+respectively).
+
+### Two more divergences, written down where they are handled
+
+`Math.sign` returns `-0` for `-0` and `NaN` for `NaN`, neither of which `copysign` reproduces — it
+maps `NaN` onto `±1` and would turn an unrepresentable command into a confident clamp. And the
+widening check reaches `null > ceiling` when a profile field is present and null, which JavaScript
+coerces to `0 > ceiling`; that is transcribed rather than tidied, because a sensible reading of the
+specification is a divergence from it.
+
+### Verified
+
+* `python editions/python/run_corpus.py` — **422 passed, 0 failed**, 633 not implemented
+* `python editions/python/self_check.py` — **23 checks**, all pass
+* `cargo test --workspace` — **1,398 passed**, unchanged: nothing outside `editions/` was touched
+* Complete: `cycle`, `digest`, `frames`, `kinematics`, `limits`, `predicate`, `roles`, `semver`,
+  `vocabulary`, `watchdog` — ten of thirty-one. `fuzz` is `partial` and says so

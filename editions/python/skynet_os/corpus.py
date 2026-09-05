@@ -18,6 +18,14 @@ harder, because it is the runner of an **incomplete** edition. Every corpus with
 reported as ``unimplemented`` and counted against the total, so the honest sentence about this
 edition is always available as a number. A runner that quietly passed 4 of 31 corpora and printed
 "OK" would be the single most misleading artifact in this repository.
+
+A corpus is not the unit, though, and that took a second reading of the corpus to see. ``fuzz`` is
+one corpus spanning three files — ``cycle``, ``observation`` and ``transport`` — so the day one of
+them is written the other two arrive at a handler never written for them. Counting those as
+**failures** would be a different claim from the true one, and a louder one: a hundred cases nobody
+has transcribed yet would read as a hundred cases this edition gets wrong. So a handler may decline
+a file by raising :class:`Unimplemented`, the runner counts it in the same bucket as a corpus with
+no handler at all, and a corpus holding a declined file is never named ``complete``.
 """
 
 from __future__ import annotations
@@ -34,10 +42,42 @@ from . import kinematics as kinematics_module
 from . import predicate as predicate_module
 from . import roles as roles_module
 from . import watchdog as watchdog_module
+from . import safety as safety_module
 from . import semver as semver_module
 from . import vocabulary as vocabulary_module
 
-__all__ = ["Case", "CorpusFile", "Failure", "Report", "run_corpus", "load_corpus"]
+__all__ = [
+    "Case",
+    "CorpusFile",
+    "Failure",
+    "Report",
+    "Unimplemented",
+    "run_corpus",
+    "load_corpus",
+]
+
+
+class Unimplemented(Exception):
+    """Raised by a handler for a corpus file this edition has not transcribed yet.
+
+    Distinct from a failure, and the distinction is the whole point. A handler is dispatched on the
+    corpus kind, and several kinds span several files: implementing ``fuzz/cycle`` would otherwise
+    send ``fuzz/observation`` and ``fuzz/transport`` into an arm never written for them and count
+    108 untranscribed cases as *wrong answers*. That number is not merely unhelpful, it is false —
+    and it gets worse exactly when the edition is making progress, which is the opposite of what a
+    progress number is for.
+
+    Declining is a property of a **file**. A handler that declines some of a file's cases and
+    answers others is a defect in this edition rather than a gap in it, and the runner reports it as
+    failures for that reason.
+    """
+
+    def __init__(self, corpus: str, label: str, note: str = "") -> None:
+        self.corpus = corpus
+        self.label = label
+        self.note = note
+        detail = f" — {note}" if note else ""
+        super().__init__(f"{corpus}/{label} is not implemented in this edition{detail}")
 
 
 @dataclass
@@ -87,13 +127,25 @@ class Failure:
 class Report:
     passed: int = 0
     failed: int = 0
-    #: Cases in corpora this edition has no handler for. Counted, never hidden.
-    unimplemented: int = 0
+    #: Cases in corpora this edition has no handler for at all. Counted, never hidden.
+    no_handler_cases: int = 0
+    #: Cases in files a handler exists for and declined by name. The same bucket, kept separate
+    #: because the two say different things about where the edition stands.
+    declined_cases: int = 0
     failures: list[Failure] = field(default_factory=list)
     #: Corpus kinds with no handler, in the order first seen.
     missing_handlers: list[str] = field(default_factory=list)
-    #: Corpus kinds where every case passed.
+    #: ``corpus/label`` for every file a handler declined, in the order first seen.
+    declined_files: list[str] = field(default_factory=list)
+    #: Corpus kinds where every case passed **and** no file was declined.
     complete: list[str] = field(default_factory=list)
+    #: Corpus kinds holding at least one declined file. Never named complete, however many of
+    #: their other files pass — a corpus is complete or it is not.
+    partial: list[str] = field(default_factory=list)
+
+    @property
+    def unimplemented(self) -> int:
+        return self.no_handler_cases + self.declined_cases
 
     @property
     def total(self) -> int:
@@ -102,7 +154,10 @@ class Report:
     def summary(self) -> str:
         return (
             f"{self.passed} passed, {self.failed} failed, "
-            f"{self.unimplemented} in corpora with no handler, {self.total} total"
+            f"{self.unimplemented} not implemented "
+            f"({self.no_handler_cases} in corpora with no handler, "
+            f"{self.declined_cases} in files a handler declined), "
+            f"{self.total} total"
         )
 
 
@@ -162,7 +217,7 @@ def _frames(label: str, case_input: dict[str, Any]) -> Any:
         return embodiment_module.frame_fault_to_json(
             embodiment_module.validate_frames(case_input["graph"])
         )
-    raise KeyError(f"no frames handler for `{label}`")
+    raise Unimplemented("frames", label)
 
 
 def _kinematics(_label: str, case_input: dict[str, Any]) -> Any:
@@ -182,7 +237,27 @@ def _semver(label: str, case_input: dict[str, Any]) -> Any:
         return semver_module.satisfies_to_json(case_input["version"], case_input["range"])
     if "compare" in label:
         return semver_module.compare_to_json(case_input["a"], case_input["b"])
-    raise KeyError(f"no semver handler for `{label}`")
+    raise Unimplemented("semver", label)
+
+
+def _limits(_label: str, case_input: dict[str, Any]) -> Any:
+    return safety_module.limits_to_json(case_input)
+
+
+def _cycle(_label: str, case_input: dict[str, Any]) -> Any:
+    return safety_module.verdict_to_json(case_input)
+
+
+def _fuzz(label: str, case_input: dict[str, Any]) -> Any:
+    """One corpus, three files, and only one of them written.
+
+    `observation` and `transport` decline by name rather than raising, so their 108 cases are
+    counted as *not implemented* instead of as 108 wrong answers. The corpus is reported `partial`
+    for exactly as long as that is true.
+    """
+    if label == "cycle":
+        return safety_module.verdict_to_json(case_input)
+    raise Unimplemented("fuzz", label)
 
 
 def _watchdog(_label: str, case_input: dict[str, Any]) -> Any:
@@ -193,7 +268,10 @@ def _watchdog(_label: str, case_input: dict[str, Any]) -> Any:
 
 
 HANDLERS: dict[str, Handler] = {
+    "cycle": _cycle,
     "digest": _digest,
+    "fuzz": _fuzz,
+    "limits": _limits,
     "frames": _frames,
     "kinematics": _kinematics,
     "predicate": _predicate,
@@ -213,17 +291,43 @@ def run_corpus(root: Path) -> Report:
         handler = HANDLERS.get(corpus_file.corpus)
 
         if handler is None:
-            report.unimplemented += len(corpus_file.cases)
+            report.no_handler_cases += len(corpus_file.cases)
             if corpus_file.corpus not in report.missing_handlers:
                 report.missing_handlers.append(corpus_file.corpus)
             continue
 
-        outcomes = per_corpus.setdefault(corpus_file.corpus, [])
-
+        # The whole file is evaluated before anything is recorded, because declining is a property
+        # of a file and cannot be acted on one case at a time: whether a declined case is *not yet
+        # written* or *an inconsistency in the handler* depends on what the file's other cases did.
+        evaluated: list[tuple[str, Case, Any]] = []
         for case in corpus_file.cases:
             try:
-                produced = canonical(handler(corpus_file.label, case.input))
+                evaluated.append(
+                    ("produced", case, canonical(handler(corpus_file.label, case.input)))
+                )
+            except Unimplemented:
+                evaluated.append(("declined", case, None))
             except Exception as error:  # noqa: BLE001 — a raising case is a failing case, reported
+                evaluated.append(("raised", case, error))
+
+        declined = [entry for entry in evaluated if entry[0] == "declined"]
+
+        if declined and len(declined) == len(evaluated):
+            report.declined_cases += len(declined)
+            name = f"{corpus_file.corpus}/{corpus_file.label}"
+            if name not in report.declined_files:
+                report.declined_files.append(name)
+            if corpus_file.corpus not in report.partial:
+                report.partial.append(corpus_file.corpus)
+            continue
+
+        outcomes = per_corpus.setdefault(corpus_file.corpus, [])
+
+        for kind, case, payload in evaluated:
+            if kind == "declined":
+                # Some of this file answered and some declined. Counting the declined ones as *not
+                # implemented* would hide a live inconsistency behind a number that reads as honest
+                # progress, which is the one thing this runner exists to prevent.
                 report.failed += 1
                 outcomes.append(False)
                 report.failures.append(
@@ -235,12 +339,32 @@ def run_corpus(root: Path) -> Report:
                         expected=case.expected,
                         produced="",
                         diverged_at=None,
-                        reason=f"{type(error).__name__}: {error}",
+                        reason=(
+                            f"handler declined {len(declined)} of {len(evaluated)} cases in this "
+                            "file — Unimplemented is a property of a file, not of a case"
+                        ),
                     )
                 )
                 continue
 
-            if produced == case.expected:
+            if kind == "raised":
+                report.failed += 1
+                outcomes.append(False)
+                report.failures.append(
+                    Failure(
+                        corpus=corpus_file.corpus,
+                        label=corpus_file.label,
+                        case=case.id,
+                        note=case.note,
+                        expected=case.expected,
+                        produced="",
+                        diverged_at=None,
+                        reason=f"{type(payload).__name__}: {payload}",
+                    )
+                )
+                continue
+
+            if payload == case.expected:
                 report.passed += 1
                 outcomes.append(True)
                 continue
@@ -254,12 +378,16 @@ def run_corpus(root: Path) -> Report:
                     case=case.id,
                     note=case.note,
                     expected=case.expected,
-                    produced=produced,
-                    diverged_at=_first_difference(case.expected, produced),
+                    produced=payload,
+                    diverged_at=_first_difference(case.expected, payload),
                 )
             )
 
-    report.complete = sorted(kind for kind, outcomes in per_corpus.items() if all(outcomes))
+    report.complete = sorted(
+        kind
+        for kind, outcomes in per_corpus.items()
+        if outcomes and all(outcomes) and kind not in report.partial
+    )
     return report
 
 

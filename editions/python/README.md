@@ -2,8 +2,8 @@
 
 > **This is not yet an edition.** §31.4: *"An edition that has not passed the corpus is not an
 > edition. It cannot carry the name, appear in the matrix, or be installed by `skynetd`."* It
-> currently passes **8 of 31 corpora**. The runner prints that number on every run and this file
-> will keep saying so until it is 31.
+> currently passes **10 of 31 corpora**, and answers part of an eleventh. The runner prints
+> those numbers on every run and this file will keep saying so until it is 31.
 
 §73's last column has carried one entry against §31 since the table was written: *"The second
 edition, which is what the corpus is for."* This is the start of it.
@@ -30,6 +30,7 @@ The three rules that keep the matrix honest apply here in full:
 ```
 python editions/python/run_corpus.py
 python editions/python/run_corpus.py --verbose      # every failure in full
+python editions/python/self_check.py                # the runner's own accounting
 ```
 
 No dependencies beyond the standard library, deliberately: an edition whose conformance run needs a
@@ -47,11 +48,26 @@ package index is an edition that cannot be checked on the machine it is being re
 | `frames` | 27 | §44.3's graph rules, and the joint names they cannot check |
 | `kinematics` | 14 | forward kinematics, poses to thirty digits |
 | `watchdog` | 13 | §46's chain, the host refusal, and window nesting |
-| | **328** | of 1,055 |
+| `limits` | 19 | §7.6's three composition rules, and the guards a body cannot run |
+| `cycle` | 35 | the eight guards in evaluation order, pose guards included |
+| `fuzz/cycle` | 40 | seeded vectors through the same path |
+| | **422** | of 1,055 |
 
-The other 23 corpora have no handler and their 727 cases are counted as such in every run. They are
-not skipped and not hidden: a runner that quietly passed eight corpora and printed "OK" would be the
+The other 20 corpora have no handler at all (525 cases), and 108 more sit in two files of `fuzz`
+that a handler exists for and **declines by name**. Both are counted in every run. They are not
+skipped and not hidden: a runner that quietly passed ten corpora and printed "OK" would be the
 most misleading artifact in this repository.
+
+### `partial` is a state, and `fuzz` is in it
+
+`fuzz` is one corpus over three files. All forty cases of `fuzz/cycle` pass and the corpus is
+still **not** `complete`, because `observation` and `transport` are declined — a corpus is
+complete or it is not, however many of its files are done. Without that rule, implementing one
+file of three would have counted the other 108 cases as *wrong answers* rather than as
+*untranscribed*, and the number would have got worse precisely as the edition improved.
+
+`self_check.py` holds the runner to this against synthetic corpora with known answers: 23 checks,
+of which four test the detector and eight test the language traps below.
 
 ## Where the values come from
 
@@ -88,8 +104,10 @@ skynet_os/
   embodiment.py    §44.3's frame graph, and the joint names the graph cannot check
   kinematics.py    forward kinematics, and the sine, cosine and square root it is written on
   watchdog.py      §46's chain and its window nesting
+  safety.py        §7's eight guards, §7.6's limit resolution, and the per-cycle verdict
   corpus.py        the runner and its dispatch
 run_corpus.py      the CLI
+self_check.py      the runner's own accounting, and the traps the corpus cannot reach
 ```
 
 `canonical.py` is a deliberate third implementation of a rule that already exists in
@@ -120,8 +138,33 @@ reference's own header explains that writing it by eye is how the TypeScript edi
 space. This edition then wrote a **raw** NUL — correct, and invisible in every editor and terminal.
 It is `_NUL = chr(0)` now, and named, which is the fix the reference's comment was asking for.
 
+## What the third round found: the traps a corpus cannot reach
+
+`safety.py` was transcribed and passed all 94 of its cases on the first run, which is a claim that
+has to be earned rather than reported. Five mutations of it broke between 1 and 17 cases each.
+
+**A sixth broke nothing**, and that is the finding. `typeof true === 'number'` is false in
+JavaScript and `isinstance(True, int)` is true in Python, so an envelope declaring
+`joint_torque_max_nm: true` clamps every joint to **1 Nm** in a naive transcription and is
+discarded outright by the reference — and no corpus case reaches it.
+
+That is not a gap in the corpus, and the fix is not to add a case. Every edition must pass the
+corpus and **Rust cannot represent the input at all**: `joint_torque_max_nm` is an `Option<f64>`
+and serde refuses `true` before any rule runs. These traps exist only for a dynamically typed
+edition, so they live in `self_check.py`, with expectations read from `safety.ts`:
+
+| Trap | The reference, versus a naive transcription |
+|---|---|
+| a boolean limit | Discarded, so 80 comes from the transport clamp — against **1 Nm on every joint** |
+| `self_collision_margin_m === undefined` | Strict. Present-and-null emits **no** notice and still clamps at zero clearance; `.get` collapses the two |
+| `capability !== undefined` | Absent means the runtime did not say, and the gate does not evaluate. Present-and-null means it said null, which is not a granted token — so the gate **trips** |
+| `Object.entries` | Array-index keys first in ascending order, *then* insertion order. `"2"` clamps before `"10"`, and `"09"` is not an index at all |
+| `Math.sign` | Returns `-0` for `-0` and `NaN` for `NaN`. `copysign` maps `NaN` onto `±1`, turning an unrepresentable command into a confident clamp |
+| `null > number` | Coerced to `0 > number`. Transcribed rather than tidied — a sensible reading of the specification is a divergence from it |
+
 ## What is next, in dependency order
 
-The four that carry the weight — `cycle` (§7's eight guards), `transport` (§6), `admission` (§8)
-and `certification` (§15) — and then the rest. Everything after the foundation is mechanical; the
-foundation is canonical serialisation and a runner that refuses to lie about what it has not done.
+`observation` (16 cases, plus 48 in `fuzz/observation`), then `transport` (40, plus 60), then
+`admission` (34) and `certification` (18) — the four §31.3 calls the ones that carry the weight,
+with `cycle` now done. Everything after the foundation is mechanical; the foundation is canonical
+serialisation and a runner that refuses to lie about what it has not done.
