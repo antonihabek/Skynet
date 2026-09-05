@@ -45,6 +45,7 @@ from . import roles as roles_module
 from . import watchdog as watchdog_module
 from . import safety as safety_module
 from . import semver as semver_module
+from . import transport as transport_module
 from . import vocabulary as vocabulary_module
 
 __all__ = [
@@ -269,7 +270,14 @@ def _fuzz(label: str, case_input: dict[str, Any]) -> Any:
         return safety_module.verdict_to_json(case_input)
     if label == "observation":
         return observation_module.frame_to_json(case_input)
+    if label == "transport":
+        return transport_module.plan_to_json(case_input)
     raise Unimplemented("fuzz", label)
+
+
+def _transport(_label: str, case_input: dict[str, Any]) -> Any:
+    """Seven files, one input shape: a source policy, a target body, and the caller's options."""
+    return transport_module.plan_to_json(case_input)
 
 
 def _watchdog(_label: str, case_input: dict[str, Any]) -> Any:
@@ -291,6 +299,7 @@ HANDLERS: dict[str, Handler] = {
     "roles": _roles,
     "vocabulary": _vocabulary,
     "semver": _semver,
+    "transport": _transport,
     "watchdog": _watchdog,
 }
 

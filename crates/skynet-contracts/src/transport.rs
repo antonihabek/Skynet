@@ -531,9 +531,13 @@ pub fn resolve_transport(
         warnings.push(TransportWarning {
             code: TransportWarningCode::UnmappedRoles,
             message: format!(
-                "{} joint{} on this body are not driven by the policy and will be held by the controller.",
+                "{} {} not driven by the policy and will be held by the controller.",
                 unmapped.len(),
-                if unmapped.len() == 1 { "" } else { "s" }
+                if unmapped.len() == 1 {
+                    "joint on this body is"
+                } else {
+                    "joints on this body are"
+                }
             ),
             subjects: Some(unmapped),
         });

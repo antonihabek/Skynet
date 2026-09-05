@@ -942,7 +942,11 @@ export function resolveTransport(
   if (unmapped.length > 0) {
     warnings.push({
       code: 'unmapped_roles',
-      message: `${unmapped.length} joint${unmapped.length === 1 ? '' : 's'} on this body are not driven by the policy and will be held by the controller.`,
+      // "1 joint ... are" — the plural was on the noun and not on the verb, in both editions
+      // identically, which is why 17 corpus cases carried it and none of them failed. A corpus
+      // detects a disagreement between editions; it cannot detect the two of them agreeing about
+      // something wrong.
+      message: `${unmapped.length} ${unmapped.length === 1 ? 'joint on this body is' : 'joints on this body are'} not driven by the policy and will be held by the controller.`,
       subjects: unmapped,
     })
   }
