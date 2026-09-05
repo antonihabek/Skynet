@@ -238,6 +238,92 @@
       "expected": "{\"hex\":\"9ba23975010100000700000000000000a20c0000000000000700000000000000abababababababababababababababababababababababababababababababab0000010000000000000000000300000064000000000000005a0000000000000004000000000003010100000000000000ffff00000000c07f0000c07f0000c07f0000c07f0000c07f0000c07f0000c07f0000c07f00000000000000000000000000000000000000000000000000000000000020400000204000000000000000000000000000000000010000cdcccc3dcdcc4c3e000000000000c07f0000c03f0000c07f0000000000\",\"size\":232}"
     },
     {
+      "id": "cycle-every-guard-tripped",
+      "note": "All eight, which is the boundary the count field sits exactly on: `MAX_TRIPPED` is eight, the guard table is eight, and the byte after the last code is `capability`. No case had gone past one tripped guard, so the clamp on that count and the slice on the table were both unexercised — and an edition that dropped either writes a ninth code over a field a cycle is read through. It also pins the strongest response, which nothing else here reaches.",
+      "input": {
+        "shape": {
+          "joints": 2,
+          "channels": 2
+        },
+        "sequence": "13",
+        "mono_ns": "3234",
+        "entry": {
+          "kind": "cycle",
+          "tick": "7",
+          "observation": "abababababababababababababababababababababababababababababababab",
+          "policy": 0,
+          "state_flags": 1,
+          "fault_code": 0,
+          "rhal_result": 0,
+          "state_seq": 3,
+          "state_stamp_ns": "100",
+          "command_stamp_ns": "90",
+          "command_seq": 4,
+          "mode": 0,
+          "advisory": false,
+          "response": "stop_cat0",
+          "tripped": [
+            "watchdog",
+            "envelope",
+            "rate_limit",
+            "workspace",
+            "self_collision",
+            "balance",
+            "proximity",
+            "mode_gate"
+          ],
+          "capability": 65535,
+          "nearest_person_m": null,
+          "base_pose": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "base_twist": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "desired": [
+            2.5,
+            -0.5
+          ],
+          "command": [
+            0,
+            0
+          ],
+          "mask": [
+            1,
+            0
+          ],
+          "clamped": [
+            true,
+            true
+          ],
+          "position": [
+            0.1,
+            0.2
+          ],
+          "velocity": [
+            0,
+            null
+          ],
+          "effort": [
+            1.5,
+            null
+          ]
+        }
+      },
+      "expected": "{\"hex\":\"2f570e59010100000d00000000000000a20c0000000000000700000000000000abababababababababababababababababababababababababababababababab0000010000000000000000000300000064000000000000005a0000000000000004000000000005080102030405060708ffff00000000c07f0000c07f0000c07f0000c07f0000c07f0000c07f0000c07f0000c07f0000000000000000000000000000000000000000000000000000000000002040000000bf00000000000000000000000000000000010003cdcccc3dcdcc4c3e000000000000c07f0000c03f0000c07f0000000000\",\"size\":232}"
+    },
+    {
       "id": "frame-two-streams",
       "note": "An assembled observation frame. The worst skew and the per-stream ages are what make \"the frame it was given was 80 ms skewed\" checkable months later (§25.1).",
       "input": {
@@ -360,6 +446,34 @@
         }
       },
       "expected": "{\"hex\":\"a6fd6e5a020100000a000000000000005a18000000000000abababababababababababababababababababababababababababababababab5618000000000000000000000100000000000000ceb1ceb1ceb1ceb1ceb1ceb1ceb1ceb10100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\",\"size\":232}"
+    },
+    {
+      "id": "frame-a-stream-name-cut-inside-a-character",
+      "note": "The cut the case above is *named* for and does not reach. Nine two-byte characters land the sixteen-byte boundary exactly between two of them, so the back-off loop exits without doing anything and an edition that never wrote one would agree about every byte. Six three-byte characters put the boundary **inside** the sixth: the cut walks back to fifteen and the record is one byte shorter than it could be, which is the whole point — sixteen bytes here would be invalid UTF-8 in the ring, and every reader from then on has to guess.",
+      "input": {
+        "shape": {
+          "joints": 2,
+          "channels": 2
+        },
+        "sequence": "13",
+        "mono_ns": "6434",
+        "entry": {
+          "kind": "frame",
+          "observation": "abababababababababababababababababababababababababababababababab",
+          "target_ns": "6430",
+          "worst_skew_us": 0,
+          "streams_omitted": 0,
+          "streams_absent": 0,
+          "streams": [
+            {
+              "name": "ああああああ",
+              "age_us": 1,
+              "stale": false
+            }
+          ]
+        }
+      },
+      "expected": "{\"hex\":\"24168188020100000d000000000000002219000000000000abababababababababababababababababababababababababababababababab1e19000000000000000000000100000000000000e38182e38182e38182e38182e38182000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\",\"size\":232}"
     },
     {
       "id": "frame-with-a-dead-capture-path",

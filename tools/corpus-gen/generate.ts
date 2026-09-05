@@ -2338,6 +2338,26 @@ recordCase(
   )
 }
 
+{
+  const everything = bbCycle({
+    response: 'stop_cat0',
+    tripped: [...GUARDS],
+    desired: [2.5, -0.5],
+    command: [0, 0],
+    clamped: [true, true],
+  })
+  recordCase(
+    'cycle-every-guard-tripped',
+    'All eight, which is the boundary the count field sits exactly on: `MAX_TRIPPED` is eight, the '
+    + 'guard table is eight, and the byte after the last code is `capability`. No case had gone '
+    + 'past one tripped guard, so the clamp on that count and the slice on the table were both '
+    + 'unexercised — and an edition that dropped either writes a ninth code over a field a cycle '
+    + 'is read through. It also pins the strongest response, which nothing else here reaches.',
+    BB_SHAPE, 13n, 3234n,
+    { kind: 'cycle', cycle: everything }, cycleInput(everything),
+  )
+}
+
 recordCase(
   'frame-two-streams',
   'An assembled observation frame. The worst skew and the per-stream ages are what make "the frame it was given was 80 ms skewed" checkable months later (§25.1).',
@@ -2419,6 +2439,37 @@ recordCase(
     streams_omitted: 0,
     streams_absent: 0,
     streams: [{ name: 'ααααααααα', age_us: 1, stale: false }],
+  },
+)
+
+recordCase(
+  'frame-a-stream-name-cut-inside-a-character',
+  'The cut the case above is *named* for and does not reach. Nine two-byte characters land the '
+  + 'sixteen-byte boundary exactly between two of them, so the back-off loop exits without doing '
+  + 'anything and an edition that never wrote one would agree about every byte. Six three-byte '
+  + 'characters put the boundary **inside** the sixth: the cut walks back to fifteen and the '
+  + 'record is one byte shorter than it could be, which is the whole point — sixteen bytes here '
+  + 'would be invalid UTF-8 in the ring, and every reader from then on has to guess.',
+  BB_SHAPE, 13n, 6434n,
+  {
+    kind: 'frame',
+    frame: {
+      observation: BB_OBSERVATION,
+      targetNs: 6430n,
+      worstSkewUs: 0,
+      streamsOmitted: 0,
+      streamsAbsent: 0,
+      streams: [{ name: '\u3042\u3042\u3042\u3042\u3042\u3042', ageUs: 1, stale: false }],
+    },
+  },
+  {
+    kind: 'frame',
+    observation: hex(BB_OBSERVATION),
+    target_ns: '6430',
+    worst_skew_us: 0,
+    streams_omitted: 0,
+    streams_absent: 0,
+    streams: [{ name: '\u3042\u3042\u3042\u3042\u3042\u3042', age_us: 1, stale: false }],
   },
 )
 
@@ -2557,6 +2608,44 @@ headerCase(
     },
     canonical({ size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), opcodes: opcodes(bytes) }))
 }
+
+{
+  const channels = wire()
+  // Two messages on **one** channel, which the case above does not have: it writes one message to
+  // channel 6 and one to channel 1, so the per-channel sequence number is 1 on both and an edition
+  // that wrote a constant would produce the same file. A reader uses that number to detect a
+  // message it did not receive, so a constant is a recording that can never report a hole in
+  // itself.
+  const messages = [
+    { channelId: 6, logTime: 1700000000000001000n, payload: canonical({ mono_ns: 1000, event: 'recording_started', subject: 'dev-0001', detail: 'the ring was opened' }) },
+    { channelId: 6, logTime: 1700000000000003000n, payload: canonical({ mono_ns: 3000, event: 'estop', subject: 'operator', detail: 'the button on the chassis' }) },
+    { channelId: 6, logTime: 1700000000000002000n, payload: canonical({ mono_ns: 2000, event: 'estop_cleared', subject: 'operator', detail: 'released' }) },
+  ]
+  const bytes = writeMcap(
+    'skynet-blackbox rust-edition 0.1.0',
+    channels.map(channel => ({ id: channel.id, name: channel.name, definition: channel.definition })),
+    channels.map(channel => ({ id: channel.id, schemaId: channel.id, topic: channel.topic })),
+    [{ name: 'skynet.blackbox', pairs: [['robot_id', 'dev-0001'], ['sealed_reason', 'operator']] }],
+    messages,
+  )
+  blackboxCase('seal', 'three-messages-on-one-channel',
+    'The per-channel sequence advances 1, 2, 3 and the statistics carry the count. The third '
+    + 'message is also **out of order in time** — 3000 ns then 2000 ns — because a robot writing '
+    + 'from a ring is not writing in log-time order, and the summary\u2019s `message_start_time` is '
+    + 'therefore the minimum rather than the first one seen. An edition taking the first would '
+    + 'agree with this one on every file whose messages happen to be sorted.',
+    {
+      library: 'skynet-blackbox rust-edition 0.1.0',
+      metadata: { name: 'skynet.blackbox', pairs: [['robot_id', 'dev-0001'], ['sealed_reason', 'operator']] },
+      messages: messages.map(message => ({
+        channel_id: message.channelId,
+        log_time: String(message.logTime),
+        payload: message.payload,
+      })),
+    },
+    canonical({ size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), opcodes: opcodes(bytes) }))
+}
+
 
 // ── watchdog (§46) ───────────────────────────────────────────────────────────
 //

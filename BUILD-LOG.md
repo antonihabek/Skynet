@@ -1744,3 +1744,89 @@ the next run. That is the corpus doing the job it exists for on a change that to
 
 **Twenty-six of thirty-one corpora complete. Five remain, 84 cases:** `blackbox` 18, `calibration`
 18, `provenance` 17, `telemetry` 16, `live` 15.
+
+---
+
+## 28. `blackbox` — the corpus whose subject is bytes, and a case that never reached its own rule
+
+`blackbox` is §26's ring record, the ring header, the six MCAP channel schemas and a whole sealed
+file. **18 cases, 991 → 1,009, first run** — including the SHA-256 of a 19,805-byte MCAP file
+written by a third independent implementation of the framing, and all six schema documents
+byte-for-byte.
+
+That last part is worth stating plainly, because §31.2 puts these on the short list of things that
+stay single-source across editions on the grounds that *a black box sealed by one edition must be
+readable by every other*. Until this round that was two implementations agreeing. It is three now,
+and the third was written from the specification without ever opening the corpus.
+
+### Twenty-two mutations, nineteen caught, and the first survivor is the round
+
+`frame-astral-stream-name` exists to pin the truncation rule. Its note says a cut inside a
+multi-byte sequence *"would put invalid UTF-8 in the ring and every reader would have to guess"*,
+and its name is nine **two-byte** characters in a sixteen-byte field.
+
+Sixteen is even. The boundary falls exactly between the eighth character and the ninth, the back-off
+loop looks at a lead byte, and it exits having done nothing. **Deleting the loop entirely broke no
+case.** The one case written for this rule does not reach it, and has not since it was added.
+
+`frame-a-stream-name-cut-inside-a-character` is six **three-byte** characters. The boundary lands
+inside the sixth, the cut walks back to fifteen, and the field holds `e38182` five times and a NUL.
+Without the loop it would hold sixteen bytes ending in a bare `e3` — invalid UTF-8 in a recording
+every later reader has to interpret.
+
+This is the second time this session a case's *note* has been the thing that was true and its
+*input* the thing that was not. It is a different failure from a missing case: nobody adds a case
+for a rule that already has one.
+
+### Two more boundaries nothing had sat on
+
+**`cycle-every-guard-tripped`.** `MAX_TRIPPED` is 8, the guard table is 8 bytes at offsets 104–111,
+and `capability` is at 112. No case had gone past **one** tripped guard, so neither the clamp on the
+count nor the slice on the table had ever been exercised at the edge they exist for. The record now
+reads `08`, then `0102030405060708`, then `ffff` — which says in one line that the count field, the
+table and the field after it are the sizes the format claims.
+
+**`three-messages-on-one-channel`.** The existing seal case writes one message to channel 6 and one
+to channel 1, so the per-channel sequence is 1 on both and an edition writing a constant produces
+the same file. A reader uses that number to detect a message it did not receive, so a constant is a
+recording that can never report a hole in itself. The third message is also **out of order in
+time** — 3000 ns then 2000 ns, which is what writing from a ring looks like — which pins the
+summary's `message_start_time` as the minimum rather than the first one seen.
+
+**1,075 → 1,078.** Rust reproduces all three without a change; each pins behaviour that was already
+correct in both editions and unprotected in both.
+
+### The last survivor is a question about the format, and is not closed with a case
+
+`encodeCycle` checks seven arrays against the ring's shape — `desired`, `command`, `mask`,
+`clamped`, `position`, `velocity`, `effort` — and **throws** when one does not match:
+
+> `black box: desired holds 3 values, and the ring's shape says 2`
+
+`tripped` is the eighth array in the same function and is **silently truncated** to eight instead.
+
+A ninth guard is not something a producer emits, so the clamp is defensive rather than reachable.
+But that is the whole difficulty: a corpus case carrying one would freeze *truncation* as the
+specified answer for a malformed cycle, when the answer the other seven arrays give to the same
+question is a refusal. The two are not obviously reconcilable in the encoder's favour either — a
+record is written on the control path, and a throw there is a cycle that goes unrecorded.
+
+So it is written down rather than settled by whichever behaviour was easier to transcribe. It is not
+an edition disagreeing with another; it is one function answering the same question two ways, which
+is the shape §7.4's redundant channel exists to catch, and the second instance of it this repository
+has found in the reference (the first being `roundHalfAway`, defined twice in `kinematics.ts` and
+`observation.ts`).
+
+### Verified
+
+* `python3 editions/python/run_corpus.py --min-passed 1012` — **1,012 passed, 0 failed**, 66 not
+  implemented, of 1,078
+* `cargo test -p skynet-corpus --test corpus` — 1,078 cases, byte for byte
+* 21 of 22 mutations caught after the three new cases, up from 19; the survivor is the item above
+* `cargo test --workspace` — **1,431 passed**, 0 failed, 7 ignored
+* `python3 editions/python/self_check.py` — 41 checks; `tsc -p .` clean; the generator reproduces
+  all 77 files
+* The CI ratchet raised to 1,012
+
+**Twenty-seven of thirty-one corpora complete. Four remain, 66 cases:** `calibration` 18,
+`provenance` 17, `telemetry` 16, `live` 15.

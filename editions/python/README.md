@@ -2,7 +2,7 @@
 
 > **This is not yet an edition.** §31.4: *"An edition that has not passed the corpus is not an
 > edition. It cannot carry the name, appear in the matrix, or be installed by `skynetd`."* It
-> currently passes **26 of 31 corpora**. The runner prints that number on every run and this
+> currently passes **27 of 31 corpora**. The runner prints that number on every run and this
 > file will keep saying so until it is 31.
 
 §73's last column has carried one entry against §31 since the table was written: *"The second
@@ -68,9 +68,10 @@ package index is an edition that cannot be checked on the machine it is being re
 | `readiness` | 12 | the tier a registry subject can attain, and what blocks the next one |
 | `checkin` | 25 | §17's claim, §33.6's age rule, and the document that crosses the boundary |
 | `cell` | 28 | §55.2's descriptor: every fault in it, and the two projections read out of it |
-| | **991** | of 1,075 |
+| `blackbox` | 21 | §26's record layout, the ring header, the six schemas, and a sealed file |
+| | **1,012** | of 1,078 |
 
-The other 5 corpora have no handler at all — 84 cases, counted in every run. They are not
+The other 4 corpora have no handler at all — 66 cases, counted in every run. They are not
 skipped and not hidden: a runner that quietly passed most corpora and printed "OK" would be the
 most misleading artifact in this repository.
 
@@ -143,6 +144,7 @@ skynet_os/
   readiness.py     the tier a subject can attain, and the blockers between it and the next
   checkin.py       §17's claim, §33.6's health, and the document that crosses to the Hub
   cell.py          §55.2's descriptor, its faults, and the two projections a robot reads
+  blackbox.py      §26's bytes: the ring record, the header, the schemas and the MCAP file
   js.py            the four JavaScript expressions Python has no equivalent for
   corpus.py        the runner and its dispatch
 run_corpus.py      the CLI
@@ -425,9 +427,56 @@ editions run now, and the Python row carries a ratchet for the regression the ru
 cannot see: cases that stop being answered are counted as *not implemented*, which is the bucket that
 reads as progress.
 
+## What the tenth round found: a case that did not reach the rule it is named for
+
+`blackbox` — 18 cases, first run, and it is the one corpus whose subject is **bytes**. A third
+implementation of the ring record, the header, the six MCAP schemas and the sealed file produced the
+identical SHA-256 for a 19,805-byte file on the first attempt, which is the strongest single piece of
+evidence in this repository that §31.2's single-source list is actually single-source.
+
+Twenty-two mutations, nineteen caught. Three survivors, and the first is the finding:
+
+### `frame-astral-stream-name` never cuts inside a character
+
+Its note says a cut inside a multi-byte sequence *"would put invalid UTF-8 in the ring and every
+reader would have to guess"*, and the case is nine **two-byte** characters in a sixteen-byte field.
+Sixteen is even, so the boundary lands exactly between the eighth and the ninth: the back-off loop
+looks at a lead byte, exits without doing anything, and an edition that had never written one agreed
+about every byte of the record. Deleting the loop entirely broke nothing.
+
+`frame-a-stream-name-cut-inside-a-character` is six **three-byte** characters. The boundary falls
+inside the sixth, the cut walks back to fifteen, and the field holds five characters and a NUL —
+one byte shorter than it could be, which is exactly the point.
+
+### Two more boundaries nobody had sat on
+
+`cycle-every-guard-tripped` is all eight. `MAX_TRIPPED` is eight, the guard table is eight bytes at
+offsets 104–111, and `capability` is at 112 — so the count byte reads `08`, the table reads
+`0102030405060708`, and the next two bytes are `ffff`. No case had gone past **one** tripped guard.
+
+`three-messages-on-one-channel` writes three messages to channel 6 where the existing seal case
+writes one each to two channels, so the per-channel sequence was 1 on every message and a constant
+produced the same file. A reader uses that number to detect a message it did not receive. The third
+message is also out of order in time — 3000 ns then 2000 ns, which is what writing from a ring looks
+like — so the summary's `message_start_time` is pinned as the minimum rather than the first seen.
+
+**1,075 → 1,078**, and Rust reproduces all three without a change.
+
+### And one inconsistency in the format, recorded rather than pinned
+
+The last survivor cannot be closed with a case, and the reason is worth more than the mutation.
+`encodeCycle` checks seven arrays against the ring's shape — `desired`, `command`, `mask`,
+`clamped`, `position`, `velocity`, `effort` — and **throws** when one does not match. `tripped` is
+the eighth array and is silently truncated to eight instead.
+
+A ninth guard is not something a producer emits, so the clamp is defensive rather than reachable,
+and a corpus case carrying one would freeze *truncation* as the specified answer for a malformed
+cycle — when the answer the other seven arrays give is a refusal. That is a question about the
+format rather than a gap in an edition, so it is written down here and in `BUILD-LOG.md` rather than
+settled by whichever behaviour was easier to transcribe.
+
 ## What is next, in dependency order
 
-`blackbox` (18 cases), `calibration` (18), `provenance` (17), `telemetry` (16), `live` (15). Five
-corpora, 84 cases, and none of them is a foundation any of the others needs. Everything after the
+`calibration` (18 cases), `provenance` (17), `telemetry` (16), `live` (15). Four corpora, 66 cases, and none of them is a foundation any of the others needs. Everything after the
 foundation is mechanical; the foundation is canonical serialisation and a runner that refuses to lie
 about what it has not done.
