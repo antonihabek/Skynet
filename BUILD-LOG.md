@@ -1388,3 +1388,96 @@ replaced.
 | Defects found in another edition | 0 | **2** — one fixed, one referred to §80 |
 
 Four commits on `main` in the OS repository and one in the Hub. **Nothing pushed.**
+
+---
+
+## 23. `skill`, `opstate` and `identity` — and the most dangerous line nothing was testing
+
+Three modules, **163 cases, 644 → 815 passed**, all three first run, zero failures. Eighteen
+corpora complete. Thirty-nine mutations across the three; **thirty caught**. Of the nine survivors:
+four became corpus cases, three went to `self_check`, one is §80's new open question — and one was
+a badly built mutation of my own that changed nothing, which a correctly built version of it caught
+immediately.
+
+### The default this module's own header calls out by name
+
+`opstate.py` — §27's machine — carries this about its inputs:
+
+> Every field is optional and every default is the least capable reading. A caller who has not
+> observed something has not established it, and a state machine that read "nobody told me about the
+> kernel" as "the kernel is live" would be **the single most dangerous line in this repository**.
+
+Defaulting `kernel` to `live` broke **no case**. Twenty-five cases reach that rule and every one of
+them names the kernel explicitly; the only case that leaves it out — `observed-nothing` — leaves out
+*everything*, and is refused four rules earlier by the RHAL default. So the one default the file
+singles out was the one nothing reached on its own.
+
+`a-kernel-nobody-observed-is-down` observes every condition **except** the kernel. An edition
+defaulting to `live` there reports a robot as `running` on the strength of a field nobody filled in.
+
+### Two more gaps in the same run
+
+| New case | What it pins |
+|---|---|
+| `a-key-the-vendor-signed-with-no-certificate-to-check-it` | `attested` takes **both** halves. Every existing case had the certificate trusted *or* the key absent, so an edition requiring only the hardware binding agreed everywhere |
+| `a-credential-that-declares-no-scopes-at-all` | An empty scope list is not an absent one: absent is an opaque bearer token (a warning), empty is a credential that declared it carries nothing (no finding). Truthiness reads the first for the second |
+
+Plus `root-absent-is-a-root-invocation` for `skill`: the test is `root === false`, not a truthy one,
+so an invocation that never said acquires its own leases. Read loosely, an unlabelled invocation
+skips `acquiring` entirely and runs **holding nothing** — §25.2 bypassed by omission. Every other
+lifecycle case sets `root` explicitly, so both readings agreed on all of them.
+
+**1,066 → 1,069 cases.** The Rust edition reproduces all four new ones byte for byte.
+
+### A third divergence between the editions, and it is left open too
+
+Transcribing `identity.py` raised a question about `String.length`, and probing it confirmed one:
+
+| | eight astral characters typed as a pairing code |
+|---|---|
+| reference, and the Hub | `too_long` — *"A pairing code is 8 characters and this is **16**"* |
+| `skynet-contracts`, on the robot | `not_in_alphabet` — *"Character **1** of the 8…"* |
+
+`.length` counts UTF-16 code units and `chars().count()` counts code points. Both editions refuse,
+so nothing unsafe is shipping either way — what is wrong is that §64 requires a refusal to name its
+fix, and these name two different fixes for one typo. The reference's sentence is also **false as
+English**: somebody who typed eight characters is told they typed sixteen.
+
+So this is the rare divergence where the *reference* is the edition that should change, which makes
+it a specification edit the Hub's mirrored `identity.ts` inherits. Recorded in **§80**, and the
+probe case was **withdrawn** rather than left red: pinning either answer would settle it by whichever
+edition was easier to edit.
+
+### What went into `self_check` instead, and why each had to
+
+Five strict-`true` tests that Rust's `Option<bool>` cannot express, so no corpus every edition must
+pass can reach them — **31 checks → 34**:
+
+* `hold === true` decides which clauses are re-checked every cycle, which is the whole of §54.2's
+  second rule: *"battery dropping below reserve mid-skill should stop the skill, not be discovered
+  at the end."*
+* `stop_settled === true` decides whether a robot mid-ramp is reported `safe`.
+* `credential === true` decides whether a robot is treated as paired.
+
+### The transcription traps worth naming
+
+* **`Math.round` is half toward +∞** — neither of Python's roundings. It rounds a *timeout in
+  milliseconds*, so the disagreement is a skill stopped a millisecond apart and, at the boundary, a
+  different verdict. Mutating it breaks a case.
+* **An array is an object to JavaScript**, so a clause whose predicate is a list reaches the
+  evaluator and is refused as malformed, rather than being called unenforceable. Two different
+  reports, and the reader is not the place that decides which.
+* **`String.length` and `Array.sort` both work in UTF-16**, which is the same disagreement
+  `digest.py` documents, reached from two more directions.
+* **`String.prototype.trim` is a smaller set than Python's `strip()`** — Python also removes
+  `\x1c`–`\x1f`, so a namespace of one of those is empty to Python and non-empty to the reference.
+
+### Verified
+
+* `python editions/python/run_corpus.py` — **815 passed, 0 failed**, 254 not implemented, of 1,069
+* `python editions/python/self_check.py` — **34 checks**
+* `cargo test -p skynet-corpus --test corpus` — **1,069 cases across 77 files, byte for byte**
+* `cargo test --workspace` — **1,398 passed, 0 failed**
+* `node tools/corpus-gen/generate.ts` — regenerating is a no-op
+* `docs/skynet-os-architecture.md` byte-identical in both repositories
+* **Eighteen of thirty-one corpora complete.** Thirteen remain, 254 cases

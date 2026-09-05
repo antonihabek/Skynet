@@ -2,7 +2,7 @@
 
 > **This is not yet an edition.** §31.4: *"An edition that has not passed the corpus is not an
 > edition. It cannot carry the name, appear in the matrix, or be installed by `skynetd`."* It
-> currently passes **15 of 31 corpora**. The runner prints that number on every run and this
+> currently passes **18 of 31 corpora**. The runner prints that number on every run and this
 > file will keep saying so until it is 31.
 
 §73's last column has carried one entry against §31 since the table was written: *"The second
@@ -57,9 +57,12 @@ package index is an edition that cannot be checked on the machine it is being re
 | `fuzz/transport` | 60 | seeded vectors through the same path |
 | `admission` | 36 | §8's install gate: signatures, budgets, grants and §49.1's reserved token |
 | `certification` | 20 | §15's award: absence is not a pass, and the evidence caps the claim |
-| | **648** | of 1,065 |
+| `skill` | 86 | §54.2–54.5: preconditions, success, timeout, composition and the lifecycle |
+| `opstate` | 37 | §27's machine, and the two predicate tables it is read through |
+| `identity` | 42 | §10, §19 and §50: pairing codes, credentials and what is running |
+| | **815** | of 1,069 |
 
-The other 16 corpora have no handler at all — 417 cases, counted in every run. They are not
+The other 13 corpora have no handler at all — 254 cases, counted in every run. They are not
 skipped and not hidden: a runner that quietly passed ten corpora and printed "OK" would be the
 most misleading artifact in this repository.
 
@@ -71,8 +74,8 @@ without it, implementing one file of three would have counted the other 108 case
 answers* rather than as *untranscribed*, and the number would have got worse precisely as the
 edition improved. A corpus is complete or it is not, however many of its files are done.
 
-`self_check.py` holds the runner to this against synthetic corpora with known answers: **29
-checks**, of which four test the detector and fourteen test the language traps below.
+`self_check.py` holds the runner to this against synthetic corpora with known answers: **34
+checks**, of which four test the detector and nineteen test the language traps below.
 
 ## Where the values come from
 
@@ -114,6 +117,9 @@ skynet_os/
   transport.py     §6's planner: how a policy's action space reaches a body
   admission.py     §8's install gate, and §49.1's one reserved capability
   certification.py §15's award, and the evidence that caps it
+  skill.py         §54's five sections: preconditions, success, timeout, composition, lifecycle
+  opstate.py       §27's machine, which four callers described in prose before it was declared
+  identity.py      pairing codes, device credentials, and §10's attestation sentence
   corpus.py        the runner and its dispatch
 run_corpus.py      the CLI
 self_check.py      the runner's own accounting, and the traps the corpus cannot reach
@@ -301,9 +307,38 @@ the same second changes neither. It produced one false failure here, against cod
 longer on disk. Every mutation figure in this file was re-measured with the cache cleared before
 each run: **34 of 34 caught**.
 
+## What the seventh round found: the default the module warns about, untested
+
+`skill`, `opstate` and `identity` — 163 cases, all three first run. Thirty-nine mutations,
+**thirty caught**, and the sharpest survivor is one sentence away from where it lives.
+
+`opstate.py`'s header says of its inputs:
+
+> a state machine that read "nobody told me about the kernel" as "the kernel is live" would be
+> **the single most dangerous line in this repository**.
+
+Defaulting `kernel` to `live` broke **no case**. Twenty-five cases reach that rule and every one
+names the kernel explicitly; the only case that omits it omits *everything*, and is refused four
+rules earlier by the RHAL default. `a-kernel-nobody-observed-is-down` observes every condition
+except that one.
+
+Three more became cases — `attested` needing **both** halves, an empty scope list not being an
+absent one, and `root === false` being strict, so an invocation that never said it was nested
+acquires its own leases rather than running holding nothing. 1,066 → **1,069**.
+
+### And a third divergence between the editions, left open
+
+Eight astral characters typed as a pairing code are `too_long` to the reference — *"a pairing
+code is 8 characters and this is 16"* — and `not_in_alphabet` at position 1 to the Rust edition.
+`.length` counts UTF-16 code units; `chars().count()` counts code points. Both refuse, so nothing
+unsafe is shipping; what is wrong is that one operator gets two sentences about one typo, and the
+reference's is false as English. Recorded in §80, and the probe case **withdrawn** rather than
+left red — pinning either answer would settle it by whichever edition was easier to edit.
+
 ## What is next, in dependency order
 
-`skill` (85 cases), `identity` (42), `opstate` (36), `transfer` (31), `ota` (28), `power` (28),
-`cell` (26), `checkin` (23) — and then the eight smaller ones. The four that carry the weight are
-done. Everything after the foundation is mechanical; the foundation is canonical
+`transfer` (31 cases), `ota` (28), `power` (28), `cell` (26), `checkin` (23), `blackbox` (18),
+`calibration` (18), `provenance` (17), `telemetry` (16), `live` (15), `readiness` (12),
+`birth` (11), `intent` (11). Thirteen corpora, 254 cases, and none of them is a foundation any
+of the others needs. Everything after the foundation is mechanical; the foundation is canonical
 serialisation and a runner that refuses to lie about what it has not done.

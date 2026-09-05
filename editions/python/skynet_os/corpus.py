@@ -40,13 +40,16 @@ from . import admission as admission_module
 from . import certification as certification_module
 from . import digest as digest_module
 from . import embodiment as embodiment_module
+from . import identity as identity_module
 from . import kinematics as kinematics_module
 from . import observation as observation_module
+from . import opstate as opstate_module
 from . import predicate as predicate_module
 from . import roles as roles_module
 from . import watchdog as watchdog_module
 from . import safety as safety_module
 from . import semver as semver_module
+from . import skill as skill_module
 from . import transport as transport_module
 from . import vocabulary as vocabulary_module
 
@@ -224,12 +227,34 @@ def _frames(label: str, case_input: dict[str, Any]) -> Any:
     raise Unimplemented("frames", label)
 
 
+def _identity(label: str, case_input: dict[str, Any]) -> Any:
+    """Three files: what somebody typed, what credential is held, and what is running."""
+    if label == "pairing":
+        return identity_module.code_to_json(case_input)
+    if label == "credential":
+        return identity_module.identity_to_json(case_input)
+    if label == "attestation":
+        return identity_module.attestation_to_json(case_input)
+    raise Unimplemented("identity", label)
+
+
 def _kinematics(_label: str, case_input: dict[str, Any]) -> Any:
     return kinematics_module.solved_to_json(
         case_input.get("frames", {}),
         case_input.get("joints", []),
         case_input.get("command", {}),
     )
+
+
+def _opstate(label: str, case_input: dict[str, Any]) -> Any:
+    """Three files: one evaluation, and two whole-table freezes of the predicates it uses."""
+    if label == "evaluate":
+        return opstate_module.transition_to_json(case_input)
+    if label == "properties":
+        return opstate_module.properties_to_json(case_input)
+    if label == "warning":
+        return opstate_module.warning_matrix_to_json(case_input)
+    raise Unimplemented("opstate", label)
 
 
 def _predicate(_label: str, case_input: dict[str, Any]) -> Any:
@@ -285,6 +310,23 @@ def _fuzz(label: str, case_input: dict[str, Any]) -> Any:
     raise Unimplemented("fuzz", label)
 
 
+def _skill(label: str, case_input: dict[str, Any]) -> Any:
+    """Six files, six questions: §54.2 twice, §54.3, §54.4 twice and §54.5."""
+    if label == "preconditions":
+        return skill_module.preconditions_to_json(case_input)
+    if label == "success":
+        return skill_module.success_to_json(case_input)
+    if label == "timeout":
+        return skill_module.timeout_to_json(case_input)
+    if label == "bounded-deadline":
+        return skill_module.bounded_deadline_to_json(case_input)
+    if label == "composition":
+        return skill_module.composition_to_json(case_input)
+    if label == "lifecycle":
+        return skill_module.lifecycle_to_json(case_input)
+    raise Unimplemented("skill", label)
+
+
 def _transport(_label: str, case_input: dict[str, Any]) -> Any:
     """Seven files, one input shape: a source policy, a target body, and the caller's options."""
     return transport_module.plan_to_json(case_input)
@@ -305,12 +347,15 @@ HANDLERS: dict[str, Handler] = {
     "fuzz": _fuzz,
     "limits": _limits,
     "observation": _observation,
+    "opstate": _opstate,
     "frames": _frames,
+    "identity": _identity,
     "kinematics": _kinematics,
     "predicate": _predicate,
     "roles": _roles,
     "vocabulary": _vocabulary,
     "semver": _semver,
+    "skill": _skill,
     "transport": _transport,
     "watchdog": _watchdog,
 }

@@ -18,6 +18,20 @@
       "expected": "{\"changed\":true,\"from\":\"hold\",\"reason\":\"nominal\",\"to\":\"running\",\"warning\":true}"
     },
     {
+      "id": "a-kernel-nobody-observed-is-down",
+      "note": "Every condition observed except the kernel. §27: \"a robot with a policy and no kernel must not exist\", and the default is `down` because nobody has said otherwise — an edition defaulting to `live` here reports a robot as RUNNING on the strength of a field nobody filled in. Every other case in this file names the kernel, so both readings agreed on all of them.",
+      "input": {
+        "previous": "hold",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "rhal": "present",
+          "policy": "ready"
+        }
+      },
+      "expected": "{\"changed\":false,\"from\":\"hold\",\"reason\":\"kernel_down\",\"to\":\"hold\",\"warning\":false}"
+    },
+    {
       "id": "observed-nothing",
       "note": "The most important case in this file. A caller that has observed nothing has established nothing, and every default is the least capable reading — so an empty conditions object is a robot in SAFE with a lost RHAL, not a robot licensed to run by an object literal.",
       "input": {
