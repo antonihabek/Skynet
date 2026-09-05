@@ -59,6 +59,7 @@ from . import watchdog as watchdog_module
 from . import safety as safety_module
 from . import semver as semver_module
 from . import skill as skill_module
+from . import telemetry as telemetry_module
 from . import transfer as transfer_module
 from . import transport as transport_module
 from . import vocabulary as vocabulary_module
@@ -423,6 +424,19 @@ def _skill(label: str, case_input: dict[str, Any]) -> Any:
     raise Unimplemented("skill", label)
 
 
+def _telemetry(label: str, case_input: dict[str, Any]) -> Any:
+    """§74's telemetry. Two files, because a window and a set of them are two questions.
+
+    An edition could agree about the first while disagreeing about the second — and the second is
+    the one §15's field conformance divides by, which is where a gap becomes visible.
+    """
+    if label == "window":
+        return telemetry_module.window_to_json(case_input)
+    if label == "coverage":
+        return telemetry_module.coverage_to_json(case_input)
+    raise Unimplemented("telemetry", label)
+
+
 def _transfer(label: str, case_input: dict[str, Any]) -> Any:
     """Four files: a fetch and its arrival, an upload and its receipt. Mirrors, not duplicates."""
     if label == "fetch":
@@ -474,6 +488,7 @@ HANDLERS: dict[str, Handler] = {
     "vocabulary": _vocabulary,
     "semver": _semver,
     "skill": _skill,
+    "telemetry": _telemetry,
     "transfer": _transfer,
     "transport": _transport,
     "watchdog": _watchdog,
