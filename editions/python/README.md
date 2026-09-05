@@ -2,7 +2,7 @@
 
 > **This is not yet an edition.** §31.4: *"An edition that has not passed the corpus is not an
 > edition. It cannot carry the name, appear in the matrix, or be installed by `skynetd`."* It
-> currently passes **28 of 31 corpora**. The runner prints that number on every run and this
+> currently passes **29 of 31 corpora**. The runner prints that number on every run and this
 > file will keep saying so until it is 31.
 
 §73's last column has carried one entry against §31 since the table was written: *"The second
@@ -70,9 +70,10 @@ package index is an edition that cannot be checked on the machine it is being re
 | `cell` | 28 | §55.2's descriptor: every fault in it, and the two projections read out of it |
 | `blackbox` | 21 | §26's record layout, the ring header, the six schemas, and a sealed file |
 | `calibration` | 31 | §45's validity, the guards a set feeds, and which sets a body can hold |
-| | **1,043** | of 1,091 |
+| `telemetry` | 25 | §74's windows, the coverage they tile, and §15's field conformance |
+| | **1,068** | of 1,100 |
 
-The other 3 corpora have no handler at all — 48 cases, counted in every run. They are not
+The other 2 corpora have no handler at all — 32 cases, counted in every run. They are not
 skipped and not hidden: a runner that quietly passed most corpora and printed "OK" would be the
 most misleading artifact in this repository.
 
@@ -147,6 +148,7 @@ skynet_os/
   cell.py          §55.2's descriptor, its faults, and the two projections a robot reads
   blackbox.py      §26's bytes: the ring record, the header, the schemas and the MCAP file
   calibration.py   §45's validity, expiry and the guards a parameter set feeds
+  telemetry.py     §74's windows, what a set of them covers, and §15's ratio
   js.py            the four JavaScript expressions Python has no equivalent for
   corpus.py        the runner and its dispatch
 run_corpus.py      the CLI
@@ -531,8 +533,37 @@ One `to_fixed` now, in `js.py`, on the `Decimal` rule. The corpus was green befo
 nothing reachable moved — which is exactly what makes it worth doing now rather than after somebody
 finds the input.
 
+## What the twelfth round found: eight of nineteen, and nine boundaries
+
+`telemetry` — 16 cases, first run, and then **eight of nineteen** mutations caught, which is worse
+than `calibration`'s nine. Nine new cases later it is seventeen, and the two remaining survivors are
+no-ops: one edits a line after the `continue` that makes it unreachable, and the other removes a
+guard that `field_conformance` repeats immediately below.
+
+**1,091 → 1,100.** Rust reproduces every new case without a change.
+
+The shape of what was missing is worth reading as a list, because it is the same shape nine times:
+
+| New case | The boundary |
+|---|---|
+| `a-clock-that-stepped-back-part-of-a-second` | Every skew here was a whole number of seconds, so `Math.trunc` and a floor agreed. −90.5 s truncates to −90 and floors to −91 — and truncation is what the reference *chose*, in a comment naming this exact disagreement |
+| `a-counter-that-went-backwards` | The `< 0` arm of a three-way test, unreached. A wrapped counter would have produced a negative rate on a fleet page |
+| `a-duration-that-is-negative` | `elapsed_ms: 0` had a case and a negative one did not, and they take different paths once a report decides what to put in `elapsed_ms` |
+| `a-window-of-no-wall-duration-at-all` | `to === from` is **not** inverted: a coarse clock, not a backwards one |
+| `a-clock-corrected-by-one-millisecond` | And `to === from - 1` is. The rule is `<` rather than a tolerance, because no size of backwards step makes an interval nameable |
+| `a-skew-of-exactly-one-minute` | Strictly greater. Every skew was zero or an hour |
+| `a-skew-of-exactly-minus-one-minute` | The same value the other way, because the test is two comparisons rather than one over an absolute value |
+| `a-window-wholly-inside-another` | Every overlap ran forwards, where "the later end" and "the latest end" are the same number. A contained window is a robot that restarted and re-reported a slice |
+| `windows-reported-out-of-order` | Every case arrived sorted, so the sort was free. A robot writing from a ring does not write in wall-clock order |
+
+None of these is a Python trap and none is a defect in any edition. They are nine places where two
+correct editions were being compared on inputs that could not tell them apart, and the pattern
+across `calibration` and `telemetry` together is one sentence: **this corpus is very good at the
+middle of a rule and had almost nothing on the edges of one.** Fifteen of the twenty-two cases added
+across the two rounds are boundaries.
+
 ## What is next, in dependency order
 
-`provenance` (17 cases), `telemetry` (16), `live` (15). Three corpora, 48 cases, and none of them is a foundation any of the others needs. Everything after the
+`provenance` (17 cases), `live` (15). Two corpora, 32 cases, and none of them is a foundation any of the others needs. Everything after the
 foundation is mechanical; the foundation is canonical serialisation and a runner that refuses to lie
 about what it has not done.

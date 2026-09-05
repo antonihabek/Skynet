@@ -6528,6 +6528,74 @@ windowCase('a-machine-that-was-suspended',
   + 'neither is a reason to throw a measurement away.',
   { ...FIVE_MINUTES, to_ms: 1_760_003_900_000 })
 
+windowCase('a-clock-that-stepped-back-part-of-a-second',
+  'The skew rendered, at a value that is not a whole number of seconds. Every skew in this corpus '
+  + 'was an exact multiple of a thousand, so `Math.trunc` and a floor agreed — and they disagree on '
+  + 'exactly the negative fractions a backwards clock produces, which is the case the reference '
+  + 'chose truncation for in the first place. \u221290.5 s truncates to \u221290 and floors to \u221291, in a '
+  + 'sentence a fleet page renders.',
+  { from_ms: 1_760_000_000_000, to_ms: 1_760_000_209_500, elapsed_ms: 300_000, counters: {} })
+
+windowCase('a-clock-corrected-by-one-millisecond',
+  'The other side of the inversion boundary, one millisecond over. `to === from` is a coarse clock '
+  + 'and `to === from - 1` is a clock that moved backwards, and the rule is `<` rather than a '
+  + 'tolerance — because there is no size of backwards step that makes an interval nameable, and a '
+  + 'tolerance here would be somebody deciding how much of a clock correction is acceptable to '
+  + 'count over.',
+  {
+    from_ms: 1_760_000_000_000, to_ms: 1_759_999_999_999, elapsed_ms: 300_000,
+    counters: { cycles: 30_000 },
+  })
+
+windowCase('a-skew-of-exactly-one-minute',
+  'Exactly 60,000 ms of disagreement, which is **not** implausible: the test is strictly greater, '
+  + 'and every skew in this corpus was either zero or an hour. A robot whose clock is corrected by '
+  + 'exactly a minute is at the value an operator will read as the threshold, so this is the case '
+  + 'that says which side of it the threshold falls on.',
+  {
+    from_ms: 1_760_000_000_000, to_ms: 1_760_000_360_000, elapsed_ms: 300_000,
+    counters: { cycles: 30_000 },
+  })
+
+windowCase('a-skew-of-exactly-minus-one-minute',
+  'And the same value the other way, because the test is two comparisons rather than one over an '
+  + 'absolute value. An edition writing `Math.abs(skew) >= 60_000` agrees with this one everywhere '
+  + 'except on the two boundaries themselves.',
+  {
+    from_ms: 1_760_000_000_000, to_ms: 1_760_000_240_000, elapsed_ms: 300_000,
+    counters: { cycles: 30_000 },
+  })
+
+windowCase('a-counter-that-went-backwards',
+  'A negative count is not a count. It is a counter that wrapped, or a field somebody defaulted to '
+  + '\u22121, and it lands in `unmeasured` rather than producing a negative rate on a fleet page — '
+  + 'which is a number nobody can read and which would drag a total below the counts that are real. '
+  + 'The `< 0` arm of the three-way test had no case.',
+  {
+    from_ms: 1_760_000_000_000, to_ms: 1_760_000_300_000, elapsed_ms: 300_000,
+    counters: { cycles: 30_000, guard_trips: -1 },
+  })
+
+windowCase('a-duration-that-is-negative',
+  'The other side of the same guard. `elapsed_ms: 0` is refused by a case above; a **negative** '
+  + 'duration was not, and the two are different code paths once a report has to decide what to put '
+  + 'in `elapsed_ms`. It is zero, because a window that reports a negative duration has reported no '
+  + 'duration — passing it through would put a negative denominator into `observed_ms`.',
+  {
+    from_ms: 1_760_000_000_000, to_ms: 1_760_000_300_000, elapsed_ms: -300_000,
+    counters: { cycles: 30_000 },
+  })
+
+windowCase('a-window-of-no-wall-duration-at-all',
+  'The inversion boundary: `to` equal to `from` is **not** inverted. A robot that reported two '
+  + 'windows in the same millisecond has a coarse clock rather than one that went backwards, and '
+  + 'refusing it would discard counts over a real interval — the monotonic duration says the '
+  + 'interval was five minutes and it is the monotonic duration the rates come from.',
+  {
+    from_ms: 1_760_000_000_000, to_ms: 1_760_000_000_000, elapsed_ms: 300_000,
+    counters: { cycles: 30_000 },
+  })
+
 coverageCase('two-windows-that-tile',
   'Contiguous, so there is nothing missing and the span equals what was observed.',
   [
@@ -6563,6 +6631,25 @@ coverageCase('overlapping-windows-are-merged-for-the-span-and-summed-for-the-cou
 // §15's floor, from both sides. Every case above sits comfortably over 0.999, so none of them
 // discriminates the number the third suite exists to produce — an edition could compute
 // conformance differently and reproduce all four. These four are the ones that pin it.
+
+coverageCase('a-window-wholly-inside-another',
+  'A five-minute window and a one-minute window inside it. The span is the outer one and the reach '
+  + 'must not go **backwards** onto the inner window\u2019s end — every overlap in this corpus so far '
+  + 'ran forwards, where taking the later end and taking the latest end are the same number. This '
+  + 'is a robot that restarted and re-reported a slice, which is the case the merge exists for.',
+  [
+    { from_ms: 1_760_000_000_000, to_ms: 1_760_000_300_000, elapsed_ms: 300_000, counters: { cycles: 30_000 } },
+    { from_ms: 1_760_000_060_000, to_ms: 1_760_000_120_000, elapsed_ms: 60_000, counters: { cycles: 6_000 } },
+  ])
+
+coverageCase('windows-reported-out-of-order',
+  'The same two tiling windows, sent latest first. A robot writing from a ring is not writing in '
+  + 'wall-clock order, and every case here had been sorted already — so the sort was free and an '
+  + 'edition that dropped it reported a gap where the windows tile and a span running backwards.',
+  [
+    { from_ms: 1_760_000_300_000, to_ms: 1_760_000_600_000, elapsed_ms: 300_000, counters: { cycles: 30_000 } },
+    { from_ms: 1_760_000_000_000, to_ms: 1_760_000_300_000, elapsed_ms: 300_000, counters: { cycles: 30_000 } },
+  ])
 
 coverageCase('conformance-under-the-floor',
   '§15 suspends below 0.999, "because a robot whose commands have been leaving its envelope is not '

@@ -1923,3 +1923,68 @@ morning after somebody finds the input.
 
 **Twenty-eight of thirty-one corpora complete. Three remain, 48 cases:** `provenance` 17,
 `telemetry` 16, `live` 15.
+
+---
+
+## 30. `telemetry` — eight of nineteen, and nine boundaries
+
+`telemetry` is §74: counts over a self-describing half-open window, and what a set of them covers.
+**16 cases, 1,043 → 1,059, first run.**
+
+Then **eight of nineteen** mutations caught, which is worse than the round before it. Nine new cases
+later it is seventeen, and both remaining survivors are no-ops — one edits a line the `continue`
+above it makes unreachable for the differing case, the other removes a guard `field_conformance`
+repeats two lines down.
+
+**1,091 → 1,100.** Rust reproduces all nine without a change.
+
+### The nine, and the one sentence they share
+
+| New case | The boundary |
+|---|---|
+| `a-clock-that-stepped-back-part-of-a-second` | Every skew in the corpus was a whole number of seconds, so `Math.trunc` and a floor agreed |
+| `a-counter-that-went-backwards` | The `< 0` arm of a three-way test |
+| `a-duration-that-is-negative` | `elapsed_ms: 0` had a case; a negative one did not |
+| `a-window-of-no-wall-duration-at-all` | `to === from` is **not** inverted |
+| `a-clock-corrected-by-one-millisecond` | And `to === from - 1` is |
+| `a-skew-of-exactly-one-minute` | Strictly greater; every skew was zero or an hour |
+| `a-skew-of-exactly-minus-one-minute` | And the same value the other way |
+| `a-window-wholly-inside-another` | Every overlap ran forwards |
+| `windows-reported-out-of-order` | Every case arrived sorted |
+
+The first is the one the reference had already argued about. Its own comment says truncation was
+chosen over rounding because *"`Math.round` is half toward positive infinity and the Rust edition's
+helper is half away from zero, and the two disagree on exactly the negative halves a backwards clock
+produces"* — and then no case carried a skew that was not a whole number of seconds, so the
+disagreement it was written to prevent was invisible. −90.5 s truncates to −90 and floors to −91.
+
+None of the nine is a Python trap and none is a defect in any edition. They are nine places where
+two correct editions were being compared on inputs that could not tell them apart.
+
+### The pattern across two rounds, which is the finding
+
+`calibration` caught 9 of 19 and `telemetry` 8 of 19 — the two weakest runs of the project, back to
+back — and **fifteen of the twenty-two cases added across them are boundaries**: a value exactly at
+a threshold, a comparison's other side, a sort's other order, an absolute value's other sign.
+
+That is a property of how this corpus was written rather than of these two modules. A case is
+written to demonstrate a rule, so it is given an input that demonstrates it clearly — an age well
+past its limit, a skew of exactly an hour, windows that tile in order. Every one of those choices is
+the right one for a reader and the wrong one for a differential test, and the two purposes have been
+pulling in opposite directions since the first case was written.
+
+It is worth stating as a rule for the corpus rather than as an observation about two files: **a case
+that demonstrates a rule and a case that pins it are different cases, and a corpus needs both.** The
+first is what somebody reads to understand the specification; the second is what stops two editions
+drifting. Fifteen of the twenty-two are the second kind, and none of them existed.
+
+### Verified
+
+* `python3 editions/python/run_corpus.py --min-passed 1068` — **1,068 passed, 0 failed**, 32 not
+  implemented, of 1,100
+* `cargo test -p skynet-corpus --test corpus` — 1,100 cases, byte for byte
+* 17 of 19 mutations caught, up from 8; both survivors shown equivalent by construction
+* `cargo test --workspace` — **1,431 passed**, 0 failed, 7 ignored
+* `python3 editions/python/self_check.py` — 41 checks; CI ratchet raised to 1,068
+
+**Twenty-nine of thirty-one corpora complete. Two remain, 32 cases:** `provenance` 17, `live` 15.
