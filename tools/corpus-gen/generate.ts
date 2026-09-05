@@ -475,6 +475,58 @@ transportCase('rate', 'undeclared',
   'A policy that declares no rate produces no rate.',
   policy([channel(0, 'joint_torque', 'right_arm.elbow.flex')], { control_hz: undefined }), ARM)
 
+// Four cases added because a mutation run on the Python edition showed the corpus could not tell
+// the difference. Each is a rule this module states in prose, in a comment or in a `?? 0`, and
+// each was unprotected: replacing the rule with a plausible wrong one changed no expected byte.
+
+const DUPLICATE_ROLE: EmbodimentDescriptor = {
+  ...ARM,
+  robot_slug: 'test-duplicate-role',
+  joints: [
+    joint('J1', 'right_arm.elbow.flex', 80, ['torque', 'position']),
+    joint('J2', 'right_arm.elbow.flex', 60, ['torque', 'position']),
+    joint('J3', 'right_arm.wrist.roll', 20, ['position']),
+  ],
+}
+
+const ZERO_WATCHDOG: EmbodimentDescriptor = {
+  ...ARM,
+  robot_slug: 'test-zero-watchdog',
+  envelope: {
+    joint_velocity_max_rad_s: 2, joint_torque_max_nm: 80,
+    watchdog_ms: 0, estop: true, source: 'https://example.invalid/arm.pdf',
+  },
+}
+
+transportCase('binding', 'duplicate-role-first-wins',
+  'A body declaring one role on two joints is a descriptor bug, and `indexTarget` keeps the first '
+  + 'because silently preferring the later one would make the mapping depend on array order. The '
+  + 'two joints are rated 80 and 60 Nm, so which one wins is visible in the binding\'s target and '
+  + 'in its limit — until this case existed, last-wins produced identical bytes everywhere.',
+  policy([channel(0, 'joint_torque', 'right_arm.elbow.flex')]), DUPLICATE_ROLE)
+
+transportCase('scaling', 'scaled-to-an-exact-half',
+  'A 128 Nm peak against an 80 Nm rating is a scale of exactly 0.625, so the percentage in the '
+  + 'warning lands on 62.5. `toFixed(0)` takes the larger integer on a tie and renders 63; '
+  + 'round-half-to-even, which is what a Python edition gets from its own formatter, renders 62. '
+  + 'Every other scale in this corpus is nowhere near a half.',
+  policy([channel(0, 'joint_torque', 'right_arm.shoulder.pitch', { peak: 128 })]), ARM)
+
+transportCase('observation', 'sensor-declares-no-width',
+  'The IMU has no width at all and the policy asks for 640. `candidate.width ?? 0` makes an '
+  + 'undeclared dimension a zero rather than a match, so this is a downscale — an edition treating '
+  + 'the absence as "no constraint" would report the stream as direct and hand the policy a frame '
+  + 'nobody checked. Every other degradation case has both numbers present.',
+  policy([channel(0, 'joint_torque', 'left_arm.elbow.flex')], {
+    observations: [{ name: 'torso_imu', modality: 'imu', width: 640 }],
+  }), HUMANOID)
+
+transportCase('rate', 'zero-watchdog-is-no-watchdog',
+  'A watchdog window of zero is not a window: it yields no `min_control_hz` in the clamp and no '
+  + '`rate_below_watchdog` warning, because both would be a division by it. The guard is `> 0` '
+  + 'rather than a presence check in two separate places, and neither was covered.',
+  policy([channel(0, 'joint_torque', 'right_arm.elbow.flex')], { control_hz: 5 }), ZERO_WATCHDOG)
+
 transportCase('declaration', 'unverified-body',
   'An unsigned descriptor is usable and flagged.',
   policy([channel(0, 'joint_torque', 'left_arm.elbow.flex')], { dof: 5 }), HUMANOID)

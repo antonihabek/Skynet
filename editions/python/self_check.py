@@ -239,9 +239,10 @@ def main() -> int:
             corpus_module.HANDLERS = original
 
     divergences()
+    transport_divergences()
 
     print()
-    total = 15 + 8
+    total = 15 + 8 + 4
     if FAILURES:
         print(f"self-check FAILED — {len(FAILURES)} of {total}")
         return 1
@@ -432,6 +433,126 @@ def divergences() -> None:
         "...and a channel named `09` is not an array index, so it keeps its place",
         zero_order == ["2", "09"],
         f"clamped order={zero_order}, want ['2', '09']",
+    )
+
+
+# -- The transport traps, for the same reason -----------------------------------------------------
+#
+# Two more mutations of `transport.py` survive the corpus, and both survive it correctly: Rust's
+# `allowRetarget` is an `Option<bool>` and cannot hold a truthy non-boolean at all, and serde reads
+# an absent field and an explicit null into the same `None`. Neither distinction is expressible in
+# every edition, so neither belongs in a corpus every edition must pass.
+
+ARM_JOINTS = [
+    {
+        "name": "J1", "role": "right_arm.shoulder.pitch", "type": "revolute",
+        "limits": {
+            "position_min_rad": -3, "position_max_rad": 3,
+            "velocity_max_rad_s": 2, "effort_max_nm": 80,
+        },
+        "control_modes": ["torque", "position"],
+    },
+    {
+        "name": "J2", "role": "right_arm.elbow.flex", "type": "revolute",
+        # No `effort_max_nm`: this joint has no rating for a torque channel, which is what makes
+        # the `unscalable_channel` branch reachable.
+        "limits": {"position_min_rad": -3, "position_max_rad": 3, "velocity_max_rad_s": 2},
+        "control_modes": ["torque", "position"],
+    },
+]
+
+
+def arm(**overrides: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "schema_version": 1,
+        "robot_slug": "test-arm",
+        "digest": "sha256:arm",
+        "verified": True,
+        "base": "fixed",
+        "dof": 3,
+        "joints": ARM_JOINTS,
+        "end_effectors": [],
+        "sensors": [],
+        "control": {
+            "modes": ["position", "torque"], "rate_hz_max": 200,
+            "rate_hz_min": 10, "command_latency_ms": 4,
+        },
+        "envelope": {
+            "joint_velocity_max_rad_s": 2, "joint_torque_max_nm": 80,
+            "watchdog_ms": 100, "estop": True, "source": "https://example.invalid/arm.pdf",
+        },
+        "solvers": ["trac_ik"],
+    }
+    body.update(overrides)
+    return body
+
+
+def trainer(channels: list[dict[str, Any]], **overrides: Any) -> dict[str, Any]:
+    source: dict[str, Any] = {
+        "robot_slug": "trainer",
+        "digest": "sha256:policy",
+        "dof": 3,
+        "control_mode": "torque",
+        "control_hz": 50,
+        "action_channels": channels,
+        "observations": [],
+    }
+    source.update(overrides)
+    return source
+
+
+def transport_divergences() -> None:
+    from skynet_os import transport
+
+    print()
+    print("the transport traps the corpus cannot reach")
+
+    # 1 and 2. `options.allowRetarget === true` is strict. A truthy non-boolean does *not* grant
+    #    retargeting, and — this is the part worth pinning — the message it produces then blames a
+    #    missing solver on a body that has one, because the message branch is a truthy test while
+    #    the grant is an identity test. Transcribed as it stands; it is the reference's sentence.
+    #    A chain that exists with a joint that does not is what needs task space at all.
+    needs_task_space = trainer(
+        [{"index": 0, "kind": "joint_torque", "role": "right_arm.wrist.roll"}]
+    )
+    loose = transport.resolve_transport(needs_task_space, arm(), {"allowRetarget": 1})
+    check(
+        "a truthy-but-not-true allowRetarget does not grant retargeting",
+        loose["verdict"] == "refused"
+        and all(b["method"] != "retarget" for b in loose["bindings"]),
+        f"verdict={loose['verdict']}, methods={[b['method'] for b in loose['bindings']]}",
+    )
+    check(
+        "...and still takes the message branch that blames a solver this body has",
+        any(
+            w["code"] == "retarget_without_solver" and "no inverse-kinematics solver" in w["message"]
+            for w in loose["warnings"]
+        ),
+        f"warnings={[w['code'] for w in loose['warnings']]}",
+    )
+
+    # 3 and 4. `channel.peak !== undefined` decides whether an unscalable channel is warned about.
+    #    J2 declares no torque rating, so `scaleFor` returns 1 either way and the *only* observable
+    #    difference is the warning — which is the whole point of it.
+    absent_peak = transport.resolve_transport(
+        trainer([{"index": 0, "kind": "joint_torque", "role": "right_arm.elbow.flex"}]), arm(), {}
+    )
+    check(
+        "a channel with no declared peak raises no unscalable warning",
+        not any(w["code"] == "unscalable_channel" for w in absent_peak["warnings"]),
+        f"warnings={[w['code'] for w in absent_peak['warnings']]}",
+    )
+    null_peak = transport.resolve_transport(
+        trainer(
+            [{"index": 0, "kind": "joint_torque", "role": "right_arm.elbow.flex", "peak": None}]
+        ),
+        arm(),
+        {},
+    )
+    check(
+        "a peak present and null does raise it -- `!== undefined` is strict, and `.get` is not",
+        any(w["code"] == "unscalable_channel" for w in null_peak["warnings"]),
+        f"warnings={[w['code'] for w in null_peak['warnings']]}",
     )
 
 

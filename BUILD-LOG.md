@@ -1203,3 +1203,84 @@ its own item rather than a drive-by inside a transcription round.
 * `cargo test --workspace` — **1,398 passed, 0 failed**
 * `node tools/check-contract-mirrors.mjs "../Robot Overflow"` — every mirrored contract matches
 * Complete: eleven of thirty-one corpora. `fuzz` is `partial` with one file left
+
+---
+
+## 21. `transport.py` — and a defect a corpus is structurally unable to catch
+
+§6's planner: how a policy's action space reaches a body, by name, by canonical role, through task
+space, or not at all. **100 cases, 488 → 588 passed**, first run, zero failures. `fuzz` reached
+`complete` — all three of its files written, so `partial` and `declined` are empty for the first
+time since item 18 created them.
+
+Ten mutations. **Four caught, six not**, and the six split cleanly into two kinds.
+
+### The largest catch, worth stating on its own
+
+Walking a warning's `subjects` as a Python `set` instead of in insertion order breaks **51 cases**.
+A JavaScript `Set` iterates in insertion order and a Python `set` has *no promised order at all* —
+so an edition that reached for the obvious type would produce entirely correct plans whose warnings
+are shuffled, **differently between runs of the same input**. Two lists are built this way: the
+unmapped roles, and the chains that need retargeting.
+
+### Four of the six were gaps in the corpus
+
+Every edition can express these, so the TypeScript changed first and the corpus grew 1,057 → 1,061:
+
+| New case | The rule it pins, and what was producing identical bytes without it |
+|---|---|
+| `duplicate-role-first-wins` | A body declaring one role on two joints keeps the **first** — the reference's own comment says preferring the later one "would make the mapping depend on array order". Two joints rated 80 and 60 Nm, so the winner is visible in the binding's target *and* its limit |
+| `scaled-to-an-exact-half` | A 128 Nm peak on an 80 Nm rating is a scale of exactly 0.625, so the warning's percentage lands on 62.5. `toFixed(0)` takes the **larger** integer on a tie and renders `63`; half-to-even renders `62`. Every other scale in the corpus was nowhere near a half |
+| `sensor-declares-no-width` | `candidate.width ?? 0` makes an undeclared dimension a **zero** rather than a match, so an IMU with no width against a 640-wide requirement *downscales*. Reading the absence as "no constraint" reports the stream as direct and hands the policy a frame nobody checked |
+| `zero-watchdog-is-no-watchdog` | A watchdog window of zero is not a window: no `min_control_hz`, no `rate_below_watchdog`. The `> 0` guard appears in two separate places and neither was covered |
+
+### Two of the six are not the corpus's to hold
+
+`allowRetarget` read as truthy rather than strictly `true`, and an absent `peak` conflated with a
+null one. Rust's `allowRetarget` is an `Option<bool>` and cannot hold `1` or `"yes"` at all, and
+serde reads an absent field and an explicit null into the same `None` — so a corpus every edition
+must pass cannot carry either. They went to `self_check.py`, **23 checks → 27**, and both mutations
+now fail two checks each.
+
+The `allowRetarget` one is worth reading twice: the *grant* is an identity test and the *message
+branch* is a truthy test, so a truthy non-boolean refuses retargeting and then blames a missing
+solver on a body that has one. Transcribed as it stands, and pinned, because it is the reference's
+sentence rather than this edition's opinion of it.
+
+### The defect none of this would ever have found
+
+`duplicate-role-first-wins` was the first case in the corpus with exactly **one** unmapped joint,
+and it printed:
+
+> `1 joint on this body **are** not driven by the policy and will be held by the controller.`
+
+The plural was on the noun and not on the verb. **Seventeen existing cases carried it**, every
+edition reproduced it byte for byte, and the corpus was silent — because all three editions had the
+*same* bug. A corpus detects editions disagreeing. It is structurally unable to detect them agreeing
+about something wrong, and no amount of adding cases changes that; only reading the output does.
+
+Fixed in the order the mirror requires: `reference/typescript/embodiment.ts` first, since it is the
+specification; then `crates/skynet-contracts/src/transport.rs`, which has to produce the same bytes
+or the corpus test fails; then this edition. Corpus regenerated, and the Hub resynced — `embodiment`
+is a mirrored contract, so the change was one the Hub owed.
+
+### Verified
+
+* `python editions/python/run_corpus.py` — **592 passed, 0 failed**, 469 not implemented, of 1,061
+* `python editions/python/self_check.py` — **27 checks**
+* `cargo test -p skynet-corpus --test corpus` — **1,061 cases across 77 files, byte for byte**
+* `cargo test --workspace` — **1,398 passed, 0 failed**
+* `npx vitest run` (Hub) — **1,735 passed**, 72 files, with the resynced contract
+* `node tools/check-contract-mirrors.mjs "../Robot Overflow"` — every mirrored contract matches
+* `node tools/corpus-gen/generate.ts` — regenerating is a no-op
+* **Thirteen of thirty-one corpora complete.** 328 → 592 cases over three rounds
+
+### Round state
+
+Three commits on `main` in the OS repository and one in the Hub, **none pushed**.
+
+| | At §17 | Now |
+|---|---|---|
+| Python edition | 328 / 1,055 in 8 corpora | **592 / 1,061 in 13** |
+| Corpus | 1,055 cases | **1,061** — six added, each closing a mutation the suite survived |
+| Editions holding a shared defect | 3 | 0, for the one that was found |

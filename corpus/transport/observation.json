@@ -619,6 +619,141 @@
         "options": {}
       },
       "expected": "{\"bindings\":[{\"limit\":60,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"J2\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J2\"}],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J2\":60},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[{\"method\":\"missing\",\"reason\":\"Not present on this body; the policy declares it optional.\",\"required\":\"head_cam\",\"target\":null}],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.roll\"]}]}"
+    },
+    {
+      "id": "sensor-declares-no-width",
+      "note": "The IMU has no width at all and the policy asks for 640. `candidate.width ?? 0` makes an undeclared dimension a zero rather than a match, so this is a downscale — an edition treating the absence as \"no constraint\" would report the stream as direct and hand the policy a frame nobody checked. Every other degradation case has both numbers present.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "left_arm.elbow.flex"
+            }
+          ],
+          "observations": [
+            {
+              "name": "torso_imu",
+              "modality": "imu",
+              "width": 640
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-humanoid",
+          "digest": "sha256:humanoid",
+          "verified": false,
+          "base": "legged",
+          "dof": 5,
+          "joints": [
+            {
+              "name": "l_sh_p",
+              "role": "left_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 120
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "l_el_f",
+              "role": "left_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 90
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "r_sh_p",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 120
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "r_el_f",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 90
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "waist",
+              "role": "torso.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 200
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [
+            {
+              "name": "head_rgb",
+              "role": "head.camera.rotate",
+              "modality": "rgb",
+              "width": 1280,
+              "height": 720,
+              "fps": 30
+            },
+            {
+              "name": "torso_imu",
+              "role": "torso.imu",
+              "modality": "imu"
+            }
+          ],
+          "control": {
+            "modes": [
+              "torque"
+            ],
+            "rate_hz_max": 500,
+            "rate_hz_min": 50
+          },
+          "envelope": null,
+          "solvers": []
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":90,\"method\":\"remap\",\"reason\":\"Mapped by role left_arm.elbow.flex to \\\"l_el_f\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"left_arm.elbow.flex\",\"target\":\"l_el_f\"}],\"clamp\":{\"per_channel\":{\"l_el_f\":90}},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[{\"method\":\"downscale\",\"reason\":\"Present but below the trained resolution or frame rate; frames are upscaled.\",\"required\":\"torso_imu\",\"target\":\"torso_imu\"}],\"robot_slug\":\"test-humanoid\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:humanoid\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-humanoid\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-humanoid\"]},{\"code\":\"dof_mismatch\",\"message\":\"The policy was trained on a 3 degree-of-freedom body; this one has 5.\"},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"},{\"code\":\"observation_degraded\",\"message\":\"\\\"torso_imu\\\" is lower resolution or slower than the stream the policy was trained on.\",\"subjects\":[\"torso_imu\"]},{\"code\":\"unmapped_roles\",\"message\":\"4 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"left_arm.shoulder.pitch\",\"right_arm.shoulder.pitch\",\"right_arm.elbow.flex\",\"torso.yaw\"]}]}"
     }
   ]
 }
