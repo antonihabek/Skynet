@@ -241,9 +241,11 @@ def main() -> int:
     divergences()
     transport_divergences()
     admission_divergences()
+    skill_divergences()
+    state_and_identity_divergences()
 
     print()
-    total = 15 + 8 + 4 + 2
+    total = 15 + 8 + 4 + 2 + 2 + 3
     if FAILURES:
         print(f"self-check FAILED — {len(FAILURES)} of {total}")
         return 1
@@ -618,6 +620,118 @@ def admission_divergences() -> None:
         "...and a declared simulator raises no such warning",
         not any(f["code"] == "environment_inert" for f in real["findings"]),
         f"findings={[f['code'] for f in real['findings']]}",
+    )
+
+
+# -- The skill trap -------------------------------------------------------------------------------
+#
+# `record.hold === true` is strict, and Rust's `hold` is an `Option<bool>` that cannot hold a truthy
+# non-boolean -- so the corpus cannot reach the difference. It decides which clauses are re-checked
+# every cycle: §54.2's whole second rule is that a subset marked `hold` is evaluated continuously,
+# and "battery dropping below reserve mid-skill should stop the skill, not be discovered at the end".
+
+def skill_divergences() -> None:
+    from skynet_os import skill
+
+    print()
+    print("the skill trap the corpus cannot reach")
+
+    clauses = skill.resolve_clauses(
+        skill.read_clauses(
+            [
+                {
+                    "statement": "the battery is above reserve",
+                    "predicate": {"op": "gt", "path": "battery", "value": 20},
+                    # Truthy, and not `true`. A manifest written by hand, or by a serialiser that
+                    # renders booleans as 0/1.
+                    "hold": 1,
+                }
+            ]
+        )
+    )
+    check(
+        "a `hold` of 1 is not a hold: the clause is not re-checked in the hold phase",
+        skill.evaluate_preconditions(clauses, {"battery": 50}, "hold")["results"] == [],
+        f"results={skill.evaluate_preconditions(clauses, {'battery': 50}, 'hold')['results']}",
+    )
+    real = skill.resolve_clauses(
+        skill.read_clauses(
+            [
+                {
+                    "statement": "the battery is above reserve",
+                    "predicate": {"op": "gt", "path": "battery", "value": 20},
+                    "hold": True,
+                }
+            ]
+        )
+    )
+    check(
+        "...and a declared one is, so the check above is not passing by finding nothing",
+        len(skill.evaluate_preconditions(real, {"battery": 50}, "hold")["results"]) == 1,
+        f"results={skill.evaluate_preconditions(real, {'battery': 50}, 'hold')['results']}",
+    )
+
+
+# -- The last two strict-`true` traps -------------------------------------------------------------
+#
+# `stop_settled === true` and `credential === true`. Both are `Option<bool>` in Rust and cannot hold
+# a truthy non-boolean, so no corpus case every edition must pass can reach either. The first
+# decides whether a robot mid-ramp is reported as `safe`; the second decides whether a robot is
+# treated as paired.
+#
+# A third survivor of the same mutation run is *not* here on purpose: the pairing code's length is
+# measured in UTF-16 code units by the reference and in code points by the Rust edition, and that
+# disagreement is recorded in §80 as an open question rather than pinned by either edition.
+
+def state_and_identity_divergences() -> None:
+    from skynet_os import identity, opstate
+
+    print()
+    print("the last two strict-true traps")
+
+    settled = opstate.evaluate(
+        "stopping",
+        {
+            "post": "passed", "homing": "complete", "kernel": "live",
+            "rhal": "present", "policy": "ready",
+            "stop": "operator",
+            # Truthy, and not `true`. A runtime that reports a settled stop as 1.
+            "stop_settled": 1,
+        },
+    )
+    check(
+        "a truthy-but-not-true `stop_settled` has not settled the stop: still `stopping`",
+        settled["to"] == "stopping" and settled["reason"] == "stopping_operator",
+        f"to={settled['to']}, reason={settled['reason']}",
+    )
+    real = opstate.evaluate(
+        "stopping",
+        {
+            "post": "passed", "homing": "complete", "kernel": "live",
+            "rhal": "present", "policy": "ready",
+            "stop": "operator", "stop_settled": True,
+        },
+    )
+    check(
+        "...and a declared one reaches `safe`, so the check above is not passing by accident",
+        real["to"] == "safe" and real["reason"] == "stop_complete",
+        f"to={real['to']}, reason={real['reason']}",
+    )
+
+    truthy_credential = identity.check_identity(
+        {
+            "device_id": "dev_7", "namespace": "acme", "device_key": "aa",
+            "binding": "hardware", "credential": 1, "credential_prefix": "skd_",
+            "scopes": ["device:checkin"],
+        },
+        {"birth_key": "aa", "birth_certificate": True},
+    )
+    check(
+        "a truthy-but-not-true `credential` is not a credential: the robot reads as unpaired",
+        truthy_credential["paired"] is False
+        and any(f["code"] == "not_paired" for f in truthy_credential["findings"]),
+        f"paired={truthy_credential['paired']}, "
+        f"findings={[f['code'] for f in truthy_credential['findings']]}",
     )
 
 

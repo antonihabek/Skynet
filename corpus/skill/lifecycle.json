@@ -139,6 +139,26 @@
       "expected": "{\"changed\":true,\"detail\":\"a nested call runs under the root invocation's leases (§54.5)\",\"from\":\"preconditions\",\"outcome\":null,\"reason\":\"leases_held_by_root\",\"release_leases\":false,\"to\":\"running\"}"
     },
     {
+      "id": "root-absent-is-a-root-invocation",
+      "note": "The test is `root === false`, not a truthy one, so an invocation that never said acquires its own leases. Read loosely, an unlabelled invocation would skip `acquiring` entirely and run holding nothing — which is §25.2 bypassed by omission rather than by decision. The fixture sets `root` on every other case, so both readings agreed everywhere until this one.",
+      "input": {
+        "phase": "preconditions",
+        "progress": {
+          "invoked": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running"
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"every evaluated precondition held\",\"from\":\"preconditions\",\"outcome\":null,\"reason\":\"preconditions_met\",\"release_leases\":false,\"to\":\"acquiring\"}"
+    },
+    {
       "id": "lease-pending",
       "note": "A lease nobody has taken is not one that was granted — the same rule as the precondition above, arrived at from §25.2 rather than from §54.2.",
       "input": {

@@ -4285,6 +4285,17 @@ opCase('nominal', 'Booted, homed, kernel live, body present, policy holding its 
   + 'ordering: the reason names the last rule standing.',
   'hold', opConditions())
 
+// Added because a mutation run on the Python edition showed the corpus survived it. `observed-
+// nothing` pins the defaults when *everything* is absent, and every other case sets `kernel`
+// explicitly — so the one default this module's own header calls out by name was the one nothing
+// reached on its own.
+opCase('a-kernel-nobody-observed-is-down',
+  'Every condition observed except the kernel. §27: "a robot with a policy and no kernel must not '
+  + 'exist", and the default is `down` because nobody has said otherwise — an edition defaulting '
+  + 'to `live` here reports a robot as RUNNING on the strength of a field nobody filled in. Every '
+  + 'other case in this file names the kernel, so both readings agreed on all of them.',
+  'hold', { post: 'passed', homing: 'complete', rhal: 'present', policy: 'ready' })
+
 opCase('observed-nothing', 'The most important case in this file. A caller that has observed '
   + 'nothing has established nothing, and every default is the least capable reading — so an empty '
   + 'conditions object is a robot in SAFE with a lost RHAL, not a robot licensed to run by an '
@@ -4539,6 +4550,22 @@ lifecycleCase('nested-call-does-not-acquire',
   + 'how you get a skill deadlocking against its own child." The one composition limit that is not '
   + 'a graph property, and it lives here.',
   'preconditions', progress({ root: false }))
+
+// Added because a mutation run on the Python edition showed the corpus survived it: every
+// lifecycle case sets `root` explicitly, so nothing pinned what its *absence* means.
+lifecycleCase('root-absent-is-a-root-invocation',
+  'The test is `root === false`, not a truthy one, so an invocation that never said acquires its '
+  + 'own leases. Read loosely, an unlabelled invocation would skip `acquiring` entirely and run '
+  + 'holding nothing — which is §25.2 bypassed by omission rather than by decision. The fixture '
+  + 'sets `root` on every other case, so both readings agreed everywhere until this one.',
+  'preconditions', {
+    invoked: true,
+    entry_permitted: true,
+    leases: 'held',
+    elapsed_ms: 100,
+    deadline: skillDeadline(10, DEFAULT_OVERRUN_FACTOR),
+    robot: 'running',
+  })
 
 lifecycleCase('lease-pending',
   'A lease nobody has taken is not one that was granted — the same rule as the precondition above, '
@@ -5333,6 +5360,23 @@ identityCase('everything-wrong-at-once',
     scopes: ['repositories:write'],
   },
   ATTESTED)
+
+// Two more, added because a mutation run on the Python edition showed the corpus survived them.
+
+identityCase('a-key-the-vendor-signed-with-no-certificate-to-check-it',
+  'A birth key is present and the certificate is not trusted, so there is nothing to check the key '
+  + 'against. `attested` takes **both** halves — a hardware key nobody attested is a key the robot '
+  + 'generated for itself — and every other case here has the certificate either trusted or the '
+  + 'key absent, so an edition requiring only the binding agreed with this one everywhere.',
+  PAIRED, { birth_key: 'aa', birth_certificate: false })
+
+identityCase('a-credential-that-declares-no-scopes-at-all',
+  'An empty list is not an absent one. Absent means an opaque bearer token whose scopes live on '
+  + 'the Hub, which is a warning; empty means a credential that declares it carries nothing, which '
+  + 'is nothing to refuse. An edition testing truthiness reads the first for the second and warns '
+  + 'about a credential that said what it was.',
+  { ...PAIRED, scopes: [] }, ATTESTED)
+
 
 // ── §10's image attestation ──────────────────────────────────────────────────
 
