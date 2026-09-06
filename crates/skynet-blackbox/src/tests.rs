@@ -1195,3 +1195,103 @@ fn a_gap_inside_the_window_makes_it_unreportable() {
     assert!(!tally.complete());
     assert!(!tally.measured());
 }
+
+// ── §26.2's claimed sequences ────────────────────────────────────────────────
+//
+// `stage_claimed` is the append two processes share. The properties it has to have are the ones a
+// single-writer ring gets for free from its own counter, so they are worth asserting where they can
+// be seen: the slot a record lands in, what the ring's own counter does afterwards, and the one
+// value the arithmetic cannot take.
+
+/// Two writers interleaving claimed sequences produce one ordered recording, and every record is
+/// in the slot its sequence names.
+#[test]
+fn records_staged_at_claimed_sequences_land_where_their_sequence_says() {
+    let (mut ring, mut store) = ring_of(8);
+    let mut scratch = vec![0u8; ring.geometry().record_size];
+
+    // What the two processes do: one claims 1 and 3, the other claims 2 and 4, and neither knows
+    // the other exists. The order they are *written* in is not the order they are numbered in,
+    // which is exactly the case a shared counter has to survive.
+    for sequence in [1u64, 3, 2, 4] {
+        let cycle = plain_cycle(sequence);
+        let view = cycle.view();
+        let offset = ring
+            .stage_claimed(
+                &mut scratch,
+                1_000 * sequence,
+                Entry::Cycle(&view),
+                sequence,
+            )
+            .expect("a claimed sequence stages");
+        let size = ring.geometry().record_size;
+        store[offset..offset + size].copy_from_slice(&scratch);
+    }
+
+    let ordered = ring.ordered(&store);
+    assert_eq!(
+        ordered.iter().map(|r| r.sequence).collect::<Vec<_>>(),
+        vec![1, 2, 3, 4],
+        "the file is read in sequence order, whatever order it was written in",
+    );
+    for record in &ordered {
+        assert_eq!(
+            record.mono_ns,
+            1_000 * record.sequence,
+            "record {} holds the stamp staged with it, so no two writers overwrote one slot",
+            record.sequence,
+        );
+    }
+}
+
+/// The ring's own counter is raised, never lowered — so `next_sequence()` is a floor and not a
+/// claim about what the other writer has taken.
+#[test]
+fn a_claimed_sequence_raises_the_rings_counter_and_never_lowers_it() {
+    let (mut ring, _store) = ring_of(8);
+    let mut scratch = vec![0u8; ring.geometry().record_size];
+    let cycle = plain_cycle(1);
+    let view = cycle.view();
+
+    ring.stage_claimed(&mut scratch, 1_000, Entry::Cycle(&view), 5)
+        .expect("staged");
+    assert_eq!(
+        ring.next_sequence(),
+        6,
+        "staging 5 means the recording holds at least five records",
+    );
+
+    // The other writer claimed 6 and 7 while this one was idle; this one's next claim is 8.
+    ring.stage_claimed(&mut scratch, 2_000, Entry::Cycle(&view), 8)
+        .expect("staged");
+    assert_eq!(ring.next_sequence(), 9);
+
+    // A late write of an *earlier* sequence — which cannot happen through a claim counter, and is
+    // asserted anyway because the counter is what the ring reports to §74's telemetry window.
+    ring.stage_claimed(&mut scratch, 3_000, Entry::Cycle(&view), 2)
+        .expect("staged");
+    assert_eq!(
+        ring.next_sequence(),
+        9,
+        "the floor does not fall, or a window opened at 9 would be told it opened at 3",
+    );
+}
+
+/// Zero is the one number the arithmetic cannot take, and it is exactly what an unseeded claim
+/// counter hands out.
+#[test]
+fn a_zero_sequence_is_refused_rather_than_wrapped_onto_the_last_slot() {
+    let (mut ring, _store) = ring_of(8);
+    let mut scratch = vec![0u8; ring.geometry().record_size];
+    let cycle = plain_cycle(0);
+    let view = cycle.view();
+
+    // `offset_of` is `(sequence - 1) % capacity`. A zero underflows it, and in a release build with
+    // `overflow-checks` off would address the last slot in the ring — on top of the oldest record
+    // this window holds, silently.
+    match ring.stage_claimed(&mut scratch, 1_000, Entry::Cycle(&view), 0) {
+        Err(crate::ring::RingError::Unseeded) => {}
+        Err(other) => panic!("refused for the wrong reason: {other:?}"),
+        Ok(_) => panic!("a zero sequence was accepted, which is a record written over another one"),
+    }
+}

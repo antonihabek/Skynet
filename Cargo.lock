@@ -26,6 +26,7 @@ dependencies = [
  "skynet-contracts",
  "skynet-dl",
  "skynet-json",
+ "skynet-mdns",
  "skynet-rhal",
  "skynet-sha256",
  "skynet-urdf",
@@ -82,13 +83,37 @@ dependencies = [
  "skynet-dl",
  "skynet-kernel",
  "skynet-lock",
+ "skynet-obs",
  "skynet-rhal",
  "skynet-ring",
+ "skynet-ring-shm",
 ]
 
 [[package]]
 name = "skynet-lock"
 version = "0.1.0"
+dependencies = [
+ "skynet-claim",
+]
+
+[[package]]
+name = "skynet-mdns"
+version = "0.1.0"
+
+[[package]]
+name = "skynet-obs"
+version = "0.1.0"
+
+[[package]]
+name = "skynet-policy-host"
+version = "0.1.0"
+dependencies = [
+ "skynet-kernel",
+ "skynet-kernel-host",
+ "skynet-obs",
+ "skynet-ring",
+ "skynet-ring-shm",
+]
 
 [[package]]
 name = "skynet-rhal"
@@ -107,6 +132,10 @@ dependencies = [
 
 [[package]]
 name = "skynet-sha256"
+version = "0.1.0"
+
+[[package]]
+name = "skynet-statfs"
 version = "0.1.0"
 
 [[package]]
@@ -135,6 +164,8 @@ dependencies = [
  "skynet-ed25519",
  "skynet-json",
  "skynet-lock",
+ "skynet-mdns",
  "skynet-sha256",
+ "skynet-statfs",
  "skynetd",
 ]

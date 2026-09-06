@@ -1,12 +1,19 @@
 //! What the counter has to be true of, and one thing it deliberately is not.
 
 use super::*;
+#[cfg(target_os = "linux")]
 use std::sync::atomic::Ordering;
 
 /// A directory nobody else is using, removed on drop. No `tempfile`: the workspace has no
 /// third-party dependencies, and this is the whole of what one would be for.
+///
+/// Linux-only along with everything that uses it, and that is worth one line rather than an
+/// `allow`: on any other target this crate's five interesting tests do not exist, and a helper
+/// compiled for nobody is exactly what a dead-code warning is for.
+#[cfg(target_os = "linux")]
 struct TempDir(PathBuf);
 
+#[cfg(target_os = "linux")]
 impl TempDir {
     fn new(label: &str) -> TempDir {
         static COUNTER: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
@@ -19,6 +26,7 @@ impl TempDir {
     }
 }
 
+#[cfg(target_os = "linux")]
 impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);

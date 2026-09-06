@@ -290,6 +290,17 @@ impl Layout {
         self.state().join("power.json")
     }
 
+    /// Where the control loop offers §25's rings, and a policy connects to take them.
+    ///
+    /// In `/run` rather than `/data` because it is a rendezvous rather than state: it exists while
+    /// something is listening and means nothing across a reboot. `skynetk --policy-socket` binds it
+    /// and `skynetd` passes it to the one package that may write a command ring, which is the whole
+    /// of how the two halves of §25 find each other on a robot where neither starts the other
+    /// (§33.1: the kernel is started by systemd **before** `skynetd`).
+    pub fn policy_socket(&self) -> PathBuf {
+        self.root.join("run").join("policy.sock")
+    }
+
     /// Local credentials, hashed (§39.2).
     pub fn credentials(&self) -> PathBuf {
         self.state().join("credentials.json")

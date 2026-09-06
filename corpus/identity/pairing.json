@@ -140,11 +140,35 @@
     },
     {
       "id": "eight-characters-that-are-not-ascii",
-      "note": "Eight code points, so it is not a length fault, and the first of them is not in the alphabet. Counted in characters rather than bytes: telling somebody they typed twenty-four characters would be a sentence about an encoding they did not choose.",
+      "note": "Eight code points, so it is not a length fault, and the first of them is not in the alphabet. Counted in characters rather than bytes: telling somebody they typed twenty-four characters would be a sentence about an encoding they did not choose. Greek is inside the basic plane, so this case passed even while the length arithmetic was wrong; the next one is the one that could tell.",
       "input": {
         "input": "αβγδεζηθ"
       },
       "expected": "{\"code\":null,\"fault\":{\"code\":\"not_in_alphabet\",\"detail\":\"Character 1 of the 8 is not one a pairing code uses. Codes are digits and upper-case letters, without I, L, O or U — if you read one of those off the screen it was a 1 or a 0, and typing it that way works too.\",\"position\":1}}"
+    },
+    {
+      "id": "eight-characters-above-the-basic-plane",
+      "note": "The other half of the §80 pairing question, decided 2026-09-05 and pinned here. Each of these is one code point and two UTF-16 code units, so `String.length` made this a code of sixteen and the reference refused it as `too_long` — telling somebody who typed eight characters that they typed sixteen, which is false as English and is the whole reason the reference was the edition that had to change. Rust counted code points and refused it one rule later, as `not_in_alphabet` at position 1. Both now say the second thing, which is the true one.",
+      "input": {
+        "input": "𝟎𝟏𝟐𝟑𝟒𝟓𝟔𝟕"
+      },
+      "expected": "{\"code\":null,\"fault\":{\"code\":\"not_in_alphabet\",\"detail\":\"Character 1 of the 8 is not one a pairing code uses. Codes are digits and upper-case letters, without I, L, O or U — if you read one of those off the screen it was a 1 or a 0, and typing it that way works too.\",\"position\":1}}"
+    },
+    {
+      "id": "a-ligature-that-folds-into-the-alphabet",
+      "note": "A divergence nobody had recorded, found while fixing the one above and worse than it. Upper-casing the fi ligature yields two characters, and the reference folded that *pair* — leaving FI, whose I is not in the alphabet — while Rust folded each character and got F1, which is. So this string was a refusal to the Hub and a **valid code** to the robot: the §17 disagreement in the direction where the half that says yes is the half that decides. Seven code points in, eight out.",
+      "input": {
+        "input": "ﬁ234567"
+      },
+      "expected": "{\"code\":\"F1234567\",\"fault\":null}"
+    },
+    {
+      "id": "a-sharp-s-that-expands-to-two-letters",
+      "note": "The neighbouring case the two editions always agreed on, pinned so the agreement cannot rot while its neighbour is being changed. The sharp s upper-cases to SS, neither of which folds, so folding the pair and folding each character give the same answer. Seven code points in, eight out, and a code.",
+      "input": {
+        "input": "ß234567"
+      },
+      "expected": "{\"code\":\"SS234567\",\"fault\":null}"
     }
   ]
 }

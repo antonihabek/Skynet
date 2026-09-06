@@ -1184,15 +1184,55 @@ admissionCase('every-finding-at-once',
   })
 
 admissionCase('os-version-with-an-empty-segment',
-  'A malformed version both editions already agree about. `Number("")` is 0 and a failed Rust '
-  + 'parse falls back to 0, so "1..0" is exactly "1.0.0" and the package installs. This pins the '
-  + 'agreement; it deliberately does *not* pin the neighbouring case where the two disagree — a '
-  + 'segment like "0-rc1" is NaN to the reference and 0 to the Rust edition, which is a '
-  + 'specification question rather than a defect, and it is recorded in §80 rather than settled '
-  + 'here by whichever edition was easier to change.',
+  'A malformed version both editions have always agreed about, and the one that decided the §80 '
+  + 'question. `Number("")` is 0 and a failed Rust parse fell back to 0, so "1..0" is exactly '
+  + '"1.0.0" and the package installs. It is pinned unchanged across the 2026-09-05 rule change, '
+  + 'because a segment with no leading digits is still 0 — which is the argument that settled the '
+  + 'neighbouring cases below: the reference was already treating one unreadable segment as zero, '
+  + 'so treating the rest as NaN was not a rule, it was an inconsistency.',
   {
     manifest: manifest({ min_os_version: '1.0.0' }),
     capacity: capacity({ os_version: '1..0' }),
+  })
+
+admissionCase('os-version-with-a-prerelease-segment',
+  'The §80 open question, decided 2026-09-05 and pinned here. A robot on "1.2.0-rc1" asked for a '
+  + 'package needing "1.2.1". Until this rule the reference read "0-rc1" as NaN, reported the '
+  + 'robot as *newer* than the minimum and **admitted** it — so any robot whose version had one '
+  + 'non-numeric segment satisfied every `min_os_version` there has ever been. It is refused, and '
+  + 'the refusal is the point of the field.',
+  {
+    manifest: manifest({ min_os_version: '1.2.1' }),
+    capacity: capacity({ os_version: '1.2.0-rc1' }),
+  })
+
+admissionCase('os-version-with-a-prerelease-of-a-later-patch',
+  'The other half of the same decision, and the reason the rule is *leading digits* rather than '
+  + 'the whole segment falling back to 0. A robot on "1.2.10-rc1" needs "1.2.5". Reading the '
+  + 'segment as 0 would refuse it and say "Requires Skynet OS 1.2.5 or later; this robot runs '
+  + '1.2.10-rc1" — a sentence naming a version that looks newer than the one demanded, which §64 '
+  + 'makes a defect rather than a cosmetic problem. It installs: a candidate compares as the '
+  + 'release it is a candidate for.',
+  {
+    manifest: manifest({ min_os_version: '1.2.5' }),
+    capacity: capacity({ os_version: '1.2.10-rc1' }),
+  })
+
+admissionCase('os-version-with-a-segment-that-is-not-a-number-at-all',
+  'No leading digit, so the segment is 0 and the robot is the oldest version there is. Fail '
+  + 'closed, which is the property the whole rule is chosen for.',
+  {
+    manifest: manifest({ min_os_version: '1.2.1' }),
+    capacity: capacity({ os_version: '1.2.rc1' }),
+  })
+
+admissionCase('os-version-claiming-to-be-infinite',
+  'The hole, pinned shut. `Number("Infinity")` is infinity and the Rust `"Infinity".parse::<f64>()` '
+  + 'is infinity too, so this was the rare malformed version the two editions *agreed* on — and '
+  + 'agreed to admit, against every minimum simultaneously. There is no leading digit, so it is 0.',
+  {
+    manifest: manifest({ min_os_version: '2.0.0' }),
+    capacity: capacity({ os_version: 'Infinity.0.0' }),
   })
 
 admissionCase('reserved-and-denied',
@@ -5511,8 +5551,35 @@ codeCase('the-first-character-is-the-bad-one',
 codeCase('eight-characters-that-are-not-ascii',
   'Eight code points, so it is not a length fault, and the first of them is not in the alphabet. '
   + 'Counted in characters rather than bytes: telling somebody they typed twenty-four characters '
-  + 'would be a sentence about an encoding they did not choose.',
+  + 'would be a sentence about an encoding they did not choose. Greek is inside the basic plane, '
+  + 'so this case passed even while the length arithmetic was wrong; the next one is the one that '
+  + 'could tell.',
   'αβγδεζηθ')
+
+codeCase('eight-characters-above-the-basic-plane',
+  'The other half of the §80 pairing question, decided 2026-09-05 and pinned here. Each of these '
+  + 'is one code point and two UTF-16 code units, so `String.length` made this a code of sixteen '
+  + 'and the reference refused it as `too_long` — telling somebody who typed eight characters '
+  + 'that they typed sixteen, which is false as English and is the whole reason the reference was '
+  + 'the edition that had to change. Rust counted code points and refused it one rule later, as '
+  + '`not_in_alphabet` at position 1. Both now say the second thing, which is the true one.',
+  '\u{1D7CE}\u{1D7CF}\u{1D7D0}\u{1D7D1}\u{1D7D2}\u{1D7D3}\u{1D7D4}\u{1D7D5}')
+
+codeCase('a-ligature-that-folds-into-the-alphabet',
+  'A divergence nobody had recorded, found while fixing the one above and worse than it. Upper-'
+  + 'casing the fi ligature yields two characters, and the reference folded that *pair* — leaving '
+  + 'FI, whose I is not in the alphabet — while Rust folded each character and got F1, which is. '
+  + 'So this string was a refusal to the Hub and a **valid code** to the robot: the §17 '
+  + 'disagreement in the direction where the half that says yes is the half that decides. Seven '
+  + 'code points in, eight out.',
+  '\uFB01' + '234567')
+
+codeCase('a-sharp-s-that-expands-to-two-letters',
+  'The neighbouring case the two editions always agreed on, pinned so the agreement cannot rot '
+  + 'while its neighbour is being changed. The sharp s upper-cases to SS, neither of which folds, '
+  + 'so folding the pair and folding each character give the same answer. Seven code points in, '
+  + 'eight out, and a code.',
+  '\u00DF' + '234567')
 
 // ── §19's device credential, and §10's key binding ───────────────────────────
 

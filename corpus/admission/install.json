@@ -1711,7 +1711,7 @@
     },
     {
       "id": "os-version-with-an-empty-segment",
-      "note": "A malformed version both editions already agree about. `Number(\"\")` is 0 and a failed Rust parse falls back to 0, so \"1..0\" is exactly \"1.0.0\" and the package installs. This pins the agreement; it deliberately does *not* pin the neighbouring case where the two disagree — a segment like \"0-rc1\" is NaN to the reference and 0 to the Rust edition, which is a specification question rather than a defect, and it is recorded in §80 rather than settled here by whichever edition was easier to change.",
+      "note": "A malformed version both editions have always agreed about, and the one that decided the §80 question. `Number(\"\")` is 0 and a failed Rust parse fell back to 0, so \"1..0\" is exactly \"1.0.0\" and the package installs. It is pinned unchanged across the 2026-09-05 rule change, because a segment with no leading digits is still 0 — which is the argument that settled the neighbouring cases below: the reference was already treating one unreadable segment as zero, so treating the rest as NaN was not a rule, it was an inconsistency.",
       "input": {
         "manifest": {
           "schema_version": 1,
@@ -1758,6 +1758,206 @@
         "observed_digest": "sha256:pkg"
       },
       "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[]}"
+    },
+    {
+      "id": "os-version-with-a-prerelease-segment",
+      "note": "The §80 open question, decided 2026-09-05 and pinned here. A robot on \"1.2.0-rc1\" asked for a package needing \"1.2.1\". Until this rule the reference read \"0-rc1\" as NaN, reported the robot as *newer* than the minimum and **admitted** it — so any robot whose version had one non-numeric segment satisfied every `min_os_version` there has ever been. It is refused, and the refusal is the point of the field.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "min_os_version": "1.2.1"
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0-rc1",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"os_too_old\",\"message\":\"Requires Skynet OS 1.2.1 or later; this robot runs 1.2.0-rc1.\",\"severity\":\"error\"}]}"
+    },
+    {
+      "id": "os-version-with-a-prerelease-of-a-later-patch",
+      "note": "The other half of the same decision, and the reason the rule is *leading digits* rather than the whole segment falling back to 0. A robot on \"1.2.10-rc1\" needs \"1.2.5\". Reading the segment as 0 would refuse it and say \"Requires Skynet OS 1.2.5 or later; this robot runs 1.2.10-rc1\" — a sentence naming a version that looks newer than the one demanded, which §64 makes a defect rather than a cosmetic problem. It installs: a candidate compares as the release it is a candidate for.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "min_os_version": "1.2.5"
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.10-rc1",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[]}"
+    },
+    {
+      "id": "os-version-with-a-segment-that-is-not-a-number-at-all",
+      "note": "No leading digit, so the segment is 0 and the robot is the oldest version there is. Fail closed, which is the property the whole rule is chosen for.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "min_os_version": "1.2.1"
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.rc1",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"os_too_old\",\"message\":\"Requires Skynet OS 1.2.1 or later; this robot runs 1.2.rc1.\",\"severity\":\"error\"}]}"
+    },
+    {
+      "id": "os-version-claiming-to-be-infinite",
+      "note": "The hole, pinned shut. `Number(\"Infinity\")` is infinity and the Rust `\"Infinity\".parse::<f64>()` is infinity too, so this was the rare malformed version the two editions *agreed* on — and agreed to admit, against every minimum simultaneously. There is no leading digit, so it is 0.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "min_os_version": "2.0.0"
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "Infinity.0.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"os_too_old\",\"message\":\"Requires Skynet OS 2.0.0 or later; this robot runs Infinity.0.0.\",\"severity\":\"error\"}]}"
     },
     {
       "id": "reserved-and-denied",

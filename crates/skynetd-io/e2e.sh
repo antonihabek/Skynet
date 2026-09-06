@@ -185,8 +185,27 @@ want "grants lists what is granted" "manipulation.grasp" "$ROOT/out"
 
 "$SKYNET" grants add openrobot/holder sensing.camera.rgb $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
 want "a grant can be added" "granted" "$ROOT/out"
-"$SKYNET" grants remove openrobot/holder sensing.camera.rgb $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
-want "and revoked" "revoked" "$ROOT/out"
+
+# And then the reconciler takes it away again, because §11's desired state does not name it. This
+# check asserted `revoked` and had been failing for as long as anybody had run this file: it removed
+# the grant itself and raced the next pass, which had usually got there first and answered
+# `not_held`. What was actually wrong was not the assertion — it is the two writers underneath it.
+# A grant made at the robot survives exactly until the next pass, and the console offers a button
+# that says `granted` about a permission that will not outlive the second.
+#
+# The convergence is §33.3 working as specified. What is asserted here is the half that is not a
+# question: it has to leave a record. Until this round the API wrote `capability.grant` to the audit
+# log and the reconciler's revocation went to the ring alone — minutes of retention for the taking
+# away, permanent for the giving.
+i=0
+while [ $i -lt 60 ]; do
+  grep -q "capability.revoke" "$ROOT/data/state/audit.jsonl" && break
+  i=$((i + 1)); sleep 0.1
+done
+grep -q "capability.revoke" "$ROOT/data/state/audit.jsonl"   && pass "and the next pass revokes it, with an audit row saying so (§38.3)"   || fail "the reconciler took the grant away and left no audit row"
+grep -q '"actor":"desired state' "$ROOT/data/state/audit.jsonl"   && pass "attributed to the desired state rather than to a person"   || fail "the revocation names a person who did not make it"
+"$SKYNET" grants $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+grep -q "sensing.camera.rgb" "$ROOT/out"   && fail "the grant outlived the pass that should have converged it away"   || pass "and the capability is gone from what the robot reports"
 
 "$SKYNET" status $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
 grep -q "not provisioned" "$ROOT/out" && fail "still reported unprovisioned"   || pass "the robot no longer reports itself unprovisioned"
@@ -232,7 +251,42 @@ want "0.0.0.0 is refused" "34.2" "$ROOT/out"
 
 stop_daemon
 
-say "7. Rollback (§37.2)"
+# ── §82: a robot answers a browse ──────────────────────────────
+#
+# The one check in this file that needs a network stack rather than a socket file, and the reason
+# it is here rather than in the suite: the responder was written with unit tests that passed while
+# it did the wrong thing on a link, twice. A browse is the only thing that asks the question an
+# operator asks.
+#
+# Port 5353 is held permanently by Avahi and by mDNSResponder, so on a developer machine the
+# daemon reports that it could not bind and this step reports that it did not run. Where the port
+# is free the browse is *required* to find the robot: a check that quietly does not run is the
+# failure §15 spends a rule on.
+say "7. A robot answers a browse (§82)"
+rm -rf "$ROOT/mdns" && mkdir -p "$ROOT/mdns"
+"$SKYNETD" --root "$ROOT/mdns" --user --interval 1000 --lan 127.0.0.1:8099 \n  --advertise skynet-e2e > "$ROOT/mdns.log" 2>&1 &
+MDNS=$!
+# Wait for the *claim*, not for the start-up line. The daemon prints "announcing ..." before it has
+# probed, and a browse sent in that window is a browse the robot is right not to answer — which
+# would have made this check a race rather than a test.
+i=0
+while [ $i -lt 60 ]; do
+  grep -q "skynetd: mDNS" "$ROOT/mdns.log" 2>/dev/null && break
+  i=$((i + 1)); sleep 0.1
+done
+if grep -q "no mDNS socket could be bound" "$ROOT/mdns.log"; then
+  printf '  [2m- port 5353 is held on this machine; the browse step did not run[0m
+'
+else
+  want "the daemon takes its name" "advertising" "$ROOT/mdns.log"
+  "$SKYNET" discover --timeout 2500 > "$ROOT/browse" 2>&1 || true
+  want "a browse finds it" "skynet-e2e" "$ROOT/browse"
+  want "and points at the console rather than at 5353" "8099" "$ROOT/browse"
+fi
+kill "$MDNS" 2>/dev/null || true
+wait "$MDNS" 2>/dev/null || true
+
+say "8. Rollback (§37.2)"
 sed -i 's/"version":"1.0.0"/"version":"2.0.0"/' "$ROOT/pkg/manifest.json"
 "$SKYNET" install "$ROOT/pkg" --root "$ROOT" --id openrobot/holder --kind policy \
   --version 2.0.0 --digest 0000000000000000000000000000000000000000000000000000000000000000 \

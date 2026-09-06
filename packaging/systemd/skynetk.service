@@ -1,0 +1,63 @@
+[Unit]
+# §25's control loop: the process that owns the RHAL driver and the Safety Kernel.
+#
+# §33.1 is the sentence this file exists to make true rather than merely stated:
+#
+#   The kernel and the RHAL driver survive a `skynetd` restart. They are separate processes with
+#   separate lifetimes; the kernel is started by systemd BEFORE `skynetd` and does not depend on it.
+#
+# So the ordering lives here, on the unit that must come first, and `skynetd.service` carries the
+# matching `After=`. Neither unit `Requires=` the other: a robot with no `skynetd` is a robot that
+# holds position safely (§33.1), and a robot with no control loop is one that supervises packages
+# and commands nothing — both are states this platform is designed to be in.
+Description=Skynet OS control loop (§25)
+Documentation=file:/usr/share/doc/skynet/skynet-os-architecture.md
+Before=skynetd.service
+# The driver is opened at start and the loop cannot run without it. Failing here is loud and the
+# robot is left with no commanding process at all, which is the safe direction: nothing writes to
+# an actuator until something reads a ring.
+After=local-fs.target
+
+[Service]
+Type=exec
+EnvironmentFile=/etc/skynet/skynetk.env
+ExecStart=/usr/bin/skynetk run \
+    --driver ${SKYNET_DRIVER} \
+    --config ${SKYNET_DRIVER_CONFIG} \
+    --tier ${SKYNET_TIER} \
+    --hz ${SKYNET_HZ} \
+    --blackbox ${SKYNET_ROOT}/data/blackbox \
+    --policy-socket ${SKYNET_ROOT}/run/policy.sock
+
+# §33.5's restart rules are `skynetd`'s decision for *packages*. This is not a package: it is the
+# process that holds the robot, and a loop that has exited is a robot with nothing writing to the
+# drives. It restarts, always, with a delay that is long enough to be visible in a journal and
+# short enough that a transient driver fault does not leave a robot limp for a minute.
+Restart=always
+RestartSec=2s
+
+# §40.2: the core running the kernel and the RHAL is isolated at boot, and no package's cpuset may
+# include it. This is the other side of that rule — the loop is pinned to it. The number is the
+# machine's, so it lives in the environment file beside the driver rather than here.
+CPUAffinity=${SKYNET_RT_CPU}
+
+# §23.5's real-time argument, made a scheduling policy rather than a hope. `99` is deliberately not
+# used: a task at the top priority that spins cannot be preempted by anything, including the
+# watchdog that would notice it.
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=80
+
+# The loop must not be swapped out mid-cycle, and a page fault on the command path is a missed
+# deadline that no amount of headroom explains afterwards.
+LimitMEMLOCK=infinity
+
+# It writes the black box and reads the driver. It does not need the network, and §33.1's whole
+# argument is that this process is small enough to reason about.
+PrivateNetwork=yes
+ProtectSystem=strict
+ReadWritePaths=/run/skynet ${SKYNET_ROOT}/data/blackbox
+ProtectHome=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -34,6 +34,7 @@
 mod args;
 mod check;
 mod descriptor_cmd;
+mod discover_cmd;
 mod driver_cmd;
 mod frames_cmd;
 mod robot_cmd;
@@ -55,6 +56,7 @@ skynet — Skynet OS workstation tools
   transport <policy> --robot <d>  What this body would do with this policy (§18)
   frames <descriptor>             The frame graph, its poses, and what the pose
                                   guards can do with it (§44)
+  discover                        Which robots are on this link (§82)
   role <role>...                  Parse canonical roles (§5.1)
   version                         Version, ABI version and contract version
 
@@ -103,6 +105,7 @@ fn dispatch(argv: &[String]) -> i32 {
                 "`descriptor {other}` is not a subcommand. The only one is `from-urdf`."
             )),
         },
+        "discover" => run_or_help(rest, discover_cmd::USAGE, discover_cmd::run),
         "driver" => driver_cmd::run(rest),
         "transport" => run_or_help(rest, transport_cmd::USAGE, transport_cmd::run),
         "frames" => run_or_help(rest, frames_cmd::USAGE, frames_cmd::run),

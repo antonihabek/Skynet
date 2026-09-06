@@ -8,5 +8,13 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+# §26.2's counter, and the only dependency this crate has or should have. A writership is a lock
+# and a claim: the lock decides who creates the recording, the claim is what every writer takes its
+# sequence numbers from, and separating them into two crates that never meet would leave the join
+# written twice — in the daemon and in the kernel host, which is the arrangement this crate exists
+# to prevent.
+[dependencies]
+skynet-claim = { path = "../skynet-claim" }
+
 [lints.rust]
 missing_docs = "warn"

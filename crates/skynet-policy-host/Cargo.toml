@@ -1,0 +1,35 @@
+[package]
+name = "skynet-policy-host"
+description = "The process that fills §25's command ring: the producer the ring has never had, and the half of the control path the kernel host is deliberately not."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "skynetp"
+path = "src/main.rs"
+
+# `skynet-ring-shm` was removed once, with a `--ring-fd` that adopted a mapping another process
+# created: nothing in this system handed a descriptor over, so adopting one was half a handshake, and
+# §79.7 is what half a route costs — the probe answers, the transfer backs off, nothing moves, and
+# the failure looks like patience. It is back because the other half exists: `skynet-kernel-host`'s
+# `handoff::Port` creates the ring and offers it, and `--ring-socket` is the side that takes it.
+[dependencies]
+skynet-obs = { path = "../skynet-obs" }
+skynet-ring = { path = "../skynet-ring" }
+skynet-ring-shm = { path = "../skynet-ring-shm" }
+
+# The kernel host is a **dev**-dependency and never a dependency, which is the distinction the whole
+# arrangement rests on. The shipped crate links nothing on the other side of the ring — §25 has two
+# processes meeting at a shared mapping, and two processes that linked each other's code could not
+# be replaced independently, which is the property a vendor writing one half needs. The test binary
+# links both because a single process is what a test can start, and what it exercises is the wire.
+[dev-dependencies]
+skynet-kernel = { path = "../skynet-kernel" }
+skynet-kernel-host = { path = "../skynet-kernel-host" }
+
+[lints.rust]
+missing_docs = "warn"

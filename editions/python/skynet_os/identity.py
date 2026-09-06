@@ -8,13 +8,17 @@ robot's credential is in, and what it is actually running.
 
 ── Where Python is quietly not JavaScript, here ─────────────────────────────
 
-``String.prototype.length``
-    Counts **UTF-16 code units**; ``len`` counts code points. They disagree for every character
-    above U+FFFF, which arrives as a surrogate *pair*. Eight astral characters are a code of length
-    **16** to the reference — refused as ``too_long`` — and of length 8 to a naive edition, which
-    then refuses them one rule later as ``not_in_alphabet`` at position 1. Two different faults, two
-    different sentences, and both look correct in isolation. :func:`_utf16_length` and
-    :func:`_utf16_at` keep the reference's arithmetic.
+``String.prototype.length``, and why this edition stopped reproducing it
+    It counts **UTF-16 code units**; ``len`` counts code points, and they disagree for every
+    character above U+FFFF. Eight astral characters used to be a code of length **16** to the
+    reference — refused as ``too_long``, a sentence that is simply false to somebody who typed
+    eight — and of length 8 to the Rust edition, which refused them one rule later as
+    ``not_in_alphabet`` at position 1. Two faults, two sentences, one typo. This edition carried
+    ``utf16_length`` and ``utf16_at`` to keep the reference's arithmetic exactly.
+
+    §80 recorded it as the rare divergence where the *reference* was the edition that should
+    change, and on 2026-09-05 it did. Code points on all three sides, so there is nothing left here
+    to reproduce and the two helpers are gone from this module.
 
 ``Array.prototype.sort``
     Orders by UTF-16 code unit, and ``sorted`` orders by code point — the same disagreement,
@@ -40,9 +44,7 @@ from typing import Any, Final
 
 from .js import (
     js_trim as _js_trim,
-    utf16_at as _utf16_at,
     utf16_key as _utf16_key,
-    utf16_length as _utf16_length,
 )
 
 __all__ = [
@@ -149,11 +151,18 @@ def normalize_pairing_code(value: str) -> dict[str, Any]:
             },
         }
 
+    # Two loops, because upper-casing one code point can yield more than one: the sharp s is
+    # "SS" and the fi ligature is "FI". Folding the *result* asks :func:`_fold` about a string
+    # when every case it answers is about a character, and the reference did exactly that
+    # until 2026-09-05 — so the ligature stayed "FI" there and folded to "F1" in Rust, two
+    # characters that are both in the alphabet. A ligature made a code the Hub refused and the
+    # robot accepted, which is the §17 disagreement in its worst direction.
     normalized = ""
     for character in value:
         if character in ("-", " ", "\t", "\n", "\r"):
             continue
-        normalized += _fold(character.upper())
+        for upper in character.upper():
+            normalized += _fold(upper)
 
     if normalized == "":
         return {
@@ -168,7 +177,7 @@ def normalize_pairing_code(value: str) -> dict[str, Any]:
             },
         }
 
-    length = _utf16_length(normalized)
+    length = len(normalized)
     if length != PAIRING_CODE_LENGTH:
         return {
             "code": None,
@@ -183,7 +192,7 @@ def normalize_pairing_code(value: str) -> dict[str, Any]:
         }
 
     for index in range(length):
-        if _utf16_at(normalized, index) not in PAIRING_ALPHABET:
+        if normalized[index] not in PAIRING_ALPHABET:
             return {
                 "code": None,
                 "fault": {

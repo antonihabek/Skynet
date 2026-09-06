@@ -1,0 +1,799 @@
+//! The shape a supervisor opens its recording ring at (§26.3, §80).
+//!
+//! # The question, and why it was filed as blocked
+//!
+//! §26.3 ends on the one thing the two-writer ring did not close:
+//!
+//! > On a robot, `skynetd` starts first (§27) and opens a ring shaped for zero joints and zero
+//! > channels, because that is the honest description of a supervisor that commands nothing. A
+//! > control loop starting afterwards is then refused — its cycles do not fit. So the ordering that
+//! > works today is the loop first, and the ordering a robot actually boots in is the daemon first.
+//!
+//! A record's size is a function of the joint and channel counts, so a ring holds one shape. The
+//! daemon creates the recording because it starts first; the loop attaches and — unlike the daemon,
+//! which writes only events and gaps — **cannot take any shape it finds**, because a cycle carries
+//! a value per joint and per channel. `skynet-kernel-host`'s refusal already says what would fix
+//! it, in the last clause: *"Point this loop at another directory, or **give the other writer this
+//! body's shape**."* This module is that clause.
+//!
+//! §80 records the blocker as a channel count that nothing carries to the daemon:
+//!
+//! > This was blocked on a **channel count** the specification said was *"the policy runtime's, and
+//! > that runtime is unwritten"* — and `skynet-policy-host` is that runtime, and
+//! > `Commanding::channels` is that number, declared when a lease is granted, which is before
+//! > either ring is opened. So the reason this is still open has changed, and shrunk: the number
+//! > exists and **nothing carries it to the daemon**. That is a lease record `skynetd` can read,
+//! > not a design question.
+//!
+//! # The finding: nothing has to carry it, because the daemon already computes it
+//!
+//! A lease record would have worked and would have been wrong in a way worth stating, because the
+//! shape of the mistake is more useful than the fix. A lease is granted when a policy **starts**,
+//! and the daemon needs the number when *it* starts, which is earlier. A record written at the
+//! first lease and read at every later boot is a robot whose first boot after installing a policy
+//! still refuses the loop, and whose ring is sized by whatever ran last — configuration inferred
+//! from history, which is the thing [`crate::layout`]'s header argues against in as many words:
+//! *"a record kept beside the thing it describes is a record that can disagree with it."*
+//!
+//! The number does not need carrying. §37.1's `transport` stage already resolves a plan for every
+//! package this robot installs, and [`skynet_contracts::transport::TransportPlan::bindings`] is
+//! *"every channel, in the policy's output order"* — which is the same count
+//! `Commanding::channels` holds, derived from the same declaration, one process earlier. The daemon
+//! computes it at install and throws it away. So the inputs are:
+//!
+//! | | Where |
+//! |---|---|
+//! | joints | the embodiment descriptor, which [`crate::embodiment::load`] already reads |
+//! | channels | the transport plan, which [`crate::admit::transport_plan`] already resolves |
+//!
+//! Both are on disk before the first pass reconciles anything, both are read from the robot's own
+//! provisioning rather than from a peer's announcement, and neither needs the policy runtime to be
+//! running — or to exist. §80's entry can be closed without the lease record it asks for.
+//!
+//! # Refusing to choose is a case, not a failure
+//!
+//! §25 has one command ring, one loop and one lease. Two installed packages that both declare an
+//! action space are a robot where **the daemon cannot know which policy is going to command**, and
+//! sizing for either would be a guess that costs the other one its recording. So that is
+//! [`Supervising::Ambiguous`], the ring is opened events-only as it is today, and the packages are
+//! named — an operator reading the line can see exactly what to do about it.
+//!
+//! The same reasoning covers a plan whose verdict is `refused`: a policy that cannot be transported
+//! onto this body is a loop that will never run, and a ring sized for its channels would spend the
+//! window on arrays nothing fills. §13 asks for roughly an hour and a record's size divides
+//! straight into it, so an unfillable channel is not a harmless over-allocation.
+//!
+//! # What this does not close
+//!
+//! **A loop nothing declared.** `skynetk` run by hand against a driver defaults to one channel per
+//! joint and names no package, so a robot with a body and no commanding package still meets the
+//! shape refusal. That is the honest answer rather than a gap: nothing on that robot declares a
+//! policy, and the daemon inventing one would be sizing evidence for a loop that exists only in an
+//! operator's terminal. What it costs is a bench session, and §26.3's message already says where to
+//! point it.
+//!
+//! **A plan that drops an optional channel.** `bindings` keeps every channel the policy declared,
+//! dropped ones included, so the count is the policy's output width and matches what the loop
+//! writes. A loop that instead sized itself to the *bound* channels would disagree, and the
+//! comparison on the other side is `!=` rather than `<=`. Nothing here relies on that today; it is
+//! written down because a future change to either side would break it silently.
+
+use skynet_blackbox::record::Shape;
+use skynet_contracts::json::manifest_from_json;
+use skynet_contracts::transport::is_installable;
+
+use crate::admit::transport_plan;
+use crate::embodiment::Body;
+use crate::store::Store;
+
+/// What the daemon concluded about the body it is recording.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Supervising {
+    /// No descriptor, or one that does not parse. Nothing can be said about the body.
+    NoBody,
+    /// A body, and nothing installed that declares an action space.
+    NoPolicy {
+        /// How many joints the descriptor declares.
+        joints: usize,
+    },
+    /// One commanding package, and a plan that resolves onto this body.
+    Policy {
+        /// The package whose action space sized the ring.
+        package: String,
+        /// Joints, from the descriptor.
+        joints: usize,
+        /// Channels, from the plan's bindings.
+        channels: usize,
+        /// The plan's verdict, for the operator line.
+        verdict: &'static str,
+    },
+    /// One commanding package whose plan this body refuses.
+    Refused {
+        /// The package.
+        package: String,
+        /// Joints, from the descriptor.
+        joints: usize,
+    },
+    /// More than one commanding package. The daemon does not choose between them.
+    Ambiguous {
+        /// Every package that declares an action space, in installed order.
+        packages: Vec<String>,
+        /// Joints, from the descriptor.
+        joints: usize,
+    },
+    /// An installed package whose manifest this daemon cannot read.
+    ///
+    /// Separate from [`Supervising::NoPolicy`] on the authority of the contract that produces it.
+    /// `manifest_from_json` documents the same distinction where it decodes the block: *"a block
+    /// that does not decode is an **error** rather than an absence: an action space nobody could
+    /// parse and an action space nobody declared are opposite facts."*
+    ///
+    /// It is fatal to the whole answer rather than to one package, and that is the conservative
+    /// reading: the unreadable manifest may be the one that declares the action space, so a count
+    /// taken without it is a count that cannot be trusted. §37.1 already refuses to admit such a
+    /// package — `tests.rs` asserts *"`manifest_from_json` refuses, so admission does not run at
+    /// all"* — so this is a robot with a problem the operator needs to see, not a shape to guess
+    /// around.
+    Unreadable {
+        /// The package whose manifest could not be read.
+        package: String,
+        /// Joints, from the descriptor.
+        joints: usize,
+        /// What went wrong, for the operator line.
+        detail: String,
+    },
+}
+
+impl Supervising {
+    /// The shape to open the ring at.
+    ///
+    /// Everything but [`Supervising::Policy`] is events-only, and that is deliberate rather than a
+    /// fallback: a shape with joints and no channels still sizes every record for a per-joint array
+    /// that no writer fills, which spends the window §13 asks for on zeroes.
+    pub fn shape(&self) -> Shape {
+        match self {
+            Supervising::Policy {
+                joints, channels, ..
+            } => Shape {
+                joints: *joints as u16,
+                channels: *channels as u16,
+            },
+            _ => Shape {
+                joints: 0,
+                channels: 0,
+            },
+        }
+    }
+
+    /// One line for the operator, saying what sized the recording and where the number came from.
+    ///
+    /// Printed at every start. A ring sized for a body is a different artifact from one sized for a
+    /// supervisor — it holds a much shorter window — and an operator who cannot see which they have
+    /// discovers it from an incident report that stops earlier than they expected.
+    pub fn describe(&self) -> String {
+        match self {
+            Supervising::NoBody => "events only: this robot has no embodiment descriptor, so \
+                 nothing here can describe the body a cycle would be about"
+                .to_string(),
+            Supervising::NoPolicy { joints } => format!(
+                "events only: {joints} joints declared and no installed package declares an action \
+                 space, so nothing commands this body"
+            ),
+            Supervising::Policy {
+                package,
+                joints,
+                channels,
+                verdict,
+            } => format!(
+                "sized for the body: {joints} joints and {channels} channels, from {package}'s \
+                 transport plan ({verdict})"
+            ),
+            Supervising::Refused { package, joints } => format!(
+                "events only: {package} declares an action space and this body refuses its \
+                 transport plan, so no loop will run it — {joints} joints left unsized"
+            ),
+            Supervising::Ambiguous { packages, joints } => format!(
+                "events only: {} packages declare an action space ({}) and §25 has one control \
+                 loop, so which of them will command these {joints} joints is not this daemon's to \
+                 guess — leave one installed to size the ring for it",
+                packages.len(),
+                packages.join(", "),
+            ),
+            Supervising::Unreadable {
+                package,
+                joints,
+                detail,
+            } => format!(
+                "events only: {package}'s manifest cannot be read ({detail}), so whether anything \
+                 commands these {joints} joints is not a question this robot can answer — an \
+                 action space nobody could parse is not an action space nobody declared"
+            ),
+        }
+    }
+}
+
+/// Work out the shape this supervisor should open its ring at.
+///
+/// `allow_retarget` is the caller's for the same reason [`crate::admit::transport_plan`] takes it:
+/// §6.1 makes retargeting an operator's decision rather than a default, and a plan resolved with a
+/// different answer to it can bind a different number of channels.
+pub fn supervising(store: &Store, body: &Body, allow_retarget: bool) -> Supervising {
+    let Some(known) = body.known() else {
+        return Supervising::NoBody;
+    };
+    let joints = known.descriptor.joints.len();
+
+    // Every installed package that declares an action space. `installed()` is the active set — a
+    // staged package is not one this robot is running, and sizing a recording for something that
+    // has not been activated would be sizing it for a rollout that may never happen.
+    //
+    // The manifest is kept rather than re-read, so the plan below is resolved against the same
+    // bytes this loop counted. Re-reading would open a window in which the two disagree, which on
+    // this path means a ring sized from one manifest for a loop described by another.
+    let mut commanding: Vec<(String, skynet_contracts::admission::PackageManifest)> = Vec::new();
+    for (id, digest) in store.installed() {
+        let document = match store.manifest(&digest) {
+            Ok(document) => document,
+            Err(error) => {
+                return Supervising::Unreadable {
+                    package: id.as_str(),
+                    joints,
+                    detail: error.to_string(),
+                }
+            }
+        };
+        let manifest = match manifest_from_json(&document) {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                return Supervising::Unreadable {
+                    package: id.as_str(),
+                    joints,
+                    detail: format!("{error:?}"),
+                }
+            }
+        };
+        if manifest.source_embodiment.is_some() {
+            commanding.push((id.as_str(), manifest));
+        }
+    }
+
+    match commanding.len() {
+        0 => Supervising::NoPolicy { joints },
+        1 => {
+            let (package, manifest) = &commanding[0];
+            match transport_plan(manifest, body, allow_retarget) {
+                // `transport_plan` returns `None` when the manifest declares no source embodiment,
+                // which cannot happen here — it is the condition that put the package in this list.
+                // Treated as no policy rather than unwrapped, because a panic in the black box's
+                // sizing path would be a robot that cannot record because of a recording.
+                None => Supervising::NoPolicy { joints },
+                Some(plan) if !is_installable(&plan) => Supervising::Refused {
+                    package: package.clone(),
+                    joints,
+                },
+                Some(plan) => Supervising::Policy {
+                    package: package.clone(),
+                    joints,
+                    channels: plan.bindings.len(),
+                    verdict: plan.verdict.as_str(),
+                },
+            }
+        }
+        _ => Supervising::Ambiguous {
+            packages: commanding.iter().map(|(id, _)| id.clone()).collect(),
+            joints,
+        },
+    }
+}
+
+/// Where §25's rings are, for the one package that may write one.
+///
+/// **Only the commanding package**, and the authority for who that is is
+/// [`crate::shape::supervising`] rather than this function: the daemon already asks it which
+/// package sized the black box, it refuses to choose when two packages declare an action space,
+/// and a second answer here could disagree with the first. A package that is not commanding is
+/// told nothing — the address of a command ring is not a thing every unit on the robot needs to
+/// know, and §8 is the rule that a package gets what it declared and no more.
+///
+/// The channel count travels with the path because the policy cannot infer it: §6.2's plan is
+/// resolved here, against this body, and a producer that guessed would be a producer whose mask
+/// is the wrong width.
+pub fn rendezvous(store: &Store, id: &str) -> Vec<(String, String)> {
+    let layout = store.layout();
+    let body = crate::embodiment::load(layout);
+    // `false` for `allow_retarget`, the same reason the boot path gives: §6.1 makes retargeting
+    // a decision somebody made rather than a fallback that happens quietly, and a reconcile pass
+    // has no somebody in it.
+    match supervising(store, &body, false) {
+        Supervising::Policy {
+            package, channels, ..
+        } if package == id => vec![
+            (
+                "SKYNET_RING_SOCKET".to_string(),
+                layout.policy_socket().display().to_string(),
+            ),
+            ("SKYNET_RING_CHANNELS".to_string(), channels.to_string()),
+        ],
+        _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(unix)]
+    use skynet_json::Json;
+    #[cfg(unix)]
+    use std::path::Path;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use crate::layout::Layout;
+    // Only `install` names it, and that is `cfg(unix)` for the symlink swap.
+    #[cfg(unix)]
+    use crate::layout::PackageId;
+
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    struct TempRoot(PathBuf);
+
+    impl TempRoot {
+        fn new(label: &str) -> Self {
+            let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let path = std::env::temp_dir().join(format!(
+                "skynetd-shape-{}-{}-{}",
+                std::process::id(),
+                label,
+                n
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).expect("temp root");
+            Self(path)
+        }
+
+        fn layout(&self) -> Layout {
+            Layout::new(&self.0)
+        }
+
+        #[cfg(unix)]
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempRoot {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A body with `joints` revolute joints named `J0..`, each carrying a role a policy can bind to.
+    ///
+    /// Roles as well as names, because [`skynet_contracts::transport::resolve_transport`] matches
+    /// on the exact wire name first and the canonical role second, and a fixture that exercised
+    /// only one of those paths would not notice the other breaking.
+    fn descriptor(joints: usize) -> String {
+        let entries: Vec<String> = (0..joints)
+            .map(|index| {
+                format!(
+                    "{{\"name\":\"J{index}\",\"role\":\"right_arm.joint{index}\",\
+                     \"type\":\"revolute\",\
+                     \"limits\":{{\"position_min_rad\":-3,\"position_max_rad\":3,\
+                     \"velocity_max_rad_s\":2,\"effort_max_nm\":80}},\
+                     \"control_modes\":[\"position\"]}}"
+                )
+            })
+            .collect();
+        format!(
+            "{{\"schema_version\":1,\"robot_slug\":\"bench-arm\",\"digest\":\"sha256:arm\",\
+             \"verified\":true,\"base\":\"fixed\",\"dof\":{joints},\"joints\":[{}]}}",
+            entries.join(",")
+        )
+    }
+
+    fn write_descriptor(root: &TempRoot, joints: usize) {
+        let layout = root.layout();
+        std::fs::create_dir_all(layout.state()).unwrap();
+        std::fs::write(layout.embodiment(), descriptor(joints)).unwrap();
+    }
+
+    /// A manifest, optionally declaring an action space of `channels` joint-position channels.
+    ///
+    /// `None` is a package that commands nothing — a skill, a driver, anything without a policy's
+    /// output vector — which is the case that has to stay events-only.
+    #[cfg(unix)]
+    fn manifest(id: &str, channels: Option<usize>) -> Json {
+        let mut budget = Json::obj();
+        budget
+            .set("ram_mb", Json::Num(512.0))
+            .set("cpu_cores", Json::Num(1.5));
+        let mut runtime = Json::obj();
+        runtime.set("entrypoint", Json::from("bin/run"));
+        let mut m = Json::obj();
+        m.set("schema_version", Json::Num(1.0))
+            .set("id", Json::from(id))
+            .set("version", Json::from("1.0.0"))
+            .set("kind", Json::from("policy"))
+            .set("isolation", Json::from("wasm"))
+            // Required by `manifest_from_json`, and carried by every real published manifest —
+            // the admission corpus's own cases have one. A fixture without it does not decode,
+            // which is how the first version of these tests read every package as commanding
+            // nothing.
+            .set(
+                "digest",
+                Json::from(
+                    "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                ),
+            )
+            .set("budget", budget)
+            .set("runtime", runtime);
+
+        if let Some(channels) = channels {
+            let mut actions = Vec::new();
+            for index in 0..channels {
+                let role = format!("right_arm.joint{index}");
+                let joint = format!("J{index}");
+                let mut channel = Json::obj();
+                channel
+                    .set("index", Json::Num(index as f64))
+                    .set("kind", Json::from("joint_position"))
+                    .set("role", Json::from(role.as_str()))
+                    .set("joint", Json::from(joint.as_str()));
+                actions.push(channel);
+            }
+            let mut source = Json::obj();
+            source
+                .set("robot_slug", Json::from("trainer"))
+                .set("digest", Json::from("sha256:policy"))
+                .set("dof", Json::Num(channels as f64))
+                .set("control_mode", Json::from("position"))
+                .set("action_channels", Json::Arr(actions))
+                .set("observations", Json::Arr(Vec::new()));
+            m.set("source_embodiment", source);
+        }
+        m
+    }
+
+    /// Stage and activate a package, through the store's own path rather than by writing links.
+    ///
+    /// The activation matters to what is being tested: [`supervising`] reads `installed()`, which
+    /// is the *active* set, and a fixture that staged without activating would be asserting about
+    /// a rollout that has not happened.
+    ///
+    /// `cfg(unix)` because activation is the atomic symlink swap §37.1 requires, and this module's
+    /// sibling in `tests.rs` states the same rule: *"Most of it runs anywhere. The parts that need
+    /// POSIX — symlinks, Unix sockets — are `cfg(unix)`."* The two cases that reach no package run
+    /// everywhere.
+    #[cfg(unix)]
+    fn install(store: &Store, root: &TempRoot, id: &str, channels: Option<usize>) {
+        let source = root.path().join(format!("source-{}", id.replace('/', "-")));
+        std::fs::create_dir_all(source.join("bin")).unwrap();
+        let m = manifest(id, channels);
+        std::fs::write(
+            source.join("manifest.json"),
+            m.to_canonical().unwrap().as_bytes(),
+        )
+        .unwrap();
+        std::fs::write(source.join("bin/run"), b"x").unwrap();
+
+        let files = vec![skynet_contracts::digest::DigestFile {
+            path: "bin/run".to_string(),
+            sha256: String::from_utf8_lossy(&skynet_sha256::hex_bytes(b"x")).into_owned(),
+        }];
+        let digest =
+            skynet_contracts::digest::version_digest("policy", "1.0.0", &m, &files).unwrap();
+        let parsed = PackageId::parse(id).unwrap();
+        store
+            .stage(&parsed, "policy", "1.0.0", &digest, &source)
+            .unwrap();
+        store.activate(&parsed, &digest).unwrap();
+    }
+
+    fn fixture(label: &str) -> (TempRoot, Store) {
+        let root = TempRoot::new(label);
+        let store = Store::new(root.layout());
+        store.prepare().unwrap();
+        (root, store)
+    }
+
+    /// The commanding package is told where the rings are, and told how wide its mask must be.
+    #[cfg(unix)]
+    #[test]
+    fn the_commanding_package_is_told_where_the_rings_are() {
+        let (root, store) = fixture("rendezvous-policy");
+        write_descriptor(&root, 4);
+        install(&store, &root, "openrobot/grasp", Some(3));
+
+        let told = rendezvous(&store, "openrobot/grasp");
+        assert_eq!(told.len(), 2, "the path and the channel count: {told:?}");
+        assert_eq!(
+            told[0].1,
+            root.layout().policy_socket().display().to_string()
+        );
+        assert_eq!(
+            told[1],
+            ("SKYNET_RING_CHANNELS".to_string(), "3".to_string()),
+            "§6.2's plan resolved it; a producer that guessed would have the wrong mask width",
+        );
+    }
+
+    /// Everything else is told nothing, which is §8's rule rather than an omission.
+    #[cfg(unix)]
+    #[test]
+    fn a_package_that_commands_nothing_is_not_told_where_the_ring_is() {
+        let (root, store) = fixture("rendezvous-quiet");
+        write_descriptor(&root, 4);
+        install(&store, &root, "openrobot/grasp", Some(3));
+        install(&store, &root, "openrobot/logger", None);
+
+        assert!(
+            rendezvous(&store, "openrobot/logger").is_empty(),
+            "the address of a command ring is not a thing every unit on the robot needs",
+        );
+    }
+
+    /// Two commanding packages, and nobody is told anything.
+    ///
+    /// The daemon does not choose between them for the black box's shape, and it must not choose
+    /// here either: handing the ring to whichever the loop happened to iterate first is exactly the
+    /// silent arbitration §25.2 describes as two policies driving one elbow.
+    #[cfg(unix)]
+    #[test]
+    fn two_commanding_packages_leave_both_without_a_ring() {
+        let (root, store) = fixture("rendezvous-ambiguous");
+        write_descriptor(&root, 4);
+        install(&store, &root, "openrobot/grasp", Some(3));
+        install(&store, &root, "openrobot/walk", Some(2));
+
+        assert!(rendezvous(&store, "openrobot/grasp").is_empty());
+        assert!(rendezvous(&store, "openrobot/walk").is_empty());
+    }
+
+    /// No descriptor at all. Nothing can be said about the body, so nothing is claimed about it.
+    #[test]
+    fn a_robot_with_no_descriptor_records_events_only() {
+        let (root, store) = fixture("no-body");
+        let body = crate::embodiment::load(&root.layout());
+
+        let resolved = supervising(&store, &body, false);
+
+        assert_eq!(resolved, Supervising::NoBody);
+        assert_eq!(
+            resolved.shape(),
+            Shape {
+                joints: 0,
+                channels: 0
+            }
+        );
+    }
+
+    /// A body, and nothing installed that commands it. This is the shape the daemon opened
+    /// unconditionally before §26.3 was closed, and it is still the right one for this robot.
+    #[test]
+    fn a_body_with_no_policy_records_events_only() {
+        let (root, store) = fixture("no-policy");
+        write_descriptor(&root, 4);
+        let body = crate::embodiment::load(&root.layout());
+
+        let resolved = supervising(&store, &body, false);
+
+        assert_eq!(resolved, Supervising::NoPolicy { joints: 4 });
+        assert_eq!(
+            resolved.shape(),
+            Shape {
+                joints: 0,
+                channels: 0
+            },
+            "joints without channels would size every record for an array no writer fills",
+        );
+    }
+
+    /// A package that declares no action space does not make a robot a commanded one.
+    #[test]
+    #[cfg(unix)]
+    fn a_package_that_commands_nothing_does_not_size_the_ring() {
+        let (root, store) = fixture("non-commanding");
+        write_descriptor(&root, 4);
+        install(&store, &root, "openrobot/driver", None);
+        let body = crate::embodiment::load(&root.layout());
+
+        assert_eq!(
+            supervising(&store, &body, false),
+            Supervising::NoPolicy { joints: 4 }
+        );
+    }
+
+    /// The case §26.3 was open on: the daemon sizes its ring for the body, from the plan.
+    #[test]
+    #[cfg(unix)]
+    fn one_policy_sizes_the_ring_for_the_body() {
+        let (root, store) = fixture("one-policy");
+        write_descriptor(&root, 4);
+        install(&store, &root, "openrobot/grasp", Some(3));
+        let body = crate::embodiment::load(&root.layout());
+
+        let resolved = supervising(&store, &body, false);
+
+        let Supervising::Policy {
+            package,
+            joints,
+            channels,
+            verdict,
+        } = &resolved
+        else {
+            panic!("expected a plan, got {resolved:?}");
+        };
+        assert_eq!(package, "openrobot/grasp");
+        assert_eq!(*joints, 4, "joints are the body's, not the policy's");
+        assert_eq!(
+            *channels, 3,
+            "channels are the policy's output width, which is what a cycle carries",
+        );
+        assert_eq!(*verdict, "direct");
+        assert_eq!(
+            resolved.shape(),
+            Shape {
+                joints: 4,
+                channels: 3
+            }
+        );
+    }
+
+    /// Two policies and one control loop. The daemon says so rather than picking one.
+    #[test]
+    #[cfg(unix)]
+    fn two_policies_are_not_a_shape_this_daemon_guesses() {
+        let (root, store) = fixture("two-policies");
+        write_descriptor(&root, 4);
+        install(&store, &root, "openrobot/grasp", Some(3));
+        install(&store, &root, "openrobot/walk", Some(2));
+        let body = crate::embodiment::load(&root.layout());
+
+        let resolved = supervising(&store, &body, false);
+
+        let Supervising::Ambiguous { packages, joints } = &resolved else {
+            panic!("expected ambiguity, got {resolved:?}");
+        };
+        assert_eq!(*joints, 4);
+        assert_eq!(packages.len(), 2);
+        assert!(packages.contains(&"openrobot/grasp".to_string()));
+        assert!(packages.contains(&"openrobot/walk".to_string()));
+        assert_eq!(
+            resolved.shape(),
+            Shape {
+                joints: 0,
+                channels: 0
+            },
+        );
+        // The line an operator reads has to name both, or it is a refusal they cannot act on.
+        let described = resolved.describe();
+        assert!(described.contains("openrobot/grasp"), "{described}");
+        assert!(described.contains("openrobot/walk"), "{described}");
+    }
+
+    /// A policy this body refuses is a loop that will never run, so its channels are not sized for.
+    #[test]
+    #[cfg(unix)]
+    fn a_refused_plan_does_not_size_the_ring() {
+        let (root, store) = fixture("refused");
+        // One joint on the body, three required channels in the policy: two have no equivalent.
+        write_descriptor(&root, 1);
+        install(&store, &root, "openrobot/grasp", Some(3));
+        let body = crate::embodiment::load(&root.layout());
+
+        let resolved = supervising(&store, &body, false);
+
+        assert_eq!(
+            resolved,
+            Supervising::Refused {
+                package: "openrobot/grasp".to_string(),
+                joints: 1,
+            }
+        );
+        assert_eq!(
+            resolved.shape(),
+            Shape {
+                joints: 0,
+                channels: 0
+            },
+            "a ring sized for a loop that cannot run spends the window on arrays nothing fills",
+        );
+    }
+
+    /// The property the whole change exists for, asserted as the value the other side compares.
+    ///
+    /// `skynet-kernel-host`'s recorder refuses an attach when `ring.geometry().shape != shape`,
+    /// where its `shape` is the body's joints and the plan's channels. This crate cannot link that
+    /// one — §33.1 keeps the daemon and the loop apart, and the two-writer test in `tests.rs`
+    /// models the loop the same way — so what is asserted here is the equality that check
+    /// performs, against a ring created the way the daemon now creates it.
+    #[test]
+    #[cfg(unix)]
+    fn the_ring_the_daemon_creates_is_one_the_loop_can_attach_to() {
+        let (root, store) = fixture("attachable");
+        write_descriptor(&root, 4);
+        install(&store, &root, "openrobot/grasp", Some(4));
+        let body = crate::embodiment::load(&root.layout());
+        let layout = root.layout();
+
+        // The daemon's boot path, in order: resolve, then create.
+        let resolved = supervising(&store, &body, false);
+        let recorder = crate::blackbox::Recorder::open(
+            &layout,
+            crate::blackbox::supervisor_meta(&layout),
+            resolved.shape(),
+            64 * 1024,
+        )
+        .expect("a recorder");
+
+        // What `skynet-kernel-host` would build for this body and this plan.
+        let loop_shape = Shape {
+            joints: 4,
+            channels: 4,
+        };
+        assert_eq!(
+            recorder.geometry().shape,
+            loop_shape,
+            "the loop compares with `!=` and refuses a mismatch by name",
+        );
+    }
+
+    /// A manifest that does not decode is not a package that commands nothing.
+    ///
+    /// Found by running these tests on Linux for the first time: the fixture omitted the `digest`
+    /// field `manifest_from_json` requires, every package therefore failed to decode, and the first
+    /// version of `supervising` swallowed that with `let Ok(..) else { continue }` — reading four
+    /// commanding robots as four robots with no policy. The fixture was wrong and so was the code,
+    /// and only one of those would have been caught by fixing the fixture.
+    ///
+    /// `json.rs` states the rule this restores, where it decodes the same block: *"an action space
+    /// nobody could parse and an action space nobody declared are opposite facts."*
+    #[test]
+    #[cfg(unix)]
+    fn a_manifest_that_does_not_decode_is_not_a_package_that_commands_nothing() {
+        let (root, store) = fixture("unreadable");
+        write_descriptor(&root, 4);
+        install(&store, &root, "openrobot/grasp", Some(3));
+
+        // Overwrite the stored manifest with one missing a required field. This is what a truncated
+        // write, a partial upgrade or a publisher on an older schema leaves behind — the state
+        // `tests.rs` already asserts admission refuses to run against.
+        let (_, digest) = store.installed().into_iter().next().expect("one package");
+        let bare = "{\"id\":\"openrobot/grasp\",\"version\":\"1.0.0\",\"kind\":\"policy\"}";
+        std::fs::write(
+            store.layout().blob(&digest).join("manifest.json"),
+            bare.as_bytes(),
+        )
+        .unwrap();
+
+        let body = crate::embodiment::load(&root.layout());
+        let resolved = supervising(&store, &body, false);
+
+        let Supervising::Unreadable {
+            package,
+            joints,
+            detail,
+        } = &resolved
+        else {
+            panic!("expected an unreadable manifest, got {resolved:?}");
+        };
+        assert_eq!(package, "openrobot/grasp");
+        assert_eq!(*joints, 4);
+        assert!(
+            !detail.is_empty(),
+            "the operator needs to know what is wrong"
+        );
+
+        assert_eq!(
+            resolved.shape(),
+            Shape {
+                joints: 0,
+                channels: 0
+            },
+            "the unreadable manifest may be the one declaring the action space, so the count \
+             taken without it cannot be trusted",
+        );
+        // And it must not read as the robot that simply has no policy, which is the bug.
+        assert_ne!(resolved, Supervising::NoPolicy { joints: 4 });
+    }
+}

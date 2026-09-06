@@ -604,6 +604,38 @@ Only a `driver` may run `native`. A `policy` is always sandboxed — no flag, no
 `--privileged`. An escape hatch here would quietly undo the invariant §7 is built on, so there
 isn't one.
 
+### 8.4 What `min_os_version` reads, and why it is not `semver.ts`
+
+*Written 2026-09-05, when §80's open question was decided. The rule lives here because it is a
+rule about admission, and an amendments list is a bad place to look for one.*
+
+A manifest's `min_os_version` is compared against **whatever the running image reports**, which is
+the only field in §8 with that property: everything else a package declares was validated by the
+Hub at publish, and this one is matched against a string a robot supplies about itself. So the
+question that decides the function is not how it compares two well-formed versions — every
+implementation agrees about that — but what it does with a segment that is not a number.
+
+**A segment is worth its leading run of ASCII digits, or zero.** `"10-rc1"` is 10, `"0-rc1"` is 0,
+`"rc1"` is 0, `""` is 0, and comparison is segment by segment with absent segments reading as zero,
+so `1.2` and `1.2.0` are the same version.
+
+Two properties, and each one rules out an answer that looks reasonable:
+
+* **It never fails open.** A version this cannot read is the oldest version there is, so the
+  package is refused. The alternative is not hypothetical — it is what the reference edition did
+  until this was decided, and it meant a robot whose version had one non-numeric segment satisfied
+  *every* `min_os_version` there has ever been.
+* **A candidate compares as the release it is a candidate for.** Falling the whole segment back to
+  zero is fail-closed and still wrong: `1.2.10-rc1` would compare as `1.2.0`, be refused a package
+  needing `1.2.5`, and say so in a sentence naming a version that looks newer than the one it is
+  demanding. §64 makes that a defect, because it is a refusal an operator cannot act on.
+
+It deliberately does **not** defer to `semver.ts`, which is a stricter parser this platform already
+has. That one requires three segments and returns null for `"2.0"` — a spelling an image reports as
+often as `"2.0.0"` — and a null in this position is a package admitted onto an OS nobody compared.
+Two comparators with two jobs: one orders artifacts a publisher was made to version correctly, and
+this one reads a claim.
+
 ---
 
 ## 9. skynetd — the system
@@ -646,6 +678,32 @@ and adds two things:
 
 Pairing is a one-time operator action: `skynet pair <code>` on the robot, confirmed in the Hub UI,
 minting a device token shown exactly once.
+
+### 10.1 A pairing code is eight characters, and *character* had to be defined
+
+*Written 2026-09-05, when §80's second open question was decided.*
+
+The code is eight characters from Crockford's base32, printed in two groups of four, with `O`
+folding to `0` and `I` and `L` to `1` because those are the four somebody misreads off a screen.
+Hyphens and spaces are stripped. None of that was ever in doubt. What was in doubt is what
+**counts as one character**, and two editions answered differently for two different reasons.
+
+**Length and position are counted in code points.** Not UTF-16 code units, which is what
+`String.length` gives and what the reference used to report: eight characters above U+FFFF were a
+code of length *sixteen*, and somebody who typed eight was told they had typed sixteen. §64 makes
+a refusal that miscounts what a person typed a defect rather than a rounding error, and the same
+arithmetic put the `not_in_alphabet` position on half a surrogate pair — a character in no alphabet
+and not one anybody typed.
+
+**Folding is applied to each character of the upper-cased result, not to the result.** Upper-casing
+one code point can yield more than one: `ß` becomes `SS` and `ﬁ` becomes `FI`. Folding the pair
+leaves `FI`, whose `I` is not in the alphabet; folding each character gives `F1`, whose characters
+both are. So the two editions did not merely word a refusal differently — one **refused** a string
+the other accepted as a **valid code**, which is the §17 disagreement in its worst direction,
+because the half that says yes is the half that decides whether a robot pairs.
+
+Neither rule is a matter of taste and both cost nothing to get right, which is the argument for
+writing them down here rather than leaving them as whatever three implementations happen to do.
 
 ---
 
@@ -1310,6 +1368,11 @@ desired[]  ──▶ ┌──────────────────�
 Single-producer / single-consumer, lock-free, fixed-size slots in a `memfd`-backed mapping. No
 serialisation, no sockets, no DDS, no allocation in the hot path.
 
+> **The producer exists, as of 2026-09-05.** For as long as this section had been written, the
+> left-hand column of that diagram was prose: `skynet-kernel-host` read the ring and nothing filled
+> it, so every cycle on every robot read `Empty` and held. `skynet-policy-host` is the other half,
+> and §25.3 is what building it settled.
+
 Two properties are load-bearing:
 
 * **The ring is the only channel from the policy to the kernel.** Not a convention — a
@@ -1363,6 +1426,39 @@ behaviour** (a fall-arrest reflex, a retreat) may pre-empt a lease. It is a dist
 it is granted separately, and every pre-emption is a black box event. Sensing capabilities are
 shared freely — two policies reading the same camera is normal; two policies driving the same
 elbow is not.
+
+### 25.3 Three things a policy can be doing, and two of them are not the same
+
+*Written 2026-09-05, when the producer was built and the design turned out to rest on one
+distinction this section had never made.*
+
+A policy that has decided to command nothing and a policy that has **stopped** are different events
+on a robot, and modelling what a runtime returns as "a command, or nothing" spells them the same
+way. The consequences are opposite:
+
+| | published | the sequence | what §7.1's watchdog sees |
+|---|---|---|---|
+| a command | a command | advances | a live producer |
+| a **hold** | a command with an all-zero mask | **advances** | a live producer asking for nothing |
+| **silence** | nothing at all | **does not advance** | a **stalled producer**, and a controlled stop |
+
+A hold is a policy saying *I am here and I want nothing*, and it must satisfy the watchdog, because
+a robot that stopped every time a policy waited would be unusable. Silence is a policy that has
+crashed, hung or been killed, and it must **not** satisfy it. §24 already decided what happens —
+*"the watchdog treats a repeat as a stalled producer"* — and the rule this adds is on the other
+side: **the sequence counts commands that reached the ring, and nothing else.** Not cycles, not
+ticks. A runtime that advanced it on a cycle it published nothing on would be telling the kernel a
+producer is alive when it is not, which is the one lie a producer can tell that the architecture
+cannot survive.
+
+It follows that publishing nothing is the *cheapest* thing a runtime in trouble can do, which is
+deliberate: a policy host should not have to succeed at anything in order to fail safely.
+
+Two smaller rules fall out of the same place. A hold masks every channel **out** rather than
+commanding zero, because on a torque-controlled joint a zero value goes limp and a zero mask holds
+position — §24's reason for having a mask at all. And a command that exceeds the lease is **refused
+rather than clamped**: narrowing it would be the policy runtime forming an opinion about what is
+safe, and §7's guards are the only place that opinion is allowed to live.
 
 ---
 
@@ -1453,6 +1549,24 @@ lock on the directory.** A second writer is refused, by name, and the refusal sa
 Failing loudly beats corrupting evidence, and a robot that cannot record is a robot with a visible
 problem rather than an invisible one.
 
+**A holder that has exited is not a holder** — *amended 2026-09-06, after a run rather than a
+review*. The rule above was first built as *a lock is never cleared automatically*, reasoning that a
+recorder which took over a directory would one day take over one another process was still writing.
+The reasoning is right; the rule was wrong, because of how a daemon stops. `skynetd` is stopped by a
+signal and installs no handler, so `Drop` never runs and the lock is left behind on **every**
+restart. A stale lock was not an exception; it was the state every robot is in from its second boot
+onward — and an attacher may not seal, so from that boot the robot could never close a window again.
+Silently, with the recording still running.
+
+So the sentence is sharpened rather than reversed: **a lock is never taken from a process that
+exists.** Existence is asked of the operating system, not guessed: the note carries the holder's pid
+and the moment it started (field 22 of `/proc/<pid>/stat`), and that pair is an identity where a pid
+alone is not — numbers are reused within hours and reset entirely at a reboot, which is exactly the
+case in question. A holder that is gone has its lock reclaimed, and **the reclaim is reported**, so
+a directory that changed hands is a fact in the journal rather than a silence. Where the question
+cannot be answered — no `/proc`, or a note missing either field — the lock is refused, because not
+being able to tell is not the same as knowing.
+
 Three alternatives were considered and are worth recording as rejected:
 
 * **Two rings.** The daemon's and the host's, sealed separately. Rejected: §13 describes *the* black
@@ -1503,6 +1617,99 @@ mapping*, with every writer thereafter attaching to it.
 One property §25's ring needs and this one does not: **no seqlock**. `skynet-ring` runs one because
 a reader may race a writer mid-slot; sealing takes the lock, so a black box slot is written by
 exactly one writer and read by nobody until that writer has finished with it.
+
+### 26.3 Built, and the two roles it turned out to need
+
+*Written 2026-09-05, when the design above was implemented and the implementation found the half it
+did not cover.*
+
+`skynet-claim` is the mapping and `skynet-lock`'s `Writership` is the join: one crate both recorders
+use, because the daemon must not link the kernel host and the host must not link the daemon. Asking
+for writership of a directory returns one of two roles, and the roles are not symmetric.
+
+| | Creator | Attacher |
+|---|---|---|
+| Holds the directory lock | for its life | no |
+| Creates or replaces the ring | yes | **never** |
+| Seeds the counter | from `Ring::open`'s scan | no |
+| Appends | at claimed sequences | at claimed sequences |
+| Seals | yes | **no** |
+
+**An attacher never creates a ring**, and that is the rule that took the most care. Both recorders
+already replaced a ring whose shape did not match the body — sealing what was there first, which is
+right for a robot whose descriptor changed between boots and catastrophic for a process that arrived
+second. A window the other writer is still filling is not a window to seal and replace.
+
+**Only the creator seals.** Sealing reads the whole ring and writes it out under a digest, and the
+property that lets this format do without a seqlock is that a claimed slot is read by nobody until
+its writer has finished with it. Two processes sealing would be two readers and two windows of one
+recording. The creator holds the lock for its life, so this needs no new mechanism: sealing is what
+the lock still gates, exactly as it did before there were two roles. What a creator's seal may still
+catch is a slot an attacher is part-way through — a torn record, failing its CRC, dropped by the
+reader rather than believed. Losing the in-flight record of a concurrent writer is the honest price
+of keeping a lock off the real-time append path.
+
+**The shapes are asymmetric, and that is what makes one recording possible.** A record's size is a
+function of the joint and channel counts. A cycle carries a value per joint and per channel, so the
+control loop cannot write into a ring shaped for a smaller body and refuses a mismatch by name. An
+event carries neither, so the daemon writes into whatever the creator sized and takes the ring it
+finds. That asymmetry is not a concession: it is the reason a supervisor that does not know the body
+and a loop that does can share one file.
+
+**A zero is not a sequence.** `offset_of` is `(sequence - 1) % capacity`, so a claim counter read
+before its creator seeded it would address the ring's last slot — on top of the oldest record it
+holds, silently. The ring refuses a zero by name, and an attacher waits a bounded two seconds for
+the counter to be seeded rather than writing at one: a creator preallocating sixty-four mebibytes is
+a process that has begun a step it will finish, and one that never seeds is a person's problem and
+says so.
+
+**What this left, and how it closed.** *Written 2026-09-06.* On a robot, `skynetd` starts first
+(§27) and — because it starts first — **creates** the recording. It used to open one shaped for zero
+joints and zero channels, which is the honest description of a supervisor that commands nothing and
+was the wrong thing to write into a file another writer has to share. A control loop starting
+afterwards was refused: its cycles do not fit. So the ordering that worked was the loop first, and
+the ordering a robot actually boots in is the daemon first.
+
+The specification said closing that needed a channel count nothing tells the daemon, *"because
+channels are the policy runtime's, and the policy runtime is unwritten"*, and §80 carried it as
+waiting on a lease record. **Neither was true, and the correction is the useful part.** A lease is
+granted when a policy *starts*; the daemon needs the number when *it* starts, which is earlier — so
+a lease record would have left the first boot after installing a policy still refusing the loop, and
+sized every later ring from whatever ran last. That is configuration inferred from history, which is
+what §28's layout argues against in as many words.
+
+The number needs no carrying, because **the daemon already computes it**. §37.1's `transport` stage
+resolves a plan for every package this robot installs, and a plan's bindings are *"every channel, in
+the policy's output order"* — the same count `Commanding::channels` holds, from the same
+declaration, one process earlier. Joints come from the embodiment descriptor the daemon already
+reads. Both are on disk before the first pass reconciles anything.
+
+`skynetd-io`'s `shape::supervising` is that resolution, and what makes it safe is that it refuses to
+guess in four separate ways rather than one:
+
+| | The ring |
+|---|---|
+| No descriptor | events only — nothing can describe the body a cycle would be about |
+| A body, nothing installed that declares an action space | events only — nothing commands it |
+| One commanding package, plan resolves | **the body's shape**: the descriptor's joints, the plan's channels |
+| One commanding package, plan `refused` | events only — a loop that will never run |
+| More than one commanding package | events only, both named — §25 has one loop, and which one commands is not the daemon's to guess |
+| A manifest that does not decode | events only, named — see below |
+
+**Joints without channels is not a shape.** Every events-only outcome is zero joints *and* zero
+channels rather than the body's joints, because a record sized for a per-joint array no writer fills
+spends §13's window on zeroes.
+
+**And a manifest that does not decode is not a package that commands nothing.** The first
+implementation read an undecodable manifest as an absent action space, which is the mistake §8's own
+decoder warns about where it reads the block: *an action space nobody could parse and an action
+space nobody declared are opposite facts.* It is now fatal to the whole answer rather than to one
+package — the unreadable manifest may be the one declaring the action space, so a count taken
+without it cannot be trusted — and the operator is told which package and why.
+
+What this does **not** close is a loop nothing declared: `skynetk` run by hand against a driver names
+no package, so a robot with a body and no commanding package still meets the shape refusal. That is
+the honest answer rather than a gap, and §64's message already says where to point it.
 
 ---
 
@@ -4851,7 +5058,7 @@ migration. That sequencing works only if the repository is separate from the out
 | Repository | Holds |
 |---|---|
 | **`skynet-os`** (new, private → public) | Spec, RHAL bindings, the conformance corpus, every edition, contracts (Rust plus the WASM build and the TypeScript reference oracle), drivers, CLI, Yocto layers, the on-robot console |
-| **`Botmarket`** (existing, private) | Hub API routes, Skynet OS UI pages, migrations, registry readiness — consuming the contracts as a published package |
+| **`Botmarket`** (existing, private) | Hub API routes, Skynet OS UI pages, migrations, registry readiness — consuming the contracts as a published package — and **Skynet Console**, the operator's desktop application (§83.3a) |
 
 One repository rather than one per edition: §31.4's differential fuzzing needs every edition
 testable against one corpus in one CI run, and splitting them makes that a cross-repository problem
@@ -4893,11 +5100,11 @@ miniature, and currently trivial to fix.
 | Conformance and certification | §15, §31.4, §56 | **Built on both sides** — and a robot now runs §15's eight runtime tests on itself (`GET /conformance`); §15's third suite has its numerator and denominator, counted off §13's ring (§74.6) | Four of the eight now execute where the tier allows it, and the other four name what they wait for. `package.grants.gate` is the one that moved, and how it moved is the point: its skip reason named the mode gate as *"the Safety Kernel's, through a path §33.1 denies this daemon"*, and `skynet-kernel-host` is that path. It is measured against a robot's own grants — one command admitted, one refused and sending no channel, one naming no capability and treated as neither. On a **guest**-tier robot it still skips, and the new reason is a live property rather than a missing one: §7.4 forwards the command whatever the guards said, so a tier that cannot refuse has not passed a test about refusing. Nothing signs a result and nothing will on a robot — §19 makes that a rule rather than a gap (§15.1). The `field` figure is measurable rather than measured: it needs a robot that runs cycles |
 | LeRobot | §16, §67 | **Built** — the bridge and its self-test | — |
 | Hub contract | §17, §57 | **Built** — all thirteen endpoints, no breaking change; four of them frozen as wire fixtures produced by the real producer (§31.6), and the thirteenth stopped being half a route when the Hub's side of §79 was written (§79.7) | Two of them carry assertions rather than evidence (§57.1) |
-| Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 48 CLI commands, the golden path checked mechanically | — |
+| Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 49 CLI commands, the golden path checked mechanically | — |
 | Security, local access control | §19, §39 | **Built** — Ed25519, the trust store, five signature states, four roles; §38.3's two records now written for a capability grant, which had left neither (§81.4) | — |
 | Distribution and business model | §20, §72 | Designed | — |
-| Languages, editions, levels | §23, §31, §42 | **Built** — one edition, held to a corpus of 77 files and 1,055 cases | The second edition, which is what the corpus is for |
-| IPC, observation assembly, arbitration | §25 | **Built** — the shared-memory ring, its layout and the command frame; and, since `skynet-kernel-host`, the **consumer end running**: a real RHAL driver opened, a cycle turned at a declared rate, the eight guards evaluated, the verdict written to the driver, and a `Cycle` recorded every pass | The row previously said *"the ring exists and **nothing fills it**"*, and that was one sentence about two halves. The half that reads the ring now exists. The half that **fills** it does not: no process assembles sensor readings into an observation and no process turns a frame into a command, because both are the policy runtime's and §33.1 keeps the daemon off that path. So a robot running the host today holds on every cycle — §33.1's own property, now observable — and the ring still has no action channels, which is why five of §74's counters report unmeasured on a shipping robot |
+| Languages, editions, levels | §23, §31, §42 | **Built** — **two** editions, Rust and Python, each passing all 1,116 cases of a corpus of 78 files. The row said *"one edition"* and *"the second edition, which is what the corpus is for"* for as long as that was true and for a while after | A **third** edition is what would test the claim properly. Two implementations can agree because the second was transcribed from the first — which this one was, deliberately and with its divergences documented — and the corpus only proves its worth when an edition is written by somebody who did not write the reference |
+| IPC, observation assembly, arbitration | §25 | **Built — and the loop closes.** The command ring with both ends; `skynet-obs` carrying proprioception the other way; and a backend whose command on cycle *n* is a function of what the body did on cycle *n − 1*. A test drives the whole diagram — driver read, state across the observation ring, decision, command across the command ring, eight guards, driver written — and a second one shows a **clamped** command coming back as the position the robot actually reached rather than the one it was told, which is the only way a policy can notice it is being clamped. §25.1's staleness budget is enforced by the runtime: a reading past it is a hold the backend never sees | **Nothing the robot can see.** The observation ring carries the body, not the cameras: a 4 KiB slot holds 128 joints three times over and does not hold one image, and a ring of megabyte slots would be a copy per frame at capture rate. Vision needs a buffer pool with handles and a lifetime rule, which is a larger design and is not started here — so manipulation from pixels is still out of reach and §54's skills cannot be what they will be. **Both rings now cross two processes**, in one `SCM_RIGHTS` message so that a policy gets both or neither: `handoff::Port` creates them and offers them, `skynetp --ring-socket` takes them — the command ring writable, the body read-only — and the loop closes across the boundary. A policy in one process reads what a driver in another reported and commands from it: 300 cycles, 300 commanded, none held, and a test asserts the arithmetic rather than the liveness (§80). **And no backend does inference** — §23.3's runtime is a named vacancy in the `Backend` trait, and what ships is a hold, an open-loop table and a proportional approach |
 | Boot, faults, POST, homing | §27, §48 | **Built** — §27's machine, POST's eight checks | Five of the eight are the kernel's, through a path §33.1 denies the daemon |
 | Networking and time | §34–35 | **Built** — bearers, metering, the outbound queue, backoff, two clocks kept apart | — |
 | Power and thermal | §36 | **Built** — the four states plus `unmetered`, the reserve, §36.3's ladder, §36.4's override; the gauge and the thermal zones read from `/sys`; enforced at §54.4's `acquiring`; `GET /power` and `skynet power` | §36.4's override has no input: the RHAL flag and its fault code reach this daemon through a path §33.1 denies it, so no robot can report a brownout. §36.1's `reserve` and `critical` rows ask for a controlled stop, and nothing performs one — the stop path is the kernel's |
@@ -4907,19 +5114,39 @@ miniature, and currently trivial to fix.
 | Sensor and media pipeline | §47 | **Built** — capture, gaps annotated as gaps | — |
 | Audio | §49 | **Built** — §49.1's warning channel: the tone sounds on every transition into a commanding state, the channel is declared like a bearer, and a robot that cannot warn raises an incident rather than moving quietly (§81) | No robot has sounded one: §33.1 leaves seven of §27's conditions unobserved, so this edition never enters a commanding state. §49.2's speech-discarding capture is a backend that does not exist |
 | Entitlement | §51 | **Built** — offline verification | — |
-| Skills, environments, on-robot evaluation | §54–56 | **Built** — §54.4's lifecycle, composition, safety notes, and an episode's `intervention_count` read off §13's ring rather than defaulted away (§74.6) | Nothing on this edition can run a policy, so no skill has ever executed. The count is attributed only while one invocation is in `running`: the ring counts an interval and the recording knows which policy was commanding by digest, which nothing reads yet |
-| Interface — Hub-side and on-robot | §32 | **Built on both sides** — the console, the fleet page, the device page; §7.6's guards and limits cross §17 and are rendered on both, relayed rather than recomputed, and §32.2's four console panels all draw something measured | The transport plan does not cross §17, and should not until a policy runtime exists to be running one — the robot serves it per package at `GET /limits?package=`, for staged packages as well as active ones (§6.2). §32.1's guard-trip column now has its source and is frozen against a document a robot produces (§74.6); what it does not yet have is a robot that trips a guard |
+| Skills, environments, on-robot evaluation | §54–56 | **Built** — §54.4's lifecycle, composition, safety notes, and an episode's `intervention_count` read off §13's ring rather than defaulted away (§74.6) | A policy runtime exists now (`skynet-policy-host`) and no **skill** has executed through it: §54.4's lifecycle and the runtime were built a fortnight apart and nothing joins them, so an invocation still starts nothing. What changed is that the sentence is now about a missing wire rather than a missing half of the system. The count is attributed only while one invocation is in `running`: the ring counts an interval and the recording knows which policy was commanding by digest, which nothing reads yet |
+| Interface — Hub-side and on-robot | §32 | **Built on both sides** — the console, the fleet page, the device page; §7.6's guards and limits cross §17 and are rendered on both, relayed rather than recomputed, and §32.2's four console panels all draw something measured | The transport plan does not cross §17, and should not until a policy runtime exists to be running one — the robot serves it per package at `GET /limits?package=`, for staged packages as well as active ones (§6.2). §32.1's guard-trip column now has its source and is frozen against a document a robot produces (§74.6); what it does not yet have is a **robot** that trips one — a guard now trips in the suite, on a command a policy produced rather than one a test wrote, which is a different and much smaller gap than the one this column described for eleven sessions |
+| Discovery — finding a robot on the link | §82 | **Built on both sides** — the DNS-SD wire format, RFC 6763's TXT convention, what a robot may advertise, a one-shot browse behind `skynet discover`, and §82.4's responder in `skynetd`: probing, defending, answering and refusing. 106 tests, and it has run between two daemons on one link | The **goodbye** has no caller: `farewell()` exists and the daemon is stopped by a signal, so a robot that is switched off stays in a cache until the 120-second TTL expires. The **browse** still cannot hold 5353 (§82.3), so it sees answers to its own question and never an unsolicited announcement — which is why there is no watch mode here and why §83.3's applications use their platform's resolver instead |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **103,000 lines of Rust** across **eighteen crates** with
-**1,392 tests** over a corpus of 77 files and 1,055 cases, **13,300 lines** of the TypeScript
-reference edition that the corpus holds it to, **5,400 lines** of drivers, and **8,200 lines** in
-the Hub's mirror of the shared contracts. The Hub's own suite is **1,726 tests**.
+**Built** means running, tested code: **116,000 lines of Rust** across **twenty-three crates**, held by a
+corpus of 78 files and 1,116 cases to **14,000 lines** of the TypeScript reference edition and
+**15,000 lines** of the Python edition, with **5,000 lines** of drivers and **8,000 lines** in the
+Hub's mirror of the shared contracts.
 
-The three crates past fifteen are the ones §25's control loop needed and the workspace did not have:
-`skynet-dl` (the loader `unsafe`, extracted so it has one home and two callers), `skynet-kernel-host`
-(the loop itself), and `skynet-lock` (§26.2's one ring, one writer, enforced on both writers rather
-than only the new one).
+> **Every figure in that sentence is measured, and checked.** It is the third time this paragraph
+> has been wrong — on 2026-09-05 it said eighteen crates against twenty, one edition against two,
+> and 1,055 corpus cases against 1,116 — which is a strong enough pattern to stop treating as
+> carelessness and start treating as a missing mechanism. `tools/scale-report.mjs` measures the
+> tree, pins the result in `reference/reports/scale.json`, and `--check` fails when this paragraph
+> and the tree disagree: exactly for a count somebody could recount (crates, corpus files, corpus
+> cases), and to the nearest thousand for a line count, so adding a hundred lines does not fail a
+> build and adding eight thousand does. Test counts are deliberately not in it — the suites report
+> them on every run, and a specification is not where anybody should read them.
+
+The seven crates past fifteen are the ones §25's control loop, §26.2's shared recording and both
+ends of §25's policy path needed and the workspace did not have: `skynet-dl` (the loader `unsafe`, extracted so it
+has one home and two callers), `skynet-kernel-host` (the loop itself), `skynet-lock` (§26.2's one
+ring, one writer, enforced on both writers rather than only the new one), `skynet-claim` (the
+sequence the two writers share), `skynet-statfs` (free disk, which §33.6 and §79.4 had both been
+waiting on) `skynet-policy-host` (the half of §25 that fills the command ring) and `skynet-obs` (the ring that carries the body back the other way).
+
+The twenty-third is the only one that runs on **both** machines. `skynet-mdns` is §82's discovery
+layer, and it is here because §34.2's rule that the console binds **link-local only** leaves it
+reachable and unaddressable — a correct security property with a bootstrap hole behind it. Its
+browse half was the first code in this workspace written to run on an operator's Windows or macOS
+machine, which is why it is `std::net` and nothing else; its responder half runs on the robot, under
+`skynetd`, which is what makes the browse worth running at all.
 
 Numbers go stale; the shape does not. What the table is for is the **last column**, and the honest
 summary of it is that every subsystem that can be built without hardware has been, every subsystem
@@ -5646,12 +5873,15 @@ cause — a client asserting something about a route it does not own:
 
 | Open | Why |
 |---|---|
-| **A ring two processes can write** — *designed 2026-09-05* | §26.2. `skynetd` records events and the kernel host records cycles, both belong in one recording, and a `Ring` holds its next sequence in memory — so two writers over one file would encode two records into one slot and produce a recording that passes every check a reader applies and is wrong in the interval that matters. An exclusive directory lock makes the interim safe: the second writer is refused by name rather than allowed to corrupt evidence. §26.2 now carries the design: a shared `AtomicU64` beside the ring, seeded from `Ring::open`'s scan and claimed by fetch-add, **not** a field in the CRC'd header — which is what the design pass overturned, and why the on-disk format, the corpus and every language edition are untouched by it. |
-| **Retention of sealed windows** — *decided 2026-09-04, unbuilt* | §79.4 keeps every one, and a robot that seals daily for a year does not survive §28's disk floor. The owner's rule, and the reasoning it answers: the Hub's acknowledgement is **another party's word**, and §13 exists precisely for the day that party is the one being asked questions — so acknowledgement alone never authorises a deletion. A window an **incident names is never reclaimed**. A routine window may be reclaimed only when a receipt exists, the receipt's digest **is** the window's digest, and the disk is under the floor — oldest first. A reclaim writes a **tombstone**: digest, seal time, byte count, reason. The chain of custody is therefore complete for ever and only the bytes are ever freed, which is the difference between a robot that cannot account for a window and one that can say what it held and when it let it go. |
+| **A ring two processes can write** — *built 2026-09-05, §26.3* | §26.2. `skynetd` records events and the kernel host records cycles, both belong in one recording, and a `Ring` holds its next sequence in memory — so two writers over one file would encode two records into one slot and produce a recording that passes every check a reader applies and is wrong in the interval that matters. An exclusive directory lock makes the interim safe: the second writer is refused by name rather than allowed to corrupt evidence. §26.2 now carries the design: a shared `AtomicU64` beside the ring, seeded from `Ring::open`'s scan and claimed by fetch-add, **not** a field in the CRC'd header — which is what the design pass overturned, and why the on-disk format, the corpus and every language edition are untouched by it. **Built**: `skynet-claim`, `skynet-lock`'s `Writership`, and both recorders. §26.3 has the two roles it needed and the one it did not close. |
+| **The shape a supervisor opens its ring at** — *closed 2026-09-06, §26.3* | `skynetd` starts first and therefore creates the recording, and it opened one shaped for zero joints and zero channels — so a control loop starting afterwards was refused, because a cycle does not fit a record sized for no body. The loop-first ordering worked and was the one the tests exercised; the daemon-first ordering is the one a robot boots in. This row said the blocker was a **channel count** that *"nothing carries to the daemon"*, and asked for a lease record. **Both halves were wrong.** A lease is granted when a policy starts and the daemon needs the number earlier, so a lease record would have left the first boot after an install still refusing the loop and sized every later ring from whatever ran last. And nothing has to carry it: §37.1's `transport` stage already resolves a plan for every package this robot installs, and a plan's bindings *are* the policy's output channels — the same count `Commanding::channels` holds, one process earlier. Joints come from the descriptor the daemon already reads. **Built** in `skynetd-io`'s `shape::supervising`, which refuses to guess in five distinct ways rather than sizing optimistically: no descriptor, no commanding package, a refused plan, two commanding packages, and a manifest that does not decode — that last one separated from "declares nothing" on §8's own rule that the two are opposite facts. What stays open is a loop nothing declared: `skynetk` run by hand names no package, and the daemon inventing one would size evidence for a loop that exists in an operator's terminal. |
+| **Retention of sealed windows** — *built 2026-09-05* | §79.4 keeps every one, and a robot that seals daily for a year does not survive §28's disk floor. The owner's rule, and the reasoning it answers: the Hub's acknowledgement is **another party's word**, and §13 exists precisely for the day that party is the one being asked questions — so acknowledgement alone never authorises a deletion. A window an **incident names is never reclaimed**. A routine window may be reclaimed only when a receipt exists, the receipt's digest **is** the window's digest, and the disk is under the floor — oldest first. A reclaim writes a **tombstone**: digest, seal time, byte count, reason. The chain of custody is therefore complete for ever and only the bytes are ever freed, which is the difference between a robot that cannot account for a window and one that can say what it held and when it let it go. **Built** in `skynetd-io::retention`: the three conditions, the oldest-first order, and the tombstone. Its third condition — *the disk is under the floor* — spent a day as a parameter nothing could supply, because nothing on the robot measured free disk; `skynet-statfs` is that measurement, and §33.6's `storage_headroom` was absent for the same reason and is reported now. What the reading refuses to do is guess: a volume it cannot measure is *unmeasured* rather than zero, and nothing is reclaimed. |
+| **What a policy can see** — *the body: built 2026-09-05. The cameras: open* | §25 specifies the arrow **from** the policy to the kernel and said nothing about the other one except that the policy *"cannot reach the RHAL at all"*, which left §25.1's assembler — built, corpus-pinned, reproduced in three editions — wired to nothing and every backend open-loop. `skynet-obs` is that channel for **proprioception**: joint positions, velocities and efforts, the base pose and twist, the flags and fault code, under the acquisition stamp §24 insists on. It is the mirror of §25's ring and a **separate format with different magic**, so a consumer built for commands that opened it is refused at the first word rather than reading joint positions as setpoints with the drives live. The process holding the RHAL publishes it, because that process has already read the state for §7's guards, and it publishes on cycles where the read **failed** too — a policy watching the sequence stop advancing then learns what the black box learns. What stays open is **vision**. A 4 KiB slot does not hold an image and widening it is not the answer; frames need a buffer pool with handles and a lifetime rule, and starting that as a side effect of this would have produced a bad version of it. So a policy can close the loop on where its joints are and not on what is in front of them. |
+| **No two processes have shared a ring** — *built 2026-09-06* | §25 has the runtime create the ring and hand the descriptor to the sandboxed policy. Both hosts created theirs privately and neither offered one, so the split into two processes had never been performed — what had run end to end was the *protocol*, in one process, because a single process is what a test can start. A draft of `skynetp` had a `--ring-fd` that adopted a descriptor **nobody published**, and it was removed rather than shipped: §79.7 is the record of what half a route costs. **Built** as both halves at once. `skynet-ring-shm`'s `pass` module carries a descriptor over `SCM_RIGHTS` — a socket rather than inheritance, because §33.5 starts a policy as a systemd unit and the process that creates the ring is therefore not the process that starts the one which writes it. `skynet-kernel-host`'s `handoff::Port` creates the mapping and offers it, level-triggered, so a policy that starts a minute late gets it a minute late rather than making a control loop wait. `skynetp --ring-socket` takes it and maps it **writable** while the runtime's own mapping carries no `PROT_WRITE`, so *the policy is the only writer* is a property of the page tables rather than an agreement. Run on a real machine: a policy in one process, a driver in another, **199 commanded cycles**, zero write failures, zero overruns — and a cross-process test in `skynet-policy-host/tests/handoff.rs` that spawns the real binary keeps it that way. The **observation** ring crosses with it, in the same message: both descriptors or neither, because a policy handed the commands and not the body is a closed-loop program commanding blind. So the loop closes across the boundary — `--backend approach` reads what a driver in the other process reported and commands from it, and the test asserts the arithmetic (half the remaining distance) rather than that something moved. And the two halves find each other on a robot without either starting the other, which §33.1 requires: the kernel is started by systemd **before** `skynetd`, so the daemon passes the rendezvous — `SKYNET_RING_SOCKET` and `SKYNET_RING_CHANNELS` — in the unit's environment, to the **one** package §37.1 resolved a commanding plan for and to nothing else. `shape::rendezvous` is that, and it defers to `shape::supervising` for who that package is rather than deciding again: two commanding packages leave both without a ring, exactly as they leave the black box events-only. A policy started with no ring flags at all closes the loop. What is still one process is a **sandbox**: §8's permissions and the cgroup limits §40 resolves are the daemon's to apply to the unit it launches, and this hand-off changes nothing about them. |
 | **`people_detection` in §5's vocabulary** | The seventh of `resolveLimits()`'s inputs, and the only one with no path. It is not a missing delivery — §11's profile delivers six — it is that no body can *declare* a person detector, so `proximity` resolves to a ceiling whose guard is permanently unavailable. Adding it means extending the sensor vocabulary, which §30 says needs a governance process first. |
-| **Refusing to command a body that cannot warn** | §81.3. A transition that demands a tone and cannot produce one is a robot moving with a control missing from somebody's risk assessment, and `skynetd` cannot decline it: §27's state is derived from conditions rather than granted, so there is nothing to withhold. The rule belongs in the kernel's interlock, where the transition is, and putting it anywhere else would be a second definition of §27's machine. |
-| **How a malformed OS version compares** — *needs a decision* | §8.2's `min_os_version` gate splits both versions on `.` and compares the segments as numbers, and the two editions disagree about a segment that is not one. The reference maps `Number` over the parts, so `"0-rc1"` is **NaN** — which makes `diff !== 0` true and `diff < 0` false, so the robot reads as *newer* than the minimum and the package is admitted. `skynet-contracts` parses with a fallback of **0**, so the same robot reads as *older* and the package is refused. A robot on `1.2.0-rc1` is therefore told by the Hub that a package needing `1.2.1` will install, and refused it by the robot — the §17 disagreement the corpus exists to prevent, and it was invisible because no case carried a malformed version. It is left open rather than settled by whichever edition was easier to edit, because the two answers are not equally safe: the reference **fails open**, and any robot whose version has a non-numeric segment satisfies *every* `min_os_version`, which is the one thing that field exists to prevent. The conservative reading is the Rust one; adopting it is a change to the specification and to the Hub's mirrored copy, so it is an owner's decision rather than a transcription's. `corpus/admission/install.json :: os-version-with-an-empty-segment` pins the case the two already agree on, so the agreement cannot rot while the disagreement is open. |
-| **How long a pairing code is** — *needs a decision* | The two editions measure the same typed string differently, and §64's rule that a refusal must name its fix is what makes it matter. The reference uses `String.length`, which counts **UTF-16 code units**; `skynet-contracts` uses `chars().count()`, which counts **code points**. Eight characters above U+FFFF are therefore `too_long` — *"A pairing code is 8 characters and this is 16"* — to the Hub, and `not_in_alphabet` at position 1 to the robot. Both refuse, so nothing unsafe is shipping either way and this is not urgent; what is wrong is that one operator gets two different sentences about one typo, and the reference's is **false as English** — somebody who typed eight characters is told they typed sixteen. The Rust reading is the defensible one, which makes this the rare divergence where the *reference* is the edition that should change; that is a specification edit the Hub's mirrored `identity.ts` inherits, so it is recorded here rather than taken. No corpus case pins it, deliberately: pinning either answer would settle it by whichever edition was easier to edit. |
+| **Refusing to command a body that cannot warn** — *built 2026-09-05* | §81.3. A transition that demands a tone and cannot produce one is a robot moving with a control missing from somebody's risk assessment, and `skynetd` cannot decline it: §27's state is derived from conditions rather than granted, so there is nothing to withhold. The rule belongs in the kernel's interlock, where the transition is, and putting it anywhere else would be a second definition of §27's machine. **Built** in `can_start`, which looking for it found had **no production caller at all** — four tests asked it and `skynetk` turned a cycle without ever consulting the start gate. `WarningChannel` has three states and `Ready` is deliberately the weakest of them: nothing short of sounding a klaxon proves a klaxon works. The refusal is **certified-only**, which is §81.3's own scoping rather than a softening — refusing every bench robot without a speaker is the *"refuses to start on every imperfection"* failure `can_start`'s own header warns about. All three refusals are dormant in `skynetk`, and the log says why for each rather than implying a gate went live. |
+| **How a malformed OS version compares** — *decided and built 2026-09-05* | §8.2's `min_os_version` gate splits both versions on `.` and compares the segments as numbers, and the two editions disagreed about a segment that is not one. The reference mapped `Number` over the parts, so `"0-rc1"` was **NaN** — `diff !== 0` true and `diff < 0` false, so the robot read as *newer* than the minimum and the package was admitted. `skynet-contracts` fell the whole segment back to **0**, so the same robot read as *older* and was refused. **Decided: neither, and the reason is that the reference was not consistent with itself.** It already read `""` as 0 — `Number("")` is 0, which is the case `os-version-with-an-empty-segment` has pinned since the corpus was written — so an unreadable segment being worth zero was *already* the rule, and NaN was an exception to it that nobody had chosen. Falling the whole segment back to 0 is the fail-closed half of the answer and gets the other half wrong: `"1.2.10-rc1"` then compares as `1.2.0` and is refused a package needing `1.2.5`, with a message reading *"Requires Skynet OS 1.2.5 or later; this robot runs 1.2.10-rc1"* — a refusal naming a version that looks newer than the one demanded, which §64 makes a defect rather than a cosmetic problem. So the rule is the segment's **leading run of ASCII digits, or 0**: a candidate compares as the release it is a candidate for, and anything genuinely unreadable is the oldest version there is. `"Infinity"` and `"0x10"` go to 0 with it — both were fail-*open* before, and `"Infinity"` was the rare malformed version the two editions agreed on and agreed to admit against every minimum simultaneously. Built in all three editions and pinned by five cases in `corpus/admission/install.json`. |
+| **How long a pairing code is** — *decided and built 2026-09-05* | The two editions measured the same typed string differently, and §64's rule that a refusal must name its fix is what made it matter. The reference used `String.length`, which counts **UTF-16 code units**; `skynet-contracts` uses `chars().count()`, which counts **code points**. Eight characters above U+FFFF were therefore `too_long` — *"A pairing code is 8 characters and this is 16"* — to the Hub, and `not_in_alphabet` at position 1 to the robot. Both refused, so nothing unsafe was shipping; what was wrong is that one operator got two different sentences about one typo, and the reference's was **false as English**. **Decided: code points**, which makes this the divergence where the *reference* was the edition that changed. Its `not_in_alphabet` position was a UTF-16 index too, and indexing a string that way yields half a surrogate pair — a character in no alphabet and not one anybody typed — so the position moved with the length. **And fixing it found a second divergence in the same twelve lines, which was worse:** upper-casing one code point can yield more than one (`ß` is `SS`, `ﬁ` is `FI`), the reference folded the *result* and Rust folded each character, so `ﬁ` stayed `FI` here — whose `I` is not in the alphabet — and became `F1` there, whose characters both are. A string containing a ligature was a refusal to the Hub and a **valid code** to the robot: the §17 disagreement in the one direction that matters, where the half that says yes is the half that decides. Both are fixed in the reference and the Python edition; Rust was already right about both. Pinned by `a-ligature-that-folds-into-the-alphabet`, `eight-characters-above-the-basic-plane` and `a-sharp-s-that-expands-to-two-letters`. |
 | **A signature on a conformance result** | §57.1's asserted row. §19 forbids a robot holding a signing key, so a runner cannot sign its own result, and §12's kernel gate therefore reads evidence nobody signed. The shape that would close it — the Hub countersigning what a device credential delivered — is a different claim from the one §15 asks for and should not be built as though it were the same. |
 
 ---
@@ -5775,3 +6005,360 @@ is a safety control that ships untested.
 is a token like any other, default-denied because grants are explicit, and now audit-logged like
 every other. What §49.2 asks for beyond that — *"a spectrum with speech discarded at the source"* —
 is a property of a capture backend, and no capture backend exists.
+
+---
+
+# Part XI — The operator's machine
+
+> Everything before this runs on a robot or on the Hub. This part is about the third machine that
+> has always been in the room and never been in the document: the laptop somebody is standing in
+> front of while they set a robot up.
+
+## 82. Discovery
+
+### 82.1 The hole §34.2 leaves, and why it is not a bug in §34.2
+
+§32.2 gives the console its whole reason for existing: *"when the network is down the Hub is
+unreachable, and that is exactly the moment somebody needs to see the robot."* §34.2 then holds the
+line properly — `Lan::bind` **refuses a routable address**, so the console is bound link-local and
+cannot be reached from off the robot's network. Both are right and neither should change.
+
+Together they leave the console **reachable and unaddressable**. To open it you need the robot's
+address, and a link-local IPv6 address carries a zone index — `fe80::a1b2:c3d4:e5f6:0708%en0` —
+which nobody types, reads off a chassis, or guesses. The unstated assumption everywhere in Part I is
+that an operator already knows where the robot is. On a bench with three of them, or on the first
+boot of a robot whose network configuration is the thing that is wrong, they do not.
+
+Nothing in either repository advertised and nothing discovered: before `skynet-mdns`, the strings
+`mdns`, `_tcp` and `dns-sd` had **zero occurrences in the tree**. This was not a gap in an
+implementation. It was a missing subsystem sitting underneath the one surface the specification
+promises will work when everything else has failed.
+
+### 82.2 What a robot advertises, and the two rules that decide it
+
+DNS-SD over multicast DNS, service type `_skynet._tcp`. What may go in the record is governed by two
+rules, and the second removes more than the first.
+
+**Rule one — a multicast record is published at `Anonymous`.** §39.1's authorisation table gives
+exactly two routes to nobody in particular, `POST /stop` and `GET /status`, and puts everything else
+behind a credential. An advertisement is readable by every host on the link, unauthenticated and
+unsolicited. So a key placed in a TXT record is that key published at `Anonymous`, whatever the
+route that also serves it requires.
+
+The first draft put the **device identifier** in the record, because correlating a robot on a bench
+with a device in a Hub fleet is exactly what an operator wants. `GET /identity` is `Observer`.
+Advertising the identifier would have moved it to anonymous — a crate outside the daemon quietly
+overruling the daemon's own table, which is the silent widening that table exists to prevent. It is
+not there.
+
+**Rule two — a discovery record carries identity, not state.** mDNS records are cached, by other
+hosts and by the operating system's resolver, for the TTL the responder set. A record announced at
+boot is still being served after the robot has been paired, upgraded, put into `HOLD` or unplugged.
+So anything that *changes* is wrong to advertise, and §32.2's discipline applies here with more
+force than it does on the console: a discovery list rendering a tier, an operating state or a
+package count out of a cached datagram is *"a dashboard that renders a stale torque reading as a
+live one"* with a longer cache behind it.
+
+What survives both rules is small, and every field is a constant or an address:
+
+| | |
+|---|---|
+| The instance name | The label an operator gave the robot. Already on the wire in the SRV target |
+| `txtvers` | RFC 6763 §6.7's key-set version. A constant |
+| `api` | The path prefix the daemon's API is under. A contract, not state |
+| SRV | Host and port — without which there is nothing to connect to |
+| A / AAAA | The address |
+
+**The OS version is deliberately absent**, and it is worth naming because it is the most tempting
+field there is: it is anonymous on `GET /status`, so rule one permits it, and it is genuinely useful
+in a fleet list. It fails rule two. It changes on every OTA, and a list showing a robot on the image
+it had before last night's update is a list that will be trusted and be wrong. It is one request
+away over the connection this record exists to make possible.
+
+### 82.3 The unicast reply, which is a constraint rather than a preference
+
+The textbook browser binds port **5353**, joins the multicast group and sees every announcement on
+the link including unsolicited ones. That is the better design and it is not what is built, for a
+reason worth recording so it is not rediscovered:
+
+**Binding 5353 requires `SO_REUSEPORT`, and `std::net` does not expose it.** The port is permanently
+held by `mDNSResponder` on macOS and by Avahi on most Linux, so a plain bind fails on two of the
+three platforms this has to run on. Reaching the option needs `unsafe` and a raw `setsockopt`, or a
+dependency — and this workspace has ruled out both.
+
+So the query sets RFC 6762 §5.4's **QU bit** and the browser listens on an ephemeral port. §5.4
+exists precisely for a client that cannot hold the well-known port, so this is a mode of the
+protocol rather than a workaround. What it costs, exactly:
+
+* **unsolicited announcements are not seen.** A robot that boots thirty seconds after a browse is
+  not in that browse's results — which is why discovery is a question with a deadline and there is
+  **no watch mode**. A watch built on this transport would silently miss arrivals, and a watch that
+  misses arrivals is worse to offer than no watch;
+* **a responder that ignores QU is missed.** Conformant ones do not. It is named because it is the
+  failure that would look like a robot being absent.
+
+Both are properties of the **browse**, and neither is removed by §82.4's responder. The responder
+holds 5353 on the robot, which is where it is free; a browse runs on an operator's laptop, which is
+where Avahi and `mDNSResponder` already hold it. Removing them still needs a socket that can share
+the port through a platform layer this crate has deliberately not grown — and §83.3 is the reason
+that is now a smaller loss than it was: both desktop applications browse through their own system
+resolver, which owns 5353 and does watch.
+
+### 82.4 Both halves — *the responder built 2026-09-06*
+
+`advertisement()` — the records a robot answers a browse *with* — lives beside the parser that reads
+them, so the two halves are one definition rather than two spellings that agree until they do not
+(§78). This section said **nothing calls it**, and named the missing piece: binding the responder
+socket belongs to `skynetd`.
+
+`skynet-mdns::responder` decides what to answer and when; `skynetd-io::discovery` binds the socket.
+The split is the same one this section drew: the protocol beside the parser, the machine in the
+daemon. `skynetd --lan <addr:port> [--advertise <label>]` starts it, and **a browse on a real
+network now finds a robot** — demonstrated between two daemons on one link, with `skynet discover`
+resolving the label to the console's own URL.
+
+Three rules, and the second and third were each written after a run contradicted the code.
+
+**It advertises the console or it does not run.** The SRV port is the console's and the address
+records are the address §34.2 bound it to; a daemon started without `--lan` starts no responder. An
+advertisement is an invitation to open a page, and a robot answering a browse while serving nothing
+on the LAN sends an operator to a closed port and looks like a network fault. It never enumerates
+interfaces: the address to advertise is not a matter of discovery, it is the one address the console
+answers on.
+
+**A name is defended by whoever already holds it, and refused by whoever arrives second.** RFC 6762
+§8.1 says rename on conflict; this does not rename, because the label is what an operator reads off
+a list before opening a console whose largest control is a stop, and `arm-01 (2)` is a name nobody
+assigned to any robot on the bench. So the second robot refuses, names the address of the first, and
+says the fix — and the first **defends**, which is the half that was wrong in the first
+implementation and that only two daemons on one link could show: a responder that treats every claim
+on its name as a conflict yields to whichever robot booted last, so the browse points at the robot
+that arrived second and the one that has been there all afternoon goes quiet.
+
+**Probing is a window, not a pacing.** The three probes are 250 ms apart and the name is taken one
+interval after the last of them. A responder that queues them at start-up and sends whatever is
+overdue puts all three on the link in one burst the first time a caller is late — and `skynetd`
+preallocates a black box before its first poll, so it always is. A robot that closes the window wins
+every conflict against a robot that is already there, silently. So each probe is sent only when the
+interval has elapsed *since the previous one actually went*, one per pass.
+
+§79 is the record of what half a route costs when nobody writes that down: an address that answered,
+a sender that backed off on §34.4's curve, no bytes moved, and *"the failure was indistinguishable
+from patience."* Both sides therefore count what they could not do. The browse reports how many
+sockets it managed to ask on, how many datagrams arrived malformed, and how many were answers about
+some other service, and returns an **error** rather than an empty list when it could not ask at all
+— on a laptop with a VPN filtering multicast, "no robots answered" and "this machine could not ask"
+are indistinguishable from a result set, and only one of them is about robots. The responder reports
+what it sent, what arrived, what it answered and what it defended, and the daemon prints that line
+**on every change** rather than at start-up: a robot that loses its name at four in the afternoon
+because somebody powered on a second one has stopped being findable, and a line printed once at boot
+would go on saying it was advertising.
+
+What the responder still does not have is a **caller for its goodbye**. `farewell()` builds RFC 6762
+§10.1's withdrawal and `skynetd` never sends one, because the daemon has no shutdown path — systemd
+stops it with a signal, and installing a handler needs `unsafe`, which this crate forbids. So a
+robot that is switched off stays in a browser's cache until the 120-second TTL expires. That is the
+condition the TTL is for, and it is named here rather than left to be discovered.
+
+### 82.5 What it refuses to hand back
+
+A link-local IPv6 address with no scope is **not an address**, and mDNS does not carry one — the
+zone index comes from the socket that received the packet. `Discovered::endpoint()` returns nothing
+rather than an address that will fail to connect with a confusing error, because the whole reason
+this section exists is an unaddressable console and reproducing that one layer further in would be
+a poor joke.
+
+---
+
+## 83. Skynet Console — the operator's application
+
+> Recorded because it was decided in discussion and would otherwise be rebuilt from scratch every
+> time somebody asks why the console needs an application in front of it. **Nothing here is built.**
+
+### 83.0 Its name, and the one ambiguity the name costs
+
+**Skynet Console.** Decided by the owner, and it creates a collision worth managing rather than
+pretending away: §32.2 already calls the page `skynetd` serves *the on-robot console*.
+
+Two things, and the rule for writing about them is fixed here so that the distinction survives:
+
+| | |
+|---|---|
+| **the on-robot console** | The page a robot serves over the LAN from the machine it describes (§32.2). Never bare "the console" where both are in play |
+| **Skynet Console** | This application, which finds robots and shows each one the page it already serves |
+
+The distinction is load-bearing rather than pedantic, because §83.2's entire rule depends on it:
+the application **embeds** that page rather than reimplementing it, and a reader who believes they
+are one thing will eventually write the second implementation. `main.rs` carries the same paragraph
+where somebody would be about to do it.
+
+### 83.1 One application, not two
+
+The question put was whether the Hub deserves a desktop application of its own alongside an OS one.
+It does not, and the reason the answer is *one application* rather than *one application and no Hub*
+is that installing a skill **is** a Hub fetch followed by a robot install — §37.1's transport stage,
+§8's admission, §12's bundle fetch. Splitting that across two applications makes an operator do half
+a job in a browser and half in a console, copying digests between them.
+
+The line, and it is a line about outcomes rather than about subsystems:
+
+> **If it ends in a robot doing something, it is in the application. If it ends in a person reading
+> something, it is on the web.**
+
+So packages, skills, models, versions, digests, signatures, compatibility and *install to this
+robot* are in. Discussions, pull requests, leaderboards, organisation settings and everything the
+Hub's SEO surface exists for stay on the web, where a link and a crawler are the point and a desktop
+wrapper subtracts both.
+
+### 83.2 It is a shell, not a client
+
+The obvious build re-renders §32.2's six panels — status, stop, guards, plan, packages, black box —
+in native widgets. **It must not.** That is a second implementation of the same data, and this
+repository has a documented history with exactly that shape: §78's two spellings of a package's
+requirements, §73's own figures wrong three times, a README three features behind the tree. Two
+renderers drift, and the drift is invisible because each half looks complete.
+
+So the application **embeds the on-robot console the robot already serves** and owns only what a
+browser cannot do:
+
+| The application owns | Because |
+|---|---|
+| Discovery (§82) | No browser can browse mDNS. This is the bootstrap hole |
+| USB and serial | §50's factory provisioning and §10's pairing describe a robot that has never been on a network, reachable over USB and nothing else |
+| Sealed windows (§13, §26) | A multi-gigabyte MCAP recording, scrubbed and replayed locally against the robot's own resolved limits. `telemetry.replay.deterministic` already exists; a browser tab is not where it runs |
+| An always-reachable stop | A tray item and a global hotkey beat finding a browser tab |
+| Several robots at once | A bench has three |
+
+The panels stay the robot's, which means they can never be a version behind the daemon serving
+them, and §32.2's *"it must never show a value it did not receive"* is inherited rather than
+re-earned.
+
+**The stop in the tray is a convenience and must be labelled as one.** It is not an emergency stop,
+it is not the kernel's interlock, and the moment it is presented as a safety control this
+application has become the failure this document is arranged to avoid.
+
+### 83.3 Two native applications — reversed, and the reason is what the application is for
+
+This section first specified **one** Tauri application: a Rust binary linking the OS crates, with
+its interface in a system webview. It was built and it worked. **The owner reversed it, and the
+reversal is right for a reason stronger than preference.**
+
+| | |
+|---|---|
+| **Windows** | **WinUI 3** — C#, .NET, XAML, MVVM. Microsoft's own current native UI stack |
+| **macOS** | **SwiftUI** — a Swift package, Apple's own |
+
+No shared runtime, no shared UI layer, and **no webview for the application's own interface**.
+
+The Tauri argument was that a webview is mandatory anyway, since §83.2's whole design is to *embed
+the page the robot serves* — so once one is in the process, building the surrounding chrome in the
+same technology is coherent. That is true and it is not the point. **A webview is required for one
+control, not for the application**, and the two are different claims: `WebView2` and `WKWebView` are
+native controls that a native application hosts, exactly as it hosts a list or a table.
+
+What the reversal costs is two interfaces to keep in step. What it buys is larger than it looks:
+
+* **the platform's own idiom** — a WinUI window and a SwiftUI window each behave the way an operator
+  on that machine expects, and a bench tool is used under pressure, by somebody who should not have
+  to learn it;
+* **the discovery limitation disappears.** §82.3 records that `skynet-mdns` cannot hold port 5353
+  and therefore browses with the QU bit, cannot see unsolicited announcements, and cannot support a
+  watch mode. Both native platforms expose DNS-SD **through the system resolver that does own
+  5353** — `DeviceInformation` with a DNS-SD selector on Windows, `NWBrowser` on macOS. So both
+  applications **subscribe** rather than scan: a robot that boots appears on its own and one that is
+  unplugged disappears, with nothing to press. Going native did not work around §82.3's compromise,
+  it removed the condition that forced it.
+
+### 83.3a What replaces the shared Rust core
+
+The Tauri build linked the OS crates directly, and that is what two native applications give up.
+The honest accounting:
+
+| | |
+|---|---|
+| **Discovery** | **Not a loss.** Each platform's resolver is *better* than `skynet-mdns` for a browser, per above. `skynet-mdns` remains what it was written for — §82's responder half, which runs on the robot |
+| **Black box reading, signature verification** | A real loss, and deferred rather than solved. When §83.2's black box viewer is built, both applications will need `skynet-blackbox` and `skynet-ed25519` — either through a C ABI both can call, or reimplemented twice. **That decision is not taken here**, and taking it early on no evidence is how a bad FFI boundary gets designed |
+| **The CLI's 48 commands** | Invoked as a subprocess by either application, which is what a CLI is for |
+
+### 83.3b One contract, three implementations, one check
+
+§82's discovery contract now has three spellings — the Rust responder, the C# browser and the Swift
+browser — which is precisely §78's shape. It is held together by a mechanism rather than by care:
+
+`desktop/shared/skynet-service.json` states the contract as data, and
+`scripts/check-skynet-service.mjs` verifies the chain **specification → contract → three
+implementations**, including that §82 itself names every advertised key. Each application re-checks
+the file against its own constants **at launch** as well, and reports the result in its status bar,
+because a developer running one locally has not necessarily run the script.
+
+The reason it is a build check and not a review item is the failure signature. A browser looking for
+the wrong service name **finds nothing** — and finding nothing is the *expected* result today
+(§82.4), so a divergence would stay invisible for exactly as long as it took somebody to notice a
+robot they could see was missing from a list.
+
+### 83.3c Which repository — reversed, and the reversal is the licence argument
+
+This section first put the application in `skynet-os`, beside the crates it links. **That was
+wrong, and the owner corrected it.**
+
+§72.1 splits the repositories so that the OS can be open-sourced without a history-scrubbing
+rewrite: `skynet-os` begins private and **becomes public**. Skynet Console is a commercial product
+surface, not part of the runtime a vendor compiles against. Putting it in the repository that is
+going to be published would mean either publishing it or performing exactly the history surgery
+§72.1 exists to avoid.
+
+So it lives in **BotMarket**, at `desktop/`. And it had to move *before* it grew, which is §72.3's
+own argument in miniature — moving a window and a scan is minutes, moving that plus a bundler, a
+signing pipeline and a release matrix is a week.
+
+| | |
+|---|---|
+| `skynet-os` (private → **public**) | `skynet-mdns`, and §82's responder half when it is written |
+| **BotMarket** (private) | Skynet Console: `desktop/windows` (WinUI 3), `desktop/macos` (SwiftUI), `desktop/shared` |
+
+**`skynet-mdns` stays where it is**, and that is the half of the decision worth defending. §82's
+responder belongs to `skynetd`, and a vendor reading the OS needs to see what a robot advertises.
+
+Since §83.3 the desktop applications no longer *link* it — each uses its own platform resolver — so
+the two repositories are now independent to build. What crosses the boundary is the **contract**
+rather than a binary, and `scripts/check-skynet-service.mjs` reads the Rust constants when the OS is
+checked out beside this repository and reports them as unchecked when it is not.
+
+### 83.3d Distribution — from the Hub
+
+The application is downloaded from the Skynet Hub, like everything else the platform publishes, and
+that is not merely a convenient place to put a file. §19's trust story is that a robot verifies what
+it installs; an operator's workstation is the machine that will hold a pairing credential and, one
+day, a signing key (§83.4), so the thing that runs there deserves the same treatment as a package:
+
+* **a signed artefact per platform** — Authenticode on Windows, notarised on macOS. Unsigned, an
+  application that commands robots trips Gatekeeper and SmartScreen, which trains an operator to
+  click through exactly the warning that should stop them;
+* **a published digest** beside the download, so a build can be checked against what the Hub says
+  it published;
+* **a version compatibility statement** against `skynetd`'s local API. This is §8.2's
+  `min_os_version` problem in a new place, and it should be answered with the same care rather than
+  discovered when an old application silently misreads a new robot.
+
+None of that is built. The download surface on the Hub, the release pipeline and the certificates
+are all outstanding, and until they exist the application is a local `cargo build`.
+
+### 83.4 What it opens, and what it must not assume it opens
+
+§19 forbids a **robot** holding a signing key, which is why §80's *"a robot that signs a conformance
+result"* has no shape. An operator's workstation is a different trust position and can hold one, so
+*"I witnessed this run on this device"* becomes a signable claim for the first time.
+
+That is an opportunity and not an answer. §80 already warns that a Hub countersignature *"is a
+different claim from the one §15 asks for and should not be built as though it were the same"*, and
+an operator attestation is a **third** claim again. It needs deciding before it is built, not
+during.
+
+### 83.5 When
+
+The first version is discovery, pairing, the on-robot console in a webview, and black box download
+and replay — and nothing else. **Discovery and the window exist**; the other three do not, and the
+window lists them as absent rather than omitting them. It becomes worth building the day there is one physical robot on a bench
+that an operator cannot reach because they do not know its address. Before that it can be dogfooded
+against `skynetd` on a laptop with the mock or MuJoCo driver, and it should not grow past that list
+until a robot exists to complain about it.

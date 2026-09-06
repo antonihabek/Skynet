@@ -21,6 +21,14 @@ skynet-sha256 = { path = "../skynet-sha256" }
 skynet-ed25519 = { path = "../skynet-ed25519" }
 skynet-blackbox = { path = "../skynet-blackbox" }
 
+# §82's responder half. The crate holds the wire format and what a robot may advertise; this crate
+# holds the socket, which is §82.4's own split.
+skynet-mdns = { path = "../skynet-mdns" }
+
+# §33.6's free-disk measurement and §80's floor, in a crate of its own because this one forbids
+# `unsafe` and a `statfs` is one.
+skynet-statfs = { path = "../skynet-statfs" }
+
 # Deliberately **not** `skynet-rhal`, for the same reason `skynetd` is not — and it matters more
 # here, because this is the half that can actually open things. §33.1's property is about the
 # daemon, not about one of its crates: "it never touches an actuator" stops being true the moment

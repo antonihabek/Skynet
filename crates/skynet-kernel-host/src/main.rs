@@ -14,10 +14,13 @@
 //! being tolerated: it is the state §33.1 describes as the one that makes the rest of the OS
 //! possible, and it is worth being able to reach and watch.
 //!
-//! **The ring is private to this process.** §25 has the runtime create the ring and hand the fd to
-//! the sandboxed policy, and there is no policy to hand it to — `skynet-ring-shm` is the `memfd`
-//! that would carry it and it is Linux-only. So this binary allocates the ring in its own address
-//! space and says so on every run, rather than printing a path nothing can open.
+//! **The ring is private to this process unless `--policy-socket` says otherwise.** §25 has the
+//! runtime create the ring and hand the descriptor to the sandboxed policy, and this binary is the
+//! side that creates and offers: with a socket it maps a `memfd`, gives the descriptor to whatever
+//! connects, and reads what that process writes; without one it allocates the ring in its own
+//! address space and says so on every run, rather than printing a path nothing can open. The other
+//! half is `skynetp --ring-socket`, and the two have been run against each other — 199 commanded
+//! cycles from a separate process, through the eight guards, to a driver.
 //!
 //! **Nothing here decides a tier.** `--tier` says what to resolve limits at, and
 //! [`skynet_kernel::Tier::enforcement`] derives what that means. Passing `--tier host` on a
@@ -36,6 +39,7 @@ use skynet_kernel::{
     TransportClamp, WarningChannel,
 };
 use skynet_kernel_host::driver::{Actuator, Rhal};
+use skynet_kernel_host::handoff;
 use skynet_kernel_host::recorder::{Recorder, DEFAULT_BUDGET};
 use skynet_kernel_host::run::Host;
 use skynet_ring::{words_for, Ring};
@@ -64,6 +68,10 @@ skynetk run --driver <library> [options]
                         seal the window on exit. Takes an exclusive writer lock: one
                         ring has one writer, and a second is refused rather than
                         allowed to corrupt it.
+  --policy-socket <p>   create the command ring in shared memory and offer its
+                        descriptor to whatever connects here (§25). Without it the
+                        ring is private to this process and every cycle reads an
+                        empty one, which is a robot with no policy.
   --quiet               only print the summary.
 
 skynetk blackbox <dir>
@@ -71,9 +79,11 @@ skynetk blackbox <dir>
   Read a ring back: its shape, what it holds, and §74's five counters. Needs no
   daemon and no socket — it opens the file  wrote.
 
-  The ring is private to this process: there is no policy runtime to hand it to, so
-  every cycle reads an empty ring and the kernel holds. That is the state §33.1
-  describes, and it is what this binary can honestly demonstrate today.";
+  Without --policy-socket the ring is private to this process, so every cycle reads
+  an empty one and the kernel holds — which is the honest state of a robot that is
+  running no policy (§33.1). With it, `skynetp --ring-socket <p>` is the other half:
+  the runtime creates the ring, the policy receives it and writes, and the guards
+  are between them.";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -92,8 +102,17 @@ struct Options {
     jerk: Option<f64>,
     watchdog_ms: Option<f64>,
     blackbox: Option<PathBuf>,
+    policy_socket: Option<PathBuf>,
     quiet: bool,
 }
+
+/// How many slots the command ring holds.
+///
+/// Sixteen at 100 Hz is a sixth of a second of history, which is far more than a consumer
+/// reading one slot per cycle needs — the ring is not a buffer, it is the newest command and
+/// enough room behind it that a reader is never torn by a writer (§25.1). It is the runtime's
+/// number and not the policy's: a policy is told what it received and cannot choose it.
+const RING_SLOTS: usize = 16;
 
 fn fail(message: &str) -> i32 {
     eprintln!("skynetk: {message}");
@@ -112,6 +131,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         jerk: None,
         watchdog_ms: None,
         blackbox: None,
+        policy_socket: None,
         quiet: false,
     };
 
@@ -191,6 +211,10 @@ fn parse(args: &[String]) -> Result<Options, String> {
             }
             "--blackbox" => {
                 options.blackbox = Some(PathBuf::from(value()?));
+                index += 2;
+            }
+            "--policy-socket" => {
+                options.policy_socket = Some(PathBuf::from(value()?));
                 index += 2;
             }
             "--quiet" => {
@@ -349,25 +373,92 @@ fn run(args: &[String]) -> i32 {
                 missing.join(", ")
             );
         }
-        println!(
-            "ring       private to this process — no policy runtime exists to receive it (§25)"
-        );
-        println!();
+        // Only when there is no socket. The shared case prints its own line below, once the port is
+        // open — and printing both was this binary saying two contradictory things about one ring
+        // in the same breath.
+        if options.policy_socket.is_none() {
+            println!(
+                "ring       private to this process — no policy was offered one on this run (§25)"
+            );
+            println!();
+        }
     }
 
-    // The ring, allocated here. See the module header: on a robot this is a `memfd` handed to the
-    // sandbox, and there is no sandbox.
-    let words: Vec<AtomicU32> = (0..words_for(16)).map(|_| AtomicU32::new(0)).collect();
-    let ring = match Ring::create(&words, 16) {
-        Ok(ring) => ring,
-        Err(error) => {
-            return fail(&format!(
-                "the ring could not be created: {}",
-                error.as_str()
-            ))
-        }
+    // The ring. Two shapes, and which one this run has is the difference between a loop that can be
+    // commanded and one that cannot.
+    //
+    // **Private**, in this process's own memory, when nothing was asked for: the state every run of
+    // this binary has been in since it was written, and the honest one on a robot with no policy.
+    //
+    // **Shared**, over a `memfd` this process creates and hands to whoever connects to
+    // `--policy-socket`, which is §25's arrangement — the runtime creates the ring, the sandboxed
+    // policy receives it, and the page tables rather than an agreement are what make the policy the
+    // only writer.
+    // The mapping and the port are two variables rather than a pair, and the compiler is why: the
+    // ring below borrows the mapping for the rest of the run, and a tuple would make offering the
+    // descriptor a mutable borrow of the same thing the ring is reading.
+    let mut shared = None;
+    let mut body_ring = None;
+    let mut port = None;
+    match options.policy_socket.as_deref() {
+        None => {}
+        Some(path) => match handoff::Port::open(path, RING_SLOTS, RING_SLOTS) {
+            Ok((mapping, observations, opened)) => {
+                if !options.quiet {
+                    println!("ring       shared, offered at {}", path.display());
+                    println!("body       published into the observation ring beside it");
+                    println!();
+                }
+                shared = Some(mapping);
+                body_ring = Some(observations);
+                port = Some(opened);
+            }
+            // Refused rather than fallen back to a private ring. A loop that quietly ran with a
+            // ring nobody can reach, after being asked for one that could be, is a robot that looks
+            // commandable and is not — and §79.7 is this repository's record of what a route that
+            // answers and moves nothing costs.
+            Err(error) => return fail(&error.to_string()),
+        },
+    }
+
+    let words: Vec<AtomicU32> = (0..words_for(RING_SLOTS))
+        .map(|_| AtomicU32::new(0))
+        .collect();
+    let ring = match shared.as_ref() {
+        Some(mapping) => match mapping.ring() {
+            Ok(ring) => ring,
+            Err(error) => return fail(&format!("the shared ring could not be opened: {error}")),
+        },
+        None => match Ring::create(&words, RING_SLOTS) {
+            Ok(ring) => ring,
+            Err(error) => {
+                return fail(&format!(
+                    "the ring could not be created: {}",
+                    error.as_str()
+                ))
+            }
+        },
     };
     let mut consumer = ring.consumer();
+
+    // The other direction (§25, §73's IPC row). A policy in its own process can command and, until
+    // this, could not see: `Host::step_observing` has taken a producer since `skynet-obs` was
+    // written and the binary called `Host::step`, which passes none — so the observation ring had a
+    // producer API and no production caller. It has one when a ring was handed over, and none when
+    // there is nobody to read it, which is the same rule the command ring follows.
+    let observing = match body_ring.as_ref() {
+        None => None,
+        Some(mapping) => match skynet_obs::Ring::open(mapping.words()) {
+            Ok(ring) => Some(ring),
+            Err(error) => {
+                return fail(&format!(
+                    "the observation ring could not be opened: {}",
+                    error.as_str()
+                ))
+            }
+        },
+    };
+    let mut observations = observing.map(|ring| ring.producer());
 
     // §13's ring, when one was asked for. The shape is the body's, because a record's size is a
     // function of the joint and channel counts — a ring sized for a different robot could not hold
@@ -449,9 +540,27 @@ fn run(args: &[String]) -> i32 {
             }
         }
 
+        // §25's hand-off, offered rather than waited for. A policy that starts a minute after this
+        // loop gets the descriptor a minute later, and a loop that stopped to wait for a producer
+        // would miss its deadline because nothing was commanding it.
+        if let (Some(mapping), Some(body), Some(port)) =
+            (shared.as_ref(), body_ring.as_ref(), port.as_mut())
+        {
+            if port.offer(mapping, body) > 0 && !options.quiet {
+                println!("policy     took the rings ({} so far)", port.handed());
+            }
+        }
+
         let started = Instant::now();
         let now_ns = origin.elapsed().as_nanos() as u64;
-        let turn = host.step(now_ns, &mut body, &mut consumer, &limits, Some(&envelope));
+        let turn = host.step_observing(
+            now_ns,
+            &mut body,
+            &mut consumer,
+            &limits,
+            Some(&envelope),
+            observations.as_mut(),
+        );
 
         if let Some(error) = turn.read_error {
             if first_error.is_none() {

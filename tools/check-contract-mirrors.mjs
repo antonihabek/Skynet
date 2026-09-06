@@ -214,6 +214,25 @@ const WIRE = ['checkin', 'episode', 'incident', 'telemetry', 'telemetry-counted'
 const WIRE_REFERENCE = 'reference/wire'
 const WIRE_HUB = 'lib/skynet/os/wire'
 
+/**
+ * The generated reports, mirrored for a third reason.
+ *
+ * A contract is mirrored so two implementations of one rule cannot drift. A fixture is mirrored so a
+ * producer and a consumer in different repositories can be tested against each other. A **report**
+ * is mirrored because the Hub renders numbers about this repository — `/skynet/os/editions` prints
+ * how many corpus cases each edition reproduces — and §32.2's rule does not stop at the robot:
+ * *it must never show a value it did not receive*.
+ *
+ * `tools/edition-report.mjs` produces it by **running the editions**, and refuses to write one from
+ * a failing run. So a figure on that page is the output of a command, carried across as bytes, and
+ * a page that has drifted from the repository it describes is a check failing in both trees rather
+ * than a table somebody forgot.
+ */
+const REPORTS = ['editions']
+
+const REPORT_REFERENCE = 'reference/reports'
+const REPORT_HUB = 'lib/skynet/os/reports'
+
 const args = process.argv.slice(2)
 const sync = args.includes('--sync')
 const given = args.find(arg => !arg.startsWith('--'))
@@ -280,6 +299,13 @@ function wireDigestOf(name) {
   return createHash('sha256').update(lf(readFileSync(path, 'utf8'))).digest('hex')
 }
 
+/** The digest of one generated report. Bytes, for `wireDigestOf`'s reason. */
+function reportDigestOf(name) {
+  const path = join(HERE, REPORT_REFERENCE, `${name}.json`)
+  if (!existsSync(path)) return null
+  return createHash('sha256').update(lf(readFileSync(path, 'utf8'))).digest('hex')
+}
+
 /** Both sets, keyed the way the pin file holds them. */
 function allDigests() {
   const digests = {}
@@ -291,6 +317,10 @@ function allDigests() {
     const digest = wireDigestOf(name)
     // Namespaced, so a contract and a fixture with the same stem cannot collide in one flat map.
     if (digest !== null) digests[`wire/${name}`] = digest
+  }
+  for (const name of REPORTS) {
+    const digest = reportDigestOf(name)
+    if (digest !== null) digests[`reports/${name}`] = digest
   }
   return digests
 }
@@ -327,7 +357,11 @@ function checkPins() {
   let wrong = 0
   for (const [name, digest] of Object.entries(allDigests())) {
     if (pinned[name] === digest) continue
-    const what = name.startsWith('wire/') ? 'fixture' : 'contract'
+    const what = name.startsWith('wire/')
+      ? 'fixture'
+      : name.startsWith('reports/')
+        ? 'report'
+        : 'contract'
     console.error(
       pinned[name]
         ? `CHANGED  ${name} — this ${what} no longer matches its pinned digest.`
@@ -493,6 +527,50 @@ for (const name of WIRE) {
  * changing without a resync, on a machine that has never heard of the Hub — which is the case CI
  * actually runs in.
  */
+for (const name of REPORTS) {
+  const ours = join(HERE, REPORT_REFERENCE, `${name}.json`)
+  const theirs = join(hub, REPORT_HUB, `${name}.json`)
+
+  if (!existsSync(ours)) {
+    console.log(`SKIP     reports/${name} — no reference copy. Run tools/edition-report.mjs.`)
+    continue
+  }
+  const expected = lf(readFileSync(ours, 'utf8'))
+
+  if (!existsSync(theirs)) {
+    if (sync) {
+      mkdirSync(dirname(theirs), { recursive: true })
+      writeFileSync(theirs, expected, 'utf8')
+      console.log(`created  ${REPORT_HUB}/${name}.json`)
+      synced += 1
+    } else {
+      console.log(`MISSING  ${REPORT_HUB}/${name}.json — the Hub has no copy of this report`)
+      missing += 1
+    }
+    continue
+  }
+
+  if (lf(readFileSync(theirs, 'utf8')) === expected) {
+    console.log(`match    reports/${name}`)
+    continue
+  }
+
+  if (sync) {
+    writeFileSync(theirs, expected, 'utf8')
+    console.log(`synced   ${REPORT_HUB}/${name}.json  <- ${REPORT_REFERENCE}/${name}.json`)
+    synced += 1
+    continue
+  }
+
+  // A report is generated, so a divergence here is never an edit to reconcile: one side is simply
+  // older. The instruction is to regenerate and sync rather than to go and look.
+  console.log(
+    `DIVERGED reports/${name} — the Hub's copy is not this run's. `
+      + 'Run `node tools/edition-report.mjs` then sync.',
+  )
+  diverged += 1
+}
+
 if (sync) {
   writePins(hub)
 }

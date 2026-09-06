@@ -358,8 +358,10 @@ skynet install ./my-policy --root /tmp/robot \
 # Say what the robot should be running, then reconcile once and read the plan.
 skynetd once --root /tmp/robot
 
-# Or run it, with the local API in front (§33.7).
-skynetd --root /tmp/robot &
+# Or run it, with the local API in front (§33.7). Add --lan and it answers a browse, so a
+# laptop on the same network can find it without being told the address (§82).
+skynetd --root /tmp/robot --lan 169.254.3.4:8099 --advertise arm-01 &
+skynet discover                                        # which robots are on this link
 skynet status --socket /tmp/robot/run/skynetd.sock     # needs no credential (§39.1)
 skynet estop  --socket /tmp/robot/run/skynetd.sock     # nor does this
 skynetd credential add --root /tmp/robot --label laptop --role operator

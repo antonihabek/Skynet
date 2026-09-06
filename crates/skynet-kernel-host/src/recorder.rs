@@ -1,13 +1,22 @@
 //! §13's ring, written by the process that sees every cycle.
 //!
 //! [`skynet_blackbox`] is the format and the arithmetic and opens nothing. `skynetd-io`'s recorder
-//! is the half that opens files, and it writes **events and gaps** — because when it was written
-//! there was no control loop, and its own header says so: *"the ring this daemon opens has a shape
-//! of zero joints and zero channels, which is the honest description of a robot that is supervising
-//! packages and not commanding a body."*
+//! is the half that opens files, and it writes **events and gaps** — cycles are this recorder's,
+//! because the daemon has no control loop in it and §33.1 keeps it off that path.
 //!
-//! There is a control loop now, and this is the recorder for it: the same format, the same
-//! preallocated ring, the same seal — writing the channel the daemon never could.
+//! This is the recorder for the loop: the same format, the same preallocated ring, the same seal —
+//! writing the channel the daemon never could.
+//!
+//! # Which of the two creates the ring, and why that is not this crate's decision
+//!
+//! Whichever starts first. On a bench that is this loop; on a robot it is `skynetd`, because §27
+//! brings the supervisor up before anything it supervises. The creator sizes the ring, and a
+//! creator that sized it for no body would leave the other writer unable to attach — which is what
+//! made the daemon-first order the one that could not run a loop until `skynetd-io`'s
+//! `shape::supervising` resolved a shape from the descriptor and the transport plan.
+//!
+//! The refusal below still exists and still matters: it is what a genuine disagreement about the
+//! body looks like, rather than the ordinary consequence of booting.
 //!
 //! # One ring, one writer, and the lock that makes that true
 //!
@@ -39,7 +48,7 @@ use std::path::{Path, PathBuf};
 use skynet_blackbox::record::{Cycle, CycleView, Entry, Shape};
 use skynet_blackbox::ring::{Geometry, Meta, Ring};
 use skynet_blackbox::seal::{seal, Reason, Sealed};
-use skynet_lock::WriterLock;
+use skynet_lock::{Joining, Role, Writership};
 
 /// How many bytes the ring is preallocated with.
 ///
@@ -57,8 +66,19 @@ pub const CAPABILITIES: u16 = 16;
 /// Why a recorder could not be opened.
 #[derive(Debug)]
 pub enum RecorderError {
-    /// Another process holds the writer lock on this directory (§26.2).
+    /// The directory could not be joined at all (§26.2) — unwritable, in practice.
     Locked(skynet_lock::LockError),
+    /// Another process created this recording and this one could not attach to it (§26.2).
+    Attach(skynet_lock::AttachError),
+    /// Another process created this recording with a ring shaped for a different body.
+    Shape {
+        /// Who holds the directory.
+        holder: String,
+        /// What the ring on disk records.
+        found: Shape,
+        /// What this loop records.
+        wanted: Shape,
+    },
     /// The directory could not be created, or the ring could not be written.
     Io(std::io::Error),
     /// The geometry the body implies is not one the format can hold.
@@ -69,6 +89,16 @@ impl std::fmt::Display for RecorderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RecorderError::Locked(error) => write!(f, "{error}"),
+            RecorderError::Attach(error) => write!(f, "{error}"),
+            RecorderError::Shape {
+                holder,
+                found,
+                wanted,
+            } => write!(
+                f,
+                "{holder} created this black box with a ring shaped for {} joints and {} channels,                  and this loop records {} and {}. A record's size is a function of those counts, so                  a cycle does not fit — and replacing the ring would delete the window the other                  writer is still filling. Point this loop at another directory, or give the other                  writer this body's shape.",
+                found.joints, found.channels, wanted.joints, wanted.channels,
+            ),
             RecorderError::Io(error) => write!(f, "{error}"),
             RecorderError::Geometry(detail) => write!(f, "sizing the black box: {detail}"),
         }
@@ -84,9 +114,9 @@ pub struct Recorder {
     path: PathBuf,
     sealed_dir: PathBuf,
     scratch: Vec<u8>,
-    // Dropped last of the fields it matters against, and only ever after the file handles above are
-    // closed, because releasing the lock is what lets another writer in.
-    _lock: WriterLock,
+    // §26.2's writership. Dropped last of the fields it matters against, and only ever after the
+    // file handles above are closed, because releasing the lock is what lets another writer create.
+    writership: Writership,
 }
 
 impl Recorder {
@@ -101,22 +131,56 @@ impl Recorder {
         let sealed_dir = dir.join("sealed");
         fs::create_dir_all(&sealed_dir).map_err(RecorderError::Io)?;
 
-        // Before the ring, because a recorder that read the ring and then failed to lock would have
+        // Before the ring, because a recorder that read the ring and then failed to join would have
         // touched a file another process owns.
-        let lock = WriterLock::take(dir, "skynetk").map_err(RecorderError::Locked)?;
+        let joining = Writership::join(dir, "skynetk").map_err(RecorderError::Locked)?;
 
         let path = dir.join("ring");
+
+        let creating = match joining {
+            Joining::Creator(creating) => creating,
+            // `skynetd` created this recording and is filling it with events. This loop attaches
+            // and claims its sequences from the counter beside it — but unlike the daemon, it
+            // cannot take any shape it finds: a cycle carries a value per joint and per channel, so
+            // a ring shaped for a different body has no room for one.
+            Joining::Attacher(attaching) => {
+                let holder = attaching.holder().to_string();
+                let store = fs::read(&path).map_err(RecorderError::Io)?;
+                let ring = Ring::open(&store).map_err(|error| {
+                    RecorderError::Geometry(format!(
+                        "{holder} holds this directory and its ring cannot be opened here: {error:?}"
+                    ))
+                })?;
+                if ring.geometry().shape != shape {
+                    return Err(RecorderError::Shape {
+                        holder,
+                        found: ring.geometry().shape,
+                        wanted: shape,
+                    });
+                }
+                let writership = attaching.attach().map_err(RecorderError::Attach)?;
+                let scratch = vec![0u8; ring.geometry().record_size];
+                return Ok(Recorder {
+                    ring,
+                    path,
+                    sealed_dir,
+                    scratch,
+                    writership,
+                });
+            }
+        };
 
         if let Ok(store) = fs::read(&path) {
             if let Ok(ring) = Ring::open(&store) {
                 if ring.geometry().shape == shape {
                     let scratch = vec![0u8; ring.geometry().record_size];
+                    let writership = creating.seed(ring.next_sequence());
                     return Ok(Recorder {
                         ring,
                         path,
                         sealed_dir,
                         scratch,
-                        _lock: lock,
+                        writership,
                     });
                 }
                 // The body changed under the recording. What is there is sealed before it is
@@ -139,13 +203,19 @@ impl Recorder {
         file.sync_all().map_err(RecorderError::Io)?;
 
         let scratch = vec![0u8; ring.geometry().record_size];
+        let writership = creating.seed(ring.next_sequence());
         Ok(Recorder {
             ring,
             path,
             sealed_dir,
             scratch,
-            _lock: lock,
+            writership,
         })
+    }
+
+    /// Which of §26.2's two roles this recorder has.
+    pub fn role(&self) -> Role {
+        self.writership.role()
     }
 
     /// The geometry this recording has.
@@ -154,8 +224,14 @@ impl Recorder {
     }
 
     /// The sequence the next record will get.
+    ///
+    /// Off the shared counter when there is one: with two writers the ring's own is a floor rather
+    /// than the answer, because it knows what this process staged and nothing about what the other
+    /// has claimed since.
     pub fn next_sequence(&self) -> u64 {
-        self.ring.next_sequence()
+        self.writership
+            .peek()
+            .unwrap_or_else(|| self.ring.next_sequence())
     }
 
     /// Append one control cycle.
@@ -199,10 +275,25 @@ impl Recorder {
     }
 
     fn write(&mut self, mono_ns: u64, entry: Entry<'_>) -> Result<u64, RecorderError> {
-        let (sequence, offset) = self
-            .ring
-            .stage(&mut self.scratch, mono_ns, entry)
-            .map_err(|error| RecorderError::Geometry(format!("encoding a record: {error:?}")))?;
+        // §26.2. `None` is a lone creator on a platform with no shared mapping, where the ring's own
+        // counter is correct because a second writer cannot exist.
+        let (sequence, offset) = match self.writership.next() {
+            Some(claimed) => {
+                let offset = self
+                    .ring
+                    .stage_claimed(&mut self.scratch, mono_ns, entry, claimed)
+                    .map_err(|error| {
+                        RecorderError::Geometry(format!("encoding a record: {error:?}"))
+                    })?;
+                (claimed, offset)
+            }
+            None => self
+                .ring
+                .stage(&mut self.scratch, mono_ns, entry)
+                .map_err(|error| {
+                    RecorderError::Geometry(format!("encoding a record: {error:?}"))
+                })?,
+        };
         let mut file = OpenOptions::new()
             .write(true)
             .open(&self.path)
@@ -222,7 +313,16 @@ impl Recorder {
     }
 
     /// Seal the window into a file, and say what was written and where.
+    ///
+    /// The creator's, and only the creator's (§26.2): sealing reads the whole ring and writes it
+    /// out under a digest, and two processes doing that produce two windows of one recording.
     pub fn seal(&self, reason: Reason, mono_ns: u64) -> Result<(Sealed, PathBuf), RecorderError> {
+        if !self.writership.may_seal() {
+            return Err(RecorderError::Geometry(
+                "this loop attached to a black box another process created, and the creator seals                  it (§26.2)"
+                    .to_string(),
+            ));
+        }
         let store = self.read()?;
         let sealed = seal(&self.ring, &store, reason, mono_ns);
         let path = write_sealed(&self.sealed_dir, &sealed, mono_ns).map_err(RecorderError::Io)?;

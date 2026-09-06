@@ -37,6 +37,16 @@ def main() -> int:
     )
     parser.add_argument("--verbose", action="store_true", help="Print every failure in full.")
     parser.add_argument(
+        "--json",
+        action="store_true",
+        help=(
+            "Print the summary as one JSON object instead of the human report. Used by "
+            "`tools/edition-report.mjs`, which assembles what the Hub renders at "
+            "/skynet/os/editions: a number on that page has to come from a run rather than from "
+            "somebody typing it into a template."
+        ),
+    )
+    parser.add_argument(
         "--min-passed",
         type=int,
         default=None,
@@ -54,6 +64,30 @@ def main() -> int:
         return 2
 
     report = run_corpus(root)
+
+    if args.json:
+        import json
+
+        # Deliberately the same fields the human report prints, and no derived ones: a summary that
+        # computed a percentage here and a page that computed it differently would be two answers
+        # to one question.
+        json.dump(
+            {
+                "passed": report.passed,
+                "failed": report.failed,
+                "unimplemented": report.unimplemented,
+                "total": report.total,
+                "complete": sorted(report.complete),
+                "partial": sorted(report.partial),
+                "missing_handlers": sorted(report.missing_handlers),
+                "declined_files": sorted(report.declined_files),
+            },
+            sys.stdout,
+            indent=2,
+            sort_keys=True,
+        )
+        print()
+        return 1 if report.failed else 0
 
     print(f"corpus     {root}")
     print(f"result     {report.summary()}")

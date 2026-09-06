@@ -13,17 +13,18 @@ end up granting everything.
 
 ── Where Python is quietly not JavaScript, here ──────────────────────────────
 
-``Number(segment)``
-    ``compareVersions`` splits on ``.`` and maps ``Number`` over the parts. ``Number('')`` is **0**
-    and ``Number('abc')`` is **NaN**, where ``float('')`` and ``float('abc')`` both raise — so a
-    malformed version string is an *answer* in the reference and a crash in a naive edition.
-    :func:`_js_number` is that coercion, and it is deliberately **not** ``predicate._js_number``,
-    which implements the reference's stricter ``toNumber``: that one refuses a blank string on
-    purpose, and reusing it here would make ``1..0`` compare differently from the way it does.
+``Number(segment)``, and why this note is now shorter than it was
+    ``compareVersions`` used to map ``Number`` over the dotted parts, and the two paragraphs that
+    stood here described the contortions needed to reproduce it: ``Number('')`` is **0** where
+    ``float('')`` raises, ``Number('abc')`` is **NaN**, and a NaN segment makes ``diff !== 0`` true
+    and ``diff < 0`` false so the reference reported ``a > b`` — a robot *newer* than any minimum.
+    This edition carried a ``_js_number`` and reproduced all of it faithfully, including the part
+    that was a hole.
 
-``NaN`` in a comparison
-    A NaN segment makes ``diff !== 0`` true and ``diff < 0`` false, so the reference reports
-    ``a > b``. Reproduced rather than rejected: it is the specification's answer.
+    The reference now reads the **leading ASCII digits** of a segment and nothing else (§80,
+    decided 2026-09-05), which is the same function in Python as it is in JavaScript. There is no
+    JavaScript-shaped edge left to reproduce here, so the coercion is gone rather than kept for a
+    caller that no longer needs it.
 
 ``capacity.simulator !== true``
     Strict. Absent means false — a real robot should not have to declare what it is not, and the
@@ -38,7 +39,6 @@ end up granting everything.
 from __future__ import annotations
 
 import math
-import re
 from typing import Any, Final
 
 from .canonical import OMIT
@@ -92,50 +92,6 @@ def _or_default(value: Any, default: Any) -> Any:
     return default if value is _ABSENT or value is None else value
 
 
-_RADIX = re.compile(r"^[+-]?0[xXoObB]")
-_DECIMAL = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$")
-
-
-def _js_number(value: Any) -> float:
-    """``Number(value)`` — the raw coercion, blanks and all.
-
-    Not :func:`predicate._js_number`, which is the reference's stricter ``toNumber``: that one
-    refuses a blank string so an empty field cannot compare as zero. Here a blank *is* zero, because
-    that is what ``'1..0'.split('.').map(Number)`` produces, and the difference decides how a
-    malformed version orders.
-    """
-    if isinstance(value, bool):
-        return 1.0 if value else 0.0
-    if value is None:
-        return 0.0
-    if isinstance(value, (int, float)):
-        return float(value)
-    if not isinstance(value, str):
-        return math.nan
-
-    text = value.strip()
-    if text == "":
-        return 0.0
-    if text in ("Infinity", "+Infinity"):
-        return math.inf
-    if text == "-Infinity":
-        return -math.inf
-    if _RADIX.match(text):
-        sign = -1.0 if text[0] == "-" else 1.0
-        body = text.lstrip("+-")
-        base = {"x": 16, "o": 8, "b": 2}[body[1].lower()]
-        try:
-            return sign * float(int(body[2:], base))
-        except ValueError:
-            return math.nan
-    if not _DECIMAL.match(text):
-        return math.nan
-    try:
-        return float(text)
-    except ValueError:
-        return math.nan
-
-
 def _js_int_string(value: Any) -> str:
     """A number inside a template literal. ``String(512)`` is ``"512"``, not ``"512.0"``."""
     if isinstance(value, bool):
@@ -150,18 +106,29 @@ def _js_int_string(value: Any) -> str:
     return str(value)
 
 
+def _segment_value(segment: str) -> int:
+    """The leading run of ASCII digits in one dotted segment, or 0.
+
+    Transcribed from ``segmentValue``. ``str.isdigit`` is deliberately not used: it is true for
+    Arabic-Indic digits, superscripts and a few hundred other code points, and the reference tests
+    ``>= '0' and <= '9'`` on UTF-16 code units, which is ASCII and only ASCII. A version segment of
+    ``'٣'`` is therefore 0 — unreadable, and so the oldest version there is — in both editions.
+    """
+    digits = 0
+    while digits < len(segment) and "0" <= segment[digits] <= "9":
+        digits += 1
+    return int(segment[:digits]) if digits else 0
+
+
 def _compare_versions(a: str, b: str) -> int:
     """Numeric-segment comparison, sufficient for ``major.minor.patch`` OS versions."""
-    left = [_js_number(part) for part in a.split(".")]
-    right = [_js_number(part) for part in b.split(".")]
+    left = [_segment_value(part) for part in a.split(".")]
+    right = [_segment_value(part) for part in b.split(".")]
     for i in range(max(len(left), len(right))):
-        lhs = left[i] if i < len(left) else 0.0
-        rhs = right[i] if i < len(right) else 0.0
-        diff = lhs - rhs
-        # `NaN !== 0` is true and `NaN < 0` is false, so a segment that is not a number reports
-        # `a > b`. The reference's answer, reproduced rather than corrected.
-        if not (diff == 0):
-            return -1 if diff < 0 else 1
+        lhs = left[i] if i < len(left) else 0
+        rhs = right[i] if i < len(right) else 0
+        if lhs != rhs:
+            return -1 if lhs < rhs else 1
     return 0
 
 

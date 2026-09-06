@@ -873,7 +873,7 @@ fn the_window_seals_into_a_file() {
 /// and produce a recording that looks intact and is not — discovered by an investigator, months
 /// later, in the file that was supposed to answer the question.
 #[test]
-fn a_second_writer_is_refused_rather_than_allowed_to_corrupt_the_ring() {
+fn a_second_writer_attaches_where_it_can_and_is_refused_where_it_cannot() {
     let (dir, first) = recorder("lock");
 
     let shape = skynet_blackbox::record::Shape {
@@ -893,24 +893,161 @@ fn a_second_writer_is_refused_rather_than_allowed_to_corrupt_the_ring() {
     };
 
     let second = crate::recorder::Recorder::open(&dir, meta.clone(), shape, 64 * 1024);
-    match second {
-        Err(crate::recorder::RecorderError::Locked(error)) => {
-            let said = error.to_string();
-            assert!(
-                said.contains("skynetk"),
-                "the refusal has to name who holds the ring, not just that it is held: {said}",
+
+    #[cfg(target_os = "linux")]
+    {
+        let second = second.expect("a second writer attaches to the recording the first created");
+        assert_eq!(
+            second.role(),
+            skynet_lock::Role::Attached,
+            "the second writer does not become a second creator",
+        );
+        assert!(
+            first.next_sequence() >= 1 && second.next_sequence() >= 1,
+            "both read the same counter",
+        );
+        // The property the whole mechanism is for: the two never take the same number.
+        // A real cycle to write, from the loop rather than hand-built: a record this test
+        // invented could be one the encoder would reject on a robot.
+        let words = ring_words();
+        let command_ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+        let mut consumer = command_ring.consumer();
+        let mut body = Fake::new(2);
+        let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
+        let mut host = Host::new(&CHANNELS);
+        let turn = host.step(0, &mut body, &mut consumer, &limits, None::<&Envelope<'_>>);
+
+        let mut second = second;
+        let mut first = first;
+        let mut taken = Vec::new();
+        for tick in 0..8u64 {
+            taken.push(
+                first
+                    .cycle(tick * 1_000, &turn.cycle)
+                    .expect("the creator writes"),
+            );
+            taken.push(
+                second
+                    .cycle(tick * 1_000, &turn.cycle)
+                    .expect("the attacher writes"),
             );
         }
-        Err(other) => panic!("refused for the wrong reason: {other}"),
-        Ok(_) => panic!("two writers were allowed onto one ring"),
+        taken.sort_unstable();
+        assert_eq!(
+            taken,
+            (1..=16).collect::<Vec<u64>>(),
+            "sixteen records took sixteen sequence numbers, each exactly once",
+        );
+
+        // And the recording holds all sixteen, in order, which is the assertion that would fail if
+        // two of them had gone into one slot.
+        let store = first.read().expect("the ring reads back");
+        let ring = skynet_blackbox::ring::Ring::open(&store).expect("a ring");
+        assert_eq!(
+            ring.ordered(&store).len(),
+            16,
+            "every claimed slot holds a record of its own",
+        );
+
+        assert!(
+            second
+                .seal(skynet_blackbox::seal::Reason::Shutdown, 0)
+                .is_err(),
+            "an attacher sealing would be a second reader of a file a writer is in the middle of",
+        );
+        drop(second);
+        drop(first);
     }
 
-    // Releasing the first lets a second in, so the lock is a lock and not a permanent refusal.
-    drop(first);
+    #[cfg(not(target_os = "linux"))]
+    {
+        match second {
+            Err(crate::recorder::RecorderError::Attach(error)) => {
+                let said = error.to_string();
+                assert!(
+                    said.contains("skynetk"),
+                    "the refusal has to name who holds the ring: {said}",
+                );
+                assert!(
+                    said.contains("Linux"),
+                    "and say that the missing shared counter is why, rather than implying the                      other process is at fault: {said}",
+                );
+            }
+            Err(other) => panic!("refused for the wrong reason: {other}"),
+            Ok(_) => panic!("two writers with no shared counter were allowed onto one ring"),
+        }
+        drop(first);
+    }
+
+    // Releasing the creator lets the next process create, so this is a lock and not a permanent
+    // refusal.
     let third = crate::recorder::Recorder::open(&dir, meta, shape, 64 * 1024);
     assert!(third.is_ok(), "the lock is released when its holder goes");
 
     drop(third);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A loop cannot attach to a ring shaped for a different body, and the refusal says why.
+///
+/// The asymmetry with `skynetd` is the point: that recorder writes events and gaps, which carry no
+/// per-joint array and fit any record size, so it takes the ring it finds. A cycle carries a value
+/// per joint and per channel, so it does not.
+#[test]
+fn a_loop_will_not_attach_to_a_ring_shaped_for_another_body() {
+    let dir = std::env::temp_dir().join("skynet-recorder-shape");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let channels: Vec<String> = CHANNELS.iter().map(|name| name.to_string()).collect();
+    let meta = skynet_blackbox::ring::Meta {
+        robot_id: String::new(),
+        embodiment: [0u8; 32],
+        os_image: [0u8; 32],
+        tier: Tier::Host as u8,
+        enforcement: Enforcement::Enforcing as u8,
+        simulator: false,
+        wall_epoch_ns: 0,
+        mono_ns: 0,
+        channels: channels.clone(),
+    };
+
+    // A creator that recorded a two-joint arm.
+    let first = crate::recorder::Recorder::open(
+        &dir,
+        meta.clone(),
+        skynet_blackbox::record::Shape {
+            joints: 2,
+            channels: 2,
+        },
+        64 * 1024,
+    )
+    .expect("a fresh directory");
+
+    let second = crate::recorder::Recorder::open(
+        &dir,
+        meta,
+        skynet_blackbox::record::Shape {
+            joints: 30,
+            channels: 4,
+        },
+        64 * 1024,
+    );
+
+    match second {
+        Err(crate::recorder::RecorderError::Shape {
+            found,
+            wanted,
+            holder,
+        }) => {
+            assert_eq!(found.joints, 2);
+            assert_eq!(wanted.joints, 30);
+            assert!(holder.contains("skynetk"), "{holder}");
+        }
+        Err(other) => panic!("refused for the wrong reason: {other}"),
+        Ok(_) => panic!("a ring holding two joints accepted a thirty-joint cycle"),
+    }
+
+    drop(first);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
