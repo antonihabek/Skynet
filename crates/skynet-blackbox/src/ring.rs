@@ -132,6 +132,15 @@ pub enum RingError {
     DigestTableFull,
     /// The capability token table is full, for the same reason and with the same consequence.
     TokenTableFull,
+    /// A claimed sequence number was zero (§26.2).
+    ///
+    /// Sequences start at 1, and [`Ring::offset_of`] subtracts one before taking the remainder, so
+    /// a zero is not a slot — it is a claim counter that was read before whoever created it had
+    /// seeded it. `skynet_claim`'s own header names that race and says a zero is the way it shows:
+    /// a writer that attached between the creator's `open` and its `store` gets one. Refused here
+    /// rather than wrapped around to the last slot in the ring, which is where the arithmetic would
+    /// otherwise put it — on top of the oldest record, silently.
+    Unseeded,
 }
 
 /// The arithmetic of a ring, before any bytes exist.
@@ -496,6 +505,40 @@ impl Ring {
         let offset = self.offset_of(sequence);
         self.next += 1;
         Ok((sequence, offset))
+    }
+
+    /// Encode a record into `slot` at a sequence **claimed somewhere else**, and say where it goes.
+    ///
+    /// [`Ring::stage`] takes the sequence from this `Ring`'s own counter, which is in memory and is
+    /// therefore correct for exactly one writer. §26.2 has two — `skynetd` records events and gaps,
+    /// `skynet-kernel-host` records cycles, and both belong in one recording — so on a robot with a
+    /// control loop the number comes from the `AtomicU64` both processes map (`skynet-claim`) and
+    /// arrives here already claimed.
+    ///
+    /// # What this does to the ring's own counter
+    ///
+    /// It raises it to `sequence + 1` and never lowers it, so `next_sequence()` stays a floor
+    /// rather than becoming a lie: a writer that has staged sequence 900 knows the recording has at
+    /// least 900 records in it, and does **not** know what the other writer has claimed since. A
+    /// caller that needs the true next sequence asks the claim counter, which is the only thing
+    /// that has it. Recovery is unaffected either way — `Ring::open` scans, on purpose, and the
+    /// highest sequence on disk is the truth whatever any counter says.
+    pub fn stage_claimed(
+        &mut self,
+        slot: &mut [u8],
+        mono_ns: u64,
+        entry: Entry<'_>,
+        sequence: u64,
+    ) -> Result<usize, RingError> {
+        if sequence == 0 {
+            return Err(RingError::Unseeded);
+        }
+        encode(self.geometry.shape, slot, sequence, mono_ns, entry).map_err(RingError::Record)?;
+        let offset = self.offset_of(sequence);
+        if sequence >= self.next {
+            self.next = sequence + 1;
+        }
+        Ok(offset)
     }
 
     /// Append into a store held in memory.

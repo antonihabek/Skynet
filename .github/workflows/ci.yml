@@ -244,6 +244,16 @@ jobs:
           node tools/check-mirrors.mjs
           node tools/check-contract-mirrors.mjs
 
+      # §73's closing paragraph is the first quantitative thing a vendor reads, and it has now been
+      # wrong three times — most recently saying eighteen crates against twenty and one edition
+      # against two, in the same section whose own preamble is an essay about a table going stale.
+      # Three is enough to stop calling it carelessness. The numbers have a source now, and this is
+      # the check that the source and the sentence still agree. It is deliberately exact about
+      # counts anybody could recount and rounded to the nearest thousand about line counts, so a
+      # reflow or a hundred new lines does not fail a build.
+      - name: The specification still states the size of the thing it specifies
+        run: node tools/scale-report.mjs --check
+
       # §65 promises that a vendor engineer reaches a moving robot without reading Parts II
       # through VII, and that "if they cannot, the fault is in the golden path rather than in
       # their patience." That is a promise about a document, and a document is the thing here with
@@ -310,39 +320,62 @@ jobs:
       # genuinely needs it — turning an `mmap` into that slice — is one call, and it belongs to the
       # mapping layer rather than to the protocol. The protocol is the part where a mistake is a
       # moving robot, and it is the part the compiler checks.
-      - name: Everything but the ABI, the two loaders and the two mappings forbids unsafe
+      - name: Everything but the ABI, the loader and the three syscall crates forbids unsafe
         run: |
-          # An allow-list of the five, and every *other* crate in the workspace is required to
+          # An allow-list of the six, and every *other* crate in the workspace is required to
           # forbid it — enumerated from the directory rather than from a list kept beside it, so the
           # check covers the next crate somebody adds instead of the ones somebody remembered. The
           # previous version listed the crates that must forbid it, which is the same check with the
           # default pointing the wrong way: a new crate joined the workspace unwatched.
-          allowed="skynet-rhal skynet-cli skynet-dl skynet-ring-shm skynet-claim"
+          allowed="skynet-rhal skynet-cli skynet-dl skynet-ring-shm skynet-claim skynet-statfs"
+
+          # A crate's root is `src/lib.rs`, or `src/main.rs` for one that is only a binary. Written
+          # out because the version before this one looked only for `lib.rs`, and `skynet-cli` does
+          # not have one — so the loop below reported the CLI as an allow-listed crate containing no
+          # `unsafe`, when what was true is that the check was reading a file that does not exist.
+          # A check that cannot pass is worth no more than one that cannot fail.
+          root() {
+            if [ -f "crates/$1/src/lib.rs" ]; then echo "crates/$1/src/lib.rs"
+            else echo "crates/$1/src/main.rs"; fi
+          }
+
           for path in crates/*/; do
             crate=$(basename "$path")
             case " $allowed " in *" $crate "*) continue ;; esac
-            grep -q 'forbid(unsafe_code)' "$path/src/lib.rs" || {
+            # The **attribute**, anchored, rather than the string anywhere in the file. A doc
+            # comment that mentions `#![forbid(unsafe_code)]` — to explain why some *other* crate
+            # has it — satisfied the unanchored version, and `skynet-statfs` is the crate that
+            # found it: its header explains that `skynetd-io` forbids unsafe, which is why the
+            # syscall lives in a crate of its own, and that sentence would have passed it off as a
+            # crate with no unsafe in it. A check a comment can satisfy is a check about comments.
+            grep -qE '^#!\[forbid\(unsafe_code\)\]' "$(root "$crate")" || {
               echo "::error::crates/$crate does not forbid(unsafe_code), and is not one of: $allowed"
               echo "§23.1. If it genuinely cannot be safe, say so here and say why in its crate docs."
               exit 1
             }
           done
 
-          # And the five are each allowed for one stated reason, so the reason has to still be
+          # And the six are each allowed for one stated reason, so the reason has to still be
           # written down. The two mappings are the smallest: `skynet-ring-shm` is four `extern "C"`
           # declarations, one mmap and one `from_raw_parts`, deliberately split from the protocol in
           # `skynet-ring` so that a reviewer asking whether the command path is memory-safe reads a
           # short file — and `skynet-claim` is §26.2's shared sequence, five declarations and one
           # `AtomicU64::from_ptr`, split from `skynet-lock` for the same reason.
           #
+          # `skynet-statfs` is the sixth: §33.6's free-disk measurement and §80's floor, one
+          # `statfs` read into `[u64; 15]` rather than a libc struct whose layout is glibc's, and
+          # every reading checked before it is returned because the number authorises deleting a
+          # sealed recording.
+          #
           # `skynet-dl` joined this list late, and the reason is worth keeping: it was added to the
           # workspace after this check was written and the check has never run, so nothing caught
           # it. §73 already calls it "the loader `unsafe`, extracted so it has one home and two
           # callers" — the same argument `skynet-cli` is here for, in the crate that now holds it.
           for crate in $allowed; do
-            grep -q 'unsafe' "crates/$crate/src/lib.rs" || {
-              echo "::error::crates/$crate is on the unsafe allow-list and contains no unsafe."
-              echo "Either it no longer needs to be there, or lib.rs no longer explains why it is."
+            grep -q 'unsafe' "$(root "$crate")" || {
+              echo "::error::crates/$crate is on the unsafe allow-list and its root file does not"
+              echo "mention unsafe. Either it no longer needs to be there, or the argument for it"
+              echo "has left the crate header, which is the one place a reviewer looks first."
               exit 1
             }
           done

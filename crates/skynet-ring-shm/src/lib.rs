@@ -9,7 +9,8 @@
 //!
 //! `skynet-rhal` declares a C vtable of raw function pointers and `skynet-cli` loads arbitrary
 //! native code; those two cannot be safe by construction and CI asserts every other crate is. This
-//! is the third, and `skynet-claim` — §26.2's shared sequence — is the fourth. Both are
+//! is the third, `skynet-claim` — §26.2's shared sequence — is the fourth, and `skynet-statfs`
+//! — §33.6's free-disk read — is the fifth. All are
 //! deliberately as small as a crate can be; this one is four `extern "C"` declarations,
 //! one `mmap`, and one `slice::from_raw_parts`. Everything about the ring that could move a robot
 //! wrongly — the seqlock, the wrap, the tear detection, the layout — is in `skynet-ring`, where the
@@ -54,6 +55,8 @@
 
 #![forbid(missing_docs)]
 
+pub mod pass;
+
 use core::sync::atomic::AtomicU32;
 
 use skynet_ring::{Ring, HEADER_BYTES, SLOT_BYTES};
@@ -75,6 +78,16 @@ pub enum ShmError {
     Geometry,
     /// The mapping is not a ring this build can address. Carries the protocol's own verdict.
     Ring(skynet_ring::RingError),
+    /// `sendmsg` failed while handing the descriptor over, with its `errno`.
+    Send(i32),
+    /// `recvmsg` failed while receiving it, with its `errno`.
+    Receive(i32),
+    /// A message arrived carrying no descriptor.
+    ///
+    /// Its own variant rather than an `errno`, because it is not a failure of the syscall: the
+    /// socket worked and the peer sent something that was not a ring. A policy that treated it as a
+    /// transport error would retry for ever against a runtime that is never going to send one.
+    NoDescriptor,
 }
 
 impl ShmError {
@@ -88,6 +101,9 @@ impl ShmError {
             ShmError::Map(_) => "map",
             ShmError::Geometry => "geometry",
             ShmError::Ring(_) => "ring",
+            ShmError::Send(_) => "send",
+            ShmError::Receive(_) => "receive",
+            ShmError::NoDescriptor => "no-descriptor",
         }
     }
 }
@@ -102,6 +118,12 @@ impl core::fmt::Display for ShmError {
             ShmError::Map(e) => write!(f, "mmap failed: errno {e}"),
             ShmError::Geometry => write!(f, "the slot count must be a non-zero power of two"),
             ShmError::Ring(e) => write!(f, "not a usable ring: {}", e.as_str()),
+            ShmError::Send(e) => write!(f, "the descriptor could not be sent: errno {e}"),
+            ShmError::Receive(e) => write!(f, "the descriptor could not be received: errno {e}"),
+            ShmError::NoDescriptor => write!(
+                f,
+                "the peer on this socket sent no descriptor, so there is no ring here to map"
+            ),
         }
     }
 }
@@ -233,6 +255,39 @@ impl Mapping {
         let mapping = Self::create_inner(name, slot_count)?;
         Ring::create(mapping.words(), slot_count).map_err(ShmError::Ring)?;
         Ok(mapping)
+    }
+
+    /// Create a mapping with **no ring in it**, for a protocol that is not §25's command ring.
+    ///
+    /// [`Mapping::create`] writes a command-ring header and validates it; this writes nothing. The
+    /// caller lays its own structure over [`Mapping::words`] — §25's observation ring is the reason
+    /// it exists, and it has a different magic on purpose so that a consumer built for commands
+    /// which opened one is refused at the first word rather than reading joint positions as
+    /// setpoints with the drives live.
+    ///
+    /// The sealing, the `MFD_CLOEXEC` and the geometry rules are the same; what is absent is any
+    /// opinion about what the bytes mean.
+    pub fn create_raw(name: &str, slot_count: usize) -> Result<Mapping, ShmError> {
+        if slot_count == 0 || !slot_count.is_power_of_two() {
+            return Err(ShmError::Geometry);
+        }
+        Self::create_inner(name, slot_count)
+    }
+
+    /// Map a raw mapping somebody else created, without reading a ring header.
+    ///
+    /// **Takes ownership of `fd`**, like [`Mapping::adopt`]. The caller validates whatever protocol
+    /// it expects to find: this cannot, because the whole point of the raw pair is that the bytes
+    /// are not §25's.
+    pub fn adopt_raw(
+        fd: core::ffi::c_int,
+        slot_count: usize,
+        access: Access,
+    ) -> Result<Mapping, ShmError> {
+        if slot_count == 0 || !slot_count.is_power_of_two() {
+            return Err(ShmError::Geometry);
+        }
+        Self::adopt_inner(fd, slot_count, access)
     }
 
     /// Map a ring somebody else created, from a file descriptor they passed over.
@@ -403,7 +458,13 @@ impl Mapping {
     }
 
     #[cfg(target_os = "linux")]
-    fn words(&self) -> &[AtomicU32] {
+    /// The words the protocol runs on.
+    ///
+    /// Public because [`Mapping::create_raw`] would be useless without it: a caller laying its own
+    /// ring over this mapping needs the slice, and the alternative — a second copy of the mapping
+    /// logic in the crate that owns the other protocol — is the second `mmap` this crate exists to
+    /// prevent.
+    pub fn words(&self) -> &[AtomicU32] {
         // SAFETY: this is the one place in the workspace that turns an address into a slice, and
         // four things make it sound.
         //
@@ -441,7 +502,8 @@ impl Mapping {
     }
 
     #[cfg(not(target_os = "linux"))]
-    fn words(&self) -> &[AtomicU32] {
+    /// Nothing is mapped here, so there are no words.
+    pub fn words(&self) -> &[AtomicU32] {
         &[]
     }
 }

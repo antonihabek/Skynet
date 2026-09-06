@@ -840,20 +840,45 @@ fn check_budget(budget: &ResourceBudget, capacity: &DeviceCapacity) -> Vec<Packa
 /// A non-numeric segment reads as 0, matching the reference implementation's `Number()` coercion of
 /// `NaN` — deliberately kept rather than "fixed", because a pre-release suffix comparing as 0 is a
 /// behaviour the corpus pins and the two implementations must share.
+/// The value of one dotted segment: its leading run of ASCII digits, or 0.
+///
+/// This edition used to fall the *whole* segment back to 0 on a failed parse, which is fail-closed
+/// and was the right half of the answer. The half it got wrong is that `"1.2.10-rc1"` then compares
+/// as `1.2.0` and is refused a package needing `1.2.5` — with a message reading *"Requires Skynet
+/// OS 1.2.5 or later; this robot runs 1.2.10-rc1"*, which names a version that looks newer than the
+/// one being demanded. §64 makes that a defect rather than a cosmetic problem: it is a refusal an
+/// operator cannot act on.
+///
+/// Taking the leading digits keeps every fail-closed property — `"rc1"`, `""`, `"0x10"` and
+/// `"Infinity"` are all 0, so a version this cannot read is the oldest version there is and the
+/// package is refused — and lets a pre-release image compare as the release it is a candidate for.
+///
+/// The arithmetic is integer and saturating on purpose. The reference reaches the same values
+/// through `Number`, whose doubles are exact for every version anybody types; saturation is what
+/// keeps a robot reporting a forty-digit segment from wrapping into a small number, which is the
+/// one way an overflow here could fail *open*.
+fn segment_value(segment: &str) -> u64 {
+    let mut value: u64 = 0;
+    for byte in segment.bytes() {
+        if !byte.is_ascii_digit() {
+            break;
+        }
+        value = value
+            .saturating_mul(10)
+            .saturating_add((byte - b'0') as u64);
+    }
+    value
+}
+
 fn compare_versions(a: &str, b: &str) -> i32 {
-    let left: Vec<f64> = a
-        .split('.')
-        .map(|s| s.parse::<f64>().unwrap_or(0.0))
-        .collect();
-    let right: Vec<f64> = b
-        .split('.')
-        .map(|s| s.parse::<f64>().unwrap_or(0.0))
-        .collect();
+    let left: Vec<u64> = a.split('.').map(segment_value).collect();
+    let right: Vec<u64> = b.split('.').map(segment_value).collect();
     let len = left.len().max(right.len());
     for i in 0..len {
-        let diff = left.get(i).copied().unwrap_or(0.0) - right.get(i).copied().unwrap_or(0.0);
-        if diff != 0.0 {
-            return if diff < 0.0 { -1 } else { 1 };
+        let lhs = left.get(i).copied().unwrap_or(0);
+        let rhs = right.get(i).copied().unwrap_or(0);
+        if lhs != rhs {
+            return if lhs < rhs { -1 } else { 1 };
         }
     }
     0
@@ -874,6 +899,47 @@ mod tests {
             0,
             "absent segments are zero"
         );
+    }
+
+    #[test]
+    fn a_segment_is_worth_its_leading_digits_and_nothing_else() {
+        // A candidate compares as the release it is a candidate for, which is what stops the
+        // refusal naming a version that looks newer than the one it demands (§64).
+        assert_eq!(compare_versions("1.2.10-rc1", "1.2.5"), 1);
+        assert_eq!(compare_versions("1.2.0-rc1", "1.2.1"), -1);
+        assert_eq!(compare_versions("1.2.0-rc1", "1.2.0"), 0);
+
+        // No leading digit is the oldest version there is, so the gate fails closed. Each of
+        // these was admitted against every minimum by one edition or both before 2026-09-05.
+        assert_eq!(segment_value("rc1"), 0);
+        assert_eq!(
+            segment_value(""),
+            0,
+            "unchanged, and the case the corpus pins"
+        );
+        assert_eq!(
+            segment_value("Infinity"),
+            0,
+            "was infinity in both editions"
+        );
+        assert_eq!(segment_value("0x10"), 0, "was 16 to the reference");
+        assert_eq!(
+            segment_value(" 3"),
+            0,
+            "was 3 to the reference: it trims, this does not"
+        );
+
+        // Not `char::is_numeric`, which is true for several hundred code points. The reference
+        // tests `>= '0' && <= '9'` on UTF-16 units, so the agreed alphabet is ASCII.
+        assert_eq!(
+            segment_value("\u{0663}"),
+            0,
+            "Arabic-Indic three is not a digit here"
+        );
+
+        // The one way an overflow in here could fail *open* is by wrapping into a small number.
+        assert_eq!(segment_value("99999999999999999999999999"), u64::MAX);
+        assert_eq!(compare_versions("99999999999999999999999999.0", "2.0"), 1);
     }
 
     fn capacity(simulator: bool) -> DeviceCapacity {

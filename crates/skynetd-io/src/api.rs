@@ -886,9 +886,10 @@ fn audit<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
 fn health<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let actual = context.daemon.observe(context.now_ms);
     let reading = context.daemon.read_power(context.now_ms);
+    let headroom = context.daemon.read_headroom();
     let health = context
         .daemon
-        .health(&actual, context.now_ms, Some(&reading));
+        .health(&actual, context.now_ms, Some(&reading), headroom);
 
     let mut packages = Json::arr();
     for package in &health.packages {
@@ -1543,9 +1544,10 @@ fn checkin<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
 
     let actual = context.daemon.observe(context.now_ms);
     let reading = context.daemon.read_power(context.now_ms);
+    let headroom = context.daemon.read_headroom();
     let health = context
         .daemon
-        .health(&actual, context.now_ms, Some(&reading));
+        .health(&actual, context.now_ms, Some(&reading), headroom);
     let policy = crate::identity::running_policy(&context.daemon.store, &actual);
     let attestation =
         crate::identity::attestation(&layout, &trust, &identity, &actual.os.active, &policy);

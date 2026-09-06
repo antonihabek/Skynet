@@ -1,0 +1,50 @@
+[Unit]
+# §9, §33: the supervisor. Reconciles desired state, launches packages as transient units, serves
+# the local API and the on-robot console, records events, talks to the Hub.
+#
+# `After=` and not `Requires=`, and the distinction is §33.1's:
+#
+#   `skynetd` may crash, hang, leak, be killed by the OOM reaper, or be stopped by an operator, and
+#   the robot does not become dangerous — the kernel keeps running, sees no fresh commands, and
+#   holds.
+#
+# A `Requires=skynetk.service` would make that false in the other direction: stopping the loop would
+# stop the supervisor, and a robot that lost its fleet management because a driver faulted is a
+# robot nobody can ask what happened.
+Description=Skynet OS supervisor (§9, §33)
+Documentation=file:/usr/share/doc/skynet/skynet-os-architecture.md
+After=skynetk.service network.target
+Wants=network.target
+
+[Service]
+Type=exec
+EnvironmentFile=/etc/skynet/skynetd.env
+# --lan is the on-robot console (§32.2), and §34.2 refuses a routable address here rather than
+# warning about one. --advertise is the label a browse shows (§82); without it the machine's own
+# name is used, and without --lan nothing is advertised at all.
+ExecStart=/usr/bin/skynetd \
+    --root ${SKYNET_ROOT} \
+    --lan ${SKYNET_CONSOLE_ADDRESS} \
+    --advertise ${SKYNET_LABEL} \
+    --interval ${SKYNET_INTERVAL_MS}
+
+# It supervises; it is not supervised by the thing it supervises. A restart is cheap and level-
+# triggered reconciliation makes it idempotent (§33.3), so the only question is how long a robot
+# goes without fleet management, and the answer should be seconds.
+Restart=always
+RestartSec=5s
+
+# §40.2: never the isolated core. A supervisor scheduled onto the core running the kernel could
+# delay the kernel, and §23.5's real-time argument would be void — which is the same rule packages
+# are held to, applied to the process that holds them to it.
+CPUAffinity=${SKYNET_GENERAL_CPUS}
+
+# It launches transient units through `systemd-run`, so it needs the manager. Everything else it
+# touches is under its own root.
+ProtectSystem=strict
+ReadWritePaths=/run/skynet ${SKYNET_ROOT}
+ProtectHome=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

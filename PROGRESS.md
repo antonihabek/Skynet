@@ -11777,3 +11777,109 @@ fmt and clippy clean, golden path 48 commands.
      correct, complete and half-applied within one session of being written, and the half it did not
      reach was the one that had been writing the ring for fifty-three sessions. Writing a rule down
      is not the same as applying it, and the gap is invisible because the new code obeys it.
+
+---
+
+## 2026-09-06 (fifty-ninth) — a robot answers a browse, and three things only a running machine said
+
+§82 shipped one half in the previous session: the wire format, what a robot may advertise, and a
+browse. **Nothing advertised**, so a browse on a real network found nothing — a true report and an
+empty one. `skynet_mdns::responder` is what to answer and when; `skynetd_io::discovery` is the
+socket under it; `skynetd --lan <addr> --advertise <label>` starts it; and `skynet discover` is the
+49th CLI command, which the browse had been waiting for since it was written.
+
+The split is §82.4's own and it earned itself immediately: the responder is a pure function of bytes
+and a clock reading, so probing, defending, the conflict rule and RFC 6762 §6's answer delay are all
+reachable from a test with no network. The socket half is sixty lines and a `Link` trait.
+
+### The rule that is not RFC 6762's
+
+The RFC renames on a name conflict. This refuses. An operator reads a label off a list and opens the
+console it points at, and that console's largest control is a stop — so two robots answering to
+`arm-01` is a stop pressed on the wrong machine, and `arm-01 (2)` is a label nobody assigned to
+anything on the bench. The second robot refuses, names the address of the first and states the fix.
+It is `skynet-lock`'s answer to a second writer, one subsystem over.
+
+### Two daemons on one link, and two defects that had passed every test
+
+Both were in this session's own code, both passed the crate's unit tests, and neither is reachable
+by a single responder. Two containers on one bridge network found them in one run.
+
+**The incumbent yielded its name to whoever booted last.** Treating every claim as a conflict means
+the newcomer probes, the incumbent falls silent, and the newcomer takes the name — so the browse
+pointed at the robot that arrived second. Backwards, and it was the exact hazard the design says it
+exists to prevent. An established responder defends; only one still probing refuses.
+
+**The three probes went out together.** They were queued 250 ms apart and drained when overdue, and
+`skynetd` preallocates a 67 MB ring before its first poll — so the whole schedule was always in the
+past and the name was claimed in one instant. The 250 ms is not pacing, it is the window in which
+somebody else gets to object, and a robot that closes it wins every conflict against a robot already
+there. Probes are paced from the last one that *went*, one per pass, and the claim waits an interval
+after the last of them.
+
+### And a third: the responder cannot live in the reconcile loop
+
+At `--interval 1000` a robot took **six seconds** to take its own name rather than 750 ms, because
+the poll cadence is bounded by how long a pass takes and a pass stages packages, drains a queue and
+uploads a window. A browse waits two seconds. So the responder has a thread — the daemon's only one
+— and the §33.2 argument it appears to break is about a scheduler in front of a reconcile and an
+accept, which this is not: it owns its sockets and its state and shares nothing.
+
+### The seal, which had been broken since §26.2 landed
+
+`crates/skynetd-io/e2e.sh` had been aborting mid-way on a non-zero `skynet blackbox seal`. The
+refusal was §26.2's: *the creator is the one that seals it*. **`skynetd` is stopped by a signal and
+installs no handler**, so its writer lock is left behind on every restart, the next daemon attaches
+rather than creates, and an attacher may not seal. Every robot lost the ability to close a window
+from its second boot onward, silently, with the recording still running.
+
+The fifty-eighth session's rule — a stale lock is named, not stolen — is right about the hazard and
+wrong about the frequency: a stale lock is not the exception here, it is the normal state. So: **a
+lock is never taken from a process that exists**, and existence is the kernel's answer. The note
+carries the holder's pid *and its start time* (field 22 of `/proc/<pid>/stat`), because a pid alone
+is not an identity — reused within hours, reset at a reboot. A first attempt compared `comm` with
+the label in the note and was wrong in the dangerous direction: a live holder read as gone whenever
+a caller's label was not the executable's name. Six tests said so by turning red on Linux and
+passing on Windows.
+
+A reclaim is reported rather than silent, up through `Writership::reclaimed_from` to a line in the
+journal.
+
+### The grant the reconciler took back, and the row nobody wrote
+
+With the seal fixed the script reached its end for the first time, and one older failure became
+visible: `grants add` answers `granted`, and `grants remove` a moment later answers `not_held`. The
+reconciler had converged the operator's grant away — §33.3 working as specified — and had left **no
+audit row**. A grant made at the robot was permanent evidence; the taking of it went to the ring
+alone, which holds minutes. `audit_grant_changes` records both, attributed to *"desired state
+(§11)"* rather than to a person.
+
+What is left open is a decision rather than a defect: the console offers a button that says
+`granted` about a permission that will not survive the next pass.
+
+### Numbers
+
+`cargo test --workspace` — **1,557 passed**, 0 failed. `cargo fmt --check` and `cargo clippy
+--workspace --all-targets` clean, from a tree that had ten formatting diffs and four warnings at the
+start of the session. `e2e.sh` — **all checks passed**, first complete run. Corpus 1,116 of 1,116 in
+both editions. Golden path 49 commands.
+
+### Findings, restated
+
+1-107 as before.
+
+108. **A protocol whose subject is two machines cannot be finished by a test with one.** Two
+     defects, both in code that passed every unit test in its crate, both found in the first run
+     with a second daemon on the link — and one of them had the responder implementing the exact
+     inverse of the rule its own header states.
+109. **A schedule drained by "whatever is overdue" is not a schedule.** Three probes 250 ms apart
+     became three probes at once the first time the caller was late, and the caller is always late:
+     the daemon preallocates a black box before it polls anything. The interval was doing safety
+     work, and the queue silently deleted it.
+110. **A rule can be right about the hazard and wrong about the frequency.** "A stale lock is named,
+     not stolen" was written for the day a process was slow rather than dead. Every restart of the
+     daemon leaves one, so the exception was the normal case, and the consequence — a robot that
+     can never seal a window again — was invisible because everything kept recording.
+111. **Two writers of one file need one story about who wins, and both need to write it down.** The
+     API and the reconciler both edit the grant file; the reconciler always wins, which is correct,
+     and it was the only one of the two that kept no permanent record of what it did.

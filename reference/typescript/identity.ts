@@ -147,12 +147,28 @@ export function normalizePairingCode(input: string): CodeResult {
     }
   }
 
+  // Two loops rather than one, and both of them are code points.
+  //
+  // `toUpperCase()` on one code point can return more than one — `ß` is `SS`, `ﬁ` is `FI` — so
+  // folding its *result* asks `fold` a question about a string when every case it answers is about
+  // a character. This file did that until 2026-09-05, and the cost was not theoretical: `ﬁ`
+  // uppercased to `FI` and stayed `FI` here, while the Rust edition folded each character and got
+  // `F1` — two characters that are both **in** the alphabet. So a code containing a ligature was
+  // refused by the Hub and accepted by the robot, which is the §17 disagreement in its worst
+  // direction: the half that decides is the half that says yes.
   let normalized = ''
   for (const character of input) {
     if (character === '-' || character === ' ' || character === '\t'
       || character === '\n' || character === '\r') continue
-    normalized += fold(character.toUpperCase())
+    for (const upper of character.toUpperCase()) normalized += fold(upper)
   }
+
+  // Code points, not UTF-16 code units, for everything below: the length in the message and the
+  // position in the fault. `'𝟶'.length` is 2 and a person who typed one character is not told they
+  // typed two — §64 makes a refusal that miscounts what somebody typed a defect, not a rounding
+  // error. Indexing matters for the same reason and one worse: `normalized[i]` on an astral
+  // character yields half a surrogate pair, which is in no alphabet and is not what anybody typed.
+  const characters = Array.from(normalized)
 
   if (normalized === '') {
     return {
@@ -166,20 +182,20 @@ export function normalizePairingCode(input: string): CodeResult {
     }
   }
 
-  if (normalized.length !== PAIRING_CODE_LENGTH) {
+  if (characters.length !== PAIRING_CODE_LENGTH) {
     return {
       code: null,
       fault: {
-        code: normalized.length < PAIRING_CODE_LENGTH ? 'too_short' : 'too_long',
+        code: characters.length < PAIRING_CODE_LENGTH ? 'too_short' : 'too_long',
         detail: `A pairing code is ${PAIRING_CODE_LENGTH} characters and this is `
-          + `${normalized.length}. Hyphens and spaces do not count towards it.`,
+          + `${characters.length}. Hyphens and spaces do not count towards it.`,
         position: null,
       },
     }
   }
 
-  for (let index = 0; index < normalized.length; index += 1) {
-    if (!PAIRING_ALPHABET.includes(normalized[index])) {
+  for (let index = 0; index < characters.length; index += 1) {
+    if (!PAIRING_ALPHABET.includes(characters[index])) {
       return {
         code: null,
         fault: {

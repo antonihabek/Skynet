@@ -209,6 +209,13 @@ pub struct Unit {
     pub program: std::path::PathBuf,
     /// Its arguments.
     pub args: Vec<String>,
+    /// Environment variables to set, beyond what systemd gives every unit.
+    ///
+    /// Empty for almost every package. §25's rendezvous is the reason it exists: a policy the
+    /// daemon launches has to be told where the runtime is offering its rings, and it cannot be an
+    /// argument because a package declares its own `runtime.args` and the daemon appending to them
+    /// would be the daemon editing somebody's command line.
+    pub env: Vec<(String, String)>,
     /// The directory it runs in — the blob, so a package cannot reach the store's other versions.
     pub working_directory: std::path::PathBuf,
     /// Resource ceilings.
@@ -317,6 +324,12 @@ impl SystemdLauncher {
         })?;
         argv.push("-p".to_string());
         argv.push(cpus);
+
+        // Before the program, which is where `systemd-run` takes its own options. A `--setenv` after
+        // it is an argument to the package.
+        for (name, value) in &unit.env {
+            argv.push(format!("--setenv={name}={value}"));
+        }
 
         argv.push(unit.program.display().to_string());
         argv.extend(unit.args.iter().cloned());

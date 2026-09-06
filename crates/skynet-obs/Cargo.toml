@@ -1,0 +1,16 @@
+[package]
+name = "skynet-obs"
+description = "The observation ring: proprioception from the process holding the RHAL to the policy runtime (§25)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+# No dependencies at all, including on `skynet-ring`. A ring is a place two processes meet, and the
+# two rings are deliberately independent formats with different magic — see the crate documentation.
+[dependencies]
+
+[lints.rust]
+missing_docs = "warn"

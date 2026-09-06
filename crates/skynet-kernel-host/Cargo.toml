@@ -17,8 +17,14 @@ skynet-blackbox = { path = "../skynet-blackbox" }
 skynet-dl = { path = "../skynet-dl" }
 skynet-kernel = { path = "../skynet-kernel" }
 skynet-lock = { path = "../skynet-lock" }
+skynet-obs = { path = "../skynet-obs" }
 skynet-rhal = { path = "../skynet-rhal" }
 skynet-ring = { path = "../skynet-ring" }
+
+# §25's hand-off: the mapping this process creates and the descriptor a policy receives. The
+# crate is the one place `mmap` and `SCM_RIGHTS` live, and on anything but Linux every function
+# in it answers `Unsupported` rather than failing to compile.
+skynet-ring-shm = { path = "../skynet-ring-shm" }
 
 [lints.rust]
 missing_docs = "warn"

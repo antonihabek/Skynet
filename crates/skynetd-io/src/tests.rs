@@ -586,6 +586,7 @@ fn a_unit_that_cannot_be_given_a_cpuset_is_not_started() {
         kind: PackageKind::Policy,
         program: PathBuf::from("/data/packages/blobs/x/bin/run"),
         args: Vec::new(),
+        env: Vec::new(),
         working_directory: PathBuf::from("/data/packages/blobs/x"),
         limits: Limits::default(),
         cpus: Cpus {
@@ -608,6 +609,10 @@ fn the_systemd_command_line_says_restart_is_not_systemds_decision() {
         kind: PackageKind::Policy,
         program: PathBuf::from("/data/packages/blobs/x/bin/run"),
         args: vec!["--fast".to_string()],
+        env: vec![(
+            "SKYNET_RING_SOCKET".to_string(),
+            "/run/policy.sock".to_string(),
+        )],
         working_directory: PathBuf::from("/data/packages/blobs/x"),
         limits: Limits {
             ram_mb: Some(512.0),
@@ -622,6 +627,20 @@ fn the_systemd_command_line_says_restart_is_not_systemds_decision() {
     let argv = SystemdLauncher::system().command_line(&unit).unwrap();
     assert!(argv.contains(&"--unit=skynet:openrobot:grasp".to_string()));
     assert!(argv.contains(&"Restart=no".to_string()));
+    // The environment goes to `systemd-run`, before the program: after it, a `--setenv` is an
+    // argument the package receives and does nothing.
+    let setenv = argv
+        .iter()
+        .position(|arg| arg == "--setenv=SKYNET_RING_SOCKET=/run/policy.sock")
+        .expect("the rendezvous is on the command line");
+    let program = argv
+        .iter()
+        .position(|arg| arg.ends_with("bin/run"))
+        .expect("the program");
+    assert!(
+        setenv < program,
+        "a --setenv after the program is an argument to it"
+    );
     assert!(argv.contains(&"MemoryMax=512M".to_string()));
     assert!(argv.contains(&"AllowedCPUs=0".to_string()));
     assert_eq!(argv.last().unwrap(), "--fast");
@@ -3891,7 +3910,21 @@ fn the_capacity_is_read_or_refused_and_never_estimated() {
             // Absent rather than zero. A console rendering `vram_mb: 0` reports a robot with no
             // accelerator, which is a different claim from one nothing has measured.
             assert_eq!(body.get("vram_mb"), Some(&Json::Null));
-            assert_eq!(body.get("disk_mb"), Some(&Json::Null));
+
+            // `disk_mb` was on that line until `skynet-statfs` was written, and the rule it is
+            // held to now is the same one: **never estimated**. A machine whose volume can be read
+            // reports the megabytes available where packages are installed — which admission
+            // compares a package's declared need against — and one that cannot reports nothing.
+            // Zero is the answer neither may give, because §8.1 would then refuse every package
+            // that declares any disk at all.
+            match body.get("disk_mb") {
+                Some(Json::Null) => {}
+                Some(Json::Num(mb)) => assert!(
+                    *mb > 1.0,
+                    "{mb} MB free is a reading being misinterpreted, not a machine that runs this                      daemon",
+                ),
+                other => panic!("disk_mb is megabytes or nothing: {other:?}"),
+            }
             assert!(body.get_present("unmeasured").is_some());
             // §38.1: a withheld-capability list read from an unverified profile would be a
             // safety-relevant value anybody on the robot could edit.
@@ -4094,17 +4127,25 @@ fn health_reports_what_nobody_has_measured_as_unmeasured() {
 
     let (status, body) = fixture.request("GET", "/health", Some("observer-token"), "");
     assert_eq!(status, 200);
-    for field in [
-        "guard_trip_rate",
-        "battery",
-        "temperature_c",
-        "storage_headroom",
-    ] {
+    for field in ["guard_trip_rate", "battery", "temperature_c"] {
         assert_eq!(
             body.get(field),
             Some(&Json::Null),
             "{field} must not be zero"
         );
+    }
+
+    // Storage headroom left that list when `skynet-statfs` was written, and the assertion that
+    // replaces it is the one that was underneath it all along: **never zero unless it is true**.
+    // A machine that can measure reports a fraction; one that cannot reports null; neither reports
+    // a full disk on a fixture with room on it.
+    match body.get("storage_headroom") {
+        Some(Json::Null) => {}
+        Some(Json::Num(fraction)) => assert!(
+            *fraction > 0.0 && *fraction <= 1.0,
+            "a measured headroom is a fraction of a disk that is not full: {fraction}",
+        ),
+        other => panic!("storage_headroom is a fraction or nothing: {other:?}"),
     }
     let packages = body.get("packages").and_then(Json::as_arr).unwrap();
     assert_eq!(
@@ -4514,6 +4555,94 @@ mod recorder {
     fn open(root: &TempRoot, shape: Shape) -> Recorder {
         let layout = root.layout();
         Recorder::open(&layout, supervisor_meta(&layout), shape, BUDGET).expect("a recorder")
+    }
+
+    /// §26.2: the daemon attaches to a recording a control loop created, and takes its shape.
+    ///
+    /// This is the asymmetry, asserted where it is decided. A cycle carries a value per joint and
+    /// per channel and does not fit a ring shaped for a smaller body, so the loop refuses a
+    /// mismatch. An event carries neither, so this recorder writes into whatever the creator sized
+    /// — which is what makes **one** recording possible on a robot where the loop knows the body
+    /// and the supervisor does not.
+    #[test]
+    fn the_daemon_attaches_to_a_ring_a_control_loop_shaped() {
+        let root = TempRoot::new("blackbox-attach");
+        let layout = root.layout();
+
+        // What `skynet-kernel-host` creates: a ring for a body with joints and channels in it.
+        let commanding = Shape {
+            joints: 6,
+            channels: 3,
+        };
+        let creator = Recorder::open(&layout, supervisor_meta(&layout), commanding, BUDGET)
+            .expect("a fresh directory");
+        assert_eq!(creator.role(), skynet_lock::Role::Creator);
+        assert_eq!(creator.geometry().shape, commanding);
+
+        // What this daemon asks for, and does not get: its own events-only shape.
+        let second = Recorder::open(&layout, supervisor_meta(&layout), events_only(), BUDGET);
+
+        #[cfg(target_os = "linux")]
+        {
+            let mut second = second.expect("the daemon attaches rather than replacing the ring");
+            assert_eq!(second.role(), skynet_lock::Role::Attached);
+            assert_eq!(
+                second.geometry().shape,
+                commanding,
+                "an attacher takes the ring it finds; it does not reshape it",
+            );
+
+            let mut creator = creator;
+            let mut taken = Vec::new();
+            for n in 0..8u64 {
+                taken.push(
+                    creator
+                        .event(n, EventCode::RecordingStarted, "creator", "x")
+                        .expect("the creator writes"),
+                );
+                taken.push(
+                    second
+                        .event(n, EventCode::RecordingStarted, "attacher", "x")
+                        .expect("the attacher writes"),
+                );
+            }
+            taken.sort_unstable();
+            assert_eq!(
+                taken,
+                (1..=16).collect::<Vec<u64>>(),
+                "sixteen records, sixteen sequence numbers, none of them twice",
+            );
+
+            assert!(
+                second.seal(Reason::Operator, 100).is_err(),
+                "the creator seals the window (§26.2)",
+            );
+            let (sealed, _) = creator
+                .seal(Reason::Operator, 100)
+                .expect("the creator seals");
+            assert!(
+                !sealed.bytes.is_empty(),
+                "and what it seals is the one recording both wrote",
+            );
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            // No shared counter, so a second writer is refused exactly as it was before §26.2 was
+            // built — and, importantly, the creator's ring is **not** replaced on the way out.
+            let error = second
+                .expect_err("no mapping, no second writer")
+                .to_string();
+            assert!(
+                error.contains("skynetd"),
+                "the refusal names the holder: {error}"
+            );
+            assert_eq!(
+                creator.geometry().shape,
+                commanding,
+                "the refused writer left the recording alone",
+            );
+        }
     }
 
     /// §56.4, end to end: the recording says which body it is of.
@@ -7737,7 +7866,9 @@ mod checkin {
         let trust = TrustStore::load(&layout);
         let (identity, _) = crate::identity::evaluate(&layout, &trust);
         let actual = fixture.daemon.observe(1_000);
-        let observed = fixture.daemon.health(&actual, 1_000, power);
+        let observed = fixture
+            .daemon
+            .health(&actual, 1_000, power, fixture.daemon.read_headroom());
         let policy = crate::identity::running_policy(&fixture.daemon.store, &actual);
         let attestation =
             crate::identity::attestation(&layout, &trust, &identity, &actual.os.active, &policy);
@@ -11055,6 +11186,41 @@ mod retention {
             digest: format!("sha256:{name}"),
             receipted,
             cited,
+        }
+    }
+
+    /// The measurement §80's third condition waited on, taken from a real disk.
+    ///
+    /// Every other test in this module supplies `Free::Bytes` because the policy is decided in a
+    /// test rather than on a machine whose disk happens to be full. This one is about the input:
+    /// `free_of` reads a volume now, and the two answers it may give are a number or *unmeasured* —
+    /// never a zero, which is the reading that would run §80's rule at full force against every
+    /// window the robot holds.
+    #[test]
+    fn free_disk_is_measured_or_absent_and_never_zero() {
+        let root = TempRoot::new("retention-free");
+        let layout = root.layout();
+
+        match retention::free_of(&layout) {
+            Free::Bytes(bytes) => {
+                assert!(
+                    bytes > 0,
+                    "a volume with a temporary directory on it has bytes free",
+                );
+                let headroom = retention::headroom_of(&layout).expect("measured either way");
+                assert!(
+                    headroom > 0.0 && headroom <= 1.0,
+                    "§33.6's headroom is a fraction: {headroom}",
+                );
+            }
+            // The platform this suite also runs on. `skynet-statfs` reads a structure that is the
+            // kernel's on 64-bit Linux and nothing anywhere else, and refuses rather than guessing.
+            Free::Unmeasured => {
+                assert!(
+                    retention::headroom_of(&layout).is_none(),
+                    "a disk that cannot be measured has no headroom to report either",
+                );
+            }
         }
     }
 

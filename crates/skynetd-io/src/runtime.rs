@@ -813,7 +813,8 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         // turn of the loop, so a battery figure in it that came from a different turn would be the
         // one thing this struct exists not to be.
         let reading = self.read_power(now_ms);
-        let health = self.health(&actual, now_ms, Some(&reading));
+        let headroom = self.read_headroom();
+        let health = self.health(&actual, now_ms, Some(&reading), headroom);
         let pass = Pass {
             at_ms: now_ms,
             plan,
@@ -1096,6 +1097,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
                 .get("runtime")
                 .map(|runtime| runtime.str_arr("args"))
                 .unwrap_or_default(),
+            env: crate::shape::rendezvous(&self.store, id),
             working_directory: blob,
             limits: Limits::from_manifest(&manifest),
             cpus: self.cpus.clone(),
@@ -1353,7 +1355,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
 
         let post = crate::post::run(&layout, wall_s);
         let reading = self.read_power(now_ms);
-        let health = self.health(actual, now_ms, Some(&reading));
+        let health = self.health(actual, now_ms, Some(&reading), self.read_headroom());
         let wanted_running = !health.packages.is_empty()
             && health
                 .packages
@@ -1676,6 +1678,15 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         reading
     }
 
+    /// §33.6's `storage_headroom`: the fraction of the black box's volume still free.
+    ///
+    /// Beside [`Runtime::read_power`] and shaped like it — the I/O is here, and the rollup is
+    /// handed the number. Which volume is the question this answers by choosing one: the black
+    /// box's, because that is the disk §28 reserves and the one §80's reclaim would free.
+    pub fn read_headroom(&self) -> Option<f64> {
+        crate::retention::headroom_of(self.store.layout())
+    }
+
     /// §36.1's `low` row as a sentence, or `None` when new task leases may be granted.
     ///
     /// The sentence names *which* of §36's two reasons is in force, because they send an operator
@@ -1737,11 +1748,18 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     /// thing §36 remembers, and a health rollup that opened `/sys` would be doing I/O behind a name
     /// that promises an aggregate. `None` is a caller that did not read one, which reports the two
     /// fields absent — as they were on every check-in until §36 was written.
+    ///
+    /// `headroom` is §33.6's free-disk fraction, taken by the caller for exactly the reason `power`
+    /// is: measuring it is a syscall, and a rollup that made one behind a name promising an
+    /// aggregate is the shape this method was written against. `None` is a caller that did not
+    /// measure, or a disk `skynet-statfs` refused to believe — both report the field absent, which
+    /// is what every check-in did before this crate existed.
     pub fn health(
         &self,
         actual: &Actual,
         now_ms: u64,
         power: Option<&crate::power::Reading>,
+        headroom: Option<f64>,
     ) -> Health {
         let packages = actual
             .units
@@ -1764,7 +1782,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             // Generation lag against the Hub needs the Hub. §34.1: not reaching it is not a
             // failure, and `None` is a different fact from a lag of zero.
             generation_lag: None,
-            storage_headroom: None,
+            storage_headroom: headroom,
             guard_trip_rate: None,
             // §36's two, and this is their only source. `GET /health` and the check-in both read
             // this struct, so a robot cannot report one battery figure on its console and another

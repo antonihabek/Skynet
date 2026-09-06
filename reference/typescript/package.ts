@@ -548,10 +548,45 @@ function checkBudget(budget: ResourceBudget, capacity: DeviceCapacity): PackageF
   }]
 }
 
+/**
+ * The value of one dotted segment: its leading run of ASCII digits, or 0.
+ *
+ * §8.2's gate is the one place on the platform where a version arrives as *whatever an image
+ * reports* rather than as something a publisher was made to validate, so the only question worth
+ * asking about this function is what it does with a segment that is not a number. There are three
+ * answers and two of them are wrong.
+ *
+ * `Number(segment)` — what this file did until 2026-09-05 — reads `"0-rc1"` as **NaN**. `NaN !== 0`
+ * is true and `NaN < 0` is false, so the comparison reports the robot as *newer* than the minimum
+ * and the package is admitted. A robot whose version has one non-numeric segment therefore
+ * satisfies **every** `min_os_version` there has ever been, which is the single thing the field
+ * exists to prevent. It also read `"Infinity"` as infinity and `"0x10"` as 16, both fail-open, and
+ * — the detail that settles this — it already read `""` as **0**, so the file was not even
+ * consistent with itself about what an unreadable segment is worth.
+ *
+ * Falling the whole segment back to 0 is fail-closed and was the Rust edition's answer. It costs
+ * something real: `"1.2.10-rc1"` becomes `1.2.0` and is refused a package needing `1.2.5`, and the
+ * refusal it produces reads *"Requires Skynet OS 1.2.5 or later; this robot runs 1.2.10-rc1"* —
+ * a sentence naming a version that looks newer than the one being demanded. §64 makes that a
+ * defect: an operator cannot act on it.
+ *
+ * So: the **leading digits**, and 0 when there are none. `"10-rc1"` is 10, `"0-rc1"` is 0, `"rc1"`
+ * is 0, `""` is 0. A pre-release image compares as the release it is a candidate for, which is what
+ * an operator means by it, and anything genuinely unreadable still reads as the oldest possible
+ * version and is refused. Note it does not defer to `semver.ts`: that parser requires three
+ * segments and returns null for `"2.0"`, which an image reports as often as `"2.0.0"`, and a null
+ * in this position is a package admitted onto an OS nobody compared.
+ */
+function segmentValue(segment: string): number {
+  let digits = 0
+  while (digits < segment.length && segment[digits] >= '0' && segment[digits] <= '9') digits += 1
+  return digits === 0 ? 0 : Number(segment.slice(0, digits))
+}
+
 /** Numeric-segment comparison, sufficient for `major.minor.patch` OS versions. */
 function compareVersions(a: string, b: string): number {
-  const left = a.split('.').map(Number)
-  const right = b.split('.').map(Number)
+  const left = a.split('.').map(segmentValue)
+  const right = b.split('.').map(segmentValue)
   for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
     const diff = (left[i] ?? 0) - (right[i] ?? 0)
     if (diff !== 0) return diff < 0 ? -1 : 1

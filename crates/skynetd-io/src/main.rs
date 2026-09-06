@@ -56,6 +56,8 @@ skynetd — the Skynet OS supervisor
 
   --root       Where /data and /run live. Default `/`.
   --lan        Also serve the console on a link-local address. Refused if it is routable (§34.2).
+  --advertise  The label a browse shows for this robot. Default: this machine's name.
+               Only with --lan: an advertisement is an invitation to open the console.
   --interval   Reconcile period in milliseconds. Default 10000.
   --user       Use the calling user's systemd manager rather than the system one.
   --signed-by  The public key that signed this version's digest, and
@@ -161,27 +163,50 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
     // The black box (§13, §33.2). Opened before anything is reconciled, so the first pass's actions
     // are inside the recording rather than before it.
     //
-    // A shape of zero joints and zero channels, because this robot has no control loop: the policy
-    // runtime and observation assembly (§25) are unwritten, so there are no cycles to record and
-    // claiming a shape would size every record for arrays nothing fills. The ring still records
-    // §26's event channel, which is what a supervisor produces.
+    // §26.3: this daemon starts first (§27) and therefore *creates* the recording, and a record's
+    // size is a function of the joint and channel counts — so the shape chosen here decides whether
+    // a control loop starting afterwards can attach to it or is refused. Opening events-only
+    // unconditionally, which is what this did until §26.3 was closed, made the daemon-first boot
+    // order the one ordering that could not run a loop.
+    //
+    // `false` for `allow_retarget`, for the reason `stage` gives where the flag is read: §6.1 makes
+    // retargeting *"a decision somebody made, not a fallback that happens quietly"*, and there is
+    // no somebody at boot. The reconcile loop passes `false` for the same reason.
+    let supervising = skynetd_io::shape::supervising(
+        &daemon.store,
+        &skynetd_io::embodiment::load(&layout),
+        false,
+    );
+    eprintln!("skynetd: black box {}", supervising.describe());
     let mut recorder = match skynetd_io::blackbox::Recorder::open(
         &layout,
         skynetd_io::blackbox::supervisor_meta(&layout),
-        skynet_blackbox::record::Shape {
-            joints: 0,
-            channels: 0,
-        },
+        supervising.shape(),
         skynetd_io::blackbox::DEFAULT_BUDGET,
     ) {
         Ok(recorder) => {
+            // §26.2: which of the two roles this process got. A robot with a control loop has
+            // the loop create the recording and this daemon attach to it, and an operator should
+            // be able to see which happened without reading two logs — the difference decides
+            // who seals the window and what shape the records are.
+            let role = match recorder.role() {
+                skynet_lock::Role::Creator => "created",
+                skynet_lock::Role::Attached => "attached to (§26.2)",
+            };
             eprintln!(
-                "skynetd: black box at {}, {} records of {} bytes. Events only — §26's four cycle \
-                 channels need a control loop, and this robot has none.",
+                "skynetd: black box {role} {}, {} records of {} bytes",
                 layout.blackbox().display(),
                 recorder.geometry().capacity,
                 recorder.geometry().record_size,
             );
+            // §26.2's lock, reclaimed from a holder the kernel says is gone — which is what the
+            // previous `skynetd` leaves every time it is stopped, since a signal runs no `Drop`.
+            // Said out loud because a directory that changed hands is a fact somebody reading this
+            // recording later is entitled to, and because for as long as it was *not* reclaimed
+            // this daemon could not seal a window at all.
+            if let Some(previous) = recorder.reclaimed_from() {
+                eprintln!("skynetd: black box lock reclaimed from {previous}, which has exited");
+            }
             Some(recorder)
         }
         Err(failure) => {
@@ -354,6 +379,91 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         let _ = local.listener().set_nonblocking(true);
         if let Some(lan) = &lan {
             let _ = lan.listener().set_nonblocking(true);
+        }
+
+        // §82's responder. Only with a console: the SRV record's port is the console's, and a
+        // robot that answered a browse while serving nothing on the LAN would send an operator to
+        // a closed port and look like a network fault.
+        let discovery = lan.as_ref().and_then(|lan| {
+            let address = lan.local_addr().ok()?;
+            let host = match skynetd_io::discovery::machine_name() {
+                Some(host) => host,
+                None => {
+                    // Naming the robot something is not better than not advertising: an operator
+                    // browsing a bench would read a label this machine does not answer to
+                    // anywhere else.
+                    eprintln!(
+                        "skynetd: not advertising on mDNS — this machine has no usable name and                          §82 will not invent one. Pass --advertise <label>."
+                    );
+                    return None;
+                }
+            };
+            let label = flag(argv, "--advertise").unwrap_or_else(|| host.clone());
+            match skynetd_io::discovery::Discovery::open(&label, &host, address, monotonic(origin))
+            {
+                Ok(discovery) => {
+                    println!("skynetd: announcing {} on mDNS", discovery.instance());
+                    Some(discovery)
+                }
+                Err(error) => {
+                    // Reported, not fatal. The console is unaffected; what is lost is being found
+                    // without knowing the address already, which is the hole §82 exists to close
+                    // and not a reason to refuse to supervise a robot.
+                    eprintln!("skynetd: {error}");
+                    None
+                }
+            }
+        });
+        // A thread of its own, and it is the only one in this daemon. The rule it looks like it
+        // breaks is §33.2's — *"one thread, one loop, and the API is polled between passes"* — and
+        // what that rule is against is a scheduler in front of a reconcile and an accept. This is
+        // not that: the responder owns its sockets and its state, shares nothing with the loop, and
+        // touches no file the daemon writes.
+        //
+        // What forced it is a deadline. A browse waits two seconds; RFC 6762 §6 wants an answer
+        // within 120 ms of the question, and §82.1's probe sequence is three datagrams 250 ms
+        // apart. A reconcile pass takes as long as it takes — it stages packages, drains a queue and
+        // uploads a window — so a responder polled between passes answers a browse that stopped
+        // listening, and at `--interval 1000` a robot took **six seconds** to take its own name
+        // rather than 750 ms. Measured, on a robot doing nothing else.
+        if let Some(mut discovery) = discovery {
+            std::thread::spawn(move || {
+                let mut announced: Option<String> = None;
+                loop {
+                    let now = monotonic(origin);
+                    discovery.poll(now, jitter_for(now));
+                    // Printed on every **change**, not once. A robot that takes its name and then
+                    // loses it hours later — because somebody powered on a second robot with the
+                    // same label — has stopped being findable, and a line printed only at start-up
+                    // would leave the journal saying it was advertising for as long as the daemon
+                    // ran. §82.4's lesson is that silence here is indistinguishable from a link
+                    // with nothing on it.
+                    //
+                    // A **defence** is printed as well, and for the same reason it is counted
+                    // separately: it means somebody on this link powered on a robot carrying this
+                    // one's label. This robot kept the name, so nothing is broken here — but the
+                    // other machine has gone quiet on discovery and its operator is about to
+                    // wonder why, and this is the only line anywhere that says which robot the
+                    // name went to.
+                    if !matches!(
+                        discovery.claim(),
+                        skynet_mdns::responder::Claim::Probing { .. }
+                    ) {
+                        let state = format!(
+                            "{} defended:{}",
+                            discovery.claim(),
+                            discovery.counters().defended
+                        );
+                        if announced.as_deref() != Some(state.as_str()) {
+                            println!("skynetd: mDNS {}", discovery.report());
+                            announced = Some(state);
+                        }
+                    }
+                    // Twenty milliseconds is §6's own floor for an answer to a shared record, so
+                    // this is the coarsest tick that cannot make the responder late.
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            });
         }
 
         let mut next_reconcile = 0u64;
@@ -1242,7 +1352,7 @@ fn report_checkin<L, S>(
     // somebody replaced on a running robot.
     let body = skynetd_io::embodiment::load(layout);
     let (_, reading) = skynetd_io::power::observe(&mut daemon.power, layout, &body, now_ms);
-    let health = daemon.health(&actual, now_ms, Some(&reading));
+    let health = daemon.health(&actual, now_ms, Some(&reading), daemon.read_headroom());
     let policy = skynetd_io::identity::running_policy(&daemon.store, &actual);
     let attestation =
         skynetd_io::identity::attestation(layout, &trust, &identity, &actual.os.active, &policy);
@@ -1466,6 +1576,18 @@ fn converge_and_record<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::
         eprintln!("skynetd: §12's boot gate could not reach the bootloader: {detail}");
     }
 
+    // §38.3's *other* record, and it was missing on exactly the half that matters longest.
+    //
+    // A grant changed over the local API is written to both the audit log and the ring. A grant the
+    // **reconciler** changes was written only to the ring — which holds minutes — so a capability
+    // that arrived with an operator and was taken away by a desired state left a permanent record
+    // of the giving and nothing at all of the taking. Eleven months later the log answers "when did
+    // this robot start letting that package move an arm" and cannot answer when it stopped.
+    //
+    // Before the recorder is unwrapped, because a robot with no black box still has an audit log,
+    // and this is the record that outlives the ring by design.
+    audit_grant_changes(layout, &passes);
+
     let Some(recorder) = recorder else {
         return passes;
     };
@@ -1531,6 +1653,46 @@ fn record_skills(
             &report.invocation,
             &report.event_detail(),
         );
+    }
+}
+
+/// The audit half of a grant the reconciler changed (§38.3).
+///
+/// The actor is the **desired state** rather than a person, and naming it that way is the point: it
+/// is the honest answer to *who did this*, it is not a credential label, and it cannot be confused
+/// with one. `previous` is "held" on a revocation for the same reason the API records it — a reader
+/// has to be able to tell a revocation from a request that changed nothing — and absent on a grant,
+/// where there was nothing before.
+///
+/// Only [`Outcome::Applied`] is recorded. A level-triggered reconciler emits `AlreadyTrue` on every
+/// pass, and a log with one row per second per grant is a log nobody reads.
+fn audit_grant_changes(layout: &Layout, passes: &[skynetd_io::runtime::Pass]) {
+    use skynetd::reconcile::ActionKind as K;
+
+    let audit = skynetd_io::audit::Audit::of(layout);
+    let at = skynetd_io::audit::rfc3339(wall_ms());
+    for pass in passes {
+        for (action, outcome) in &pass.applied {
+            if !matches!(outcome, skynetd_io::runtime::Outcome::Applied) {
+                continue;
+            }
+            let (verb, id, token, previous) = match &action.kind {
+                K::GrantCapability { id, token } => ("capability.grant", id, token, None),
+                K::RevokeCapability { id, token } => ("capability.revoke", id, token, Some("held")),
+                _ => continue,
+            };
+            let subject = format!("{id}:{token}");
+            if let Err(failure) = audit.append(
+                &at,
+                "desired state (§11)",
+                verb,
+                &subject,
+                "converged to the desired state, not a local decision (§11, §33.3)",
+                previous,
+            ) {
+                eprintln!("skynetd: `{verb}` on {subject} could not be recorded: {failure}");
+            }
+        }
     }
 }
 

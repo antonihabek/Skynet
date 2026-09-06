@@ -33,9 +33,16 @@
 //! | `denied` | *nothing yet* — see below |
 //! | `installed` | the package store |
 //!
-//! `vram_mb` and `disk_mb` stay `None`, which admission already treats as "not declared" rather
-//! than as zero. Accelerator memory needs a vendor runtime this daemon does not link, and free disk
-//! needs `statvfs`; both are honest absences rather than placeholders.
+//! `vram_mb` stays `None`, which admission already treats as "not declared" rather than as zero:
+//! accelerator memory needs a vendor runtime this daemon does not link.
+//!
+//! `disk_mb` was absent for the same kind of reason — *"free disk needs `statvfs`"* — and is
+//! measured now, through `skynet-statfs`. Two things about it are worth stating because they change
+//! what an admission decision means. It is **available** space rather than total, because the
+//! question admission asks is whether a package fits. And it is therefore **a reading rather than a
+//! property**: a package admitted today can be refused tomorrow on a robot whose disk filled, which
+//! is the correct answer and a new way for an install to fail. On a machine `skynet-statfs` cannot
+//! measure it stays `None`, exactly as before.
 //!
 //! `denied` is empty and that is the one field here whose emptiness is *not* yet a claim: §38.1's
 //! operator profile is delivered through desired state, signed, and this daemon does not verify a
@@ -194,7 +201,11 @@ pub fn read(store: &Store, body: &Body, os_version: &str) -> Capacity {
         cpu_cores: std::thread::available_parallelism()
             .ok()
             .map(|n| n.get() as f64),
-        disk_mb: None,
+        // §33.6's measurement, asked of the store's volume rather than the black box's: the
+        // question here is whether a package fits where packages go.
+        disk_mb: skynet_statfs::space_of(store.layout().root())
+            .ok()
+            .map(|space| space.available_bytes as f64 / (1024.0 * 1024.0)),
         os_version: os_version.to_string(),
         capabilities,
         extensions,
@@ -239,7 +250,7 @@ pub fn to_json(capacity: &Capacity) -> skynet_json::Json {
                 // rendering `vram_mb: 0` would be reporting a robot with no accelerator, which is
                 // a different claim from one nothing has measured.
                 .set("vram_mb", Json::Null)
-                .set("disk_mb", Json::Null)
+                .set("disk_mb", capacity.disk_mb.map_or(Json::Null, Json::Num))
                 .set(
                     "unmeasured",
                     Json::from(

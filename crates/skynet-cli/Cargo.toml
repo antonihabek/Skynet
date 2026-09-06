@@ -16,6 +16,7 @@ path = "src/main.rs"
 skynet-contracts = { path = "../skynet-contracts" }
 skynet-dl = { path = "../skynet-dl" }
 skynet-json = { path = "../skynet-json" }
+skynet-mdns = { path = "../skynet-mdns" }
 skynet-rhal = { path = "../skynet-rhal" }
 skynet-sha256 = { path = "../skynet-sha256" }
 skynet-urdf = { path = "../skynet-urdf" }

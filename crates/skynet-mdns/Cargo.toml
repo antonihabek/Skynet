@@ -1,0 +1,22 @@
+[package]
+name = "skynet-mdns"
+description = "DNS-SD over multicast DNS (§32.2, §34.2): how an operator's machine finds a robot whose console is reachable and unaddressable."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+# No third-party dependencies, like every crate in this workspace. Two extra reasons here:
+#
+# * this is the first crate written to run on an operator's **Windows or macOS** machine rather
+#   than on a robot, and the portable subset of `std::net` is the whole of what it needs — a
+#   platform-specific socket option crate would buy nothing and cost the property in the root
+#   manifest;
+# * it parses packets from an untrusted LAN. A hand-written parser whose every bound is visible is
+#   reviewable in an afternoon; a dependency's is a supply chain in the one tool an operator
+#   reaches for when a robot is misbehaving.
+
+[lints.rust]
+missing_docs = "warn"

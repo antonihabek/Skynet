@@ -35,13 +35,16 @@
 //! the kernel's: *the clock and the conditions are supplied*. That is what lets the policy be
 //! decided in a test rather than on a machine whose disk happens to be full.
 //!
-//! It is also the honest shape today, because **nothing on this robot measures free disk**.
-//! §33.6's `storage_headroom` is reported absent for the same reason, in
-//! [`crate::checkin`]'s own words — *"needs a `statvfs` nothing here calls"* — and `skynetd-io`
-//! carries `#![forbid(unsafe_code)]`, so the syscall belongs in a crate of its own with the
-//! argument in its header, the way [`skynet_dl`](https://docs.rs) holds the loader's `unsafe`.
-//! Until that exists, [`Free::Unmeasured`] is what the caller supplies and nothing is ever
-//! reclaimed — which is the correct direction for a rule whose failure mode is destroying evidence.
+//! It **was** also the honest shape, because nothing on this robot measured free disk: §33.6's
+//! `storage_headroom` was absent for the same reason, in [`crate::checkin`]'s own words — *"needs a
+//! `statvfs` nothing here calls"* — and `skynetd-io` carries `#![forbid(unsafe_code)]`, so the
+//! syscall belonged in a crate of its own with the argument in its header.
+//!
+//! `skynet-statfs` is that crate, and [`free_of`] now reads a disk. What has not changed is the
+//! shape: `plan` still takes the number rather than fetching it, and [`Free::Unmeasured`] is still
+//! what a caller supplies on a platform the syscall does not support or a reading the crate refuses
+//! to believe — in which case nothing is reclaimed, which is the correct direction for a rule whose
+//! failure mode is destroying evidence.
 //!
 //! # The tombstone is not the audit log
 //!
@@ -503,11 +506,7 @@ pub fn report(layout: &Layout, free: Free, floor_bytes: u64) -> Json {
         out.set(
             "detail",
             Json::Str(
-                "Nothing on this robot measures free disk — §33.6's `storage_headroom` is absent \
-                 for the same reason — so §80's reclaim never runs and every sealed window is \
-                 kept. That is the safe direction and it is not the intended one: a robot that \
-                 seals daily will eventually fill this volume, and the operator is the party who \
-                 finds out."
+                "This machine's volume could not be measured — §33.6's `storage_headroom` is \n                 absent for the same reason, and `skynet-statfs` needs 64-bit Linux and \n                 refuses a reading that cannot describe a filesystem — so §80's reclaim \n                 does not run and every sealed window is kept. That is the safe direction \n                 and it is not a state to stay in: a robot that seals daily will \n                 eventually fill this volume, and the operator is the party who finds out."
                     .to_string(),
             ),
         );
@@ -529,10 +528,29 @@ pub fn report(layout: &Layout, free: Free, floor_bytes: u64) -> Json {
 /// for a profile. It is listed with the retention work in `BUILD-LOG.md`.
 pub const DEFAULT_FLOOR_BYTES: u64 = 1_024 * 1_024 * 1_024;
 
-/// What this robot can say about its own free disk today.
+/// What this robot can say about its own free disk.
 ///
-/// One function, so the day a `statvfs` exists there is one line to change and every caller gets
-/// it. See the module header for why the syscall is not here.
-pub fn free_of(_layout: &Layout) -> Free {
-    Free::Unmeasured
+/// The volume the **black box** is on rather than the root filesystem, because that is the disk
+/// §28 reserves and the one a reclaim would free. On a robot where they are the same partition the
+/// answer is the same; on one where they are not, this is the question that was being asked.
+///
+/// An unmeasurable disk is [`Free::Unmeasured`] and never a zero. The distinction is the whole
+/// reason this returns an enum: a robot that read *no bytes free* off a failed syscall would run
+/// §80's rule at full force against every window it holds.
+pub fn free_of(layout: &Layout) -> Free {
+    match skynet_statfs::space_of(&layout.blackbox()) {
+        Ok(space) => Free::Bytes(space.available_bytes),
+        Err(_) => Free::Unmeasured,
+    }
+}
+
+/// §33.6's `storage_headroom`: the fraction of that volume still free, 0–1.
+///
+/// `None` for an unmeasurable disk, which is what `Health` already means by an absent field —
+/// *nothing on this structure is inferred, and nothing defaults to a flattering value*. A robot
+/// that could not measure its disk reports nothing rather than reporting full.
+pub fn headroom_of(layout: &Layout) -> Option<f64> {
+    skynet_statfs::space_of(&layout.blackbox())
+        .ok()
+        .map(|space| space.free_fraction())
 }

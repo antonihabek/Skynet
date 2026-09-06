@@ -35,9 +35,10 @@
 //! # This is the fourth `unsafe` in the workspace
 //!
 //! `skynet-rhal` declares a C vtable, `skynet-cli` loads native code, `skynet-ring-shm` maps a
-//! `memfd`. This is the fourth, and it takes the same treatment: as small as a crate can be — five
-//! `extern "C"` declarations, one `mmap`, one `AtomicU64::from_ptr` — with everything a reviewer
-//! has to check visible in one file.
+//! `memfd`. This is the fourth, and `skynet-statfs` — §33.6's free-disk read — is the fifth. It
+//! takes the same treatment as all of them: as small as a crate can be — five `extern "C"`
+//! declarations, one `mmap`, one `AtomicU64::from_ptr` — with everything a reviewer has to check
+//! visible in one file.
 //!
 //! What it deliberately does **not** do is run a seqlock. `skynet-ring` needs one because a reader
 //! may race a writer mid-slot; the black box has no concurrent reader, because sealing takes the

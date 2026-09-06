@@ -140,6 +140,9 @@ pub struct Host<'a> {
     state_velocity: Vec<f32>,
     state_effort: Vec<f32>,
     frame: skynet_ring::Command,
+    /// One reusable observation, for the mirror ring. Filled and published each cycle when a
+    /// producer is attached; never allocated in the hot path, like everything else here.
+    body_out: skynet_obs::Observation,
     have_command: bool,
     summary: Summary,
 }
@@ -157,6 +160,7 @@ impl<'a> Host<'a> {
             state_position: Vec::with_capacity(channels.len()),
             state_velocity: Vec::with_capacity(channels.len()),
             state_effort: Vec::with_capacity(channels.len()),
+            body_out: skynet_obs::Observation::default(),
             frame: skynet_ring::Command::default(),
             have_command: false,
             summary: Summary::default(),
@@ -168,7 +172,11 @@ impl<'a> Host<'a> {
         &self.summary
     }
 
-    /// Turn the loop once.
+    /// Turn the loop once, with nothing reading the body.
+    ///
+    /// Equivalent to [`Host::step_observing`] with no producer: the robot is driven and the state
+    /// it reports goes nowhere but the black box. That is the deployment every robot had before
+    /// `skynet-obs` existed, and it is still the right one for an open-loop policy.
     pub fn step<A: Actuator>(
         &mut self,
         now_ns: u64,
@@ -176,6 +184,35 @@ impl<'a> Host<'a> {
         ring: &mut Consumer<'_>,
         limits: &ResolvedLimits<'a>,
         envelope: Option<&Envelope<'a>>,
+    ) -> Turn {
+        self.step_observing(now_ns, body, ring, limits, envelope, None)
+    }
+
+    /// Turn the loop once, publishing the body this cycle read.
+    ///
+    /// # Why this process is the one that publishes it
+    ///
+    /// It is already holding the answer. §7's guards need the measured state every cycle, so the
+    /// read has happened and the arrays are in hand; publishing is a copy into a mapping this
+    /// process opened. The alternative — the policy runtime opening its own handle on the driver —
+    /// is the thing §25 forbids outright (*"cannot reach the RHAL at all"*) and would put a second
+    /// reader on a device that mostly does not have one.
+    ///
+    /// # It is published whatever the cycle did
+    ///
+    /// Including cycles where the read **failed**. A failed read leaves the previous arrays in
+    /// place and `sample` as `None`, so what goes out carries the fallback stamp and a zero
+    /// sequence — and a policy watching the sequence stop advancing learns exactly what the black
+    /// box learns. Skipping the publish would leave the policy reading a stale slot with no way to
+    /// tell it apart from a body that is not moving.
+    pub fn step_observing<A: Actuator>(
+        &mut self,
+        now_ns: u64,
+        body: &mut A,
+        ring: &mut Consumer<'_>,
+        limits: &ResolvedLimits<'a>,
+        envelope: Option<&Envelope<'a>>,
+        observations: Option<&mut skynet_obs::Producer<'_>>,
     ) -> Turn {
         self.tick += 1;
         self.summary.cycles += 1;
@@ -223,6 +260,31 @@ impl<'a> Host<'a> {
             base_pose: sample.map_or([f32::NAN; 7], |sample| sample.base_pose),
             base_twist: sample.map_or([0.0; 6], |sample| sample.base_twist),
         };
+
+        // ── Publish the body, if anybody is listening ────────────────────────
+        if let Some(producer) = observations {
+            let joints = position.len().min(skynet_obs::MAX_JOINTS);
+            self.body_out.stamp_ns = observed.stamp_ns;
+            self.body_out.seq = observed.seq as u64;
+            self.body_out.joints = joints;
+            self.body_out.flags = observed.flags as u32;
+            self.body_out.fault_code = observed.fault_code;
+            self.body_out.base_pose = observed.base_pose;
+            self.body_out.base_twist = observed.base_twist;
+            for (joint, measured) in position.iter().take(joints).enumerate() {
+                // `NaN` where the driver reported fewer entries than positions, which is the same
+                // value `skynet-obs` writes above a declared joint count and means the same thing:
+                // there is no measurement here. A zero would be a claim.
+                self.body_out.position[joint] = *measured;
+                self.body_out.velocity[joint] = velocity.get(joint).copied().unwrap_or(f32::NAN);
+                self.body_out.effort[joint] = effort.get(joint).copied().unwrap_or(f32::NAN);
+            }
+            // The error is unreachable — `joints` is clamped to the ceiling above — and it is
+            // discarded rather than unwrapped because a panic in the control loop over a mirror
+            // ring would stop a robot that is otherwise running correctly. The black box is the
+            // record that matters, and it is written either way.
+            let _ = producer.publish(&self.body_out);
+        }
 
         // ── Take whatever the policy posted ──────────────────────────────────
         let reading = ring.read(&mut self.frame);
