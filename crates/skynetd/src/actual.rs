@@ -104,6 +104,15 @@ pub struct Actual {
     /// Distinct from `grants`: a grant says a package *may* use a capability, a lease says it
     /// currently *is*. Two packages may hold the same grant; only one holds the lease.
     pub leases: Vec<(String, String)>,
+    /// Packages with a live (non-terminal) skill invocation (§54.4).
+    ///
+    /// Read off the daemon's own skill table on the observing pass — the same way `leases`
+    /// is read off `leases.json` — because the reconciler cannot otherwise see the second
+    /// writer of its process table. A unit in this set is wanted by definition for as long
+    /// as its invocation is live, so the plan holds no stop for it; the set empty again, a
+    /// leftover unit is reaped rather than supervised. A set rather than a list, because
+    /// membership is the only question asked of it.
+    pub live_skills: std::collections::BTreeSet<String>,
 }
 
 impl Actual {

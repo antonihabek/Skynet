@@ -285,6 +285,7 @@ fn it_converges_from_a_state_nobody_arranged() {
         profile_limits: None,
         grants: vec![("ghost/gone".to_string(), "manipulation.grasp".to_string())],
         leases: vec![("ghost/gone".to_string(), "manipulation.grasp".to_string())],
+        live_skills: Default::default(),
     };
 
     machine.converge(&want);
@@ -430,6 +431,53 @@ fn stopping_never_waits_and_starting_always_does() {
         "making a robot less capable never waits"
     );
     assert_eq!(stopping.ready(SafeState::No, &running).count(), 1);
+}
+
+/// §54.4 against §33.3: a unit a live skill invocation started is wanted by definition for
+/// as long as the invocation is live, so the plan holds no stop for it. Without this the
+/// level-triggered reconciler kills every skill-started unit on the pass after it starts —
+/// desired state never names it, so `!should_run` is true for ever — and a skill cannot run
+/// longer than one reconcile interval on any robot.
+#[test]
+fn a_unit_backing_a_live_skill_is_not_stopped() {
+    let want = desired(vec![]);
+    let running = Actual {
+        units: vec![UnitStatus {
+            id: "acme/pick".to_string(),
+            state: UnitState::Running,
+            restarts: 0,
+            last_exit: None,
+        }],
+        live_skills: ["acme/pick".to_string()].into_iter().collect(),
+        ..Actual::default()
+    };
+    let spared = plan(&want, &running);
+    assert!(
+        spared.actions.iter().all(
+            |action| !matches!(&action.kind, ActionKind::StopPackage { id } if id == "acme/pick")
+        ),
+        "a live skill owns its unit: {:?}",
+        spared
+            .actions
+            .iter()
+            .map(|action| &action.kind)
+            .collect::<Vec<_>>()
+    );
+
+    // And the backstop: the invocation over, nothing owns it, and the reconciler reaps the
+    // leftover rather than supervising a process nobody asked for. This is what collects the
+    // unit when the daemon died mid-skill and no `Stop` effect will ever come.
+    let reaped = Actual {
+        live_skills: Default::default(),
+        ..running
+    };
+    let cleanup = plan(&want, &reaped);
+    assert!(
+        cleanup.actions.iter().any(
+            |action| matches!(&action.kind, ActionKind::StopPackage { id } if id == "acme/pick")
+        ),
+        "nothing owns it now, so it is reaped"
+    );
 }
 
 #[test]

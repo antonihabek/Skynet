@@ -128,6 +128,35 @@ echo yes > "$ROOT/data/state/safe-state"
 
 if command -v systemd-run >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
   want "and it starts" "start_package openrobot/holder → applied" "$ROOT/out"
+  # §59's confinement, read back off the real unit rather than the argv that requested it.
+  # The suite asserts what `command_line` builds; only this asks systemd what landed — and a
+  # launcher whose sandbox is only ever seen by systemd is a sandbox nobody has read. The
+  # holder is the unit to read: it runs for the whole script, so there is no race, and it
+  # travels the same `command_line` as every other policy.
+  systemctl --user show "skynet:openrobot:holder.service" \
+    -p NoNewPrivileges,ProtectSystem,ProtectKernelTunables,ProtectKernelModules,ProtectControlGroups,RestrictSUIDSGID,CapabilityBoundingSet,MemoryMax,TasksMax,AllowedCPUs \
+    > "$ROOT/unit" 2>&1 || true
+  want "no new privileges on the unit" "NoNewPrivileges=yes" "$ROOT/unit"
+  want "a read-only OS tree on the unit" "ProtectSystem=yes" "$ROOT/unit"
+  want "no sysctl writes on the unit" "ProtectKernelTunables=yes" "$ROOT/unit"
+  want "no module loads on the unit" "ProtectKernelModules=yes" "$ROOT/unit"
+  want "no cgroup writes on the unit (§40)" "ProtectControlGroups=yes" "$ROOT/unit"
+  want "no setuid on the unit" "RestrictSUIDSGID=yes" "$ROOT/unit"
+  # Line-exact: a substring match would pass `CapabilityBoundingSet=cap_anything`.
+  grep -qx "CapabilityBoundingSet=" "$ROOT/unit" \
+    && pass "and no capabilities on the unit" \
+    || { fail "the unit kept capabilities:"; sed 's/^/      /' "$ROOT/unit"; }
+  # `MemoryMax=64M` as sent arrives as bytes; the 64 is the declared `ram_mb` in §2's
+  # manifest, so this asserts the budget became the limit, not merely that a limit exists.
+  want "the declared budget became the limit" "MemoryMax=67108864" "$ROOT/unit"
+  want "and the fixed task ceiling" "TasksMax=128" "$ROOT/unit"
+  # Present and non-empty, with the value deliberately unpinned: the core set is the
+  # machine's, and pinning it would fail the check on every other machine. What is
+  # asserted is that no misconfiguration silently omitted it — an omitted cpuset is every
+  # core, including the kernel's (§40.2).
+  grep -q "^AllowedCPUs=[0-9]" "$ROOT/unit" \
+    && pass "and the unit holds a real cpuset" \
+    || { fail "no cpuset on the unit:"; sed 's/^/      /' "$ROOT/unit"; }
   STARTED=1
 else
   want "the start fails, saying it could not reach systemd" "start_package openrobot/holder → failed" "$ROOT/out"
@@ -303,6 +332,130 @@ PREV=$(readlink "$ROOT/data/packages/active/openrobot/holder/prev.1" | sed 's#.*
 [ "$PREV" = "$DIGEST" ] && pass "and the previous version is pinned for rollback" || fail "prev.1 is $PREV"
 [ -d "$ROOT/data/packages/blobs/$DIGEST" ] \
   && pass "its blob survived collection (§37.3)" || fail "the rollback target was collected"
+
+say "9. A skill starts its policy, on the ordinary path (§54.4)"
+mkdir -p "$ROOT/skillpkg/bin"
+cat > "$ROOT/skillpkg/bin/run" <<PROGRAM
+#!/bin/sh
+# The skynetp-in-a-blob pattern: the package carries its entrypoint, the robot carries the
+# policy host, and the rendezvous (SKYNET_RING_SOCKET) arrives in the environment when a
+# runtime offers one. No runtime runs in this script — no skynetk, no driver — so the hold
+# backend publishes into a ring that is private to the process, for a bounded 60 seconds,
+# and exits cleanly. The touch is the whole of the proof below: a file only the unit's own
+# process can write, so its presence means the daemon really started this package on this
+# machine rather than reporting that it did. The 60-second bound is the other half of the
+# honesty: a demo that hangs on a failure would leave a stray unit on every robot it ran on.
+touch "$ROOT/skill-ran" 2>/dev/null || true
+exec "$BIN/skynetp" run --hz 10 --cycles 600 --backend hold --quiet
+PROGRAM
+chmod +x "$ROOT/skillpkg/bin/run"
+cat > "$ROOT/skillpkg/manifest.json" <<'MANIFEST'
+{"budget":{"cpu_cores":0.5,"ram_mb":64},"expected_duration_seconds":120,"id":"acme/wave","isolation":"sandboxed","kind":"skill","runtime":{"entrypoint":"bin/run"},"schema_version":1,"version":"1.0.0"}
+MANIFEST
+"$SKYNET" install "$ROOT/skillpkg" --root "$ROOT" --id acme/wave --kind skill \
+  --version 1.0.0 --digest 0000000000000000000000000000000000000000000000000000000000000000 \
+  > "$ROOT/out" 2>&1 || true
+SKILLDIGEST=$(sed -n 's/.*hashes to \([0-9a-f]\{64\}\).*/\1/p' "$ROOT/out")
+[ -n "$SKILLDIGEST" ] || { echo "could not read the skill digest from the refusal"; exit 1; }
+"$SKYNET" install "$ROOT/skillpkg" --root "$ROOT" --id acme/wave --kind skill \
+  --version 1.0.0 --digest "$SKILLDIGEST" > "$ROOT/out" 2>&1
+want "the skill package stages" "staged acme/wave" "$ROOT/out"
+
+# Desired state names it as installed but not running: the Hub wants the skill present and
+# the invocation decides when it runs. Without this entry a pass would collect the
+# activation (§37.3) before the skill ever starts — and `"state":"installed"` never starts
+# it, because anything but `"running"` parses as stopped.
+cat > "$ROOT/data/state/desired.json" <<DESIRED
+{"generation":43,"os":{"channel":"stable","version":""},
+ "packages":[{"id":"openrobot/holder","version":"2.0.0","digest":"$SECOND",
+              "kind":"policy","state":"running","grants":["manipulation.grasp"]},
+             {"id":"acme/wave","version":"1.0.0","digest":"$SKILLDIGEST",
+              "kind":"skill","state":"installed","grants":[]}]}
+DESIRED
+"$SKYNETD" once --root "$ROOT" --user > "$ROOT/out" 2>&1 || true
+want "the skill package is activated" "activate_package acme/wave" "$ROOT/out"
+if grep -q "start_package acme/wave" "$ROOT/out"; then
+  fail "desired state says installed, not running, and the skill started anyway"
+else
+  pass "and desired state alone does not start it"
+fi
+
+start_daemon
+"$SKYNET" skill run acme/wave $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+want "the invocation is accepted, not started" "Accepted, not started" "$ROOT/out"
+
+# idle → preconditions → acquiring → running is three passes at a one-second interval. Poll
+# for the phase rather than sleeping a fixed span: a fixed sleep is a race on a loaded
+# machine and a wait on a fast one.
+i=0
+while [ $i -lt 40 ]; do
+  "$SKYNET" skills $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1 || true
+  if grep "acme/wave" "$ROOT/out" | grep -q "running"; then break; fi
+  i=$((i + 1)); sleep 0.5
+done
+if grep "acme/wave" "$ROOT/out" | grep -q "running"; then
+  pass "the invocation reaches running"
+else
+  fail "the invocation never reached running:"; sed 's/^/      /' "$ROOT/out"
+fi
+
+# Steady running is not asserted here, and the reason is the design rather than the
+# script: this robot has no kernel — no skynetk runs in this script — so the daemon's
+# operating state is `safe`, and a skill that stayed in `running` on a robot that cannot
+# command would be the interlock failing, not the demo working. What is asserted instead
+# is both halves of the honest outcome: the unit ran, and the lifecycle refused to command
+# through it. (The spare clause that keeps the reconciler from killing skill units has its
+# proof in the suite, where a kernel-less robot does not confuse the question.)
+if command -v systemd-run >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+  # The trace file the entrypoint touches: presence means the daemon really started this
+  # package on this machine. Poll rather than sleep — systemd starts units in milliseconds
+  # and the 60-second `--cycles` bound means a failure cannot strand the wait.
+  i=0
+  while [ $i -lt 40 ]; do
+    [ -f "$ROOT/skill-ran" ] && break
+    i=$((i + 1)); sleep 0.5
+  done
+  [ -f "$ROOT/skill-ran" ] \
+    && pass "its unit ran on this robot" \
+    || fail "the unit never ran — the start was reported, not performed"
+  i=0
+  while [ $i -lt 40 ]; do
+    "$SKYNET" skills $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1 || true
+    if grep "acme/wave" "$ROOT/out" | grep -q "terminal"; then break; fi
+    i=$((i + 1)); sleep 0.5
+  done
+  if grep "acme/wave" "$ROOT/out" | grep -q "terminal"; then
+    pass "and the invocation lands in terminal"
+  else
+    fail "the invocation never landed:"; sed 's/^/      /' "$ROOT/out"
+  fi
+  want "with no kernel it refuses to command, and names the reason" "robot_stopped" "$ROOT/out"
+  [ -n "$(ls -A "$ROOT/data/state/outbound" 2>/dev/null)" ] \
+    && pass "and the episode it recorded is queued (§34.4, §54.4)" \
+    || fail "terminal, but the outbound queue holds no episode"
+else
+  # No systemd here, so the start is refused loudly rather than run — the same contract §3
+  # asserts for a desired package. The lifecycle then reads a skill in `running` with nothing
+  # running as a skill that finished, and lands in `terminal` on its own.
+  grep -q "would not start" "$ROOT/daemon.log" \
+    && pass "the start fails, saying what it could not reach" \
+    || fail "no loud refusal in the daemon log"
+  [ -f "$ROOT/skill-ran" ] \
+    && fail "refused, yet something ran anyway" \
+    || pass "and nothing ran"
+  i=0
+  while [ $i -lt 40 ]; do
+    "$SKYNET" skills $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1 || true
+    if grep "acme/wave" "$ROOT/out" | grep -q "terminal"; then break; fi
+    i=$((i + 1)); sleep 0.5
+  done
+  if grep "acme/wave" "$ROOT/out" | grep -q "terminal"; then
+    pass "and the invocation lands in terminal anyway"
+  else
+    fail "the invocation never landed:"; sed 's/^/      /' "$ROOT/out"
+  fi
+fi
+stop_daemon
 
 printf '\n'
 if [ "$FAILED" -eq 0 ]; then

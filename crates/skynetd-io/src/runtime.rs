@@ -778,8 +778,23 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     }
 
     /// Observe the machine.
+    ///
+    /// Plus the one fact no outside reading can supply: which packages have a live skill
+    /// invocation, which the reconciler must not stop (§54.4, and the spare clause in the
+    /// plan it feeds). Read off this daemon's own skill table on the observing pass — the
+    /// same discipline as every other field, only the source is a table rather than a file.
+    /// Terminal invocations are not in it: their units are the lifecycle's to stop, and a
+    /// leftover with no live invocation is the reconciler's to reap.
     pub fn observe(&self, now_ms: u64) -> Actual {
-        observe::observe(&self.store, &self.launcher, &self.slots, now_ms)
+        let mut actual = observe::observe(&self.store, &self.launcher, &self.slots, now_ms);
+        actual.live_skills = self
+            .skills
+            .invocations()
+            .iter()
+            .filter(|invocation| !invocation.terminal())
+            .map(|invocation| invocation.package.clone())
+            .collect();
+        actual
     }
 
     /// One pass.

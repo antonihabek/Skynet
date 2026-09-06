@@ -11883,3 +11883,154 @@ both editions. Golden path 49 commands.
 111. **Two writers of one file need one story about who wins, and both need to write it down.** The
      API and the reconciler both edit the grant file; the reconciler always wins, which is correct,
      and it was the only one of the two that kept no permanent record of what it did.
+
+---
+
+## 2026-09-06 (sixtieth) — the sandbox at launch
+
+§80's ring row ended with the sentence this session was assigned: *"What is still one process is a
+sandbox: §8's permissions and the cgroup limits §40 resolves are the daemon's to apply to the unit
+it launches."* The sentence names two mechanisms, and the audit found them in different states —
+§40's shipped seasons ago (`Limits::from_manifest`, the RT-core-subtracting cpuset, both wired
+into every `Unit` in the activate path), §8.3's never started (every unit launched with ambient
+privilege; `isolation: "sandboxed"` recorded at admission and enforced nowhere at launch).
+
+So the build is the missing half only: `launch::confinement_properties(kind)` — seven systemd
+directives for `policy`/`service`/`skill`, none for `driver` by §8.3's own exemption (§19's
+signature gate is the compensating control) — wired into `SystemdLauncher::command_line` where
+the cgroup properties already are, with three tests on the argv systemd will actually see. The
+directives left out are named in the module header with the unblocker for each: `PrivateTmp`
+and `ProtectHome`/`strict` would fence stores under `/tmp` (which `e2e.sh` uses) or a home
+directory; `DevicePolicy` waits on §40.3's accelerator allow-list, without which `closed`
+refuses every GPU policy rather than the second one; syscall and address-family filters wait on
+a measured allow-list, which §64 makes a defect to invent. The OCI sandbox of §23.4 stays the
+designed end state, and nothing here claims to be it.
+
+`safety.policy.isolation` stays skipped, and its reason is the most-edited sentence of the
+session: the old one ("nothing on this edition sandboxes a package") is now false, but the
+check as specified still has no machine that performs the forbidden hold — and the launcher
+asserting its own argv would be an edition property, which is what `safety.kernel.parity` is
+skipped for being. The audit also closed a stale bullet for free: round seven's "ships no unit
+file" is now two files (`packaging/systemd/skynetd.service`, `skynetk.service`).
+
+Deliberately untouched: `docs/skynet-os-architecture.md`. §80's sandbox sentence is half-stale
+now, and correcting it means editing a file that mirrors BotMarket byte for byte, with
+BotMarket absent from this machine. Noted in the build log rather than diverged in the spec.
+
+### Numbers
+
+`cargo test --workspace` — **1,628 passed**, 0 failed, summed over all 56 test targets;
+baseline before the change 1,625, the +3 confirmed by stash-and-rerun to be the new
+confinement tests. `cargo fmt --check --all` and
+`cargo clippy --workspace --all-targets` clean. `node tools/check-*.mjs` not run — no `node`
+on this machine; the change touches no mirrors, corpus, or golden-path surface.
+
+### Findings, restated
+
+1-110 as before.
+
+111. **A gap described as one thing can be two halves in different states.** §80's sandbox row
+     assigned §8 and §40 jointly to the launch, and read as a sentence it was one unfinished
+     thing; audited as mechanisms, one half had shipped seasons ago and the other had never
+     started. A joint sentence about two mechanisms hides a done inside an undone — audit the
+     halves, not the sentence.
+
+---
+
+## 2026-09-06 (sixty-first) — a skill starts its unit
+
+Round seven's skill bullet named a missing demo package and missed the unnamed half: whether
+the daemon, given such a package, starts it at all. The contract suite proves the lifecycle
+emits `Effect::Start`; nothing proved `Daemon::perform` performs it through the same `start()`
+a desired state uses. The new test —
+`a_skill_entering_running_starts_its_unit_and_leaving_it_stops_it` — drives the real fixture
+daemon (`POST /skills`, three `advance_skills` into `running`, unit marked exited, two more
+into `terminal`) and asserts `start acme/pick` then `stop acme/pick` in the launcher's calls.
+It passed on the first run: the path was correct and only unwitnessed.
+
+The same audit closed the "daemon does not launch the runtime" bullet for good — `skynetk` is
+a boot unit by design, the daemon passes the rendezvous, both witnessed — and declined three
+builds with named unblockers: the vision buffer pool (no capture backend, no consumer — a
+pool now would be an unmeasured allow-list per §64), the isolation probe (half a route
+without the CLI wiring, unverifiable without a systemd bus), and device confinement (still
+`vram_mb: None` for want of a vendor runtime). Details and the round-nine list are in the
+build log §60.
+
+### Numbers
+
+`cargo test --workspace` — **1,629 passed**, 0 failed; `cargo fmt --check --all` and
+`cargo clippy --workspace --all-targets` clean.
+
+### Findings, restated
+
+1-111 as before.
+
+112. **An effect nobody performs is a second launcher waiting to happen.** A lifecycle can be
+     fully tested at its own boundary — every transition, every effect, exactly once — and
+     still never have moved a process, because emission and performance are different halves
+     owned by different modules. Test the seam, not just the sides.
+
+---
+
+## 2026-09-06 (sixty-second) — the reconciler killed every skill on its second pass
+
+Building round nine's demo package found the bug underneath it: `perform` starts a skill's
+unit through the ordinary path, and the next reconcile pass stops it — desired state never
+names the package, so `!should_run` holds for ever. Every skill on a looping daemon lived
+one interval. Fixed with `Actual.live_skills`, filled in `Daemon::observe` off the skill
+table and spared in the plan's stop rule; no invocation live, the leftover is reaped. The
+plan test failed red with the stop in full view before the fix, and the daemon spare test
+drives the loop order end to end. `e2e.sh` §9 carries the live half a kernel-less robot
+allows: the unit's trace file proves the start was performed, `robot_stopped` proves the
+interlock (no kernel, no commanding — steady running here would be the interlock failing),
+and the episode is queued. Full story, including the stash experiment that failed
+identically with and without the fix and what that taught, is in the build log §61.
+
+### Numbers
+
+`cargo test --workspace` — **1,631 passed**, 0 failed; `cargo fmt --check --all` and
+`cargo clippy --workspace --all-targets` clean; `sh crates/skynetd-io/e2e.sh` — all checks
+passed.
+
+### Findings, restated
+
+1-112 as before.
+
+113. **Red without green is a story, not a proof.** The new e2e failed with the fix stashed,
+     exactly as predicted — and failed identically with the fix restored, because the
+     interlock dominates a kernel-less robot either way. A failing end-to-end check is not
+     evidence about your change until the passing run is also shown; here the pass lives one
+     layer down, where no kernel confuses the question, and the e2e keeps the half it can
+     honestly prove.
+
+---
+
+## 2026-09-06 (sixty-third) — the sandbox, read back off a real unit
+
+§59's confinement was proven at the argv layer with a note that no systemd machine had been
+asked what landed. This machine is one, so `e2e.sh` §3 now reads the daemon's own unit back
+(`systemctl --user show`) and asserts ten properties — six directives, empty capabilities,
+budget-as-bytes, task ceiling, non-empty cpuset with its value deliberately unpinned. No
+Rust changed; the mechanism was probed with a throwaway unit first. Full e2e green.
+
+The audit corrected a standing item rather than building one: round ten's "kernel in the
+e2e loop" is misstated, because nothing outside contract tests ever reports kernel, RHAL or
+homing state — the daemon derives `safe` on every robot, always, so a running skynetk alone
+would change nothing observable. Restated in the build log §62 as design work (kernel
+liveness into the daemon's conditions, within §33.1), alongside the conformance flip the
+new e2e evidence half-delivers.
+
+### Numbers
+
+`cargo test --workspace` — **1,631 passed**, 0 failed; `sh crates/skynetd-io/e2e.sh` — all
+checks passed, including the ten new unit-property reads.
+
+### Findings, restated
+
+1-113 as before.
+
+114. **An assertion about argv is not an assertion about the machine.** The suite proved
+     what `command_line` builds; only a running systemd could say what landed, and bytes
+     (`MemoryMax=67108864`) disagree with strings (`MemoryMax=64M`) in exactly the place a
+     substring assertion would hide. Read back what the platform reports, in its units, or
+     the check proves the request rather than the result.
