@@ -31,6 +31,30 @@
 //! than quietly omitting `AllowedCPUs=`. An omitted cpuset is every core, including the one the
 //! kernel is on, so the failure mode of a misconfigured isolation list would be the exact thing
 //! §40.2 says is not a tunable.
+//!
+//! # A policy runs sandboxed, and this is where
+//!
+//! §8.3 has one sentence with no override: only a `driver` may run `native`, and a `policy` is
+//! always sandboxed. Admission records that property (`isolation: "sandboxed"`) and the kernel's
+//! `mode_gate` guard enforces the grants — but until this module, nothing confined the process
+//! itself: every unit launched with the ambient privilege of whatever systemd context the daemon
+//! runs in. [`confinement_properties`] closes that half, per kind, on every launch.
+//!
+//! # What is deliberately not here
+//!
+//! Every directive below is one that cannot break a legitimate package whatever directory the
+//! robot keeps its store in. The path-dependent ones — `PrivateTmp`, `ProtectHome`,
+//! `ProtectSystem=strict` — stay out because a store under `/tmp` (which `e2e.sh` uses) or under
+//! a home directory (which a development machine uses) would vanish or go read-only inside the
+//! unit, and a sandbox that breaks the layout it confines is a sandbox operators remove. Device
+//! confinement stays out because there is no declared device set to allow-list from: §40.3's
+//! accelerator rule (one policy holds the GPU, the second is refused at admission) is the design
+//! that closes it, and a `DevicePolicy=closed` written before that admission exists would refuse
+//! every GPU policy rather than the second one. Syscall and address-family filters stay out
+//! because nobody has measured the allow-list, and §64 makes a wrong filter a defect rather than
+//! caution: a refusal an operator cannot act on. The designed end state is §23.4's OCI sandbox;
+//! this is the systemd confinement that holds until it exists, and the omissions are listed so
+//! nobody mistakes it for the finished one.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -89,6 +113,45 @@ impl Limits {
 
 fn positive(value: Option<f64>) -> Option<f64> {
     value.filter(|n| n.is_finite() && *n > 0.0)
+}
+
+/// The systemd confinement a package kind launches under (§8.3, §40).
+///
+/// A `driver` runs `native` — that is §8.3's own exemption, and its compensating control is §19's
+/// signature gate (a driver activates only against a trusted key) plus the resource limits and
+/// cpuset every kind carries. Everything else launches confined, with no flag to ask out: an
+/// escape hatch here would quietly undo the invariant §7 is built on, so there isn't one.
+///
+/// Each directive earns its place against a sentence in the spec:
+///
+/// * `NoNewPrivileges=yes` — §8.3's isolation made a property of the process: no setuid/setgid
+///   escalation out of the sandbox, ever.
+/// * `ProtectSystem=yes` — the OS tree (`/usr`, the boot loader directories) read-only. `yes`,
+///   not `strict`: strict would also fence the directories a store legitimately lives in.
+/// * `ProtectKernelTunables=yes`, `ProtectKernelModules=yes` — a package rewrites no sysctl and
+///   loads no module.
+/// * `ProtectControlGroups=yes` — the §40 line: a package that could rewrite its own cgroup
+///   could raise the `MemoryMax` §40.1 killed it at, and the declared budget would mean nothing.
+/// * `RestrictSUIDSGID=yes` — a content-addressed blob has no honest setuid binary to create.
+/// * `CapabilityBoundingSet=` (empty) — §23.4's "no `CAP_*`". A policy needing real-time
+///   scheduling or raw I/O is a policy contradicting §23.5, and refusing it at launch is the
+///   audible version of that contradiction.
+///
+/// Pure, so the confinement every launch carries can be asserted on any machine: a launcher
+/// whose sandbox is only ever seen by systemd is a sandbox nobody has read.
+pub fn confinement_properties(kind: PackageKind) -> Vec<String> {
+    match kind {
+        PackageKind::Driver => Vec::new(),
+        PackageKind::Policy | PackageKind::Service | PackageKind::Skill => vec![
+            "NoNewPrivileges=yes".to_string(),
+            "ProtectSystem=yes".to_string(),
+            "ProtectKernelTunables=yes".to_string(),
+            "ProtectKernelModules=yes".to_string(),
+            "ProtectControlGroups=yes".to_string(),
+            "RestrictSUIDSGID=yes".to_string(),
+            "CapabilityBoundingSet=".to_string(),
+        ],
+    }
 }
 
 /// Which cores a package may be scheduled on (§40.2).
@@ -324,6 +387,14 @@ impl SystemdLauncher {
         })?;
         argv.push("-p".to_string());
         argv.push(cpus);
+
+        // §8.3: a policy is always sandboxed, and the launch is where that stops being a record
+        // in the admission and starts being true of the process. A driver carries none of these
+        // by the same section's exemption — and still carries its limits and its cpuset above.
+        for property in confinement_properties(unit.kind) {
+            argv.push("-p".to_string());
+            argv.push(property);
+        }
 
         // Before the program, which is where `systemd-run` takes its own options. A `--setenv` after
         // it is an argument to the package.

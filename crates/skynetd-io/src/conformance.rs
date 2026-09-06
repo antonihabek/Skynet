@@ -168,9 +168,14 @@ pub fn run(
 
     results.push(skipped(
         "safety.policy.isolation",
-        "a sandboxed package holding an actuator descriptor is refused — and nothing on this \
-         edition sandboxes a package, because no policy runtime exists to sandbox one. This is the \
-         one entry in this list whose stated reason has not gone stale.",
+        "a sandboxed package holding an actuator descriptor is refused — and there is still no \
+         machine that performs the forbidden hold and reports the refusal. What changed is the \
+         premise underneath it: every non-driver unit now launches under systemd confinement \
+         (`launch::confinement_properties` — no new privileges, a read-only OS tree, no cgroup \
+         or module writes, no capabilities), so the isolation is no longer only a record in the \
+         admission. What would execute this check is a probe asserting the launched unit's actual \
+         confinement rather than the launcher's own argv — the argv asserting itself would be an \
+         edition property, which is what `safety.kernel.parity` above is skipped for being.",
     ));
 
     results.push(signature_required(capacity, at));
@@ -817,9 +822,9 @@ pub fn to_lines(run: &Run, simulator: bool) -> Vec<String> {
 /// Synthetic: the two commands, because no policy has ever run here.
 ///
 /// So it establishes that **the gate on this robot's own grants refuses and admits the right
-/// commands**. It does not establish that a sandboxed package was stopped, because nothing on this
-/// edition sandboxes one — that is `safety.policy.isolation`, which stays skipped and whose stated
-/// reason has not gone stale.
+/// commands**. It does not establish that a sandboxed package was stopped: units launch confined
+/// (`launch::confinement_properties`) but nothing performs the forbidden hold — that is
+/// `safety.policy.isolation`, which stays skipped, and its reason says what would execute it.
 ///
 /// # Both halves, because a gate that refuses everything is not a gate
 ///

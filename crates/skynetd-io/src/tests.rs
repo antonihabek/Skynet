@@ -646,6 +646,117 @@ fn the_systemd_command_line_says_restart_is_not_systemds_decision() {
     assert_eq!(argv.last().unwrap(), "--fast");
 }
 
+fn confined_unit(kind: PackageKind) -> Unit {
+    Unit {
+        id: "openrobot/grasp".to_string(),
+        kind,
+        program: PathBuf::from("/data/packages/blobs/x/bin/run"),
+        args: Vec::new(),
+        env: Vec::new(),
+        working_directory: PathBuf::from("/data/packages/blobs/x"),
+        limits: Limits {
+            ram_mb: Some(512.0),
+            cpu_cores: Some(1.0),
+            tasks_max: 128,
+        },
+        cpus: Cpus {
+            present: [0, 1].into_iter().collect(),
+            isolated: [1].into_iter().collect(),
+        },
+    }
+}
+
+/// §8.3 has no override: a policy launches sandboxed, and the exemption for a driver is the same
+/// section's — so the test asserts both halves, on the argv systemd will actually see.
+#[test]
+fn a_policy_unit_launches_confined_and_a_driver_does_not() {
+    let policy = SystemdLauncher::system()
+        .command_line(&confined_unit(PackageKind::Policy))
+        .unwrap();
+    for property in [
+        "NoNewPrivileges=yes",
+        "ProtectSystem=yes",
+        "ProtectKernelTunables=yes",
+        "ProtectKernelModules=yes",
+        "ProtectControlGroups=yes",
+        "RestrictSUIDSGID=yes",
+        "CapabilityBoundingSet=",
+    ] {
+        assert!(
+            policy.contains(&property.to_string()),
+            "a policy launches with {property}"
+        );
+    }
+    // The confinement changes nothing about the ceilings: the sandbox is not a second budget.
+    assert!(policy.contains(&"MemoryMax=512M".to_string()));
+    assert!(policy.contains(&"AllowedCPUs=0".to_string()));
+
+    let driver = SystemdLauncher::system()
+        .command_line(&confined_unit(PackageKind::Driver))
+        .unwrap();
+    for property in [
+        "NoNewPrivileges=yes",
+        "ProtectSystem=yes",
+        "ProtectKernelTunables=yes",
+        "ProtectKernelModules=yes",
+        "ProtectControlGroups=yes",
+        "RestrictSUIDSGID=yes",
+        "CapabilityBoundingSet=",
+    ] {
+        assert!(
+            !driver.contains(&property.to_string()),
+            "a driver runs native per §8.3, so {property} must not be there"
+        );
+    }
+    // Native is not unlimited: the exemption is from confinement, not from §40.
+    assert!(driver.contains(&"MemoryMax=512M".to_string()));
+    assert!(driver.contains(&"AllowedCPUs=0".to_string()));
+}
+
+/// Services and skills are packages too, and §8.3 names only the driver as native — so every
+/// other kind carries exactly the policy's confinement, now and after the next kind is added.
+#[test]
+fn every_non_driver_kind_carries_the_same_confinement() {
+    let policy = launch::confinement_properties(PackageKind::Policy);
+    assert!(!policy.is_empty());
+    assert_eq!(launch::confinement_properties(PackageKind::Service), policy);
+    assert_eq!(launch::confinement_properties(PackageKind::Skill), policy);
+    assert!(launch::confinement_properties(PackageKind::Driver).is_empty());
+}
+
+/// The restraint, pinned: none of these may appear without the design that makes them safe —
+/// a path-dependent directive against an unmeasured store layout, a device policy with no
+/// declared device set (§40.3), or a filter with no measured allow-list (§64).
+#[test]
+fn confinement_touches_no_path_and_invents_no_allow_list() {
+    for kind in [
+        PackageKind::Policy,
+        PackageKind::Service,
+        PackageKind::Skill,
+    ] {
+        let properties = launch::confinement_properties(kind);
+        for property in &properties {
+            // `ProtectSystem=strict` in full rather than `strict`: the substring sits inside
+            // `RestrictSUIDSGID`, which is confinement, not the fenced store this forbids.
+            for forbidden in [
+                "PrivateTmp",
+                "ProtectHome",
+                "DevicePolicy",
+                "DeviceAllow",
+                "ProtectSystem=strict",
+                "ReadWritePaths",
+                "AddressFamilies",
+                "SystemCallFilter",
+            ] {
+                assert!(
+                    !property.contains(forbidden),
+                    "{property} reaches for {forbidden}, which has no measured basis yet"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn a_unit_name_round_trips_back_to_a_package_id() {
     assert_eq!(
@@ -6278,6 +6389,150 @@ fn invoking_a_package_that_is_not_installed_says_so() {
         .and_then(Json::as_str)
         .unwrap_or_default();
     assert!(detail.contains("no activated version"), "{detail}");
+}
+
+/// §54.4's `running` row through the daemon rather than the contract: entering `running` starts
+/// the skill's unit on the ordinary supervisor path — the same `start()` a desired state uses,
+/// so with the same budget, cpuset, rendezvous and confinement — and leaving it stops the unit
+/// the same way. The contract suite proves the lifecycle emits the effects; this proves the
+/// daemon performs them, which is the half a skill that never starts a policy would be missing.
+#[test]
+fn a_skill_entering_running_starts_its_unit_and_leaving_it_stops_it() {
+    let mut fixture = Fixture::new("skill-starts-unit");
+    fixture.provision();
+    install_skill(&fixture, "acme/pick", |_| {});
+
+    let (status, _) = fixture.request(
+        "POST",
+        "/skills",
+        Some("admin-token"),
+        r#"{"skill":"acme/pick"}"#,
+    );
+    assert_eq!(status, 202);
+
+    // idle → preconditions → acquiring: two advances, and nothing has started, because a unit
+    // started before `running` would be a skill running that never cleared acquiring.
+    for now_ms in [1_001, 1_002] {
+        let actual = fixture.daemon.observe(now_ms);
+        fixture.daemon.advance_skills(now_ms, None, &actual, None);
+    }
+    assert!(
+        !fixture
+            .daemon
+            .launcher
+            .calls
+            .iter()
+            .any(|call| call == "start acme/pick"),
+        "calls: {:?}",
+        fixture.daemon.launcher.calls
+    );
+
+    // The third advance enters `running`, and the daemon performs the `Start` on the pass that
+    // emitted it rather than leaving it for the reconciler to discover.
+    let actual = fixture.daemon.observe(1_003);
+    fixture.daemon.advance_skills(1_003, None, &actual, None);
+    assert!(
+        fixture
+            .daemon
+            .launcher
+            .calls
+            .iter()
+            .any(|call| call == "start acme/pick"),
+        "calls: {:?}",
+        fixture.daemon.launcher.calls
+    );
+
+    // The unit exits: the skill returned. Observed, not assumed — the lifecycle reads the
+    // process table the supervisor changes, which is why `advance_skills` runs after the
+    // reconciler in the main loop rather than before it.
+    let unit = fixture
+        .daemon
+        .launcher
+        .units
+        .iter_mut()
+        .find(|unit| unit.id == "acme/pick")
+        .expect("the start above registered the unit");
+    unit.state = UnitState::Stopped;
+    // Gone → `verifying` → `terminal`: two advances, and the terminal transition stops it.
+    for now_ms in [1_004, 1_005] {
+        let actual = fixture.daemon.observe(now_ms);
+        fixture.daemon.advance_skills(now_ms, None, &actual, None);
+    }
+    assert!(
+        fixture
+            .daemon
+            .launcher
+            .calls
+            .iter()
+            .any(|call| call == "stop acme/pick"),
+        "calls: {:?}",
+        fixture.daemon.launcher.calls
+    );
+}
+
+/// The reconciler's half of §54.4, through the daemon the way the main loop drives it:
+/// reconcile, then advance. A unit a live invocation started is not the plan's to stop, so a
+/// pass taken while the skill is running must hold no stop for it — otherwise every skill on
+/// a looping daemon lives exactly one interval. When the invocation ends, the lifecycle's own
+/// `Stop` performs the stop (proved above), so sparing here strands nothing.
+#[test]
+fn reconcile_spares_a_unit_while_its_skill_is_live() {
+    let mut fixture = Fixture::new("skill-spared");
+    fixture.provision();
+    let digest = install_skill(&fixture, "acme/pick", |_| {});
+    // Named in desired state as installed but not running: the Hub wants the skill present
+    // and the invocation — not the reconciler — decides when it runs. Without this entry
+    // the pass below would collect the activation (§37.3) before the skill ever starts,
+    // which is the same removal an unnamed package gets and the test would prove nothing.
+    fixture.write_desired(&format!(
+        r#"{{"generation":7,"os":{{"channel":"stable","version":""}},
+             "packages":[{{"id":"acme/pick","version":"1.0.0","digest":"sha256:{digest}",
+                           "kind":"skill","state":"installed","grants":[]}}]}}"#
+    ));
+    fixture.daemon.reload();
+
+    let (status, _) = fixture.request(
+        "POST",
+        "/skills",
+        Some("admin-token"),
+        r#"{"skill":"acme/pick"}"#,
+    );
+    assert_eq!(status, 202);
+
+    // The loop's order, three times: the reconcile sees what the last advance did, and the
+    // advance reads the process table the reconcile changed.
+    for now_ms in [1_001, 1_002, 1_003] {
+        fixture.daemon.reconcile(now_ms);
+        let actual = fixture.daemon.observe(now_ms);
+        fixture.daemon.advance_skills(now_ms, None, &actual, None);
+    }
+    assert!(
+        fixture
+            .daemon
+            .launcher
+            .calls
+            .iter()
+            .any(|call| call == "start acme/pick"),
+        "the skill is running: {:?}",
+        fixture.daemon.launcher.calls
+    );
+
+    // The next pass observes a unit desired state never named — and must not stop it.
+    let pass = fixture.daemon.reconcile(1_004);
+    assert!(
+        !pass.plan.actions.iter().any(|action| matches!(
+            &action.kind,
+            skynetd::reconcile::ActionKind::StopPackage { id } if id == "acme/pick"
+        )),
+        "a live skill owns its unit"
+    );
+    assert!(
+        !pass.applied.iter().any(|(action, _)| matches!(
+            &action.kind,
+            skynetd::reconcile::ActionKind::StopPackage { id } if id == "acme/pick"
+        )),
+        "neither planned nor applied"
+    );
 }
 
 /// The cell reaching a precondition, which is the second contract this session gave a caller.

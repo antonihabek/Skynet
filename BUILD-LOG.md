@@ -4477,3 +4477,294 @@ closed loop, and this one — plus three in `shape` for who is told and who is n
   policy package that speaks §25 is now startable — what is missing is a package that does, which
   is a vendor's to write and this repository's to demonstrate.
 * **The sandbox.** Two processes, no confinement between them yet.
+
+## 59. The sandbox at launch — §8.3 stops being a record and starts being true of the process
+
+The item is the tail of §80's ring row: *"What is still one process is a sandbox: §8's permissions
+and the cgroup limits §40 resolves are the daemon's to apply to the unit it launches."* Audited
+before building, because the sentence names two mechanisms and they turned out to be in different
+states:
+
+* **§40's half was already shipped.** `Limits::from_manifest` reads the declared budget into
+  `MemoryMax`/`CPUQuota`/`TasksMax`, `Cpus` subtracts the isolated RT core and refuses an empty
+  allowance, and `runtime.rs`'s activate path wires both into every `Unit`. Nothing to build.
+* **§8.3's half had never started.** Every unit — policy included — launched with the ambient
+  privilege of the daemon's systemd context. Admission records `isolation: "sandboxed"` and the
+  kernel's `mode_gate` enforces the grants, but no line of code confined the process itself.
+
+Built in `crates/skynetd-io/src/launch.rs`:
+
+* `confinement_properties(kind)` — pure, so it is asserted on any machine: seven directives for
+  `policy`/`service`/`skill` (`NoNewPrivileges`, `ProtectSystem=yes`, `ProtectKernelTunables`,
+  `ProtectKernelModules`, `ProtectControlGroups`, `RestrictSUIDSGID`, empty
+  `CapabilityBoundingSet`), none for `driver`. The driver's exemption is §8.3's own; its
+  compensating controls are §19's signature gate and the limits/cpuset it still carries.
+* Wired into `SystemdLauncher::command_line`, after the cgroup properties — so the argv systemd
+  sees is the argv the tests read, and a sandbox only systemd ever saw would be one nobody read.
+* Three tests: policy confined + driver native on the real argv (limits intact in both, proving
+  the sandbox is not a second budget); all non-driver kinds identical; and the restraint pinned —
+  no `PrivateTmp`/`ProtectHome`/`strict`, no device policy, no syscall/address filters.
+
+The omissions are the design, not a shortfall of the session, and each names its unblocker.
+`PrivateTmp` and `ProtectHome`/`strict` would fence stores under `/tmp` (which `e2e.sh` uses) or
+a home directory (which a development machine uses) — a sandbox that breaks the layout it
+confines is a sandbox operators remove. `DevicePolicy` waits on §40.3's accelerator allow-list:
+with no declared device set, `closed` refuses every GPU policy rather than the second one.
+Syscall and address-family filters wait on a measured allow-list; §64 makes a wrong filter a
+defect rather than caution. The module header says all of this, so nobody mistakes the
+systemd confinement for §23.4's OCI sandbox, which stays the designed end state.
+
+`conformance.rs`'s `safety.policy.isolation` stays **skipped**, with its reason rewritten: the
+old reason ("nothing on this edition sandboxes a package") is now false, but the check as
+specified — a forbidden hold performed and refused — still has no machine probe, and the
+launcher asserting its own argv would be an edition property, which is what
+`safety.kernel.parity` is skipped for being. The reason names the probe that would execute it.
+
+Two corrections to the record above, found while auditing:
+
+* "Round seven" says this repository ships no unit file. It now ships two:
+  `packaging/systemd/skynetd.service` and `packaging/systemd/skynetk.service`, with the §33.1
+  ordering (`After=`/`Before=`, neither `Requires=` the other) and the §40.2 core pinning. That
+  bullet is closed; the old text stands as what was true when written.
+* The spec document is untouched by this session. §80's sandbox sentence is now half-stale, and
+  fixing it means editing `docs/skynet-os-architecture.md`, which mirrors BotMarket byte for
+  byte (`docs/README.md`: edited in both repositories or in neither). BotMarket is not present
+  on this machine, so the annotation waits for a pass that has both trees — noted here rather
+  than diverged there.
+
+### Run
+
+```
+cargo test --workspace — 1,628 passed, 0 failed (baseline before the change: 1,625; the +3 are
+the new confinement tests, confirmed by stash-and-rerun rather than by arithmetic)
+cargo fmt --check --all — clean
+cargo clippy --workspace --all-targets — clean
+```
+
+`node tools/check-*.mjs` not run: no `node` on this machine. The change touches no mirrors,
+no corpus, and no golden-path surface, so there is nothing for them to re-pin — stated, not
+assumed.
+
+## What round eight leaves
+
+* **Device confinement (§40.3).** The accelerator allow-list at admission first, then
+  `DeviceAllow` derived from it. This order or the sandbox refuses the first GPU policy.
+* **A probe-based isolation check.** Something that reads a launched unit's actual confinement
+  (e.g. `systemctl show` on a `skynet:*` unit) rather than the argv that requested it — that is
+  what flips `safety.policy.isolation` from skipped to executed.
+* **Vision.** Unchanged: the observation ring carries the body, not the cameras; frames need a
+  buffer pool with handles and a lifetime rule.
+* **A skill starting a policy.** Unchanged: `Effect::Start` starts a package; the demo package
+  that speaks §25 is still the missing piece.
+
+## 60. A skill starts its unit — through the daemon, on the ordinary path
+
+Round seven's skill bullet had two halves and only named one. The named half — a demo policy
+package that speaks §25 — is a vendor artifact and still missing. The unnamed half — whether
+the daemon, given such a package, actually starts it — had never been exercised past the
+contract boundary: the skill suite proves the lifecycle *emits* `Effect::Start`, and nothing
+proved `Daemon::perform` *performs* it through the same `start()` a desired state uses. A
+lifecycle whose effects nobody performs is a second launcher waiting to happen, so this session
+proved the wiring rather than building another path.
+
+The test is `a_skill_entering_running_starts_its_unit_and_leaving_it_stops_it`, through the
+real `Fixture` daemon with a `RecordingLauncher` — no new harness, the one the API suite
+already uses:
+
+* `POST /skills` invokes `acme/pick` (202, `idle` — the existing acceptance, reused as setup).
+* Two `advance_skills` move `idle → preconditions → acquiring` with nothing started: a unit
+  started before `running` would be a skill running that never cleared acquiring.
+* The third advance enters `running` and the daemon performs the `Start` on the emitting pass —
+  `launcher.calls` holds `start acme/pick`, via `start()` with its budget, cpuset, rendezvous
+  env and (as of §59) confinement, because there is no second launcher to perform it differently.
+* The unit is marked exited, the observation is re-taken with `daemon.observe` rather than
+  assumed — the lifecycle reads the process table the supervisor changes, which is why
+  `advance_skills` runs after the reconciler in `main.rs` — and two advances later
+  (`verifying → terminal`) `launcher.calls` holds `stop acme/pick`.
+
+Passed on the first run, which is evidence about the code rather than the test: the path was
+already correct, it was only unwitnessed.
+
+### Audited and deliberately not built
+
+* **Daemon runtime launch.** Re-checked against the tree rather than the old bullets: `skynetk`
+  is a systemd unit at boot (`packaging/systemd/skynetk.service`, §33.1 ordering, §40.2 pinning),
+  the daemon never starts it by design, and the rendezvous (`SKYNET_RING_SOCKET`,
+  `SKYNET_RING_CHANNELS` to the one commanding package, nothing to two) is covered by
+  `shape`'s tests. There is no gap here any more — the "daemon does not launch the runtime"
+  bullet died when the unit files landed, alongside the §59 correction.
+* **Vision buffer pool.** `skynet-obs`'s header states the design (handles plus a lifetime rule)
+  and the reason it is not started: no capture backend exists (V4L2/GenICam are hardware-blocked)
+  and no consumer exists, so a pool written now would fix frame sizes, rates and handle
+  widths against nothing — the unmeasured allow-list mistake §64 exists to prevent, in a new
+  crate. The unblocker is the first capture backend with a measured frame contract, not another
+  session of guessing at it.
+* **Isolation probe.** The parser half without the wiring would be half a route (§79.7's
+  `skynetp --ring-fd` lesson), and the wiring half needs three things this machine has none
+  of: a systemd bus to read `systemctl show` from, the CLI surface to carry the observation
+  into `conformance::run` (which is pure today), and a robot to show the executed outcome on.
+  It stays open with its unblocker named: a systemd robot to capture the first real `show`
+  fixture from.
+* **Device confinement.** Still blocked where capacity.rs says it is: `vram_mb` stays `None`
+  because accelerator memory needs a vendor runtime this daemon does not link. No admission
+  number, no allow-list, no `DeviceAllow` — the order from round eight stands.
+
+### Run
+
+```
+cargo test --workspace — 1,629 passed, 0 failed (1,628 before; +1, the skill-unit test)
+cargo fmt --check --all — clean
+cargo clippy --workspace --all-targets — clean (0 warnings)
+```
+
+## What round nine leaves
+
+* **The demo skill-policy package.** The daemon side is now witnessed end to end; what is
+  missing is a real `.sky` skill package whose entrypoint speaks §25 (the `skynetp`-in-a-blob
+  pattern), exercised in `e2e.sh`'s systemd-gated section on a machine that has systemd.
+* **A probe-based isolation check**, unblocked by a systemd robot to capture the first `show`
+  fixture from.
+* **Vision**, unblocked by the first capture backend with a measured frame contract.
+* **Device confinement**, unblocked by a vendor runtime that reports accelerator memory.
+
+## 61. The reconciler killed every skill on its second pass — and the demo that proved it
+
+Round nine's first item is built: `e2e.sh` §9 installs a real skill package (`acme/wave`,
+`skynetp-in-a-blob` entrypoint, bounded 60-second `hold`), activates it through desired state,
+invokes it over the socket, and watches the daemon start it. Building it found a real bug
+underneath the demo, which is why the demo took the session rather than the hour.
+
+### The bug
+
+`Daemon::perform` starts a skill's unit through the ordinary `start()`, and on the next pass
+the level-triggered reconciler stops it: desired state never names the package, so
+`!should_run` is true for ever, and `StopPackage` is emitted. Every skill on a looping daemon
+lives exactly one reconcile interval. The contract suite could not see it — emission and
+performance are tested, the plan's view of a skill-started unit was not — and neither could
+anything else, because no test had ever driven all three in one room.
+
+Red proof, at the plan boundary where it belongs:
+`a_unit_backing_a_live_skill_is_not_stopped` failed with the signature in full —
+`[StageOsImage {...}, StopPackage { id: "acme/pick" }]`.
+
+### The fix
+
+`Actual` gains `live_skills: BTreeSet<String>` — packages with a live (non-terminal)
+invocation, read off the daemon's own skill table in `Daemon::observe`, the same discipline
+as every other field. The plan's stop rule spares the set; the set empty again, a leftover
+unit is reaped rather than supervised, which is what collects the unit when the daemon died
+mid-skill and no `Stop` effect will ever come. Two writers, one story — finding 111's rule,
+applied to the exact pair it was written about.
+
+Deliberately not a signature change: the plan stays a function of desired and actual, and
+the eleven spread-literal tests in the `skynetd` suite needed no touch at all — one
+exhaustive literal took one line. The spare is also why `Daemon::observe` fills the set
+rather than `observe::observe`: the free function takes store, launcher and slots, and an
+observer inventing membership from nothing would be the supervisor trusting its own record.
+
+Covered twice: the plan test above (spared while live, reaped when over) and
+`reconcile_spares_a_unit_while_its_skill_is_live`, which drives the fixture daemon in loop
+order — reconcile, advance, three times — with the skill in desired state as `installed`,
+and asserts the pass holds no stop. The desired entry matters: without it the pass collects
+the activation (§37.3) before the skill starts, and the test would prove nothing. The e2e
+carries the same entry for the same reason.
+
+### What the demo proves live, and what it honestly cannot
+
+`e2e.sh` §9 passes end to end on a systemd machine: stages, activates (desired alone does
+not start it), invokes (202), reaches running, the unit's trace file appears
+(`$ROOT/skill-ran`, touched by the unit's own process — presence means the daemon really
+started this package, not that it reported doing so), lands in terminal with `robot_stopped`,
+and the episode is queued. The non-systemd half mirrors §3's contract: loud refusal in the
+log, the trace file absent, terminal anyway.
+
+Steady running is not asserted, and the reason is the design: this robot has no kernel, so
+the daemon's operating state is `safe`, and `robot_stopped` aborts every running skill
+within two passes. A skill that stayed running here would be the interlock failing. The
+spare clause therefore has no live witness — on a kernel-less robot the interlock fires on
+the same passes the reconciler would — and the log states the division plainly: the suite
+carries the arbitration, e2e carries start-performed, interlock-named, episode-queued. The
+steady-running witness waits on a kernel in the loop (skynetk plus the mock driver, §58's
+machine, inside e2e's systemd section).
+
+### The stash experiment that corrected itself
+
+The new e2e was run with the fix stashed, expecting the reconciler kill to fail it. It did
+fail — and the identical failure with the fix restored showed the failure was the interlock
+both times, not the kill. Red without green is a story, not a proof: the experiment's value
+was revealing the confound (and the reframed assertions), not reproducing the bug. The
+reproduction stands one layer down, where no kernel confuses the question: the plan test's
+red run above.
+
+### Run
+
+```
+cargo test --workspace — 1,631 passed, 0 failed (1,629 before; +2: the plan spare test and
+the daemon spare test)
+cargo fmt --check --all — clean
+cargo clippy --workspace --all-targets — clean
+sh crates/skynetd-io/e2e.sh — all checks passed (systemd branch: unit ran, robot_stopped
+named, episode queued)
+```
+
+## What round ten leaves
+
+* **A kernel in the e2e loop.** skynetk plus the mock driver inside the systemd section, so a
+  skill can hold `running` on a live machine and the spare clause gets its live witness. Until
+  then the suite carries the arbitration and e2e carries everything around it.
+* **A probe-based isolation check**, unblocked by a systemd robot to capture the first `show`
+  fixture from.
+* **Vision**, unblocked by the first capture backend with a measured frame contract.
+* **Device confinement**, unblocked by a vendor runtime that reports accelerator memory.
+
+## 62. The sandbox, read back off a real unit
+
+§59 built the confinement at the argv layer and noted, honestly, that no systemd machine had
+ever been asked what landed. This machine is one — `systemd-run --user` works here, and §3
+starts a real policy unit — so `e2e.sh` §3 now reads the unit back with `systemctl --user
+show` and asserts ten properties: the six confinement directives, the empty capability set
+(line-exact, because a substring match would pass `cap_anything`), the declared 64 MB budget
+arrived as `MemoryMax=67108864` (bytes, so this asserts the budget became the limit rather
+than that a limit exists), the fixed `TasksMax=128`, and a non-empty `AllowedCPUs` whose
+value stays deliberately unpinned — the core set is the machine's, and pinning it would fail
+the check on every other machine. What is asserted about the cpuset is the failure mode:
+an omitted cpuset is every core including the kernel's (§40.2), so presence is the property.
+
+No Rust changed in this session. The mechanism was probed first with a throwaway transient
+unit (empty `CapabilityBoundingSet=` accepted and reported empty, `MemoryMax=64M` reported
+as bytes), then pinned against the daemon's own unit. All ten pass; the full e2e is green.
+
+Two audit notes from the same pass, for the record rather than the build:
+
+* The operating-state inputs are unwired territory. Nothing outside contract tests ever
+  reports `RhalState::Present`, `KernelState::Live`, or homing complete, so
+  `refresh_operating_state` derives from post plus defaults — RHAL lost means `safe` on
+  every robot, always. That is why no skill can hold `running` on any current machine, and
+  why round ten's "kernel in the e2e loop" item is misstated as written: a running skynetk
+  alone changes nothing observable, because the daemon's conditions still say the kernel is
+  down. The item should read "kernel liveness into the daemon's conditions, then skynetk in
+  the e2e loop" — which crosses §33.1 (the kernel/daemon separation) and is a design task,
+  not a gap to fill in passing. It is restated that way below.
+* The isolation probe from round ten is half-delivered by the above: the live evidence it
+  wanted (confinement lands on real units) now exists in e2e. What remains is the
+  conformance flip — `safety.policy.isolation` from skipped to executed — which needs the
+  observation carried into `conformance::run` (pure today) plus a robot to show the executed
+  outcome on. Smaller than it was; still open.
+
+### Run
+
+```
+cargo test --workspace — 1,631 passed, 0 failed (no Rust changed; confirms the suite)
+sh crates/skynetd-io/e2e.sh — all checks passed, including the ten new unit-property reads
+```
+
+## What round eleven leaves
+
+* **Kernel liveness into the daemon's conditions, then skynetk in the e2e loop.** Restated
+  (see above): without the first half, the second changes nothing observable. Design work —
+  how the daemon may know the kernel is live without violating §33.1.
+* **The conformance flip for isolation.** Carry a unit-confinement observation into
+  `conformance::run` and execute `safety.policy.isolation` against it; e2e already proves
+  the underlying fact.
+* **Vision**, unblocked by the first capture backend with a measured frame contract.
+* **Device confinement**, unblocked by a vendor runtime that reports accelerator memory.

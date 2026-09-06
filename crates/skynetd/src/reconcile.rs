@@ -478,14 +478,24 @@ pub fn plan(desired: &DesiredState, actual: &Actual) -> Plan {
         // so the activation never opens. Found by upgrading one on a machine with real systemd,
         // where it is the ordinary case rather than the interesting one.
         let swap_pending = swap_pending(desired, actual, &entry.id);
+        // A unit a live skill invocation started is owned by that invocation, not by this
+        // plan: desired state never names it, so `!should_run` is true for ever, and without
+        // this clause the reconciler kills every skill-started unit on the pass after it
+        // starts — holding a skill's lifetime to one reconcile interval on every robot. The
+        // lifecycle stops its own unit when the invocation ends (`Effect::Stop`); a unit left
+        // over with no live invocation — the daemon died mid-skill — is reaped by this same
+        // rule on the next pass, because the set is empty again. Two writers, one story.
+        let skill_owned = actual.live_skills.contains(&entry.id);
         match entry.state {
-            UnitState::Running if !should_run || swap_pending => actions.push(Action::new(
-                5,
-                ActionKind::StopPackage {
-                    id: entry.id.clone(),
-                },
-                Gate::Open,
-            )),
+            UnitState::Running if (!should_run || swap_pending) && !skill_owned => {
+                actions.push(Action::new(
+                    5,
+                    ActionKind::StopPackage {
+                        id: entry.id.clone(),
+                    },
+                    Gate::Open,
+                ))
+            }
             // A failed unit is left alone. §33.5: after the crash-loop threshold the package is
             // marked failed and left alone, and a reconciler that restarted it would be the
             // infinite restart loop the threshold exists to stop — one iteration slower.

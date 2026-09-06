@@ -178,6 +178,11 @@ pub fn observe<L: Launcher, S: Slots>(
         profile_limits,
         grants,
         leases,
+        // Empty here and filled by the daemon: the live skill set is read off the skill
+        // table, and this function does not take one — see `Daemon::observe`, which is the
+        // only caller that has it. An observer that invented membership would be the
+        // supervisor trusting its own record, which `actual.rs` forbids at the top.
+        live_skills: Default::default(),
     }
 }
 
