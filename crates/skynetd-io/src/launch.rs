@@ -154,6 +154,68 @@ pub fn confinement_properties(kind: PackageKind) -> Vec<String> {
     }
 }
 
+/// Every directive name any kind's confinement asks for, sorted and deduplicated.
+///
+/// This exists so the query and the comparison cannot drift apart, and the drift it prevents has a
+/// nasty shape: `confinement` asks systemd for a **named** list of properties, and a directive
+/// added to [`confinement_properties`] but not to that list would come back unreported — which
+/// [`confinement_shortfall`] counts, correctly, as not landed. The result would be a robot failing
+/// its own `safety.policy.isolation` because of a forgotten string, and the failure would name a
+/// directive that was in fact applied. Deriving one from the other removes the possibility rather
+/// than testing for it.
+pub fn confinement_property_names() -> Vec<String> {
+    let mut names: Vec<String> = [
+        PackageKind::Policy,
+        PackageKind::Service,
+        PackageKind::Skill,
+        PackageKind::Driver,
+    ]
+    .into_iter()
+    .flat_map(confinement_properties)
+    .map(|line| line.split('=').next().unwrap_or_default().to_string())
+    .filter(|name| !name.is_empty())
+    .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// What systemd reports about a unit, as `Key=Value` pairs in the order it printed them.
+///
+/// Pure, so the comparison below can be tested on a machine with no systemd — which is most of
+/// them, and which is exactly why this is separated from the call that produces the text.
+pub fn parse_properties(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|line| {
+            let line = line.trim_end_matches('\r');
+            let at = line.find('=')?;
+            Some((line[..at].to_string(), line[at + 1..].to_string()))
+        })
+        .collect()
+}
+
+/// Which of the confinement directives this kind asks for did **not** land on the unit.
+///
+/// The comparison is on the whole `Key=Value` string and never on the key alone, and that is the
+/// load-bearing decision rather than a stylistic one. `CapabilityBoundingSet=` is asked for as the
+/// **empty** set, so a check that found the key and stopped would pass a unit carrying
+/// `CapabilityBoundingSet=cap_sys_admin` — the exact failure the directive exists to prevent, and
+/// the one `e2e.sh` learned to assert line-exactly for the same reason.
+///
+/// A property systemd did not report at all counts as not landed. That is the fail-closed
+/// direction: an unreported directive is one this code cannot show was applied, and a sandbox
+/// nobody can read is not a sandbox anybody should certify.
+pub fn confinement_shortfall(kind: PackageKind, observed: &[(String, String)]) -> Vec<String> {
+    let seen: Vec<String> = observed
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect();
+    confinement_properties(kind)
+        .into_iter()
+        .filter(|wanted| !seen.iter().any(|line| line == wanted))
+        .collect()
+}
+
 /// Which cores a package may be scheduled on (§40.2).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Cpus {
@@ -308,6 +370,17 @@ pub trait Launcher {
 
     /// What the system says about every unit this launcher owns.
     fn observe(&self) -> Result<Vec<UnitStatus>, LaunchError>;
+
+    /// What the system says about one unit's **confinement** (§8.3, §59).
+    ///
+    /// Separate from [`observe`](Launcher::observe) because it asks a different question of a
+    /// different vocabulary: `observe` maps systemd's lifecycle words onto §33.3's, and this reads
+    /// the sandbox directives back off a unit that is already running. It exists because a
+    /// launcher's own argv is not evidence — asserting what `command_line` built proves what was
+    /// requested, and §15's `safety.policy.isolation` is a question about what landed.
+    ///
+    /// `Err` when there is nothing to read, with the sentence a conformance result will carry.
+    fn confinement(&self, id: &str) -> Result<Vec<(String, String)>, LaunchError>;
 }
 
 /// Why a launch failed.
@@ -424,6 +497,38 @@ impl Launcher for SystemdLauncher {
             Err(error) if error.detail.contains("not loaded") => Ok(()),
             Err(error) => Err(error),
         }
+    }
+
+    fn confinement(&self, id: &str) -> Result<Vec<(String, String)>, LaunchError> {
+        let mut argv: Vec<String> = self.scope().iter().map(|s| s.to_string()).collect();
+        argv.push("show".to_string());
+        argv.push(format!("{}.service", unit_name(id)));
+        // Named rather than dumping every property: `systemctl show` with no `-p` prints a few
+        // hundred lines, and a check that scanned them would be one whose cost grows with
+        // systemd's feature list. The names come from `confinement_properties` itself, so a
+        // directive added there is asked for here without anybody remembering to.
+        argv.push(format!("--property={}", confinement_property_names().join(",")));
+        let output = Command::new("systemctl")
+            .args(&argv)
+            .output()
+            .map_err(|error| LaunchError {
+                id: id.to_string(),
+                detail: format!(
+                    "could not run systemctl to read the unit's confinement: {error}. This robot \
+                     cannot say what landed on its own sandbox."
+                ),
+            })?;
+        if !output.status.success() {
+            return Err(LaunchError {
+                id: id.to_string(),
+                detail: format!(
+                    "systemctl could not describe {}.service: {}",
+                    unit_name(id),
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ),
+            });
+        }
+        Ok(parse_properties(&String::from_utf8_lossy(&output.stdout)))
     }
 
     fn observe(&self) -> Result<Vec<UnitStatus>, LaunchError> {
@@ -603,6 +708,15 @@ impl Launcher for RecordingLauncher {
         Ok(())
     }
 
+    fn confinement(&self, id: &str) -> Result<Vec<(String, String)>, LaunchError> {
+        Err(LaunchError {
+            id: id.to_string(),
+            detail: "this launcher records rather than launching, so no unit exists to read \
+                     confinement from. A recorded start is a plan, and a plan is not evidence \
+                     about a sandbox."
+                .to_string(),
+        })
+    }
     fn observe(&self) -> Result<Vec<UnitStatus>, LaunchError> {
         let mut units = self.units.clone();
         units.sort_by(|a, b| a.id.cmp(&b.id));

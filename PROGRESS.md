@@ -12170,3 +12170,61 @@ green.
      `is True` are the same rule and not the same code, and the Python one is a genuine trap:
      `1 == True`. The case for the number one exists so that the paragraph describing the trap is
      a check rather than a claim.
+
+## 2026-09-07 (sixty-sixth) — `safety.policy.isolation`, and the difference between argv and a unit
+
+Round eleven left this half-delivered: §59 built the confinement, `e2e.sh` read ten properties
+off a real unit, and the conformance runner still said **skipped**. The gap was not effort. §59's
+suite asserts what `command_line` builds, which proves what was *requested*, and a directive
+systemd rejected, dropped or does not support on this kernel produces exactly the same argv. It
+is also the wrong kind of result: a check whose subject is this repository's own constant is an
+**edition** property, which is what `safety.kernel.parity` two lines above is skipped for being.
+
+`Launcher::confinement(id)` runs `systemctl show <unit> -p <directives>`; `confinement_shortfall`
+names what did not land. Three decisions, each with an obvious wrong alternative:
+
+* the comparison is the whole `Key=Value` line, because `CapabilityBoundingSet=` is asked for as
+  the **empty** set and a key match would pass `cap_sys_admin`;
+* an unreported directive counts as not landed — a sandbox nobody can read is not one anybody
+  should certify;
+* the `--property=` query is **derived** from `confinement_properties` rather than typed beside
+  it, which removes a bug that was otherwise waiting: a directive added to the launcher and
+  forgotten in the query would fail the robot's own isolation test while naming a directive that
+  was in fact applied.
+
+The route reads the first running **non-driver** unit — §8.3 makes a driver native by design, so
+failing one for its absent confinement would be the robot failing itself for obeying the
+specification. `RecordingLauncher` returns an error rather than an empty list, because an empty
+list would make `--dry-run` fail a safety test on a machine it never touched. `conformance::run`
+stays a function over facts; the I/O is in `api.rs`.
+
+**What this session could not watch.** This container has `systemd-run` installed, no
+`/run/systemd/system`, and `process_api` as PID 1 — `systemctl --user is-system-running` answers
+`offline`. So `e2e.sh` took its no-systemd branch and asserted the **skip**. The pass assertion
+is in the file and runs on a machine with a user systemd; round eleven's had one and this one
+does not. The pass path has not been watched in this session, and reporting otherwise would be
+the exact failure this runner's header exists to name.
+
+### Numbers
+
+`cargo test --workspace` — **1,655 passed** (1,645 before), 0 failed. `cargo clippy --workspace`
+clean. `sh crates/skynetd-io/e2e.sh` — all checks passed.
+
+### Findings, restated
+
+1-120 as before.
+
+121. **A launcher's argv is a request, and a conformance suite that reads it is grading its own
+     homework.** The same seven flags are produced whether systemd honoured them, ignored them,
+     or does not implement them on this kernel. Two rounds separated "the confinement exists"
+     from "the confinement landed", and only the second is a fact about a robot.
+
+122. **A query derived from a constant cannot drift from it; a query typed beside one will.**
+     `--property=` and `confinement_properties` are the same list, and had they been two lists
+     the failure would have been a robot failing itself over a forgotten string while naming a
+     directive that was applied. The fix is one function, not one test.
+
+123. **A fake must refuse, not answer emptily.** `RecordingLauncher` returning no properties
+     would have been read as a unit with no confinement, so `--dry-run` would fail a safety
+     conformance test about a machine it never touched. The honest empty answer is an error
+     carrying its reason.

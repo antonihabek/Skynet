@@ -724,6 +724,122 @@ fn every_non_driver_kind_carries_the_same_confinement() {
     assert!(launch::confinement_properties(PackageKind::Driver).is_empty());
 }
 
+/// What systemd printed, parsed. Blank lines and lines without `=` are not properties.
+#[test]
+fn a_property_block_parses_to_pairs() {
+    let text = "NoNewPrivileges=yes\nCapabilityBoundingSet=\nAllowedCPUs=0-3\n\nrubbish\n";
+    let parsed = launch::parse_properties(text);
+    assert_eq!(
+        parsed,
+        vec![
+            ("NoNewPrivileges".to_string(), "yes".to_string()),
+            // The empty value survives as an empty value rather than being dropped, which is the
+            // whole point of the directive it belongs to.
+            ("CapabilityBoundingSet".to_string(), String::new()),
+            ("AllowedCPUs".to_string(), "0-3".to_string()),
+        ]
+    );
+}
+
+/// A unit that landed everything §8.3 asks of a policy.
+#[test]
+fn a_fully_confined_unit_has_no_shortfall() {
+    let observed: Vec<(String, String)> = launch::confinement_properties(PackageKind::Policy)
+        .iter()
+        .map(|line| {
+            let (key, value) = line.split_once('=').expect("every directive is Key=Value");
+            (key.to_string(), value.to_string())
+        })
+        .collect();
+    assert!(launch::confinement_shortfall(PackageKind::Policy, &observed).is_empty());
+    // A driver asks for none, so it cannot fall short — §8.3 makes it native by design, and a
+    // driver reported as failing confinement would be this robot failing itself for obeying the
+    // specification.
+    assert!(launch::confinement_shortfall(PackageKind::Driver, &observed).is_empty());
+}
+
+/// The comparison that must be line-exact, and the reason it must be.
+///
+/// A unit holding `CapabilityBoundingSet=cap_sys_admin` has the key the launcher asked for and
+/// none of the property. A shortfall computed on keys would report this unit as fully confined,
+/// which is the single most misleading result this check could produce.
+#[test]
+fn a_capability_set_that_is_not_empty_is_a_shortfall() {
+    let mut observed: Vec<(String, String)> = launch::confinement_properties(PackageKind::Policy)
+        .iter()
+        .map(|line| {
+            let (key, value) = line.split_once('=').expect("Key=Value");
+            (key.to_string(), value.to_string())
+        })
+        .collect();
+    for entry in &mut observed {
+        if entry.0 == "CapabilityBoundingSet" {
+            entry.1 = "cap_sys_admin".to_string();
+        }
+    }
+    assert_eq!(
+        launch::confinement_shortfall(PackageKind::Policy, &observed),
+        vec!["CapabilityBoundingSet=".to_string()]
+    );
+}
+
+/// A directive systemd did not report counts as not landed.
+///
+/// Fail-closed, and the direction matters more here than almost anywhere: an unreported directive
+/// is one this code cannot show was applied, and a sandbox nobody can read is not a sandbox
+/// anybody should certify.
+#[test]
+fn an_unreported_directive_is_a_shortfall() {
+    let shortfall = launch::confinement_shortfall(PackageKind::Policy, &[]);
+    assert_eq!(
+        shortfall.len(),
+        launch::confinement_properties(PackageKind::Policy).len(),
+        "a unit systemd said nothing about has landed nothing this code can show"
+    );
+}
+
+/// The query and the comparison are one list, so a new directive cannot be half-added.
+///
+/// Adding a directive to `confinement_properties` and forgetting the `systemctl show -p` list
+/// would make it come back unreported, which the shortfall counts as not landed — a robot failing
+/// its own isolation test over a forgotten string, naming a directive that was in fact applied.
+#[test]
+fn every_directive_asked_for_is_a_directive_asked_about() {
+    let names = launch::confinement_property_names();
+    for kind in [
+        PackageKind::Policy,
+        PackageKind::Service,
+        PackageKind::Skill,
+        PackageKind::Driver,
+    ] {
+        for property in launch::confinement_properties(kind) {
+            let key = property.split('=').next().expect("Key=Value").to_string();
+            assert!(
+                names.contains(&key),
+                "{key} is asked of a unit and never asked about"
+            );
+        }
+    }
+    // And nothing else: a name in the query that no kind asks for would be a property read and
+    // never compared, which is cost without an assertion.
+    assert_eq!(
+        names.len(),
+        launch::confinement_properties(PackageKind::Policy).len()
+    );
+}
+
+/// A launcher that records rather than launching has nothing to read, and says so.
+///
+/// The alternative — reporting an empty confinement — would make `--dry-run` fail a safety
+/// conformance test on a machine it never touched.
+#[test]
+fn a_recording_launcher_refuses_to_describe_a_sandbox() {
+    let launcher = launch::RecordingLauncher::new();
+    let error = launch::Launcher::confinement(&launcher, "openrobot/holder")
+        .expect_err("nothing was launched");
+    assert!(error.detail.contains("records rather than launching"));
+}
+
 /// The restraint, pinned: none of these may appear without the design that makes them safe —
 /// a path-dependent directive against an unmeasured store layout, a device policy with no
 /// declared device set (§40.3), or a filter with no measured allow-list (§64).
@@ -2238,7 +2354,22 @@ fn the_conformance_route_runs_what_it_can_and_names_what_it_cannot() {
     // The one this edition passes, by running the function its own updater runs. Host-independent:
     // `admit_bundle` reads no file and asks the machine nothing.
     assert_eq!(by_id("ota.safety_gate"), "pass");
+    // Skipped here, and the reason is a property of the fixture rather than of the check: this
+    // route runs against a `RecordingLauncher` with nothing started, so there is no sandboxed unit
+    // to read. The three verdicts the check itself produces are asserted in `conformance`'s own
+    // suite, and the pass is asserted against a real systemd unit in `e2e.sh`.
     assert_eq!(by_id("safety.policy.isolation"), "skipped");
+    let isolation = body
+        .arr_or_empty("results")
+        .iter()
+        .find(|r| r.get("test_id").and_then(Json::as_str) == Some("safety.policy.isolation"))
+        .and_then(|r| r.get("detail").and_then(Json::as_str))
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        isolation.contains("no sandboxed unit is running"),
+        "a skip has to name what is missing: {isolation}"
+    );
 
     // And the one it fails, which is the point of running the suite on yourself — and the only row
     // whose verdict depends on the **host** rather than on the edition. §8.1's memory figure comes

@@ -21,11 +21,20 @@
 //! | `ota.safety_gate` | needs the updater | §12, and §75's bundle route |
 //! | `telemetry.replay.deterministic` | needs the black box | ring, MCAP, sealing, replay |
 //! | `security.credential.scope` | needs device tokens | `skd_` credentials and their scopes |
+//! | `safety.policy.isolation` | needs a sandbox | §59's confinement, and §62's read-back |
 //!
 //! This is finding 49 at scale — *"which we do not" is a sentence to check, not to believe* — and
 //! the value of a runner is as much in re-asking those questions as in answering them. Two of the
-//! five turn out to be answerable **right now**, one is answerable and is not this machine's to
-//! answer, and two need something that still does not exist.
+//! five turned out to be answerable **right now**, one is answerable and is not this machine's to
+//! answer, and two needed something that did not exist.
+//!
+//! `safety.policy.isolation` is the sixth, and it is the one that took two rounds. §59 built the
+//! confinement, which made the sentence *"needs a sandbox"* false — and left a different one true,
+//! because what the suite could assert was the launcher's own argv. Asking `systemd-run` for seven
+//! directives proves what was **requested**; §15 asks what a package is held to, and a directive
+//! systemd rejected, dropped or does not support on this kernel produces exactly the same argv. So
+//! it stayed skipped, with a reason naming the probe that would execute it, until the daemon could
+//! read a running unit back.
 //!
 //! # A check that runs, or a reason. Never a pass by omission
 //!
@@ -154,6 +163,7 @@ pub fn run(
     body: &Body,
     limits: &crate::limits::Owned,
     grants: &[String],
+    isolation: Option<&Confinement>,
     at: &str,
 ) -> Run {
     let mut results = Vec::with_capacity(RUNTIME_TESTS.len());
@@ -166,17 +176,7 @@ pub fn run(
          compiler.",
     ));
 
-    results.push(skipped(
-        "safety.policy.isolation",
-        "a sandboxed package holding an actuator descriptor is refused — and there is still no \
-         machine that performs the forbidden hold and reports the refusal. What changed is the \
-         premise underneath it: every non-driver unit now launches under systemd confinement \
-         (`launch::confinement_properties` — no new privileges, a read-only OS tree, no cgroup \
-         or module writes, no capabilities), so the isolation is no longer only a record in the \
-         admission. What would execute this check is a probe asserting the launched unit's actual \
-         confinement rather than the launcher's own argv — the argv asserting itself would be an \
-         edition property, which is what `safety.kernel.parity` above is skipped for being.",
-    ));
+    results.push(policy_isolation(isolation, at));
 
     results.push(signature_required(capacity, at));
     results.push(grants_gate(body, limits, grants, at));
@@ -217,6 +217,118 @@ pub fn run(
 ///
 /// A robot whose capacity could not be assembled reports `skipped`: admission over an invented
 /// capacity would be a conformance result about a robot that does not exist.
+/// What this robot could observe about one running unit's confinement (§8.3, §59).
+///
+/// Assembled by the caller rather than here, because reading it is I/O and `run` is a function
+/// over facts. `Err` carries the sentence the skip will show — the reason nothing was read is as
+/// much a conformance result as the reading would have been.
+pub struct Confinement {
+    /// The package whose unit was read.
+    pub package: String,
+    /// What kind it is, which decides which directives were asked for (§8.3: a driver is native).
+    pub kind: skynetd::desired::PackageKind,
+    /// `Ok` with what systemd reported, `Err` with why nothing could be.
+    pub observed: Result<Vec<(String, String)>, String>,
+}
+
+/// §15's `safety.policy.isolation`, executed against a unit systemd is actually running.
+///
+/// # Why this could not be answered from the launcher's own argv
+///
+/// §59 built the confinement and the suite asserted it at the argv layer: `command_line` puts
+/// seven `--property=` flags on `systemd-run` for every non-driver package, and a test read them
+/// back. That proves what was **requested**. §15 asks what a sandboxed package is actually held
+/// to, and those are different questions in every way that matters — a directive systemd rejected,
+/// dropped or does not support on this kernel produces exactly the same argv.
+///
+/// It is also why answering from argv would have been the wrong kind of result. A check whose
+/// subject is this repository's own code rather than this machine's state is an **edition**
+/// property, which is precisely what `safety.kernel.parity` above is skipped for being. A robot
+/// reporting one would be reporting on its compiler.
+///
+/// # What a pass means, and the three ways there is nothing to say
+///
+/// Pass: every directive `confinement_properties` asks for this kind is present on the running
+/// unit, compared as a whole `Key=Value` line. `CapabilityBoundingSet=` is the one that makes the
+/// line-exactness load-bearing rather than tidy — matching the key alone would pass a unit holding
+/// `CapabilityBoundingSet=cap_sys_admin`, which is the failure the directive exists to prevent.
+///
+/// Fail: the unit is running and a directive did not land, named. A property systemd did not
+/// report counts as not landed, which is the fail-closed direction: a sandbox nobody can read is
+/// not a sandbox anybody should certify.
+///
+/// Skipped, in three cases, each naming what is missing:
+///
+/// * **no non-driver unit is running** — there is no sandbox on this machine to read. A robot
+///   running only drivers is correctly outside this test rather than passing it, because §8.3
+///   makes a driver native by design;
+/// * **the launcher cannot read units** — `--dry-run`, or a machine with no systemd;
+/// * **systemd would not describe the unit** — it stopped between the two calls, most likely.
+///
+/// # What it still does not establish
+///
+/// That a sandboxed package which *attempted* the forbidden hold was refused. Confinement landing
+/// is the mechanism; a probe performing the hold and being stopped is the demonstration, and it
+/// needs a package built to try. This is the honest half of the test and it is the half that was
+/// missing: until now, nothing on a robot had ever asked the operating system what its own
+/// sandboxes were made of.
+fn policy_isolation(isolation: Option<&Confinement>, at: &str) -> SctsResult {
+    let id = "safety.policy.isolation";
+
+    let Some(confinement) = isolation else {
+        return skipped(
+            id,
+            "no sandboxed unit is running on this robot, so there is no confinement to read. A \
+             driver is native by design (§8.3) and is not the subject of this test; start a \
+             policy, service or skill package and this runs against the unit systemd gives it.",
+        );
+    };
+
+    let observed = match &confinement.observed {
+        Ok(observed) => observed,
+        Err(detail) => {
+            return skipped(
+                id,
+                format!(
+                    "{} is running and its confinement could not be read: {detail}",
+                    confinement.package
+                ),
+            )
+        }
+    };
+
+    let shortfall = crate::launch::confinement_shortfall(confinement.kind, observed);
+    if shortfall.is_empty() {
+        return ran(
+            id,
+            SctsOutcome::Pass,
+            at,
+            format!(
+                "every directive §8.3 asks of a {} landed on the unit systemd is running for {} — \
+                 read back with `systemctl show`, compared line-exactly, not taken from the argv \
+                 that asked for them.",
+                confinement.kind.as_str(),
+                confinement.package
+            ),
+        );
+    }
+
+    ran(
+        id,
+        SctsOutcome::Fail,
+        at,
+        format!(
+            "{} is running without {}. The launcher asked for {} on every {}; systemd is not \
+             reporting {} of them, so this robot cannot show that its sandbox is one.",
+            confinement.package,
+            shortfall.join(", "),
+            crate::launch::confinement_properties(confinement.kind).len(),
+            confinement.kind.as_str(),
+            shortfall.len(),
+        ),
+    )
+}
+
 fn signature_required(capacity: &Capacity, at: &str) -> SctsResult {
     let id = "package.signature.required";
     let Some(capacity) = capacity.known() else {
@@ -1069,6 +1181,7 @@ mod tests {
             &Body::Absent,
             &bare_limits(),
             &[],
+            None,
             "2026-09-02T00:00:00Z",
         );
         let ids: Vec<&str> = run
@@ -1081,6 +1194,95 @@ mod tests {
 
     /// The same eight `skynet driver check` says it cannot cover. A test in one list and not the
     /// other is a test nobody runs, and it would be invisible from either side.
+    fn landed(kind: skynetd::desired::PackageKind) -> Vec<(String, String)> {
+        crate::launch::confinement_properties(kind)
+            .iter()
+            .map(|line| {
+                let (key, value) = line.split_once('=').expect("Key=Value");
+                (key.to_string(), value.to_string())
+            })
+            .collect()
+    }
+
+    /// The pass, and the sentence it carries.
+    ///
+    /// What makes this a machine property rather than an edition one is in the detail: it says the
+    /// directives were read back off a running unit and compared line-exactly, never that the
+    /// launcher asked for them. A robot reporting the second would be reporting on its compiler.
+    #[test]
+    fn a_confined_unit_passes_isolation() {
+        let result = policy_isolation(
+            Some(&Confinement {
+                package: "openrobot/holder".to_string(),
+                kind: skynetd::desired::PackageKind::Policy,
+                observed: Ok(landed(skynetd::desired::PackageKind::Policy)),
+            }),
+            "2026-09-07T00:00:00Z",
+        );
+        assert_eq!(result.outcome, SctsOutcome::Pass);
+        assert!(!result.ran_at.is_empty(), "a measured result carries its time");
+        let detail = result.detail.unwrap_or_default();
+        assert!(detail.contains("systemctl show"));
+        assert!(detail.contains("not taken from the argv"));
+    }
+
+    /// The fail names the directive, because §64 makes a refusal that does not say what to fix a
+    /// defect rather than a message.
+    #[test]
+    fn a_unit_that_kept_capabilities_fails_isolation() {
+        let mut observed = landed(skynetd::desired::PackageKind::Policy);
+        for entry in &mut observed {
+            if entry.0 == "CapabilityBoundingSet" {
+                entry.1 = "cap_sys_admin".to_string();
+            }
+        }
+        let result = policy_isolation(
+            Some(&Confinement {
+                package: "openrobot/holder".to_string(),
+                kind: skynetd::desired::PackageKind::Policy,
+                observed: Ok(observed),
+            }),
+            "2026-09-07T00:00:00Z",
+        );
+        assert_eq!(result.outcome, SctsOutcome::Fail);
+        assert!(result
+            .detail
+            .unwrap_or_default()
+            .contains("CapabilityBoundingSet="));
+    }
+
+    /// Nothing running is a skip, never a pass. §15's first award rule is that absence is not one.
+    #[test]
+    fn no_sandboxed_unit_is_a_skip() {
+        let result = policy_isolation(None, "2026-09-07T00:00:00Z");
+        assert_eq!(result.outcome, SctsOutcome::Skipped);
+        // A skipped test carries no time: §15 decays an award from the age of the oldest bench
+        // result, and a gap dated today would look fresh.
+        assert!(result.ran_at.is_empty());
+        assert!(result
+            .detail
+            .unwrap_or_default()
+            .contains("A driver is native by design"));
+    }
+
+    /// A unit that is running and could not be described is a skip carrying the reason, not a
+    /// fail. Nothing was measured, so nothing failed.
+    #[test]
+    fn a_unit_that_could_not_be_read_is_a_skip_that_says_why() {
+        let result = policy_isolation(
+            Some(&Confinement {
+                package: "openrobot/holder".to_string(),
+                kind: skynetd::desired::PackageKind::Policy,
+                observed: Err("systemctl could not describe the unit: it stopped".to_string()),
+            }),
+            "2026-09-07T00:00:00Z",
+        );
+        assert_eq!(result.outcome, SctsOutcome::Skipped);
+        let detail = result.detail.unwrap_or_default();
+        assert!(detail.contains("openrobot/holder"));
+        assert!(detail.contains("it stopped"));
+    }
+
     #[test]
     fn the_two_lists_are_the_same_eight() {
         let mut mine: Vec<&str> = RUNTIME_TESTS.to_vec();
@@ -1111,6 +1313,7 @@ mod tests {
             &Body::Absent,
             &bare_limits(),
             &[],
+            None,
             "2026-09-02T00:00:00Z",
         );
         assert_eq!(
@@ -1133,6 +1336,7 @@ mod tests {
             &Body::Absent,
             &bare_limits(),
             &[],
+            None,
             "2026-09-02T00:00:00Z",
         );
         assert_eq!(outcome(&run, "ota.safety_gate"), SctsOutcome::Pass);
@@ -1149,6 +1353,7 @@ mod tests {
             &Body::Absent,
             &bare_limits(),
             &[],
+            None,
             "2026-09-02T00:00:00Z",
         );
         assert_eq!(run.executed, 2);
@@ -1172,6 +1377,7 @@ mod tests {
             &Body::Absent,
             &bare_limits(),
             &[],
+            None,
             "2026-09-02T00:00:00Z",
         );
         for result in &run.results {
@@ -1194,6 +1400,7 @@ mod tests {
             &Body::Absent,
             &bare_limits(),
             &[],
+            None,
             "2026-09-02T00:00:00Z",
         );
         assert_eq!(
@@ -1212,6 +1419,7 @@ mod tests {
             &Body::Absent,
             &bare_limits(),
             &[],
+            None,
             "2026-09-02T00:00:00Z",
         );
         let verdict = run.attainable(false);
@@ -1236,6 +1444,7 @@ mod tests {
             &Body::Absent,
             &bare_limits(),
             &[],
+            None,
             "2026-09-02T00:00:00Z",
         );
         let document = to_json(&run, false);
@@ -1427,6 +1636,7 @@ mod tests {
             &body,
             &enforcing_limits(),
             &[],
+            None,
             "2026-09-04T00:00:00Z",
         );
         assert_eq!(
@@ -1439,6 +1649,7 @@ mod tests {
             &body,
             &enforcing_limits(),
             &["hri.speech".to_string()],
+            None,
             "2026-09-04T00:00:00Z",
         );
         assert_eq!(outcome(&with, "package.grants.gate"), SctsOutcome::Pass);
