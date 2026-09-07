@@ -65,12 +65,29 @@
 //!
 //! # What this does not close
 //!
-//! **A loop nothing declared.** `skynetk` run by hand against a driver defaults to one channel per
-//! joint and names no package, so a robot with a body and no commanding package still meets the
-//! shape refusal. That is the honest answer rather than a gap: nothing on that robot declares a
-//! policy, and the daemon inventing one would be sizing evidence for a loop that exists only in an
-//! operator's terminal. What it costs is a bench session, and §26.3's message already says where to
-//! point it.
+//! **A loop nothing declared — closed 2026-09-07, by an operator declaring it.** `skynetk` run by
+//! hand against a driver names no package, so this resolver sized the recording events-only and the
+//! loop was refused at `Recorder::open`. The refusal was right and stopping there was not. Two
+//! sentences were being run together: *the daemon must not invent a loop*, which is true and is why
+//! nothing is guessed from the driver; and *therefore a bench loop cannot be recorded*, which does
+//! not follow. An operator saying **I am about to run a loop this wide** is not the daemon
+//! inventing anything.
+//!
+//! `state/bench.json` is that declaration, and it is §34.3's rule applied a fourth time — the same
+//! shape as `power.json` naming which of two batteries is the traction pack, and as
+//! `brownout_fault_codes` naming which codes mean sag. The parts a machine can measure are
+//! measured, the parts it cannot are declared, and every surface says which is which.
+//!
+//! It is deliberately **weaker than a plan** in three ways, because a declaration is a person's
+//! word and a plan is two signed documents:
+//!
+//! * a commanding package always wins, so a bench file left behind on a robot that later installs
+//!   a policy changes nothing;
+//! * it cannot resolve `Refused`, `Ambiguous` or `Unreadable` into a shape — those are robots with
+//!   a problem an operator needs to see, and letting a bench file paper over `Ambiguous` would hide
+//!   exactly the case §80 leaves both packages unringed for;
+//! * every surface says the width was **declared** rather than resolved, so nothing reads a bench
+//!   window as evidence about a policy.
 //!
 //! **A plan that drops an optional channel.** `bindings` keeps every channel the policy declared,
 //! dropped ones included, so the count is the policy's output width and matches what the loop
@@ -106,6 +123,17 @@ pub enum Supervising {
         channels: usize,
         /// The plan's verdict, for the operator line.
         verdict: &'static str,
+    },
+    /// No commanding package, and an operator has declared a bench loop's width (§80).
+    ///
+    /// Ranked below [`Supervising::Policy`] and reachable only from [`Supervising::NoPolicy`]: a
+    /// declaration is a person's word about what they are about to do, and a transport plan is two
+    /// signed documents about what a package will do. Where both exist the plan decides.
+    Bench {
+        /// Joints, from the descriptor — measured, not declared. A bench loop reads the same body.
+        joints: usize,
+        /// Channels, as the operator declared them.
+        channels: usize,
     },
     /// One commanding package whose plan this body refuses.
     Refused {
@@ -154,7 +182,8 @@ impl Supervising {
         match self {
             Supervising::Policy {
                 joints, channels, ..
-            } => Shape {
+            }
+            | Supervising::Bench { joints, channels } => Shape {
                 joints: *joints as u16,
                 channels: *channels as u16,
             },
@@ -187,6 +216,12 @@ impl Supervising {
             } => format!(
                 "sized for the body: {joints} joints and {channels} channels, from {package}'s \
                  transport plan ({verdict})"
+            ),
+            Supervising::Bench { joints, channels } => format!(
+                "sized for a declared bench loop: {joints} joints and {channels} channels, from \
+                 state/bench.json. No package declares an action space — this width is an \
+                 operator's word rather than a transport plan, and a window recorded under it is \
+                 evidence about a bench session and not about a policy"
             ),
             Supervising::Refused { package, joints } => format!(
                 "events only: {package} declares an action space and this body refuses its \
@@ -279,7 +314,15 @@ impl PolicySighting {
     pub fn of(supervising: &Supervising, running: impl Fn(&str) -> bool) -> PolicySighting {
         match supervising {
             Supervising::NoBody => PolicySighting::Nothing { no_body: true },
-            Supervising::NoPolicy { .. } => PolicySighting::Nothing { no_body: false },
+            // A declared bench loop is **not** a policy, and this is the arm where saying so
+            // matters. §25.2's lease is granted to a policy the Safety Kernel knows about; a loop
+            // an operator started by hand holds none and never will, and nothing installed
+            // declares an action space. So §27's condition is `no_policy` — *there is nothing to
+            // run* — exactly as it is without the file. What the declaration changes is the shape
+            // of the recording, and deliberately nothing else.
+            Supervising::NoPolicy { .. } | Supervising::Bench { .. } => {
+                PolicySighting::Nothing { no_body: false }
+            }
             Supervising::Refused { package, .. } => PolicySighting::NotReady {
                 package: Some(package.clone()),
                 why: "this body refuses its transport plan, so there is nothing for a lease to \
@@ -399,7 +442,13 @@ pub fn supervising(store: &Store, body: &Body, allow_retarget: bool) -> Supervis
     }
 
     match commanding.len() {
-        0 => Supervising::NoPolicy { joints },
+        // The one arm a declaration may fill. §80's rule is that the daemon must not invent a
+        // loop; an operator naming one is not that, and every other arm here is a robot with a
+        // problem an operator needs to see rather than one to size around.
+        0 => match bench_channels(store.layout()) {
+            Some(channels) => Supervising::Bench { joints, channels },
+            None => Supervising::NoPolicy { joints },
+        },
         1 => {
             let (package, manifest) = &commanding[0];
             match transport_plan(manifest, body, allow_retarget) {
@@ -425,6 +474,41 @@ pub fn supervising(store: &Store, body: &Body, allow_retarget: bool) -> Supervis
             joints,
         },
     }
+}
+
+/// The bench width an operator declared, if any (§80).
+///
+/// # What it refuses to read, and why each refusal is not fussiness
+///
+/// The file's only job is to size a recording, and every malformed value has a plausible-looking
+/// wrong answer available:
+///
+/// * **A missing or unreadable file is nothing**, never zero. Zero channels is `events only`, which
+///   is what the robot already does; there is no reason to spell it in a file and a reader that
+///   accepted it would let a typo silently disarm a bench session.
+/// * **Zero is refused for the same reason**, so `{"channels": 0}` is a mistake rather than a
+///   request for the default.
+/// * **A width above the record format's limit is refused**, because `Shape.channels` is a `u16`
+///   and a value that wrapped would size a ring for a loop nobody could run.
+/// * **A non-integer is refused.** JSON has one number type and `2.5` channels is not a typo this
+///   should round.
+///
+/// Returning `None` for all of them is safe by construction: the caller falls back to the shape it
+/// had, which is the events-only recording that was correct before this existed.
+fn bench_channels(layout: &crate::layout::Layout) -> Option<usize> {
+    let text = std::fs::read_to_string(layout.bench()).ok()?;
+    let document = skynet_json::Json::parse(&text).ok()?;
+    let channels = document
+        .get("channels")
+        .and_then(skynet_json::Json::as_f64)?;
+    if !channels.is_finite() || channels.fract() != 0.0 {
+        return None;
+    }
+    let channels = channels as i64;
+    if channels <= 0 || channels > u16::MAX as i64 {
+        return None;
+    }
+    Some(channels as usize)
 }
 
 /// Where §25's rings are, for the one package that may write one.
@@ -688,6 +772,152 @@ mod tests {
 
         assert!(rendezvous(&store, "openrobot/grasp").is_empty());
         assert!(rendezvous(&store, "openrobot/walk").is_empty());
+    }
+
+    /// Write `state/bench.json`, as an operator about to run `skynetk` by hand would.
+    fn declare_bench(root: &TempRoot, body: &str) {
+        let layout = root.layout();
+        std::fs::create_dir_all(layout.state()).unwrap();
+        std::fs::write(layout.bench(), body).unwrap();
+    }
+
+    /// §80's *"a loop nothing declared"*, closed by the operator declaring it.
+    ///
+    /// The distinction this rests on: the daemon must not **invent** a loop, and an operator saying
+    /// *I am about to run one this wide* is not the daemon inventing anything. It is the same rule
+    /// `state/power.json` follows for a machine with two batteries.
+    #[test]
+    fn a_declared_bench_loop_sizes_the_ring_and_says_it_was_declared() {
+        let (root, store) = fixture("bench-declared");
+        write_descriptor(&root, 4);
+        declare_bench(&root, r#"{"channels": 4}"#);
+        let body = crate::embodiment::load(&root.layout());
+
+        let resolved = supervising(&store, &body, false);
+
+        assert_eq!(
+            resolved,
+            Supervising::Bench {
+                joints: 4,
+                channels: 4
+            }
+        );
+        assert_eq!(
+            resolved.shape(),
+            Shape {
+                joints: 4,
+                channels: 4
+            },
+            "a cycle fits now, which is the whole of what this buys"
+        );
+        // The sentence is the other half. A window recorded under a declaration must never read as
+        // evidence about a policy, so the operator line says which it is.
+        let line = resolved.describe();
+        assert!(line.contains("declared bench loop"), "{line}");
+        assert!(line.contains("operator's word"), "{line}");
+        assert!(!line.contains("transport plan ("), "{line}");
+    }
+
+    /// A declaration is weaker than a plan, in the two ways that need a package installed.
+    ///
+    /// Each is a case where letting the file win would hide something an operator needs to see.
+    ///
+    /// `cfg(unix)` for `install`'s reason: activation is §37.1's atomic symlink swap. The third
+    /// way — a width with no body — needs no package and is asserted below.
+    #[cfg(unix)]
+    #[test]
+    fn a_bench_declaration_never_outranks_a_transport_plan() {
+        // A commanding package wins. A bench file left behind on a robot that later installs a
+        // policy changes nothing — otherwise the ring would be sized by whoever wrote a file last
+        // rather than by two signed documents.
+        let (root, store) = fixture("bench-loses-to-policy");
+        write_descriptor(&root, 4);
+        declare_bench(&root, r#"{"channels": 9}"#);
+        install(&store, &root, "openrobot/walk", Some(2));
+        let body = crate::embodiment::load(&root.layout());
+        let resolved = supervising(&store, &body, false);
+        assert_eq!(
+            resolved.shape().channels,
+            2,
+            "the plan's width, not the file's"
+        );
+        assert!(matches!(resolved, Supervising::Policy { .. }));
+
+        // And it cannot resolve `Ambiguous`. Two commanding packages leave both without a ring
+        // (§80), and a bench file papering over that would hide the one case the rule exists for —
+        // a robot where nobody knows which policy would command the arm.
+        let (root, store) = fixture("bench-does-not-resolve-ambiguity");
+        write_descriptor(&root, 4);
+        declare_bench(&root, r#"{"channels": 4}"#);
+        install(&store, &root, "openrobot/grasp", Some(3));
+        install(&store, &root, "openrobot/walk", Some(2));
+        let body = crate::embodiment::load(&root.layout());
+        let resolved = supervising(&store, &body, false);
+        assert!(matches!(resolved, Supervising::Ambiguous { .. }));
+        assert_eq!(resolved.shape().channels, 0);
+    }
+
+    /// A width with no body is not a shape.
+    ///
+    /// The third way a declaration is weaker than a plan, and the one that needs no package: a
+    /// robot nobody has described has nothing for a cycle to be *about*, however many channels an
+    /// operator names.
+    #[test]
+    fn a_bench_declaration_without_a_body_sizes_nothing() {
+        let (root, store) = fixture("bench-needs-a-body");
+        declare_bench(&root, r#"{"channels": 4}"#);
+        let body = crate::embodiment::load(&root.layout());
+        assert_eq!(supervising(&store, &body, false), Supervising::NoBody);
+    }
+
+    /// Every malformed declaration falls back to the recording the robot already had.
+    ///
+    /// Safe by construction — the fallback is events-only, which was correct before this existed —
+    /// and worth asserting per case because each has a plausible-looking wrong answer available.
+    /// A zero that read as "the default" would let a typo silently disarm a bench session.
+    #[test]
+    fn a_declaration_that_cannot_be_read_sizes_nothing() {
+        for (name, body) in [
+            ("empty", ""),
+            ("not-json", "channels = 4"),
+            ("no-field", r#"{"joints": 4}"#),
+            ("zero", r#"{"channels": 0}"#),
+            ("negative", r#"{"channels": -4}"#),
+            ("fractional", r#"{"channels": 2.5}"#),
+            ("above-u16", r#"{"channels": 70000}"#),
+            ("a-string", r#"{"channels": "4"}"#),
+        ] {
+            let (root, store) = fixture(&format!("bench-bad-{name}"));
+            write_descriptor(&root, 4);
+            declare_bench(&root, body);
+            let loaded = crate::embodiment::load(&root.layout());
+            assert_eq!(
+                supervising(&store, &loaded, false),
+                Supervising::NoPolicy { joints: 4 },
+                "{name} must not size a ring"
+            );
+        }
+    }
+
+    /// A declared bench loop is not a policy, and §27's condition still says `no_policy`.
+    ///
+    /// The assertion that keeps the declaration in its lane. §25.2's lease is granted to a policy
+    /// the Safety Kernel knows about; a loop an operator started by hand holds none and never will.
+    /// What the file changes is the shape of the recording, and deliberately nothing else.
+    #[test]
+    fn a_declared_bench_loop_is_not_a_policy() {
+        let (root, store) = fixture("bench-not-a-policy");
+        write_descriptor(&root, 4);
+        declare_bench(&root, r#"{"channels": 4}"#);
+        let body = crate::embodiment::load(&root.layout());
+
+        let resolved = supervising(&store, &body, false);
+        assert!(matches!(resolved, Supervising::Bench { .. }));
+        assert_eq!(
+            PolicySighting::of(&resolved, |_| true),
+            PolicySighting::Nothing { no_body: false },
+            "even with something running, nothing installed declares an action space"
+        );
     }
 
     /// No descriptor at all. Nothing can be said about the body, so nothing is claimed about it.

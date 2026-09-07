@@ -7004,3 +7004,103 @@ something — §36.1's controlled stop, §48.2's estop assert-and-observe — an
 where they are.
 
 Nothing is pushed.
+
+---
+
+# Round twenty-nine — 2026-09-07
+
+## 91. §80's "a loop nothing declared", and two sentences that had been run together
+
+The last of §80's open rows with a source in this repository, and it closed the way the others did:
+by rereading the reason rather than by building something large.
+
+> **A loop nothing declared.** `skynetk` run by hand against a driver names no package, so a robot
+> with a body and no commanding package still meets the shape refusal. That is the honest answer
+> rather than a gap: nothing on that robot declares a policy, and the daemon inventing one would be
+> sizing evidence for a loop that exists only in an operator's terminal.
+
+Two sentences, and only the first is true:
+
+1. **The daemon must not invent a loop.** Correct, and it is why nothing is inferred from whichever
+   driver a bench operator happens to be pointing at.
+2. **Therefore a bench loop cannot be recorded.** Does not follow. An operator saying *I am about to
+   run a loop this wide* is not the daemon inventing anything.
+
+`state/bench.json` is that declaration, and it is not a new idea in this system — it is §34.3's rule
+applied for the **fourth** time. `power.json` names which of two batteries is the traction pack
+because no measurement can. `brownout_fault_codes` names which vendor codes mean sag because §24
+forbids the OS interpreting one. Bearers are declared for the same reason. *The parts a machine can
+measure are measured, the parts it cannot are declared, and every surface says which is which.*
+
+The joints stay **measured**, off the descriptor. Only the width is a person's word.
+
+### Weaker than a plan, in three ways, each of which would otherwise hide something
+
+A transport plan is two signed documents; a declaration is somebody's word. So:
+
+* **A commanding package always wins.** A bench file left on a robot that later installs a policy
+  changes nothing — otherwise the ring would be sized by whoever wrote a file last.
+* **It cannot resolve `Refused`, `Ambiguous` or `Unreadable`.** Those are robots with a problem an
+  operator needs to see, and papering over `Ambiguous` would hide precisely the case §80 leaves both
+  packages unringed for: a robot where nobody knows which policy would command the arm.
+* **It is not a policy.** §27's condition still reads `no_policy`, because §25.2's lease is granted
+  to a policy the Safety Kernel knows about and a loop started by hand holds none and never will.
+  The file changes the shape of a recording and deliberately nothing else.
+
+### Every malformed value falls back, and the zero is the one worth arguing
+
+Eight cases are pinned, and the interesting one is `{"channels": 0}`. Reading it as *the default*
+would be defensible and wrong: zero channels is events-only, which is what the robot already does,
+so nobody would ever write it deliberately — and a reader that accepted it would let a typo silently
+disarm a bench session. It is refused, like a negative, a fraction, a value above `u16`, a string,
+an absent field and a file that is not JSON. The fallback is safe by construction: events-only was
+correct before this existed.
+
+The operator line says **declared** rather than resolved, so a window recorded under it is never
+read as evidence about a policy.
+
+## 92. Two items checked and closed as correct rather than built
+
+The audit that opened this session listed both, and reading them settles both:
+
+* **§78's two spellings** of a package's requirements. Not a gap — §78.2 is a **decision**, and it
+  is fully implemented: the union on read, the publish refusal in one direction,
+  `embodiment_undeclared` as the seventeenth rejection code in all three editions, and corpus cases
+  in `admission/install.json` and `vocabulary/closed-sets.json`. The duplication is load-bearing
+  because `embodiment.capabilities` is normative and `required_capabilities` is cited by digests in
+  published benchmark results.
+* **§48.2's five `elsewhere` checks.** Also correct. The tempting one was
+  `describe_matches_descriptor` — the ring records a joint count, so why not compare it? Because the
+  ring's shape is **sized from the descriptor** by this same daemon, so the comparison is circular.
+  The other four need the daemon to *act* on an actuator: load a driver, call `describe()`, assert a
+  stop, read joints at boot. That is the line §33.1 actually draws, and it holds.
+
+## Run
+
+```
+cargo test --workspace                      1,631 passed, 0 failed  (1,627 before)
+cargo clippy --workspace --all-targets      clean, no warnings
+cargo fmt --all --check                     clean
+node tools/scale-report.mjs --check         §73 matches the tree
+node tools/check-rhal-flags.mjs             10 constants agree across 4 definitions
+node tools/check-mirrors.mjs                all shared documents match, re-pinned
+node tools/check-golden-path.mjs            4 documents, 51 commands
+```
+
+## What round twenty-nine leaves
+
+The rule these four rounds found is worth keeping: **before recording that a fact is unobservable,
+separate *whose fact it is* from *where the evidence lives*, and separate *the daemon must not
+guess* from *therefore nobody can say*.** Four rows closed on the first distinction and one on the
+second, and none of them needed a new subsystem.
+
+What is genuinely left in the OS is short, and none of it is a reasoning error:
+
+* **The vision mapping half and an inference backend** (§80, §23.3) — real design work, and §80 says
+  in its own words that starting it as a side effect of something else produces a bad version of it.
+* **§79's two halves joined to each other** — each is exercised against a double; joining them needs
+  a running Hub beside a running robot.
+* **A third edition** — excluded by the owner from this pass.
+* **Hardware** — the certified tier, a physical joint, a TPM, a vendor driver, an applied OTA.
+
+Nothing is pushed.

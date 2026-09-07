@@ -290,6 +290,27 @@ impl Layout {
         self.state().join("power.json")
     }
 
+    /// An operator's declaration that a control loop is being run by hand (§80).
+    ///
+    /// The second file in `state/` that exists because a daemon refuses to guess, and it is the
+    /// same shape as [`Layout::power`] one layer up: `power.json` names which of two batteries is
+    /// the traction pack, and this names how wide a bench loop's action space is. Neither is
+    /// measurable from here, and both have a wrong answer that looks plausible.
+    ///
+    /// §80 left this open as *"a loop nothing declared"*: `skynetk` run against a driver names no
+    /// package, so `shape::supervising` sizes the recording events-only and the loop is refused at
+    /// `Recorder::open`. That was the right refusal and the wrong conclusion to stop at — the
+    /// daemon must not **invent** a loop, and an operator saying *I am about to run one this wide*
+    /// is not the daemon inventing anything. It is §34.3's rule, which this repository applies to
+    /// bearers, to the traction pack and to `brownout_fault_codes`: the parts a machine can
+    /// measure are measured, the parts it cannot are declared, and every surface says which is
+    /// which.
+    ///
+    /// Absent on every robot that is not a bench, which is every robot in the field.
+    pub fn bench(&self) -> PathBuf {
+        self.state().join("bench.json")
+    }
+
     /// Where the control loop offers §25's rings, and a policy connects to take them.
     ///
     /// In `/run` rather than `/data` because it is a rendezvous rather than state: it exists while
