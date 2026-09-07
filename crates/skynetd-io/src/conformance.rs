@@ -1235,6 +1235,7 @@ mod tests {
             &crate::layout::Layout::new("does-not-exist"),
             &Body::Absent,
             crate::limits::ROBOT_TIER,
+            &crate::blackbox::ProximitySighting::Unobservable("this fixture has no ring"),
         )
     }
 
@@ -1677,6 +1678,7 @@ mod tests {
             &crate::layout::Layout::new("does-not-exist"),
             &Body::Absent,
             skynet_contracts::safety::Tier::Host,
+            &crate::blackbox::ProximitySighting::Unobservable("this fixture has no ring"),
         )
     }
 

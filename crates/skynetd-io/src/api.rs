@@ -790,7 +790,12 @@ fn power<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
 fn limits<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, request: &Request) -> Json {
     let layout = context.daemon.store.layout().clone();
     let body = crate::embodiment::load(&layout);
-    let mut owned = crate::limits::read(&layout, &body, crate::limits::ROBOT_TIER);
+    let mut owned = crate::limits::read(
+        &layout,
+        &body,
+        crate::limits::ROBOT_TIER,
+        &context.daemon.proximity_sighting,
+    );
 
     let mut refused: Option<String> = None;
     let mut plan: Option<Box<skynet_contracts::transport::TransportPlan>> = None;
@@ -992,7 +997,12 @@ fn conformance<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let at = crate::audit::rfc3339(wall_ms());
     // The same composition `GET /limits` serves, so a conformance result and the limits panel
     // beside it can never be about two different limit sets.
-    let limits = crate::limits::read(&layout, &body, crate::limits::ROBOT_TIER);
+    let limits = crate::limits::read(
+        &layout,
+        &body,
+        crate::limits::ROBOT_TIER,
+        &context.daemon.proximity_sighting,
+    );
     // The grants an operator actually made on this machine, not a set this route invents. The mode
     // gate is measured against them, so a robot with none is skipped rather than half-measured.
     let grants: Vec<String> = crate::observe::read_grants(&layout)
@@ -1791,6 +1801,7 @@ fn checkin<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
             &layout,
             &crate::embodiment::load(&layout),
             crate::limits::ROBOT_TIER,
+            &context.daemon.proximity_sighting,
         ))),
     );
 

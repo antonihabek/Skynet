@@ -6908,3 +6908,99 @@ genuinely not are the ones requiring the daemon to *act* on an actuator — asse
 to a park pose — rather than to know something.
 
 Nothing is pushed.
+
+---
+
+# Round twenty-eight — 2026-09-07
+
+## 88. §80's `inert` was decided on a constant, and the constant was the bug
+
+Round twenty-six's rule — *before recording that a fact is unobservable because of §33.1, check
+whether §26 already writes it down* — found its third target the same day, and this one is different
+from the first two: nothing here claimed the fact was unobservable. It just never asked.
+
+§80 raised `inert` on 2026-09-07 for a guard *"whose every declared input resolves and whose
+per-cycle reading never arrives"*, and built it against `available.proximity_reading` — hard `false`
+in **two** files, the daemon and the kernel host, each carrying the note *"the day a producer
+exists, this is the line that changes."*
+
+That note is the whole problem. It is correct today, it is a promise about a future edit, and the
+failure mode is silent in the worst direction: **the day a producer existed, a robot would go on
+drawing a working proximity guard as inert, and nothing anywhere would say so.** A console renders
+that partition. §7.2's rule is that a measurement nobody can attribute is not one, and a constant is
+not a measurement at all.
+
+`cycle.nearest_person_m` is a field in every cycle record. The daemon holds the ring.
+
+## 89. An interval, not an instant — the one reading in the system that is counted
+
+Every other ring reading here is a **state**: `rhal`, `stop`, `guard_hold` and `homing` are all
+questions about *now*, so the newest cycle decides them.
+
+*Does a producer exist* is not a state, and taking it off the newest cycle would have been the
+obvious mistake. A detector at 30 Hz under a 1 kHz control loop leaves `NaN` in roughly thirty-two
+cycles out of thirty-three — so a newest-cycle reading would report a **working** detector as absent
+on almost every pass, and flicker between active and inert at the sensor's beat frequency.
+
+So `ProximitySighting` counts, like `Recorder::tally`: how many cycles in the interval, and how many
+carried a number. `Counted { cycles: 4000, filled: 120 }` is a healthy 30 Hz sensor. The count is
+carried rather than a boolean because **0 of 4,000 and 0 of 0 are different problems** and send an
+operator to different places.
+
+Two things are counted in neither, and both are §26.4 one field along: a cycle whose body read
+failed carries the previous cycle's values, so a `NaN` in a fill is not evidence that nothing
+produced a reading and a number in one is not evidence that something did.
+
+The counting is a **pure function over an iterator of cycles**, for the reason `KernelSighting::
+from_tally` is pure: only a control loop can put a cycle in a ring (§26.2), so a rule reachable only
+through a disk would be one this crate's own suite could never exercise.
+
+## 90. Half of a gap the resolver had already named
+
+`GuardsSighting`'s header has said since it was written:
+
+> The gap that remains is a declared sensor that fails at runtime: the descriptor goes on declaring
+> it and nothing here notices. **That is a per-cycle fact and belongs with the ring readings.**
+
+It does, and it is there now. A detector that was filling `cycle.nearest_person_m` and stops moves
+`proximity` from **active to inert within one interval** — a console stops drawing protection the
+robot no longer has, with nobody editing a descriptor. That is the direction that matters.
+
+It is **half**, and the header now says which half and why: that is the only sensor whose per-cycle
+reading appears in a record at all. An IMU that fails is still invisible, because §26 carries the
+base pose and twist a driver reported rather than a per-sensor liveness, and `balance` resolves off
+the descriptor's `imu` declaration alone. Claiming otherwise would be the overreach the type exists
+to prevent.
+
+Fail-closed throughout: an unreadable ring, an events-only ring and an interval with no cycles all
+resolve the guard **inert** rather than active. The alternative was available and is a robot
+claiming to watch for people on the strength of a file it could not open.
+
+## Run
+
+```
+cargo test --workspace                      1,627 passed, 0 failed  (1,623 before)
+cargo clippy --workspace --all-targets      clean, no warnings
+cargo fmt --all --check                     clean
+node tools/scale-report.mjs --check         §73 matches the tree (Rust 123k → 124k)
+node tools/check-rhal-flags.mjs             10 constants agree across 4 definitions
+node tools/check-mirrors.mjs                all shared documents match, re-pinned
+node tools/check-golden-path.mjs            4 documents, 51 commands
+```
+
+Four new tests: the counting and both §26.4 skips as a pure function; an events-only ring saying
+nothing; a detector that stops filling moving the guard active → inert with no other change to the
+body; and an unobserved reading leaving it inert rather than active.
+
+## What round twenty-eight leaves
+
+The kernel host's own `proximity_reading: false` stays, and it is **not** the same kind of constant:
+that process knows its own backends, so it is reporting a fact about itself rather than inferring
+one from an absence. The daemon is the one that had to look.
+
+Three of §33.1's "unobservable" claims have now turned out to be facts already in the ring. The ones
+that remain are the ones requiring the daemon to **act** on an actuator rather than to know
+something — §36.1's controlled stop, §48.2's estop assert-and-observe — and those are correctly
+where they are.
+
+Nothing is pushed.

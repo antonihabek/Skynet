@@ -364,6 +364,40 @@ impl Recorder {
         }
     }
 
+    /// §80's `proximity_reading`: is anything on this robot filling `cycle.nearest_person_m`?
+    ///
+    /// **An interval, not an instant**, and that is the one structural difference between this and
+    /// every other reading in this file. `rhal`, `stop`, `guard_hold` and `homing` are states, so
+    /// the newest cycle decides them. *Does a producer exist* is not a state: a detector running at
+    /// 30 Hz under a control loop at 1 kHz leaves `NaN` in about thirty-two cycles out of
+    /// thirty-three, and a reading taken off the newest one would report a working detector as
+    /// absent on almost every pass and flicker between the two.
+    ///
+    /// So it counts, like [`Recorder::tally`], and reads the whole file for the same reason.
+    pub fn proximity(&self, since: u64) -> ProximitySighting {
+        let Ok(store) = self.read() else {
+            return ProximitySighting::Unobservable(
+                "the ring could not be read, so nothing can be said about the proximity reading",
+            );
+        };
+        if self.ring.geometry().shape.channels == 0 {
+            return ProximitySighting::Unobservable(
+                "this recording has no action channels, so it holds no control cycles and cannot \
+                 say whether anything fills the proximity reading (§26, §74.3)",
+            );
+        }
+        ProximitySighting::of(
+            self.ring
+                .ordered(&store)
+                .into_iter()
+                .filter(|record| record.sequence >= since)
+                .filter_map(|record| match record.body {
+                    skynet_blackbox::record::Body::Cycle(cycle) => Some(cycle),
+                    _ => None,
+                }),
+        )
+    }
+
     /// §27's **guard hold** condition, off the same newest cycle as [`body`](Self::body).
     ///
     /// The fourth reading taken from this ring, and the first one that is a fact about the
@@ -888,6 +922,107 @@ const RHAL_HOMING_PENDING: u16 = 2 << RHAL_HOMING_SHIFT;
 
 /// `SKR_HOMING_COMPLETE`, already shifted.
 const RHAL_HOMING_COMPLETE: u16 = 3 << RHAL_HOMING_SHIFT;
+
+/// Whether anything on this robot is producing §7.2's proximity reading, over one interval.
+///
+/// # The gap this closes, and the one it does not
+///
+/// §80 raised `inert` for a guard *"whose every declared input resolves and whose per-cycle reading
+/// never arrives"*, and built it against a **constant**: `available.proximity_reading` was `false`
+/// in both the daemon and the kernel host, each with a comment saying *"the day a producer exists,
+/// this is the line that changes"*. That is a correct answer on this edition and it is not a
+/// reading, and the difference shows up the moment a producer does exist — a robot would go on
+/// drawing the guard as inert with a detector filling the field every cycle.
+///
+/// It also closes half of the gap [`crate::limits::GuardsSighting`] names in its own header: *"a
+/// declared sensor that fails at runtime is a per-cycle fact and belongs with the ring readings"*.
+/// A detector that was filling the field and stops now moves the guard from active to **inert**
+/// within an interval, which is the direction that matters: a console stops drawing protection the
+/// robot no longer has. What it still cannot do is say *why* it stopped — that is the vendor's
+/// fault code, and §24 does not carry one per sensor.
+///
+/// # Why `filled == 0` is not "the sensor is broken"
+///
+/// It is *nothing produced a reading in this interval*, which on a robot with no vision path is
+/// every interval and entirely correct. The guard is inert either way and the remedy differs, so
+/// the count is carried rather than a boolean: an operator seeing 0 of 4,000 cycles is looking at
+/// a different problem from one seeing 0 of 0.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProximitySighting {
+    /// Nothing could be counted, with the reason. Not a reading.
+    Unobservable(&'static str),
+    /// Cycles were counted, and this many of them carried a reading.
+    Counted {
+        /// Control cycles in the interval whose body read succeeded.
+        cycles: u64,
+        /// How many of those carried a number rather than `NaN`.
+        filled: u64,
+    },
+}
+
+impl ProximitySighting {
+    /// Count the interval's cycles, and how many of them carried a reading.
+    ///
+    /// Pure, for [`KernelSighting::from_tally`]'s reason: only a control loop can put a cycle in a
+    /// ring (§26.2), so a rule that could be exercised only through a disk would be one this
+    /// crate's own suite could never reach.
+    pub fn of(cycles: impl Iterator<Item = skynet_blackbox::Cycle>) -> ProximitySighting {
+        let mut counted = 0u64;
+        let mut filled = 0u64;
+        for cycle in cycles {
+            // A failed read is counted in neither, for §26.4's reason one field along: the fill
+            // carries the previous cycle's value, so a `NaN` there is not evidence that nothing
+            // produced a reading and a number there is not evidence that something did.
+            if !cycle.read.measured() {
+                continue;
+            }
+            counted += 1;
+            if !cycle.nearest_person_m.is_nan() {
+                filled += 1;
+            }
+        }
+        if counted == 0 {
+            return ProximitySighting::Unobservable(
+                "no control cycle was recorded in the last interval, so nothing has read the \
+                 proximity sensor",
+            );
+        }
+        ProximitySighting::Counted {
+            cycles: counted,
+            filled,
+        }
+    }
+
+    /// Whether a producer exists. Everything that is not a positive count is `false`.
+    ///
+    /// Fail-closed, and here that means **the guard is drawn as inert rather than as protection**,
+    /// which is the safe direction: §7.2's partition is what a console renders, and an active
+    /// proximity guard is a claim that the robot is watching for people.
+    pub fn arriving(&self) -> bool {
+        matches!(self, ProximitySighting::Counted { filled, .. } if *filled > 0)
+    }
+
+    /// Whether this was an observation at all.
+    pub fn observed(&self) -> bool {
+        !matches!(self, ProximitySighting::Unobservable(_))
+    }
+
+    /// What was seen, in a sentence.
+    pub fn detail(&self) -> String {
+        match self {
+            ProximitySighting::Unobservable(why) => (*why).to_string(),
+            ProximitySighting::Counted { cycles, filled } if *filled == 0 => format!(
+                "{cycles} control cycle(s) were recorded in this interval and none carried a \
+                 proximity reading, so nothing on this robot fills `cycle.nearest_person_m`"
+            ),
+            ProximitySighting::Counted { cycles, filled } => format!(
+                "{filled} of {cycles} control cycle(s) carried a proximity reading, so a producer \
+                 exists. A detector slower than the control loop fills a minority of cycles and \
+                 that is the expected shape, not a fault"
+            ),
+        }
+    }
+}
 
 /// What a daemon could see of §27's **homing** condition in one interval.
 ///

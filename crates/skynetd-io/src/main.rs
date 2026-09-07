@@ -1477,6 +1477,7 @@ fn report_checkin<L, S>(
             layout,
             &body,
             skynetd_io::limits::ROBOT_TIER,
+            &daemon.proximity_sighting,
         ))),
     );
     let queue = skynetd_io::outbound::Queue::of(layout);
@@ -1952,8 +1953,23 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
     // robot reporting the guards it had when it booted.
     let layout = daemon.store.layout().clone();
     let body = skynetd_io::embodiment::load(&layout);
+    // §80's proximity reading, counted over the same interval as the four readings above and
+    // before the partition that consumes it. It is not one of §27's conditions — it feeds §7.2's
+    // partition, which §27 reads as `guards_unavailable` — so it is taken here rather than in the
+    // tuple, and stored on the daemon so the routes resolve limits against this pass's reading.
+    daemon.proximity_sighting = match recorder {
+        Some(recorder) => recorder.proximity(daemon.kernel_sequence),
+        None => skynetd_io::blackbox::ProximitySighting::Unobservable(
+            "this robot has no black box, so there is no record of a proximity reading",
+        ),
+    };
     let guards = skynetd_io::limits::guards(
-        &skynetd_io::limits::read(&layout, &body, skynetd_io::limits::ROBOT_TIER),
+        &skynetd_io::limits::read(
+            &layout,
+            &body,
+            skynetd_io::limits::ROBOT_TIER,
+            &daemon.proximity_sighting,
+        ),
         &skynetd_io::calibration::status(&layout, wall_s()).unavailable(),
     );
 
