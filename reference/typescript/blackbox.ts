@@ -60,6 +60,24 @@ export function crc32Of(bytes: Uint8Array): number {
 // ── The record ───────────────────────────────────────────────────────────────
 
 export const PREFIX = 24
+/**
+ * The per-record schema version this edition writes.
+ *
+ * Distinct from `FORMAT_VERSION`, which is the **ring header's** and refuses a whole recording
+ * whose layout it does not know. This one is per slot, for the reason the encoder's own comment has
+ * always given — a ring outlives a daemon upgrade and a reader must be able to tell which layout a
+ * given slot is in — and until 2026-09-07 nothing read it, so it said `1` while the frame record
+ * had already grown a field.
+ *
+ * **2** puts `read_state`'s outcome on the cycle record, in four bytes (172..176) that were
+ * reserved padding, so nothing moved and `FORMAT_VERSION` did not change. What did change is what a
+ * zero there means: in a schema-1 record those bytes are padding and the read's outcome is
+ * *unrecorded*; in a schema-2 record a zero means the driver answered. A reader that ignored this
+ * byte would read every older recording as a robot whose every read succeeded, which is the failure
+ * the field exists to prevent.
+ */
+export const RECORD_SCHEMA = 2
+
 export const CYCLE_FIXED = 176
 export const MAX_TRIPPED = 8
 export const MAX_STREAMS = 6
@@ -165,7 +183,21 @@ export interface Cycle {
   policy: number
   stateFlags: number
   faultCode: number
+  /** What `write_command` returned. Negative is an `errno` (§24). */
   rhalResult: number
+  /**
+   * What `read_state` returned: `0` for success, a negative `errno` otherwise (§24).
+   *
+   * §24 has always said errors are negative-errno, and the record has always carried what the
+   * **write** returned. It carried nothing about the read, so a cycle in which the driver did not
+   * answer was encoded with zeroed flags, a zero fault code, a zero sequence, the loop's own clock
+   * as the acquisition stamp and the previous cycle's joint positions — a record indistinguishable
+   * from a healthy one, on the failure that matters most.
+   *
+   * When this is negative, every other body field in the record is a fill value or stale data
+   * rather than a measurement. That is what the field is for.
+   */
+  readResult: number
   stateSeq: number
   stateStampNs: bigint
   commandStampNs: bigint
@@ -227,7 +259,7 @@ export function encodeRecord(
 ): Uint8Array {
   const slot = new Cursor(recordSize(shape))
   slot.u8(4, KINDS[entry.kind])
-  slot.u8(5, 1)
+  slot.u8(5, RECORD_SCHEMA)
   slot.u64(8, sequence)
   slot.u64(16, monoNs)
 
@@ -279,6 +311,9 @@ function encodeCycle(shape: Shape, slot: Cursor, cycle: Cycle): void {
   slot.f32(116, cycle.nearestPersonM)
   cycle.basePose.forEach((value, index) => slot.f32(120 + index * 4, value))
   cycle.baseTwist.forEach((value, index) => slot.f32(148 + index * 4, value))
+  // 172..176 was reserved padding, which is why this landed without moving a byte or bumping the
+  // ring's format. The schema byte separates "reserved zero" from "the read succeeded".
+  slot.i32(172, cycle.readResult)
 
   const at = cycleOffsets(shape)
   cycle.desired.forEach((value, index) => slot.f32(at.desired + index * 4, value))

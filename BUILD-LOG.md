@@ -5211,3 +5211,123 @@ Four stale sentences corrected on the way: the start-up banner, `GET /limits`' `
 * **A guard active with no producer** (§80, round thirteen). Still a decision.
 * **The mapping half of §47.6**, and the capture backend behind it.
 * **Device confinement**, unblocked by a vendor runtime that reports accelerator memory.
+
+# Round sixteen — 2026-09-07
+
+## 67. The cycle record could not say the read had failed
+
+Round fifteen ended by naming the next condition — `RhalState` off the cycle record — and called
+it *"a mapping decision over §24's `rhal_result`, `state_flags` and `fault_code`, not a missing
+channel"*. Reading those fields to write the mapping found that the channel is missing after all,
+in a way that is worse than a gap.
+
+### What a failed read actually records
+
+`Host::step` builds its `Observed` with `map_or` defaults when `sample` fails:
+
+```rust
+let (sample, read_error) = match body.sample(now_ns) { … };
+let observed = Observed {
+    stamp_ns: sample.map_or(now_ns, |s| s.stamp_ns),
+    seq:      sample.map_or(0, |s| s.seq),
+    flags:    sample.map_or(0, |s| s.flags),
+    fault_code: sample.map_or(0, |s| s.fault_code),
+    …
+};
+```
+
+Zero flags. Zero fault code. Zero sequence. The **loop's own clock** as the acquisition stamp,
+which §24 is explicit must be an acquisition time. And the joint arrays are copied out of
+`body.state()`, which on a failed read still holds *the previous cycle's* positions.
+
+Every one of those is a legal value on a healthy robot. So a recording of a driver that had
+stopped answering was byte-comparable with a recording of one that had not, and a replay of it
+showed a robot **holding still**. The loop knew — `summary.read_failures` counts them — and that
+counter lives in the process's memory and dies with it. The black box is the thing that outlives
+the robot, and it was the thing that could not say.
+
+That is why this had to land before the RHAL mapping and not after. A mapping is only as good as
+its input, and the input said "healthy" on the cycles that matter.
+
+### Four bytes that were already there
+
+`read_result` sits at offset 172, which was **reserved padding** — `CYCLE_FIXED` is 176 and the
+fields ended at 172. So nothing moved, no offset changed, and the ring's `FORMAT_VERSION` stayed
+2. Which raises the question the change actually turns on: **what does a zero at 172 mean in a
+recording written last week?**
+
+### The version byte that had never been read
+
+The answer is the **per-record schema byte**, and finding it is the second half of this round.
+`slot[5]` has existed since the format was written, with a comment stating exactly why:
+
+> The record schema version, per record rather than per file: a ring outlives a daemon upgrade,
+> and a reader must be able to tell which layout a given slot is in.
+
+It was written as `1` and **read by nothing** — not by the decoder, not by replay, not by any
+edition. Meanwhile `FORMAT_VERSION` (the ring *header's*, which is properly checked) had gone to
+2 for the frame record's `streams_absent`, and `README.md` reported "Record format 2" about a
+byte that said 1. Three claims, two of them wrong, and no check between them.
+
+It says `2` now and the decoder reads it:
+
+| Schema | Bytes 172..176 | The read's outcome |
+|---|---|---|
+| 1 | reserved padding | **unrecorded** — nothing is known |
+| 2 | `read_result` | `0` is success; negative is the `errno` |
+
+`ReadOutcome::Unrecorded` is the variant that matters. A reader that ignored the byte would read
+every older recording as a robot whose every read succeeded — the exact failure the field exists
+to prevent — so absence reads as *unrecorded* and never as *fine*.
+
+### The code, not the sentence
+
+`Actuator::sample` returned `Result<Sample, String>`, and a string is not something a black box
+can be replayed against: a recording is read months later by somebody who does not have this
+build's error strings, and a `-110` is a timeout in any language. `ReadFailure` carries both, and
+`ReadFailure::from_driver` maps each `DriverError` onto the `errno` that is *true* of it rather
+than onto a placeholder — a call that returned a code carries that code, a vtable with no
+`read_state` is `-ENOSYS` (the answer a missing `write_command` already gets), and a shared object
+that would not load is `-ENODEV`. A driver that returned zero and called it an error becomes
+`-EIO`, because the alternative is a record saying the read worked on the cycle the driver said it
+did not.
+
+### Three editions, and the corpus as arbiter
+
+The Rust was written first this time and the reference second — the wrong order by §31.4's third
+rule, and worth saying rather than hiding. What preserved the rule's purpose is that the two were
+written **independently against the decision** (offset 172, schema byte 2) and the corpus judged
+them: had either guessed differently, `blackbox/records.json` would have said so. Both reproduce,
+as does Python, and the mutation run confirms the cases bite:
+
+```
+rust    schema byte back to 1              1,125 of 1,137   (12 records)
+python  the i32 at 172 not written           1,136 of 1,137   (the new case)
+```
+
+`cycle-the-read-failed` is the new case, and it is the record this field was added for: a cycle
+whose `read_state` returned `-ETIMEDOUT`, with every other body field a fill value.
+
+### Run
+
+```
+cargo test --workspace  — 1,659 passed, 0 failed  (1,658 before)
+cargo clippy --workspace — clean
+cargo run -p skynet-corpus      — 1,137 of 1,137
+python3 editions/python/run_corpus.py — 1,137 passed
+sh crates/skynetd-io/e2e.sh — all checks passed
+mirrors, contract mirrors, golden path, scale, edition report — all green
+```
+
+## What round sixteen leaves
+
+* **`RhalState` from the record**, now that the record can carry the fact it needs. Next, and it
+  is the mapping this round set out to write.
+* **Replay does not mark the fill values.** A record whose read failed still carries the previous
+  cycle's positions, and now also carries the fact that they are not measurements. Making a
+  replay say so is a separate change; `state_seq` and `state_stamp_ns` are integers with no
+  `NaN`, so it cannot be done by writing a sentinel.
+* **A package that attempts the forbidden hold** (§15's isolation).
+* **A guard active with no producer** (§80). Still a decision.
+* **The mapping half of §47.6**, and the capture backend behind it.
+* **Device confinement**, unblocked by a vendor runtime that reports accelerator memory.

@@ -562,9 +562,11 @@ fn run(args: &[String]) -> i32 {
             observations.as_mut(),
         );
 
-        if let Some(error) = turn.read_error {
+        if let Some(failure) = turn.read_error {
             if first_error.is_none() {
-                first_error = Some(error);
+                // The code as well as the sentence: a reader of this line and a reader of the
+                // recording should see the same fact, and the record keeps the number.
+                first_error = Some(format!("{} ({})", failure.detail, failure.code));
             }
         }
         stop_unavailable_seen |= turn.stop_unavailable;

@@ -459,6 +459,7 @@ pub fn record(
     posted: Option<&Posted<'_, '_>>,
     decision: &Decision,
     rhal_result: i32,
+    read_result: i32,
 ) -> Cycle {
     let width = decision.channels;
 
@@ -498,6 +499,16 @@ pub fn record(
         state_flags: observed.flags,
         fault_code: observed.fault_code,
         rhal_result,
+        // §26 records what the *read* returned beside what the write did, and until 2026-09-07 it
+        // recorded only the write. On a failed read every other field here is a fill value or the
+        // previous cycle's data — `observed` is built with `map_or` defaults and the joint arrays
+        // are whatever the driver's buffers last held — so a record without this was a record of a
+        // healthy robot on the cycle its driver stopped answering.
+        read: if read_result == 0 {
+            skynet_blackbox::record::ReadOutcome::Ok
+        } else {
+            skynet_blackbox::record::ReadOutcome::Failed(read_result)
+        },
         state_seq: observed.seq,
         state_stamp_ns: observed.stamp_ns,
         // §24 stamps a command when the policy produced it. The ring carries nanoseconds and the

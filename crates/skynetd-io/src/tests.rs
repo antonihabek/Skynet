@@ -9803,6 +9803,7 @@ mod wire {
                 policy: 0,
                 state_flags: 0,
                 fault_code: 0,
+                read_result: 0,
                 rhal_result: 0,
                 state_seq: tick as u32,
                 state_stamp_ns: tick * 1_000_000,

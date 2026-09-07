@@ -1518,7 +1518,7 @@ Channels, each with an embedded schema so the file stays readable without the co
 
 | Channel | Rate | Carries |
 |---|---|---|
-| `/sk/state` | joint rate | `rhal_state` verbatim |
+| `/sk/state` | joint rate | `rhal_state` verbatim, **and what `read_state` returned** — see §26.4 |
 | `/sk/desired` | policy rate | what the policy asked for |
 | `/sk/verdict` | joint rate | guards tripped, clamps applied, response |
 | `/sk/command` | joint rate | what actually went to `write_command`, and its return |
@@ -1528,6 +1528,50 @@ Channels, each with an embedded schema so the file stays readable without the co
 Observation *hashes* rather than observation bytes: an hour of three-camera video is hundreds of
 gigabytes and the robot has neither the disk nor the uplink. The hash proves which frame was seen;
 full-fidelity capture is a separate, explicitly enabled recording mode for data collection.
+
+### 26.4 What the read returned, and the schema byte that made it readable
+
+*Built 2026-09-07. Record schema **2**; `FORMAT_VERSION` is unchanged.*
+
+The cycle record carried what `write_command` returned and nothing about the **read**, which is
+half of §24's own sentence — *"errors are negative `errno`-style"* — applied to one direction. The
+consequence is not a missing field, it is a **lying record**. On a cycle where `read_state` failed,
+the loop builds its observation from defaults: the flags are zero, the fault code is zero, the
+sequence is zero, the acquisition stamp is the loop's own clock rather than an acquisition time,
+and the joint arrays hold whatever the driver's buffers last contained — which is the *previous*
+cycle's positions.
+
+Every one of those is a legal value on a healthy robot. So a recording of a driver that had stopped
+answering was byte-comparable with a recording of one that had not, and a replay of it showed a
+robot holding still. The loop's own counters knew — `summary.read_failures` — and they live in that
+process's memory and die with it. The black box is what outlives the robot.
+
+`read_result` is four bytes at offset 172, which was **reserved padding**, so nothing moved and the
+ring's header version did not change. What changed is what a zero there means, and that is what the
+**per-record schema byte** is for. It has existed since the format was written, with a comment
+saying exactly why — *a ring outlives a daemon upgrade, and a reader must be able to tell which
+layout a given slot is in* — and nothing had ever read it, so it said `1` while the frame record had
+already grown a field. It says `2` now and the decoder reads it:
+
+| Schema | Bytes 172..176 | The read's outcome |
+|---|---|---|
+| 1 | reserved padding | **unrecorded** — nothing is known |
+| 2 | `read_result` | `0` is success; negative is the `errno` |
+
+A reader that ignored the byte would read every older recording as a robot whose every read
+succeeded, which is precisely the failure the field exists to prevent. So absence reads as
+*unrecorded* and never as *fine*.
+
+The failure carries a code as well as a sentence from the driver upward, because a recording is
+replayed months later by somebody who does not have that build's error strings: a `-110` in a record
+is a timeout in any language. Each `DriverError` maps onto the `errno` that is true of it — a call
+that returned a code carries that code, a vtable with no `read_state` is `-ENOSYS` (the answer
+`write_command`'s absence already gets), and a driver that would not load at all is `-ENODEV`.
+
+What this does **not** do is repair the other fields. A record whose read failed still carries the
+previous cycle's positions; what it now also carries is the fact that they are not measurements.
+Replay marking them is a separate change, and pretending a fill value is a `NaN` would move the
+problem rather than solve it — `state_seq` and `state_stamp_ns` are integers with no such value.
 
 ### 26.1 The ring is not itself an MCAP file
 
@@ -5215,7 +5259,7 @@ miniature, and currently trivial to fix.
 | Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 49 CLI commands, the golden path checked mechanically | — |
 | Security, local access control | §19, §39 | **Built** — Ed25519, the trust store, five signature states, four roles; §38.3's two records now written for a capability grant, which had left neither (§81.4) | — |
 | Distribution and business model | §20, §72 | Designed | — |
-| Languages, editions, levels | §23, §31, §42 | **Built** — **two** editions, Rust and Python, each passing all 1,136 cases of a corpus of 80 files. The row said *"one edition"* and *"the second edition, which is what the corpus is for"* for as long as that was true and for a while after | A **third** edition is what would test the claim properly. Two implementations can agree because the second was transcribed from the first — which this one was, deliberately and with its divergences documented — and the corpus only proves its worth when an edition is written by somebody who did not write the reference |
+| Languages, editions, levels | §23, §31, §42 | **Built** — **two** editions, Rust and Python, each passing all 1,137 cases of a corpus of 80 files. The row said *"one edition"* and *"the second edition, which is what the corpus is for"* for as long as that was true and for a while after | A **third** edition is what would test the claim properly. Two implementations can agree because the second was transcribed from the first — which this one was, deliberately and with its divergences documented — and the corpus only proves its worth when an edition is written by somebody who did not write the reference |
 | IPC, observation assembly, arbitration | §25 | **Built — and the loop closes.** The command ring with both ends; `skynet-obs` carrying proprioception the other way; and a backend whose command on cycle *n* is a function of what the body did on cycle *n − 1*. A test drives the whole diagram — driver read, state across the observation ring, decision, command across the command ring, eight guards, driver written — and a second one shows a **clamped** command coming back as the position the robot actually reached rather than the one it was told, which is the only way a policy can notice it is being clamped. §25.1's staleness budget is enforced by the runtime: a reading past it is a hold the backend never sees | **Nothing the robot can see.** The observation ring carries the body, not the cameras: a 4 KiB slot holds 128 joints three times over and does not hold one image, and a ring of megabyte slots would be a copy per frame at capture rate. Vision needs a buffer pool with handles and a lifetime rule, which is a larger design and is not started here — so manipulation from pixels is still out of reach and §54's skills cannot be what they will be. **Both rings now cross two processes**, in one `SCM_RIGHTS` message so that a policy gets both or neither: `handoff::Port` creates them and offers them, `skynetp --ring-socket` takes them — the command ring writable, the body read-only — and the loop closes across the boundary. A policy in one process reads what a driver in another reported and commands from it: 300 cycles, 300 commanded, none held, and a test asserts the arithmetic rather than the liveness (§80). **And no backend does inference** — §23.3's runtime is a named vacancy in the `Backend` trait, and what ships is a hold, an open-loop table and a proportional approach |
 | Boot, faults, POST, homing | §27, §48 | **Built** — §27's machine, POST's eight checks, and since 2026-09-07 the **`kernel` condition**, which had been a default on every robot since the machine was written | Six of the eight are still the kernel's, through a path §33.1 denies the daemon. The one that moved shows how the rest can: liveness is read off **§13's ring** — a turning control loop records a cycle every pass — and never off systemd, because `ActiveState=active` is what a *hung* kernel also reports and §27's most consequential condition cannot rest on the one signal that conflates them. It fails closed in the only direction that is safe: cycles recorded means `live`, and silence, an unreadable ring or no ring at all all mean `down`, so a wrong answer can hold a robot and can never release one. And the daemon cannot forge it — §26.2 gives the supervisor the event channel and the control loop the four cycle channels, so `skynetd` is structurally incapable of writing the record it reads. **The RHAL is the next one and the evidence is already there**: a cycle record carries `rhal_result`, `state_flags` and `fault_code` (§24), so what is missing is the mapping from those onto `Present`/`Degraded`/`Lost` — a decision about §24's semantics rather than a channel that does not exist |
 | Networking and time | §34–35 | **Built** — bearers, metering, the outbound queue, backoff, two clocks kept apart | — |
@@ -5231,8 +5275,8 @@ miniature, and currently trivial to fix.
 | Discovery — finding a robot on the link | §82 | **Built on both sides** — the DNS-SD wire format, RFC 6763's TXT convention, what a robot may advertise, a one-shot browse behind `skynet discover`, and §82.4's responder in `skynetd`: probing, defending, answering and refusing. 106 tests, and it has run between two daemons on one link | The **goodbye** has no caller: `farewell()` exists and the daemon is stopped by a signal, so a robot that is switched off stays in a cache until the 120-second TTL expires. The **browse** still cannot hold 5353 (§82.3), so it sees answers to its own question and never an unsolicited announcement — which is why there is no watch mode here and why §83.3's applications use their platform's resolver instead |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **118,000 lines of Rust** across **twenty-three crates**, held by a
-corpus of 80 files and 1,136 cases to **14,000 lines** of the TypeScript reference edition and
+**Built** means running, tested code: **119,000 lines of Rust** across **twenty-three crates**, held by a
+corpus of 80 files and 1,137 cases to **14,000 lines** of the TypeScript reference edition and
 **16,000 lines** of the Python edition, with **5,000 lines** of drivers and **8,000 lines** in the
 Hub's mirror of the shared contracts.
 
