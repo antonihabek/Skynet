@@ -353,6 +353,16 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         // somebody the table did not give it to.
         ("POST", ["identity", "pair"]) => Role::Admin,
         ("POST", ["identity", "unpair"]) => Role::Admin,
+        // §82.4's shutdown, and it is admin by decision rather than by the fall-through below —
+        // which would have given it the same answer and none of the reasoning. The argument is the
+        // one two lines above: a robot whose supervisor is not running applies no desired state,
+        // launches nothing and answers nobody, and only systemd can start it again. That is the
+        // destructive half of an admin action, and an operator role that held it could take a
+        // robot out of service without being able to put it back.
+        //
+        // It is emphatically **not** §39.1's `POST /stop`, which is anonymous because a stop must
+        // never wait for a credential. This one stops the supervisor and leaves the body alone.
+        ("POST", ["shutdown"]) => Role::Admin,
         ("GET", ["audit"]) => Role::Observer,
         // §39.1 gives observer "read health, guards, plan". Which guards have lost their input is
         // guard state, and it is the panel somebody reads when a robot is running with fewer of

@@ -172,6 +172,31 @@ function fenced(source) {
 const known = commands()
 let checked = 0
 
+/**
+ * §73 states the command count in prose, and this script is the only thing that counts them.
+ *
+ * Added after `skynet state` took the total from 49 to 50 and §73 kept saying 49 — the same shape
+ * as every other figure `tools/scale-report.mjs` guards, and the reason it is checked *here* rather
+ * than there is that the counting rule is subtle (sub-dispatches, two-word commands) and lives in
+ * `commands()` above. A second implementation of that rule in another script would be §78's two
+ * spellings, which is what this repository keeps finding.
+ */
+function checkCommandCount(known) {
+  const spec = join(HERE, 'docs', 'skynet-os-architecture.md')
+  if (!existsSync(spec)) return
+  const text = readFileSync(spec, 'utf8').replace(/\s+/g, ' ')
+  const match = /\*\*Built\*\* — (\d+) CLI commands/.exec(text)
+  if (!match) {
+    problems.push(
+      '§73 no longer states how many CLI commands there are, so this check is guarding nothing')
+    return
+  }
+  if (Number(match[1]) !== known.size) {
+    problems.push(
+      `§73 says ${match[1]} CLI commands and the CLI dispatches ${known.size}`)
+  }
+}
+
 for (const document of DOCUMENTS) {
   const path = join(HERE, document)
   if (!existsSync(path) || !statSync(path).isFile()) {
@@ -184,6 +209,8 @@ for (const document of DOCUMENTS) {
   checkCommands(document, source, known)
   checked += 1
 }
+
+checkCommandCount(known)
 
 if (problems.length > 0) {
   console.error(`\n${problems.length} problem(s) in the golden path:\n`)

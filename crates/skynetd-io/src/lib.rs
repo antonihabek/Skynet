@@ -74,6 +74,7 @@ pub mod layout;
 pub mod limits;
 pub mod notes;
 pub mod observe;
+pub mod observed;
 pub mod ota;
 pub mod outbound;
 pub mod post;

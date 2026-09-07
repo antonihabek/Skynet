@@ -130,13 +130,23 @@ export const RHAL_STATES = ['present', 'degraded', 'lost'] as const
 export type RhalState = (typeof RHAL_STATES)[number]
 
 /**
- * §27's four causes of a controlled stop, and no fifth.
+ * §27's causes of a controlled stop. Five since 2026-09-07, and the fifth is a different kind.
  *
- * The list is closed on purpose. A fifth cause added here is a fifth thing that stops a robot, and
- * it should be added by somebody who found this constant rather than by somebody who found a
- * boolean called `stopping` and set it.
+ * The list is closed on purpose. A cause added here is another thing that stops a robot, and it
+ * should be added by somebody who found this constant rather than by somebody who found a boolean
+ * called `stopping` and set it.
+ *
+ * The first four are the **kernel's own decisions** — it evaluated a guard, or a person asked, and
+ * it commanded a stop. `estop` is not one of those: it is the body reporting that the hardware
+ * emergency-stop chain is open, which happened whether or not any software agreed. §24 gives it one
+ * bit in the state flags, so a robot can say the chain is open and cannot say what opened it.
+ *
+ * That is why it is not folded into `operator`. `operator` means *a person asked*, and an estop
+ * chain is also opened by a light curtain, a door interlock and a safety relay noticing itself
+ * fail. Reporting those as a person having asked would put a name on an event that has none, and
+ * §64 makes a message that misdescribes what happened a defect rather than a wording choice.
  */
-export const STOP_CAUSES = ['watchdog', 'proximity', 'balance', 'operator'] as const
+export const STOP_CAUSES = ['watchdog', 'proximity', 'balance', 'operator', 'estop'] as const
 
 export type StopCause = (typeof STOP_CAUSES)[number]
 
@@ -186,6 +196,12 @@ export interface Conditions {
    *
    * Read only when a stop is commanded. A robot that is not stopping has not completed a stop, and
    * a caller leaving this true between stops would otherwise pin the machine in `SAFE`.
+   *
+   * **For `estop` it is not observable on any edition that exists**, and that is a property of the
+   * evidence rather than an omission. §24 gives the hardware chain one bit, which says the chain is
+   * open and says nothing about whether the body has come to rest — so a supplier that set this
+   * true for a hardware stop would be claiming to have watched a robot stop moving. Absent, it
+   * derives `stopping`, which can hold a robot and can never release one.
    */
   stop_settled?: boolean
   /** §27's `HOLD` row: "a guard `hold`". */
@@ -222,6 +238,7 @@ export const STATE_REASONS = [
   'stopping_proximity',
   'stopping_balance',
   'stopping_operator',
+  'stopping_estop',
   'post_incomplete',
   'homing_pending',
   'kernel_down',
@@ -327,6 +344,7 @@ function stoppingReason(cause: StopCause): StateReason {
     case 'proximity': return 'stopping_proximity'
     case 'balance': return 'stopping_balance'
     case 'operator': return 'stopping_operator'
+    case 'estop': return 'stopping_estop'
   }
 }
 

@@ -398,6 +398,17 @@ pub struct Available {
     pub people_detection: bool,
     /// The body has legs, so balance is applicable at all.
     pub legged: bool,
+    /// Whether anything on this robot fills the per-cycle proximity reading (§80).
+    ///
+    /// A different fact from [`Available::people_detection`], and the distinction is the whole of
+    /// [`InertGuard`]. `people_detection` is the **body's** claim, out of §5's descriptor: this
+    /// machine has a sensor that detects people. This is the **operating system's**: something
+    /// running here fills `cycle.nearest_person_m` every cycle.
+    ///
+    /// A robot can have the first without the second, and every robot that exists does. `false` is
+    /// the default for the reason every default in this module is the least capable reading: a
+    /// caller that has not said has not established it.
+    pub proximity_reading: bool,
 }
 
 /// Everything [`resolve_limits`] needs.
@@ -484,6 +495,31 @@ pub struct UnavailableGuard<'a> {
     pub missing: FixedVec<&'a str, MAX_SUBJECTS>,
 }
 
+/// A guard whose declared inputs all resolve and whose per-cycle reading nothing produces (§80).
+///
+/// The third state, and it exists because the first two could not describe a real robot. §7.2
+/// partitioned guards into *active* and *unavailable*, and `available.people_detection` opened a
+/// gap between them: a body that declares a person detector resolves `proximity` **active**, every
+/// input the resolver can see is present, and no cycle ever carries `nearest_person_m` — so the
+/// guard is reported as running and will never trip.
+///
+/// That matters because *active* is what every surface renders as **protection**. A console, a
+/// check-in, a device page and `skynet limits` all draw this partition, and all four would show a
+/// robot as guarded against approach by a guard that cannot fire.
+///
+/// It is not `unavailable`, and folding it there was the tempting simplification. `unavailable`
+/// means *an input this robot does not have*, and its remedy is to fit the sensor or write the
+/// profile. This one's inputs are all present and its remedy is a producer in the operating system,
+/// which is a different sentence to a different person.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InertGuard {
+    /// Which guard.
+    pub guard: Guard,
+    /// The per-cycle field nothing fills, named for §64's reason: a refusal that does not say what
+    /// to fix is a defect rather than a message.
+    pub reading: &'static str,
+}
+
 /// The single set of ceilings the kernel enforces, and what it can and cannot check.
 #[derive(Debug, Clone)]
 pub struct ResolvedLimits<'a> {
@@ -512,6 +548,8 @@ pub struct ResolvedLimits<'a> {
     pub active_guards: FixedVec<Guard, MAX_TRIPPED>,
     /// Guards specified but inoperable here, with the input that is missing.
     pub unavailable_guards: FixedVec<UnavailableGuard<'a>, MAX_TRIPPED>,
+    /// §80's third state: every declared input resolves and the reading is not coming.
+    pub inert_guards: FixedVec<InertGuard, MAX_TRIPPED>,
     /// Provenance of the numbers. `None` when nobody cited one.
     pub source: Option<&'a str>,
     /// Things an operator must read.
@@ -683,7 +721,7 @@ pub fn resolve_limits<'a>(params: &ResolveLimitsParams<'a>) -> ResolvedLimits<'a
         push_notice(&mut notices, NoticeCode::NoRateLimit, None, &[]);
     }
 
-    let (active, unavailable) = partition_guards(params, max_delta);
+    let (active, unavailable, inert) = partition_guards(params, max_delta);
 
     // Emitted only when the guard it is about will actually run. A robot with no collision geometry
     // is already being told the guard is unavailable, and adding "and its margin is unset" to that
@@ -723,6 +761,7 @@ pub fn resolve_limits<'a>(params: &ResolveLimitsParams<'a>) -> ResolvedLimits<'a
         per_channel: transport.map(|t| t.per_channel).unwrap_or(&[]),
         active_guards: active,
         unavailable_guards: unavailable,
+        inert_guards: inert,
         source: envelope
             .and_then(|e| e.source)
             .or_else(|| transport.and_then(|t| t.source)),
@@ -751,9 +790,11 @@ fn partition_guards<'a>(
 ) -> (
     FixedVec<Guard, MAX_TRIPPED>,
     FixedVec<UnavailableGuard<'a>, MAX_TRIPPED>,
+    FixedVec<InertGuard, MAX_TRIPPED>,
 ) {
     let mut active: FixedVec<Guard, MAX_TRIPPED> = FixedVec::new();
     let mut unavailable: FixedVec<UnavailableGuard<'a>, MAX_TRIPPED> = FixedVec::new();
+    let mut inert: FixedVec<InertGuard, MAX_TRIPPED> = FixedVec::new();
 
     for guard in GUARDS {
         let mut missing: FixedVec<&'a str, MAX_SUBJECTS> = FixedVec::new();
@@ -848,14 +889,28 @@ fn partition_guards<'a>(
             Guard::ModeGate => {}
         }
 
-        if missing.is_empty() {
-            active.push(guard);
-        } else {
+        if !missing.is_empty() {
             unavailable.push(UnavailableGuard { guard, missing });
+            continue;
         }
+        // Checked **after** `missing`, and the order is the point: a guard with no sensor is
+        // unavailable, not inert. Reporting a robot that has no person detector as "the reading is
+        // not coming" would describe a missing producer on a machine whose problem is a missing
+        // sensor.
+        //
+        // Only `proximity` today: the other seven act on the command, the previous command, the
+        // clock or the frame graph, all of which the cycle always carries.
+        if guard == Guard::Proximity && !params.available.proximity_reading {
+            inert.push(InertGuard {
+                guard,
+                reading: "cycle.nearest_person_m",
+            });
+            continue;
+        }
+        active.push(guard);
     }
 
-    (active, unavailable)
+    (active, unavailable, inert)
 }
 
 // ── The per-cycle decision ───────────────────────────────────────────────────

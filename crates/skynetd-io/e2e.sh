@@ -53,12 +53,27 @@ stop_daemon() {
 }
 
 if [ -z "$BIN" ]; then
-  cargo build -p skynetd-io -p skynet-cli >/dev/null
+  cargo build -p skynetd-io -p skynet-cli -p skynet-kernel-host >/dev/null
   BIN="$(cargo metadata --format-version 1 --no-deps 2>/dev/null | sed 's/.*"target_directory":"\([^"]*\)".*/\1/')/debug"
 fi
 SKYNETD="$BIN/skynetd"
 SKYNET="$BIN/skynet"
+SKYNETK="$BIN/skynetk"
 [ -x "$SKYNETD" ] || { echo "no skynetd at $SKYNETD"; exit 1; }
+
+# This file drives a Unix socket, an atomic symlink swap and systemd units, and `skynetd` refuses to
+# serve anywhere but Linux — it says so itself and points at `skynetd once`. Run from Git Bash on
+# Windows it stopped on `no skynetd at .../debug/skynetd`, which reads as a build failure and is
+# not one: the binary is there with `.exe` on the end. A check that fails for a reason unrelated to
+# its subject is worse than one that does not run, so this says which it is.
+case "$(uname -s 2>/dev/null || echo unknown)" in
+  MINGW*|MSYS*|CYGWIN*|Windows_NT)
+    echo "This is the end-to-end run, and it needs Linux — a Unix socket, an atomic symlink swap"
+    echo "and systemd (§23.5). \`skynetd\` refuses to serve on Windows and says so on start-up."
+    echo "\`cargo test --workspace\` covers what is portable; run this under WSL or on a robot."
+    exit 1
+    ;;
+esac
 
 rm -rf "$ROOT"
 mkdir -p "$ROOT/pkg/bin" "$ROOT/data/state"
@@ -253,6 +268,12 @@ if [ "$STARTED" = "1" ]; then
   grep -q "not taken from the argv" "$ROOT/out" \
     && pass "and says the directives were read back, not assumed" \
     || fail "the pass does not say what it measured"
+  # The third rung, and the reason it is asserted separately: a pass that had only reached the
+  # manager's record would still say "pass" here, and a check that could not tell the two apart
+  # would go quiet on exactly the machine where `/proc` stopped answering.
+  grep -q "the kernel agrees" "$ROOT/out" \
+    && pass "and the kernel agrees about the two it exposes, read off /proc (§15)" \
+    || { fail "the pass never reached the kernel:"; sed 's/^/      /' "$ROOT/out"; }
 else
   grep -A3 "safety.policy.isolation" "$ROOT/out" | grep -q "skipped" \
     && pass "no systemd here, so isolation is skipped naming what is missing — never passed" \
@@ -316,6 +337,9 @@ stop_daemon
 # failure §15 spends a rule on.
 say "7. A robot answers a browse (§82)"
 rm -rf "$ROOT/mdns" && mkdir -p "$ROOT/mdns"
+# Before the daemon, because it reads its credentials once at start — the same ordering §5 above
+# uses, and the reason the shutdown below can authenticate at all.
+MTOKEN=$("$SKYNETD" credential add --root "$ROOT/mdns" --label bye --role admin 2>/dev/null)
 "$SKYNETD" --root "$ROOT/mdns" --user --interval 1000 --lan 127.0.0.1:8099 \n  --advertise skynet-e2e > "$ROOT/mdns.log" 2>&1 &
 MDNS=$!
 # Wait for the *claim*, not for the start-up line. The daemon prints "announcing ..." before it has
@@ -335,6 +359,52 @@ else
   want "a browse finds it" "skynet-e2e" "$ROOT/browse"
   want "and points at the console rather than at 5353" "8099" "$ROOT/browse"
 fi
+# ── §82.4's goodbye, which had no caller for eleven rounds ───────────────────
+#
+# Asked properly rather than signalled. `skynetd` is stopped by a signal and handling one needs
+# `unsafe`, which its crate forbids — so a robot switched off cleanly stayed in every browser's
+# cache until the 120-second TTL expired. `POST /shutdown` is the path across, and the unit file's
+# `ExecStop=` is what calls it on a real robot.
+#
+# The daemon must **exit on its own**: nothing here sends a signal, so a process still running
+# afterwards is a shutdown path that does not work rather than one that is slow.
+say "7b. The daemon can be asked to stop, and says goodbye on the way (§82.4, §13)"
+"$SKYNET" shutdown --socket "$ROOT/mdns/run/skynetd.sock" --token "$MTOKEN" > "$ROOT/bye" 2>&1 || true
+want "the shutdown is accepted, and says it stops the supervisor not the robot"   "not the robot" "$ROOT/bye"
+
+i=0
+while [ $i -lt 100 ]; do
+  kill -0 "$MDNS" 2>/dev/null || break
+  i=$((i + 1)); sleep 0.1
+done
+if kill -0 "$MDNS" 2>/dev/null; then
+  fail "the daemon was asked to stop and is still running:"
+  tail -5 "$ROOT/mdns.log" | sed 's/^/      /'
+else
+  pass "and the daemon exits on its own, with nothing signalled (§82.4)"
+fi
+
+# §13, and the reason this needed no new event code: `Reason::Shutdown` already exists for exactly
+# this, and sealing writes §26's `sealed` event — so a clean stop is *in* the recording rather than
+# being the moment it goes quiet.
+want "it sealed the window, naming the reason" "reason shutdown" "$ROOT/mdns.log"
+want "and said so plainly" "stopped." "$ROOT/mdns.log"
+if [ -n "$(ls -A "$ROOT/mdns/data/blackbox/sealed" 2>/dev/null)" ]; then
+  pass "and the sealed window is on the robot"
+else
+  fail "nothing was sealed into data/blackbox/sealed"
+fi
+
+# The withdrawal itself only happens where a responder was running. On a developer machine Avahi
+# holds 5353, so there is no name to take back and none to give up — reported rather than asserted,
+# for the same reason the browse above is.
+if grep -q "no mDNS socket could be bound" "$ROOT/mdns.log"; then
+  printf '  [2m- no responder bound here, so there was no name to withdraw[0m
+'
+else
+  want "and it withdrew its mDNS name" "withdrew" "$ROOT/mdns.log"
+fi
+
 kill "$MDNS" 2>/dev/null || true
 wait "$MDNS" 2>/dev/null || true
 
@@ -479,6 +549,238 @@ else
   fi
 fi
 stop_daemon
+
+# ── §25 and §27: the loop turns, and the daemon reads it off §13's ring ──────
+#
+# A robot of its own, and not because isolation is tidy. Everything above runs against a robot with
+# **no embodiment descriptor**, so `shape::supervising` answers `NoBody` before it reads a manifest
+# and the ring is events-only — which is why every check above sees "no control loop". Sizing a
+# ring for a body needs a descriptor *and* a package that declares an action space, and giving the
+# robot above one would change what §27 derives underneath forty checks written about a robot with
+# nothing commanding it.
+#
+# What this section is for: `skynetk` records cycles, `skynetd` reads them, and two of §27's eight
+# conditions stop being defaults. Both halves have been true in the suite for two rounds against a
+# ring one process opened. This is the first time they are two processes on one recording, which is
+# §26.2's whole subject, and the first time the count on the route is a count a robot produced.
+say "10. The kernel turns, and §27 stops deciding from one condition (§25, §26.2, §27)"
+
+CC="${CC:-}"
+if [ -z "$CC" ]; then
+  for candidate in cc gcc clang; do
+    if command -v "$candidate" >/dev/null 2>&1; then CC="$candidate"; break; fi
+  done
+fi
+
+if [ -z "$CC" ]; then
+  # Reported, never skipped silently — §15's rule, and the same shape as the systemd step above.
+  printf '  \033[2m- no C compiler (tried cc, gcc, clang), so the mock robot could not be built and\033[0m\n'
+  printf '  \033[2m  this section did not run. Set CC.\033[0m\n'
+else
+  K="$ROOT/kernel"
+  rm -rf "$K" && mkdir -p "$K/data/state" "$K/pkg/bin"
+  if "$CC" -std=c11 -O2 -fPIC -shared -I bindings/c -o "$K/mock_robot.so" \
+      drivers/mock/mock_robot.c -lm 2>"$K/cc.log"; then
+    pass "the mock robot compiles ($CC)"
+  else
+    fail "the mock robot did not compile:"; sed 's/^/      /' "$K/cc.log"
+  fi
+
+  # The robot's own descriptor (§5), which on a real machine §50 writes at the factory. Three
+  # revolute joints, matching the body `drivers/mock` presents — and matching is the point: the
+  # daemon sizes the ring from *this* file and the loop sizes its records from the *driver*, and
+  # `skynet-kernel-host` compares the two with `!=` and refuses a mismatch by name. A descriptor
+  # that disagreed with the driver would fail loudly here rather than record cycles about the
+  # wrong machine.
+  cat > "$K/data/state/embodiment.json" <<'DESCRIPTOR'
+{"schema_version":1,"robot_slug":"mock-arm","digest":null,"verified":false,
+ "base":"fixed","dof":3,
+ "joints":[
+  {"name":"J1","role":"right_arm.shoulder.pitch","type":"revolute",
+   "limits":{"position_min_rad":-3.14,"position_max_rad":3.14,"velocity_max_rad_s":2,"effort_max_nm":80},
+   "control_modes":["position","torque"]},
+  {"name":"J2","role":"right_arm.elbow.flex","type":"revolute",
+   "limits":{"position_min_rad":-2.6,"position_max_rad":2.6,"velocity_max_rad_s":2,"effort_max_nm":60},
+   "control_modes":["position","torque"]},
+  {"name":"J3","role":"right_arm.wrist.roll","type":"continuous",
+   "limits":{"position_min_rad":-6.28,"position_max_rad":6.28,"velocity_max_rad_s":4,"effort_max_nm":20},
+   "control_modes":["position"]}],
+ "end_effectors":[],"sensors":[],
+ "control":{"modes":["position","torque"],"rate_hz_max":1000,"rate_hz_min":10,"command_latency_ms":1},
+ "envelope":null,"solvers":[]}
+DESCRIPTOR
+  echo yes > "$K/data/state/safe-state"
+
+  # A **commanding** package: one whose manifest declares a `source_embodiment` (§6). That block is
+  # the only thing that makes it commanding — `kind: policy` does not, which is why the holder above
+  # sizes nothing. Its three action channels bind to J1/J2/J3 by exact joint name, so §6.2's plan
+  # resolves `direct` and its `bindings` are the channel count the ring is sized from.
+  cat > "$K/pkg/bin/run" <<'PROGRAM'
+#!/bin/sh
+while true; do sleep 5; done
+PROGRAM
+  chmod +x "$K/pkg/bin/run"
+  cat > "$K/pkg/manifest.json" <<'MANIFEST'
+{"budget":{"cpu_cores":0.5,"ram_mb":64},"digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000","id":"openrobot/reach","isolation":"sandboxed","kind":"policy","runtime":{"entrypoint":"bin/run"},"schema_version":1,"source_embodiment":{"robot_slug":"mock-arm","dof":3,"control_mode":"position","control_hz":200,"action_channels":[{"index":0,"kind":"joint_position","joint":"J1","unit":"rad","peak":3.14},{"index":1,"kind":"joint_position","joint":"J2","unit":"rad","peak":2.6},{"index":2,"kind":"joint_position","joint":"J3","unit":"rad","peak":6.28}],"observations":[]},"version":"1.0.0"}
+MANIFEST
+
+  "$SKYNET" install "$K/pkg" --root "$K" --id openrobot/reach --kind policy --version 1.0.0 \
+    --digest 0000000000000000000000000000000000000000000000000000000000000000 > "$K/out" 2>&1 || true
+  KDIGEST=$(sed -n 's/.*hashes to \([0-9a-f]\{64\}\).*/\1/p' "$K/out")
+  [ -n "$KDIGEST" ] || { echo "could not read the policy digest from the refusal"; exit 1; }
+  "$SKYNET" install "$K/pkg" --root "$K" --id openrobot/reach --kind policy --version 1.0.0 \
+    --digest "$KDIGEST" > "$K/out" 2>&1
+  want "the commanding package stages" "staged openrobot/reach" "$K/out"
+
+  # `installed`, not `running`: this section is about the black box and §27, and starting the
+  # package would ask systemd for a unit that has nothing to do with either.
+  cat > "$K/data/state/desired.json" <<DESIRED
+{"generation":1,"os":{"channel":"stable","version":""},
+ "packages":[{"id":"openrobot/reach","version":"1.0.0","digest":"$KDIGEST",
+              "kind":"policy","state":"installed","grants":[]}]}
+DESIRED
+  "$SKYNETD" once --root "$K" --user > "$K/first" 2>&1 || true
+  want "and is activated" "activate_package openrobot/reach" "$K/first"
+
+  # The credential before the daemon, because the daemon reads them at start.
+  KTOKEN=$("$SKYNETD" credential add --root "$K" --label kernel --role operator 2>/dev/null)
+
+  rm -f "$K/run/skynetd.sock"
+  "$SKYNETD" --root "$K" --user --interval 500 > "$K/d.log" 2>&1 &
+  KDAEMON=$!
+  i=0
+  while [ $i -lt 60 ]; do
+    "$SKYNET" status --socket "$K/run/skynetd.sock" >/dev/null 2>&1 && break
+    i=$((i + 1)); sleep 0.1
+  done
+  KSOCK="--socket $K/run/skynetd.sock"
+
+  # §26.3, and the ordering a robot actually boots in: the supervisor starts first and therefore
+  # *creates* the recording, so it has to size it for a body it will never touch. Both numbers come
+  # off the robot's own provisioning — joints from the descriptor, channels from the transport plan.
+  want "the daemon sizes the ring from the descriptor and the plan (§26.3, §80)" \
+    "3 joints and 3 channels" "$K/d.log"
+
+  # Before the loop, and this is the distinction the whole condition is built on. The ring here
+  # **can** hold a control cycle — the daemon just sized it for three channels — so silence from it
+  # is evidence rather than an absence, and §27's `kernel` is therefore *observed* and *down*. On
+  # every other robot in this script the same silence is `Unobservable`, because a ring with no
+  # action channels says nothing about a kernel. Same reading, opposite meaning, and the ring's
+  # shape is what separates them.
+  "$SKYNET" state $KSOCK --token "$KTOKEN" > "$K/before" 2>&1
+  want "before the loop the kernel is observed and down, not unobserved" \
+    "no control cycle was recorded" "$K/before"
+  want "and the RHAL is lost, because nothing is reading the body" "rhal        lost" "$K/before"
+  want "which is what holds the robot safe (§27)" "rhal_lost" "$K/before"
+
+  # The loop. A second writer on the ring the daemon created: §26.2's shared sequence counter is
+  # what makes that safe, and a refusal here is the lock working rather than a flake.
+  "$SKYNETK" run --driver "$K/mock_robot.so" --tier host --velocity-max 2.0 --jerk 0.1 \
+    --watchdog-ms 50 --hz 200 --cycles 6000 --channels J1,J2,J3 \
+    --blackbox "$K/data/blackbox" > "$K/k.log" 2>&1 &
+  KLOOP=$!
+
+  # Poll for the condition rather than sleeping a fixed span: the daemon re-reads the ring once an
+  # interval, and a fixed sleep is a race on a loaded machine and a wait on a fast one.
+  #
+  # Poll for the **state**, never for the count. `observed` is true the moment the ring can hold a
+  # cycle, so a poll that waited for "three of §27's eight conditions" would be satisfied before
+  # the loop had written anything — and every assertion after it would then be sampling a robot
+  # whose kernel had not started. The first draft did exactly that and produced a `state` document
+  # reporting a live RHAL beside a silent kernel, which §27 says can never be true of one instant.
+  i=0
+  while [ $i -lt 60 ]; do
+    "$SKYNET" state $KSOCK --token "$KTOKEN" > "$K/after" 2>&1 || true
+    grep -q "control cycles were recorded" "$K/after" && break
+    i=$((i + 1)); sleep 0.25
+  done
+
+  if grep -q "already has a writer" "$K/k.log"; then
+    fail "the loop was refused the ring:"; sed 's/^/      /' "$K/k.log"
+  else
+    pass "the loop attaches to the ring the daemon created (§26.2)"
+  fi
+
+  # Four, not three: `stop` is read off §24's flags on the same newest cycle, so a ring that can
+  # hold a cycle makes it observable at the same moment the other two become observable.
+  want "and §27 now counts four observed conditions" \
+    "four of §27's eight conditions" "$K/after"
+  want "the kernel is live, with the cycles that say so" "control cycles were recorded" "$K/after"
+  want "and the RHAL is present, off the newest cycle" "read the body and reported it present" "$K/after"
+  # Both off one interval and one set of records. A robot reporting a present driver beside a
+  # silent kernel would be describing a pair that was true at no instant, which is the reason
+  # §27 reads them together rather than on two routes.
+  grep -q "no control cycle was recorded" "$K/after" \
+    && { fail "the kernel and the RHAL disagree about the same interval:"; sed 's/^/      /' "$K/after"; } \
+    || pass "and the two readings agree about the interval they share (§27)"
+
+  # The half that matters most, and the reason this is not merely a nicer status line. §27 makes
+  # `SAFE` **sticky**: it takes a named human clearance to leave, never a condition improving. A
+  # robot that started in `safe` with `rhal_lost` and quietly began commanding because a driver
+  # started answering would be the single worst defect this machine could have.
+  if grep -q "safe" "$K/after"; then
+    pass "and the robot is still safe: a sticky state is not released by a better reading (§27)"
+  else
+    fail "the robot left safe without a clearance:"; sed 's/^/      /' "$K/after"
+  fi
+
+  # And the daemon's own view of the recording, which is where §74's counters read from.
+  "$SKYNET" blackbox $KSOCK --token "$KTOKEN" > "$K/bb" 2>&1
+  if grep -q "no control loop" "$K/bb"; then
+    fail "the index still says the cycle channels are empty:"; sed 's/^/      /' "$K/bb"
+  else
+    pass "the index no longer says the cycle channels are empty"
+  fi
+  CYCLES=$(sed -n 's/^cycles *\([0-9]*\).*/\1/p' "$K/bb" | head -1)
+  if [ -n "$CYCLES" ] && [ "$CYCLES" -gt 0 ]; then
+    pass "and it counts $CYCLES cycles a different process wrote (§26.2)"
+  else
+    fail "the index counts no cycles:"; sed 's/^/      /' "$K/bb"
+  fi
+
+  kill "$KLOOP" 2>/dev/null || true
+  wait "$KLOOP" 2>/dev/null || true
+
+  # ── §27's stop, off §24's flags on the same records ───────────────────────
+  #
+  # The mock driver latches its estop from the first read when it is opened with `fault=estop`, so
+  # this is the chain being open on a real driver rather than a flag a test wrote. What it proves is
+  # the decision of 2026-09-07 end to end: an open chain is `estop` and never `operator` — §24 gives
+  # the chain one bit and a light curtain opens the same chain as the button — and it never becomes
+  # a *completed* stop, because `stop_settled` is not observable from that bit.
+  "$SKYNETK" run --driver "$K/mock_robot.so" --config "fault=estop" --tier host \
+    --velocity-max 2.0 --jerk 0.1 --watchdog-ms 50 --hz 200 --cycles 6000 --channels J1,J2,J3 \
+    --blackbox "$K/data/blackbox" > "$K/k2.log" 2>&1 &
+  KSTOP=$!
+
+  i=0
+  while [ $i -lt 90 ]; do
+    "$SKYNET" state $KSOCK --token "$KTOKEN" > "$K/estop" 2>&1 || true
+    grep -q "chain is open" "$K/estop" && break
+    i=$((i + 1)); sleep 0.25
+  done
+
+  want "the open chain is observed off §24's flags" "chain is open on the newest cycle" "$K/estop"
+  want "and says what it cannot know about it" "not knowable from here" "$K/estop"
+  # The robot does **not** move to `stopping`, and asserting that is the point rather than an
+  # inconvenience. It was already `safe` — nothing had read its body when the daemon started — and
+  # §27 makes `SAFE` sticky: it takes a named human clearance to leave, never a condition changing.
+  # A stop arriving at a robot that is already safe cannot make it less safe, and the first draft of
+  # this check asserted `stopping_estop` because it had reasoned about the rule and not run it.
+  want "and the robot stays safe: a stop cannot make a safe robot less safe (§27)" \
+    "safe_sticky" "$K/estop"
+  # The half that is the whole trade: nothing may ever report this as a *completed* stop, because
+  # nothing here watched the body come to rest.
+  grep -q "stop_complete" "$K/estop" \
+    && { fail "an estop was reported as a completed stop:"; sed 's/^/      /' "$K/estop"; } \
+    || pass "and never as a completed stop — nothing watched the body come to rest (§27)"
+
+  kill "$KSTOP" 2>/dev/null || true
+  wait "$KSTOP" 2>/dev/null || true
+  kill "$KDAEMON" 2>/dev/null || true
+  wait "$KDAEMON" 2>/dev/null || true
+fi
+
 
 printf '\n'
 if [ "$FAILED" -eq 0 ]; then

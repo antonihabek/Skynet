@@ -339,6 +339,11 @@ fn run(args: &[String]) -> i32 {
             imu: false,
             people_detection: false,
             legged: false,
+            // §80. This host has no proximity producer — nothing here fills
+            // `cycle.nearest_person_m` — and it says so rather than leaving the resolver to a
+            // default that happens to be right. The day a producer exists, this is the line that
+            // changes and the guard stops being inert.
+            proximity_reading: false,
         },
         frames: None,
     });

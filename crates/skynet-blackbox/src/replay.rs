@@ -54,6 +54,58 @@ pub struct Outcome {
     /// Whether this cycle had a predecessor, and so whether the rate limit could be evaluated as it
     /// was on the robot.
     pub warmed: bool,
+    /// Whether the body fields in this cycle were measurements at all (§26.4).
+    pub observation: Observation,
+}
+
+/// What the observation in a replayed cycle actually was (§26.4).
+///
+/// §26.4 built `read_result` and closed by naming what it deliberately did not do: *"A record whose
+/// read failed still carries the previous cycle's positions; what it now also carries is the fact
+/// that they are not measurements. Replay marking them is a separate change."* This is that change.
+///
+/// # Why it does not make a replay non-deterministic
+///
+/// The temptation is to treat a failed read as an unevaluable cycle and skip it, and that would be
+/// wrong twice. The kernel's verdict on such a cycle is reproducible — replay recomputes it from
+/// the *recorded* desired values, timing and limits, none of which the read supplies — so a replay
+/// that skipped it would report a window as non-deterministic on the strength of something
+/// determinism does not depend on. And the robot really did produce that verdict from that fill,
+/// so a replay of an incident has to reproduce it: the fill is part of the history being
+/// reconstructed, not an error in the reconstruction.
+///
+/// What it changes is what the **reader** is told. A cycle whose read failed replays perfectly and
+/// shows a robot holding still, and an investigator drawing "the arm was stationary" out of it is
+/// reading the previous cycle's positions repeated. So the outcome carries which it was, and
+/// [`Replay`] carries the counts and the driver's own codes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Observation {
+    /// The driver answered: the flags, fault code, sequence, stamp and joint arrays are readings.
+    Measured,
+    /// It did not, with the `errno` (§24). **Every body field in this cycle is a fill value.**
+    Fill(i32),
+    /// A schema-1 recording, which has no `read_result` and therefore cannot say.
+    ///
+    /// Not folded into either of the others. `Measured` would be the reading §26.4 exists to
+    /// prevent — *"a reader that ignored the byte would read every older recording as a robot whose
+    /// every read succeeded"* — and `Fill` would report a fault in a window that may have had none.
+    Unrecorded,
+}
+
+impl Observation {
+    /// Read it off the record.
+    pub fn of(cycle: &Cycle) -> Observation {
+        match cycle.read {
+            crate::record::ReadOutcome::Ok => Observation::Measured,
+            crate::record::ReadOutcome::Failed(errno) => Observation::Fill(errno),
+            crate::record::ReadOutcome::Unrecorded => Observation::Unrecorded,
+        }
+    }
+
+    /// Whether this cycle's body fields can be read as measurements.
+    pub fn measured(self) -> bool {
+        matches!(self, Observation::Measured)
+    }
 }
 
 impl Outcome {
@@ -94,6 +146,20 @@ pub struct Replay {
     /// Reported rather than counted as agreement. A replay that treated an unevaluable cycle as a
     /// pass would be the conformance-suite failure §15 spends a rule on.
     pub skipped: Vec<Skipped>,
+    /// Cycles whose `read_state` failed, so every body field in them is a fill value (§26.4).
+    ///
+    /// A count rather than a list, and the reason is arithmetic: a driver that stops answering for
+    /// one second at 1 kHz produces a thousand of them, and a list an investigator has to scroll
+    /// past is a worse answer than a number they can act on. What is actionable is beside it.
+    pub unmeasured: usize,
+    /// Cycles from a schema-1 recording, which cannot say whether the read succeeded.
+    pub unrecorded: usize,
+    /// The distinct `errno`s the driver returned, in first-seen order (§24).
+    ///
+    /// Bounded by the vocabulary rather than by the window, and this is the actionable half: a
+    /// timeout and a faulted drive lead to completely different investigations, and §26.4 carries
+    /// the code precisely so that somebody without that build's error strings can tell them apart.
+    pub read_errors: Vec<i32>,
 }
 
 impl Replay {
@@ -104,6 +170,61 @@ impl Replay {
     /// light that means nothing.
     pub fn deterministic(&self) -> bool {
         self.diverged.is_empty() && self.skipped.is_empty() && self.cycles > 0
+    }
+
+    /// Whether every cycle in the window was a measurement (§26.4).
+    ///
+    /// Deliberately **not** part of [`deterministic`](Self::deterministic) — see [`Observation`]
+    /// for why a fill value does not make a replay non-deterministic. It is a separate question
+    /// with a separate answer, and a caller that reports the first without the second is telling
+    /// an investigator that a window reproduced without telling them how much of it was measured.
+    pub fn observations_measured(&self) -> bool {
+        self.unmeasured == 0 && self.unrecorded == 0
+    }
+
+    /// One sentence about what the window was measured from, or `None` when all of it was.
+    ///
+    /// Rendered here rather than at each call site, because every consumer of a replay owes an
+    /// investigator the same sentence and three spellings of it would be §78's shape again.
+    pub fn observation_note(&self) -> Option<String> {
+        if self.observations_measured() {
+            return None;
+        }
+        let mut note = String::new();
+        if self.unmeasured > 0 {
+            note.push_str(&alloc::format!(
+                "{} of {} cycles carry no measurement: `read_state` failed and every body field in \
+                 them — the flags, the fault code, the sequence, the stamp and the joint arrays — \
+                 is a fill value holding the previous cycle's reading (§26.4). A replay of those \
+                 cycles shows a robot holding still because nothing was reading it, not because \
+                 nothing moved.",
+                self.unmeasured, self.cycles,
+            ));
+            if !self.read_errors.is_empty() {
+                let codes: Vec<String> = self
+                    .read_errors
+                    .iter()
+                    .map(|code| code.to_string())
+                    .collect();
+                note.push_str(&alloc::format!(
+                    " The driver returned {}.",
+                    codes.join(", ")
+                ));
+            }
+        }
+        if self.unrecorded > 0 {
+            if !note.is_empty() {
+                note.push(' ');
+            }
+            note.push_str(&alloc::format!(
+                "{} of {} cycles were written before the record carried the read's outcome \
+                 (schema 1), so whether their body fields are measurements is not knowable from \
+                 this recording — which is not the same as their being fine.",
+                self.unrecorded,
+                self.cycles,
+            ));
+        }
+        Some(note)
     }
 }
 
@@ -140,6 +261,9 @@ pub fn replay(
         diverged: Vec::new(),
         warmed: 0,
         skipped: Vec::new(),
+        unmeasured: 0,
+        unrecorded: 0,
+        read_errors: Vec::new(),
     };
 
     // Carried across cycles, exactly as the control loop carries them.
@@ -151,6 +275,21 @@ pub fn replay(
             continue;
         };
         result.cycles += 1;
+
+        // Counted before the skip below, not after. A cycle the header cannot describe still has a
+        // read outcome, and a window whose channel table is wrong is exactly the window where an
+        // investigator most needs to know whether the body was being read.
+        let observation = Observation::of(cycle);
+        match observation {
+            Observation::Measured => {}
+            Observation::Fill(errno) => {
+                result.unmeasured += 1;
+                if !result.read_errors.contains(&errno) {
+                    result.read_errors.push(errno);
+                }
+            }
+            Observation::Unrecorded => result.unrecorded += 1,
+        }
 
         if cycle.desired.len() > channels.len() {
             result.skipped.push(Skipped {
@@ -222,6 +361,7 @@ pub fn replay(
                 tick: cycle.tick,
                 divergences,
                 warmed,
+                observation,
             });
         }
 

@@ -109,6 +109,54 @@ function measureHubMirror() {
   return null
 }
 
+/**
+ * How many of §27's eight conditions this edition observes, read off the code that decides it.
+ *
+ * `skynetd_io::observed::Observed::of` builds one array of eight booleans and every runtime
+ * sentence about the count is generated from it. Four *documents* also state the number, and
+ * before this they stated it by hand: §73 in two rows, the README, and this crate's own header.
+ * That number was wrong in the README for two rounds, and the build log recorded the same
+ * correction three rounds running — which is the same signal that produced this whole file.
+ *
+ * Parsed rather than executed, because this is a Node script and the authority is Rust. What it
+ * looks at is deliberately narrow: the literal `false` entries in that one array. An entry that is
+ * `true` or a call — `kernel.observed()` — is a condition this daemon reads, and a condition that
+ * gains a producer changes from `false` to a call in exactly that array. So the parse tracks the
+ * decision rather than a comment near it, and it fails loudly if the array is not where it says.
+ */
+function measureConditions() {
+  const source = readFileSync(
+    join(ROOT, 'crates', 'skynetd-io', 'src', 'observed.rs'), 'utf8')
+  // Anchored on the function, not on the field name: `struct Observed` declares `seen: [bool; 8]`
+  // and an unanchored search finds that first, then reports one entry against eight conditions.
+  const body = /pub fn of\([\s\S]*?seen:\s*\[([\s\S]*?)\],\s*\}/.exec(source)
+  const array = body
+  if (!array) {
+    throw new Error(
+      'tools/scale-report.mjs cannot find `Observed::of`\'s array in '
+      + 'crates/skynetd-io/src/observed.rs. That array is the authority for how many of §27\'s '
+      + 'eight conditions this edition observes; if it has moved, this parse has to move with it '
+      + 'rather than be deleted.')
+  }
+  // One entry per line, each ending in a comma before its trailing comment.
+  const entries = array[1]
+    .split('\n')
+    .map((line) => line.replace(/\/\/.*$/, '').trim())
+    .filter((line) => line.length > 0)
+    .map((line) => line.replace(/,$/, '').trim())
+  const total = /CONDITIONS:\s*\[&str;\s*(\d+)\]/.exec(source)
+  if (!total || entries.length !== Number(total[1])) {
+    throw new Error(
+      `observed.rs declares ${total ? total[1] : '?'} conditions and `
+      + `Observed::of sets ${entries.length}. Those have to be the same number.`)
+  }
+  return {
+    total: entries.length,
+    observed: entries.filter((entry) => entry !== 'false').length,
+    unobserved: entries.filter((entry) => entry === 'false').length,
+  }
+}
+
 function measure() {
   const rustFiles = walk(join(ROOT, 'crates'), ['.rs'])
   const crates = readdirSync(join(ROOT, 'crates'))
@@ -144,6 +192,7 @@ function measure() {
       lines: lines(walk(join(ROOT, 'drivers'), ['.py', '.c', '.cpp', '.h', '.hpp', '.rs'])),
     },
     corpus: measureCorpus(),
+    conditions: measureConditions(),
     hub_mirror: { lines: hub ? hub.lines : previous?.hub_mirror?.lines ?? null },
   }
 }
@@ -216,8 +265,75 @@ function claims(m) {
 }
 
 const NUMBER_WORDS = {
+  none: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,
+  nine: 9, ten: 10,
   fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
   'twenty-one': 21, 'twenty-two': 22, 'twenty-three': 23, 'twenty-four': 24, 'twenty-five': 25,
+}
+
+/**
+ * The sentences that state how many of §27's conditions this edition does not observe.
+ *
+ * A separate pass from `claims`, and for two reasons rather than one.
+ *
+ * **Every occurrence has to match, not the first.** The figures in `claims` appear once each in one
+ * paragraph. This one appears in §73's `§27` row, §73's `Audio` row, §81's closing paragraph and
+ * the README — and the way it went wrong was that somebody corrected the row they were editing and
+ * left the other three. A check that stopped at the first match would have passed on exactly that.
+ *
+ * **It spans two files.** The README is the first thing a vendor reads and it carried the figure
+ * two rounds after it stopped being true.
+ *
+ * The count is the **unobserved** one because that is what all four sentences state. It is derived
+ * from `Observed::of`, so a condition gaining a producer fails this check in four places at once
+ * and the fix is to write the new number, not to remember that there was one.
+ */
+const CONDITION_SENTENCES = [
+  {
+    file: SPEC,
+    label: '§73/§81',
+    pattern: /([\w-]+) of (?:§27's eight|the eight) conditions are still (?:unobserved|the kernel's)/gi,
+  },
+  {
+    file: SPEC,
+    label: '§73',
+    pattern: /([\w-]+) of the eight are still the kernel's/gi,
+  },
+  {
+    file: join(ROOT, 'README.md'),
+    label: 'README',
+    pattern: /([\w-]+) of §27's eight conditions are unobserved/gi,
+  },
+]
+
+function checkConditions(m) {
+  const failures = []
+  let found = 0
+  for (const sentence of CONDITION_SENTENCES) {
+    const text = readFileSync(sentence.file, 'utf8').replace(/\s+/g, ' ')
+    for (const match of text.matchAll(sentence.pattern)) {
+      found += 1
+      const stated = NUMBER_WORDS[match[1].toLowerCase()]
+      if (stated === undefined) {
+        failures.push(
+          `${sentence.label}: "${match[1]}" is not a number word this check can read`)
+        continue
+      }
+      if (stated !== m.conditions.unobserved) {
+        failures.push(
+          `${sentence.label}: says ${match[1]} of §27's conditions are unobserved, `
+          + `and Observed::of leaves ${m.conditions.unobserved}`)
+      }
+    }
+  }
+  // A figure nobody states any more is a figure this check has stopped guarding, and it would go
+  // quiet rather than fail. The same argument `claims` makes when a pattern finds nothing.
+  if (found === 0) {
+    failures.push(
+      "no document states how many of §27's conditions are unobserved any more, so this check "
+      + 'is guarding nothing — restore the sentence or remove the check deliberately')
+  }
+  return failures
 }
 
 function checkSpec(m) {
@@ -261,6 +377,7 @@ if (check) {
       + 'run `node tools/scale-report.mjs` and read the diff')
   }
   failures.push(...checkSpec(measured))
+  failures.push(...checkConditions(measured))
   if (failures.length > 0) {
     console.error('§73 and the tree disagree:\n')
     for (const failure of failures) console.error(`  ${failure}`)

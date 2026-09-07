@@ -126,6 +126,17 @@ pub fn limits_to_json(limits: &ResolvedLimits<'_>, profile_name: Option<&str>) -
     }
     out.set("unavailable_guards", unavailable);
 
+    // §80's third state, always present. A shape that omitted it where empty would let an edition
+    // that never produces it agree with every case that has none.
+    let mut inert = Json::arr();
+    for entry in limits.inert_guards.iter() {
+        let mut item = Json::obj();
+        item.set("guard", Json::from(entry.guard.as_str()));
+        item.set("reading", Json::from(entry.reading));
+        inert.push(item);
+    }
+    out.set("inert_guards", inert);
+
     out.set(
         "source",
         match limits.source {

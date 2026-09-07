@@ -86,9 +86,17 @@ HOMING_STATES: Final = ("not_required", "pending", "complete")
 #: longer command or observe.
 RHAL_STATES: Final = ("present", "degraded", "lost")
 
-#: §27's four causes of a controlled stop, and no fifth. The list is closed on purpose: a fifth cause
-#: should be added by somebody who found this constant rather than a boolean called ``stopping``.
-STOP_CAUSES: Final = ("watchdog", "proximity", "balance", "operator")
+#: §27's causes of a controlled stop. The list is closed on purpose: a cause should be added by
+#: somebody who found this constant rather than a boolean called ``stopping``.
+#:
+#: The first four are the **kernel's own decisions** — it evaluated a guard, or a person asked, and
+#: it commanded a stop. ``estop`` is not one of those: it is the body reporting that the hardware
+#: emergency-stop chain is open, which happened whether or not any software agreed. §24 gives it one
+#: bit, so a robot can say the chain is open and cannot say what opened it — which is why it is not
+#: folded into ``operator``. An estop chain is also opened by a light curtain, a door interlock and a
+#: safety relay noticing itself fail, and reporting those as a person having asked would put a name
+#: on an event that has none.
+STOP_CAUSES: Final = ("watchdog", "proximity", "balance", "operator", "estop")
 
 #: ``held`` is a policy that exists and is not ready — staged, refused a lease, or waiting on a plan.
 #: Distinct from ``none`` because the two send an operator to different places, and neither runs.
@@ -107,6 +115,7 @@ STATE_REASONS: Final = (
     "stopping_proximity",
     "stopping_balance",
     "stopping_operator",
+    "stopping_estop",
     "post_incomplete",
     "homing_pending",
     "kernel_down",
@@ -180,6 +189,7 @@ def _stopping_reason(cause: str) -> str:
         "proximity": "stopping_proximity",
         "balance": "stopping_balance",
         "operator": "stopping_operator",
+        "estop": "stopping_estop",
     }
     if cause not in reasons:
         raise AssertionError(f"unknown stop cause {cause!r}")

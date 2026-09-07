@@ -630,7 +630,7 @@ const CLAMP = {
   source: 'https://example.invalid/datasheet.pdf',
 }
 
-const ALL_AVAILABLE = { imu: true, people_detection: true, legged: true }
+const ALL_AVAILABLE = { imu: true, people_detection: true, legged: true, proximity_reading: true }
 
 function hostParams(overrides: Partial<ResolveLimitsParams> = {}): ResolveLimitsParams {
   return {
@@ -969,6 +969,29 @@ limitsCase('proximity-unsensed', 'Configured, and nothing detects people.',
       proximity: { stop_distance_m: 0.3, slow_distance_m: 1, slow_factor: 0.3 },
     },
     available: { ...ALL_AVAILABLE, people_detection: false },
+  }))
+limitsCase('proximity-inert', '§80\'s third state, decided 2026-09-07. The body declares a person '
+  + 'detector and the operator configured separation, so every input the resolver can see is '
+  + 'present — and nothing on this robot fills `cycle.nearest_person_m`. The guard is therefore '
+  + 'neither active nor unavailable: it is *inert*, and the reading it waits on is named. Before '
+  + 'this state existed it resolved **active**, which is what every surface renders as protection.',
+  hostParams({
+    profile: {
+      name: 'shared-space', max_delta_per_cycle: 0.25,
+      proximity: { stop_distance_m: 0.3, slow_distance_m: 1, slow_factor: 0.3 },
+    },
+    available: { ...ALL_AVAILABLE, proximity_reading: false },
+  }))
+limitsCase('proximity-unsensed-and-unproduced', 'Both at once, and the order decides which is '
+  + 'reported. A robot with no person detector is **unavailable** rather than inert, whatever its '
+  + 'producers: the remedy is to fit a sensor, and reporting "the reading is not coming" would '
+  + 'describe a missing producer on a machine whose problem is a missing sensor.',
+  hostParams({
+    profile: {
+      name: 'shared-space', max_delta_per_cycle: 0.25,
+      proximity: { stop_distance_m: 0.3, slow_distance_m: 1, slow_factor: 0.3 },
+    },
+    available: { ...ALL_AVAILABLE, people_detection: false, proximity_reading: false },
   }))
 limitsCase('transport-only', 'Ceilings from the plan with no envelope behind them.',
   hostParams({ envelope: null }))
@@ -4603,7 +4626,7 @@ opCase('post-failed', '§48.2: SAFE, not DEGRADED. Sticky, needs a human, "becau
 opCase('stop-complete', 'The ramp finished. §27 puts this in the SAFE row beside a lost RHAL.',
   'stopping', opConditions({ stop: 'operator', stop_settled: true }))
 
-// §27's four stop causes, and no fifth.
+// §27's five stop causes.
 
 opCase('stopping-watchdog', '§46 fired. The cause reaches the reason, because "the robot is '
   + 'stopping" and "the watchdog stopped it" send an operator to different places.',
@@ -4617,6 +4640,26 @@ opCase('stopping-balance', 'The balance guard.',
 
 opCase('stopping-operator', 'A person asked.',
   'running', opConditions({ stop: 'operator' }))
+
+opCase('stopping-estop', 'The hardware chain is open (§24). Deliberately its own cause rather than '
+  + '`operator`: §24 gives the chain one bit, so a robot can say it is open and cannot say what '
+  + 'opened it — a light curtain and a door interlock open the same chain, and reporting either as '
+  + 'a person having asked would put a name on an event that has none.',
+  'running', opConditions({ stop: 'estop' }))
+
+opCase('an-estop-that-nobody-watched-settle', 'The decision of 2026-09-07, pinned. `stop_settled` '
+  + 'is not observable for a hardware stop on any edition that exists — §24 says the chain is open '
+  + 'and says nothing about whether the body came to rest — so it is absent, and the machine '
+  + 'derives `stopping` rather than `safe`. Fail-closed in the only direction that is safe: this '
+  + 'can hold a robot and can never release one.',
+  'safe', opConditions({ stop: 'estop' }))
+
+opCase('an-estop-somebody-did-watch-settle', 'And the other half, so the absence above is a '
+  + 'reading rather than a rule the machine hard-codes. A caller that genuinely observed the body '
+  + 'come to rest supplies `stop_settled`, and §27 answers SAFE with `stop_complete` exactly as it '
+  + 'does for the other four causes. The machine treats every cause alike; what differs is what a '
+  + 'robot can honestly supply.',
+  'stopping', opConditions({ stop: 'estop', stop_settled: true }))
 
 opCase('stop-during-post', 'An operator stop is honoured whatever the robot is doing, including '
   + 'booting — which is why the stop rule sits above the POST rules rather than below them.',
@@ -6472,6 +6515,10 @@ documentCase('the-limits-a-robot-is-under',
       self_collision_margin_m: 0.05,
       source: 'vendor datasheet rev C',
       active: ['watchdog', 'envelope', 'mode_gate'],
+      // §80's third state, empty on this robot and carried anyway. A frozen wire fixture is what
+      // an edition is held to, and a field omitted where it is empty would let an edition that
+      // never emits it pass — which is the shape §31.6 freezes these documents to prevent.
+      inert: [],
       unavailable: [
         { guard: 'rate_limit', missing: ['profile.max_delta_per_cycle'] },
         // The row that has to survive verbatim: `balance` on a fixed base is not a defect, and

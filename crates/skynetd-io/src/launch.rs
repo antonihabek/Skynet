@@ -180,6 +180,109 @@ pub fn confinement_property_names() -> Vec<String> {
     names
 }
 
+/// The two facts the **kernel** exposes about a confined process, from `/proc/<pid>/status`.
+///
+/// # Why a second layer, when `systemctl show` already answers
+///
+/// It answers a different question. `systemctl show` reports what the service manager **recorded**
+/// for a unit — its own copy of the directives it was given. What a process is actually held to is
+/// the kernel's, and the two can disagree: a directive the manager accepted, stored and reports
+/// happily can fail to be applied by the kernel it is running on, and every layer above would go on
+/// saying it landed.
+///
+/// §15's `safety.policy.isolation` has been walking down this ladder one rung at a time, and the
+/// reasoning is the same each time. §59 asserted the **argv** — what was requested. §62 read the
+/// unit back with `systemctl show` — what the manager holds. This is what the **kernel applied**,
+/// which is the last rung and the only one that is a fact about the running process rather than
+/// about something's record of it.
+///
+/// # Only two, and why not more
+///
+/// `NoNewPrivs` and `CapBnd` are the two directives in [`confinement_properties`] that the kernel
+/// exposes per-process and unambiguously. The five `Protect*` directives are implemented as mount
+/// namespaces, and what a namespace contains is not a line in `status` — verifying those from
+/// inside would mean attempting a write and reporting what happened, which is a probe rather than
+/// a reading and belongs to the demonstration §15 still lacks. Claiming to check five and checking
+/// two would be worse than checking two.
+pub const KERNEL_CONFINEMENT: [&str; 2] = ["NoNewPrivs", "CapBnd"];
+
+/// Parse `/proc/<pid>/status`, keeping only [`KERNEL_CONFINEMENT`]'s lines.
+///
+/// Pure, for [`parse_properties`]'s reason: the comparison has to be testable on a machine with no
+/// `/proc`, which is every developer machine this was written on.
+///
+/// The format is `Key:\t<value>` rather than `Key=Value`, and the values are kept verbatim —
+/// `CapBnd` is a 16-digit hex mask and turning it into a number here would decide, in a parser,
+/// what counts as empty. [`kernel_shortfall`] decides that, where the decision is visible.
+pub fn parse_proc_status(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|line| {
+            let at = line.find(':')?;
+            let key = line[..at].trim();
+            if !KERNEL_CONFINEMENT.contains(&key) {
+                return None;
+            }
+            Some((key.to_string(), line[at + 1..].trim().to_string()))
+        })
+        .collect()
+}
+
+/// Which of the kernel's two facts contradict the confinement this kind asked for.
+///
+/// Empty means the kernel agrees with the request. A **missing** line is a shortfall, on
+/// [`confinement_shortfall`]'s own rule: a property nobody can read is not one anybody should
+/// certify, and `/proc` not carrying it is the same fail-closed direction as systemd not
+/// reporting it.
+///
+/// `CapBnd` is compared against zero **as a mask**, parsed from hex, because the empty bounding
+/// set is written `0000000000000000` and a string comparison against that literal would be a
+/// check that a future kernel could break by printing a different width.
+pub fn kernel_shortfall(kind: PackageKind, applied: &[(String, String)]) -> Vec<String> {
+    if confinement_properties(kind).is_empty() {
+        return Vec::new();
+    }
+    let read = |key: &str| {
+        applied
+            .iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value.as_str())
+    };
+    let mut shortfall = Vec::new();
+
+    match read("NoNewPrivs") {
+        Some("1") => {}
+        Some(other) => shortfall.push(format!(
+            "NoNewPrivs is {other} on the running process, while the unit says \
+             NoNewPrivileges=yes"
+        )),
+        None => shortfall.push(
+            "the running process does not report NoNewPrivs, so whether the kernel applied it \
+             cannot be established"
+                .to_string(),
+        ),
+    }
+
+    match read("CapBnd").map(|mask| u64::from_str_radix(mask, 16)) {
+        Some(Ok(0)) => {}
+        Some(Ok(mask)) => shortfall.push(format!(
+            "the running process holds capability bounding set {mask:016x}, while the unit says \
+             CapabilityBoundingSet= (empty)"
+        )),
+        Some(Err(_)) => shortfall.push(
+            "the running process reports a capability bounding set this robot cannot read as a \
+             mask"
+                .to_string(),
+        ),
+        None => shortfall.push(
+            "the running process does not report CapBnd, so whether the kernel emptied the \
+             bounding set cannot be established"
+                .to_string(),
+        ),
+    }
+
+    shortfall
+}
+
 /// What systemd reports about a unit, as `Key=Value` pairs in the order it printed them.
 ///
 /// Pure, so the comparison below can be tested on a machine with no systemd — which is most of
@@ -381,6 +484,13 @@ pub trait Launcher {
     ///
     /// `Err` when there is nothing to read, with the sentence a conformance result will carry.
     fn confinement(&self, id: &str) -> Result<Vec<(String, String)>, LaunchError>;
+
+    /// What the **kernel** applied to the unit's own process (§15, and see [`KERNEL_CONFINEMENT`]).
+    ///
+    /// The rung below [`confinement`](Launcher::confinement). That reads the manager's record of
+    /// the directives; this reads `/proc/<MainPID>/status` on the process they were supposed to
+    /// confine. A launcher with no running process says so.
+    fn applied(&self, id: &str) -> Result<Vec<(String, String)>, LaunchError>;
 }
 
 /// Why a launch failed.
@@ -507,7 +617,10 @@ impl Launcher for SystemdLauncher {
         // hundred lines, and a check that scanned them would be one whose cost grows with
         // systemd's feature list. The names come from `confinement_properties` itself, so a
         // directive added there is asked for here without anybody remembering to.
-        argv.push(format!("--property={}", confinement_property_names().join(",")));
+        argv.push(format!(
+            "--property={}",
+            confinement_property_names().join(",")
+        ));
         let output = Command::new("systemctl")
             .args(&argv)
             .output()
@@ -529,6 +642,55 @@ impl Launcher for SystemdLauncher {
             });
         }
         Ok(parse_properties(&String::from_utf8_lossy(&output.stdout)))
+    }
+
+    fn applied(&self, id: &str) -> Result<Vec<(String, String)>, LaunchError> {
+        // `MainPID` rather than the whole property list: this is a second call and the first one is
+        // already asking for the directives. Asking for the pid there would have coupled two
+        // questions whose failure modes differ — a unit systemd cannot describe and a process that
+        // has exited between the two calls are different sentences.
+        let mut argv: Vec<String> = self.scope().iter().map(|s| s.to_string()).collect();
+        argv.extend([
+            "show".to_string(),
+            format!("{}.service", unit_name(id)),
+            "--property=MainPID".to_string(),
+        ]);
+        let output = Command::new("systemctl")
+            .args(&argv)
+            .output()
+            .map_err(|error| LaunchError {
+                id: id.to_string(),
+                detail: format!(
+                    "could not run systemctl to find the unit's process: {error}. This robot \
+                     cannot say what the kernel applied to its own sandbox."
+                ),
+            })?;
+        let pid = parse_properties(&String::from_utf8_lossy(&output.stdout))
+            .into_iter()
+            .find(|(key, _)| key == "MainPID")
+            .map(|(_, value)| value)
+            .unwrap_or_default();
+        // Zero is systemd's "no process", not a pid. Reading `/proc/0` would produce a confusing
+        // file-not-found where the true answer is that the unit is not running any more.
+        if pid.is_empty() || pid == "0" {
+            return Err(LaunchError {
+                id: id.to_string(),
+                detail: format!(
+                    "{}.service has no running process, so there is nothing for the kernel to be \
+                     holding. It stopped between being listed and being read.",
+                    unit_name(id)
+                ),
+            });
+        }
+        let path = format!("/proc/{pid}/status");
+        let text = std::fs::read_to_string(&path).map_err(|error| LaunchError {
+            id: id.to_string(),
+            detail: format!(
+                "{path} could not be read: {error}. What the kernel applied to this unit cannot be \
+                 established from this machine."
+            ),
+        })?;
+        Ok(parse_proc_status(&text))
     }
 
     fn observe(&self) -> Result<Vec<UnitStatus>, LaunchError> {
@@ -717,6 +879,16 @@ impl Launcher for RecordingLauncher {
                 .to_string(),
         })
     }
+
+    fn applied(&self, id: &str) -> Result<Vec<(String, String)>, LaunchError> {
+        Err(LaunchError {
+            id: id.to_string(),
+            detail: "this launcher records rather than launching, so there is no process for a \
+                     kernel to be holding."
+                .to_string(),
+        })
+    }
+
     fn observe(&self) -> Result<Vec<UnitStatus>, LaunchError> {
         let mut units = self.units.clone();
         units.sort_by(|a, b| a.id.cmp(&b.id));

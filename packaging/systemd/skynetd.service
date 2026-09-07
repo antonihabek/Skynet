@@ -28,6 +28,23 @@ ExecStart=/usr/bin/skynetd \
     --advertise ${SKYNET_LABEL} \
     --interval ${SKYNET_INTERVAL_MS}
 
+# §82.4's goodbye, which is the whole reason this line exists. `skynetd` is stopped by a signal and
+# handling one needs `unsafe`, which its crate forbids — so a robot switched off cleanly used to stay
+# in every browser's cache on the link until the 120-second TTL expired. `ExecStop=` runs **before**
+# the signal, while the daemon is still up and still holds its own socket, so it can be asked
+# properly: withdraw the mDNS name, seal the black box window with reason `shutdown` (§13), exit.
+#
+# `-` so a failure here never blocks a stop. A robot that cannot reach its own socket is one whose
+# supervisor is already gone, and refusing to stop it would turn a lost goodbye into a hung unit.
+#
+# The credential is admin (§39.1): this stops the supervisor, and only systemd can start it again.
+ExecStop=-/usr/bin/skynet shutdown --socket ${SKYNET_SOCKET} --token ${SKYNET_ADMIN_TOKEN}
+
+# The daemon exits on its own once it has withdrawn and sealed; this is the ceiling on how long
+# that may take. A second is the responder's own bound plus the seal, and past it systemd sends the
+# signal — which is the state that existed before `ExecStop` did, so the worst case is unchanged.
+TimeoutStopSec=15s
+
 # It supervises; it is not supervised by the thing it supervises. A restart is cheap and level-
 # triggered reconciliation makes it idempotent (§33.3), so the only question is how long a robot
 # goes without fleet management, and the answer should be seconds.

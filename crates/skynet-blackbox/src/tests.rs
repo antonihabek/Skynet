@@ -161,7 +161,10 @@ fn a_cycle_says_whether_the_read_succeeded() {
 
     let healthy = two(1, 0);
     encode(shape, &mut slot, 1, 100, Entry::Cycle(&healthy.view())).expect("a cycle");
-    assert_eq!(slot[5], RECORD_SCHEMA, "records carry the schema they are in");
+    assert_eq!(
+        slot[5], RECORD_SCHEMA,
+        "records carry the schema they are in"
+    );
     let Body::Cycle(decoded) = decode(shape, &slot).map(|r| r.body).expect("decodes") else {
         panic!("a cycle")
     };
@@ -186,7 +189,10 @@ fn a_cycle_says_whether_the_read_succeeded() {
     slot[5] = 1;
     let crc = crate::crc32::crc32(&slot[4..]);
     slot[0..4].copy_from_slice(&crc.to_le_bytes());
-    let Body::Cycle(decoded) = decode(shape, &slot).map(|r| r.body).expect("an older record still decodes") else {
+    let Body::Cycle(decoded) = decode(shape, &slot)
+        .map(|r| r.body)
+        .expect("an older record still decodes")
+    else {
         panic!("a cycle")
     };
     assert_eq!(decoded.read, ReadOutcome::Unrecorded);
@@ -1025,6 +1031,138 @@ fn a_changed_limit_diverges_rather_than_agreeing_quietly() {
         .map(|d| d.field)
         .collect();
     assert!(fields.contains(&"command"), "{fields:?}");
+}
+
+/// §26.4's other half: a window that reproduces perfectly and was not measured.
+///
+/// The cycle whose `read_state` failed replays **exactly** — the kernel's verdict comes from the
+/// recorded desired values, timing and limits, and the read supplies none of them — so a replay
+/// that skipped it or called it a divergence would be reporting non-determinism on the strength of
+/// something determinism does not depend on. What it must not do is stay silent: every body field
+/// in that record is a fill value holding the previous cycle's reading, so an investigator reading
+/// "the arm was stationary" out of it is reading the same numbers twice.
+///
+/// So: deterministic **and** not measured, said separately, with the driver's own code.
+#[test]
+fn a_failed_read_replays_exactly_and_is_still_marked_as_unmeasured() {
+    let (mut ring, mut store) = ring_of(8);
+    let params = limits_params(Envelope::default(), &[]);
+    let limits = resolve_limits(&params);
+
+    for (tick, read_result) in [(1u64, 0i32), (2, -110), (3, 0)] {
+        let owned = OwnedCycle {
+            tick,
+            desired: vec![0.25, 0.25, 0.25],
+            command: vec![0.25, 0.25, 0.25],
+            mask: vec![1, 1, 1],
+            clamped: vec![false, false, false],
+            position: vec![0.0; 3],
+            velocity: vec![0.0; 3],
+            effort: vec![0.0; 3],
+            tripped: Vec::new(),
+            response: None,
+            read_result,
+        };
+        let mut view = owned.view();
+        view.command_stamp_ns = tick * 1_000_000;
+        view.command_seq = tick as u32;
+        ring.append(&mut store, tick * 1_000_000, Entry::Cycle(&view))
+            .unwrap();
+    }
+
+    let result = replay_ring(&ring, &store, &limits, None);
+
+    assert_eq!(result.cycles, 3);
+    assert_eq!(result.agreed, 3, "diverged: {:?}", result.diverged);
+    assert!(
+        result.deterministic(),
+        "a failed read does not make a window non-deterministic"
+    );
+
+    // And the half the pass must not swallow.
+    assert!(!result.observations_measured());
+    assert_eq!(result.unmeasured, 1);
+    assert_eq!(result.unrecorded, 0);
+    assert_eq!(
+        result.read_errors,
+        vec![-110],
+        "the driver's own code, carried verbatim (§24)"
+    );
+
+    let note = result
+        .observation_note()
+        .expect("a window with a fill says so");
+    assert!(
+        note.contains("1 of 3 cycles carry no measurement"),
+        "{note}"
+    );
+    assert!(
+        note.contains("-110"),
+        "the code reaches the sentence: {note}"
+    );
+}
+
+/// A recording written before the read's outcome existed is not a recording of successful reads.
+///
+/// §26.4: *"a reader that ignored the byte would read every older recording as a robot whose every
+/// read succeeded, which is precisely the failure the field exists to prevent."* The replay reports
+/// those cycles as unrecorded — a third answer, because reporting them as fills would invent a
+/// fault in a window that may have had none.
+#[test]
+fn a_schema_one_recording_is_unrecorded_rather_than_measured() {
+    let (mut ring, mut store) = ring_of(8);
+    let params = limits_params(Envelope::default(), &[]);
+    let limits = resolve_limits(&params);
+
+    let owned = OwnedCycle {
+        tick: 1,
+        desired: vec![0.25, 0.25, 0.25],
+        command: vec![0.25, 0.25, 0.25],
+        mask: vec![1, 1, 1],
+        clamped: vec![false, false, false],
+        position: vec![0.0; 3],
+        velocity: vec![0.0; 3],
+        effort: vec![0.0; 3],
+        tripped: Vec::new(),
+        response: None,
+        read_result: 0,
+    };
+    let mut view = owned.view();
+    view.command_stamp_ns = 1_000_000;
+    view.command_seq = 1;
+    ring.append(&mut store, 1_000_000, Entry::Cycle(&view))
+        .unwrap();
+
+    // The decoded shape a schema-1 slot produces, reached by decoding a real record and setting the
+    // one field the byte decides. Flipping the byte in the store would be the more literal fixture
+    // and would test the wrong thing: the slot carries a CRC, so a hand-edited byte decodes as
+    // `Torn` and the record never reaches `replay` at all. What is under test here is what replay
+    // does with `ReadOutcome::Unrecorded`; `record.rs`'s own tests cover the byte producing it.
+    let mut records = ring.ordered(&store);
+    let Body::Cycle(cycle) = &mut records[0].body else {
+        panic!("not a cycle")
+    };
+    cycle.read = ReadOutcome::Unrecorded;
+
+    let result = replay(
+        &records,
+        &ring.meta().channels,
+        ring.capabilities(),
+        &limits,
+        None,
+    );
+    assert_eq!(result.cycles, 1);
+    assert_eq!(result.unmeasured, 0, "nothing here says a read failed");
+    assert_eq!(result.unrecorded, 1);
+    assert!(!result.observations_measured());
+    let note = result
+        .observation_note()
+        .expect("a schema-1 window says so");
+    assert!(note.contains("schema 1"), "{note}");
+    assert!(
+        note.contains("not the same as their being fine"),
+        "the note refuses the reading §26.4 exists to prevent: {note}"
+    );
 }
 
 #[test]

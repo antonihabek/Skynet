@@ -20,8 +20,8 @@ use skynetd::desired::PackageKind;
 use skynetd::reconcile::SafeState;
 
 use crate::api::{self, Context};
-use crate::blackbox;
 use crate::auth::{requirement, Credential, Credentials, Role};
+use crate::blackbox;
 use crate::http;
 use crate::launch::{self, CpuError, Cpus, Limits, RecordingLauncher, SystemdLauncher, Unit};
 use crate::layout::{parse_digest, Layout, PackageId};
@@ -1428,6 +1428,7 @@ fn console_fixture() {
         None,
         &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
         &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
+        &blackbox::StopSighting::Unobservable("no ring in this fixture"),
     );
     let vendor = driver_key(31);
     write_trust(&fixture, "bench-robotics", &public_hex(&vendor));
@@ -2339,7 +2340,8 @@ fn a_half_written_separation_block_does_not_acquire_a_default() {
 
 /// `GET /state` reports what was seen of the kernel, and whether anybody looked.
 ///
-/// Two of §27's eight conditions are observed now. The one that matters on this route is the
+/// Three of §27's eight conditions are observed now, and `crate::observed` is what counts them.
+/// The one that matters on this route is the
 /// distinction §27 itself does not draw: a robot whose ring cannot hold a cycle and a robot whose
 /// kernel has stopped are both `down` to the machine and are not the same fact to a person. A
 /// console that showed "kernel: down" about the first would send somebody to restart a kernel that
@@ -3970,6 +3972,7 @@ fn status_carries_the_operating_state_and_the_reason_it_is_there() {
         None,
         &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
         &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
+        &blackbox::StopSighting::Unobservable("no ring in this fixture"),
     );
     let (_, after) = fixture.request("GET", "/status", None, "");
     assert_eq!(after.get("state").and_then(Json::as_str), Some("safe"));
@@ -3990,6 +3993,7 @@ fn the_state_route_admits_how_little_it_observed() {
         None,
         &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
         &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
+        &blackbox::StopSighting::Unobservable("no ring in this fixture"),
     );
     let (status, body) = fixture.request("GET", "/state", Some("observer-token"), "");
     assert_eq!(status, 200);
@@ -4017,6 +4021,278 @@ fn the_state_route_admits_how_little_it_observed() {
             "`{unobserved}` is not this process's to observe (§33.1)"
         );
     }
+}
+
+/// Two routes describe one pass, and they must agree about how much of it was observed.
+///
+/// The regression this exists for is not hypothetical and was not small. `GET /state`'s `partial`
+/// note, `GET /status`'s `safe_state_note` and the start-up banner each carried a hand-written
+/// count, and on 2026-09-07 they disagreed: two said three conditions were observed and the third
+/// told an operator the machine was deciding from *"the self-test and eight unobserved
+/// conditions"* — a sentence that counted §27's total as the remainder, so it described a daemon
+/// that had looked at nine things and observed one. It had been wrong on every pass for a
+/// fortnight and nothing could have failed.
+///
+/// So the assertion is the **relationship**, never the number: whatever `observed` holds, both
+/// sentences count it the same way. A condition gaining a producer moves all three together, and
+/// this test does not need editing when one does — which is the property the old arrangement
+/// lacked and the only reason `crate::observed` exists.
+#[test]
+fn every_sentence_about_the_conditions_counts_the_same_object() {
+    for (kernel, rhal, stop, expected) in [
+        (
+            blackbox::KernelSighting::Unobservable("no ring in this fixture"),
+            blackbox::RhalSighting::Unobservable("no ring in this fixture"),
+            blackbox::StopSighting::Unobservable("no ring in this fixture"),
+            1,
+        ),
+        (
+            blackbox::KernelSighting::Turning { cycles: 40 },
+            blackbox::RhalSighting::Seen {
+                state: skynet_contracts::opstate::RhalState::Present,
+                errno: None,
+                fault_code: 0,
+            },
+            blackbox::StopSighting::Clear,
+            4,
+        ),
+    ] {
+        let mut fixture = Fixture::new("condition-count");
+        fixture.provision();
+        fixture
+            .daemon
+            .refresh_operating_state(None, &kernel, &rhal, &stop);
+
+        let (_, state) = fixture.request("GET", "/state", Some("observer-token"), "");
+        let observed = state.get("observed").expect("the observation map");
+        let counted = crate::observed::CONDITIONS
+            .iter()
+            .filter(|name| observed.get(name).and_then(Json::as_bool) == Some(true))
+            .count();
+        assert_eq!(
+            counted, expected,
+            "the object itself is the authority and it says {counted}"
+        );
+
+        // The word every one of these sentences opens its tally with. Read out of the rendered
+        // string rather than recomputed, because a test that recomputed it would pass on two
+        // sentences that were both wrong in the same way.
+        let word = [
+            "none", "one", "two", "three", "four", "five", "six", "seven", "eight",
+        ][counted];
+        let clause = format!("{word} of §27's eight conditions");
+
+        let partial = state
+            .get("partial")
+            .and_then(Json::as_str)
+            .unwrap_or_default();
+        assert!(
+            partial.contains(&clause),
+            "GET /state's partial note must say `{clause}`, and says: {partial}"
+        );
+
+        let (_, status) = fixture.request("GET", "/status", None, "");
+        let note = status
+            .get("safe_state_note")
+            .and_then(Json::as_str)
+            .unwrap_or_default();
+        assert!(
+            note.contains(&clause),
+            "GET /status's safe-state note must say `{clause}`, and says: {note}"
+        );
+
+        // And the complement, by name rather than by count — which is what the note renders and is
+        // the stronger half: a reader who is told five conditions went unobserved still does not
+        // know which, and "the homing state" is the one that decides whether a robot may move.
+        //
+        // Every condition appears exactly once, whichever side of the sentence it is on, so a
+        // rendering that dropped one or listed it twice fails here.
+        for (name, label) in crate::observed::CONDITIONS.iter().zip([
+            "the self-test",
+            "the kernel",
+            "the RHAL",
+            "the homing state",
+            "the stop",
+            "the guard hold",
+            "the guard set",
+            "the policy's lease",
+        ]) {
+            assert_eq!(
+                note.matches(label).count(),
+                1,
+                "`{name}` must appear once in the note, on whichever side it belongs. It says: \
+                 {note}"
+            );
+        }
+    }
+}
+
+/// §82.4's shutdown: a request, an actor, and a route that stops nothing by itself.
+///
+/// The split is the design rather than a limitation. This function runs inside a connection the
+/// caller is still waiting on; the mDNS responder is another thread and the recording is the
+/// loop's to seal. So the route records **who asked** and the loop performs it at the top of its
+/// next turn — §33.3's shape, where the API states an intent and the loop converges on it.
+#[test]
+fn shutdown_records_who_asked_and_stops_nothing_by_itself() {
+    let mut fixture = Fixture::new("shutdown-request");
+    fixture.provision();
+
+    assert!(
+        fixture.daemon.shutdown_requested.is_none(),
+        "nothing has asked yet"
+    );
+
+    let (status, body) = fixture.request("POST", "/shutdown", Some("admin-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(body.get("stopping").and_then(Json::as_bool), Some(true));
+
+    // The actor, by the credential's label rather than by its token. §38.3 wants the name of the
+    // somebody, and a shutdown is exactly the act somebody will be asked about later.
+    let asked = fixture
+        .daemon
+        .shutdown_requested
+        .as_deref()
+        .expect("the request is recorded");
+    assert!(!asked.is_empty(), "a shutdown carries who asked for it");
+
+    // And the note says what it does *not* do, because the confusion is one an operator can make
+    // under pressure: this stops the supervisor and leaves the body alone.
+    let note = body.get("note").and_then(Json::as_str).unwrap_or_default();
+    assert!(note.contains("not the robot"), "{note}");
+    assert!(note.contains("§82.4"), "it names the goodbye: {note}");
+    assert!(note.contains("shutdown"), "and the seal reason: {note}");
+}
+
+/// It is admin, and an operator is refused (§39.1).
+///
+/// The fall-through in `auth` would have given the same answer, and the entry is explicit for the
+/// reason the table gives about `unpair`: a robot whose supervisor is not running applies no
+/// desired state and answers nobody, and only systemd can start it again.
+#[test]
+fn shutdown_is_admin_and_an_operator_cannot_stop_the_supervisor() {
+    let mut fixture = Fixture::new("shutdown-role");
+    fixture.provision();
+
+    let (status, _) = fixture.request("POST", "/shutdown", Some("operator-token"), "");
+    assert_eq!(
+        status, 403,
+        "an operator may stop the robot, not the daemon"
+    );
+    assert!(
+        fixture.daemon.shutdown_requested.is_none(),
+        "a refused request is not a request"
+    );
+
+    // And anonymously, which is the one that matters most: §39.1 makes `POST /stop` open on
+    // purpose, and a caller reaching for the wrong one must not take the supervisor down with it.
+    let (status, _) = fixture.request("POST", "/shutdown", None, "");
+    assert_eq!(status, 401);
+    assert!(fixture.daemon.shutdown_requested.is_none());
+}
+
+/// §27's `stop`, off §24's flags, and the two halves of the decision taken on 2026-09-07.
+///
+/// A robot whose emergency-stop chain is open reports `stopping` with `stopping_estop` — its own
+/// cause, never `operator`, because §24 gives the chain one bit and a light curtain opens the same
+/// chain as the button. And it never reports the stop as **finished**: `stop_settled` is not
+/// observable from that bit, so the machine cannot reach `stop_complete` and a robot whose chain
+/// has been open for an hour goes on saying `stopping`. That is the whole of the trade, and it is
+/// the fail-closed direction — this can hold a robot and can never release one.
+#[test]
+fn an_open_stop_chain_is_its_own_cause_and_never_a_completed_stop() {
+    let mut fixture = Fixture::new("estop-condition");
+    fixture.provision();
+    fixture.daemon.refresh_operating_state(
+        None,
+        &blackbox::KernelSighting::Turning { cycles: 40 },
+        &blackbox::RhalSighting::Seen {
+            state: skynet_contracts::opstate::RhalState::Present,
+            errno: None,
+            fault_code: 0,
+        },
+        &blackbox::StopSighting::Asserted,
+    );
+
+    let (status, state) = fixture.request("GET", "/state", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(
+        state.get("state").and_then(Json::as_str),
+        Some("stopping"),
+        "an open chain is a stop in progress, not a completed one"
+    );
+    assert_eq!(
+        state.get("reason").and_then(Json::as_str),
+        Some("stopping_estop"),
+        "its own cause: `operator` would claim a person asked, and the chain cannot say"
+    );
+
+    let observed = state.get("observed").expect("the observation map");
+    assert_eq!(observed.get("stop").and_then(Json::as_bool), Some(true));
+
+    let stop = state.get("stop").expect("the stop block");
+    assert_eq!(stop.get("asserted").and_then(Json::as_bool), Some(true));
+    assert!(stop
+        .get("detail")
+        .and_then(Json::as_str)
+        .unwrap_or_default()
+        .contains("open on the newest cycle"));
+}
+
+/// A cycle whose read failed is not a reading of the chain (§26.4), in either direction.
+///
+/// The flags in such a record are the *previous* cycle's, so reporting `Clear` off one would be
+/// §26.4's own failure a field further along — and reporting `Asserted` off one would raise a stop
+/// nobody observed. It is unobservable, and §27 is already holding the robot through `rhal`, which
+/// reads the same record.
+#[test]
+fn a_failed_read_says_nothing_about_the_stop_chain() {
+    use skynet_blackbox::record::ReadOutcome;
+
+    let mut cycle = skynet_blackbox::Cycle {
+        tick: 1,
+        observation: [0; 32],
+        policy: 0,
+        state_flags: 0,
+        fault_code: 0,
+        rhal_result: 0,
+        read: ReadOutcome::Failed(-110),
+        state_seq: 1,
+        state_stamp_ns: 0,
+        command_stamp_ns: 0,
+        command_seq: 0,
+        mode: 0,
+        advisory: false,
+        response: None,
+        tripped: Vec::new(),
+        capability: skynet_blackbox::record::NO_CAPABILITY,
+        nearest_person_m: f32::NAN,
+        base_pose: [f32::NAN; 7],
+        base_twist: [0.0; 6],
+        desired: Vec::new(),
+        command: Vec::new(),
+        mask: Vec::new(),
+        clamped: Vec::new(),
+        position: Vec::new(),
+        velocity: Vec::new(),
+        effort: Vec::new(),
+    };
+    assert!(
+        !blackbox::StopSighting::of(Some(&cycle)).observed(),
+        "a fill value is not a reading of the chain"
+    );
+
+    // And with the bit set in the fill, which is the dangerous direction: the previous cycle's
+    // asserted chain must not be reported as this cycle's.
+    cycle.state_flags = 1;
+    assert!(!blackbox::StopSighting::of(Some(&cycle)).observed());
+
+    // The same record with a successful read is a reading, and says so.
+    cycle.read = ReadOutcome::Ok;
+    assert_eq!(
+        blackbox::StopSighting::of(Some(&cycle)),
+        blackbox::StopSighting::Asserted
+    );
 }
 
 /// The narrowing, from the direction that matters. §33.4's asymmetry says either source may close
@@ -6748,6 +7024,7 @@ fn invoking_a_package_that_is_not_installed_says_so() {
 /// the same way. The contract suite proves the lifecycle emits the effects; this proves the
 /// daemon performs them, which is the half a skill that never starts a policy would be missing.
 #[test]
+#[cfg(unix)]
 fn a_skill_entering_running_starts_its_unit_and_leaving_it_stops_it() {
     let mut fixture = Fixture::new("skill-starts-unit");
     fixture.provision();
@@ -6827,6 +7104,7 @@ fn a_skill_entering_running_starts_its_unit_and_leaving_it_stops_it() {
 /// a looping daemon lives exactly one interval. When the invocation ends, the lifecycle's own
 /// `Stop` performs the stop (proved above), so sparing here strands nothing.
 #[test]
+#[cfg(unix)]
 fn reconcile_spares_a_unit_while_its_skill_is_live() {
     let mut fixture = Fixture::new("skill-spared");
     fixture.provision();

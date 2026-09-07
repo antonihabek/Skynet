@@ -209,7 +209,11 @@ impl FramePool {
         }
         let mut slots = Vec::new();
         slots.resize(capacity, Slot::default());
-        Some(FramePool { stream: stream.to_string(), slots, stats: FramePoolStats::default() })
+        Some(FramePool {
+            stream: stream.to_string(),
+            slots,
+            stats: FramePoolStats::default(),
+        })
     }
 
     /// The stream this pool holds.
@@ -296,7 +300,11 @@ impl FramePool {
         slot.identity = Some(frame);
         slot.acquired = false;
         self.stats.published += 1;
-        Ok(FrameHandle { stream: self.stream.clone(), slot: index, generation: slot.generation })
+        Ok(FrameHandle {
+            stream: self.stream.clone(),
+            slot: index,
+            generation: slot.generation,
+        })
     }
 
     /// The newest published frame's handle, or `None` when nothing has been published yet.

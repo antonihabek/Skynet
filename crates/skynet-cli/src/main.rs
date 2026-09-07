@@ -14,7 +14,8 @@
 //! and, since `skynetd` exists, the commands that need a robot on the other end (§33.7):
 //!
 //! ```text
-//! skynet status · ps · plan · logs · grants · estop · rollback     §18, over the local socket
+//! skynet status · state · ps · plan · logs · grants · estop        §18, over the local socket
+//! skynet rollback                                                  the rest of §33.7
 //! skynet install ./package --id ns/name --kind policy …            §37.1, into the store
 //! ```
 //!
@@ -62,8 +63,8 @@ skynet — Skynet OS workstation tools
 
   Talking to a robot (§33.7), over /run/skynetd.sock or --host:
 
-  status · ps · plan · logs · grants · estop · rollback · cell · power
-  conformance · limits · identity · pair · unpair · checkin · intent · releases · ota
+  status · state · ps · plan · logs · grants · estop · rollback · cell · power
+  conformance · limits · identity · pair · unpair · checkin · intent · releases · ota · shutdown
   skills · skill run <ns/name> · skill stop <inv-id>
   install <dir> --id <ns/name> --kind <k> --version <v> --digest <hex>
   blackbox [index] · blackbox seal · blackbox get <name>
@@ -112,9 +113,8 @@ fn dispatch(argv: &[String]) -> i32 {
         "role" => role(rest),
         "status" | "ps" | "plan" | "logs" | "grants" | "estop" | "rollback" | "install"
         | "blackbox" | "skills" | "skill" | "ota" | "identity" | "pair" | "unpair" | "checkin"
-        | "intent" | "releases" | "cell" | "power" | "limits" | "conformance" => {
-            robot_cmd::run(command, rest)
-        }
+        | "intent" | "releases" | "cell" | "power" | "state" | "limits" | "conformance"
+        | "shutdown" => robot_cmd::run(command, rest),
         other => term::fail(&format!("`{other}` is not a skynet command.\n\n{USAGE}")),
     }
 }

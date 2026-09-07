@@ -230,6 +230,18 @@ pub enum StopCause {
     Balance,
     /// A person asked.
     Operator,
+    /// The hardware emergency-stop chain is open (§24's `SKR_FLAG_ESTOP`).
+    ///
+    /// The odd one out, and deliberately not folded into [`StopCause::Operator`]. The first four
+    /// are the **kernel's own decisions** — it evaluated a guard, or a person asked, and it
+    /// commanded a stop. This one is the body reporting that the chain is open, which happened
+    /// whether or not any software agreed.
+    ///
+    /// §24 gives it one bit, so a robot can say the chain is open and cannot say what opened it.
+    /// `operator` means *a person asked*, and an estop chain is also opened by a light curtain, a
+    /// door interlock and a safety relay noticing itself fail. Reporting those as a person having
+    /// asked would put a name on an event that has none.
+    Estop,
 }
 
 impl StopCause {
@@ -240,6 +252,7 @@ impl StopCause {
             StopCause::Proximity => "proximity",
             StopCause::Balance => "balance",
             StopCause::Operator => "operator",
+            StopCause::Estop => "estop",
         }
     }
 
@@ -253,16 +266,18 @@ impl StopCause {
             StopCause::Proximity => StateReason::StoppingProximity,
             StopCause::Balance => StateReason::StoppingBalance,
             StopCause::Operator => StateReason::StoppingOperator,
+            StopCause::Estop => StateReason::StoppingEstop,
         }
     }
 }
 
 /// Every stop cause.
-pub const STOP_CAUSES: [StopCause; 4] = [
+pub const STOP_CAUSES: [StopCause; 5] = [
     StopCause::Watchdog,
     StopCause::Proximity,
     StopCause::Balance,
     StopCause::Operator,
+    StopCause::Estop,
 ];
 
 /// Whether there is a policy the robot could be running (§27's `RUNNING` row).
@@ -341,6 +356,13 @@ pub struct Conditions {
     pub stop: Option<StopCause>,
     /// Whether the ramp has finished. Read only when a stop is commanded, so a caller that left it
     /// true between stops cannot pin the machine in `SAFE`.
+    ///
+    /// **For [`StopCause::Estop`] it is not observable on any edition that exists**, and that is a
+    /// property of the evidence rather than an omission. §24 gives the hardware chain one bit,
+    /// which says the chain is open and says nothing about whether the body has come to rest — so a
+    /// supplier setting this true for a hardware stop would be claiming to have watched a robot
+    /// stop moving. Left false it derives `stopping`, which can hold a robot and can never release
+    /// one.
     pub stop_settled: bool,
     /// §27's `HOLD` row: "a guard `hold`".
     pub guard_hold: bool,
@@ -386,6 +408,8 @@ pub enum StateReason {
     StoppingBalance,
     /// A person asked.
     StoppingOperator,
+    /// The hardware emergency-stop chain is open, and what opened it is not knowable (§24).
+    StoppingEstop,
     /// §48.4: the checks could not run, so nothing was established.
     PostIncomplete,
     /// §48.1: joint positions are unknown.
@@ -418,6 +442,7 @@ impl StateReason {
             StateReason::StoppingProximity => "stopping_proximity",
             StateReason::StoppingBalance => "stopping_balance",
             StateReason::StoppingOperator => "stopping_operator",
+            StateReason::StoppingEstop => "stopping_estop",
             StateReason::PostIncomplete => "post_incomplete",
             StateReason::HomingPending => "homing_pending",
             StateReason::KernelDown => "kernel_down",
@@ -432,7 +457,7 @@ impl StateReason {
 }
 
 /// Every reason, in rule order.
-pub const STATE_REASONS: [StateReason; 17] = [
+pub const STATE_REASONS: [StateReason; 18] = [
     StateReason::RhalLost,
     StateReason::SafeSticky,
     StateReason::PostFailed,
@@ -441,6 +466,7 @@ pub const STATE_REASONS: [StateReason; 17] = [
     StateReason::StoppingProximity,
     StateReason::StoppingBalance,
     StateReason::StoppingOperator,
+    StateReason::StoppingEstop,
     StateReason::PostIncomplete,
     StateReason::HomingPending,
     StateReason::KernelDown,
@@ -768,7 +794,7 @@ mod tests {
         let parsed = conditions_from_json(
             &Json::parse(
                 r#"{"kernel":"LIVE","rhal":"Present","post":"pass","homing":"done",
-                    "policy":"READY","stop":"estop"}"#,
+                    "policy":"READY","stop":"emergency"}"#,
             )
             .expect("parses"),
         );
@@ -778,8 +804,14 @@ mod tests {
         assert_eq!(parsed.homing, HomingState::Pending);
         assert_eq!(parsed.policy, PolicyState::None);
         // An unrecognised stop cause is *no* stop rather than a stop with no cause. The robot is
-        // held by the RHAL rule above it either way, and inventing a fifth cause here would put a
-        // reason on a console that `STOP_CAUSES` does not contain.
+        // held by the RHAL rule above it either way, and inventing a cause here would put a reason
+        // on a console that `STOP_CAUSES` does not contain.
+        //
+        // The value used to be `"estop"`, chosen because it was a plausible word that the
+        // vocabulary did not contain — and on 2026-09-07 the vocabulary grew to contain it, so this
+        // test started asserting that a real cause parsed to nothing. `"emergency"` replaces it and
+        // the lesson is kept: a fixture whose whole point is that a string is *not* in a closed set
+        // has to be reread whenever the set changes, because nothing else will notice.
         assert_eq!(parsed.stop, None);
     }
 
@@ -839,6 +871,7 @@ mod tests {
             (StopCause::Proximity, StateReason::StoppingProximity),
             (StopCause::Balance, StateReason::StoppingBalance),
             (StopCause::Operator, StateReason::StoppingOperator),
+            (StopCause::Estop, StateReason::StoppingEstop),
         ] {
             let conditions = Conditions {
                 stop: Some(cause),
@@ -1421,6 +1454,10 @@ mod tests {
             },
             Conditions {
                 rhal: RhalState::Degraded,
+                ..nominal()
+            },
+            Conditions {
+                stop: Some(StopCause::Estop),
                 ..nominal()
             },
             nominal(),

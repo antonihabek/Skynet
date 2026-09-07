@@ -323,6 +323,13 @@ def _guard_report(report: Any) -> dict[str, Any] | None:
             }
             for entry in (report.get("unavailable") or [])
         ],
+        # §80's third state. Absent decodes to an empty list, on this decoder's own rule that a
+        # field that is not there is absent rather than a zero — and an older robot that predates
+        # the state genuinely has none to report.
+        "inert": [
+            {"guard": _text(entry.get("guard")), "reading": _text(entry.get("reading"))}
+            for entry in (report.get("inert") or [])
+        ],
         "notices": [
             {
                 "code": _text(entry.get("code")),
@@ -461,6 +468,12 @@ def _guard_json(report: dict[str, Any] | None) -> Any:
         "unavailable": [
             {"guard": entry["guard"], "missing": list(entry["missing"])}
             for entry in report["unavailable"]
+        ],
+        # Always present, empty included: a field omitted where it is empty would let an edition
+        # that never emits it pass this frozen document (§31.6).
+        "inert": [
+            {"guard": entry["guard"], "reading": entry["reading"]}
+            for entry in report.get("inert", [])
         ],
     }
 

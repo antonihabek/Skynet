@@ -306,6 +306,38 @@ impl Recorder {
         RhalSighting::of(newest.as_ref())
     }
 
+    /// §27's **stop** condition, off the same newest cycle as [`body`](Self::body).
+    ///
+    /// Reads the ring once more rather than taking `body`'s record, and that is deliberate for now:
+    /// the two are called back to back from one pass, so they see the same newest cycle, and
+    /// threading a record between them would couple two readings whose failure modes differ. If
+    /// this ever moves off the same pass, it has to take the record instead — §27's conditions are
+    /// only comparable when they are readings of one instant.
+    pub fn chain(&self, since: u64) -> StopSighting {
+        let Ok(store) = self.read() else {
+            return StopSighting::Unobservable(
+                "the ring could not be read, so nothing can be said about the emergency-stop chain",
+            );
+        };
+        if self.ring.geometry().shape.channels == 0 {
+            return StopSighting::Unobservable(
+                "this recording has no action channels, so it holds no control cycles and cannot \
+                 say whether the emergency-stop chain is open (§26, §74.3)",
+            );
+        }
+        let newest = self
+            .ring
+            .ordered(&store)
+            .into_iter()
+            .filter(|record| record.sequence >= since)
+            .filter_map(|record| match record.body {
+                skynet_blackbox::record::Body::Cycle(cycle) => Some(cycle),
+                _ => None,
+            })
+            .next_back();
+        StopSighting::of(newest.as_ref())
+    }
+
     /// Count §74's counters over the records at or after `from_sequence`.
     ///
     /// Reads the whole file, for [`Recorder::read`]'s reason, and runs once per reconcile pass
@@ -607,7 +639,9 @@ impl RhalSighting {
             // success would be the failure that field was added to prevent — so `Lost`, which
             // holds the robot rather than releasing it.
             ReadOutcome::Unrecorded => (RhalState::Lost, None),
-            ReadOutcome::Ok if cycle.state_flags & RHAL_DEGRADED != 0 => (RhalState::Degraded, None),
+            ReadOutcome::Ok if cycle.state_flags & RHAL_DEGRADED != 0 => {
+                (RhalState::Degraded, None)
+            }
             ReadOutcome::Ok => (RhalState::Present, None),
         };
         RhalSighting::Seen {
@@ -655,7 +689,10 @@ impl RhalSighting {
                 state.as_str()
             ),
             RhalSighting::Seen { state, .. } => {
-                format!("the newest cycle read the body and reported it {}", state.as_str())
+                format!(
+                    "the newest cycle read the body and reported it {}",
+                    state.as_str()
+                )
             }
         }
     }
@@ -663,6 +700,102 @@ impl RhalSighting {
 
 /// §24's `RHAL_DEGRADED`: running, but something is wrong — thermal, a dead encoder.
 const RHAL_DEGRADED: u16 = 1 << 2;
+
+/// §24's `SKR_FLAG_ESTOP`: an emergency stop is asserted.
+///
+/// Restated here rather than imported, for [`RHAL_DEGRADED`]'s reason and CI's: §33.1 forbids this
+/// crate an edge to `skynet-rhal`, and a transitive dependency reaches an actuator exactly as well
+/// as a direct one. What crosses the line is the **number**, out of a record this process already
+/// holds — the same arrangement §26 makes for every other field in a cycle.
+const RHAL_ESTOP: u16 = 1 << 0;
+
+/// What a daemon could see of §27's **stop** condition in one interval.
+///
+/// The third reading off the same records and the same interval as [`KernelSighting`] and
+/// [`RhalSighting`], and it is a *state* like the RHAL rather than a count like the kernel: what
+/// decides it is the newest cycle, because "is the chain open" is a question about now.
+///
+/// # Why this is a cause of its own and not `operator`
+///
+/// §24 gives the hardware chain **one bit**. It says the chain is open; it does not say what opened
+/// it, and a light curtain, a door interlock and a safety relay noticing itself fail all open the
+/// same chain as the button on the chassis. [`StopCause::Operator`] means *a person asked*, so
+/// mapping this onto it would put a name on an event that has none — and §64 makes a message that
+/// misdescribes what happened a defect rather than a wording choice.
+///
+/// # Why it never reports the stop as finished
+///
+/// §27 pairs a stop with `stop_settled`, and for a hardware stop **no edition can observe it**.
+/// The bit says the chain is open and says nothing about whether the body has come to rest, so a
+/// daemon setting `stop_settled` here would be claiming to have watched a robot stop moving. It
+/// stays false, the machine derives `stopping`, and the consequence is stated rather than hidden:
+/// a robot whose chain has been open for an hour goes on reporting `stopping`, because that is
+/// the strongest thing this evidence supports. Fail-closed in the only direction that is safe —
+/// it can hold a robot and can never release one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StopSighting {
+    /// Nothing could be read, with the reason. Not a reading.
+    Unobservable(&'static str),
+    /// A cycle was read, and the chain was open on it.
+    Asserted,
+    /// A cycle was read, and it was not.
+    Clear,
+}
+
+impl StopSighting {
+    /// Map the newest cycle onto §27's condition.
+    pub fn of(newest: Option<&skynet_blackbox::Cycle>) -> StopSighting {
+        match newest {
+            None => StopSighting::Unobservable(
+                "no control cycle was recorded in the last interval, so nothing has read the \
+                 emergency-stop chain",
+            ),
+            // A cycle whose read failed carries the *previous* cycle's flags (§26.4), so the bit in
+            // it is not a reading of the chain. Reporting `Clear` off a fill would be the exact
+            // failure §26.4 was written to end, one field further along — and reporting `Asserted`
+            // off one would raise a stop nobody observed.
+            Some(cycle) if !cycle.read.measured() => StopSighting::Unobservable(
+                "the newest cycle's read of the body failed, so its flags are a fill value and \
+                 not a reading of the emergency-stop chain (§26.4)",
+            ),
+            Some(cycle) if cycle.state_flags & RHAL_ESTOP != 0 => StopSighting::Asserted,
+            Some(_) => StopSighting::Clear,
+        }
+    }
+
+    /// §27's condition. `None` is *no stop is commanded*, never *no reading*.
+    pub fn cause(&self) -> Option<skynet_contracts::opstate::StopCause> {
+        match self {
+            StopSighting::Asserted => Some(skynet_contracts::opstate::StopCause::Estop),
+            // Unobservable collapses onto `Clear` **for the machine**, and that is not a silent
+            // default: §27 is already holding such a robot through `rhal`, which reads the same
+            // record and answers `Lost` wherever this answers `Unobservable`. The distinction is
+            // kept for the *reader* — `observed()` below — where it is the difference between a
+            // chain somebody looked at and one nobody did.
+            _ => None,
+        }
+    }
+
+    /// Whether this was an observation at all.
+    pub fn observed(&self) -> bool {
+        !matches!(self, StopSighting::Unobservable(_))
+    }
+
+    /// What was seen, in a sentence.
+    pub fn detail(&self) -> String {
+        match self {
+            StopSighting::Unobservable(why) => (*why).to_string(),
+            StopSighting::Asserted => "the emergency-stop chain is open on the newest cycle. §24 \
+                                       gives it one bit, so what opened it is not knowable from \
+                                       here — a light curtain and a door interlock open the same \
+                                       chain as the button"
+                .to_string(),
+            StopSighting::Clear => {
+                "the newest cycle read the body and the emergency-stop chain was closed".to_string()
+            }
+        }
+    }
+}
 
 /// What a daemon could see of the Safety Kernel in one interval (§27's `kernel` condition).
 ///
