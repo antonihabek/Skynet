@@ -638,6 +638,7 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
                     .collect(),
                 "package_kinds" => admission::PACKAGE_KINDS.to_vec(),
                 "isolation_modes" => admission::ISOLATION_MODES.to_vec(),
+                "frame_refusal_codes" => skynet_contracts::media::FRAME_REFUSAL_CODES.to_vec(),
                 "reserved_capabilities" => admission::RESERVED_CAPABILITIES.to_vec(),
                 "transport_verdicts" => transport::TRANSPORT_VERDICTS
                     .iter()
@@ -1042,6 +1043,22 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             out
         }
 
+        // §47.6. The first family in this corpus with **state**, and the runner reflects that: a
+        // case is a script rather than one input, because a pool's whole subject is what the
+        // fourth publish does given what the first three did. Nothing here reads the pool's
+        // slots — the handles carry the slot they were issued against, so the selection rule is
+        // pinned by the expected bytes without this edition having to agree with the reference
+        // about how a slot is stored.
+        "media" => {
+            let stream = input.get("stream").and_then(Json::as_str).ok_or("no `stream`")?;
+            let capacity = input
+                .get("capacity")
+                .and_then(Json::as_f64)
+                .ok_or("no `capacity`")? as usize;
+            let ops = input.get("ops").and_then(Json::as_arr).ok_or("no `ops`")?;
+            run_pool_script(stream, capacity, ops)?
+        }
+
         "observation" | "fuzz" if label.contains("observation") => {
             let streams = observation_streams(input)?;
             let target = input
@@ -1149,6 +1166,121 @@ pub fn default_root() -> PathBuf {
 /// the right collapse *here* and only here: on the wire the two are different facts, and the
 /// assembler's answer to both is identical — nobody declared it — which is exactly what the
 /// reference edition does with `?? null`.
+/// Run one §47.6 script and shape every step's outcome.
+///
+/// `from` names an earlier step's handle by its index in `ops`, which is how a reader actually
+/// holds one: `latest()`, then `acquire()` on what it named. Steps that produce no handle still
+/// occupy an index, so a case reads top to bottom without counting only the ones that did.
+fn run_pool_script(stream: &str, capacity: usize, ops: &[Json]) -> Result<Json, String> {
+    let mut pool = skynet_contracts::media::FramePool::new(stream, capacity)
+        .ok_or("a frame pool is for one named stream and holds at least one slot")?;
+    let mut handles: Vec<Option<skynet_contracts::media::FrameHandle>> = Vec::new();
+    let mut steps = Json::arr();
+
+    for op in ops {
+        let name = op.get("op").and_then(Json::as_str).ok_or("a step with no `op`")?;
+        let mut produced = None;
+        let mut step = Json::obj();
+        step.set("op", Json::Str(name.to_string()));
+        match name {
+            "publish" => {
+                let frame = skynet_contracts::media::FrameIdentity {
+                    stream: op
+                        .get("stream")
+                        .and_then(Json::as_str)
+                        .unwrap_or(stream)
+                        .to_string(),
+                    stamp_ns: op.get("stamp_ns").and_then(Json::as_f64).unwrap_or(0.0) as u64,
+                    sequence: op.get("sequence").and_then(Json::as_f64).unwrap_or(0.0) as u64,
+                };
+                match pool.publish(frame) {
+                    Ok(handle) => {
+                        step.set("handle", handle.to_json());
+                        produced = Some(handle);
+                    }
+                    Err(refusal) => {
+                        step.set("refusal", refusal.to_json());
+                    }
+                }
+            }
+            "latest" => {
+                let handle = pool.latest();
+                step.set(
+                    "handle",
+                    match &handle {
+                        Some(handle) => handle.to_json(),
+                        None => Json::Null,
+                    },
+                );
+                produced = handle;
+            }
+            "acquire" | "release" => {
+                let named = pool_handle(op, &handles)?;
+                if name == "acquire" {
+                    match pool.acquire(&named) {
+                        Ok(identity) => step.set("identity", identity.to_json()),
+                        Err(refusal) => step.set("refusal", refusal.to_json()),
+                    };
+                } else {
+                    match pool.release(&named) {
+                        Ok(()) => step.set("released", Json::Bool(true)),
+                        Err(refusal) => step.set("refusal", refusal.to_json()),
+                    };
+                }
+            }
+            "stats" => {
+                step.set("stats", pool.stats().to_json());
+            }
+            other => return Err(format!("unknown pool op `{other}`")),
+        }
+        handles.push(produced);
+        steps.push(step);
+    }
+
+    let mut final_state = Json::obj();
+    final_state.set(
+        "latest",
+        match pool.latest() {
+            Some(handle) => handle.to_json(),
+            None => Json::Null,
+        },
+    );
+    final_state.set("stats", pool.stats().to_json());
+
+    let mut out = Json::obj();
+    out.set("final", final_state);
+    out.set("steps", steps);
+    Ok(out)
+}
+
+/// The handle a step names: an explicit one, or the one an earlier step returned.
+fn pool_handle(
+    op: &Json,
+    handles: &[Option<skynet_contracts::media::FrameHandle>],
+) -> Result<skynet_contracts::media::FrameHandle, String> {
+    if let Some(explicit) = op.get("handle") {
+        return Ok(skynet_contracts::media::FrameHandle {
+            stream: explicit
+                .get("stream")
+                .and_then(Json::as_str)
+                .ok_or("a handle with no `stream`")?
+                .to_string(),
+            slot: explicit.get("slot").and_then(Json::as_f64).ok_or("a handle with no `slot`")?
+                as usize,
+            generation: explicit
+                .get("generation")
+                .and_then(Json::as_f64)
+                .ok_or("a handle with no `generation`")? as u64,
+        });
+    }
+    let from = op.get("from").and_then(Json::as_f64).ok_or("a step naming no handle")? as usize;
+    handles
+        .get(from)
+        .and_then(|slot| slot.clone())
+        .ok_or_else(|| format!("step {from} produced no handle"))
+}
+
+
 fn observation_streams(input: &Json) -> Result<Vec<skynet_contracts::observation::Stream>, String> {
     let mut streams = Vec::new();
     for raw in input.arr_or_empty("streams") {

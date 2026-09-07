@@ -12034,3 +12034,76 @@ checks passed, including the ten new unit-property reads.
      (`MemoryMax=67108864`) disagree with strings (`MemoryMax=64M`) in exactly the place a
      substring assertion would hide. Read back what the platform reports, in its units, or
      the check proves the request rather than the result.
+
+## 2026-09-07 (sixty-fourth) — §47.6's pool, and a rule the reference did not implement
+
+The audit that opened this round listed §47.6 as *specified 2026-09-06, awaiting the editions*.
+Filling it in looked like transcription: a TypeScript reference existed on the Hub, six unit
+tests sat beside it, and the Rust, the Python and the corpus were missing. §31.4's third rule —
+*a new case lands in the corpus before the fix lands in any edition* — is what turned it into
+something else.
+
+Ten scripted cases were written and **generated against the unfixed reference**, so the corpus's
+first record of §47.6 was what the reference did rather than what §47.6 said. Three came back
+wrong. §47.6 says `publish` *"reuses the oldest released slot"*; the reference took the
+**lowest-index** slot nobody was holding. Those agree while a pool holds one frame and diverge
+on every publish after that — and all six unit tests published exactly one frame into a
+multi-slot pool, so not one of them could see it.
+
+The cost lands on the reader. A policy holds a frame by calling `latest()` then `acquire()`, with
+no lock across the two — there cannot be one, because §47.4 forbids capture waiting on a reader.
+Capture publishes in between, and under the lowest-index rule that publish lands on the slot
+`latest()` just named: `stale_handle` on nearly every cycle, a four-slot pool absorbing none of
+the jitter it was declared for, and a symptom that reads as a slow policy. §47.4 already has a
+one-slot latest-wins channel; a §47.6 that collapses into one is a duplicate of the section above
+it rather than a weaker version of itself.
+
+The rule is now in §47.6a: among unacquired slots an **empty** slot wins outright, otherwise the
+**lowest sequence**, ties to the lower index — oldest by the frame, never by the slot's position,
+because the two stop agreeing the first time a reader holds a frame and lets it go.
+
+Three editions: `reference/typescript/media.ts`, `crates/skynet-contracts/src/media.rs`,
+`editions/python/skynet_os/media.py`. Both ports reproduced all ten cases on their first run,
+which proves nothing on its own — so the rule was reverted in each and the corpus re-run:
+**1,124 passed, 3 failed** in both, exactly the three cases written for it.
+
+The module also moved repositories. It was the Hub's, and `check-contract-mirrors.mjs` applies
+one test to that list — *both sides compute this and neither is authoritative*. Nothing on the
+Hub owns a camera, so the Hub's copy was a module nothing imported. `media` is reference-only
+now, like `cell` and `blackbox`; the orphan and its six tests were deleted there.
+
+`corpus/media/pool.json` is the first family in the corpus with **state**, so a case is a script:
+a capacity, a list of operations, and every outcome in order. Nothing in it exposes the pool's
+slots — the handles carry the slot they were issued against, which pins the selection rule
+without any edition having to agree about how a slot is stored.
+
+Four stale numbers turned up before anything was built, from the checks that exist for it: §73
+said 78 corpus files and 1,116 cases, and `README.md` said **1,055 cases and 77 files** — two
+sessions stale, in the table a vendor reads first.
+
+### Numbers
+
+`cargo test --workspace` — **1,641 passed** (1,631 before), 0 failed. Rust corpus **1,127 of
+1,127**; Python corpus **1,127 passed**. Hub: `npx vitest run` — 1,853 passed, 81 files;
+`npm run typecheck` clean. Every check tool green: mirrors, contract mirrors, golden path,
+scale (§73 matches the tree), edition report.
+
+### Findings, restated
+
+1-114 as before.
+
+115. **Six tests can pin a class and never once exercise its only decision.** Every one of
+     §47.6's unit tests published a single frame into a multi-slot pool, so the rule deciding
+     *which* slot a publish takes was unreached by all of them while each looked like a test of
+     the pool. The corpus caught it in the first case that published twice — and only because
+     the case was generated before the fix, which is what §31.4's third rule buys.
+
+116. **A degenerate implementation of a section is not a weak version of it, it is a copy of the
+     section above.** The lowest-index rule turns §47.6's pool into §47.4's latest-wins slot.
+     The failure is not "the pool is smaller than declared"; it is that a section deferring to
+     another one now has nothing to defer to.
+
+117. **The mirror list's test has a direction, and a module can fail it from the Hub's side.**
+     `media` was written where nothing consumes it. The list's own header names that mistake and
+     the check could not catch it, because a module that is not on the list is not compared —
+     absence from a mirror list is invisible to the mirror check by construction.

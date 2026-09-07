@@ -1,5 +1,5 @@
 {
-  "cases": 1116,
+  "cases": 1127,
   "editions": [
     {
       "id": "rust",
@@ -7,9 +7,9 @@
       "standing": "reference",
       "path": "crates/",
       "runner": "cargo run -q -p skynet-corpus --bin corpus-report",
-      "cases_passed": 1116,
-      "cases_total": 1116,
-      "corpus_files": 78,
+      "cases_passed": 1127,
+      "cases_total": 1127,
+      "corpus_files": 79,
       "corpora_complete": null
     },
     {
@@ -18,8 +18,8 @@
       "standing": "full",
       "path": "editions/python/",
       "runner": "python3 editions/python/run_corpus.py --json",
-      "cases_passed": 1116,
-      "cases_total": 1116,
+      "cases_passed": 1127,
+      "cases_total": 1127,
       "corpus_files": null,
       "corpora_complete": [
         "admission",
@@ -38,6 +38,7 @@
         "kinematics",
         "limits",
         "live",
+        "media",
         "observation",
         "opstate",
         "ota",
