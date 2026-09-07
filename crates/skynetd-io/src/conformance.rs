@@ -229,6 +229,12 @@ pub struct Confinement {
     pub kind: skynetd::desired::PackageKind,
     /// `Ok` with what systemd reported, `Err` with why nothing could be.
     pub observed: Result<Vec<(String, String)>, String>,
+    /// `Ok` with what the **kernel** applied to the unit's process, `Err` with why nothing could be.
+    ///
+    /// A separate result from `observed` rather than merged into it, because the two can fail
+    /// independently and for reasons an operator has to tell apart: systemd not describing the
+    /// unit is a manager problem, and `/proc` not carrying the process is a unit that stopped.
+    pub applied: Result<Vec<(String, String)>, String>,
 }
 
 /// §15's `safety.policy.isolation`, executed against a unit systemd is actually running.
@@ -265,13 +271,30 @@ pub struct Confinement {
 /// * **the launcher cannot read units** — `--dry-run`, or a machine with no systemd;
 /// * **systemd would not describe the unit** — it stopped between the two calls, most likely.
 ///
+/// # The third rung: what the kernel applied
+///
+/// `systemctl show` answers what the **manager recorded**, which is one rung above what the process
+/// is actually held to. A directive the manager accepted, stored and reports happily can fail to be
+/// applied by the kernel underneath it, and every layer above would go on saying it landed.
+///
+/// So the check now reads `/proc/<MainPID>/status` on the unit's own process as well, and compares
+/// the two facts the kernel exposes per-process — `NoNewPrivs` and the capability bounding set —
+/// against what the unit claims. **A disagreement between the layers is its own failure**, and it
+/// is the most interesting one this test can produce: a robot whose service manager and whose
+/// kernel do not agree about a sandbox is a robot whose sandbox nobody can describe.
+///
+/// Two rather than seven, and [`crate::launch::KERNEL_CONFINEMENT`] says why: the five `Protect*`
+/// directives are mount namespaces, and what a namespace contains is not a line in `status`.
+/// Checking two and saying two is better than checking two and implying seven.
+///
 /// # What it still does not establish
 ///
-/// That a sandboxed package which *attempted* the forbidden hold was refused. Confinement landing
-/// is the mechanism; a probe performing the hold and being stopped is the demonstration, and it
-/// needs a package built to try. This is the honest half of the test and it is the half that was
-/// missing: until now, nothing on a robot had ever asked the operating system what its own
-/// sandboxes were made of.
+/// That a sandboxed package which *attempted* the forbidden hold was refused. The kernel reading
+/// above is the strongest **observation** available — it is the kernel's own answer rather than a
+/// record of a request — but an observation is not an attempt. A probe performing the hold and
+/// being stopped is the demonstration, and it needs a package built to try, plus a manager running
+/// as root: on a rootless user manager most of these directives forbid something the user could not
+/// do anyway, so a refusal would prove nothing about the sandbox.
 fn policy_isolation(isolation: Option<&Confinement>, at: &str) -> SctsResult {
     let id = "safety.policy.isolation";
 
@@ -299,6 +322,41 @@ fn policy_isolation(isolation: Option<&Confinement>, at: &str) -> SctsResult {
 
     let shortfall = crate::launch::confinement_shortfall(confinement.kind, observed);
     if shortfall.is_empty() {
+        // The manager agrees. Now ask the kernel, which is the rung below and the only one that is
+        // a fact about the running process rather than about somebody's record of it.
+        let applied = match &confinement.applied {
+            Ok(applied) => applied,
+            Err(detail) => {
+                return skipped(
+                    id,
+                    format!(
+                        "every directive §8.3 asks of a {} is on the unit systemd is running for \
+                         {}, and what the kernel applied to its process could not be read: \
+                         {detail}. A sandbox confirmed by its manager and unread by anybody else \
+                         is not one this robot will certify.",
+                        confinement.kind.as_str(),
+                        confinement.package
+                    ),
+                )
+            }
+        };
+        let contradicted = crate::launch::kernel_shortfall(confinement.kind, applied);
+        if !contradicted.is_empty() {
+            return ran(
+                id,
+                SctsOutcome::Fail,
+                at,
+                format!(
+                    "systemd reports every directive §8.3 asks of a {} on {}'s unit, and the \
+                     kernel does not agree: {}. The two layers describe the same process, so one \
+                     of them is wrong about it — and a sandbox whose manager and whose kernel \
+                     disagree is a sandbox nobody can describe.",
+                    confinement.kind.as_str(),
+                    confinement.package,
+                    contradicted.join("; "),
+                ),
+            );
+        }
         return ran(
             id,
             SctsOutcome::Pass,
@@ -306,7 +364,9 @@ fn policy_isolation(isolation: Option<&Confinement>, at: &str) -> SctsResult {
             format!(
                 "every directive §8.3 asks of a {} landed on the unit systemd is running for {} — \
                  read back with `systemctl show`, compared line-exactly, not taken from the argv \
-                 that asked for them.",
+                 that asked for them — and the kernel agrees about the two it exposes per process: \
+                 the running process has NoNewPrivs set and an empty capability bounding set, read \
+                 from /proc rather than from the manager's record of what it was asked for.",
                 confinement.kind.as_str(),
                 confinement.package
             ),
@@ -715,6 +775,16 @@ fn replay_deterministic(body: &Body, limits: &crate::limits::Owned, at: &str) ->
                 .to_string()
         };
 
+        // §26.4's other half. A window can reproduce perfectly and still be built on cycles where
+        // nothing read the body — a failed `read_state` leaves the previous cycle's positions in
+        // the record, so the replay shows a robot holding still. Determinism is not the question
+        // that answers, and a pass that reported the first without the second would hand an
+        // operator a green tick over a window nobody measured.
+        let observation_note = result
+            .observation_note()
+            .map(|note| format!(" {note}"))
+            .unwrap_or_default();
+
         if result.deterministic() {
             return ran(
                 id,
@@ -726,7 +796,7 @@ fn replay_deterministic(body: &Body, limits: &crate::limits::Owned, at: &str) ->
                      reproduced, {} of them with a predecessor in the window so the rate limit was \
                      evaluated as it was. {exercised_note}. The window is synthetic and the limits \
                      are this machine's: nothing on this edition drives a control loop, so there \
-                     is no recorded policy to replay.",
+                     is no recorded policy to replay.{observation_note}",
                     result.cycles, result.agreed, result.warmed,
                 ),
             );
@@ -740,6 +810,7 @@ fn replay_deterministic(body: &Body, limits: &crate::limits::Owned, at: &str) ->
             result.diverged.len(),
             result.cycles,
         );
+        detail.push_str(&observation_note);
         for outcome in result.diverged.iter().take(3) {
             for divergence in &outcome.divergences {
                 detail.push_str(&format!(
@@ -1205,6 +1276,14 @@ mod tests {
             .collect()
     }
 
+    /// What `/proc/<pid>/status` says on a process the kernel really is holding.
+    fn held() -> Vec<(String, String)> {
+        vec![
+            ("NoNewPrivs".to_string(), "1".to_string()),
+            ("CapBnd".to_string(), "0000000000000000".to_string()),
+        ]
+    }
+
     /// The pass, and the sentence it carries.
     ///
     /// What makes this a machine property rather than an edition one is in the detail: it says the
@@ -1217,11 +1296,15 @@ mod tests {
                 package: "openrobot/holder".to_string(),
                 kind: skynetd::desired::PackageKind::Policy,
                 observed: Ok(landed(skynetd::desired::PackageKind::Policy)),
+                applied: Ok(held()),
             }),
             "2026-09-07T00:00:00Z",
         );
         assert_eq!(result.outcome, SctsOutcome::Pass);
-        assert!(!result.ran_at.is_empty(), "a measured result carries its time");
+        assert!(
+            !result.ran_at.is_empty(),
+            "a measured result carries its time"
+        );
         let detail = result.detail.unwrap_or_default();
         assert!(detail.contains("systemctl show"));
         assert!(detail.contains("not taken from the argv"));
@@ -1242,6 +1325,7 @@ mod tests {
                 package: "openrobot/holder".to_string(),
                 kind: skynetd::desired::PackageKind::Policy,
                 observed: Ok(observed),
+                applied: Ok(held()),
             }),
             "2026-09-07T00:00:00Z",
         );
@@ -1275,6 +1359,7 @@ mod tests {
                 package: "openrobot/holder".to_string(),
                 kind: skynetd::desired::PackageKind::Policy,
                 observed: Err("systemctl could not describe the unit: it stopped".to_string()),
+                applied: Err("no process".to_string()),
             }),
             "2026-09-07T00:00:00Z",
         );
@@ -1282,6 +1367,98 @@ mod tests {
         let detail = result.detail.unwrap_or_default();
         assert!(detail.contains("openrobot/holder"));
         assert!(detail.contains("it stopped"));
+    }
+
+    /// The disagreement, which is the case this rung exists for.
+    ///
+    /// systemd reports every directive and the kernel is holding none of them. Before the process
+    /// was read, that robot passed: the manager's record was the whole of the evidence, and a
+    /// record is what a manager holds rather than what a kernel applied.
+    #[test]
+    fn a_kernel_that_did_not_apply_the_directives_fails_even_when_systemd_agrees() {
+        let result = policy_isolation(
+            Some(&Confinement {
+                package: "openrobot/holder".to_string(),
+                kind: skynetd::desired::PackageKind::Policy,
+                observed: Ok(landed(skynetd::desired::PackageKind::Policy)),
+                applied: Ok(vec![
+                    ("NoNewPrivs".to_string(), "0".to_string()),
+                    ("CapBnd".to_string(), "000001ffffffffff".to_string()),
+                ]),
+            }),
+            "2026-09-07T00:00:00Z",
+        );
+        assert_eq!(result.outcome, SctsOutcome::Fail);
+        let detail = result.detail.unwrap_or_default();
+        assert!(detail.contains("the kernel does not agree"), "{detail}");
+        assert!(detail.contains("NoNewPrivs is 0"), "{detail}");
+        assert!(detail.contains("000001ffffffffff"), "{detail}");
+    }
+
+    /// A process `/proc` does not describe is a skip, on `confinement_shortfall`'s own rule.
+    ///
+    /// Fail-closed the other way would be worse: failing a robot because its own `/proc` could not
+    /// be read reports a sandbox defect where the true finding is that nothing could be measured.
+    /// Passing would be worse still — it is the manager's record standing in for the kernel's,
+    /// which is the substitution this rung was added to stop.
+    #[test]
+    fn a_process_the_kernel_will_not_describe_is_a_skip() {
+        let result = policy_isolation(
+            Some(&Confinement {
+                package: "openrobot/holder".to_string(),
+                kind: skynetd::desired::PackageKind::Policy,
+                observed: Ok(landed(skynetd::desired::PackageKind::Policy)),
+                applied: Err("/proc/4141/status could not be read".to_string()),
+            }),
+            "2026-09-07T00:00:00Z",
+        );
+        assert_eq!(result.outcome, SctsOutcome::Skipped);
+        let detail = result.detail.unwrap_or_default();
+        assert!(detail.contains("/proc/4141/status"), "{detail}");
+        assert!(
+            detail.contains("unread by anybody else"),
+            "the skip says why a manager's word alone is not enough: {detail}"
+        );
+    }
+
+    /// A missing line is a shortfall, not a silence.
+    ///
+    /// `CapBnd` absent from `/proc/<pid>/status` means the kernel did not say, and §15's rule
+    /// throughout is that a property nobody can read is not one anybody certifies.
+    #[test]
+    fn a_kernel_reading_with_a_line_missing_is_a_shortfall() {
+        let shortfall = crate::launch::kernel_shortfall(
+            skynetd::desired::PackageKind::Policy,
+            &[("NoNewPrivs".to_string(), "1".to_string())],
+        );
+        assert_eq!(shortfall.len(), 1);
+        assert!(
+            shortfall[0].contains("does not report CapBnd"),
+            "{shortfall:?}"
+        );
+    }
+
+    /// A driver is native by design (§8.3), so the kernel has nothing to contradict.
+    #[test]
+    fn a_driver_asks_nothing_of_the_kernel_either() {
+        assert!(
+            crate::launch::kernel_shortfall(skynetd::desired::PackageKind::Driver, &[]).is_empty()
+        );
+    }
+
+    /// The parser reads systemd's format and `/proc`'s, and they are not the same format.
+    #[test]
+    fn proc_status_is_parsed_by_its_own_rules() {
+        let text = "Name:\tsh\nNoNewPrivs:\t1\nCapBnd:\t0000000000000000\nThreads:\t1\n";
+        let read = crate::launch::parse_proc_status(text);
+        assert_eq!(
+            read,
+            vec![
+                ("NoNewPrivs".to_string(), "1".to_string()),
+                ("CapBnd".to_string(), "0000000000000000".to_string()),
+            ],
+            "only the two lines this check is about, with the tabs stripped"
+        );
     }
 
     #[test]

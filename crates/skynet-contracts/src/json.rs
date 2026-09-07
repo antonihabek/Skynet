@@ -1854,6 +1854,13 @@ pub fn guard_report_from_json(value: &Json) -> crate::checkin::GuardReport {
             missing: strings(entry, "missing"),
         });
     }
+    let mut inert = Vec::new();
+    for entry in value.arr_or_empty("inert") {
+        inert.push(crate::checkin::InertGuard {
+            guard: opt_string(entry, "guard").unwrap_or_default(),
+            reading: opt_string(entry, "reading").unwrap_or_default(),
+        });
+    }
     let mut notices = Vec::new();
     for entry in value.arr_or_empty("notices") {
         notices.push(crate::checkin::Notice {
@@ -1874,6 +1881,7 @@ pub fn guard_report_from_json(value: &Json) -> crate::checkin::GuardReport {
         source: opt_string(value, "source"),
         active: strings(value, "active"),
         unavailable,
+        inert,
         notices,
     }
 }

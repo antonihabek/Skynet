@@ -135,6 +135,10 @@ impl LimitsOwned {
                     .and_then(Json::as_bool)
                     .unwrap_or(false),
                 legged: node.get("legged").and_then(Json::as_bool).unwrap_or(false),
+                proximity_reading: node
+                    .get("proximity_reading")
+                    .and_then(Json::as_bool)
+                    .unwrap_or(false),
             })
             .unwrap_or_default();
 

@@ -1065,7 +1065,10 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
         // pinned by the expected bytes without this edition having to agree with the reference
         // about how a slot is stored.
         "media" => {
-            let stream = input.get("stream").and_then(Json::as_str).ok_or("no `stream`")?;
+            let stream = input
+                .get("stream")
+                .and_then(Json::as_str)
+                .ok_or("no `stream`")?;
             let capacity = input
                 .get("capacity")
                 .and_then(Json::as_f64)
@@ -1193,7 +1196,10 @@ fn run_pool_script(stream: &str, capacity: usize, ops: &[Json]) -> Result<Json, 
     let mut steps = Json::arr();
 
     for op in ops {
-        let name = op.get("op").and_then(Json::as_str).ok_or("a step with no `op`")?;
+        let name = op
+            .get("op")
+            .and_then(Json::as_str)
+            .ok_or("a step with no `op`")?;
         let mut produced = None;
         let mut step = Json::obj();
         step.set("op", Json::Str(name.to_string()));
@@ -1280,21 +1286,25 @@ fn pool_handle(
                 .and_then(Json::as_str)
                 .ok_or("a handle with no `stream`")?
                 .to_string(),
-            slot: explicit.get("slot").and_then(Json::as_f64).ok_or("a handle with no `slot`")?
-                as usize,
+            slot: explicit
+                .get("slot")
+                .and_then(Json::as_f64)
+                .ok_or("a handle with no `slot`")? as usize,
             generation: explicit
                 .get("generation")
                 .and_then(Json::as_f64)
                 .ok_or("a handle with no `generation`")? as u64,
         });
     }
-    let from = op.get("from").and_then(Json::as_f64).ok_or("a step naming no handle")? as usize;
+    let from = op
+        .get("from")
+        .and_then(Json::as_f64)
+        .ok_or("a step naming no handle")? as usize;
     handles
         .get(from)
         .and_then(|slot| slot.clone())
         .ok_or_else(|| format!("step {from} produced no handle"))
 }
-
 
 fn observation_streams(input: &Json) -> Result<Vec<skynet_contracts::observation::Stream>, String> {
     let mut streams = Vec::new();

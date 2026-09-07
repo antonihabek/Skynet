@@ -344,6 +344,14 @@ export interface GuardReport {
   /** Guards specified and inoperable here, each with what it wanted. */
   unavailable: UnavailableGuard[]
   /**
+   * §80's third state: every declared input resolves and the per-cycle reading is not coming.
+   *
+   * Carried across §17 rather than derived on the Hub, for the reason every other field here is: a
+   * robot's own reading of its own guards is evidence, and a Hub that recomputed the partition
+   * would be a second implementation of `resolveLimits`.
+   */
+  inert: InertGuard[]
+  /**
    * Everything an operator must read, as codes and subjects.
    *
    * **Codes, never sentences.** The Hub renders these in thirty-five locales (§32.3) and a robot
@@ -363,6 +371,19 @@ export interface UnavailableGuard {
   guard: string
   /** What it needs and does not have — a missing input, or "not applicable to this body". */
   missing: string[]
+}
+
+/**
+ * A guard whose declared inputs all resolve and whose per-cycle reading nothing produces (§80).
+ *
+ * Separate from `UnavailableGuard` because the remedies differ and go to different people. An
+ * unavailable guard wants a sensor fitted or a profile written; an inert one has both and wants a
+ * producer in the operating system.
+ */
+export interface InertGuard {
+  guard: string
+  /** The per-cycle field nothing fills, named so the remedy is legible. */
+  reading: string
 }
 
 /** One thing an operator must read, as the kernel emitted it. */

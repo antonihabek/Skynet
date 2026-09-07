@@ -48,6 +48,8 @@ pub const USAGE: &str = "\
 skynet — talking to a running robot (§33.7)
 
   status                      What this robot is; needs no credential (§39.1)
+  state                       §27's machine: the state, the reason, and which of its
+                              eight conditions anybody actually observed
   ps                          Installed packages, their state, their grants
   logs <ns/name> [--lines N]  The package's journal
   plan                        The last reconcile pass, and anything deferred
@@ -79,6 +81,9 @@ skynet — talking to a running robot (§33.7)
   releases                    Whether the wanted OS image has a manifest this robot can judge
   pair <code|-> --hub <url>   Bind this robot to a namespace; needs admin (§10)
   unpair                      Remove the credential and the identity; needs admin
+  shutdown                    Stop the supervisor: withdraw its mDNS name (§82.4), seal the
+                              black box window (§13), exit. Needs admin. This does **not**
+                              stop the robot — `estop` is the route that reaches the body.
 
   --socket <path>   Default /run/skynetd.sock
   --host <addr:port>  The LAN console instead of the socket
@@ -162,6 +167,8 @@ pub fn run(command: &str, argv: &[String]) -> i32 {
         "releases" => show(argv, "GET", "/releases", None, print_releases),
         "cell" => show(argv, "GET", "/cell", None, print_cell),
         "power" => show(argv, "GET", "/power", None, print_power),
+        "state" => show(argv, "GET", "/state", None, print_state),
+        "shutdown" => show(argv, "POST", "/shutdown", Some(String::new()), print_note),
         "limits" => limits(argv),
         "conformance" => show(argv, "GET", "/conformance", None, print_conformance),
         "pair" => pair(argv),
@@ -1505,6 +1512,142 @@ fn print_conformance(document: &Json) {
 /// The notes and the faults are printed apart. A note is *this daemon could not read a number* and
 /// a fault is *§36 has a problem with what it was given*; they usually have different remedies and
 /// often different people, and one merged list is how an operator learns to skim both.
+/// `skynet state` — §27's machine, and how much of it anybody actually looked at.
+///
+/// # Why this is a command and not a section of `skynet status`
+///
+/// `GET /status` and `GET /state` are two routes on purpose, and `api.rs` says why where it serves
+/// them: status is *"the one line a console header wants"* and state is *"the same fact with the
+/// observation gaps spelled out"*. The gaps are the whole point of §27 — a state derived from
+/// conditions nobody read is a state nobody should act on — and folding them into the header would
+/// mean either a header nobody can scan or gaps nobody sees.
+///
+/// It existed on the wire and on the on-robot console and **nowhere in this CLI**, so the one
+/// question §27 is written to answer had no terminal that could ask it. An operator on a bench
+/// reads a terminal.
+///
+/// # What it refuses to flatten
+///
+/// Every condition is printed, including the ones this robot could not look at, because §48.5's
+/// rule is that the difference between *false* and *not looked at* is the difference between a
+/// robot that is safe and a robot nobody has checked. A list of only the observed conditions would
+/// be shorter and would be the exact reading this whole section exists to prevent.
+fn print_state(document: &Json) {
+    let text = |key: &str| document.get(key).and_then(Json::as_str).unwrap_or("—");
+    let flag = |key: &str| document.get(key).and_then(Json::as_bool).unwrap_or(false);
+
+    // The state and the reason together, always. `safe` alone reads as a robot somebody stopped
+    // rather than as a robot nothing has observed, and those send an operator to opposite ends of
+    // the building — which is `api.rs`'s own sentence about the same pair.
+    println!(
+        "{}   {}",
+        term::bold(text("state")),
+        term::dim(text("reason"))
+    );
+
+    let mut properties = Vec::new();
+    if flag("safe_state") {
+        properties.push("a safe state");
+    }
+    if flag("commands") {
+        properties.push("commanding autonomously");
+    }
+    if flag("sticky") {
+        // The one an operator has to know about before they wonder why a condition improving
+        // changed nothing: §27 requires a named human clearance to leave `SAFE`.
+        properties.push("sticky — a clearance is needed to leave it, not a better reading");
+    }
+    if !properties.is_empty() {
+        println!("  {}", term::dim(&properties.join(" · ")));
+    }
+
+    println!();
+    if let Some(observed) = document.get("observed") {
+        // The order is §27's own, which is the order `derive` consults them in — not alphabetical,
+        // because the first row that matches decides the state and a reader following a refusal
+        // upwards is reading this list.
+        for condition in [
+            "post",
+            "kernel",
+            "rhal",
+            "homing",
+            "stop",
+            "guard_hold",
+            "guards",
+            "policy",
+        ] {
+            let seen = observed
+                .get(condition)
+                .and_then(Json::as_bool)
+                .unwrap_or(false);
+            // The detail and the state live beside the condition they are about, for the two that
+            // have them.
+            let block = document.get(condition);
+            let detail = block
+                .and_then(|block| block.get("detail"))
+                .and_then(Json::as_str);
+            let state = block
+                .and_then(|block| block.get("state"))
+                .and_then(Json::as_str);
+
+            // The mark says whether anybody **looked**, and it must not be read as whether the
+            // answer was good — those are different questions and §48.5 exists because conflating
+            // them is how a robot nobody checked gets reported as a robot that is fine. The first
+            // draft of this printer put a green tick beside `kernel` on a robot whose own detail
+            // read *"no control cycle was recorded"*, which is exactly that mistake drawn in one
+            // character. So an observation that found something wrong is marked as a finding, and
+            // the state is printed rather than left implied.
+            //
+            // A slice and `contains`, never a `matches!` with `|` between the arms, and the reason
+            // is two functions below in `print_power`: `tools/check-golden-path.mjs` harvests
+            // quoted literals that a `|` or a `=>` follows, so spelling this as a pattern put
+            // `live`, `present` and `passed` into the set of things `skynet <x>` may be — and the
+            // check that counts CLI commands then reported 52 of them.
+            let good = state.is_none_or(|state| ["live", "present", "passed"].contains(&state))
+                && !flagged(block);
+            let mark = match (seen, good) {
+                (false, _) => term::dim("·"),
+                (true, true) => term::ok("✓"),
+                (true, false) => term::warn("!"),
+            };
+            // §27's `stop` has no state word — an open chain is a boolean — so its finding is
+            // read off the block rather than off a vocabulary. Without this the one condition that
+            // means *the robot has been stopped by hardware* would draw a green tick.
+            let said = match (seen, detail) {
+                (false, _) => "not observed — taken at its least capable value".to_string(),
+                (true, Some(detail)) => detail.to_string(),
+                (true, None) => String::new(),
+            };
+            match state {
+                Some(state) => println!("  {mark} {condition:<11} {state:<8} {}", term::dim(&said)),
+                None => println!("  {mark} {condition:<11} {:<8} {}", "", term::dim(&said)),
+            }
+        }
+    }
+
+    // The sentence the daemon derives rather than one this CLI composes. §32.2's rule is that a
+    // console must never show a value it did not receive, and a count re-derived here would be a
+    // second opinion about the robot's own reading — which is the failure `skynetd_io::observed`
+    // was written to end.
+    if let Some(partial) = document.get("partial").and_then(Json::as_str) {
+        println!();
+        println!("  {}", term::dim(partial));
+    }
+}
+
+/// Whether a condition block reports something an operator should look at.
+///
+/// A separate reading from the state word because not every condition has one. §27's `stop` is a
+/// boolean — the chain is open or it is not — so a mark derived only from `state` would draw a
+/// green tick beside a robot that has been stopped by its hardware, which is the same class of
+/// error as the tick this printer already had to fix for `kernel`.
+fn flagged(block: Option<&Json>) -> bool {
+    block
+        .and_then(|block| block.get("asserted"))
+        .and_then(Json::as_bool)
+        .unwrap_or(false)
+}
+
 fn print_power(document: &Json) {
     let text = |key: &str| document.get(key).and_then(Json::as_str).unwrap_or("—");
     let flag = |key: &str| document.get(key).and_then(Json::as_bool).unwrap_or(false);

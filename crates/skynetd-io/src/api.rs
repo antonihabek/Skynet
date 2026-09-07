@@ -205,6 +205,7 @@ pub fn handle<L: Launcher, S: Slots>(
         ("GET", ["telemetry"]) => ok(telemetry(context)),
         ("POST", ["identity", "pair"]) => pair(context, request),
         ("POST", ["identity", "unpair"]) => unpair(context, request),
+        ("POST", ["shutdown"]) => shutdown(context, request),
         ("GET", ["skills"]) => ok(context.daemon.skills.to_json()),
         ("GET", ["skills", id]) => match context.daemon.skills.get(id) {
             Some(invocation) => ok(invocation.to_json()),
@@ -340,6 +341,14 @@ fn act<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, raw: &str, verb: 
 
 fn status<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let actual = context.daemon.observe(context.now_ms);
+    // The same reading `GET /state` renders, taken from the same two sightings. Two routes
+    // describing one pass have to agree about how much of it was observed, and before
+    // `crate::observed` they did not.
+    let seen = crate::observed::Observed::of(
+        &context.daemon.kernel_sighting,
+        &context.daemon.rhal_sighting,
+        &context.daemon.stop_sighting,
+    );
     let running = actual
         .units
         .iter()
@@ -389,17 +398,23 @@ fn status<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
         // Named, because a console reading "safe state: yes" would otherwise read it as something
         // the robot measured. Half of it still is not: §33.1 keeps this daemon away from the body,
         // so the operator's declaration is one of the two sources and §27's machine is the other —
-        // and on this edition the machine is answering from one observed condition out of eight.
+        //
+        // How much the machine had to go on is **derived** rather than typed. This sentence carried
+        // a hand-written "eight unobserved conditions" for a fortnight, which was wrong in both
+        // directions at once: it counted §27's total as the remainder, and it said the machine had
+        // observed nothing on a pass where `GET /state` was reporting three. See `crate::observed`.
         .set("safe_state_source", Json::from("declared_and_derived"))
         .set(
             "safe_state_note",
-            Json::from(
+            Json::Str(format!(
                 "Declared by an operator in /data/state/safe-state, then narrowed by §27's \
                  operating state. Either source may close the barrier and neither opens it alone. \
-                 Nothing here has measured the body: skynetd cannot reach it (§33.1), so the \
-                 machine is deciding from the self-test and eight unobserved conditions taken at \
-                 their least capable values.",
-            ),
+                 Nothing here has measured the body: skynetd cannot reach it (§33.1) and reads \
+                 what the control loop recorded, so the machine is deciding from {} — {} — {}.",
+                seen.tally(),
+                seen.in_prose(),
+                seen.unobserved_clause(),
+            )),
         )
         // Unconditionally true, and stated rather than assumed. §39.1 makes stop unauthenticated,
         // and a console that could not tell whether stop would work is a console whose stop button
@@ -524,14 +539,9 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     // problem.
     let sighting = &context.daemon.kernel_sighting;
     let body = &context.daemon.rhal_sighting;
-    let mut observed = Json::obj();
-    observed.set("post", Json::Bool(true));
-    observed.set("kernel", Json::Bool(sighting.observed()));
-    observed.set("rhal", Json::Bool(body.observed()));
-    for condition in ["homing", "stop", "guard_hold", "guards", "policy"] {
-        observed.set(condition, Json::Bool(false));
-    }
-    out.set("observed", observed);
+    let chain = &context.daemon.stop_sighting;
+    let seen = crate::observed::Observed::of(sighting, body, chain);
+    out.set("observed", seen.to_json());
 
     // What was seen, in a sentence, beside the boolean. §32.2's rule about the on-robot console is
     // that it must never show a value it did not receive; this is the value.
@@ -566,6 +576,27 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     );
     out.set("rhal", rhal);
 
+    // And §27's stop, off §24's flags on the same newest cycle. Beside the other two rather than
+    // on a route of its own, for the reason the RHAL is: they are readings of one instant, and a
+    // console that fetched them separately could show a combination that was never true.
+    let mut stop = Json::obj();
+    stop.set(
+        "asserted",
+        Json::Bool(matches!(chain, crate::blackbox::StopSighting::Asserted)),
+    );
+    stop.set("observed", Json::Bool(chain.observed()));
+    stop.set("detail", Json::Str(chain.detail()));
+    stop.set(
+        "source",
+        Json::from(
+            "§24's `SKR_FLAG_ESTOP` on the newest control cycle in §13's ring. The chain gives \
+             one bit, so an open chain is its own stop cause and never `operator`: a light \
+             curtain and a door interlock open the same chain as the button. `stop_settled` is \
+             not observable from it, so an open chain derives `stopping` and never `stop_complete`.",
+        ),
+    );
+    out.set("stop", stop);
+
     // §49.1's channel, on the route that reports the state whose transitions demand it. Not a
     // route of its own: a warning channel is not a subsystem an operator inspects on its own, it is
     // a property of the transitions this document is about — and a console that had to fetch two
@@ -594,17 +625,17 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
 
     out.set(
         "partial",
-        Json::Str(
-            "three of §27's eight conditions were observed here: the self-test, the kernel, and \
-             the RHAL — the last two off §13's ring, where a turning control loop records a cycle \
-             every pass and says what its read of the body returned. §33.1 keeps skynetd from \
-             the actuator path, so the guard set, the stop and the homing state are still not \
-             this process's to read — and an unobserved condition is taken at \
-             the least capable value it could have, never at a hopeful one. So this answer is at \
-             least as pessimistic as the robot is, and the reason beside it names the condition \
-             that decided rather than a fault somebody found"
-                .to_string(),
-        ),
+        Json::Str(format!(
+            "{} were observed here: {} — the kernel and the RHAL off §13's ring, where a turning \
+             control loop records a cycle every pass and says what its read of the body returned. \
+             §33.1 keeps skynetd from the actuator path, so {} — and an unobserved condition is \
+             taken at the least capable value it could have, never at a hopeful one. So this \
+             answer is at least as pessimistic as the robot is, and the reason beside it names \
+             the condition that decided rather than a fault somebody found",
+            seen.tally(),
+            seen.in_prose(),
+            seen.missing_sentence(),
+        )),
     );
     out
 }
@@ -860,10 +891,18 @@ fn sandboxed_unit<L: Launcher, S: Slots>(
             .launcher
             .confinement(&id)
             .map_err(|error| error.detail);
+        // The rung below: what the kernel is actually holding this unit's process to. Read for
+        // every unit `observed` is read for, so the two answers are always about one process.
+        let applied = context
+            .daemon
+            .launcher
+            .applied(&id)
+            .map_err(|error| error.detail);
         return Some(crate::conformance::Confinement {
             package: id,
             kind,
             observed,
+            applied,
         });
     }
     None
@@ -890,14 +929,7 @@ fn conformance<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     // about the machine, and a conformance runner that shelled out mid-check would be one nobody
     // could test without a systemd.
     let isolation = sandboxed_unit(context);
-    let run = crate::conformance::run(
-        &capacity,
-        &body,
-        &limits,
-        &grants,
-        isolation.as_ref(),
-        &at,
-    );
+    let run = crate::conformance::run(&capacity, &body, &limits, &grants, isolation.as_ref(), &at);
     crate::conformance::to_json(
         &run,
         body.known().is_some_and(|known| known.descriptor.simulator),
@@ -1781,6 +1813,61 @@ fn pair<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, request: &Reques
 }
 
 /// Undo a pairing (§39.1 gives it to Admin, beside pair).
+/// `POST /shutdown` — stop this daemon, on purpose and with a record (§82.4).
+///
+/// # Why a route rather than a signal
+///
+/// §82.4's goodbye had no caller for eleven rounds, and the reason given was that the daemon has no
+/// shutdown path: systemd stops it with a signal, and installing a handler needs `unsafe`, which
+/// this crate forbids. Three ways across that were available and each crossed a boundary this
+/// repository drew on purpose. This is the one the owner chose, and what it costs is stated here
+/// rather than discovered: **a credential that can reach this socket can stop the supervisor.**
+///
+/// It is `Role::Admin` for that reason and not by inheritance. §39.1 gives admin *"pair and unpair
+/// with the Hub"*, and the argument there applies unchanged: an operator who could unpair could
+/// take a robot out of a fleet without being able to put it back. Stopping the supervisor is the
+/// same shape — a robot whose `skynetd` is not running applies no desired state, launches nothing
+/// and answers nobody, and only systemd can start it again.
+///
+/// # What it does not do
+///
+/// It does not stop the **robot**. §7's kernel and the packages it launched are not this process,
+/// and `POST /stop` is the route that reaches them — unauthenticated, per §39.1, because a stop
+/// must never wait for a credential. A caller who wanted the body stopped and called this instead
+/// has stopped the thing that supervises it and left the rest running, so the response says so.
+///
+/// # And it does not stop anything here either
+///
+/// The route records **who asked**; the loop performs it. It has to: the mDNS goodbye belongs to
+/// the responder thread, the recording is the loop's to seal, and this function is running inside
+/// a connection the caller is still waiting on. So the answer goes back first and the daemon exits
+/// at the top of its next turn, which is §33.3's shape for every other change — the API states an
+/// intent and the loop converges on it.
+fn shutdown<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, request: &Request) -> Response {
+    let actor = context
+        .credentials
+        .label_of_header(request.header("authorization"))
+        .unwrap_or("unknown")
+        .to_string();
+
+    // Recorded before the answer, so a caller that never reads the response has still asked.
+    context.daemon.shutdown_requested = Some(actor.clone());
+
+    let mut out = Json::obj();
+    out.set("stopping", Json::Bool(true))
+        .set("requested_by", Json::from(actor.as_str()))
+        .set(
+            "note",
+            Json::from(
+                "skynetd will withdraw its mDNS name (§82.4), seal the black box window with \
+                 reason `shutdown` (§13) and exit at the top of its next turn. This stops the \
+                 supervisor and not the robot: the Safety Kernel and any launched package are \
+                 other processes, and `POST /stop` is the route that reaches them.",
+            ),
+        );
+    ok(out)
+}
+
 fn unpair<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, request: &Request) -> Response {
     let layout = context.daemon.store.layout().clone();
     let actor = context

@@ -119,11 +119,11 @@ CLOSED_SETS: Final[dict[str, tuple[str, ...]]] = {
     "operating_states": ('safe', 'stopping', 'post', 'unhomed', 'hold', 'degraded', 'running'),
     "state_reasons": (
         'rhal_lost', 'safe_sticky', 'post_failed', 'stop_complete', 'stopping_watchdog',
-        'stopping_proximity', 'stopping_balance', 'stopping_operator', 'post_incomplete',
-        'homing_pending', 'kernel_down', 'guard_hold', 'no_policy', 'policy_not_ready',
-        'guards_unavailable', 'rhal_degraded', 'nominal'
+        'stopping_proximity', 'stopping_balance', 'stopping_operator', 'stopping_estop',
+        'post_incomplete', 'homing_pending', 'kernel_down', 'guard_hold', 'no_policy',
+        'policy_not_ready', 'guards_unavailable', 'rhal_degraded', 'nominal'
     ),
-    "stop_causes": ('watchdog', 'proximity', 'balance', 'operator'),
+    "stop_causes": ('watchdog', 'proximity', 'balance', 'operator', 'estop'),
     "post_verdicts": ('passed', 'failed', 'incomplete'),
     "homing_states": ('not_required', 'pending', 'complete'),
     "rhal_states": ('present', 'degraded', 'lost'),

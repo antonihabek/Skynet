@@ -43,6 +43,10 @@ fn available() -> Available {
         imu: true,
         people_detection: true,
         legged: true,
+        // The fixture robot has a producer, so `proximity` resolves active and every existing case
+        // about it keeps testing what it was written to test. §80's third state is about a robot
+        // that has the sensor and not the producer, and it gets cases of its own below.
+        proximity_reading: true,
     }
 }
 

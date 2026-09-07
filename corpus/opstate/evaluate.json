@@ -161,6 +161,55 @@
       "expected": "{\"changed\":true,\"from\":\"running\",\"reason\":\"stopping_operator\",\"to\":\"stopping\",\"warning\":false}"
     },
     {
+      "id": "stopping-estop",
+      "note": "The hardware chain is open (§24). Deliberately its own cause rather than `operator`: §24 gives the chain one bit, so a robot can say it is open and cannot say what opened it — a light curtain and a door interlock open the same chain, and reporting either as a person having asked would put a name on an event that has none.",
+      "input": {
+        "previous": "running",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready",
+          "stop": "estop"
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"running\",\"reason\":\"stopping_estop\",\"to\":\"stopping\",\"warning\":false}"
+    },
+    {
+      "id": "an-estop-that-nobody-watched-settle",
+      "note": "The decision of 2026-09-07, pinned. `stop_settled` is not observable for a hardware stop on any edition that exists — §24 says the chain is open and says nothing about whether the body came to rest — so it is absent, and the machine derives `stopping` rather than `safe`. Fail-closed in the only direction that is safe: this can hold a robot and can never release one.",
+      "input": {
+        "previous": "safe",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready",
+          "stop": "estop"
+        }
+      },
+      "expected": "{\"changed\":false,\"from\":\"safe\",\"reason\":\"safe_sticky\",\"to\":\"safe\",\"warning\":false}"
+    },
+    {
+      "id": "an-estop-somebody-did-watch-settle",
+      "note": "And the other half, so the absence above is a reading rather than a rule the machine hard-codes. A caller that genuinely observed the body come to rest supplies `stop_settled`, and §27 answers SAFE with `stop_complete` exactly as it does for the other four causes. The machine treats every cause alike; what differs is what a robot can honestly supply.",
+      "input": {
+        "previous": "stopping",
+        "conditions": {
+          "post": "passed",
+          "homing": "complete",
+          "kernel": "live",
+          "rhal": "present",
+          "policy": "ready",
+          "stop": "estop",
+          "stop_settled": true
+        }
+      },
+      "expected": "{\"changed\":true,\"from\":\"stopping\",\"reason\":\"stop_complete\",\"to\":\"safe\",\"warning\":false}"
+    },
+    {
       "id": "stop-during-post",
       "note": "An operator stop is honoured whatever the robot is doing, including booting — which is why the stop rule sits above the POST rules rather than below them.",
       "input": {

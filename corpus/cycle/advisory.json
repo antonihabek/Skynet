@@ -34,7 +34,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           }
         },
         "cycle": {
@@ -81,7 +82,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           }
         },
         "cycle": {
@@ -128,7 +130,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           }
         },
         "cycle": {

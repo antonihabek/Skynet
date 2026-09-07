@@ -18,9 +18,14 @@
 //! The consequence of that absence runs through the whole specification. §73's table has eight rows
 //! whose "what is still missing" column says some version of *nothing has run a cycle* — five of
 //! §74's telemetry counters report unmeasured because §13's ring has no action channels; seven of
-//! §27's eight conditions are unobserved, so no robot ever enters a commanding state, so §49's
+//! §27's eight conditions were unobserved, so no robot ever entered a commanding state, so §49's
 //! warning tone has never sounded; `field_conformance` is measurable rather than measured; no guard
 //! has ever tripped on a machine. Every one of those is downstream of this loop not existing.
+//!
+//! Two of them have since moved, and this crate is why: `kernel` and `rhal` are read off the cycles
+//! this host records (§26.4), so five of the eight are unobserved rather than seven. The count is
+//! not restated anywhere it could go stale — `skynetd_io::observed` derives it, and
+//! `tools/scale-report.mjs --check` holds the documents to it.
 //!
 //! # What this is not
 //!

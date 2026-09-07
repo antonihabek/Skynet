@@ -305,6 +305,16 @@ pub struct Daemon<L: Launcher, S: Slots> {
     pub kernel_sighting: crate::blackbox::KernelSighting,
     /// What the last pass could see of the RHAL, kept for the same reason.
     pub rhal_sighting: crate::blackbox::RhalSighting,
+    /// What the last pass could see of §24's emergency-stop chain, kept for the same reason.
+    pub stop_sighting: crate::blackbox::StopSighting,
+    /// Who asked this daemon to stop, when somebody has (§82.4).
+    ///
+    /// A **request** rather than an action, and the split is the whole design. The route that takes
+    /// it cannot stop the daemon: it is serving a connection inside the loop, the mDNS responder is
+    /// on the other thread, and the recording is the loop's to seal. So it records who asked and
+    /// the loop performs it at the top of its next turn, which is the same shape §33.3 gives every
+    /// other change — the API states an intent and the loop converges on it.
+    pub shutdown_requested: Option<String>,
     /// The last release-catalogue pull (§12, §57).
     ///
     /// Kept here for `last_pull`'s reason: `GET /releases` reports what happened rather than making
@@ -393,6 +403,10 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             rhal_sighting: crate::blackbox::RhalSighting::Unobservable(
                 "no reconcile pass has looked at the recording yet",
             ),
+            stop_sighting: crate::blackbox::StopSighting::Unobservable(
+                "no reconcile pass has looked at the recording yet",
+            ),
+            shutdown_requested: None,
             // From the kernel's own interfaces, not through the layout — for `cpus`'s reason two
             // fields above: the pack and the thermal zones are properties of the machine and live
             // at `/sys` on every one of them, whatever `/data` a store was rooted at.
@@ -563,6 +577,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         wall_s: Option<f64>,
         kernel: &crate::blackbox::KernelSighting,
         rhal: &crate::blackbox::RhalSighting,
+        stop: &crate::blackbox::StopSighting,
     ) -> Transition {
         let report = crate::post::run(self.store.layout(), wall_s);
         let conditions = Conditions {
@@ -575,6 +590,16 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             // a state, so what decides it is the last thing the loop observed. See `RhalSighting`
             // for the mapping, and in particular for why a faulted drive is not a lost one.
             rhal: rhal.state(),
+            // §27's fourth observed condition, off §24's flags on the same newest cycle. A cause
+            // of its own rather than `operator`, because the chain gives one bit and a light
+            // curtain opens it too — see `StopSighting`.
+            stop: stop.cause(),
+            // `stop_settled` is deliberately left false. For a hardware stop no edition can
+            // observe it — the bit says the chain is open and says nothing about whether the body
+            // came to rest — so the machine derives `stopping` and never `stop_complete`. A robot
+            // whose chain has been open for an hour goes on reporting `stopping`, which is the
+            // strongest thing this evidence supports.
+            //
             // Everything below is §33.1's line. Left at the default rather than assigned a
             // hopeful value, because a supervisor that reported a plausible fleet status from
             // nothing is the exact failure this project is arranged around.
@@ -592,6 +617,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         self.state_reason = transition.reason;
         self.kernel_sighting = kernel.clone();
         self.rhal_sighting = rhal.clone();
+        self.stop_sighting = stop.clone();
         transition
     }
 

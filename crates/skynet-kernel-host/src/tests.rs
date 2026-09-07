@@ -47,6 +47,7 @@ fn limits<'a>(
         per_channel,
         active_guards: active,
         unavailable_guards: FixedVec::new(),
+        inert_guards: FixedVec::new(),
         source: Some("test"),
         notices: FixedVec::new(),
         grants,

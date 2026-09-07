@@ -469,7 +469,7 @@ def resolve_limits(params: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
-    active, unavailable = _partition_guards(params, max_delta)
+    active, unavailable, inert = _partition_guards(params, max_delta)
 
     # Emitted only when the guard it is about will actually run. A robot with no collision geometry
     # is already being told the guard is unavailable, and adding "and its margin is unset" to that
@@ -512,6 +512,7 @@ def resolve_limits(params: dict[str, Any]) -> dict[str, Any]:
         "grants": [],
         "active_guards": active,
         "unavailable_guards": unavailable,
+        "inert_guards": inert,
         "source": _coalesce(_field(envelope, "source"), _field(transport, "source")),
         "notices": notices,
     }
@@ -546,6 +547,7 @@ def _partition_guards(
 ) -> tuple[list[str], list[dict[str, Any]]]:
     active: list[str] = []
     unavailable: list[dict[str, Any]] = []
+    inert: list[dict[str, Any]] = []
     envelope = params.get("envelope")
     profile = params.get("profile")
     available = params.get("available") or {}
@@ -605,14 +607,31 @@ def _partition_guards(
             return []
         raise AssertionError(f"unknown guard {guard!r}")
 
+    def reading_for(guard: str) -> tuple[str, bool] | None:
+        """Which per-cycle reading a guard acts on, where that reading can be absent (§80).
+
+        Only ``proximity`` today: the other seven act on the command, the previous command, the
+        clock or the frame graph, all of which the cycle always carries.
+        """
+        if guard != "proximity":
+            return None
+        return ("cycle.nearest_person_m", available.get("proximity_reading") is True)
+
     for guard in GUARDS:
         missing = missing_for(guard)
-        if not missing:
-            active.append(guard)
-        else:
+        if missing:
             unavailable.append({"guard": guard, "missing": missing})
+            continue
+        # Checked **after** ``missing``, and the order is the point: a guard with no sensor is
+        # unavailable, not inert. Reporting a robot that has no person detector as "the reading is
+        # not coming" would describe a missing producer on a machine whose problem is a sensor.
+        reading = reading_for(guard)
+        if reading is not None and not reading[1]:
+            inert.append({"guard": guard, "reading": reading[0]})
+            continue
+        active.append(guard)
 
-    return active, unavailable
+    return active, unavailable, inert
 
 
 # ── The per-cycle decision ───────────────────────────────────────────────────
@@ -975,6 +994,10 @@ def _shape_limits(limits: dict[str, Any]) -> Any:
         "unavailable_guards": [
             {"guard": entry["guard"], "missing": entry["missing"]}
             for entry in limits["unavailable_guards"]
+        ],
+        "inert_guards": [
+            {"guard": entry["guard"], "reading": entry["reading"]}
+            for entry in limits["inert_guards"]
         ],
         "source": _nullable(limits["source"]),
         "notices": [

@@ -190,6 +190,10 @@ export function shapeLimits(limits: ResolvedLimits): unknown {
       guard: entry.guard,
       missing: entry.missing,
     })),
+    inert_guards: limits.inert_guards.map(entry => ({
+      guard: entry.guard,
+      reading: entry.reading,
+    })),
     source: nullable(limits.source),
     notices: limits.notices.map(notice => ({
       code: notice.code,
@@ -969,6 +973,12 @@ export function shapeGuardReport(report: GuardReport | null): unknown {
     unavailable: report.unavailable.map(entry => ({
       guard: entry.guard,
       missing: [...entry.missing],
+    })),
+    // §80's third state. Always present, empty included: a field a robot omits where it is empty
+    // would let an edition that never emits it pass this frozen document (§31.6).
+    inert: report.inert.map(entry => ({
+      guard: entry.guard,
+      reading: entry.reading,
     })),
   }
 }

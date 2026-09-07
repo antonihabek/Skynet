@@ -68,6 +68,34 @@ jobs:
           # reasons, and nothing else in the workspace would have noticed either.
           cargo build -p skynet-kernel -p skynet-ring -p skynet-capture --target thumbv7em-none-eabihf
 
+  # The same workspace on the other platform, and it exists because of a break only this job would
+  # have caught. §57 recorded that a lint result is only as broad as the target it ran on, after
+  # clippy on Windows was clean while Linux had two warnings in `cfg(unix)` code. The complement was
+  # left open and cost a red tree: `install_skill` is `cfg(unix)` because §37.1's activation needs an
+  # atomic symlink swap, two of its four callers were not, and the workspace stopped **compiling**
+  # its tests on Windows. Every job above runs on Linux, where those callers and their helper are
+  # both present, so nothing failed.
+  #
+  # A test build is only as broad as the target it ran on, which is the sharper half of §57's rule,
+  # because a lint warns and a missing `cfg` does not build at all.
+  #
+  # What this job deliberately does not do is run the daemon end to end or the corpus. Neither is
+  # platform-specific — the daemon's launch needs a systemd manager and the corpus is bytes — so
+  # repeating them here would double a cost for no coverage. What is Windows-only is which code
+  # exists: `cfg` boundaries, path handling, and the five crates that carry `cfg(unix)`.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: rustup toolchain install stable --profile minimal --component clippy
+      # `--all-targets` so tests, benches and examples are built rather than only the libraries —
+      # which is the exact scope the break lived in: `cargo build` was fine and `cargo test` was not.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets
+      - name: Test
+        run: cargo test --workspace
+
   # The vendor-facing ABI. A driver author reads these headers before deciding whether the platform
   # is worth an afternoon, so they must compile cleanly from both C and C++.
   abi:

@@ -34,7 +34,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -80,7 +81,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -133,7 +135,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -184,7 +187,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -237,7 +241,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": []
         },
@@ -293,7 +298,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -342,7 +348,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": []
         },
@@ -383,7 +390,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -433,7 +441,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -484,7 +493,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -546,7 +556,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -603,7 +614,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -657,7 +669,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -710,7 +723,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -771,7 +785,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -821,7 +836,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -875,7 +891,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": []
         },
@@ -931,7 +948,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -975,7 +993,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": []
         },
@@ -1022,7 +1041,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -1067,7 +1087,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -1125,7 +1146,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -1177,7 +1199,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -1224,7 +1247,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": []
         },
@@ -1276,7 +1300,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -1333,7 +1358,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -1375,7 +1401,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -1438,7 +1465,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -1493,7 +1521,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": []
         },
@@ -1539,7 +1568,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": []
         },
@@ -1594,7 +1624,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -1651,7 +1682,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -1707,7 +1739,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": []
         },
@@ -1761,7 +1794,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -1816,7 +1850,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": []
         },
@@ -1863,7 +1898,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": []
         },
@@ -1913,7 +1949,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": []
         },
@@ -1963,7 +2000,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"
@@ -2016,7 +2054,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": []
         },
@@ -2071,7 +2110,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "grants": [
             "motion.arm"

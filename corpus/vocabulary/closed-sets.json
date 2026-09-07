@@ -256,7 +256,7 @@
       "input": {
         "set": "state_reasons"
       },
-      "expected": "[\"rhal_lost\",\"safe_sticky\",\"post_failed\",\"stop_complete\",\"stopping_watchdog\",\"stopping_proximity\",\"stopping_balance\",\"stopping_operator\",\"post_incomplete\",\"homing_pending\",\"kernel_down\",\"guard_hold\",\"no_policy\",\"policy_not_ready\",\"guards_unavailable\",\"rhal_degraded\",\"nominal\"]"
+      "expected": "[\"rhal_lost\",\"safe_sticky\",\"post_failed\",\"stop_complete\",\"stopping_watchdog\",\"stopping_proximity\",\"stopping_balance\",\"stopping_operator\",\"stopping_estop\",\"post_incomplete\",\"homing_pending\",\"kernel_down\",\"guard_hold\",\"no_policy\",\"policy_not_ready\",\"guards_unavailable\",\"rhal_degraded\",\"nominal\"]"
     },
     {
       "id": "stop_causes",
@@ -264,7 +264,7 @@
       "input": {
         "set": "stop_causes"
       },
-      "expected": "[\"watchdog\",\"proximity\",\"balance\",\"operator\"]"
+      "expected": "[\"watchdog\",\"proximity\",\"balance\",\"operator\",\"estop\"]"
     },
     {
       "id": "post_verdicts",

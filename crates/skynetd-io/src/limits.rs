@@ -98,7 +98,7 @@
 //! has the missing frame named, which is §44.5 working rather than a body silently unguarded.
 
 use skynet_contracts::cell::CellLayer;
-use skynet_contracts::checkin::{GuardReport, Notice, UnavailableGuard};
+use skynet_contracts::checkin::{GuardReport, InertGuard, Notice, UnavailableGuard};
 use skynet_contracts::embodiment::SafetyEnvelope;
 use skynet_contracts::kinematics::{flatten, FlatFrames};
 use skynet_contracts::transport::TransportClamp as PlanClamp;
@@ -205,6 +205,16 @@ pub fn read(layout: &Layout, body: &Body, tier: Tier) -> Owned {
         people_detection: descriptor
             .is_some_and(skynet_contracts::embodiment::has_people_detection),
         legged: descriptor.is_some_and(|d| d.base == "legged"),
+        // §80's third state, and on this edition it is a constant `false` — which is the honest
+        // value rather than a placeholder. Nothing in this operating system fills
+        // `cycle.nearest_person_m`: §25.1's assembler has no vision path (§47.6's mapping half is
+        // unwritten) and no backend infers on one. So a body that declares a person detector
+        // resolves `proximity` **inert**, and every surface that renders the partition says the
+        // reading is not coming rather than drawing the guard as protection.
+        //
+        // It is a field rather than a hard-coded branch in the resolver so that the day a producer
+        // exists, this is the line that changes.
+        proximity_reading: false,
     };
 
     Owned {
@@ -402,6 +412,14 @@ pub fn report(owned: &Owned) -> GuardReport {
                 missing: entry.missing.iter().map(|s| (*s).to_string()).collect(),
             })
             .collect(),
+        inert: limits
+            .inert_guards
+            .iter()
+            .map(|entry| InertGuard {
+                guard: entry.guard.as_str().to_string(),
+                reading: entry.reading.to_string(),
+            })
+            .collect(),
         notices: limits
             .notices
             .iter()
@@ -574,6 +592,17 @@ pub fn to_lines(owned: &Owned) -> Vec<String> {
                 "    {:<16} needs {}",
                 entry.guard.as_str(),
                 missing.join(", ")
+            ));
+        }
+        // §80's third state, said in its own words rather than folded in with the line above. An
+        // unavailable guard "needs" something this robot does not have; an inert one has
+        // everything it declared and is waiting on a reading nothing produces, and an operator
+        // told to fit a sensor they already fitted goes looking in the wrong place.
+        for entry in limits.inert_guards.iter() {
+            lines.push(format!(
+                "    {:<16} inert — every declared input resolves and nothing fills {}",
+                entry.guard.as_str(),
+                entry.reading
             ));
         }
         for notice in limits.notices.iter() {
@@ -883,7 +912,7 @@ mod tests {
     /// not say why it is inert would be a robot reporting speed-and-separation monitoring it is
     /// not doing, and that is a worse failure than the one §5 closed.
     #[test]
-    fn a_declared_detector_activates_a_guard_nothing_can_trip() {
+    fn a_declared_detector_with_no_producer_resolves_inert() {
         const SEEING_ARM: &str = r#"{
             "robot_slug": "bench-arm",
             "base": "fixed",
@@ -903,7 +932,7 @@ mod tests {
             "the vendor declared one on the head camera"
         );
 
-        let (active, missing) = owned.with_resolved(|limits, _| {
+        let (active, missing, inert) = owned.with_resolved(|limits, _| {
             (
                 limits
                     .active_guards
@@ -913,13 +942,37 @@ mod tests {
                     .unavailable_guards
                     .iter()
                     .any(|entry| entry.guard.as_str() == "proximity"),
+                limits
+                    .inert_guards
+                    .iter()
+                    .find(|entry| entry.guard.as_str() == "proximity")
+                    .map(|entry| entry.reading),
             )
         });
-        assert!(active, "both inputs are present, so the guard resolves active");
-        assert!(!missing, "and it is no longer reported as unavailable");
 
-        // The guard is active and inert, and the robot says so rather than leaving a reader to
-        // infer it from the absence of a trip.
+        // The three assertions are the decision of 2026-09-07, and the first one is the one that
+        // changed. This test was written when §7.2 had two states, and it asserted **active** —
+        // correctly, under a partition that could not express this robot. That is what §80 raised:
+        // every input the resolver can see is present, nothing fills the reading, and *active* is
+        // what every surface renders as protection.
+        assert!(
+            !active,
+            "a guard whose reading nothing produces is not one that will run"
+        );
+        assert!(
+            !missing,
+            "and it is not unavailable either — both of its declared inputs are present, and the \
+             remedy for an unavailable guard is a sensor this robot has"
+        );
+        assert_eq!(
+            inert,
+            Some("cycle.nearest_person_m"),
+            "it is inert, and it names the reading it is waiting for (§64, §80)"
+        );
+
+        // And the robot still says so in `unmeasured`, which is the sentence that existed before
+        // the state did. Kept rather than replaced: the partition tells a console how to draw the
+        // guard, and this tells a person which reading is absent.
         let document = to_json(&owned);
         assert!(
             document
@@ -927,7 +980,7 @@ mod tests {
                 .iter()
                 .filter_map(Json::as_str)
                 .any(|entry| entry.starts_with("cycle.nearest_person_m")),
-            "an active guard with no producer has to be named"
+            "an inert guard has to name what it is waiting for"
         );
     }
 

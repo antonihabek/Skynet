@@ -469,6 +469,12 @@ pub struct GuardReport {
     pub active: Vec<String>,
     /// Guards specified and inoperable here, each with what it wanted.
     pub unavailable: Vec<UnavailableGuard>,
+    /// §80's third state: every declared input resolves and the per-cycle reading is not coming.
+    ///
+    /// Carried across §17 rather than derived on the Hub, for the reason every other field here is:
+    /// a robot's own reading of its own guards is evidence, and a Hub that recomputed the partition
+    /// would be a second implementation of `resolve_limits` (§78).
+    pub inert: Vec<InertGuard>,
     /// Everything an operator must read, as codes and subjects.
     ///
     /// **Codes, never sentences.** The Hub renders these in thirty-five locales (§32.3) and a robot
@@ -489,6 +495,20 @@ pub struct UnavailableGuard {
     pub guard: String,
     /// What it needs and does not have — a missing input, or *"not applicable to this body"*.
     pub missing: Vec<String>,
+}
+
+/// A guard whose declared inputs all resolve and whose per-cycle reading nothing produces (§80).
+///
+/// Separate from [`UnavailableGuard`] because the remedies differ and go to different people. An
+/// unavailable guard wants a sensor fitted or a profile written; an inert one has both and wants a
+/// producer in the operating system. Collapsing them would tell a fleet operator to check the
+/// wiring on a robot whose wiring is fine.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InertGuard {
+    /// Which guard.
+    pub guard: String,
+    /// The per-cycle field nothing fills, named so the remedy is legible (§64).
+    pub reading: String,
 }
 
 /// One thing an operator must read, as the kernel emitted it.
@@ -523,6 +543,14 @@ pub fn guard_report_to_json(report: Option<&GuardReport>) -> Json {
         unavailable.push(row);
     }
 
+    let mut inert = Json::arr();
+    for entry in &report.inert {
+        let mut row = Json::obj();
+        row.set("guard", Json::Str(entry.guard.clone()))
+            .set("reading", Json::Str(entry.reading.clone()));
+        inert.push(row);
+    }
+
     let mut notices = Json::arr();
     for notice in &report.notices {
         let mut row = Json::obj();
@@ -538,6 +566,7 @@ pub fn guard_report_to_json(report: Option<&GuardReport>) -> Json {
             number(report.base_velocity_max_m_s),
         )
         .set("enforced", Json::Bool(report.enforced))
+        .set("inert", inert)
         .set("enforcement", Json::Str(report.enforcement.clone()))
         .set("joint_torque_max_nm", number(report.joint_torque_max_nm))
         .set(
@@ -808,6 +837,7 @@ mod tests {
                 guard: "balance".to_string(),
                 missing: vec!["a legged base — not applicable to this body".to_string()],
             }],
+            inert: Vec::new(),
             notices: vec![Notice {
                 code: "advisory_only".to_string(),
                 subjects: Vec::new(),

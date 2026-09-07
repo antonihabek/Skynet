@@ -8014,3 +8014,275 @@ features stopped being described and started being demonstrated.
 ### Numbers
 
 `npx vitest run` — **1,691 passed, 70 files**. `npm run typecheck` — clean.
+
+---
+
+## Session — 2026-09-07 (twenty-second): collections, finished — and the two defects the finish found
+
+Resumed from the 2026-09-06 progress log's three-item finishing list for Collections. All three
+are closed, and closing the third found two defects — one in the feature, one in the scanner that
+watches all features. Nothing is committed and nothing is pushed.
+
+### 0. The environment changed under the log
+
+The 09-06 session had no route to the database (no DNS, no egress, Supabase host IPv6-only). This
+shell resolves the host and reaches it, including over IPv6. What it still lacks is Node (WSL1
+cannot exec the Windows `node.exe`) and a Postgres toolchain, so both were pulled to scratch and
+left out of the tree: Linux Node v22.17.0 in `/tmp/node-skynet`, `pg` in `/tmp/pgwork`, and
+`pg_dump`/`psql` 17.9 extracted from debs in `/tmp/pgcli` (the server is Postgres 17.6 and the
+Ubuntu client is 16, which `pg_dump` refuses; `psql` 17 additionally needed `libpq` 17+, taken
+from pgdg). `node_modules` gained `@rolldown/binding-linux-x64-gnu` with `--no-save`
+`--no-package-lock`, the 09-06 session's move — `package.json`/`package-lock.json` untouched
+(their diff is the pre-existing `db:types` line plus CRLF noise).
+
+### 1. The collections migration was already applied — by someone else
+
+`node scripts/skynet-verify-migrations.mjs` reported
+`20260906200000_skynet_collections.sql` PARTIAL (2/10): the two live table probes pass, the eight
+policy/index name-checks fail. A direct probe showed **every object in the file is in the
+database** — both tables, both deny policies, all six indexes, both tables empty. The eight
+failures were all *"not in the recorded schema"*: `supabase/schema/skynet.sql` predated the
+feature, so the check was against a stale transcript, not a half-applied migration. (The
+`20260905120000_skynet_report_decisions.sql` migration the progress log calls built is likewise
+fully live at 9/9 — confirmed, not trusted.)
+
+So item 1 of the finishing list needed no apply, and item 2 was the actual fix: `node
+scripts/skynet-schema-dump.mjs` (now 64 tables, 101 indexes, 69 policies) plus `node
+scripts/skynet-schema-snapshot.mjs` (65 tables, 872 columns). The verifier now reports **26
+applied, 0 partial, 0 not checkable**. The one remaining not-applied migration,
+`20260905200100_marketplace_listing_transactions.sql`, is marketplace-side (listing-transaction
+functions), not Skynet Hub, and is left for the owner with the marketplace work.
+
+### 2. Export entries, then the verifier's first failure
+
+`EXPORT_COLLECTIONS` gains `collections` on `user_id` and `collection_items` on `added_by` —
+items keyed to the curator, which is what keeps another person's rows out of your document under
+rule 2. No new strings, no catalogue change. The schema test iterates the list, so the two new
+collections arrived already guarded (28 cases).
+
+`node scripts/skynet-verify-collections.mjs` — run for the first time, against a local dev
+server — failed one check out of the gate: **`third visibility is refused (expected 422, got
+500)`**. The server log named the cause:
+
+> `new row for relation "skynet_collections" violates check constraint
+> "skynet_collections_slug_shape"`, row `(…, x, x, , private, …)`
+
+Two defects in one request. The probe sends `{ name: 'x', visibility: 'unlisted' }`:
+
+* **The route swallowed the invalid visibility.** Both POST and PATCH coerced anything outside
+  `public|private` to `undefined` before calling the lib, so `assertValidCollectionVisibility` —
+  which exists, is unit-tested, and throws the catalogued 422 — never saw the value. Fixed by
+  passing the body's value straight through: `CreateCollectionParams.visibility` and
+  `UpdateCollectionParams.visibility` are now `unknown`, and the assertion narrows them. An
+  invalid visibility is a 422 naming the field, not a silent default.
+* **A one-character name died on the slug CHECK.** `assertValidCollectionName` accepts 1–80
+  characters and `slugifyCollectionName('x')` is `x`, but the CHECK required two characters or
+  more — the API and the store disagreed, and the store won with an unhandled 500. A
+  one-character slug is unambiguous, so the store yields: new migration
+  `20260907120000_skynet_collection_slug_shape.sql` relaxes the expression to
+  `^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$`, applied in one transaction over confirmed-empty tables,
+  with the post-flight constraint text read back. The suffixed-slug path got the same class of
+  fix in code: a candidate truncated to the column can end in a dash, so `collectionSlugAttempt`
+  (extracted pure for testability) strips trailing dashes — identical output everywhere the old
+  output was valid.
+
+The migration verifier needed one honest addition for the new file: a name-preserving ALTER
+passes the stock `CONSTRAINT name` check on the *old* expression too, so `EXTRA_SCHEMA_CHECKS`
+gains `slugShapeAllowsSingleChar`, which requires the new expression present and the old one
+gone — checked both directions against synthetic old/new dump text, not assumed.
+
+After a server restart (the DrvFs mount does not deliver file-watcher events, so the first
+re-run tested old code against the new constraint and moved the failure from 500 to 201 rather
+than to green — worth remembering the next time a fix "does not take"), the verifier prints
+**Collections hold**, all checks, fixtures removed in `finally`.
+
+### 3. The regen exposed a miscount in the embed scanner
+
+With the dump regenerated, `skynet-embed-ambiguity.test.ts` failed on three collections embeds —
+`items -> repo:skynet_repos` and `collections -> items` twice, "2 relationships" each. The embeds
+are fine: `scripts/skynet-verify-embeds.mjs` puts all 310 selects in front of a real PostgREST
+and every one parses (170 distinct). The scanner was double-counting: `foreignKeyGraph` reads
+both the dump (named `ADD CONSTRAINT`) and the migrations (unnamed inline `REFERENCES`), and its
+dedup only matched equal constraint *names* — an unnamed edge never dedups. Every migrated table
+counts every relationship twice; the old tables never showed it because all nineteen of their
+embeds already carry hints, and collections was the first feature whose dump arrived after its
+embeds. The 09-06 full-suite green was green on a stale transcript.
+
+Fixed at the root cause in `scripts/lib/skynet-embeds.mjs`: both spellings now capture
+`(local columns, referenced columns)` and dedup on the full quad, whitespace-blind. Verified on
+the real graph — collections pairs drop to 1, `skynet_repo_versions ↔ skynet_repos` stays 2 (two
+genuinely different FKs, which the detector's own self-test pins) — and pinned with two
+fixture-based cases: same FK under both spellings counts once and raises no finding; two
+different inline FKs still count twice.
+
+### Numbers
+
+* `npx vitest run --testTimeout=120000` — **1,889 passed, 84 files** (the flag, not the code:
+  seven tree-scanning suites exceed the 5s default on this filesystem and fail as timeouts
+  without it — the same shape the 09-06 session logged at 120s).
+* `npm run typecheck` — clean. `npx eslint` on all touched files — clean.
+* `scripts/skynet-verify-migrations.mjs` — 26 applied, 0 partial, 0 not checkable
+  (1 marketplace migration not applied, out of scope — see above).
+* `scripts/skynet-verify-collections.mjs` — **Collections hold** (the previously UNRUN script).
+* `scripts/skynet-verify-export.mjs` — **The export holds** (re-run: `export.ts` changed).
+* `scripts/skynet-verify-embeds.mjs` — all 310 selects parse against the live schema.
+
+### Still not built
+
+Unchanged, minus the collections finishing list, which is now fully closed (module, routes, UI,
+docs, catalogue, migration applied, schema transcripts regenerated, export entries, unit tests,
+three live verifiers). The erasure half's live-DB verification is unblocked by the same
+environment change that unblocked this session — this shell reaches the database now — but it is
+a separate item and was not started here.
+
+---
+
+## Session — 2026-09-07 (twenty-third): erasure, run for real — and the audit trail it was deleting
+
+The 09-06 erasure build shipped with mocked-DB unit tests only, and its live verification was
+explicitly deferred for want of a networked shell. This shell has one. New
+`scripts/skynet-verify-erasure.mjs` (38 checks) puts four throwaway accounts through the real
+`DELETE /api/delete-account` against the production database — an owner O with a published
+model, a surviving stranger S with a benchmark, a model and a thread, an org owner O2, and a
+second member S2 — all content via real routes (repos with file-free published versions,
+self-reported evaluations, stars, follows, collections, discussions), everything removed in a
+`finally`. Nothing is committed and nothing is pushed.
+
+### What it proves, section by section
+
+1. **A pinned repository refuses the whole erasure.** S evaluates O's model, so `deleteRepo`'s
+   `evaluated` blocker fires: 409 naming the repo, and profile, namespace, repo and both
+   evaluations all survive. The refusal lands before any marketplace row is touched, which is
+   the ordering the whole feature exists for.
+2. **A shared namespace refuses the whole erasure.** O2 founds a marketplace org through the
+   real route, connects it to Skynet through the real route, and S2 joins by direct insert —
+   the one setup row written by hand, because org invites are hobby-blocked and the code under
+   test (`listMembers` counting the roster through the delete route) runs for real. 409 naming
+   the handle; org, namespace and profile survive.
+3. **Unpinned and solo, the owner goes.** Profile and auth user gone; personal namespace, repo
+   and version gone; stars, follows, collections and items cascaded; O's evaluation of S's work
+   stays with `submitted_by` NULL; O's comment stays with `author_id` NULL; S untouched.
+4. **Solo again, the org owner goes.** The marketplace org deletion cascades the org namespace
+   — the half `executeErasure` deliberately leaves — and O2's profile and auth user go with it.
+
+### The defect: the erasure deleted its own audit trail
+
+Section 3's audit check read **zero rows** after a fully successful erasure. The insert path was
+exonerated first (a direct service-role insert succeeds), which left the schema: `recordAudit`
+writes `namespace_id` on every namespace-scoped action, and `skynet_audit_log.namespace_id`
+deleted by `CASCADE`. The `repo.delete` row written seconds before the namespace goes was
+removed by the namespace going — while `actor_user_id` beside it correctly detached by SET
+NULL. An audit trail that drops exactly the entries about deletions is worse than no trail,
+because it is trusted, and the erasure decision says these rows stay.
+
+Fixed at the schema, not at the call sites: new migration
+`20260907130000_skynet_audit_namespace_detach.sql` re-declares the FK as `ON DELETE SET NULL`
+under the same name (rows keep their namespace scoping while the namespace lives; the audit
+call-site test requiring `namespaceId` is untouched), applied in one transaction over a
+confirmed-empty audit table with the constraint text read back. The migration verifier gains
+`auditNamespaceDetaches`, scoped to the dump line carrying the constraint's name — the first
+version matched pg_dump's `-- Name:` comment instead of the declaration and reported PARTIAL on
+a correctly applied migration, which is recorded here because a checker that misreads its own
+transcript is the failure mode these bespoke checks exist to prevent.
+
+Re-run after the fix, the audit check asserts the stronger claim: the `repo.delete` row names
+the erased repo and the erased namespace, both gone, and survives detached on **both**
+references. **Erasure holds**, all 38, fixtures removed in `finally` (survivors leave through
+the real delete route; the probe's own evaluations, which no route deletes, are removed by the
+exact IDs the probe submitted — never by age, author, or NULL).
+
+### Numbers
+
+* `scripts/skynet-verify-erasure.mjs` — **Erasure holds** (new; 38 checks).
+* `scripts/skynet-verify-migrations.mjs` — 27 applied, 0 partial, 0 not checkable
+  (1 marketplace migration not applied, out of scope as before).
+* `npx vitest run --testTimeout=120000` — **1,889 passed, 84 files**. `npm run typecheck` —
+  clean. `npx eslint` on scripts — ignored by config, 0 errors elsewhere touched.
+* Unit tests for erasure/audit/migration-artifacts — 30 passed, unchanged (the defect lived
+  below every mock).
+
+### Still not built
+
+The erasure line is now closed end to end (module, route, UI copy, catalogue, mocked tests,
+live verifier, and the audit FK the verifier caught). Remaining Hub-side: the six dead
+catalogue keys, and everything that needs a robot (field-conformance figure, run bundle, robot
+signing — §19 makes the last a rule, not a gap).
+
+---
+
+## Session — 2026-09-07 (twenty-fourth): the six dead catalogue keys
+
+`dataset_required`, `environment_required`, `last_owner`, `member_remove`, `member_role`,
+`member_update` — catalogued in all 35 files since the sixth session consolidated the
+membership roster, thrown by nothing. Verified dead across the whole tree in both quote styles
+before touching anything, then removed by exact-line match (all six were single standard lines
+in every file, none last, so no comma repair). Nothing is committed and nothing is pushed.
+
+Two things the deletion turned up, both handled:
+
+* The catalogues are not 35 files but 37: `messages/.en-source-snapshot.json` (the English
+  baseline `sync` diffs against) and `messages/.gpt-5.6-luna-translation-notes.json`
+  (translation provenance) still name the keys. The snapshot is regenerated state — a dry-run
+  `sync` showed zero invalidations and zero additions, so the real `sync` ran and advanced it
+  (deleted keys are absent from `en.json`, which `getChangedEnglishKeys` does not count as
+  changed, and the key-count difference advances the baseline). The provenance file is a
+  historical log read only by translate-time tooling; rewriting it would falsify what the
+  model did, so it keeps its entries and this paragraph records why.
+* The `+` lines in the catalogue diff are pre-existing working-tree state from earlier
+  sessions' syncs, not this deletion — `sed /d` cannot emit content, and the additions name
+  other keys.
+
+### Numbers
+
+* `node scripts/i18n-catalog.mjs audit` — all catalogues OK, 6,104 populated source keys.
+* All 35 catalogues still parse as JSON after the edit.
+* `npx vitest run --testTimeout=120000` — **1,889 passed, 84 files**. `npm run typecheck` —
+  clean.
+
+### Still not built
+
+The Hub-side list is now empty except what needs a robot: a field-conformance figure that is
+not null on a real robot, a robot that produces a run bundle (both waiting on `skynetd`
+editions, other repo), and robot-signed conformance (§19 makes it a rule, not a gap). The one
+not-applied migration remains the marketplace-side listing-transactions file, with the
+marketplace work.
+
+---
+
+## Session — 2026-09-07 (twenty-fifth): decisions, run for real — no defects this time
+
+An audit for anything Hub-side, unblocked and unbuilt turned up exactly one item with the shape
+this log keeps finding: the report-decision half shipped with vocabulary unit tests only, and
+the live behaviour — the staff gate, the uphold that hides, the audit rows — had never run
+against a database. New `scripts/skynet-verify-decisions.mjs` (21 checks): a reporter, a repo
+owner and a rostered staff member through the real routes, everything removed in a `finally`.
+Nothing is committed and nothing is pushed.
+
+It passed first run, all 21, which is a result rather than an anticlimax — the 403s fire before
+anything is read or written, reject settles without touching visibility, uphold 404s the repo
+for strangers and owner alike while the neighbour stays up, double-decide is 409, malformed
+decisions speak English, and all three audit rows name the staff actor. The staff roster insert
+is the one setup row written directly, and it is the production path: the role deliberately has
+no grant route. Cleanup leaves through the real delete-account route; the probe's reports, which
+no route deletes, are removed by the exact IDs filed.
+
+### One finding, not built: the restore with no surface
+
+`restoreRepo` exists complete in lib — validation, conditional update, its own audit row, and a
+docblock arguing it is "a separate act rather than a re-decision". No route calls it. A takedown
+staff cannot undo except by SQL is operationally half a feature, but wiring a second
+cross-namespace power is the governance caution `staff.ts` exists to enforce, and route
+placement (repo vs report) is a product call — so this is recorded for the owner rather than
+built. The countersignature question (§57.1's asserted rows) stands beside it: same reason,
+still needs the call.
+
+### Numbers
+
+* `scripts/skynet-verify-decisions.mjs` — **Decisions hold** (new; 21 checks).
+* No lib, route or schema changes — unit suite and typecheck unaffected (last full run 1,889
+  green stands).
+
+### Still not built
+
+Unchanged: the restore surface (owner's call, above), the Hub countersignature (owner's call),
+the robot-dependent items, and the marketplace-side migration.

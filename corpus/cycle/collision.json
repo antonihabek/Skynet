@@ -35,7 +35,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "frames": {
             "root": "base_link",
@@ -157,7 +158,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "frames": {
             "root": "base_link",
@@ -279,7 +281,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "frames": {
             "root": "base_link",
@@ -403,7 +406,8 @@
           "available": {
             "imu": true,
             "people_detection": true,
-            "legged": true
+            "legged": true,
+            "proximity_reading": true
           },
           "frames": {
             "root": "base_link",

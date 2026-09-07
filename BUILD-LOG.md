@@ -5405,3 +5405,705 @@ They are all derived from one number and none of them derives it.
 * **A guard active with no producer** (§80). Still a decision.
 * **The mapping half of §47.6**, and the capture backend behind it.
 * **Replay does not mark the fill values** of a failed read (§26.4).
+
+# Round eighteen — 2026-09-07
+
+Resumed on the OS, in the order round seventeen left. The first item was not on that list: the
+workspace did not build.
+
+## 69. `cargo test --workspace` had not compiled on this machine, and no CI job would have said so
+
+Round seventeen's numbers open with `cargo test --workspace — 1,660 passed`. Reproducing that
+before changing anything — this repository's own rule — produced instead:
+
+```
+error[E0425]: cannot find function `install_skill` in this scope
+    --> crates\skynetd-io\src\tests.rs:6754:5
+error: could not compile `skynetd-io` (lib test) due to 2 previous errors
+```
+
+`install_skill` is `#[cfg(unix)]`, because §37.1's activation needs an atomic symlink swap and
+`Store::activate` refuses to fake one. Two of its four callers — the skill-starts-a-unit test from
+round nine and the reconciler-spares-it test from round ten — were not. On Linux the helper and the
+callers are both present and nothing fails. On Windows the callers survive and the helper does not.
+
+### The gap is the CI file, not the two attributes
+
+All four jobs are `runs-on: ubuntu-latest`. So the workspace has never once been compiled by CI on
+the platform it is developed on, and the two attributes were only ever going to be found by
+somebody running the suite here.
+
+§57 recorded the mirror image of this in round six — clippy was clean on Windows and had two
+warnings on Linux, both in `cfg(unix)` code — and drew the rule: *"a lint result is only as broad
+as the target it ran on."* The complement was left open and this is what it cost. A test **build**
+is only as broad as the target it ran on too, and it is the sharper half, because a lint warns and
+a missing `cfg` does not build at all.
+
+Added a `windows` job: clippy `--all-targets` and `cargo test --workspace`. `--all-targets`
+deliberately, because that is the exact scope the break lived in — `cargo build` was fine and
+`cargo test` was not. It does **not** repeat the daemon end-to-end run or the corpus: neither is
+platform-specific, so repeating them would double a cost for no coverage. What is Windows-only is
+*which code exists*.
+
+**1,590 passed, 0 failed** on Windows against 1,660 on Linux, and the difference is the
+`cfg(unix)` tests, which is the number being right rather than a gap.
+
+## 70. Four sentences stated one number by hand, and one of them had never been right
+
+Round seventeen's third item: *"Four surfaces state how many of §27's eight conditions are observed
+and every one is a typed number. Small, and this round is the third time it has gone stale."*
+
+It was worse than stale. The three **rendered** strings disagreed with each other on the same pass:
+
+| Where | Said | True |
+|---|---|---|
+| `GET /state`'s `partial` | three of eight | three |
+| `GET /status`'s `safe_state_note` | *"the self-test and **eight** unobserved conditions"* | five |
+| the start-up banner | three of eight | **one**, at the moment it prints |
+
+The middle one counted §27's *total* as the remainder, so it described a daemon that had looked at
+nine things. An operator reading the console header was told the machine had observed nothing while
+the same daemon's state route said three — and §32.2's rule is that the console must never show a
+value it did not receive. A value the daemon contradicts one route later is worse than one it never
+sent.
+
+The third is the one only a run would find. The banner prints **before the recorder is opened** —
+`observe_state(&mut daemon, None)`, deliberately, so the first look reports unobservable rather than
+down — so at the moment those words reach a terminal exactly one condition has been observed. It
+claimed three every boot.
+
+Two documents were wrong as well: `README.md` said seven unobserved (stale by two rounds) and
+`skynet-kernel-host`'s header said all eight were.
+
+### `crates/skynetd-io/src/observed.rs`
+
+One array of eight booleans, built from the same two sightings §27's machine is derived from, and
+three renderers over it — the tally, the complement, and `GET /state`'s phrasing of the complement.
+Nothing outside it holds a number. The names are §27's and fixed; the observability is per-pass and
+is not, because `kernel` and `rhal` are observed only when the recording could have held a cycle.
+
+The test that matters asserts the **relationship** rather than the number: whatever `observed`
+holds, both routes count it the same way. A condition gaining a producer moves all three sentences
+together and the test needs no editing — which is the property the old arrangement lacked and the
+only reason the module exists.
+
+### And the documents, because a check that stops at code stops halfway
+
+`tools/scale-report.mjs` already holds §73's closing paragraph to the tree. It now measures the
+condition count too, by parsing `Observed::of`'s array — the `false` entries are the unobserved
+ones — and checks **every occurrence** across `docs/skynet-os-architecture.md` and `README.md`
+rather than the first. Every occurrence, because the way it went wrong was somebody correcting the
+row they were editing and leaving the other three. Verified by breaking each file in turn.
+
+The parse is anchored on `pub fn of(` and not on the field name, which the first version was: the
+struct declares `seen: [bool; 8]` and an unanchored search finds that first, then reports one entry
+against eight conditions. It says so where it throws.
+
+## 71. §27's machine had no terminal that could ask it
+
+Writing §72's e2e section needed the state route, and there was no way to reach it. `GET /state`
+is served, the on-robot console renders it, and **no CLI command hits it** — so the one question §27
+exists to answer had no terminal. An operator on a bench reads a terminal.
+
+`skynet state`, which is 50 commands rather than 49. Not folded into `skynet status`, because
+`api.rs` says why where it serves the two routes: status is *"the one line a console header wants"*
+and state is *"the same fact with the observation gaps spelled out"*.
+
+Two things it got wrong first, both found by running it:
+
+**A tick that meant two things.** The mark says whether anybody *looked*. The first draft drew a
+green ✓ beside `kernel` on a robot whose own detail read *"no control cycle was recorded"* — §48.5's
+conflation in one character. An observation that found something wrong is now marked as a finding
+and the state is printed rather than left implied.
+
+**A pattern that added three CLI commands.** `matches!(state, Some("live") | Some("present") | …)`
+put `live`, `present` and `passed` into the set of things `skynet <x>` may be, and the command count
+went to 52. `print_power` documents this trap two functions below and its fix — a slice and
+`contains` — and this is the second time the trap has been stepped in. §73 now states the command
+count and `check-golden-path.mjs` holds it there, since that script is the only thing that counts
+them and a second counter elsewhere would be §78's two spellings again.
+
+## 72. `skynetk` in the e2e loop — round seventeen's first item
+
+### It could not be run here at all, and the script did not say so
+
+`sh crates/skynetd-io/e2e.sh` on this machine stops before its first check with `no skynetd at
+…/target/debug/skynetd`. That reads as a build failure and is not one: the binary is there with
+`.exe` on the end. The run genuinely cannot happen — `skynetd` refuses to serve on Windows and says
+so on start-up, §23.5 — but a check that fails for a reason unrelated to its subject is worse than
+one that does not run. The script now names the platform and points at WSL.
+
+Everything below ran under **WSL Ubuntu 24.04, which has systemd**, so the launch and isolation
+steps are exercised rather than skipped.
+
+### Section 10, and why it is a robot of its own
+
+Every robot above it has **no embodiment descriptor**, so `shape::supervising` answers `NoBody`
+before reading a manifest and the ring is events-only — which is why every check above sees "no
+control loop". Sizing a ring for a body needs a descriptor *and* a package that declares an action
+space, and giving the robot above one would change what §27 derives underneath forty checks written
+about a robot with nothing commanding it.
+
+So: the mock compiled as a shared object, a three-joint descriptor matching the body
+`drivers/mock` presents, and a commanding package whose `source_embodiment` binds three channels to
+J1/J2/J3 by exact joint name. The daemon starts first and sizes the ring — *"sized for the body: 3
+joints and 3 channels, from openrobot/reach's transport plan (direct)"* — and `skynetk` attaches to
+the ring the daemon created. **961 cycles, written by a different process, counted by the daemon.**
+That is §26.2 on one recording rather than in a suite.
+
+### Two things the run corrected about assertions written from reading
+
+**`observed` is true before the loop starts.** A ring with three action channels *can* hold a
+cycle, so silence from it is evidence rather than an absence: §27's `kernel` is observed and
+`down`, and `rhal` is observed and `lost`. On every other robot in the script the same silence is
+`Unobservable`. Same reading, opposite meaning, and the ring's shape is what separates them. The
+first draft asserted one observed condition before the loop and was wrong about the design.
+
+**Polling for the count sampled the wrong instant.** Because `observed` is true immediately, a poll
+waiting for *"three of §27's eight conditions"* was satisfied before the loop had written anything,
+and every assertion after it sampled a robot whose kernel had not started. The document it produced
+reported a **present RHAL beside a silent kernel** — a pair §27 says can never be true of one
+instant, and the exact failure round seventeen gave as the reason the two are read together. The
+poll waits for the state now, and there is a check asserting the two readings agree about the
+interval they share.
+
+### The assertion worth having
+
+The robot stays `safe`. It began in `safe` with `rhal_lost`, and §27 makes `SAFE` **sticky**: it
+takes a named human clearance to leave, never a condition improving. A robot that quietly began
+commanding because a driver started answering would be the worst defect this machine could have,
+and now something fails if it does.
+
+## Run
+
+```
+cargo test --workspace  — 1,595 passed, 0 failed, 7 ignored (Windows)
+cargo clippy --workspace --all-targets — clean;  cargo fmt --all --check — clean
+sh crates/skynetd-io/e2e.sh (WSL, systemd) — all checks passed, 14 of them new
+python editions/python/run_corpus.py — 1,137 of 1,137, 0 unimplemented
+check-golden-path — 50 commands;  scale-report --check — §73 matches the tree
+check-mirrors, check-contract-mirrors — all shared documents match
+```
+
+§73 gained two corrections it did not have to be told about: 120,000 lines and 50 CLI commands are
+now checked figures rather than typed ones.
+
+The Hub's copy of `docs/skynet-build-plan.md` held a whole session log — 2026-09-07's
+twenty-second, on Collections — that had never been mirrored back. Synced from the Hub, which is
+the direction the rule asks for its own document.
+
+## What round eighteen leaves
+
+* **The five remaining conditions** — homing, stop, guard_hold, guards, policy. Unchanged and
+  unchanged in reason: each needs a producer before it needs a mapping. What is different is that
+  the day one arrives, `observed.rs` is the only file that states how many there are.
+* **A package that attempts the forbidden hold** (§15's isolation).
+* **A guard active with no producer** (§80). Still a decision.
+* **The mapping half of §47.6**, and the capture backend behind it.
+* **Replay does not mark the fill values** of a failed read (§26.4).
+* **`farewell()` has no caller** (§82.4): a robot that is switched off stays in a browser's cache
+  until the 120-second TTL expires, because the daemon has no shutdown path.
+
+# Round nineteen — 2026-09-07
+
+Two more of round seventeen's list, and one item taken off it because it turns out to be a decision.
+
+## 73. §26.4's other half: replay marks what was never measured
+
+§26.4 built `read_result` and closed by naming what it deliberately did not do:
+
+> A record whose read failed still carries the previous cycle's positions; what it now also carries
+> is the fact that they are not measurements. Replay marking them is a separate change.
+
+### The half that must not change, and it is the interesting half
+
+The obvious build treats a failed read as an unevaluable cycle and skips it. That is wrong twice.
+
+A cycle whose read failed replays **exactly**: the kernel's verdict is recomputed from the recorded
+desired values, the recorded timing and the resolved limits, and the read supplies none of them. So
+skipping it would report a window as non-deterministic on the strength of something determinism does
+not depend on. And the robot really did produce that verdict from that fill — reproducing it is the
+recording being faithful, not the replay being fooled.
+
+So `Replay::deterministic()` is untouched and `Replay::observations_measured()` is new beside it.
+A window can reproduce perfectly and have been measured on none of its cycles, and a consumer that
+reported the first without the second hands an investigator a green tick over a window nobody read.
+
+### Three states, and the third is not a tidy-up
+
+`Measured`, `Fill(errno)`, `Unrecorded`. Folding a schema-1 recording into `Measured` is the exact
+reading §26.4 exists to prevent — *"a reader that ignored the byte would read every older recording
+as a robot whose every read succeeded"* — and folding it into `Fill` would invent a fault in a
+window that may have had none.
+
+Counts rather than a list, because the arithmetic decides it: a driver that stops answering for one
+second at 1 kHz produces a thousand of them, and a list somebody has to scroll past is a worse
+answer than a number they can act on. What is actionable is beside it — the distinct `errno`s,
+bounded by the vocabulary rather than by the window, because a timeout and a faulted drive lead to
+different investigations.
+
+`observation_note()` is the one sentence every consumer owes a reader, rendered once rather than
+spelled three ways (§78). §15's `telemetry.replay.deterministic` appends it to **both** its pass and
+its failure.
+
+### One fixture bug worth recording
+
+The first version of the test asserted three cycles agreed and got three divergences. The fixture
+was wrong, not the code: `desired` is `f32` and `command` is `f64`, so a recorded `0.1` compares
+against a recomputed `0.10000000149011612`. Changed to `0.25`, which is exact in both. Worth writing
+down because the failure looks like a replay defect and is a property of the record's own widths.
+
+## 74. §15's isolation reaches the kernel, which is the rung below the manager
+
+§15's `safety.policy.isolation` has been walking down a ladder one rung at a time, and it had one
+left. §59 asserted the **argv** — what was requested. §62 read the unit back with `systemctl show` —
+what the **manager holds**. Both are records of a request. What a process is actually held to is the
+kernel's, and a directive the manager accepted, stored and reports happily can fail to be applied by
+the kernel underneath it, with every layer above going on saying it landed.
+
+So the daemon now reads `/proc/<MainPID>/status` on the unit's own process and compares the two
+facts a kernel exposes per process — `NoNewPrivs` and the capability bounding set — against what the
+unit claims. **A disagreement between the layers is its own failure**, and it is the most
+interesting result this test can produce: a robot whose service manager and whose kernel do not
+agree about a sandbox is a robot whose sandbox nobody can describe.
+
+### Two rather than seven, said rather than implied
+
+`NoNewPrivs` and `CapBnd` are the two directives in `confinement_properties` the kernel exposes
+per-process and unambiguously. The five `Protect*` directives are mount namespaces, and what a
+namespace contains is not a line in `status` — verifying those from inside means attempting a write
+and reporting what happened, which is a probe rather than a reading. Checking two and saying two
+beats checking two and implying seven.
+
+`CapBnd` is compared as a **mask parsed from hex** and not against the literal
+`0000000000000000`, because a string comparison is a check a future kernel could break by printing
+a different width.
+
+### Three outcomes, and the skip is the one with the argument in it
+
+* **Fail** when the layers disagree, naming both readings.
+* **Skip** when `/proc` will not describe the process — fail-closed the other way would report a
+  sandbox defect where the finding is that nothing could be measured, and passing would be the
+  manager's record standing in for the kernel's, which is the substitution this rung exists to stop.
+* **Pass** only when both agree, and the sentence says the kernel was read *from /proc rather than
+  from the manager's record of what it was asked for*.
+
+### And the e2e asserts the rung, not just the word
+
+A pass that had only reached the manager's record still prints "pass". So the script greps for the
+kernel clause separately — otherwise the check goes quiet on exactly the machine where `/proc`
+stopped answering. Verified on a real confined unit under WSL's systemd: `NoNewPrivs: 1`,
+`CapBnd: 0000000000000000`, read off the running process.
+
+### What it still does not establish, restated more precisely
+
+An observation is not an attempt. The demonstration §15 wants — a package that *tried* the forbidden
+hold and was stopped — needs two things, and the second was not obvious: a package built to try, and
+a manager running **as root**. On a rootless user manager most of these directives forbid something
+the user could not do anyway, so a refusal there would prove nothing about the sandbox. That is now
+in §73 rather than in somebody's head.
+
+## 75. `farewell()` — taken off the buildable list, because it is a decision
+
+§82.4's goodbye has no caller and the reason is *"the daemon has no shutdown path — systemd stops it
+with a signal, and installing a handler needs `unsafe`, which this crate forbids."* Three ways
+across that, and **every one crosses a boundary this repository drew deliberately**:
+
+| | What it costs |
+|---|---|
+| a signal handler | widening the `unsafe` exemption list, which CI enforces as an invariant over five crates |
+| an admin `POST /shutdown` the unit's `ExecStop=` calls | a new route that stops the supervisor — a security surface §39.1's table governs |
+| a separate `skynetd goodbye` process | it cannot know whether the name was **held**, and `farewell()`'s guard exists because withdrawing a name you never held tells every cache on the link to drop the records of whichever robot does own it |
+
+A clean shutdown would also be worth a black box event, and that vocabulary is closed and CI-checked
+— a fourth boundary.
+
+§82.4 already accepts the TTL as the answer for a robot that is switched off, and §83.3's desktop
+applications watch through a platform resolver that notices a robot going away without a goodbye. So
+this is not urgent, it is not blocked on work, and picking one of three boundaries to cross is not a
+call to make quietly. It moves from *buildable* to *open, and needs a decision*.
+
+## Run
+
+```
+cargo test --workspace  — 1,602 passed, 0 failed, 7 ignored (Windows)
+cargo clippy --workspace --all-targets — clean;  cargo fmt --all --check — clean
+sh crates/skynetd-io/e2e.sh (WSL, systemd) — all checks passed
+python editions/python/run_corpus.py — 1,137 of 1,137
+check-golden-path — 50 commands;  scale-report --check — §73 matches the tree
+check-mirrors, check-contract-mirrors — all shared documents match
+```
+
+**`cargo fmt --all` also reformatted three files nothing in these rounds touched** —
+`skynet-contracts/src/media.rs`, `skynet-corpus/src/lib.rs` and `skynetd-io/src/limits.rs`, all
+struct literals rustfmt breaks across lines. So `cargo fmt --all --check` was red at HEAD as well,
+and it is the same cause as §69: **nothing has been pushed**, so the `rust` job has never run on any
+of this work. Two of CI's four checks were failing on a tree whose log recorded them as clean, and
+neither could have been noticed locally without running them. They pass now.
+
+## What round nineteen leaves
+
+* **The five remaining conditions** — homing, stop, guard_hold, guards, policy. Each needs a
+  producer before it needs a mapping.
+* **A package that attempts the forbidden hold**, which now has a second prerequisite written down:
+  a root manager.
+* **A guard active with no producer** (§80). Still a decision.
+* **The mapping half of §47.6**, and the capture backend behind it.
+* **`farewell()`'s caller** (§82.4). Moved to *needs a decision*; the three options and what each
+  costs are in §75 above.
+
+# Round twenty — 2026-09-07
+
+Three decisions taken by the owner, and the first of them built. §27 now decides from four of its
+eight conditions.
+
+## 76. The three decisions, recorded where they were open
+
+| Open since | Decided |
+|---|---|
+| §27's `stop`, once the producer was found (§77 below) | **`stopping`, fail-closed.** Its own cause, and never a completed stop |
+| §80's guard active with no producer | **A third state.** `active` / `unavailable` / a new one for *inputs resolve and no reading is coming* |
+| §82.4's `farewell()` caller | **A shutdown command**, called from the unit's `ExecStop=` |
+
+The second and third are not built yet and are named here so the queue is the decision list rather
+than a memory of a conversation.
+
+## 77. §27's `stop`: the producer was already in the record
+
+The five remaining conditions have been listed as *"each needs its own producer before it needs a
+mapping"* since round seventeen. That was right about four of them and wrong about one:
+`SKR_FLAG_ESTOP` is §24's first state flag, `Cycle::state_flags` has carried it since the format was
+written, and it is in **the same record, on the same newest cycle, over the same interval** the RHAL
+is read from. Nothing had to be produced. It had to be read.
+
+### The vocabulary question, which is why this was a decision and not a mapping
+
+§27's `stop` wants a **cause**, and the four that existed are the kernel's own decisions: it
+evaluated a guard, or a person asked, and it commanded a stop. An open hardware chain is none of
+those — it is the body reporting a fact that happened whether or not any software agreed.
+
+The tempting fold is onto `operator`, and it is wrong. §24 gives the chain **one bit**: a robot can
+say the chain is open and cannot say what opened it, and a light curtain, a door interlock and a
+safety relay noticing itself fail all open the same chain as the button on the chassis. `operator`
+means *a person asked*, so that mapping would put a name on an event that has none — §64's own rule
+that a message misdescribing what happened is a defect rather than a wording choice.
+
+So `estop` is a fifth cause, in a list three editions had closed at four, with `stopping_estop`
+beside it. The reference edition, the Rust contract, the Python edition, the closed-set vocabulary
+and three corpus cases.
+
+### It never reports the stop as finished, and that is the whole of the trade
+
+§27 pairs a stop with `stop_settled`, and **no edition can observe it for a hardware stop**. The bit
+says the chain is open; it says nothing about whether the body has come to rest. A daemon setting
+`stop_settled` here would be claiming to have watched a robot stop moving.
+
+So it stays false, the machine derives `stopping`, and the consequence is written down rather than
+discovered: a robot whose chain has been open for an hour goes on reporting `stopping`. That is the
+strongest thing this evidence supports, and it is fail-closed in the only direction that is safe —
+it can hold a robot and can never release one. Two corpus cases pin **both** halves, so the absence
+is a reading rather than a rule the machine hard-codes: a caller who genuinely watched the body come
+to rest supplies `stop_settled`, and §27 answers `stop_complete` for `estop` exactly as it does for
+the other four.
+
+### A fill value is not a reading of the chain, in either direction
+
+A cycle whose `read_state` failed carries the **previous** cycle's flags (§26.4). Reporting `Clear`
+off one would be §26.4's own failure a field further along; reporting `Asserted` off one would raise
+a stop nobody observed. It is `Unobservable`, and §27 is already holding such a robot through
+`rhal`, which reads the same record and answers `Lost` wherever this answers `Unobservable`.
+
+### Three things the run corrected that reading could not
+
+**The test that used `"estop"` as its example of a made-up cause.** `unreadable_fields_fall_back...`
+fed the parser `"stop":"estop"` precisely because the vocabulary did not contain it — and then the
+vocabulary grew to contain it, so the test began asserting that a real cause parsed to nothing.
+Replaced with `"emergency"`, and the lesson kept in the comment: a fixture whose whole point is that
+a string is *not* in a closed set has to be reread whenever the set changes, because nothing else
+will notice.
+
+**The corpus caught an incomplete transcription, which is what it is for.** The Python edition
+declares its vocabularies by hand in `vocabulary.py`, transcribed from the reference rather than
+generated from the corpus — deliberately, since an edition generated from the corpus agrees with it
+by construction and proves nothing. Updating `opstate.py` and not `vocabulary.py` failed two cases
+immediately.
+
+**And the e2e assertion was wrong about §27's own rule.** It asserted that an open chain moves the
+robot to `stopping`. It does not: that robot was already `safe` — nothing had read its body when the
+daemon started — and §27 makes `SAFE` **sticky**, needing a named human clearance to leave. A stop
+arriving at a robot that is already safe cannot make it less safe. The corrected check asserts
+exactly that, which is a stronger statement than the one it replaced.
+
+### Run against a real driver, not a flag a test wrote
+
+`drivers/mock` latches its estop from the first read when opened with `fault=estop`, so the e2e
+drives `skynetk` against a driver whose chain is genuinely open and reads the result back through
+`skynetd` on the socket:
+
+```
+✓ stop   the emergency-stop chain is open on the newest cycle. §24 gives it one bit, so what
+         opened it is not knowable from here — a light curtain and a door interlock open the
+         same chain as the button
+✓ and the robot stays safe: a stop cannot make a safe robot less safe (§27)
+✓ and never as a completed stop — nothing watched the body come to rest (§27)
+```
+
+### The count moved itself
+
+Four surfaces state how many of §27's conditions are observed, and none of them was edited by hand:
+`observed.rs` derives it, and round eighteen's `scale-report --check` caught all four documents in
+one run — §73's `§27` row, §73's `Audio` row, §81's closing paragraph and the README. That is the
+mechanism doing exactly the job it was built for two rounds ago, on its first real change.
+
+`skynet state`'s printer needed one fix the state words could not give it: `stop` has no state word
+— an open chain is a boolean — so a mark derived only from `state` drew a green tick beside a robot
+its own detail said had been stopped by hardware. The same class of error the printer already had to
+fix for `kernel`, and the second time in two rounds, which is why the finding is now read off the
+block rather than off a vocabulary.
+
+## Run
+
+```
+cargo test --workspace  — 1,604 passed, 0 failed, 7 ignored (Windows)
+cargo clippy --workspace --all-targets — clean;  cargo fmt --all --check — clean
+sh crates/skynetd-io/e2e.sh (WSL, systemd) — all checks passed
+python editions/python/run_corpus.py — 1,140 of 1,140, both editions
+check-golden-path — 50 commands;  scale-report --check — §73 matches the tree
+check-mirrors, check-contract-mirrors — all shared documents match
+```
+
+## What round twenty leaves
+
+* **§80's third guard state**, decided and not yet built.
+* **§82.4's shutdown command**, decided and not yet built — and it brings a second question with it:
+  a clean shutdown is worth a black box event, and that vocabulary is closed and CI-checked.
+* **The four remaining conditions** — homing, guard_hold, guards, policy. `stop` is off the list;
+  these four have no producer in any record, and `homing` is the one worth restating: it is a
+  driver-side fact §24 gives no flag for, so it needs an ABI change rather than a reader.
+* **A package that attempts the forbidden hold**, which needs a root manager as well as a package.
+* **The mapping half of §47.6**, and the capture backend behind it.
+
+# Round twenty-one — 2026-09-07
+
+§80's guard-with-no-producer, decided and built. The second of the three.
+
+## 78. `inert` — the third guard state
+
+§7.2 partitioned guards into **active** and **unavailable**, and §80 recorded the case those two
+could not describe: a body that declares a person detector resolves `proximity` *active*, every
+input the resolver can see is present, and nothing on any robot fills `cycle.nearest_person_m`. The
+guard is reported as running and will never trip — and *active* is what every surface in the system
+renders as **protection**.
+
+### Why not `unavailable`, which was the tempting fold
+
+The two mean different things to different people. `unavailable` is *an input this robot does not
+have*, and its remedy is to fit a sensor or write a profile. An inert guard has both and wants a
+**producer in the operating system**. A fleet operator sent to check wiring that is fine has been
+told the wrong thing, and §64 makes that a defect rather than a wording choice.
+
+### The input, which is not the one that already existed
+
+`available.people_detection` is the **body's** claim, out of §5's descriptor: this machine has a
+sensor that detects people. The new `available.proximity_reading` is the **operating system's**:
+something running here fills that field every cycle. A robot can have the first without the second
+and every robot that exists does — which is exactly what §7.2's two states could not express.
+
+Checked **after** the missing-input test, and the order is the design: a robot with no detector is
+`unavailable`, not inert. Two corpus cases pin both sides of that ordering.
+
+### `skynetd` sets it to a constant `false`, and that is the honest value
+
+Nothing in this operating system fills `cycle.nearest_person_m`: §25.1's assembler has no vision
+path, §47.6's mapping half is unwritten, and no backend infers on one. It is a **field** rather than
+a branch in the resolver so that the day a producer exists, that is the line that changes.
+
+### What it touched, and what the corpus caught on the way
+
+Three editions, the wire, both repositories:
+
+| | |
+|---|---|
+| `reference/typescript/safety.ts` | the partition, the third bucket, the new flag |
+| `crates/skynet-kernel/src/lib.rs` | `InertGuard`, `ResolvedLimits::inert_guards` |
+| `editions/python/skynet_os/safety.py` | the same, transcribed |
+| `checkin.ts` / `checkin.rs` / `checkin.py` | `GuardReport.inert`, carried across §17 rather than recomputed on the Hub (§78) |
+| `shape.ts` / `safety.rs` / `safety.py` | the shaped documents the corpus compares |
+| `reference/wire/checkin.json` | re-frozen, and resynced to the Hub |
+| the Hub's `lib/skynet/os/` | `checkin.ts`, `safety.ts`, the wire fixture, and two new tests |
+
+The corpus caught **three** incomplete transcriptions in a row, each one a real gap rather than a
+formality: the Python partition, the Python check-in shape, and the Rust `ResolvedLimits` shape.
+Every one of them would have shipped an edition that agreed about the guard and disagreed about the
+document describing it. §31.4's whole argument, three times in one afternoon.
+
+### One mistake worth writing down
+
+Syncing the Hub's copies by `cp` overwrote its **import specifiers**, which are the one legitimate
+difference the mirror check normalises — the reference is standalone and uses explicit `.ts`
+extensions, the Hub resolves through its bundler and takes `SafetyEnvelope` from its own object
+model. The check said "4 line(s) differ" and a plain diff of the two files said nothing, because the
+difference is the thing the comparison rewrites. Restored by hand; the lesson is that `--sync` is
+the tool and `cp` is not.
+
+### And the test the decision was raised by
+
+`a_declared_detector_activates_a_guard_nothing_can_trip` asserted **active** — correctly, under a
+partition that could not express this robot. It is now
+`a_declared_detector_with_no_producer_resolves_inert` and asserts all three: not active, not
+unavailable, and inert with the reading named. The `unmeasured` list it also checked stays, because
+the partition tells a console how to draw the guard and that list tells a person which reading is
+absent.
+
+## Run
+
+```
+cargo test --workspace  — 1,604 passed, 0 failed, 7 ignored (Windows)
+cargo clippy --workspace --all-targets — clean;  cargo fmt --all --check — clean
+python editions/python/run_corpus.py — 1,142 of 1,142, both editions
+npx tsc -p . — clean
+Hub: npx vitest run — 1,891 passed, 84 files;  npm run typecheck — clean
+check-golden-path — 50 commands;  scale-report --check — §73 matches the tree
+check-mirrors, check-contract-mirrors — all shared documents and contracts match
+```
+
+## What round twenty-one leaves
+
+* **§82.4's shutdown command**, decided and not yet built — the last of the three. It brings a
+  second question with it: a clean shutdown is worth a black box event, and that vocabulary is
+  closed and CI-checked.
+* **The four remaining conditions** — homing, guard_hold, guards, policy. None has a producer in
+  any record; `homing` is a driver-side fact §24 gives no flag for, so it needs an ABI change
+  rather than a reader.
+* **A package that attempts the forbidden hold**, which needs a root manager as well as a package.
+* **The mapping half of §47.6**, and the capture backend behind it — which is also what would flip
+  `proximity_reading` to true and make §78's new state stop applying to every robot.
+
+# Round twenty-two — 2026-09-07
+
+§82.4's goodbye, which had no caller for eleven rounds. The last of the three decisions.
+
+## 79. `POST /shutdown` — the daemon can be asked to stop
+
+`farewell()` has built RFC 6762 §10.1's withdrawal since the responder was written and `skynetd`
+never sent one, so a robot switched off cleanly stayed in every browser's cache on the link until
+the 120-second TTL expired. The reason it stayed open is worth restating, because it is not that
+nobody got to it: **all three ways across cross a boundary this repository drew on purpose.**
+
+| | What it costs |
+|---|---|
+| a signal handler | widening the `unsafe` allow-list CI enforces over six crates |
+| a separate `skynetd goodbye` | it cannot know whether the name was ever **held**, and `farewell()`'s guard exists because withdrawing a name you never held tells every cache on the link to drop the records of whichever robot does own it |
+| a route | a credential that can reach the socket can stop the supervisor |
+
+The owner chose the route. What it costs is now written in three places — the route's own header,
+§39.1's table entry, and §82.4 — rather than discovered by whoever finds out first.
+
+### Admin, by an entry rather than by the fall-through
+
+`auth`'s table already defaults an unrecognised route to `Role::Admin`, so this would have been
+admin without a line. It has one anyway, carrying the argument §39.1 makes about `unpair`: a robot
+whose supervisor is not running applies no desired state, launches nothing and answers nobody, and
+only systemd can start it again. That is the destructive half of an admin action.
+
+It is emphatically **not** §39.1's `POST /stop`, which is anonymous on purpose because a stop must
+never wait for a credential. A test asserts an operator gets 403 and an anonymous caller gets 401,
+and that neither leaves a request behind — because the confusion between the two routes is one an
+operator can make under pressure, and the one that is open must stay the one that stops the body.
+
+### The route stops nothing, and that is the design
+
+It records **who asked**; the loop performs it. It has to: the responder is another thread, the
+recording is the loop's to seal, and the handler is running inside a connection the caller is still
+waiting on. So the answer goes back first and the daemon exits at the top of its next turn — §33.3's
+shape, where the API states an intent and the loop converges on it.
+
+One `AtomicBool` each way carries the request to the responder and the acknowledgement back. `std`
+has that without the `unsafe` a signal handler needs, which is the boundary that kept this shut.
+
+### The order, and the two bounds
+
+**The name first**, because it is the only part with a deadline: every millisecond spent sealing is
+a millisecond an operator's list is wrong. The wait for the acknowledgement is **bounded at one
+second**, after which the daemon exits anyway and says the name was not withdrawn — a lost goodbye
+is the case the TTL exists for and is not a reason to keep a robot running. A daemon started without
+`--lan` runs no responder and does not wait at all.
+
+**Then §13's window**, sealed with `Reason::Shutdown` — which already existed, and whose doc is this
+case in one line: *"the robot is shutting down and the window would otherwise be lost."* That is
+why the second question this decision brought with it answered itself: **no new black box event was
+needed.** Sealing writes §26's `sealed` record, so a clean stop is *in* the recording rather than
+being the moment it goes quiet, and the closed, CI-checked event vocabulary stayed closed.
+
+The exit code is **zero**, deliberately: `ExecStop=` runs this and systemd reads the daemon's own
+exit, so a non-zero code would put a robot that stopped exactly as intended into `failed` on every
+fleet dashboard that reads unit state.
+
+### The unit file
+
+`ExecStop=-/usr/bin/skynet shutdown …`, prefixed with `-` so a failure never blocks a stop — a robot
+that cannot reach its own socket has already lost its supervisor, and refusing to stop would turn a
+lost goodbye into a hung unit. `TimeoutStopSec=15s` is the ceiling past which systemd sends the
+signal, which is the behaviour that existed before this, so the worst case is unchanged.
+
+### Two things only a run found
+
+**The Windows suite cannot see the daemon's loop.** `cargo test --workspace` passed on Windows with
+`seal()`'s arguments reversed and its return type wrong, because `skynetd`'s main loop is Linux-only
+code Windows never type-checks. Round eighteen added a Windows job for the mirror-image failure —
+code that exists only on Windows — and this is the other half of the same asymmetry: **the two
+platforms compile different subsets, and each is blind to the other's.** CI's `rust` job on ubuntu
+would have caught this one, which is the arrangement working; what caught it here was running the
+e2e under WSL rather than trusting a green suite.
+
+**A credential added after the daemon starts does not exist to it.** The daemon reads its
+credentials once, at start, so the first version of the e2e step asked for a shutdown with a token
+the running process had never heard of and got a 403. The script's own §5 already does this in the
+right order; the new step now does too.
+
+### Run for real, on a machine with systemd
+
+```
+✓ the shutdown is accepted, and says it stops the supervisor not the robot
+✓ and the daemon exits on its own, with nothing signalled (§82.4)
+✓ it sealed the window, naming the reason
+✓ and said so plainly
+✓ and the sealed window is on the robot
+✓ and it withdrew its mDNS name
+```
+
+Nothing in that step sends a signal, so a process still running afterwards would be a shutdown path
+that does not work rather than one that is slow. The withdrawal itself is asserted only where a
+responder bound 5353 — on a developer machine Avahi holds it, and there is then no name to give up.
+
+## Run
+
+```
+Windows:  cargo test --workspace — 1,606 passed, 0 failed;  clippy clean;  fmt clean
+Linux:    cargo test --workspace — 1,676 passed, 0 failed;  clippy clean;  fmt clean
+          sh crates/skynetd-io/e2e.sh (systemd) — all checks passed
+python editions/python/run_corpus.py — 1,142 of 1,142, both editions
+check-golden-path — 51 commands;  scale-report --check — §73 matches the tree
+check-mirrors, check-contract-mirrors — all shared documents and contracts match
+```
+
+## Where this leaves the OS
+
+All three of the owner's decisions are built. What remains is, in every case, waiting on something
+that is not a decision and not code anybody can write today:
+
+* **The four remaining §27 conditions** — homing, guard_hold, guards, policy. None has a producer in
+  any record. `homing` is the sharpest: it is a driver-side fact §24 gives no flag for, so it needs
+  an **ABI change** rather than a reader, and the ABI is the one thing in this system a vendor
+  compiles against.
+* **A package that attempts the forbidden hold** (§15). Needs a package built to try *and* a
+  manager running as root — on a rootless user manager the directives forbid things the user could
+  not do anyway, so a refusal proves nothing.
+* **The mapping half of §47.6 and a capture backend.** Per-OS code plus hardware, and it is also
+  what would flip `proximity_reading` to true and stop §80's new `inert` state applying to every
+  robot that exists.
+* **Everything §73's last column already names as hardware**: real drivers, the safety MCU, a TPM,
+  §36.4's brownout input, RAUC, a physical joint.
+
+§73's own summary of itself is now true without qualification: every subsystem that can be built
+without hardware has been.

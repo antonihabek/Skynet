@@ -137,12 +137,19 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
     // condition therefore reports unobservable rather than down. A daemon that reported the kernel
     // down before it had opened the recording would be announcing a fault it had not looked for.
     observe_state(&mut daemon, None);
+    // The count is derived, never typed. Three surfaces stated it by hand and one of them was
+    // wrong on every pass — see `crate::observed`, which is the only thing in this process that
+    // knows how many of §27's conditions were looked at.
+    let seen = skynetd_io::observed::Observed::of(
+        &daemon.kernel_sighting,
+        &daemon.rhal_sighting,
+        &daemon.stop_sighting,
+    );
     eprintln!(
         "skynetd: §27 state is `{}`, because {}. §33.4's barrier is `{}` says {}, narrowed by that \
-         state — and the state rests on three of §27's eight conditions: the self-test, the \
-         kernel and the RHAL, the last two read off §13's ring rather than off systemd, because a \
-         hung kernel is an active unit. The other five are on §33.1's side of the line and there \
-         is no channel to ask.",
+         state — and the state rests on {}: {} — {}. Those are on §33.1's side of the line and \
+         there is no channel to ask. The kernel and the RHAL are read off §13's ring rather than \
+         off systemd, because a hung kernel is an active unit.",
         daemon.operating_state.as_str(),
         // The reason as well as the state. `safe` on its own reads as a robot somebody stopped
         // rather than as a robot nothing has observed, and those send an operator to opposite ends
@@ -153,7 +160,10 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
             "yes"
         } else {
             "no"
-        }
+        },
+        seen.tally(),
+        seen.in_prose(),
+        seen.unobserved_clause(),
     );
     if let Some(reason) = daemon.desired_source.because() {
         // Reported at every start, because §33.8's ladder is exactly the thing an operator needs to
@@ -431,10 +441,31 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         // uploads a window — so a responder polled between passes answers a browse that stopped
         // listening, and at `--interval 1000` a robot took **six seconds** to take its own name
         // rather than 750 ms. Measured, on a robot doing nothing else.
+        // §82.4's goodbye needs the responder, and the responder is on the other thread. An
+        // `AtomicBool` each way rather than a channel: one bit is the whole of the message, and
+        // `std` has this without the `unsafe` a signal handler would need — which is the boundary
+        // that kept this open for eleven rounds.
+        let withdraw = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let withdrawn = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // False when no responder is running, so the loop below does not wait for a thread that
+        // was never started — a robot with no `--lan` has no name to withdraw.
+        let advertising = discovery.is_some();
+
         if let Some(mut discovery) = discovery {
+            let withdraw = std::sync::Arc::clone(&withdraw);
+            let withdrawn = std::sync::Arc::clone(&withdrawn);
             std::thread::spawn(move || {
                 let mut announced: Option<String> = None;
                 loop {
+                    // Checked at the top, before the poll: the goodbye is the last datagram this
+                    // responder sends, and a pass that announced first would put a record on the
+                    // link a millisecond before withdrawing it.
+                    if withdraw.load(std::sync::atomic::Ordering::Acquire) {
+                        discovery.farewell();
+                        println!("skynetd: mDNS withdrew {} (§82.4)", discovery.instance());
+                        withdrawn.store(true, std::sync::atomic::Ordering::Release);
+                        return;
+                    }
                     let now = monotonic(origin);
                     discovery.poll(now, jitter_for(now));
                     // Printed on every **change**, not once. A robot that takes its name and then
@@ -567,6 +598,67 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                         Err(_) => break,
                     }
                 }
+            }
+
+            // §82.4, at the top of the turn after the one that took the request. The route
+            // records who asked and this performs it, for the reason `api::shutdown` gives: the
+            // responder is another thread and the recording is this loop's to seal.
+            if let Some(actor) = daemon.shutdown_requested.take() {
+                eprintln!("skynetd: stopping, asked by `{actor}` (§82.4)");
+
+                // The name first, because it is the only part with a deadline: a browser that
+                // caches this robot holds it for the TTL, and every millisecond spent sealing is a
+                // millisecond an operator's list is wrong.
+                if advertising {
+                    withdraw.store(true, std::sync::atomic::Ordering::Release);
+                    // Bounded, and it is a *wait* rather than a join because the thread owns
+                    // sockets and this must not hang a shutdown on one that will not close. A
+                    // responder that has not answered in a second is one whose goodbye is lost —
+                    // which is the case the 120-second TTL exists for, and not a reason to keep a
+                    // robot running.
+                    let deadline = monotonic(origin).saturating_add(1_000);
+                    while !withdrawn.load(std::sync::atomic::Ordering::Acquire)
+                        && monotonic(origin) < deadline
+                    {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    if !withdrawn.load(std::sync::atomic::Ordering::Acquire) {
+                        eprintln!(
+                            "skynetd: the mDNS name was not withdrawn within a second, so this \
+                             robot stays in a browser's cache until the 120-second TTL expires \
+                             (§82.4)"
+                        );
+                    }
+                }
+
+                // §13's window, sealed rather than abandoned. `Reason::Shutdown` exists for exactly
+                // this — *"the robot is shutting down and the window would otherwise be lost"* —
+                // and sealing writes §26's `sealed` event, so a clean stop is **in** the recording
+                // rather than being the moment it goes quiet. That is why this needed no new event
+                // code: the black box vocabulary is closed and did not have to be widened.
+                if let Some(recorder) = recorder.as_mut() {
+                    let now_ns = monotonic(origin).saturating_mul(1_000_000);
+                    match recorder.seal(skynet_blackbox::seal::Reason::Shutdown, now_ns) {
+                        Ok((sealed, path)) => eprintln!(
+                            "skynetd: sealed {} ({} bytes) — reason shutdown (§13)",
+                            path.display(),
+                            sealed.bytes.len()
+                        ),
+                        // Reported and not fatal. A window that could not be sealed is a window an
+                        // investigator reads out of the ring instead, and refusing to exit would
+                        // leave `ExecStop=` waiting on a robot that is trying to stop.
+                        Err(error) => eprintln!(
+                            "skynetd: the window could not be sealed on shutdown: {error}. What it \
+                             holds is still in the ring."
+                        ),
+                    }
+                }
+
+                eprintln!("skynetd: stopped.");
+                // Zero, because this is a stop that was asked for. `ExecStop=` runs it and systemd
+                // reads the daemon's own exit; a non-zero code would put a robot that stopped
+                // exactly as intended into `failed` on every fleet dashboard that reads unit state.
+                return 0;
             }
 
             if !served {
@@ -1812,13 +1904,16 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
     // two. The cursor is advanced whether or not anything was counted, so an interval that saw
     // nothing is not re-counted into the next one and a robot cannot report a kernel live on the
     // strength of cycles from ten minutes ago.
-    let (kernel, rhal) = match recorder {
-        // Both off the same interval and the same records, because they are two readings of one
-        // fact and a robot whose kernel is turning while its driver has stopped answering has to
-        // report exactly that pair rather than a plausible-looking one of them.
+    let (kernel, rhal, stop) = match recorder {
+        // All three off the same interval and the same records, because they are readings of one
+        // instant and a robot whose kernel is turning while its driver has stopped answering has
+        // to report exactly that pair rather than a plausible-looking one of them. The stop joins
+        // them for the same reason: an open chain beside a silent kernel is a real state and two
+        // readings taken at two moments could show a combination that was never true.
         Some(recorder) => (
             recorder.sighting(daemon.kernel_sequence),
             recorder.body(daemon.kernel_sequence),
+            recorder.chain(daemon.kernel_sequence),
         ),
         None => (
             skynetd_io::blackbox::KernelSighting::Unobservable(
@@ -1827,11 +1922,14 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
             skynetd_io::blackbox::RhalSighting::Unobservable(
                 "this robot has no black box, so there is no record of a body read to read",
             ),
+            skynetd_io::blackbox::StopSighting::Unobservable(
+                "this robot has no black box, so there is no record of the emergency-stop chain",
+            ),
         ),
     };
     if let Some(recorder) = recorder {
         daemon.kernel_sequence = recorder.next_sequence();
     }
-    daemon.refresh_operating_state(wall_s(), &kernel, &rhal);
+    daemon.refresh_operating_state(wall_s(), &kernel, &rhal, &stop);
     daemon.refresh_safe_state();
 }

@@ -291,6 +291,28 @@ export interface ResolvedLimits {
   active_guards: Guard[]
   /** Guards specified but inoperable here, with the input that is missing. */
   unavailable_guards: Array<{ guard: Guard; missing: string[] }>
+  /**
+   * Guards whose declared inputs all resolve and whose per-cycle reading nothing produces (§80).
+   *
+   * The third state, and it exists because the first two could not describe a real robot. §7.2
+   * partitioned guards into *active* and *unavailable*, and `available.people_detection` opened a
+   * gap between them: a body that declares a person detector resolves `proximity` **active**, every
+   * input the resolver can see is present, and no cycle ever carries `nearest_person_m` — so the
+   * guard is reported as running and will never trip.
+   *
+   * That matters because *active* is what every surface renders as **protection**. A console, a
+   * check-in, a device page and `skynet limits` all draw this partition, and all four would show a
+   * robot as guarded against approach by a guard that cannot fire.
+   *
+   * It is not `unavailable`, and folding it there was the tempting simplification. `unavailable`
+   * means *an input this robot does not have*, and its remedy is to fit the sensor or write the
+   * profile. This one's inputs are all present and its remedy is a producer in the operating
+   * system, which is a different sentence to a different person.
+   *
+   * `reading` names the per-cycle field nothing fills, for §64's reason: a refusal that does not
+   * say what to fix is a defect rather than a message.
+   */
+  inert_guards: Array<{ guard: Guard; reading: string }>
   /** Provenance of the numbers. Null when the envelope declared none. */
   source: string | null
   /** Things an operator must read before this runs. */
@@ -367,6 +389,19 @@ export interface ResolveLimitsParams {
     imu?: boolean
     people_detection?: boolean
     legged?: boolean
+    /**
+     * Whether anything on this robot fills the per-cycle proximity reading (§80).
+     *
+     * A different fact from `people_detection`, and the distinction is the whole of the third
+     * state. `people_detection` is the **body's** claim, out of §5's descriptor: this machine has
+     * a sensor that detects people. This is the **operating system's**: something running here
+     * fills `cycle.nearest_person_m` every cycle.
+     *
+     * A robot can have the first without the second, and every robot that exists does — which is
+     * exactly the case §7.2's two states could not express. Absent is false, because a caller that
+     * has not said has not established it and a guard is never given the benefit of the doubt.
+     */
+    proximity_reading?: boolean
   }
 }
 
@@ -461,7 +496,7 @@ export function resolveLimits(params: ResolveLimitsParams): ResolvedLimits {
     })
   }
 
-  const { active, unavailable } = partitionGuards(params, maxDelta)
+  const { active, unavailable, inert } = partitionGuards(params, maxDelta)
 
   // Emitted only when the guard it is about will actually run. A robot with no collision geometry
   // is already being told the guard is unavailable, and adding "and its margin is unset" to that is
@@ -501,6 +536,7 @@ export function resolveLimits(params: ResolveLimitsParams): ResolvedLimits {
     grants: [],
     active_guards: active,
     unavailable_guards: unavailable,
+    inert_guards: inert,
     source: envelope?.source ?? transport?.source ?? null,
     notices,
   }
@@ -509,9 +545,14 @@ export function resolveLimits(params: ResolveLimitsParams): ResolvedLimits {
 function partitionGuards(
   params: ResolveLimitsParams,
   maxDelta: number | null,
-): { active: Guard[]; unavailable: Array<{ guard: Guard; missing: string[] }> } {
+): {
+  active: Guard[]
+  unavailable: Array<{ guard: Guard; missing: string[] }>
+  inert: Array<{ guard: Guard; reading: string }>
+} {
   const active: Guard[] = []
   const unavailable: Array<{ guard: Guard; missing: string[] }> = []
+  const inert: Array<{ guard: Guard; reading: string }> = []
   const { envelope, profile, available } = params
   const frames = params.frames ?? null
 
@@ -566,13 +607,35 @@ function partitionGuards(
     }
   }
 
-  for (const guard of GUARDS) {
-    const missing = missingFor(guard)
-    if (missing.length === 0) active.push(guard)
-    else unavailable.push({ guard, missing })
+  // Which per-cycle reading each guard acts on, for the guards whose reading can be absent while
+  // every declared input is present. Only `proximity` today: the other seven act on the command,
+  // the previous command, the clock or the frame graph, all of which the cycle always carries.
+  //
+  // A table rather than an `if` in the loop, so that adding a guard with the same shape is adding
+  // a row — and so the field name lives beside the guard it belongs to rather than in a branch.
+  const readingFor = (guard: Guard): { reading: string, produced: boolean } | null => {
+    if (guard !== 'proximity') return null
+    return { reading: 'cycle.nearest_person_m', produced: available.proximity_reading === true }
   }
 
-  return { active, unavailable }
+  for (const guard of GUARDS) {
+    const missing = missingFor(guard)
+    if (missing.length > 0) {
+      unavailable.push({ guard, missing })
+      continue
+    }
+    // Checked **after** `missing`, and the order is the point: a guard with no sensor is
+    // unavailable, not inert. Reporting a robot that has no person detector as "the reading is not
+    // coming" would describe a missing producer on a machine whose problem is a missing sensor.
+    const reading = readingFor(guard)
+    if (reading && !reading.produced) {
+      inert.push({ guard, reading: reading.reading })
+      continue
+    }
+    active.push(guard)
+  }
+
+  return { active, unavailable, inert }
 }
 
 // ── The per-cycle decision ───────────────────────────────────────────────────
