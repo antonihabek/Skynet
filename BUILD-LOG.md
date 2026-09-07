@@ -5005,3 +5005,105 @@ mirrors, contract mirrors, golden path, scale (§73 matches), edition report —
   within §33.1. Unchanged.
 * **The conformance flip for isolation.** Unchanged.
 * **Device confinement**, unblocked by a vendor runtime that reports accelerator memory.
+
+# Round fourteen — 2026-09-07
+
+## 65. `safety.policy.isolation`: the argv is not the sandbox
+
+Round eleven left this as one of four items, restated from round ten and half-delivered: §59
+had built the confinement, `e2e.sh` had read ten properties back off a real unit, and the
+conformance runner still reported the test **skipped** with a reason naming what would execute
+it. This is that.
+
+### Why two rounds, and why the first one could not finish it
+
+§59's confinement is seven `--property=` flags on `systemd-run` for every non-driver package,
+and the suite that covers it reads them back off `command_line`. That proves what was
+**requested**. §15 asks what a package is actually held to, and the two are different questions
+in every way that matters: **a directive systemd rejected, dropped, or does not support on this
+kernel produces exactly the same argv.**
+
+It is also the wrong *kind* of result. A check whose subject is this repository's own constant
+rather than this machine's state is an edition property — which is precisely what
+`safety.kernel.parity` two lines above it is skipped for being. A robot reporting one would be
+reporting on its compiler. So the old skip reason named the probe rather than hand-waving, and
+this round wrote it.
+
+### What the daemon now does
+
+`Launcher::confinement(id)` — a new trait method, beside `observe` and asking a different
+question of a different vocabulary — runs `systemctl show <unit> -p <directives>` and returns
+`Key=Value` pairs. `confinement_shortfall(kind, observed)` names every directive that did not
+land. Both halves are pure and tested on a machine with no systemd, which is most of them.
+
+Three decisions in twenty lines, each with an obvious wrong alternative:
+
+* **The comparison is on the whole `Key=Value` line, never the key.** `CapabilityBoundingSet=`
+  is asked for as the *empty* set, so a check that found the key and stopped would pass a unit
+  carrying `CapabilityBoundingSet=cap_sys_admin` — the exact failure the directive exists to
+  prevent. `e2e.sh` learned this in round eleven; the daemon inherits it, with a test that sets
+  that value and asserts the shortfall names it.
+* **A directive systemd did not report counts as not landed.** Fail-closed: an unreported
+  directive is one this code cannot show was applied, and a sandbox nobody can read is not a
+  sandbox anybody should certify.
+* **`--property=` is derived from `confinement_properties`, not typed beside it.** This is the
+  bug that would otherwise have been written later: a directive added to the launcher and
+  forgotten in the query comes back unreported, the shortfall counts it as not landed, and the
+  robot fails its own isolation test naming a directive that *was* applied.
+  `confinement_property_names()` removes the possibility rather than testing for it — and there
+  is a test that the two lists are the same length, so a name read and never compared is caught
+  too.
+
+### Which unit, and the three skips
+
+The route picks the first **running non-driver** package, by id. Which one hardly matters —
+`command_line` builds the same confinement for every policy, service and skill — and taking one
+keeps this a bounded read on a `GET`. *Non-driver* matters a great deal: §8.3 makes a driver
+native by design, so reading one and reporting its absent confinement as a failure would be
+this robot failing itself for obeying the specification.
+
+Skipped, never passed, in three cases, each naming what is missing: no sandboxed unit is
+running; the launcher records rather than launches (`--dry-run`, or no systemd); systemd would
+not describe the unit. `RecordingLauncher::confinement` returns an error saying so rather than
+an empty list — an empty list would make `--dry-run` **fail** a safety conformance test on a
+machine it never touched.
+
+`conformance::run` stays a function over facts: the observation is read in `api.rs`, where the
+I/O belongs, and passed in. A conformance runner that shelled out mid-check would be one nobody
+could test without a systemd.
+
+### What this session could and could not watch
+
+The verdict function is unit-tested in all four states — pass, fail naming the directive, and
+both skips. `e2e.sh` now calls `skynet conformance` and asserts **the pass** on a machine with
+systemd and **the skip** on one without.
+
+**This container is one without.** `systemd-run` is installed, `/run/systemd/system` does not
+exist, and PID 1 is `process_api`, so `systemctl --user is-system-running` answers `offline`.
+The e2e took its second branch and asserted the skip, correctly. So: the pass path has not been
+watched returning `pass` off a real unit **in this session**. Round eleven's machine had a user
+systemd and this one does not; the assertion is in the file and will run on the next machine
+that has one. Saying it is demonstrated would be exactly the "which we do not" this runner's own
+header warns about.
+
+### Run
+
+```
+cargo test --workspace  — 1,655 passed, 0 failed  (1,645 before; +10 in skynetd-io)
+cargo clippy --workspace — clean
+sh crates/skynetd-io/e2e.sh — all checks passed (systemd launch step did not run here)
+node tools/scale-report.mjs --check — §73 matches the tree
+```
+
+## What round fourteen leaves
+
+* **A package that attempts the forbidden hold.** Confinement landing is the mechanism; a probe
+  performing the hold and being stopped is the demonstration, and it needs a package built to
+  try. The test's own detail says so rather than implying the second from the first.
+* **The pass, watched on a real systemd.** In the file, not yet in a transcript.
+* **A guard active with no producer** (§80, raised in round thirteen). Still the sharpest open
+  item, and a decision rather than a field.
+* **The mapping half of §47.6**, and the capture backend behind it.
+* **Kernel liveness into the daemon's conditions, then skynetk in the e2e loop.** Design work
+  within §33.1.
+* **Device confinement**, unblocked by a vendor runtime that reports accelerator memory.

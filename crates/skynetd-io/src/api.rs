@@ -775,6 +775,61 @@ fn package_plan<L: Launcher, S: Slots>(
 /// invites a route that has a side effect. Neither check has one: `admit_package` and
 /// `admit_bundle` are pure functions over synthetic documents, nothing is written, nothing is
 /// staged, and running this route a thousand times leaves the robot exactly as it was.
+/// One running non-driver unit, with what systemd says its confinement is (§8.3, §59).
+///
+/// **Which unit**: the first running non-driver package, by id. Which one hardly matters —
+/// `command_line` builds the same confinement for every policy, service and skill — and taking one
+/// rather than all of them is what keeps this a bounded read on a `GET`. What does matter is
+/// *non-driver*: §8.3 makes a driver native by design, so reading one and reporting the absent
+/// confinement as a failure would be this robot failing itself for obeying the specification.
+///
+/// `None` means no sandboxed unit is running, which is a skip and not a pass. A robot running
+/// nothing has not demonstrated its sandbox; it has had no opportunity to.
+fn sandboxed_unit<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+) -> Option<crate::conformance::Confinement> {
+    let units = context.daemon.launcher.observe().ok()?;
+    let mut running: Vec<String> = units
+        .into_iter()
+        .filter(|unit| matches!(unit.state, skynetd::actual::UnitState::Running))
+        .map(|unit| unit.id)
+        .collect();
+    running.sort();
+
+    for id in running {
+        // The kind comes from the installed manifest, the same place the reconciler reads it. A
+        // kind this edition does not recognise is skipped rather than assumed: guessing would put
+        // a driver under a policy's expectations or the reverse, and both directions are wrong.
+        let Some(kind) = PackageId::parse(&id)
+            .ok()
+            .and_then(|package| context.daemon.store.active_digest(&package))
+            .and_then(|digest| context.daemon.store.manifest(&digest).ok())
+            .and_then(|manifest| {
+                manifest
+                    .get_present("kind")
+                    .and_then(Json::as_str)
+                    .and_then(skynetd::desired::PackageKind::parse)
+            })
+        else {
+            continue;
+        };
+        if kind == skynetd::desired::PackageKind::Driver {
+            continue;
+        }
+        let observed = context
+            .daemon
+            .launcher
+            .confinement(&id)
+            .map_err(|error| error.detail);
+        return Some(crate::conformance::Confinement {
+            package: id,
+            kind,
+            observed,
+        });
+    }
+    None
+}
+
 fn conformance<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let layout = context.daemon.store.layout().clone();
     let body = crate::embodiment::load(&layout);
@@ -791,7 +846,19 @@ fn conformance<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
         .into_iter()
         .map(|(_package, token)| token)
         .collect();
-    let run = crate::conformance::run(&capacity, &body, &limits, &grants, &at);
+    // §15's `safety.policy.isolation`, and the one input to this run that is I/O. It is read here
+    // rather than inside `run` for the reason every other input is: `run` is a function over facts
+    // about the machine, and a conformance runner that shelled out mid-check would be one nobody
+    // could test without a systemd.
+    let isolation = sandboxed_unit(context);
+    let run = crate::conformance::run(
+        &capacity,
+        &body,
+        &limits,
+        &grants,
+        isolation.as_ref(),
+        &at,
+    );
     crate::conformance::to_json(
         &run,
         body.known().is_some_and(|known| known.descriptor.simulator),

@@ -236,6 +236,29 @@ grep -q '"actor":"desired state' "$ROOT/data/state/audit.jsonl"   && pass "attri
 "$SKYNET" grants $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
 grep -q "sensing.camera.rgb" "$ROOT/out"   && fail "the grant outlived the pass that should have converged it away"   || pass "and the capability is gone from what the robot reports"
 
+# §15's `safety.policy.isolation`, run by the robot on itself against the unit systemd is
+# actually running. This is the half §59 could not do: that section built the confinement and the
+# suite asserted it at the argv layer, which proves what was *requested*. A directive systemd
+# rejected, dropped, or does not support on this kernel produces exactly the same argv — so until
+# the daemon read one back, the check was skipped and said so.
+#
+# It runs here rather than in the Rust suite because the subject is this machine. A conformance
+# result computed from `confinement_properties` would be this repository asserting its own
+# constant, which is what `safety.kernel.parity` is skipped for being.
+"$SKYNET" conformance $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+if [ "$STARTED" = "1" ]; then
+  grep -A3 "safety.policy.isolation" "$ROOT/out" | grep -q "pass" \
+    && pass "the robot executes safety.policy.isolation against its own running unit (§15)" \
+    || { fail "isolation did not pass on a confined unit:"; sed 's/^/      /' "$ROOT/out"; }
+  grep -q "not taken from the argv" "$ROOT/out" \
+    && pass "and says the directives were read back, not assumed" \
+    || fail "the pass does not say what it measured"
+else
+  grep -A3 "safety.policy.isolation" "$ROOT/out" | grep -q "skipped" \
+    && pass "no systemd here, so isolation is skipped naming what is missing — never passed" \
+    || fail "isolation was not skipped on a machine with no units"
+fi
+
 "$SKYNET" status $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
 grep -q "not provisioned" "$ROOT/out" && fail "still reported unprovisioned"   || pass "the robot no longer reports itself unprovisioned"
 

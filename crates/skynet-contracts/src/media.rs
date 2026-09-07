@@ -328,10 +328,7 @@ impl FramePool {
     /// The slot is pinned until [`release`](Self::release): publishing will reuse an older
     /// released slot first, and drop rather than reuse this one.
     pub fn acquire(&mut self, handle: &FrameHandle) -> Result<FrameIdentity, FrameRefusal> {
-        let slot = match self.locate(handle) {
-            Ok(index) => index,
-            Err(refusal) => return Err(refusal),
-        };
+        let slot = self.locate(handle)?;
         if self.slots[slot].identity.is_none() || handle.generation != self.slots[slot].generation {
             return Err(FrameRefusal {
                 code: FrameRefusalCode::StaleHandle,
@@ -354,10 +351,7 @@ impl FramePool {
 
     /// Return a loan. Refuses unknown, stale and already-released handles by name.
     pub fn release(&mut self, handle: &FrameHandle) -> Result<(), FrameRefusal> {
-        let slot = match self.locate(handle) {
-            Ok(index) => index,
-            Err(refusal) => return Err(refusal),
-        };
+        let slot = self.locate(handle)?;
         if self.slots[slot].identity.is_none() || handle.generation != self.slots[slot].generation {
             return Err(FrameRefusal {
                 code: FrameRefusalCode::StaleHandle,
