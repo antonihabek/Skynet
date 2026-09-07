@@ -186,7 +186,12 @@ struct ProfileOwned {
 /// envelope and no frames here, so the limits come out as though nobody had described the body —
 /// which is what a document nobody could read amounts to — and `GET /embodiment` is where the
 /// reason lives.
-pub fn read(layout: &Layout, body: &Body, tier: Tier) -> Owned {
+pub fn read(
+    layout: &Layout,
+    body: &Body,
+    tier: Tier,
+    proximity: &crate::blackbox::ProximitySighting,
+) -> Owned {
     let known = body.known();
     let descriptor = known.map(|known| &known.descriptor);
 
@@ -212,16 +217,18 @@ pub fn read(layout: &Layout, body: &Body, tier: Tier) -> Owned {
         people_detection: descriptor
             .is_some_and(skynet_contracts::embodiment::has_people_detection),
         legged: descriptor.is_some_and(|d| d.base == "legged"),
-        // §80's third state, and on this edition it is a constant `false` — which is the honest
-        // value rather than a placeholder. Nothing in this operating system fills
-        // `cycle.nearest_person_m`: §25.1's assembler has no vision path (§47.6's mapping half is
-        // unwritten) and no backend infers on one. So a body that declares a person detector
-        // resolves `proximity` **inert**, and every surface that renders the partition says the
-        // reading is not coming rather than drawing the guard as protection.
+        // §80's third state, and it is a **reading** off §13's ring rather than the constant
+        // `false` it was until 2026-09-07. The constant was the honest answer on this edition —
+        // nothing here fills `cycle.nearest_person_m` — and it carried the note *"the day a
+        // producer exists, this is the line that changes"*, which is precisely the shape that goes
+        // wrong silently: the day a producer existed, a robot would have gone on drawing the guard
+        // as inert with a detector filling the field on every cycle.
         //
-        // It is a field rather than a hard-coded branch in the resolver so that the day a producer
-        // exists, this is the line that changes.
-        proximity_reading: false,
+        // It is counted over an interval rather than taken off the newest cycle, because *does a
+        // producer exist* is not a state — see `ProximitySighting`. On a robot with no vision path
+        // the answer is still `false` and `proximity` still resolves **inert**; what changed is
+        // that the robot is now saying so because it looked.
+        proximity_reading: proximity.arriving(),
     };
 
     Owned {
@@ -410,9 +417,18 @@ impl Owned {
 /// guard whose every declared input resolves and whose per-cycle reading never arrives — and
 /// `inert` is carried here separately for that reason rather than folded into unavailable.
 ///
-/// The gap that remains is a declared sensor that fails at runtime: the descriptor goes on
-/// declaring it and nothing here notices. That is a per-cycle fact and belongs with the ring
-/// readings, and claiming it would be exactly the overreach this type is arranged against.
+/// The gap this named — *a declared sensor that fails at runtime; the descriptor goes on declaring
+/// it and nothing here notices* — is **half closed** since 2026-09-07, and it closed exactly where
+/// this paragraph said it belonged: with the ring readings. `available.proximity_reading` is
+/// counted off §13's ring by [`crate::blackbox::ProximitySighting`], so a person detector that was
+/// filling `cycle.nearest_person_m` and stops moves `proximity` from active to **inert** within an
+/// interval, and a console stops drawing protection the robot no longer has.
+///
+/// It is half rather than whole because that is the only sensor whose per-cycle reading appears in
+/// a record. An IMU that fails is still invisible here: §26 carries the base pose and twist a
+/// driver reported, not a per-sensor liveness, and `balance` resolves off the descriptor's `imu`
+/// declaration alone. Claiming otherwise would be exactly the overreach this type is arranged
+/// against.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GuardsSighting {
     /// No body has been described, so there is no partition to take. Not a reading.
@@ -863,8 +879,24 @@ mod tests {
         }
 
         fn resolve(&self, tier: Tier) -> Owned {
+            self.resolve_seeing(
+                tier,
+                &crate::blackbox::ProximitySighting::Unobservable("this bench has no ring"),
+            )
+        }
+
+        /// The same, with §80's proximity reading supplied.
+        ///
+        /// Separate rather than a fourth argument on `resolve`, because every case but one is
+        /// about the descriptor and the profile — and a bench where every call site had to name a
+        /// ring reading would bury the one case that is about it.
+        fn resolve_seeing(
+            &self,
+            tier: Tier,
+            proximity: &crate::blackbox::ProximitySighting,
+        ) -> Owned {
             let layout = self.layout();
-            read(&layout, &crate::embodiment::load(&layout), tier)
+            read(&layout, &crate::embodiment::load(&layout), tier, proximity)
         }
     }
 
@@ -1141,6 +1173,123 @@ mod tests {
 
         let document = to_json(&owned);
         assert_eq!(document.arr_or_empty("unmeasured").len(), 3);
+    }
+
+    /// A body whose vendor declared a person detector on a camera.
+    ///
+    /// Shared by the runtime-reading cases below, which differ only in what the ring counted.
+    const SEEING_ARM_FOR_RUNTIME: &str = r#"{
+        "robot_slug": "bench-arm",
+        "base": "fixed",
+        "dof": 1,
+        "envelope": { "joint_velocity_max_rad_s": 1.0, "joint_torque_max_nm": 80,
+                      "watchdog_ms": 100, "source": "vendor datasheet rev C" },
+        "sensors": [{"name": "torso_imu", "modality": "imu"},
+                    {"name": "head_cam", "modality": "rgb", "detects_people": true}],
+        "joints": [{"name": "shoulder", "type": "revolute", "control_modes": ["position"]}]
+    }"#;
+
+    /// A detector that was filling the reading and stops moves the guard to **inert**.
+    ///
+    /// The case §80 raised and could not test, because `proximity_reading` was a constant `false`
+    /// in two files. It is the runtime half of the gap `GuardsSighting`'s own header names — *"a
+    /// declared sensor that fails at runtime; the descriptor goes on declaring it and nothing here
+    /// notices"* — and the direction is the one that matters: the console stops drawing protection
+    /// the robot no longer has, without anybody editing a descriptor.
+    ///
+    /// Nothing about the body changes between the two resolutions. The only difference is what the
+    /// ring counted, which is the whole point.
+    #[test]
+    fn a_detector_that_stops_filling_the_reading_makes_the_guard_inert() {
+        use crate::blackbox::ProximitySighting;
+
+        let bench = Bench::new("proximity-runtime");
+        bench
+            .describe(SEEING_ARM_FOR_RUNTIME)
+            .profile(PROFILE_WITH_PROXIMITY);
+
+        let partition = |sighting: &ProximitySighting| {
+            bench
+                .resolve_seeing(ROBOT_TIER, sighting)
+                .with_resolved(|limits, _| {
+                    (
+                        limits
+                            .active_guards
+                            .iter()
+                            .any(|guard| guard.as_str() == "proximity"),
+                        limits
+                            .inert_guards
+                            .iter()
+                            .any(|entry| entry.guard.as_str() == "proximity"),
+                        limits
+                            .unavailable_guards
+                            .iter()
+                            .any(|entry| entry.guard.as_str() == "proximity"),
+                    )
+                })
+        };
+
+        // While it is producing. A detector slower than the control loop fills a minority of
+        // cycles, which is the expected shape rather than a fault — 120 of 4,000 is a 30 Hz sensor
+        // under a 1 kHz loop.
+        let (active, inert, unavailable) = partition(&ProximitySighting::Counted {
+            cycles: 4_000,
+            filled: 120,
+        });
+        assert!(active, "a reading that is arriving makes the guard active");
+        assert!(!inert);
+        assert!(!unavailable);
+
+        // The same robot, the same descriptor, one interval later, and the detector has stopped.
+        let (active, inert, unavailable) = partition(&ProximitySighting::Counted {
+            cycles: 4_000,
+            filled: 0,
+        });
+        assert!(
+            !active,
+            "a guard whose reading stopped arriving is not protection"
+        );
+        assert!(
+            inert,
+            "and it is inert rather than unavailable — the sensor is still declared and fitted"
+        );
+        assert!(
+            !unavailable,
+            "`unavailable` would send an operator to fit a sensor that is already there (§80)"
+        );
+    }
+
+    /// A reading nobody counted is not a reading that arrived.
+    ///
+    /// Fail-closed, and worth asserting explicitly because the other direction is available and
+    /// wrong: leaving the guard active on no evidence is a robot claiming to watch for people on
+    /// the strength of a file it could not open.
+    #[test]
+    fn a_proximity_reading_nobody_counted_leaves_the_guard_inert() {
+        use crate::blackbox::ProximitySighting;
+
+        let bench = Bench::new("proximity-unobserved");
+        bench
+            .describe(SEEING_ARM_FOR_RUNTIME)
+            .profile(PROFILE_WITH_PROXIMITY);
+
+        for sighting in [
+            ProximitySighting::Unobservable("no ring"),
+            ProximitySighting::Counted {
+                cycles: 0,
+                filled: 0,
+            },
+        ] {
+            let active = bench
+                .resolve_seeing(ROBOT_TIER, &sighting)
+                .with_resolved(|limits, _| {
+                    limits
+                        .active_guards
+                        .iter()
+                        .any(|guard| guard.as_str() == "proximity")
+                });
+            assert!(!active, "{sighting:?} must not resolve the guard active");
+        }
     }
 
     /// A vendor declares a detector, and the guard goes active on a robot that cannot see anyone.

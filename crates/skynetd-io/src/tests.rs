@@ -5706,6 +5706,123 @@ mod recorder {
         Recorder::open(&layout, supervisor_meta(&layout), shape, BUDGET).expect("a recorder")
     }
 
+    /// §80's proximity reading, and the two rules worth pinning are both about what is *not*
+    /// counted.
+    ///
+    /// **An interval, not an instant.** A detector at 30 Hz under a 1 kHz control loop leaves `NaN`
+    /// in almost every cycle, so a reading taken off the newest one — the way `rhal`, `stop` and
+    /// `homing` are taken — would report a working detector as absent nearly always, and flicker.
+    ///
+    /// **§26.4, one field along.** A cycle whose body read failed carries the previous cycle's
+    /// values, so it is counted in neither the numerator nor the denominator: a `NaN` in a fill is
+    /// not evidence that nothing produced a reading, and a number in one is not evidence that
+    /// something did.
+    ///
+    /// Driven through `ProximitySighting::of` rather than a disk, for the reason the kernel
+    /// condition's suite is: only a control loop can put a cycle in a ring (§26.2), so a test that
+    /// had to start one would be a rule nobody could check.
+    #[test]
+    fn the_proximity_reading_is_counted_over_an_interval_and_skips_a_failed_read() {
+        use crate::blackbox::ProximitySighting;
+        use skynet_blackbox::record::ReadOutcome;
+
+        fn cycle(read: ReadOutcome, nearest: f32) -> skynet_blackbox::Cycle {
+            skynet_blackbox::Cycle {
+                tick: 1,
+                observation: [0; 32],
+                policy: 0,
+                state_flags: 0,
+                fault_code: 0,
+                rhal_result: 0,
+                read,
+                state_seq: 1,
+                state_stamp_ns: 0,
+                command_stamp_ns: 0,
+                command_seq: 0,
+                mode: 0,
+                advisory: false,
+                response: None,
+                tripped: Vec::new(),
+                capability: skynet_blackbox::record::NO_CAPABILITY,
+                nearest_person_m: nearest,
+                base_pose: [f32::NAN; 7],
+                base_twist: [0.0; 6],
+                desired: Vec::new(),
+                command: Vec::new(),
+                mask: Vec::new(),
+                clamped: Vec::new(),
+                position: Vec::new(),
+                velocity: Vec::new(),
+                effort: Vec::new(),
+            }
+        }
+
+        // An interval with no cycles in it is not a reading.
+        assert!(!ProximitySighting::of(std::iter::empty()).observed());
+
+        // A slow sensor under a fast loop: two of eight cycles carry a number.
+        let slow: Vec<_> = (1..=8)
+            .map(|tick| cycle(ReadOutcome::Ok, if tick % 4 == 0 { 1.4 } else { f32::NAN }))
+            .collect();
+        let counted = ProximitySighting::of(slow.iter().cloned());
+        assert_eq!(
+            counted,
+            ProximitySighting::Counted {
+                cycles: 8,
+                filled: 2
+            }
+        );
+        assert!(
+            counted.arriving(),
+            "a minority of filled cycles is the expected shape for a slow sensor, not an absence"
+        );
+        assert!(counted.detail().contains("a producer exists"));
+
+        // Nothing produced one: counted, and not arriving. The count is carried because 0 of 4,000
+        // and 0 of 0 are different problems.
+        let none: Vec<_> = (1..=8).map(|_| cycle(ReadOutcome::Ok, f32::NAN)).collect();
+        let absent = ProximitySighting::of(none.iter().cloned());
+        assert_eq!(
+            absent,
+            ProximitySighting::Counted {
+                cycles: 8,
+                filled: 0
+            }
+        );
+        assert!(!absent.arriving());
+        assert!(absent.detail().contains("none carried"));
+
+        // A failed read carrying a number is counted in neither direction (§26.4).
+        let with_fill = vec![
+            cycle(ReadOutcome::Ok, f32::NAN),
+            cycle(ReadOutcome::Failed(-110), 1.4),
+            cycle(ReadOutcome::Unrecorded, 1.4),
+        ];
+        assert_eq!(
+            ProximitySighting::of(with_fill.into_iter()),
+            ProximitySighting::Counted {
+                cycles: 1,
+                filled: 0
+            },
+            "a fill value is not a reading in either direction (§26.4)"
+        );
+    }
+
+    /// A supervisor's own ring cannot answer the question at all.
+    ///
+    /// §26.2 gives `skynetd` the event channel and a control loop the cycle channels, so this is
+    /// every shipping robot — and the answer is `Unobservable` rather than *no producer*, because
+    /// those are different facts and only one of them is about a sensor.
+    #[test]
+    fn an_events_only_ring_says_nothing_about_a_proximity_reading() {
+        let root = TempRoot::new("proximity-events-only");
+        let recorder = open(&root, events_only());
+        let sighting = recorder.proximity(0);
+        assert!(!sighting.observed());
+        assert!(!sighting.arriving());
+        assert!(sighting.detail().contains("no action channels"));
+    }
+
     /// §27's `kernel` condition, off the records rather than off systemd.
     ///
     /// The three answers, in the order a robot meets them: a ring that cannot hold a cycle says
@@ -9506,6 +9623,7 @@ mod checkin {
                 &layout,
                 &crate::embodiment::load(&layout),
                 crate::limits::ROBOT_TIER,
+                &crate::blackbox::ProximitySighting::Unobservable("this fixture has no ring"),
             ))),
         )
     }

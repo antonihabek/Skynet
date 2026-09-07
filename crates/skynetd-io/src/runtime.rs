@@ -325,6 +325,13 @@ pub struct Daemon<L: Launcher, S: Slots> {
     /// Off §24's two-bit field on the same newest cycle as `stop`, and refused on the same terms:
     /// §26.4 fills a failed read's flags from the previous cycle, so they are not a reading.
     pub homing_sighting: crate::blackbox::HomingSighting,
+    /// What the last pass could see of §80's proximity reading.
+    ///
+    /// Not one of §27's conditions — it feeds §7.2's partition, which §27 then reads as
+    /// `guards_unavailable`. Kept here for the same reason the others are: the routes resolve
+    /// limits on demand and must resolve them against the pass's reading rather than take their
+    /// own, or `GET /limits` and the operating state could disagree about one instant.
+    pub proximity_sighting: crate::blackbox::ProximitySighting,
     /// Who asked this daemon to stop, when somebody has (§82.4).
     ///
     /// A **request** rather than an action, and the split is the whole design. The route that takes
@@ -437,6 +444,9 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
                 package: String::new(),
             },
             homing_sighting: crate::blackbox::HomingSighting::Unobservable(
+                "no reconcile pass has looked at the recording yet",
+            ),
+            proximity_sighting: crate::blackbox::ProximitySighting::Unobservable(
                 "no reconcile pass has looked at the recording yet",
             ),
             shutdown_requested: None,
@@ -1673,6 +1683,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             layout,
             &body,
             crate::limits::ROBOT_TIER,
+            &self.proximity_sighting,
         ))
         .unavailable
         .into_iter()
