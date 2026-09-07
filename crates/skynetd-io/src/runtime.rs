@@ -303,6 +303,8 @@ pub struct Daemon<L: Launcher, S: Slots> {
     /// What the last pass could see of the Safety Kernel, kept so `GET /state` reports the reading
     /// rather than re-deriving one from a ring the route would have to open.
     pub kernel_sighting: crate::blackbox::KernelSighting,
+    /// What the last pass could see of the RHAL, kept for the same reason.
+    pub rhal_sighting: crate::blackbox::RhalSighting,
     /// The last release-catalogue pull (§12, §57).
     ///
     /// Kept here for `last_pull`'s reason: `GET /releases` reports what happened rather than making
@@ -386,6 +388,9 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             // Nothing has been read yet, and a daemon that started with `Silent` would be
             // reporting an observation it has not made.
             kernel_sighting: crate::blackbox::KernelSighting::Unobservable(
+                "no reconcile pass has looked at the recording yet",
+            ),
+            rhal_sighting: crate::blackbox::RhalSighting::Unobservable(
                 "no reconcile pass has looked at the recording yet",
             ),
             // From the kernel's own interfaces, not through the layout — for `cpus`'s reason two
@@ -546,13 +551,18 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     ///
     /// The direction is the safety argument. Cycles seen is `Live` and **everything else** —
     /// silence, an unreadable ring, no ring at all — is `Down`. A wrong answer can only hold a
-    /// robot that could have been commanding; it can never raise one. The other six conditions are
-    /// still defaults, so a robot with a turning kernel derives `safe` with `rhal_lost` rather than
-    /// anything new: this removes one of seven blockers and is honest about being one of seven.
+    /// robot that could have been commanding; it can never raise one.
+    ///
+    /// `rhal` arrives the same way and from the same records, and the pair matters more than
+    /// either: a robot whose kernel is turning while its driver has stopped answering has to be
+    /// able to report exactly that. The remaining five conditions are still defaults, so a robot
+    /// with a turning kernel and a live driver derives `safe` with `post_incomplete` or
+    /// `homing_pending` rather than anything commanding — which is the honest size of the step.
     pub fn refresh_operating_state(
         &mut self,
         wall_s: Option<f64>,
         kernel: &crate::blackbox::KernelSighting,
+        rhal: &crate::blackbox::RhalSighting,
     ) -> Transition {
         let report = crate::post::run(self.store.layout(), wall_s);
         let conditions = Conditions {
@@ -561,6 +571,10 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             // the only evidence that separates a turning kernel from a hung one — an active unit is
             // both.
             kernel: kernel.state(),
+            // §27's third observed condition, off the newest cycle rather than a count: `rhal` is
+            // a state, so what decides it is the last thing the loop observed. See `RhalSighting`
+            // for the mapping, and in particular for why a faulted drive is not a lost one.
+            rhal: rhal.state(),
             // Everything below is §33.1's line. Left at the default rather than assigned a
             // hopeful value, because a supervisor that reported a plausible fleet status from
             // nothing is the exact failure this project is arranged around.
@@ -577,6 +591,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         self.operating_state = transition.to;
         self.state_reason = transition.reason;
         self.kernel_sighting = kernel.clone();
+        self.rhal_sighting = rhal.clone();
         transition
     }
 
@@ -584,8 +599,8 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     ///
     /// A method rather than four lines inside [`Daemon::refresh_operating_state`], and the reason is
     /// that the interesting half of it is unreachable from there **on this edition**: §33.1 leaves
-    /// six of §27's eight conditions unobserved — the kernel joined the self-test on 2026-09-07 and
-    /// the RHAL did not — so the machine derives `safe` every pass and
+    /// five of §27's eight conditions unobserved — the kernel and the RHAL joined the self-test on
+    /// 2026-09-07 — so the machine derives `safe` every pass and
     /// `warning_required` is never true. A robot here never enters a commanding state, so the tone
     /// never sounds and the incident is never raised — for the same reason §74.6's counters report
     /// nothing on a shipping robot.

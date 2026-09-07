@@ -5331,3 +5331,77 @@ mirrors, contract mirrors, golden path, scale, edition report — all green
 * **A guard active with no producer** (§80). Still a decision.
 * **The mapping half of §47.6**, and the capture backend behind it.
 * **Device confinement**, unblocked by a vendor runtime that reports accelerator memory.
+
+# Round seventeen — 2026-09-07
+
+## 68. §27's `rhal` condition, and the one flag that is not a loss
+
+The mapping round sixteen cleared the way for. Three of §27's eight conditions are observed now.
+
+### A state, not a count
+
+`kernel` is *cycles recorded since the last look* — an interval question, because "is the loop
+turning" is about a period. `rhal` is not. §27's `rhal` is a **state**, so what decides it is the
+**newest** cycle in the interval and not an aggregate over it: a driver that missed one read in
+two hundred is not lost, and one that has answered nothing for a second is, however many good
+reads preceded it.
+
+Both are read from the same records over the same interval, and that pairing is deliberate. A
+robot whose kernel is turning while its driver has stopped answering has to be able to report
+exactly that; two readings taken at two moments could show a pair that was never true at any
+instant.
+
+### The mapping, which is five inputs onto three states
+
+| What the newest record says | State |
+|---|---|
+| no cycle at all | `Lost` — nothing is reading the body |
+| `read_result` negative | `Lost` — the driver did not answer this cycle |
+| `read_result` unrecorded (schema 1) | `Lost` — an older recording cannot say, and this fails closed |
+| `RHAL_DEGRADED` in the flags | `Degraded` — §24: *"running, but something is wrong"* |
+| otherwise | `Present` |
+
+Four of the five are mechanical. The fifth is a decision.
+
+### `RHAL_FAULT` is not `Lost`, and that is the whole of the design
+
+§24 defines it as *"the drive has faulted; commands are being ignored"*. The obvious reading is
+that a robot whose drive is ignoring commands is a robot the kernel has lost, and it is wrong for
+a reason §27 states about itself. `rhal_lost` is the row that means **nothing else can be known** —
+no observed joint state, no estop reading, no guard that can evaluate — and it is first in
+`derive` precisely because everything below it becomes unanswerable.
+
+A faulted drive still **answers reads**. That is how anybody knows about the fault at all: the
+fault code is in the record because the read succeeded. Mapping it to `Lost` would tell an
+operator the robot cannot be observed at exactly the moment it is telling them something, and
+would discard the fault code on the way. So a fault is `Present` with the vendor's code carried
+verbatim, and what a fault *does* belongs to §7's guards.
+
+### Run
+
+```
+cargo test --workspace  — 1,660 passed, 0 failed  (1,659 before)
+cargo clippy --workspace — clean
+sh crates/skynetd-io/e2e.sh — all checks passed
+mirrors, contract mirrors, golden path, scale — all green
+```
+
+Three stale counts corrected again — the banner, `GET /limits`' `partial` note and two rows of
+§73 — which is the third round running that a condition moving has left a count wrong somewhere.
+They are all derived from one number and none of them derives it.
+
+## What round seventeen leaves
+
+* **`skynetk` in the e2e loop**, which now changes two things a route reports rather than none.
+  The last of the three items round eleven raised, and it is no longer blocked on design.
+* **The five remaining conditions** — homing, stop, guard_hold, guards, policy. Unlike the two
+  that moved, none of these has evidence in the ring today: a cycle record carries what the guards
+  *did*, not which were available, and homing is a driver-side fact nothing records. Each needs
+  its own producer before it needs a mapping.
+* **A count that nothing derives.** Four surfaces state how many of §27's eight conditions are
+  observed and every one is a typed number. Small, and this round is the third time it has gone
+  stale.
+* **A package that attempts the forbidden hold** (§15's isolation).
+* **A guard active with no producer** (§80). Still a decision.
+* **The mapping half of §47.6**, and the capture backend behind it.
+* **Replay does not mark the fill values** of a failed read (§26.4).
