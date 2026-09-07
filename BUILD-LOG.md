@@ -4768,3 +4768,131 @@ sh crates/skynetd-io/e2e.sh — all checks passed, including the ten new unit-pr
   the underlying fact.
 * **Vision**, unblocked by the first capture backend with a measured frame contract.
 * **Device confinement**, unblocked by a vendor runtime that reports accelerator memory.
+
+# Round twelve — 2026-09-07
+
+## 63. §47.6's pool: the specification and its reference did not agree, and no test could see it
+
+The audit that opened this round listed §47.6 as *specified 2026-09-06, awaiting the editions*:
+a TypeScript reference in the Hub, six unit tests beside it, and no Rust, no Python and no
+corpus. Filling that in looked like transcription. It was not, and the reason is worth the
+section.
+
+### What the corpus was written against
+
+§31.4's third rule is *a new case lands in the corpus before the fix lands in any edition*,
+and it is the rule that decides what this round found. The ten cases in `corpus/media/pool.json`
+were written and **generated against the unfixed reference**, so the first thing this repository
+recorded about §47.6 was what the reference actually did rather than what the section said it
+did. Three of the ten came back wrong, in the expected bytes, where a diff could be read:
+
+| Case | What the reference produced |
+|---|---|
+| `four-frames-into-three-slots` | `slot 0` four times — generations 1, 2, 3, 4. Slots 1 and 2 never written |
+| `the-reader-that-looks-then-takes` | the reader's `acquire` **refused `stale_handle`**, in a three-slot pool with two slots free |
+| `released-slots-go-oldest-first` | the second publish had already destroyed the first frame, before any reader existed |
+
+§47.6 says `publish` *"reuses the oldest released slot"*. The reference took
+`findIndex(slot => !slot.acquired)` — the **lowest-index** slot nobody is currently holding.
+Those two rules agree while a pool holds at most one frame and diverge on every publish after
+that, and the six unit tests written beside the reference all held pools of capacity 1, 2 or 4
+into which exactly one frame was ever published. Not one of them could see it.
+
+### The cost, which lands on the reader
+
+The wasted slots are not the problem. A policy holds a frame by calling `latest()` and then
+`acquire()` on what it named, and there is no lock across those two calls — there cannot be
+one, because §47.4 forbids capture waiting on a reader. So capture publishes in between, and
+under the lowest-index rule that publish lands on **the slot `latest()` just named**. The
+acquire is refused `stale_handle`, on nearly every cycle, at any frame rate above the reader's
+turnaround. A four-slot pool absorbs none of the jitter it was declared to absorb, and the
+symptom is a policy that appears not to keep up.
+
+§47.4 already has a one-slot latest-wins channel. A §47.6 that degenerates into one is not a
+weaker §47.6 — it is a duplicate of the section above it, and the section that defers to it
+loses its reason to exist.
+
+### The rule, stated so an edition cannot read it two ways
+
+Among the slots **not currently acquired**: an **empty** slot wins outright, because there is
+nothing in it to destroy and because that is what makes a declared capacity mean what it says —
+a pool fills before it overwrites. Otherwise the slot holding the **lowest sequence**, ties to
+the lower index. Oldest is by the **frame** and never by the slot's position: the two stop
+agreeing the first time a reader holds a frame and lets it go, which is the state a pool exists
+for. Written into §47.6a, then fixed in the reference, then regenerated — and the three cases
+turned over in the diff.
+
+### Three editions, and the mutation run in both directions
+
+`reference/typescript/media.ts`, `crates/skynet-contracts/src/media.rs` and
+`editions/python/skynet_os/media.py`. Both ported editions reproduced all ten cases on their
+first run, which is the outcome that proves nothing on its own — so the selection rule was
+reverted in each and the corpus re-run:
+
+```
+rust    reverted to lowest-index free slot  →  1,124 passed, 3 failed
+python  reverted to lowest-index free slot  →  1,124 passed, 3 failed
+```
+
+Exactly the three cases written for it, and nothing else. A corpus that had been written after
+the editions would have frozen the defect into all three and called it agreement.
+
+### Where the module lives, which was also wrong
+
+The reference was in the **Hub**, at `lib/skynet/os/media.ts`. `check-contract-mirrors.mjs`
+keeps the list of modules the Hub holds its own copy of, and the test it applies is *both sides
+compute this and neither is authoritative*. Nothing on the Hub owns a camera, publishes a frame
+or takes a loan on one — so the Hub's copy was a module nothing imported, which that file's own
+header calls the mistake the list exists to avoid.
+
+So `media` is **reference-only**, like `cell`, `blackbox` and `observation`: it lives in
+`reference/typescript/` here, the corpus holds three editions to it, and the Hub keeps no copy.
+The orphan and its six tests were deleted from the Hub as part of this change. What replaced
+them is ten cases three editions reproduce byte for byte.
+
+### The corpus grew a shape it did not have
+
+Every family in `corpus/` until now was one input through one pure function. A pool's whole
+subject is what the fourth publish does given what the first three did, so a `media` case is a
+**script**: a capacity, a list of operations, and the outcome of every one in order, with `from`
+naming an earlier step's handle so `latest` → `acquire` reads as the thing a reader does.
+
+Nothing in it exposes the pool's slots. The handles do that already — a handle carries the slot
+it was issued against — so the selection rule is pinned in the expected bytes without any
+edition having to agree about how a slot is stored.
+
+### Four stale numbers, found by the checks that exist for it
+
+`scale-report --check` and `edition-report --check` both failed on the first run of this round,
+before anything was built: §73 still said 78 corpus files and 1,116 cases from two days earlier.
+`README.md` was worse — **1,055 cases and 77 files**, which is two sessions stale, in the table a
+vendor reads first. All corrected, and the two reports regenerated and re-synced to the Hub.
+
+### Run
+
+```
+cargo test --workspace          — 1,641 passed, 0 failed  (1,631 before; +10 in skynet-contracts)
+cargo run -p skynet-corpus      — 1,127 of 1,127, 0 unimplemented
+python3 editions/python/run_corpus.py — 1,127 passed, 0 failed, 0 not implemented
+node tools/check-mirrors.mjs          — all shared documents match
+node tools/check-contract-mirrors.mjs — every contract the Hub mirrors matches the reference
+node tools/check-golden-path.mjs      — every link resolves
+node tools/scale-report.mjs --check   — §73 matches the tree
+node tools/edition-report.mjs --check — 2 editions, 1,127 cases each
+```
+
+## What round twelve leaves
+
+* **The mapping half of §47.6.** A read-only mapping of the named slot in the policy's address
+  space is per-OS code no contract can express. The loan's rules are now decided; what maps is
+  not written.
+* **`detects_people` (§5), specified 2026-09-06 and still unbuilt.** The seventh input to
+  `resolveLimits()` and the only one with no path, so `proximity` resolves to a ceiling whose
+  guard is permanently unavailable. Next item.
+* **Kernel liveness into the daemon's conditions, then skynetk in the e2e loop.** Unchanged
+  from round eleven. Design work within §33.1.
+* **The conformance flip for isolation.** Unchanged: carry a unit-confinement observation into
+  `conformance::run`.
+* **Vision**, still waiting on the first capture backend and the inference backend §23.3 leaves
+  vacant. One item shorter than it was.
+* **Device confinement**, unblocked by a vendor runtime that reports accelerator memory.

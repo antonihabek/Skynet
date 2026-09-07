@@ -67,6 +67,9 @@ import {
   assembleObservation, latestCommonInstant, type Stream as ObservationStream,
 } from '../../reference/typescript/observation.ts'
 import {
+  FramePool, FRAME_REFUSAL_CODES, type FrameHandle,
+} from '../../reference/typescript/media.ts'
+import {
   ENFORCEMENT_MODES, evaluateCycle, FAULT_RESPONSES, GUARDS, OS_TIERS, resolveLimits, withGrants,
   type CommandCycle, type ResolveLimitsParams,
 } from '../../reference/typescript/safety.ts'
@@ -7163,6 +7166,207 @@ vocabulary('bundle_checks',
   'What arrived, in the order the checks run. Size before digest, because a short file is a link '
   + 'that dropped and a wrong file is a question about where it came from.',
   BUNDLE_CHECKS)
+
+// ── §47.6 Frame handles ──────────────────────────────────────────────────────
+//
+// A frame pool is the first thing in this corpus with **state**, and the shape of these cases is
+// the consequence. Every other family here is a pure function over one input: a cycle, a manifest,
+// a set of streams. A pool's whole subject is what happens on the *fourth* publish given what the
+// first three did, and a case that could only describe one call would freeze the uninteresting
+// half of it.
+//
+// So a case is a **script**: a pool of a declared capacity, a list of operations, and the outcome
+// of every one of them in order. `from` names an earlier step's handle, which is how a reader
+// actually holds one — `latest()` then `acquire()` — and it is the pattern the selection rule is
+// judged against, because between those two calls capture is free to publish.
+//
+// Nothing here exposes the pool's slots. The handles do that already: a handle carries the slot it
+// was issued against, so a case that publishes four frames into three slots pins the selection rule
+// in its expected bytes without an edition having to agree about how slots are stored.
+
+interface PoolOp {
+  op: 'publish' | 'latest' | 'acquire' | 'release' | 'stats'
+  /** `publish` only: the frame's stream, defaulting to the pool's. */
+  stream?: string
+  /** `publish` only. */
+  stamp_ns?: number
+  /** `publish` only. */
+  sequence?: number
+  /** `acquire` / `release`: an explicit handle, for the ones no step produced. */
+  handle?: { stream: string; slot: number; generation: number }
+  /** `acquire` / `release`: the handle step `from` returned. */
+  from?: number
+}
+
+/**
+ * Run a script against the reference and shape every step's outcome.
+ *
+ * The step index in `from` is the index in `ops`, so a case reads top to bottom without counting
+ * only the steps that produced a handle.
+ */
+function runPool(stream: string, capacity: number, ops: PoolOp[]): unknown {
+  const pool = new FramePool(stream, capacity)
+  const handles: (FrameHandle | null)[] = []
+  const steps: unknown[] = []
+
+  for (const op of ops) {
+    let handle: FrameHandle | null = null
+    let step: unknown
+    switch (op.op) {
+      case 'publish': {
+        const result = pool.publish({
+          stream: op.stream ?? stream,
+          stamp_ns: op.stamp_ns ?? 0,
+          sequence: op.sequence ?? 0,
+        })
+        step = 'handle' in result
+          ? { op: 'publish', handle: result.handle }
+          : { op: 'publish', refusal: result.refusal }
+        if ('handle' in result) handle = result.handle
+        break
+      }
+      case 'latest': {
+        handle = pool.latest()
+        step = { op: 'latest', handle }
+        break
+      }
+      case 'acquire': {
+        const named = op.handle ?? handles[op.from ?? -1] ?? null
+        if (named === null) throw new Error(`acquire names no handle`)
+        const result = pool.acquire(named)
+        step = 'identity' in result
+          ? { op: 'acquire', identity: result.identity }
+          : { op: 'acquire', refusal: result.refusal }
+        break
+      }
+      case 'release': {
+        const named = op.handle ?? handles[op.from ?? -1] ?? null
+        if (named === null) throw new Error(`release names no handle`)
+        const result = pool.release(named)
+        step = 'released' in result
+          ? { op: 'release', released: true }
+          : { op: 'release', refusal: result.refusal }
+        break
+      }
+      case 'stats': {
+        step = { op: 'stats', stats: pool.stats() }
+        break
+      }
+    }
+    handles.push(handle)
+    steps.push(step)
+  }
+
+  return { steps, final: { latest: pool.latest(), stats: pool.stats() } }
+}
+
+function poolCase(file: string, id: string, note: string, capacity: number, ops: PoolOp[]): void {
+  add('media', file, {
+    id, note,
+    input: { stream: 'head_rgb', capacity, ops },
+    expected: canonical(runPool('head_rgb', capacity, ops)),
+  })
+}
+
+/** A frame at 30 Hz, so a reader comparing stamps to sequences is looking at one camera. */
+function pub(sequence: number, stream?: string): PoolOp {
+  return { op: 'publish', sequence, stamp_ns: sequence * 33_333_333, ...(stream ? { stream } : {}) }
+}
+
+poolCase('pool', 'a-frame-published-lent-and-taken-back',
+  'The whole loan, once. `latest` names what was just published, the identity that comes back is '
+  + 'the frame that went in, and the counters say one of each.',
+  4,
+  [pub(1), { op: 'latest' }, { op: 'acquire', from: 0 }, { op: 'release', from: 0 }, { op: 'stats' }])
+
+poolCase('pool', 'four-frames-into-three-slots',
+  'The case the six unit tests written with this reference could not see, because not one of them '
+  + 'published twice into a pool with more than one slot. A pool exists so that a reader can hold '
+  + 'a frame while capture keeps going, and the slot each publish lands in is the entire mechanism '
+  + 'by which it does. Publishing into the *oldest released* slot spreads four frames over three '
+  + 'slots and leaves the two most recent ones intact; taking the first slot that happens to be '
+  + 'free instead puts all four in slot 0, which is a one-slot pool wearing a pool’s costume — and '
+  + '§47.4 already has a one-slot latest-wins channel, so that reading makes §47.6 a duplicate of '
+  + 'the section above it.',
+  3,
+  [pub(1), pub(2), pub(3), pub(4), { op: 'latest' }, { op: 'stats' }])
+
+poolCase('pool', 'the-reader-that-looks-then-takes',
+  'How a policy actually holds a frame: `latest`, then `acquire` on what it named. Between those '
+  + 'two calls capture publishes, which is not a race being tolerated — it is the ordinary case at '
+  + 'any frame rate above the reader’s turnaround. With more than one free slot the publish must '
+  + 'land somewhere else and the acquire must still succeed; landing on the slot `latest` just '
+  + 'named refuses the reader its frame on nearly every cycle and reports it as `stale_handle`, '
+  + 'which reads as a reader bug.',
+  3,
+  [pub(1), { op: 'latest' }, pub(2), { op: 'acquire', from: 1 }, { op: 'stats' }])
+
+poolCase('pool', 'an-empty-pool-is-not-a-frame-of-zeros',
+  '`latest` before anything is published is `null`. A zero frame is a measurement nobody took, and '
+  + 'a policy handed one cannot tell it from a dark room.',
+  2,
+  [{ op: 'latest' }, { op: 'stats' }])
+
+poolCase('pool', 'a-stale-handle-never-shows-another-frame',
+  'One slot, reused. The generation advances, so the first handle now names a frame that is not '
+  + 'there — and the refusal is `stale_handle` rather than the frame that took its place. Slot '
+  + 'reuse is the normal case here, not the edge, which is why the generation is not optional.',
+  1,
+  [pub(1), { op: 'acquire', from: 0 }, { op: 'release', from: 0 }, pub(2),
+    { op: 'acquire', from: 0 }, { op: 'acquire', from: 3 }, { op: 'stats' }])
+
+poolCase('pool', 'a-pinned-slot-drops-rather-than-stalling',
+  'Every slot acquired, so the frame is dropped **and counted**. §47.4: capture is never stalled, '
+  + 'because stalling capture to protect a slow reader starves the policy to protect the reader — '
+  + 'the same error as starving the policy to protect the recording, one step over. The pinned '
+  + 'frame is still the newest afterwards: the drop changed nothing a reader can see except the '
+  + 'counter, which is where it belongs.',
+  1,
+  [pub(1), { op: 'acquire', from: 0 }, pub(2), { op: 'latest' }, { op: 'stats' }])
+
+poolCase('pool', 'a-loan-is-not-a-share',
+  'A second acquire of a handle already checked out is refused by name, and so is a second '
+  + 'release. Handles are single-owner loans rather than reference counts: a reader that cannot '
+  + 'track its own loans is a reader whose next frame cannot be trusted either, and a double '
+  + 'release would unpin a later loan taken on the same slot.',
+  2,
+  [pub(1), { op: 'acquire', from: 0 }, { op: 'acquire', from: 0 }, { op: 'release', from: 0 },
+    { op: 'release', from: 0 }, { op: 'stats' }])
+
+poolCase('pool', 'handles-and-frames-that-name-something-else',
+  'A frame from another stream, a slot this pool does not hold, and a handle carrying a different '
+  + 'stream name. All three are refused before anything is read, because a pool that accepted a '
+  + 'handle from a neighbouring stream would hand a policy the wrong camera.',
+  2,
+  [pub(1, 'wrist_cam'),
+    { op: 'acquire', handle: { stream: 'head_rgb', slot: 7, generation: 1 } },
+    { op: 'release', handle: { stream: 'other', slot: 0, generation: 1 } },
+    { op: 'stats' }])
+
+poolCase('pool', 'released-slots-go-oldest-first',
+  'Two slots held, then both let go, then two more frames. The order the released slots come back '
+  + 'in is the property: the one holding the older frame is reused first, so the newer of the two '
+  + 'survives one more publish than it otherwise would. This is the same rule as '
+  + '`four-frames-into-three-slots` after a reader has been through, which is where an '
+  + 'implementation that tracked "oldest" by slot index rather than by frame diverges.',
+  3,
+  [pub(1), pub(2), { op: 'acquire', from: 0 }, { op: 'acquire', from: 1 },
+    { op: 'release', from: 1 }, { op: 'release', from: 0 },
+    pub(3), pub(4), { op: 'latest' }, { op: 'stats' }])
+
+poolCase('pool', 'one-slot-and-nobody-reading',
+  'The degenerate pool, which is a legal declaration rather than a mistake: a stream whose reader '
+  + 'is always faster than capture needs no depth. Every publish reuses the one slot and the '
+  + 'generation counts them, so a handle from three frames ago is refused rather than answered.',
+  1,
+  [pub(1), pub(2), pub(3), { op: 'latest' }, { op: 'acquire', from: 0 }, { op: 'stats' }])
+
+vocabulary('frame_refusal_codes',
+  'Everything a frame pool can refuse, in the order a reader meets them: the two that say the '
+  + 'handle names nothing here, the two that say the loan is not the reader’s to take, and the one '
+  + 'that is not a refusal of the reader at all — `pool_exhausted` is capture being told it may '
+  + 'not stall.',
+  FRAME_REFUSAL_CODES)
 
 // ── Write ────────────────────────────────────────────────────────────────────
 

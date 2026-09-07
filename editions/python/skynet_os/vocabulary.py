@@ -50,6 +50,16 @@ CLOSED_SETS: Final[dict[str, tuple[str, ...]]] = {
     "signature_states": ('verified', 'failed', 'untrusted', 'absent', 'unverifiable'),
     "package_kinds": ('policy', 'skill', 'driver', 'service', 'embodiment', 'environment'),
     "isolation_modes": ('sandboxed', 'native'),
+    # §47.6. Transcribed from `reference/typescript/media.ts`, not from `media.py` beside this
+    # file — an edition checking its own transcription against itself proves nothing.
+    "frame_refusal_codes": (
+        'unknown_stream',
+        'unknown_slot',
+        'stale_handle',
+        'already_acquired',
+        'double_release',
+        'pool_exhausted',
+    ),
     "reserved_capabilities": ('hri.warning',),
     "transport_verdicts": ('direct', 'retargeted', 'degraded', 'refused'),
     "transport_methods": ('direct', 'remap', 'retarget', 'synthesize', 'drop', 'blocked'),
