@@ -139,9 +139,10 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
     observe_state(&mut daemon, None);
     eprintln!(
         "skynetd: §27 state is `{}`, because {}. §33.4's barrier is `{}` says {}, narrowed by that \
-         state — and the state rests on two of §27's eight conditions: the self-test, and the \
-         kernel, read off §13's ring rather than off systemd because a hung kernel is an active \
-         unit. The other six are on §33.1's side of the line and there is no channel to ask.",
+         state — and the state rests on three of §27's eight conditions: the self-test, the \
+         kernel and the RHAL, the last two read off §13's ring rather than off systemd, because a \
+         hung kernel is an active unit. The other five are on §33.1's side of the line and there \
+         is no channel to ask.",
         daemon.operating_state.as_str(),
         // The reason as well as the state. `safe` on its own reads as a robot somebody stopped
         // rather than as a robot nothing has observed, and those send an operator to opposite ends
@@ -1811,15 +1812,26 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
     // two. The cursor is advanced whether or not anything was counted, so an interval that saw
     // nothing is not re-counted into the next one and a robot cannot report a kernel live on the
     // strength of cycles from ten minutes ago.
-    let kernel = match recorder {
-        Some(recorder) => recorder.sighting(daemon.kernel_sequence),
-        None => skynetd_io::blackbox::KernelSighting::Unobservable(
-            "this robot has no black box, so there is no record of a control cycle to read",
+    let (kernel, rhal) = match recorder {
+        // Both off the same interval and the same records, because they are two readings of one
+        // fact and a robot whose kernel is turning while its driver has stopped answering has to
+        // report exactly that pair rather than a plausible-looking one of them.
+        Some(recorder) => (
+            recorder.sighting(daemon.kernel_sequence),
+            recorder.body(daemon.kernel_sequence),
+        ),
+        None => (
+            skynetd_io::blackbox::KernelSighting::Unobservable(
+                "this robot has no black box, so there is no record of a control cycle to read",
+            ),
+            skynetd_io::blackbox::RhalSighting::Unobservable(
+                "this robot has no black box, so there is no record of a body read to read",
+            ),
         ),
     };
     if let Some(recorder) = recorder {
         daemon.kernel_sequence = recorder.next_sequence();
     }
-    daemon.refresh_operating_state(wall_s(), &kernel);
+    daemon.refresh_operating_state(wall_s(), &kernel, &rhal);
     daemon.refresh_safe_state();
 }

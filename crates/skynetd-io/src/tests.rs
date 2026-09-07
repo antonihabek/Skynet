@@ -1427,6 +1427,7 @@ fn console_fixture() {
     fixture.daemon.refresh_operating_state(
         None,
         &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
+        &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
     );
     let vendor = driver_key(31);
     write_trust(&fixture, "bench-robotics", &public_hex(&vendor));
@@ -2354,7 +2355,8 @@ fn the_state_route_says_whether_the_kernel_was_observed_at_all() {
     assert_eq!(observed.get("post"), Some(&Json::Bool(true)));
     // This fixture's daemon has never run a pass, so nothing has looked.
     assert_eq!(observed.get("kernel"), Some(&Json::Bool(false)));
-    for condition in ["rhal", "homing", "stop", "guard_hold", "guards", "policy"] {
+    assert_eq!(observed.get("rhal"), Some(&Json::Bool(false)));
+    for condition in ["homing", "stop", "guard_hold", "guards", "policy"] {
         assert_eq!(
             observed.get(condition),
             Some(&Json::Bool(false)),
@@ -2376,6 +2378,17 @@ fn the_state_route_says_whether_the_kernel_was_observed_at_all() {
         source.contains("hung kernel is an active unit"),
         "the reason systemd is not the source has to travel with the reading"
     );
+
+    // And the RHAL beside it, off the same records. A robot whose kernel is turning while its
+    // driver has stopped answering has to be able to report exactly that pair.
+    let rhal = body.get("rhal").cloned().expect("the RHAL reading");
+    assert_eq!(rhal.get("state"), Some(&Json::from("lost")));
+    assert_eq!(rhal.get("observed"), Some(&Json::Bool(false)));
+    assert!(rhal
+        .get("source")
+        .and_then(Json::as_str)
+        .unwrap_or_default()
+        .contains("faulted drive still answers reads"));
 }
 
 /// §15's runtime tests, over the real router.
@@ -3956,6 +3969,7 @@ fn status_carries_the_operating_state_and_the_reason_it_is_there() {
     fixture.daemon.refresh_operating_state(
         None,
         &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
+        &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
     );
     let (_, after) = fixture.request("GET", "/status", None, "");
     assert_eq!(after.get("state").and_then(Json::as_str), Some("safe"));
@@ -3975,6 +3989,7 @@ fn the_state_route_admits_how_little_it_observed() {
     fixture.daemon.refresh_operating_state(
         None,
         &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
+        &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
     );
     let (status, body) = fixture.request("GET", "/state", Some("observer-token"), "");
     assert_eq!(status, 200);
@@ -4900,6 +4915,91 @@ mod recorder {
         assert_eq!(turning.state(), KernelState::Live);
         assert_eq!(turning, KernelSighting::Turning { cycles: 200 });
         assert!(turning.detail().contains("200 control cycles"));
+    }
+
+    /// §27's `rhal` condition, mapped off the newest cycle (§24).
+    ///
+    /// Five inputs, three states, and the interesting one is `RHAL_FAULT`: §24 defines it as *"the
+    /// drive has faulted; commands are being ignored"*, which is a fact about the **body**. A
+    /// faulted drive still answers reads, so the kernel has not lost it — and §27's `rhal_lost` is
+    /// the row that says nothing else can be known, which would be false at exactly the moment the
+    /// robot is telling somebody something.
+    #[test]
+    fn the_rhal_state_is_the_newest_cycles_reading() {
+        use crate::blackbox::RhalSighting;
+        use skynet_blackbox::record::ReadOutcome;
+        use skynet_contracts::opstate::RhalState;
+
+        fn cycle(read: ReadOutcome, flags: u16, fault_code: u32) -> skynet_blackbox::Cycle {
+            skynet_blackbox::Cycle {
+                tick: 1,
+                observation: [0; 32],
+                policy: 0,
+                state_flags: flags,
+                fault_code,
+                rhal_result: 0,
+                read,
+                state_seq: 1,
+                state_stamp_ns: 0,
+                command_stamp_ns: 0,
+                command_seq: 0,
+                mode: 0,
+                advisory: false,
+                response: None,
+                tripped: Vec::new(),
+                capability: skynet_blackbox::record::NO_CAPABILITY,
+                nearest_person_m: f32::NAN,
+                base_pose: [f32::NAN; 7],
+                base_twist: [0.0; 6],
+                desired: Vec::new(),
+                command: Vec::new(),
+                mask: Vec::new(),
+                clamped: Vec::new(),
+                position: Vec::new(),
+                velocity: Vec::new(),
+                effort: Vec::new(),
+            }
+        }
+
+        // Nothing read the body at all.
+        assert_eq!(RhalSighting::of(None), RhalSighting::Silent);
+        assert_eq!(RhalSighting::of(None).state(), RhalState::Lost);
+
+        // A good read, nothing wrong.
+        let ok = RhalSighting::of(Some(&cycle(ReadOutcome::Ok, 0, 0)));
+        assert_eq!(ok.state(), RhalState::Present);
+
+        // §24's `RHAL_DEGRADED`: running, but something is wrong.
+        let degraded = RhalSighting::of(Some(&cycle(ReadOutcome::Ok, 1 << 2, 0)));
+        assert_eq!(degraded.state(), RhalState::Degraded);
+
+        // §24's `RHAL_FAULT`. The drive has faulted and the RHAL is fine — the read worked, which
+        // is how anybody knows about the fault at all.
+        let faulted = RhalSighting::of(Some(&cycle(ReadOutcome::Ok, 1 << 1, 0x2A)));
+        assert_eq!(
+            faulted.state(),
+            RhalState::Present,
+            "a faulted drive still answers reads; §27's rhal_lost means nothing can be known"
+        );
+        assert!(
+            faulted.detail().contains("fault code 42"),
+            "and the code travels verbatim (§24): {}",
+            faulted.detail()
+        );
+
+        // The read failed. This is the case §26.4 added a field for, and before it this record was
+        // indistinguishable from the healthy one above.
+        let lost = RhalSighting::of(Some(&cycle(ReadOutcome::Failed(-110), 0, 0)));
+        assert_eq!(lost.state(), RhalState::Lost);
+        assert!(lost.detail().contains("-110"));
+
+        // A recording from before the field existed cannot say, and fails closed.
+        let older = RhalSighting::of(Some(&cycle(ReadOutcome::Unrecorded, 0, 0)));
+        assert_eq!(
+            older.state(),
+            RhalState::Lost,
+            "silence from a schema-1 record is not a good read"
+        );
     }
 
     /// The events-only ring a shipping robot actually has, read through the real file.

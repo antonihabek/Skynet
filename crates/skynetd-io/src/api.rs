@@ -523,10 +523,12 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     // that has no command path at all would send somebody to restart a kernel that is not the
     // problem.
     let sighting = &context.daemon.kernel_sighting;
+    let body = &context.daemon.rhal_sighting;
     let mut observed = Json::obj();
     observed.set("post", Json::Bool(true));
     observed.set("kernel", Json::Bool(sighting.observed()));
-    for condition in ["rhal", "homing", "stop", "guard_hold", "guards", "policy"] {
+    observed.set("rhal", Json::Bool(body.observed()));
+    for condition in ["homing", "stop", "guard_hold", "guards", "policy"] {
         observed.set(condition, Json::Bool(false));
     }
     out.set("observed", observed);
@@ -545,6 +547,24 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
         ),
     );
     out.set("kernel", kernel);
+
+    // The RHAL beside it, off the same records and the same interval. Two readings of one fact:
+    // a robot whose kernel is turning while its driver has stopped answering has to be able to
+    // report exactly that, and a page that fetched them separately could show a pair that was
+    // never true at any instant.
+    let mut rhal = Json::obj();
+    rhal.set("state", Json::from(body.state().as_str()));
+    rhal.set("observed", Json::Bool(body.observed()));
+    rhal.set("detail", Json::Str(body.detail()));
+    rhal.set(
+        "source",
+        Json::from(
+            "the newest control cycle in §13's ring. §27's `rhal` is a state, so the last \
+             observation decides it — and §24's `RHAL_FAULT` is deliberately not a loss: a \
+             faulted drive still answers reads.",
+        ),
+    );
+    out.set("rhal", rhal);
 
     // §49.1's channel, on the route that reports the state whose transitions demand it. Not a
     // route of its own: a warning channel is not a subsystem an operator inspects on its own, it is
@@ -575,11 +595,11 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     out.set(
         "partial",
         Json::Str(
-            "two of §27's eight conditions were observed here: the self-test, and the kernel — \
-             read off §13's ring, where a turning control loop records a cycle every pass, rather \
-             than off systemd, which cannot tell a hung kernel from a healthy one. §33.1 keeps \
-             skynetd from the actuator path, so the RHAL, the guard set, the stop and the homing \
-             state are still not this process's to read — and an unobserved condition is taken at \
+            "three of §27's eight conditions were observed here: the self-test, the kernel, and \
+             the RHAL — the last two off §13's ring, where a turning control loop records a cycle \
+             every pass and says what its read of the body returned. §33.1 keeps skynetd from \
+             the actuator path, so the guard set, the stop and the homing state are still not \
+             this process's to read — and an unobserved condition is taken at \
              the least capable value it could have, never at a hopeful one. So this answer is at \
              least as pessimistic as the robot is, and the reason beside it names the condition \
              that decided rather than a fault somebody found"

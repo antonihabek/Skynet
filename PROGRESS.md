@@ -12340,3 +12340,49 @@ new case. clippy clean, e2e green, §73 matches the tree.
      arbiter.** Rust went first here. What kept §31.4's rule meaningful is that the reference was
      written independently against the decision rather than transcribed from the Rust — had either
      guessed a different offset or byte, the corpus would have failed one of them.
+
+## 2026-09-07 (sixty-ninth) — §27's `rhal`, and the flag that is not a loss
+
+The mapping §26.4 cleared the way for. Three of §27's eight conditions are observed now.
+
+`kernel` is an interval question — *cycles since the last look* — and `rhal` is not: §27's `rhal`
+is a **state**, so the **newest** cycle decides it. A driver that missed one read in two hundred is
+not lost; one that has answered nothing for a second is, however many good reads preceded it. Both
+are read from the same records over the same interval, because a robot whose kernel is turning
+while its driver has stopped answering has to report exactly that pair.
+
+Five inputs onto three states, four of them mechanical: no cycle at all, a negative `read_result`,
+and an unrecorded one (schema 1, which fails closed) are `Lost`; `RHAL_DEGRADED` is `Degraded`;
+otherwise `Present`.
+
+The fifth is a decision. **§24's `RHAL_FAULT` is not `Lost`.** It reads as though it should be —
+"the drive has faulted; commands are being ignored" — and §27 states why not about itself:
+`rhal_lost` is the row meaning *nothing else can be known*, first in `derive` because everything
+below it becomes unanswerable. A faulted drive still **answers reads**; that is how anybody knows
+about the fault, since the fault code is in the record because the read succeeded. Mapping it to
+`Lost` would tell an operator the robot cannot be observed at the moment it is telling them
+something, and would discard the code on the way. A fault is `Present` with the vendor's code
+verbatim, and what a fault *does* belongs to §7's guards.
+
+### Numbers
+
+`cargo test --workspace` — **1,660 passed** (1,659 before). clippy clean, e2e green, every check
+tool green.
+
+### Findings, restated
+
+1-129 as before.
+
+130. **"Is it turning" and "what is it" are different questions of the same records.** An interval
+     answers the first and only the newest record answers the second. Using one shape for both
+     would make a flapping driver read as present half the time, or a healthy one read as lost
+     because of a single missed read an hour ago.
+
+131. **The strongest-sounding flag is not the most severe state.** `RHAL_FAULT` sounds worse than
+     `RHAL_DEGRADED` and maps to a *better* condition, because §27's `rhal` asks whether the body
+     can be observed rather than whether it is well. The read that reported the fault is the proof
+     the answer is yes.
+
+132. **A number stated in four places and derived in none goes stale every time it changes.**
+     Three rounds running, moving a condition has left the count wrong in the banner, in
+     `GET /limits`' note and in two rows of §73. Filed rather than fixed in passing.
