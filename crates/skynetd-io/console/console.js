@@ -417,6 +417,35 @@ function renderState(feed) {
     add('Guard holding (§27)', guard)
   }
 
+  // §27's guard set, beside the hold. Two conditions about guards and completely different
+  // questions: the hold is *is one acting right now*, and this is *can they act at all*. An
+  // operator told "no guard is holding" about a robot whose proximity guard has no calibration has
+  // been told something true and reassuring about a robot that is not protected.
+  //
+  // Dropped when unobserved, like the row above, because a robot with no descriptor has no
+  // partition and "0 unavailable" would be a claim rather than a reading.
+  const guardSet = s.guards || {}
+  if (guardSet.observed) {
+    const set = el('span')
+    const off = guardSet.guards || []
+    if (!off.length) {
+      set.appendChild(pill('all available', 'ok'))
+    } else {
+      set.appendChild(pill(off.length + ' unavailable', 'warn'))
+      set.appendChild(document.createTextNode(' '))
+      // Named, and grouped by the remedy rather than alphabetically: §45.5's whole requirement is
+      // that an unavailable guard say why, and "recalibrate" and "fit the sensor" send an operator
+      // to different parts of the building.
+      const expired = off.filter(g => g.calibration).map(g => g.guard)
+      const undeclared = off.filter(g => !g.calibration).map(g => g.guard)
+      const parts = []
+      if (expired.length) parts.push(expired.join(', ') + ' — a calibration expired (§45.5)')
+      if (undeclared.length) parts.push(undeclared.join(', ') + ' — an input the body does not declare')
+      set.appendChild(el('span', 'dim', parts.join(' · ')))
+    }
+    add('Guard set (§27)', set)
+  }
+
   // Which of §27's conditions anybody looked at. The list, not a count, because "1 of 9" tells an
   // operator how bad it is and this tells them which one they have.
   const observed = s.observed || {}

@@ -309,6 +309,12 @@ pub struct Daemon<L: Launcher, S: Slots> {
     pub stop_sighting: crate::blackbox::StopSighting,
     /// What the last pass could see of §27's guard hold, kept for the same reason.
     pub hold_sighting: crate::blackbox::HoldSighting,
+    /// What the last pass could see of §27's guard **set**, kept for the same reason.
+    ///
+    /// The one sighting that is not off §13's ring: §7.6's partition resolves on this daemon, and
+    /// §45.5's expiry list is beside it. Both are re-read each pass rather than cached from
+    /// start-up, because a calibration expires on the clock and a profile arrives from the Hub.
+    pub guards_sighting: crate::limits::GuardsSighting,
     /// Who asked this daemon to stop, when somebody has (§82.4).
     ///
     /// A **request** rather than an action, and the split is the whole design. The route that takes
@@ -410,6 +416,9 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             ),
             hold_sighting: crate::blackbox::HoldSighting::Unobservable(
                 "no reconcile pass has looked at the recording yet",
+            ),
+            guards_sighting: crate::limits::GuardsSighting::Unobservable(
+                "no reconcile pass has resolved the guard set yet",
             ),
             shutdown_requested: None,
             // From the kernel's own interfaces, not through the layout — for `cpus`'s reason two
@@ -584,6 +593,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         rhal: &crate::blackbox::RhalSighting,
         stop: &crate::blackbox::StopSighting,
         hold: &crate::blackbox::HoldSighting,
+        guards: &crate::limits::GuardsSighting,
     ) -> Transition {
         let report = crate::post::run(self.store.layout(), wall_s);
         let conditions = Conditions {
@@ -607,6 +617,12 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             // reading is still reported as an observation. A robot that said `HOLD` while its
             // command went through would be the failure §7.4 exists to prevent.
             guard_hold: hold.held(),
+            // §27's sixth observed condition, and the only one not off §13's ring: §7.6's
+            // partition resolves here and §45.5's expiry list sits beside it. It is what the
+            // guards *can* do given what the body declares and what a calibration still believes,
+            // never a reading of what the kernel had inputs for last cycle — see `GuardsSighting`,
+            // which says so where the mapping is rather than here.
+            guards_unavailable: guards.unavailable(),
             // `stop_settled` is deliberately left false. For a hardware stop no edition can
             // observe it — the bit says the chain is open and says nothing about whether the body
             // came to rest — so the machine derives `stopping` and never `stop_complete`. A robot
@@ -632,6 +648,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         self.rhal_sighting = rhal.clone();
         self.stop_sighting = stop.clone();
         self.hold_sighting = hold.clone();
+        self.guards_sighting = guards.clone();
         transition
     }
 

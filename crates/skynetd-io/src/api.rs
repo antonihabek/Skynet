@@ -349,6 +349,7 @@ fn status<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
         &context.daemon.rhal_sighting,
         &context.daemon.stop_sighting,
         &context.daemon.hold_sighting,
+        &context.daemon.guards_sighting,
     );
     let running = actual
         .units
@@ -542,7 +543,8 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     let body = &context.daemon.rhal_sighting;
     let chain = &context.daemon.stop_sighting;
     let hold = &context.daemon.hold_sighting;
-    let seen = crate::observed::Observed::of(sighting, body, chain, hold);
+    let guards = &context.daemon.guards_sighting;
+    let seen = crate::observed::Observed::of(sighting, body, chain, hold, guards);
     out.set("observed", seen.to_json());
 
     // What was seen, in a sentence, beside the boolean. §32.2's rule about the on-robot console is
@@ -624,6 +626,34 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
         ),
     );
     out.set("guard_hold", guard_hold);
+
+    // §27's guard **set**, which is the one condition on this route that does not come off §13's
+    // ring. It is here beside the other four because a reader asking "why is this robot degraded"
+    // needs the partition and the hold in one document — and because `GET /limits` answers a
+    // different and larger question, with the ceilings, the sources and every notice, which is not
+    // what a state page wants.
+    let mut guard_set = Json::obj();
+    guard_set.set("unavailable", Json::Bool(guards.unavailable()));
+    guard_set.set("observed", Json::Bool(guards.observed()));
+    guard_set.set("detail", Json::Str(guards.detail()));
+    // The guards as data, each naming which of the two sources took it out. §45.5's requirement is
+    // that an unavailable guard say *why* — "proximity unavailable" sends nobody anywhere — and a
+    // console that had only the sentence could not sort or group them.
+    let mut entries = Json::arr();
+    for entry in guards.entries() {
+        let mut row = Json::obj();
+        row.set("guard", Json::from(entry.guard.as_str()));
+        row.set("calibration", Json::Bool(entry.calibration));
+        entries.push(row);
+    }
+    guard_set.set("guards", entries);
+    guard_set.set(
+        "source",
+        Json::from(
+            "§7.6's resolved partition on this daemon, merged with §45.5's calibration expiry —              the two lists the condition can come from, and neither is the ring. It says which              guards *can* run given what the body declares and what a calibration still believes,              never which the kernel had inputs for last cycle: §80's `inert` state exists because              those differ, and a declared sensor that fails at runtime is not visible here.",
+        ),
+    );
+    out.set("guards", guard_set);
 
     // §49.1's channel, on the route that reports the state whose transitions demand it. Not a
     // route of its own: a warning channel is not a subsystem an operator inspects on its own, it is

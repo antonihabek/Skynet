@@ -1642,19 +1642,26 @@ fn print_state(document: &Json) {
 /// green tick beside a robot that has been stopped by its hardware, which is the same class of
 /// error as the tick this printer already had to fix for `kernel`.
 ///
-/// Three keys rather than one, and `advisory` is the one worth defending. A guard that **demanded**
+/// Four keys rather than one, and `advisory` is the one worth defending. A guard that **demanded**
 /// a hold and was overruled by §7.4's tier is not a robot that is held — `held` is false and §27's
 /// state is unchanged — but it is emphatically something an operator should look at: a guard is
 /// firing and nothing is acting on it. Only a cycle where a guard actually fired sets it, so this
 /// does not mark every robot on the edition; it marks the ones where the guards have something to
 /// say and no authority to say it.
+///
+/// `unavailable` is §27's `guards` — a guard that cannot run at all, for want of a declaration or a
+/// calibration. It marks rather than ticks for the same reason: an operator scanning this list for
+/// what to look at should find the guard that is off, and the detail beside it already names which
+/// of the two it is.
 fn flagged(block: Option<&Json>) -> bool {
-    ["asserted", "held", "advisory"].iter().any(|key| {
-        block
-            .and_then(|block| block.get(key))
-            .and_then(Json::as_bool)
-            .unwrap_or(false)
-    })
+    ["asserted", "held", "advisory", "unavailable"]
+        .iter()
+        .any(|key| {
+            block
+                .and_then(|block| block.get(key))
+                .and_then(Json::as_bool)
+                .unwrap_or(false)
+        })
 }
 
 fn print_power(document: &Json) {

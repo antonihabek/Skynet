@@ -1430,6 +1430,7 @@ fn console_fixture() {
         &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
         &blackbox::StopSighting::Unobservable("no ring in this fixture"),
         &blackbox::HoldSighting::Unobservable("no ring in this fixture"),
+        &crate::limits::GuardsSighting::Unobservable("no descriptor in this fixture"),
     );
     let vendor = driver_key(31);
     write_trust(&fixture, "bench-robotics", &public_hex(&vendor));
@@ -3975,6 +3976,7 @@ fn status_carries_the_operating_state_and_the_reason_it_is_there() {
         &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
         &blackbox::StopSighting::Unobservable("no ring in this fixture"),
         &blackbox::HoldSighting::Unobservable("no ring in this fixture"),
+        &crate::limits::GuardsSighting::Unobservable("no descriptor in this fixture"),
     );
     let (_, after) = fixture.request("GET", "/status", None, "");
     assert_eq!(after.get("state").and_then(Json::as_str), Some("safe"));
@@ -3997,6 +3999,7 @@ fn the_state_route_admits_how_little_it_observed() {
         &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
         &blackbox::StopSighting::Unobservable("no ring in this fixture"),
         &blackbox::HoldSighting::Unobservable("no ring in this fixture"),
+        &crate::limits::GuardsSighting::Unobservable("no descriptor in this fixture"),
     );
     let (status, body) = fixture.request("GET", "/state", Some("observer-token"), "");
     assert_eq!(status, 200);
@@ -4042,12 +4045,13 @@ fn the_state_route_admits_how_little_it_observed() {
 /// lacked and the only reason `crate::observed` exists.
 #[test]
 fn every_sentence_about_the_conditions_counts_the_same_object() {
-    for (kernel, rhal, stop, hold, expected) in [
+    for (kernel, rhal, stop, hold, guards, expected) in [
         (
             blackbox::KernelSighting::Unobservable("no ring in this fixture"),
             blackbox::RhalSighting::Unobservable("no ring in this fixture"),
             blackbox::StopSighting::Unobservable("no ring in this fixture"),
             blackbox::HoldSighting::Unobservable("no ring in this fixture"),
+            crate::limits::GuardsSighting::Unobservable("no descriptor in this fixture"),
             1,
         ),
         (
@@ -4059,14 +4063,15 @@ fn every_sentence_about_the_conditions_counts_the_same_object() {
             },
             blackbox::StopSighting::Clear,
             blackbox::HoldSighting::Clear,
-            5,
+            crate::limits::GuardsSighting::AllAvailable,
+            6,
         ),
     ] {
         let mut fixture = Fixture::new("condition-count");
         fixture.provision();
         fixture
             .daemon
-            .refresh_operating_state(None, &kernel, &rhal, &stop, &hold);
+            .refresh_operating_state(None, &kernel, &rhal, &stop, &hold, &guards);
 
         let (_, state) = fixture.request("GET", "/state", Some("observer-token"), "");
         let observed = state.get("observed").expect("the observation map");
@@ -4218,6 +4223,7 @@ fn an_open_stop_chain_is_its_own_cause_and_never_a_completed_stop() {
         },
         &blackbox::StopSighting::Asserted,
         &blackbox::HoldSighting::Clear,
+        &crate::limits::GuardsSighting::AllAvailable,
     );
 
     let (status, state) = fixture.request("GET", "/state", Some("observer-token"), "");
@@ -4430,6 +4436,7 @@ fn an_enforced_hold_reaches_the_route_and_homing_still_outranks_it() {
         },
         &blackbox::StopSighting::Clear,
         &blackbox::HoldSighting::Held,
+        &crate::limits::GuardsSighting::AllAvailable,
     );
 
     let (status, state) = fixture.request("GET", "/state", Some("observer-token"), "");
@@ -4479,6 +4486,7 @@ fn an_advisory_hold_is_reported_without_holding_the_robot() {
         },
         &blackbox::StopSighting::Clear,
         &blackbox::HoldSighting::Advisory,
+        &crate::limits::GuardsSighting::AllAvailable,
     );
 
     let (status, state) = fixture.request("GET", "/state", Some("observer-token"), "");
