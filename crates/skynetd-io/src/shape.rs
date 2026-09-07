@@ -212,6 +212,147 @@ impl Supervising {
     }
 }
 
+/// What this daemon can see of §27's **`policy`** condition — §25.2's lease, from outside it.
+///
+/// The last of §27's eight with a source in this process, and the only one where the honest answer
+/// is *partly* unobservable — which is why it is a type rather than three lines.
+///
+/// # Two of the three values are exactly knowable and the third is not
+///
+/// `PolicyState` is `None` (*nothing to run*), `Held` (*something to run that is not ready to*) and
+/// `Ready` (*lease granted and plan resolved*). This daemon resolves the plan itself — that is what
+/// [`Supervising`] is — and it launches the unit, so it can establish:
+///
+/// * **`None`** exactly. Nothing installed declares an action space, or no body is described.
+/// * **`Held`** exactly, in four distinct ways: the plan is refused, the manifest cannot be read,
+///   two packages both command (§80 leaves both without a ring for the same reason), or the plan
+///   resolves and the unit is not running — a policy whose process does not exist holds no lease.
+///
+/// What it cannot establish is **`Ready`**, and no amount of care here changes that: §25.2's lease
+/// table is the kernel's, and a resolved plan beside a running unit is *necessary and not
+/// sufficient*. So that one case is reported as unobserved, with the two facts that are known
+/// named, rather than promoted to a `Ready` this process invented.
+///
+/// # And it fixes a sentence that was wrong on every robot with a package installed
+///
+/// Until this existed the condition was left at `Conditions::default()`, which is
+/// `PolicyState::None` — and §27's rule 8 splits that from `Held` deliberately, because *"there is
+/// nothing to run"* and *"there is something and it has not got a lease"* are different sentences
+/// and the second is the one with a remedy. A robot with a commanding package installed and
+/// activated was reporting `no_policy`, which is not a cautious reading of an unobserved condition:
+/// it is a false statement about the store, made by the process that holds the store.
+///
+/// So the unobservable case feeds `Held` rather than the default. That is still the least capable
+/// value the condition could take — `Held` is weaker than `Ready` — and it is the only one of the
+/// three that is true.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PolicySighting {
+    /// Nothing installed declares an action space, or nothing describes the body.
+    Nothing {
+        /// Which of the two, for the sentence.
+        no_body: bool,
+    },
+    /// Something to run, and a reason it is not running it.
+    NotReady {
+        /// The package, when one can be named. `Ambiguous` names none: the point is that the
+        /// daemon does not choose between them.
+        package: Option<String>,
+        /// Why, in §64's terms.
+        why: &'static str,
+    },
+    /// A plan resolved and a unit is running, and the lease is on the far side of §33.1.
+    ///
+    /// Not a reading. Carries the package so the sentence can name what it is *not* able to
+    /// confirm about, which is more use than saying nothing.
+    LeaseUnknown {
+        /// The commanding package whose plan resolved.
+        package: String,
+    },
+}
+
+impl PolicySighting {
+    /// Read §27's condition off the shape and the unit the daemon launched.
+    ///
+    /// `running` answers *is this package's unit running* — the daemon's own action's result rather
+    /// than a question to the kernel, which is why taking it is not a §33.1 crossing. Passed in as
+    /// a closure so the mapping stays a function over facts and can be driven without a launcher.
+    pub fn of(supervising: &Supervising, running: impl Fn(&str) -> bool) -> PolicySighting {
+        match supervising {
+            Supervising::NoBody => PolicySighting::Nothing { no_body: true },
+            Supervising::NoPolicy { .. } => PolicySighting::Nothing { no_body: false },
+            Supervising::Refused { package, .. } => PolicySighting::NotReady {
+                package: Some(package.clone()),
+                why: "this body refuses its transport plan, so there is nothing for a lease to \
+                      command (§6, §37.1)",
+            },
+            Supervising::Unreadable { package, .. } => PolicySighting::NotReady {
+                package: Some(package.clone()),
+                why: "its manifest cannot be read, so no plan could be resolved from it (§8)",
+            },
+            Supervising::Ambiguous { .. } => PolicySighting::NotReady {
+                package: None,
+                why:
+                    "two packages declare an action space and this daemon does not choose between \
+                      them — §25.2's arbitration is where that is settled, and until it is neither \
+                      gets a ring (§80)",
+            },
+            Supervising::Policy { package, .. } if !running(package) => PolicySighting::NotReady {
+                package: Some(package.clone()),
+                why: "its plan resolves and its unit is not running, so no process exists to hold \
+                      a lease (§33.5)",
+            },
+            Supervising::Policy { package, .. } => PolicySighting::LeaseUnknown {
+                package: package.clone(),
+            },
+        }
+    }
+
+    /// §27's condition.
+    ///
+    /// Never `Ready`, on any input, and that is the design rather than a gap in the mapping: this
+    /// process cannot see §25.2's lease table, and the one value that asserts a lease is the one it
+    /// must not produce.
+    pub fn state(&self) -> skynet_contracts::opstate::PolicyState {
+        match self {
+            PolicySighting::Nothing { .. } => skynet_contracts::opstate::PolicyState::None,
+            // `Held` for both, including the unobservable case — see the type's header. `None`
+            // there would be this process saying nothing is installed while holding the store that
+            // says otherwise.
+            _ => skynet_contracts::opstate::PolicyState::Held,
+        }
+    }
+
+    /// Whether this was an observation at all.
+    pub fn observed(&self) -> bool {
+        !matches!(self, PolicySighting::LeaseUnknown { .. })
+    }
+
+    /// What was seen, in a sentence.
+    pub fn detail(&self) -> String {
+        match self {
+            PolicySighting::Nothing { no_body: true } => {
+                "no body is described, so nothing could declare an action space to command it (§5)"
+                    .to_string()
+            }
+            PolicySighting::Nothing { no_body: false } => {
+                "nothing installed declares an action space, so there is no policy to run (§8)"
+                    .to_string()
+            }
+            PolicySighting::NotReady {
+                package: Some(package),
+                why,
+            } => format!("`{package}` is installed and not running: {why}"),
+            PolicySighting::NotReady { package: None, why } => why.to_string(),
+            PolicySighting::LeaseUnknown { package } => format!(
+                "`{package}`'s plan resolves and its unit is running, which is necessary and not \
+                 sufficient: §25.2's lease is granted by the Safety Kernel and this daemon cannot \
+                 read the table. Reported as unobserved and taken at `held`, which is the weaker \
+                 of the two values it could have"
+            ),
+        }
+    }
+}
+
 /// Work out the shape this supervisor should open its ring at.
 ///
 /// `allow_retarget` is the caller's for the same reason [`crate::admit::transport_plan`] takes it:
@@ -795,5 +936,139 @@ mod tests {
         );
         // And it must not read as the robot that simply has no policy, which is the bug.
         assert_ne!(resolved, Supervising::NoPolicy { joints: 4 });
+    }
+
+    /// §27's `policy`, and the two of its three values this daemon can establish exactly.
+    ///
+    /// The mapping is a function over a shape and one boolean, so it is driven here rather than
+    /// through a launcher — which matters, because the interesting rows are the ones a fixture
+    /// cannot easily produce: two commanding packages, and an unreadable manifest.
+    #[test]
+    fn the_policy_condition_is_never_ready_and_never_falsely_none() {
+        use skynet_contracts::opstate::PolicyState;
+
+        let never = |_: &str| false;
+        let always = |_: &str| true;
+
+        // Nothing to run. The one value with no remedy, and it is exactly knowable.
+        for shape in [Supervising::NoBody, Supervising::NoPolicy { joints: 4 }] {
+            let sighting = PolicySighting::of(&shape, never);
+            assert_eq!(sighting.state(), PolicyState::None);
+            assert!(sighting.observed());
+        }
+
+        // Something to run, four ways, and every one of them observed and `held` rather than
+        // `none`. This is the defect: `none` says the store is empty and this process holds it.
+        let refused = Supervising::Refused {
+            package: "com.example.walk".to_string(),
+            joints: 4,
+        };
+        let unreadable = Supervising::Unreadable {
+            package: "com.example.walk".to_string(),
+            joints: 4,
+            detail: "the manifest is not JSON".to_string(),
+        };
+        let ambiguous = Supervising::Ambiguous {
+            packages: vec!["a".to_string(), "b".to_string()],
+            joints: 4,
+        };
+        let resolved = Supervising::Policy {
+            package: "com.example.walk".to_string(),
+            joints: 4,
+            channels: 3,
+            verdict: "direct",
+        };
+
+        for shape in [&refused, &unreadable, &ambiguous] {
+            let sighting = PolicySighting::of(shape, always);
+            assert_eq!(sighting.state(), PolicyState::Held);
+            assert!(
+                sighting.observed(),
+                "a refusal this daemon computed is a reading, not a gap"
+            );
+            assert_ne!(sighting.state(), PolicyState::None);
+        }
+
+        // A plan that resolves and a unit that is not running: still exactly knowable, because a
+        // policy whose process does not exist holds no lease.
+        let stopped = PolicySighting::of(&resolved, never);
+        assert_eq!(stopped.state(), PolicyState::Held);
+        assert!(stopped.observed());
+        assert!(stopped.detail().contains("unit is not running"));
+
+        // And the one case that is not this daemon's: unobserved, `held`, and never `ready`.
+        let running = PolicySighting::of(&resolved, always);
+        assert_eq!(running.state(), PolicyState::Held);
+        assert!(
+            !running.observed(),
+            "§25.2's lease is the kernel's; a resolved plan beside a running unit is necessary \
+             and not sufficient"
+        );
+        assert_ne!(
+            running.state(),
+            PolicyState::Ready,
+            "the one value that asserts a lease is the one this process must not produce"
+        );
+        assert!(running.detail().contains("necessary and not"));
+    }
+
+    /// The sentence this closes, stated as the assertion it is.
+    ///
+    /// §27 rule 8 splits `no_policy` from `policy_not_ready` because *"there is nothing to run"*
+    /// and *"there is something and it has not got a lease"* are different sentences and the second
+    /// is the one with a remedy. Until this mapping existed the condition sat at its default —
+    /// `PolicyState::None` — so a robot with a commanding package installed and activated reported
+    /// the first. That is not a cautious reading of an unobserved condition; it is a false
+    /// statement about a store this process holds.
+    #[test]
+    fn an_installed_commanding_package_is_never_reported_as_nothing_to_run() {
+        use skynet_contracts::opstate::{
+            evaluate, Conditions, HomingState, KernelState, OperatingState, PolicyState,
+            PostVerdict, RhalState, StateReason,
+        };
+
+        let installed = Supervising::Policy {
+            package: "com.example.walk".to_string(),
+            joints: 4,
+            channels: 3,
+            verdict: "direct",
+        };
+        let sighting = PolicySighting::of(&installed, |_| true);
+
+        // What the default said, and what this says instead.
+        assert_eq!(Conditions::default().policy, PolicyState::None);
+        assert_eq!(sighting.state(), PolicyState::Held);
+
+        // And the consequence, through §27's own machine rather than by inspection. The conditions
+        // above rule 8 have to be satisfied for the difference to be reachable, which is itself the
+        // reason this was latent for as long as it was: on this edition `homing` holds every robot
+        // three rules earlier.
+        let reached = |policy: PolicyState| {
+            let conditions = Conditions {
+                post: PostVerdict::Passed,
+                homing: HomingState::NotRequired,
+                kernel: KernelState::Live,
+                // `rhal_lost` is rule 1 and its default is `Lost`, so without this every row below
+                // is unreachable — which is the machine working: nothing else can be known about a
+                // robot whose body cannot be observed.
+                rhal: RhalState::Present,
+                policy,
+                ..Conditions::default()
+            };
+            let transition = evaluate(OperatingState::Hold, &conditions);
+            (transition.to, transition.reason)
+        };
+
+        assert_eq!(
+            reached(PolicyState::None),
+            (OperatingState::Hold, StateReason::NoPolicy),
+            "the default's sentence: there is nothing to run"
+        );
+        assert_eq!(
+            reached(sighting.state()),
+            (OperatingState::Hold, StateReason::PolicyNotReady),
+            "the true one: there is something and it has not got a lease — and it is the sentence \
+             with a remedy"
+        );
     }
 }

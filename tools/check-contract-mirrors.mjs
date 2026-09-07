@@ -15,9 +15,9 @@
  * A robot and a Hub disagreeing about `evaluateCycle` is the exact failure §31 exists to prevent,
  * and "we remember to copy the file across" is not a mechanism. This is.
  *
- *   node tools/check-contract-mirrors.mjs                 # looks for BotMarket beside this checkout
- *   node tools/check-contract-mirrors.mjs ../BotMarket    # or say where it is
- *   node tools/check-contract-mirrors.mjs --sync ../BotMarket
+ *   node tools/check-contract-mirrors.mjs                       # looks for the Hub beside this checkout
+ *   node tools/check-contract-mirrors.mjs ../RobotOverflow      # or say where it is
+ *   node tools/check-contract-mirrors.mjs --sync ../RobotOverflow
  *
  * # The one legitimate difference
  *
@@ -44,6 +44,8 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { findHubOr } from './hub-path.mjs'
 
 const HERE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -237,23 +239,11 @@ const args = process.argv.slice(2)
 const sync = args.includes('--sync')
 const given = args.find(arg => !arg.startsWith('--'))
 
-// The Hub was renamed from BotMarket to Robot Overflow, and both spellings are here because a
-// checkout made before the rename is still a valid checkout. A tool that could only find the old
-// name is a tool that prints "not found" forever and quietly stops comparing anything.
-const CANDIDATES = [
-  'Robot Overflow', 'robot-overflow', 'RobotOverflow', 'BotMarket', 'botmarket', 'Botmarket',
-  'botMarket',
-]
-
-function findHub() {
-  for (const name of CANDIDATES) {
-    const candidate = resolve(join(HERE, '..', name))
-    if (existsSync(candidate)) return candidate
-  }
-  return resolve(join(HERE, '..', 'BotMarket'))
-}
-
-const hub = given ? resolve(given) : findHub()
+// The spellings the Hub has been cloned under live in `hub-path.mjs`, because three tools in this
+// directory need them and keeping three copies is the failure this script exists to catch, one
+// directory up. A tool that can only find the old name prints "not found" forever and quietly
+// stops comparing anything.
+const hub = given ? resolve(given) : findHubOr(HERE).path
 
 /** The reference's spelling of an import, rewritten to the Hub's. */
 function toHub(source) {
@@ -375,7 +365,7 @@ function checkPins() {
         + 'The reference is the oracle the corpus holds the Rust edition to, and the Hub keeps its\n'
         + 'own copy so a Next.js application can import it. A change here is a change the Hub owes,\n'
         + 'and the two have to land together:\n\n'
-        + '    node tools/check-contract-mirrors.mjs --sync ../BotMarket\n\n'
+        + '    node tools/check-contract-mirrors.mjs --sync ../RobotOverflow\n\n'
         + 'Editing the pins by hand switches this check off.',
     )
   }
@@ -406,7 +396,7 @@ function writePins(hubPath) {
 if (!existsSync(hub)) {
   // The comparison needs both trees. The pins do not, and one repository is the case they were
   // added for, because it is the case CI runs in.
-  console.log(`BotMarket not found at ${hub} — the Hub's copies cannot be compared.`)
+  console.log(`No Hub checkout at ${hub} — the Hub's copies cannot be compared.`)
   if (sync) {
     writePins(null)
     process.exit(0)
@@ -579,7 +569,7 @@ if (sync) {
 // a stale pin cannot survive a run that had both trees in front of it.
 if (!sync && checkPins() > 0) process.exit(1)
 
-if (synced > 0) console.log(`\n${synced} file(s) synced into BotMarket.`)
+if (synced > 0) console.log(`\n${synced} file(s) synced into the Hub.`)
 
 if (diverged > 0 || missing > 0) {
   console.error(

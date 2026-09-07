@@ -9,10 +9,10 @@
  *
  * So: a shared document is edited in both repositories or in neither.
  *
- *   node tools/check-mirrors.mjs                 # looks for BotMarket beside this checkout
- *   node tools/check-mirrors.mjs ../BotMarket    # or say where it is
- *   node tools/check-mirrors.mjs --sync ../BotMarket   # copy BotMarket's copies over ours
- *   node tools/check-mirrors.mjs --pin  ../BotMarket   # copy nothing; pin what already agrees
+ *   node tools/check-mirrors.mjs                      # looks for the Hub beside this checkout
+ *   node tools/check-mirrors.mjs ../RobotOverflow     # or say where it is
+ *   node tools/check-mirrors.mjs --sync ../RobotOverflow  # copy the Hub's copies over ours
+ *   node tools/check-mirrors.mjs --pin  ../RobotOverflow  # copy nothing; pin what already agrees
  *
  * Exits non-zero on divergence, so it can be a pre-commit hook or a CI step in whichever repository
  * has both checked out.
@@ -35,6 +35,8 @@ import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { findHubOr } from './hub-path.mjs'
 
 const HERE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -70,33 +72,15 @@ const pinOnly = args.includes('--pin')
 const given = args.find(arg => !arg.startsWith('--'))
 
 /**
- * Where BotMarket is, when nobody said.
+ * Where the Hub is, when nobody said — `hub-path.mjs`'s list, not this file's.
  *
- * Several spellings, because the repository is `botmarket` on GitHub, `BotMarket` in the
- * specification's prose, and whatever `git clone` produced on disk. A case-sensitive filesystem
- * makes those three different directories, and this script's whole failure mode is reporting "not
- * found, nothing to compare" when the checkout is right there under a different capital — a check
- * that cannot run is not a check, which is the sentence this file already says about CI.
+ * The spellings live in one module because three tools here need them and one of the three had
+ * only two of the seven, which took `scale-report.mjs`'s Hub measurement off the air silently.
+ * This script's own failure mode is the same one: reporting "not found, nothing to compare" when
+ * the checkout is right there under a different capital, and falling back to its pins while
+ * passing. A check that cannot run is not a check.
  */
-// The Hub was renamed from BotMarket to Robot Overflow. Both spellings are here because a checkout
-// made before the rename is still a valid checkout — and because a tool that can only find the old
-// name prints "not found", falls back to checking its own pins, and goes on passing on a machine
-// that has both trees. That is the degraded mode written for CI doing its job silently where the
-// real comparison was available.
-const CANDIDATES = [
-  'Robot Overflow', 'robot-overflow', 'RobotOverflow', 'BotMarket', 'botmarket', 'Botmarket',
-  'botMarket',
-]
-
-function findHub() {
-  for (const name of CANDIDATES) {
-    const candidate = resolve(join(HERE, '..', name))
-    if (existsSync(candidate)) return candidate
-  }
-  return resolve(join(HERE, '..', 'BotMarket'))
-}
-
-const hub = given ? resolve(given) : findHub()
+const hub = given ? resolve(given) : findHubOr(HERE).path
 
 const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex')
 
@@ -157,8 +141,8 @@ function checkPins() {
     console.error(
       `\n${wrong} shared document(s) changed here without the pin being updated.\n`
         + 'A shared document is edited in both repositories or in neither. Make the same edit in\n'
-        + 'BotMarket, then re-pin from the two agreeing copies:\n\n'
-        + '    node tools/check-mirrors.mjs --pin ../BotMarket\n\n'
+        + 'the Hub, then re-pin from the two agreeing copies:\n\n'
+        + '    node tools/check-mirrors.mjs --pin ../RobotOverflow\n\n'
         + '--pin moves nothing. Use --sync only when the other tree holds the newer copy and you\n'
         + 'want it here. Editing the pins by hand switches this check off.',
     )
@@ -226,7 +210,7 @@ function writePins(agreed) {
 }
 
 if (!existsSync(hub)) {
-  console.log(`BotMarket not found at ${hub} — the two copies cannot be compared.`)
+  console.log(`No Hub checkout at ${hub} — the two copies cannot be compared.`)
   const wrong = checkPins()
   if (wrong > 0) process.exit(1)
   console.log('Every shared document matches its pinned digest.')

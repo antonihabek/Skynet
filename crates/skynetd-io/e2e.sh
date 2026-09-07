@@ -701,12 +701,30 @@ DESIRED
     pass "the loop attaches to the ring the daemon created (§26.2)"
   fi
 
-  # Four, not three: `stop` is read off §24's flags on the same newest cycle, so a ring that can
-  # hold a cycle makes it observable at the same moment the other two become observable.
-  want "and §27 now counts four observed conditions" \
-    "four of §27's eight conditions" "$K/after"
+  # Six, not four: `stop` and `guard_hold` are read off the same newest cycle as the RHAL — §24's
+  # flags for one and the kernel's guard verdict for the other — so a ring that can hold a cycle
+  # makes all four observable at the moment the loop writes into it. `guards` is the sixth and it
+  # is observable **before** any of them: §7.6's partition resolves off the descriptor this package
+  # staged, with no ring involved at all.
+  want "and §27 now counts seven observed conditions" \
+    "seven of §27's eight conditions" "$K/after"
   want "the kernel is live, with the cycles that say so" "control cycles were recorded" "$K/after"
   want "and the RHAL is present, off the newest cycle" "read the body and reported it present" "$K/after"
+  # The guard hold, on a loop nothing is holding: the guards ran and none of them withheld the
+  # command. Asserting the *negative* is worth a line because the failure it guards against is a
+  # console that renders "held" for a robot that is running, and because it is the sentence a
+  # reader gets on every robot that has not tripped anything.
+  want "and no guard is holding the command" "none of them held the command" "$K/after"
+  # §27's guard set, off §7.6's partition rather than the ring. This body declares no IMU and no
+  # person detector, so the assertion is the *positive* one — guards are unavailable and the
+  # condition says which and why — rather than a hopeful "all available" that would prove nothing.
+  want "and the guard set is partitioned, naming what each guard wants" \
+    "unavailable:" "$K/after"
+  # §27's policy, off the store rather than off §25.2's lease table. A commanding package is
+  # installed and activated by this point, so the assertion is that the daemon says so — the
+  # sentence `no_policy` would have been false here, and was, on every robot until this round.
+  want "and the policy condition names the package rather than reporting nothing to run" \
+    "openrobot/reach" "$K/after"
   # Both off one interval and one set of records. A robot reporting a present driver beside a
   # silent kernel would be describing a pair that was true at no instant, which is the reason
   # §27 reads them together rather than on two routes.

@@ -1426,9 +1426,14 @@ fn console_fixture() {
     // that the page is rendered against a robot that exists.
     fixture.daemon.refresh_operating_state(
         None,
-        &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
-        &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
-        &blackbox::StopSighting::Unobservable("no ring in this fixture"),
+        &crate::observed::Sightings {
+            kernel: &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
+            rhal: &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
+            stop: &blackbox::StopSighting::Unobservable("no ring in this fixture"),
+            hold: &blackbox::HoldSighting::Unobservable("no ring in this fixture"),
+            guards: &crate::limits::GuardsSighting::Unobservable("no descriptor in this fixture"),
+            policy: &crate::shape::PolicySighting::Nothing { no_body: true },
+        },
     );
     let vendor = driver_key(31);
     write_trust(&fixture, "bench-robotics", &public_hex(&vendor));
@@ -3970,9 +3975,14 @@ fn status_carries_the_operating_state_and_the_reason_it_is_there() {
 
     fixture.daemon.refresh_operating_state(
         None,
-        &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
-        &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
-        &blackbox::StopSighting::Unobservable("no ring in this fixture"),
+        &crate::observed::Sightings {
+            kernel: &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
+            rhal: &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
+            stop: &blackbox::StopSighting::Unobservable("no ring in this fixture"),
+            hold: &blackbox::HoldSighting::Unobservable("no ring in this fixture"),
+            guards: &crate::limits::GuardsSighting::Unobservable("no descriptor in this fixture"),
+            policy: &crate::shape::PolicySighting::Nothing { no_body: true },
+        },
     );
     let (_, after) = fixture.request("GET", "/status", None, "");
     assert_eq!(after.get("state").and_then(Json::as_str), Some("safe"));
@@ -3982,18 +3992,29 @@ fn status_carries_the_operating_state_and_the_reason_it_is_there() {
     );
 }
 
-/// `GET /state` says which of §27's eight conditions anybody looked at, and this edition looks at
-/// one. A page that showed the state without that would be reporting a robot as safe when the
-/// truth is that nothing has looked at it.
+/// `GET /state` says which of §27's eight conditions anybody looked at, and on a robot with no
+/// ring, no descriptor and nothing installed it looks at two. A page that showed the state without
+/// that would be reporting a robot as safe when the truth is that almost nothing has looked at it.
+///
+/// The two are `post` — this process's own self-test — and `policy`, and the second is worth
+/// stating: *nothing is installed that declares an action space* is a fact this daemon holds the
+/// store for, and answering it is not a §33.1 crossing. What would be one is claiming §25.2's
+/// lease, which is why the fixture that has a package installed reports this condition unobserved
+/// and this one does not.
 #[test]
 fn the_state_route_admits_how_little_it_observed() {
     let mut fixture = Fixture::new("state-route");
     fixture.provision();
     fixture.daemon.refresh_operating_state(
         None,
-        &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
-        &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
-        &blackbox::StopSighting::Unobservable("no ring in this fixture"),
+        &crate::observed::Sightings {
+            kernel: &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
+            rhal: &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
+            stop: &blackbox::StopSighting::Unobservable("no ring in this fixture"),
+            hold: &blackbox::HoldSighting::Unobservable("no ring in this fixture"),
+            guards: &crate::limits::GuardsSighting::Unobservable("no descriptor in this fixture"),
+            policy: &crate::shape::PolicySighting::Nothing { no_body: true },
+        },
     );
     let (status, body) = fixture.request("GET", "/state", Some("observer-token"), "");
     assert_eq!(status, 200);
@@ -4006,19 +4027,23 @@ fn the_state_route_admits_how_little_it_observed() {
 
     let observed = body.get("observed").expect("the observation map");
     assert_eq!(observed.get("post").and_then(Json::as_bool), Some(true));
-    for unobserved in [
-        "kernel",
-        "rhal",
-        "homing",
-        "stop",
-        "guard_hold",
-        "guards",
-        "policy",
-    ] {
+    assert_eq!(
+        observed.get("policy").and_then(Json::as_bool),
+        Some(true),
+        "`policy` is answerable here: nothing is installed, and this daemon holds the store"
+    );
+    assert_eq!(
+        body.get("policy")
+            .and_then(|block| block.get("state"))
+            .and_then(Json::as_str),
+        Some("none"),
+        "and the answer is `none`, which is the sentence with no remedy rather than the one with"
+    );
+    for unobserved in ["kernel", "rhal", "homing", "stop", "guard_hold", "guards"] {
         assert_eq!(
             observed.get(unobserved).and_then(Json::as_bool),
             Some(false),
-            "`{unobserved}` is not this process's to observe (§33.1)"
+            "`{unobserved}` is not observable on this fixture"
         );
     }
 }
@@ -4039,11 +4064,16 @@ fn the_state_route_admits_how_little_it_observed() {
 /// lacked and the only reason `crate::observed` exists.
 #[test]
 fn every_sentence_about_the_conditions_counts_the_same_object() {
-    for (kernel, rhal, stop, expected) in [
+    for (kernel, rhal, stop, hold, guards, policy, expected) in [
         (
             blackbox::KernelSighting::Unobservable("no ring in this fixture"),
             blackbox::RhalSighting::Unobservable("no ring in this fixture"),
             blackbox::StopSighting::Unobservable("no ring in this fixture"),
+            blackbox::HoldSighting::Unobservable("no ring in this fixture"),
+            crate::limits::GuardsSighting::Unobservable("no descriptor in this fixture"),
+            crate::shape::PolicySighting::LeaseUnknown {
+                package: "com.example.walk".to_string(),
+            },
             1,
         ),
         (
@@ -4054,14 +4084,25 @@ fn every_sentence_about_the_conditions_counts_the_same_object() {
                 fault_code: 0,
             },
             blackbox::StopSighting::Clear,
-            4,
+            blackbox::HoldSighting::Clear,
+            crate::limits::GuardsSighting::AllAvailable,
+            crate::shape::PolicySighting::Nothing { no_body: false },
+            7,
         ),
     ] {
         let mut fixture = Fixture::new("condition-count");
         fixture.provision();
-        fixture
-            .daemon
-            .refresh_operating_state(None, &kernel, &rhal, &stop);
+        fixture.daemon.refresh_operating_state(
+            None,
+            &crate::observed::Sightings {
+                kernel: &kernel,
+                rhal: &rhal,
+                stop: &stop,
+                hold: &hold,
+                guards: &guards,
+                policy: &policy,
+            },
+        );
 
         let (_, state) = fixture.request("GET", "/state", Some("observer-token"), "");
         let observed = state.get("observed").expect("the observation map");
@@ -4205,13 +4246,18 @@ fn an_open_stop_chain_is_its_own_cause_and_never_a_completed_stop() {
     fixture.provision();
     fixture.daemon.refresh_operating_state(
         None,
-        &blackbox::KernelSighting::Turning { cycles: 40 },
-        &blackbox::RhalSighting::Seen {
-            state: skynet_contracts::opstate::RhalState::Present,
-            errno: None,
-            fault_code: 0,
+        &crate::observed::Sightings {
+            kernel: &blackbox::KernelSighting::Turning { cycles: 40 },
+            rhal: &blackbox::RhalSighting::Seen {
+                state: skynet_contracts::opstate::RhalState::Present,
+                errno: None,
+                fault_code: 0,
+            },
+            stop: &blackbox::StopSighting::Asserted,
+            hold: &blackbox::HoldSighting::Clear,
+            guards: &crate::limits::GuardsSighting::AllAvailable,
+            policy: &crate::shape::PolicySighting::Nothing { no_body: false },
         },
-        &blackbox::StopSighting::Asserted,
     );
 
     let (status, state) = fixture.request("GET", "/state", Some("observer-token"), "");
@@ -4293,6 +4339,217 @@ fn a_failed_read_says_nothing_about_the_stop_chain() {
         blackbox::StopSighting::of(Some(&cycle)),
         blackbox::StopSighting::Asserted
     );
+}
+
+/// §27's `guard_hold`, and the two things it must never say.
+///
+/// This condition was `false` on every robot for as long as §27's machine has existed, filed as
+/// *"the kernel's"* — which was true about whose fact it is and false about where the evidence
+/// lives. §26 records the guard verdict beside the flags, so the daemon can read it without
+/// asking the kernel anything, exactly as it reads `kernel`, `rhal` and `stop`.
+///
+/// The two refusals are the whole design and neither is obvious from the field name:
+///
+/// 1. **An advisory hold is not a hold.** §7.4 lets a tier that cannot promise a clamp record the
+///    verdict and forward the command anyway, and every robot on this edition is one. Reporting
+///    `HOLD` there would tell an operator the robot is held at the moment it is moving.
+/// 2. **A failed body read does not stop this one.** `rhal` and `stop` refuse such a cycle because
+///    §26.4's fill replaces what the driver reported; the kernel's decision on that cycle is not a
+///    fill, and "is a guard holding" is a question about the kernel.
+#[test]
+fn a_guard_hold_is_read_off_the_verdict_and_only_when_it_was_enforced() {
+    use skynet_blackbox::record::ReadOutcome;
+
+    let mut cycle = skynet_blackbox::Cycle {
+        tick: 1,
+        observation: [0; 32],
+        policy: 0,
+        state_flags: 0,
+        fault_code: 0,
+        rhal_result: 0,
+        read: ReadOutcome::Ok,
+        state_seq: 1,
+        state_stamp_ns: 0,
+        command_stamp_ns: 0,
+        command_seq: 0,
+        mode: 0,
+        advisory: false,
+        response: None,
+        tripped: Vec::new(),
+        capability: skynet_blackbox::record::NO_CAPABILITY,
+        nearest_person_m: f32::NAN,
+        base_pose: [f32::NAN; 7],
+        base_twist: [0.0; 6],
+        desired: Vec::new(),
+        command: Vec::new(),
+        mask: Vec::new(),
+        clamped: Vec::new(),
+        position: Vec::new(),
+        velocity: Vec::new(),
+        effort: Vec::new(),
+    };
+
+    // No verdict: the guards ran and passed, or nothing was posted. Observed, and not a hold.
+    let clear = blackbox::HoldSighting::of(Some(&cycle));
+    assert_eq!(clear, blackbox::HoldSighting::Clear);
+    assert!(clear.observed());
+    assert!(!clear.held());
+
+    // An enforced hold.
+    cycle.response = Some(skynet_blackbox::FaultResponse::Hold);
+    let held = blackbox::HoldSighting::of(Some(&cycle));
+    assert_eq!(held, blackbox::HoldSighting::Held);
+    assert!(held.held());
+
+    // The same verdict, advisory. Looked at, a guard fired, and **nothing was withheld** — so §27's
+    // condition is false and the reading still counts as an observation. This is the case that
+    // exists on every robot this edition runs on.
+    cycle.advisory = true;
+    let advisory = blackbox::HoldSighting::of(Some(&cycle));
+    assert_eq!(advisory, blackbox::HoldSighting::Advisory);
+    assert!(
+        advisory.observed(),
+        "a guard fired and somebody should see it"
+    );
+    assert!(
+        !advisory.held(),
+        "an advisory verdict forwards the command; reporting HOLD would describe a robot that \
+         does not exist"
+    );
+    assert!(advisory.detail().contains("advisory"));
+
+    // A clamp is not a hold: the command was reduced and sent, so the robot is moving.
+    cycle.advisory = false;
+    cycle.response = Some(skynet_blackbox::FaultResponse::Clamp);
+    assert_eq!(
+        blackbox::HoldSighting::of(Some(&cycle)),
+        blackbox::HoldSighting::Clear
+    );
+
+    // And the split from `stop`: a cycle whose body read failed is unreadable to `StopSighting`
+    // and readable here, because the verdict is the kernel's own act rather than a fill of the
+    // body's flags (§26.4).
+    cycle.response = Some(skynet_blackbox::FaultResponse::Hold);
+    cycle.read = ReadOutcome::Failed(-110);
+    assert!(!blackbox::StopSighting::of(Some(&cycle)).observed());
+    assert_eq!(
+        blackbox::HoldSighting::of(Some(&cycle)),
+        blackbox::HoldSighting::Held,
+        "the kernel withheld the command on that cycle whatever its read of the body returned"
+    );
+
+    // No cycle at all is not a reading, and says which absence it is.
+    let none = blackbox::HoldSighting::of(None);
+    assert!(!none.observed());
+    assert!(!none.held());
+}
+
+/// An enforced hold reaches the route — and does **not** reach §27's derived state, which is the
+/// honest size of this step.
+///
+/// `guard_hold` is rule 7 of `derive`. Above it sit the self-test (4), homing (5) and the kernel
+/// (6), and `homing` is the one condition on this edition that no reader can close: §24 gives the
+/// ABI no flag for it, so it defaults to `Pending` and outranks every hold. A robot here therefore
+/// reports `unhomed` or `post` while carrying a perfectly good guard-hold observation.
+///
+/// So this asserts the two things that did change — the condition is **observed**, and the block
+/// §32.2 requires renders what was seen — and asserts the ordering explicitly rather than leaving
+/// somebody to discover it. That `derive` turns `guard_hold` into `HOLD` is not this test's to
+/// prove; `opstate`'s own suite does it, on conditions a daemon cannot yet supply.
+#[test]
+fn an_enforced_hold_reaches_the_route_and_homing_still_outranks_it() {
+    let mut fixture = Fixture::new("guard-hold-condition");
+    fixture.provision();
+    fixture.daemon.refresh_operating_state(
+        None,
+        &crate::observed::Sightings {
+            kernel: &blackbox::KernelSighting::Turning { cycles: 40 },
+            rhal: &blackbox::RhalSighting::Seen {
+                state: skynet_contracts::opstate::RhalState::Present,
+                errno: None,
+                fault_code: 0,
+            },
+            stop: &blackbox::StopSighting::Clear,
+            hold: &blackbox::HoldSighting::Held,
+            guards: &crate::limits::GuardsSighting::AllAvailable,
+            policy: &crate::shape::PolicySighting::Nothing { no_body: false },
+        },
+    );
+
+    let (status, state) = fixture.request("GET", "/state", Some("observer-token"), "");
+    assert_eq!(status, 200);
+
+    let observed = state.get("observed").expect("the observation map");
+    assert_eq!(
+        observed.get("guard_hold").and_then(Json::as_bool),
+        Some(true)
+    );
+
+    let block = state.get("guard_hold").expect("the guard-hold block");
+    assert_eq!(block.get("held").and_then(Json::as_bool), Some(true));
+    assert_eq!(block.get("advisory").and_then(Json::as_bool), Some(false));
+    assert!(block
+        .get("detail")
+        .and_then(Json::as_str)
+        .unwrap_or_default()
+        .contains("withheld it on every channel"));
+
+    // The ordering, stated as an assertion so that the day `homing` and the self-test gain
+    // producers this test says which sentence to rewrite.
+    assert_ne!(
+        state.get("reason").and_then(Json::as_str),
+        Some("guard_hold"),
+        "a condition above this one is unobserved and takes the machine first — closing \
+         `guard_hold` moves the observation, not yet the state"
+    );
+}
+
+/// And the advisory case, on the route, which is the one every robot here produces.
+///
+/// A guard fired and the command went through. The state must **not** be `hold`, the condition
+/// must be reported as observed, and `advisory` must be visible — a console given only `held`
+/// could not tell this robot from one no guard touched, and those are opposite facts.
+#[test]
+fn an_advisory_hold_is_reported_without_holding_the_robot() {
+    let mut fixture = Fixture::new("guard-hold-advisory");
+    fixture.provision();
+    fixture.daemon.refresh_operating_state(
+        None,
+        &crate::observed::Sightings {
+            kernel: &blackbox::KernelSighting::Turning { cycles: 40 },
+            rhal: &blackbox::RhalSighting::Seen {
+                state: skynet_contracts::opstate::RhalState::Present,
+                errno: None,
+                fault_code: 0,
+            },
+            stop: &blackbox::StopSighting::Clear,
+            hold: &blackbox::HoldSighting::Advisory,
+            guards: &crate::limits::GuardsSighting::AllAvailable,
+            policy: &crate::shape::PolicySighting::Nothing { no_body: false },
+        },
+    );
+
+    let (status, state) = fixture.request("GET", "/state", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    // Weaker than it looks on this edition — a condition above `guard_hold` is holding the machine
+    // anyway — so the assertion that carries the rule is on `reason`, below, and on `held` in the
+    // block. Both would be wrong the moment an advisory verdict was mapped onto §27's condition.
+    assert_ne!(
+        state.get("reason").and_then(Json::as_str),
+        Some("guard_hold"),
+        "nothing was withheld, so nothing may report the robot as held for a guard"
+    );
+
+    let observed = state.get("observed").expect("the observation map");
+    assert_eq!(
+        observed.get("guard_hold").and_then(Json::as_bool),
+        Some(true),
+        "the daemon looked; the answer was no"
+    );
+
+    let block = state.get("guard_hold").expect("the guard-hold block");
+    assert_eq!(block.get("held").and_then(Json::as_bool), Some(false));
+    assert_eq!(block.get("advisory").and_then(Json::as_bool), Some(true));
 }
 
 /// The narrowing, from the direction that matters. §33.4's asymmetry says either source may close

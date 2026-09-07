@@ -54,6 +54,8 @@ import { readdirSync, readFileSync, statSync, writeFileSync, existsSync } from '
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { HUB_DIRECTORY_NAMES, findHub } from './hub-path.mjs'
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const PIN = join(ROOT, 'reference', 'reports', 'scale.json')
 const SPEC = join(ROOT, 'docs', 'skynet-os-architecture.md')
@@ -94,19 +96,27 @@ function measureCorpus() {
   return { files: files.length, cases }
 }
 
+/**
+ * The Hub's mirror, measured, or `null` when there is no Hub checkout to measure.
+ *
+ * The candidate list is `hub-path.mjs`'s and not this file's, which is the fix for a defect this
+ * function had: it looked for two spellings where the other two tools looked for seven, so on a
+ * machine with the Hub at `../RobotOverflow` it reported the mirror unmeasured while
+ * `check-mirrors.mjs` was comparing against that very tree. An unmeasured figure exits zero, so
+ * the check was off and nothing said so.
+ *
+ * The mirror directory must exist, not merely the checkout: a Hub clone that has not yet been
+ * synced is a tree this cannot measure, and measuring zero lines would be worse than saying so.
+ */
 function measureHubMirror() {
-  const candidates = [
-    hubArg && resolve(hubArg),
-    resolve(ROOT, '..', 'Robot Overflow'),
-    resolve(ROOT, '..', 'BotMarket'),
-  ].filter(Boolean)
-  for (const base of candidates) {
-    const mirror = join(base, 'lib', 'skynet', 'os')
-    if (existsSync(mirror)) {
-      return { lines: lines(walk(mirror, ['.ts', '.tsx'])), measured: true, from: base }
-    }
-  }
-  return null
+  const explicit = hubArg ? resolve(hubArg) : null
+  const base = explicit !== null && existsSync(join(explicit, 'lib', 'skynet', 'os'))
+    ? explicit
+    : findHub(ROOT)
+  if (base === null) return null
+  const mirror = join(base, 'lib', 'skynet', 'os')
+  if (!existsSync(mirror)) return null
+  return { lines: lines(walk(mirror, ['.ts', '.tsx'])), measured: true, from: base }
 }
 
 /**
@@ -288,21 +298,37 @@ const NUMBER_WORDS = {
  * from `Observed::of`, so a condition gaining a producer fails this check in four places at once
  * and the fix is to write the new number, not to remember that there was one.
  */
+/**
+ * `is` as well as `are`, because the count reached **one** on 2026-09-07 and English changed under
+ * the check.
+ *
+ * The first draft matched only the plural, so rewording four sentences into the singular they now
+ * require made every pattern miss — and the check reported *"no document states how many of §27's
+ * conditions are unobserved any more"* rather than passing, which is the whole reason `found` is
+ * counted separately from the failures. A check whose grammar can go stale has to notice that it
+ * matched nothing; this one does, and this comment is here because the next boundary is `none`.
+ */
+const IS_OR_ARE = String.raw`(?:is|are)`
+
 const CONDITION_SENTENCES = [
   {
     file: SPEC,
     label: '§73/§81',
-    pattern: /([\w-]+) of (?:§27's eight|the eight) conditions are still (?:unobserved|the kernel's)/gi,
+    pattern: new RegExp(
+      String.raw`([\w-]+) of (?:§27's eight|the eight) conditions ${IS_OR_ARE} still `
+      + String.raw`(?:unobserved|the kernel's)`, 'gi'),
   },
   {
     file: SPEC,
     label: '§73',
-    pattern: /([\w-]+) of the eight are still the kernel's/gi,
+    pattern: new RegExp(
+      String.raw`([\w-]+) of the eight ${IS_OR_ARE} still the kernel's`, 'gi'),
   },
   {
     file: join(ROOT, 'README.md'),
     label: 'README',
-    pattern: /([\w-]+) of §27's eight conditions are unobserved/gi,
+    pattern: new RegExp(
+      String.raw`([\w-]+) of §27's eight conditions ${IS_OR_ARE} unobserved`, 'gi'),
   },
 ]
 
@@ -392,7 +418,9 @@ if (check) {
     }
   }
   if (!hubMeasured) {
-    console.log("  --  the Hub's mirror was not measured: no checkout beside this one")
+    console.log(
+      "  --  the Hub's mirror was not measured: no checkout beside this one"
+      + ` (looked for ${HUB_DIRECTORY_NAMES.length} names, or pass the path)`)
   }
 } else {
   writeFileSync(PIN, `${JSON.stringify(measured, null, 2)}\n`)

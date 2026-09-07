@@ -216,6 +216,20 @@ jobs:
       - name: The Python edition's own checks
         run: python3 editions/python/self_check.py
 
+      # The published figure, held to the run that produces it. This is the last step in the job
+      # rather than a separate one because it is the only check here that needs **both** editions
+      # to have run: it runs them again and compares the result to `reference/reports/editions.json`,
+      # which the Hub mirrors and `/skynet/os/editions` renders to the public.
+      #
+      # It is here because on 2026-09-07 that file said 1,137 cases while both editions passed
+      # 1,142, and nothing in this workflow could see it. Every neighbouring check passed honestly:
+      # `check-contract-mirrors` compares the Hub's copy to the reference's and both were stale
+      # together, and `--min-passed 1109` is a floor that 1,137 and 1,142 both clear. A ratchet
+      # cannot catch a stale exact figure — only re-deriving it can — and the number was published
+      # on a page for as long as nobody happened to run this tool by hand.
+      - name: The published edition figures are what running the editions produces
+        run: node tools/edition-report.mjs --check
+
   # Claims this repository makes about itself, checked mechanically. Each of these is a sentence
   # somewhere in the specification that would otherwise decay quietly.
   invariants:
