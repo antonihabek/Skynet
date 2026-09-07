@@ -12107,3 +12107,66 @@ scale (§73 matches the tree), edition report.
      `media` was written where nothing consumes it. The list's own header names that mistake and
      the check could not catch it, because a module that is not on the list is not compared —
      absence from a mirror list is invisible to the mirror check by construction.
+
+## 2026-09-07 (sixty-fifth) — §5's `detects_people`, and the guard it turned on
+
+`resolveLimits` takes seven `available` inputs and the seventh had no path: §5's nine modalities
+say what a sensor **produces**, and detection is what somebody does with the output, so no body
+could declare a person detector and `skynetd` wrote `people_detection: false` on every robot.
+§80 had carried it for four sessions with that diagnosis and the specified close.
+
+Built as specified: `detects_people?: boolean` on the sensor, declared per sensor by the vendor,
+with `hasPeopleDetection` deriving the input. No vocabulary, so no governance — which is what
+unblocked it while §30's role vocabulary is still open. Three editions, nine cases in
+`corpus/embodiment/detection.json`, and the daemon derives it through the contract rather than
+three lines of its own so a Hub reading the same descriptor cannot answer differently.
+
+Absent and `false` are one fact downstream and two in the descriptor. The corpus header says so
+rather than implying a coverage it has not got: both make the guard unavailable, so no expected
+value can separate them and an edition that folded them together would pass every case.
+
+What the nine cases do pin is how each edition reads the **value**, because each does it by a
+different mechanism with its own way to be wrong — `=== true`, `as_bool()`, `is True`. Python's
+is the sharpest (`1 == True` is true, `1 is True` is not), so there is a case for the number one
+and the mutation run catches every substitution: `== True` fails one case, truthiness fails two,
+and Rust's `.is_some()` fails the declared-absent one.
+
+Two cases pin that the modality is **not** consulted, including a force-torque sensor declaring
+person distance. That looks wrong and is right: the alternative is a list of modalities a
+detector may live behind, which is a vocabulary needing the governance this design avoided, and
+whose wrong entry would disable a guard on a robot whose vendor had declared one.
+
+Then the honest half, which is the finding. `proximity` acts on `cycle.nearest_person_m` and
+**nothing on this edition produces that number**. A body that declares a detector now moves the
+guard out of *unavailable* and into *active*, where it will never trip — and *active* is what
+every surface renders as protection. §7.2's partition has no state for "every input resolves and
+the reading is not coming", and adding one changes a partition the console, the check-in, the
+device page and `skynet limits` all draw. So §80 gained a row rather than an answer, and
+`skynetd`'s limits document now names `cycle.nearest_person_m` in `unmeasured` on every robot.
+
+### Numbers
+
+`cargo test --workspace` — **1,645 passed** (1,641 before), 0 failed. Rust corpus **1,136 of
+1,136**; Python corpus **1,136 passed**. Hub: 1,853 passed, typecheck clean. Every check tool
+green.
+
+### Findings, restated
+
+1-117 as before.
+
+118. **Closing a hole can open a worse one one layer down, and the direction matters.** Before
+     this, `proximity` was unavailable and named what it wanted — honest, and useless. After it,
+     a declaring body gets a guard listed *active* that cannot trip — useful-looking, and a lie.
+     The first failure sends somebody to buy a sensor; the second tells a room full of people
+     they are being watched for.
+
+119. **A vocabulary avoided is a governance process avoided, and that is worth paying for.** The
+     obvious hardening — only honour `detects_people` on modalities a person could plausibly be
+     measured in — costs a list of modalities, which is a closed set, which needs the process §30
+     leaves open. And its wrong entry fails in the disabling direction on a robot whose vendor
+     declared a detector. A boolean the vendor writes has no such entry to get wrong.
+
+120. **Three editions is three ways to be wrong about one boolean.** `=== true`, `as_bool()` and
+     `is True` are the same rule and not the same code, and the Python one is a genuine trap:
+     `1 == True`. The case for the number one exists so that the paragraph describing the trap is
+     a check rather than a claim.

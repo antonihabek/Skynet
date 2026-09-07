@@ -114,6 +114,26 @@ pub struct EmbodimentSensor {
     /// — and it is a claim no imaging pipeline can make. `rhal.sensor.latency` in the bench suite
     /// is what turns the declaration into a measurement.
     pub latency_ms: Option<f64>,
+    /// Whether this stream reports **person distance** to the `proximity` guard (§5, §7.1).
+    ///
+    /// The seventh input to [`crate::safety`]'s `resolve_limits` and the last one with no path.
+    /// Its two neighbours are read off the descriptor — a sensor whose modality is `imu`, a base
+    /// that is `legged` — and this one could not be, because §5's modalities say what a sensor
+    /// *produces* and detection is what somebody does with the output. A camera is not a person
+    /// detector; a camera plus a model somebody validated is.
+    ///
+    /// Three states, and the third is why this is `Option` rather than `bool`:
+    ///
+    /// | | |
+    /// |---|---|
+    /// | `None` | **undeclared** — nobody considered it. The guard reports unavailable (§7.2) |
+    /// | `Some(false)` | **declared absent** — considered, and this stream does not do it |
+    /// | `Some(true)` | this stream reports person distance |
+    ///
+    /// The first two read identically downstream and differently to a person: a descriptor full
+    /// of `false` is a vendor who answered the question, and one with nothing is a vendor who has
+    /// not been asked it yet.
+    pub detects_people: Option<bool>,
 }
 
 /// What the body will accept, and how fast.
@@ -398,6 +418,32 @@ pub const FRAME_KINDS: [&str; 3] = ["root", "static", "dynamic"];
 ///
 /// Returns `None` when the graph is usable. It does **not** check that the graph reaches any
 /// particular frame — "the tree does not reach the end effector" is a question about a specific
+/// Does this body declare something that reports person distance? (§5, §7.1's `proximity`.)
+///
+/// The derivation `resolve_limits`'s seventh `available` input has been waiting for.
+///
+/// **Any one sensor is enough.** The question is about the robot, not about a stream, so a body
+/// with a head camera that detects people and four that do not has a person detector. No quorum,
+/// and no "the best of them": two detectors do not make the claim stronger and one that stopped
+/// working does not make it weaker, which is what the bench and field suites are for.
+///
+/// **A declaration is honoured and not checked against the modality.** §5 puts the reason on the
+/// field: only the vendor knows whether their depth stream is one a person is measured in.
+/// Filtering by modality here would overrule the party that built the pipeline on the strength of
+/// a vocabulary describing something else.
+///
+/// **What this does not establish** is that the guard will ever see a number. `proximity` acts on
+/// `cycle.nearest_person_m`, and a declaration says a stream exists rather than that anything
+/// delivers it — the same gap `available.imu` has always had, one step wider, because no producer
+/// on this edition fills that field at all. §80 carries the question of whether an active guard
+/// with no producer deserves a name of its own.
+pub fn has_people_detection(descriptor: &EmbodimentDescriptor) -> bool {
+    descriptor
+        .sensors
+        .iter()
+        .any(|sensor| sensor.detects_people == Some(true))
+}
+
 /// guard's needs, and §44.5 has that guard report it with the frame it wanted named.
 pub fn validate_frames(graph: &FrameGraph) -> Option<FrameFault> {
     if graph.nodes.is_empty() {
@@ -771,6 +817,81 @@ mod tests {
         let nobody_looked: Option<SafetyEnvelope> = None;
         let looked_and_found_nothing = Some(SafetyEnvelope::default());
         assert_ne!(nobody_looked, looked_and_found_nothing);
+    }
+
+    fn body_with(sensors: Vec<EmbodimentSensor>) -> EmbodimentDescriptor {
+        EmbodimentDescriptor {
+            schema_version: 1,
+            robot_slug: String::from("bench"),
+            digest: None,
+            verified: false,
+            base: String::from("fixed"),
+            dof: 0.0,
+            joints: Vec::new(),
+            end_effectors: Vec::new(),
+            sensors,
+            control: ControlProfile::default(),
+            envelope: None,
+            solvers: Vec::new(),
+            capabilities: Vec::new(),
+            extensions: Vec::new(),
+            simulator: false,
+            on_command_loss: None,
+            watchdog: None,
+            frames: None,
+            power: None,
+        }
+    }
+
+    fn sensor(name: &str, modality: &str, detects: Option<bool>) -> EmbodimentSensor {
+        EmbodimentSensor {
+            name: String::from(name),
+            role: None,
+            modality: String::from(modality),
+            width: None,
+            height: None,
+            fps: None,
+            frame: None,
+            latency_ms: None,
+            detects_people: detects,
+        }
+    }
+
+    /// §5. Undeclared and declared-absent are one fact downstream and two in the descriptor.
+    #[test]
+    fn nobody_asked_and_answered_no_read_the_same_way() {
+        let unasked = body_with(alloc::vec![sensor("head", "rgb", None)]);
+        let answered = body_with(alloc::vec![sensor("head", "rgb", Some(false))]);
+        assert!(!has_people_detection(&unasked));
+        assert!(!has_people_detection(&answered));
+        // And they are still different descriptors, which is the whole reason `false` is worth
+        // writing: one vendor answered the question and the other has not been asked it.
+        assert_ne!(
+            unasked.sensors[0].detects_people,
+            answered.sensors[0].detects_people
+        );
+    }
+
+    /// One is enough, and the modality is not consulted.
+    #[test]
+    fn one_declaring_sensor_answers_for_the_body() {
+        let mixed = body_with(alloc::vec![
+            sensor("head", "rgb", Some(false)),
+            sensor("torso_depth", "depth", Some(true)),
+            sensor("imu", "imu", None),
+        ]);
+        assert!(has_people_detection(&mixed));
+
+        // Implausible and still honoured. The alternative is a list of modalities a detector may
+        // live behind, which is a vocabulary, which needs the governance §30 leaves open — and a
+        // wrong entry in it would disable a guard on a robot whose vendor declared one.
+        let odd = body_with(alloc::vec![sensor("wrist_ft", "force_torque", Some(true))]);
+        assert!(has_people_detection(&odd));
+    }
+
+    #[test]
+    fn a_body_with_no_sensors_declares_nothing() {
+        assert!(!has_people_detection(&body_with(Vec::new())));
     }
 
     #[test]

@@ -47,14 +47,30 @@
 //! | `transport` | §37.1's plan, for a named installed package |
 //! | `profile.proximity` | the same profile's `limits.proximity` (§11) |
 //! | `profile.self_collision_margin_m` | the same profile's `limits` (§11) |
-//! | `available.people_detection` | **nothing** — see below |
+//! | `available.people_detection` | a sensor declaring `detects_people` (§5) |
 //!
-//! `people_detection` is `false` on every body, and that is a measured absence rather than a
-//! default: §5's sensor vocabulary has nine modalities and none of them is a person detector. A
-//! camera is not one — detection is a perception component, not a sensor — and inferring one from
-//! `rgb` would be exactly the *"claim about the body that nothing checks"* that `Available` had two
-//! fields removed for. The consequence is visible and correct: the `proximity` guard reports
-//! unavailable naming a sensor that detects people, on a robot that has not got one.
+//! `people_detection` was `false` on every body until 2026-09-07, and that was a measured absence
+//! rather than a default: §5's sensor vocabulary has nine modalities and none of them is a person
+//! detector. A camera is not one — detection is a perception component, not a sensor — and
+//! inferring one from `rgb` would be exactly the *"claim about the body that nothing checks"* that
+//! `Available` had two fields removed for.
+//!
+//! §5 closed it the only way that does not require inference: a **boolean the vendor writes on the
+//! sensor**, because only the party that built the sensing pipeline knows whether their depth
+//! stream is one a person is measured in. The derivation is
+//! [`has_people_detection`](skynet_contracts::embodiment::has_people_detection) — a mirrored
+//! contract, not three lines here, so a Hub reading the same descriptor cannot answer differently.
+//! A body that declares nothing still leaves the guard unavailable naming a sensor that detects
+//! people, which is the guard reporting on the body rather than on the descriptor's author.
+//!
+//! **What this does not do is make the guard work.** `proximity` acts on `cycle.nearest_person_m`,
+//! and nothing on this edition fills that field: no capture backend, no perception component, no
+//! path from a declaration to a distance. So a robot whose vendor declares a detector now lists
+//! `proximity` as **active** and the guard never trips, which reads as protection to anybody
+//! looking at the list. That is a worse failure than the one this closed, it is the same shape as
+//! `available.imu` has always had, and it is one step wider because that field has no producer at
+//! all. §80 carries the question of whether the state deserves a name of its own; until it does,
+//! nothing here should be read as saying a robot is monitoring separation.
 //!
 //! The other two were gaps in the **delivery path** rather than in the body, and they are closed:
 //! §11's profile carries `self_collision_margin_m` and a `proximity` block beside its four
@@ -64,10 +80,11 @@
 //! One of them changes what the machine does. `self_collision_margin_m` is read by §7.1's fifth
 //! guard, so a profile that sets it is a robot whose collision bodies stop short of touching
 //! instead of at the moment they meet — and `NoCollisionMargin` stops being emitted on every robot.
-//! The other does not, yet: `proximity` also needs `available.people_detection`, which is `false` on
-//! every body for the reason above. What changes is the **report** — the guard now names the sensor
-//! it has not got rather than a profile field that could not be delivered, which is the difference
-//! between "this platform cannot do it" and "this robot has not got one".
+//! The other did not, then: `proximity` also needs `available.people_detection`, which was `false`
+//! on every body until §5 grew the field. What changed first was the **report** — the guard named
+//! the sensor it has not got rather than a profile field that could not be delivered, which is the
+//! difference between "this platform cannot do it" and "this robot has not got one". What changes
+//! now is that a body can answer it.
 //!
 //! # The cell's volumes stop being reported and start being applied
 //!
@@ -181,9 +198,12 @@ pub fn read(layout: &Layout, body: &Body, tier: Tier) -> Owned {
         // Declared, not inferred. A body with no `imu` sensor leaves `balance` unavailable naming
         // an IMU, which is the guard reporting on the body rather than on the descriptor's author.
         imu: descriptor.is_some_and(|d| d.sensors.iter().any(|s| s.modality == "imu")),
-        // See the module docs. Nothing in §5 declares a person detector, so this is false on every
-        // body and the `proximity` guard says so.
-        people_detection: false,
+        // Declared per sensor by the vendor, and derived by the contract rather than here: this
+        // was `false` on every body for as long as §5 had no field for it, and the derivation is
+        // `has_people_detection` so that a Hub reading the same descriptor cannot answer
+        // differently.
+        people_detection: descriptor
+            .is_some_and(skynet_contracts::embodiment::has_people_detection),
         legged: descriptor.is_some_and(|d| d.base == "legged"),
     };
 
@@ -457,9 +477,14 @@ pub fn to_json(owned: &Owned) -> Json {
                     "profile.self_collision_margin_m — the same, so two of this robot's own bodies \
                      must meet before the `self_collision` guard holds",
                 ),
+                // Not `available.people_detection` any more — §5 grew `detects_people` and a
+                // body can answer it. What is unmeasured is the reading itself, and it is the
+                // sharper entry of the two: a declaration says a stream exists, and the guard
+                // acts on a *number*.
                 Json::from(
-                    "available.people_detection — §5 declares nine sensing modalities and none of \
-                     them is a person detector",
+                    "cycle.nearest_person_m — no producer on this edition fills it, so a body \
+                     that declares `detects_people` puts `proximity` in the active guards and \
+                     nothing will ever trip it. An active guard reads as protection",
                 ),
             ]),
         );
@@ -604,6 +629,19 @@ mod tests {
             "allowed": [{ "frame": "tool0",
                           "shape": { "kind": "box", "min": [-1, -1, 0], "max": [1, 1, 2] } }]
         }
+    }"#;
+
+    /// The same profile with §11's `proximity` block, which is the guard's other input.
+    ///
+    /// All three numbers or none (see `read_profile`): two thresholds and no factor is a guard
+    /// nobody finished configuring, and this layer inventing the third would be it deciding a
+    /// safety parameter.
+    const PROFILE_WITH_PROXIMITY: &str = r#"{
+        "name": "site-a",
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "limits": { "joint_velocity_max_rad_s": 0.5, "max_delta_per_cycle": 0.1,
+                    "proximity": { "stop_distance_m": 0.3, "slow_distance_m": 1.0,
+                                   "slow_factor": 0.25 } }
     }"#;
 
     struct Bench {
@@ -808,9 +846,9 @@ mod tests {
 
     /// The three inputs with no source, and the guards that report them.
     ///
-    /// A camera is not a person detector, so `proximity` is unavailable on a body that has one —
-    /// and the reason names the sensor rather than the profile, because the profile field has no
-    /// delivery path either and naming only that would send somebody to fix the wrong thing.
+    /// A camera is not a person detector, so `proximity` is unavailable on a body that has one and
+    /// declares nothing — the vendor says whether their stream measures a person (§5), and this
+    /// descriptor does not.
     #[test]
     fn a_camera_is_not_a_person_detector() {
         let bench = Bench::new("proximity");
@@ -830,6 +868,67 @@ mod tests {
 
         let document = to_json(&owned);
         assert_eq!(document.arr_or_empty("unmeasured").len(), 3);
+    }
+
+    /// A vendor declares a detector, and the guard goes active on a robot that cannot see anyone.
+    ///
+    /// This is the honest half of §5's field and the reason `unmeasured` names
+    /// `cycle.nearest_person_m` rather than `available.people_detection`. The declaration is a
+    /// claim about the **body**, and it is now answerable; the guard acts on a **number**, and
+    /// nothing on this edition produces one. So `proximity` moves out of `unavailable_guards` —
+    /// which is correct, because the input it was naming is no longer missing — and into
+    /// `active_guards`, where it will never trip.
+    ///
+    /// The assertion worth having is the last one. A robot that lists the guard as active and does
+    /// not say why it is inert would be a robot reporting speed-and-separation monitoring it is
+    /// not doing, and that is a worse failure than the one §5 closed.
+    #[test]
+    fn a_declared_detector_activates_a_guard_nothing_can_trip() {
+        const SEEING_ARM: &str = r#"{
+            "robot_slug": "bench-arm",
+            "base": "fixed",
+            "dof": 1,
+            "envelope": { "joint_velocity_max_rad_s": 1.0, "joint_torque_max_nm": 80,
+                          "watchdog_ms": 100, "source": "vendor datasheet rev C" },
+            "sensors": [{"name": "torso_imu", "modality": "imu"},
+                        {"name": "head_cam", "modality": "rgb", "detects_people": true}],
+            "joints": [{"name": "shoulder", "type": "revolute", "control_modes": ["position"]}]
+        }"#;
+
+        let bench = Bench::new("declared-detector");
+        bench.describe(SEEING_ARM).profile(PROFILE_WITH_PROXIMITY);
+        let owned = bench.resolve(ROBOT_TIER);
+        assert!(
+            owned.available.people_detection,
+            "the vendor declared one on the head camera"
+        );
+
+        let (active, missing) = owned.with_resolved(|limits, _| {
+            (
+                limits
+                    .active_guards
+                    .iter()
+                    .any(|guard| guard.as_str() == "proximity"),
+                limits
+                    .unavailable_guards
+                    .iter()
+                    .any(|entry| entry.guard.as_str() == "proximity"),
+            )
+        });
+        assert!(active, "both inputs are present, so the guard resolves active");
+        assert!(!missing, "and it is no longer reported as unavailable");
+
+        // The guard is active and inert, and the robot says so rather than leaving a reader to
+        // infer it from the absence of a trip.
+        let document = to_json(&owned);
+        assert!(
+            document
+                .arr_or_empty("unmeasured")
+                .iter()
+                .filter_map(Json::as_str)
+                .any(|entry| entry.starts_with("cycle.nearest_person_m")),
+            "an active guard with no producer has to be named"
+        );
     }
 
     /// `balance` is not applicable to a fixed base, and the wording says which — so nobody reads a
