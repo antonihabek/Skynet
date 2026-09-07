@@ -20,6 +20,7 @@ use skynetd::desired::PackageKind;
 use skynetd::reconcile::SafeState;
 
 use crate::api::{self, Context};
+use crate::blackbox;
 use crate::auth::{requirement, Credential, Credentials, Role};
 use crate::http;
 use crate::launch::{self, CpuError, Cpus, Limits, RecordingLauncher, SystemdLauncher, Unit};
@@ -1423,7 +1424,10 @@ fn console_fixture() {
     // the panel for a robot mid-boot rather than for the one the rest of this fixture describes,
     // which is the drift the fixture exists to prevent: the answers come from `api::handle` so
     // that the page is rendered against a robot that exists.
-    fixture.daemon.refresh_operating_state(None);
+    fixture.daemon.refresh_operating_state(
+        None,
+        &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
+    );
     let vendor = driver_key(31);
     write_trust(&fixture, "bench-robotics", &public_hex(&vendor));
 
@@ -2329,6 +2333,48 @@ fn a_half_written_separation_block_does_not_acquire_a_default() {
     assert!(
         missing.iter().any(|why| why.contains("profile.proximity")),
         "two of three is not a proximity configuration: {missing:?}"
+    );
+}
+
+/// `GET /state` reports what was seen of the kernel, and whether anybody looked.
+///
+/// Two of §27's eight conditions are observed now. The one that matters on this route is the
+/// distinction §27 itself does not draw: a robot whose ring cannot hold a cycle and a robot whose
+/// kernel has stopped are both `down` to the machine and are not the same fact to a person. A
+/// console that showed "kernel: down" about the first would send somebody to restart a kernel that
+/// is not the problem.
+#[test]
+fn the_state_route_says_whether_the_kernel_was_observed_at_all() {
+    let mut fixture = Fixture::new("state-kernel");
+    fixture.provision();
+    let (status, body) = fixture.request("GET", "/state", Some("observer-token"), "");
+    assert_eq!(status, 200);
+
+    let observed = body.get("observed").cloned().expect("the condition table");
+    assert_eq!(observed.get("post"), Some(&Json::Bool(true)));
+    // This fixture's daemon has never run a pass, so nothing has looked.
+    assert_eq!(observed.get("kernel"), Some(&Json::Bool(false)));
+    for condition in ["rhal", "homing", "stop", "guard_hold", "guards", "policy"] {
+        assert_eq!(
+            observed.get(condition),
+            Some(&Json::Bool(false)),
+            "{condition} is still §33.1's side of the line"
+        );
+    }
+
+    let kernel = body.get("kernel").cloned().expect("the reading beside it");
+    assert_eq!(kernel.get("state"), Some(&Json::from("down")));
+    assert_eq!(kernel.get("observed"), Some(&Json::Bool(false)));
+    // The source, because §32.2 says a console must never show a value it did not receive — and
+    // the *reason* this comes off the ring is the load-bearing half of the design.
+    let source = kernel
+        .get("source")
+        .and_then(Json::as_str)
+        .unwrap_or_default();
+    assert!(source.contains("§13's ring"));
+    assert!(
+        source.contains("hung kernel is an active unit"),
+        "the reason systemd is not the source has to travel with the reading"
     );
 }
 
@@ -3907,7 +3953,10 @@ fn status_carries_the_operating_state_and_the_reason_it_is_there() {
         "a daemon that has not observed has not observed a failure either"
     );
 
-    fixture.daemon.refresh_operating_state(None);
+    fixture.daemon.refresh_operating_state(
+        None,
+        &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
+    );
     let (_, after) = fixture.request("GET", "/status", None, "");
     assert_eq!(after.get("state").and_then(Json::as_str), Some("safe"));
     assert_eq!(
@@ -3923,7 +3972,10 @@ fn status_carries_the_operating_state_and_the_reason_it_is_there() {
 fn the_state_route_admits_how_little_it_observed() {
     let mut fixture = Fixture::new("state-route");
     fixture.provision();
-    fixture.daemon.refresh_operating_state(None);
+    fixture.daemon.refresh_operating_state(
+        None,
+        &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
+    );
     let (status, body) = fixture.request("GET", "/state", Some("observer-token"), "");
     assert_eq!(status, 200);
     assert_eq!(body.get("state").and_then(Json::as_str), Some("safe"));
@@ -4797,6 +4849,74 @@ mod recorder {
     fn open(root: &TempRoot, shape: Shape) -> Recorder {
         let layout = root.layout();
         Recorder::open(&layout, supervisor_meta(&layout), shape, BUDGET).expect("a recorder")
+    }
+
+    /// §27's `kernel` condition, off the records rather than off systemd.
+    ///
+    /// The three answers, in the order a robot meets them: a ring that cannot hold a cycle says
+    /// **nothing** about a kernel, a ring that can and holds none says the loop is not turning, and
+    /// a ring with cycles in it is the only thing that says it is.
+    ///
+    /// Driven through `from_tally` rather than a disk, because only a control loop can put a cycle
+    /// in a ring (§26.2) — which is also the property that makes this evidence worth having:
+    /// `skynetd` is structurally incapable of writing the record it reads here.
+    #[test]
+    fn a_kernel_is_live_only_when_it_recorded_cycles() {
+        use crate::blackbox::KernelSighting;
+        use skynet_blackbox::tally::Tally;
+        use skynet_contracts::opstate::KernelState;
+
+        fn tally(commands: bool, cycles: u64) -> Tally {
+            Tally {
+                commands,
+                cycles,
+                ..Tally::default()
+            }
+        }
+
+        // A ring that could not be read at all. Not a reading, and not a kernel fault.
+        let unread = KernelSighting::from_tally(None);
+        assert!(!unread.observed());
+        assert_eq!(unread.state(), KernelState::Down);
+
+        // Every robot on this edition: no commanding package, so the supervisor's ring has no
+        // action channels. Silence from it is not evidence, and §27 still holds — what changes is
+        // whether a console sends somebody to restart a kernel that is not the problem.
+        let inert = KernelSighting::from_tally(Some(&tally(false, 0)));
+        assert!(!inert.observed(), "no channels means no reading");
+        assert_eq!(inert.state(), KernelState::Down);
+        assert!(inert.detail().contains("no action channels"));
+
+        // A ring a control loop shaped, with nothing in it. Now silence *is* a reading.
+        let quiet = KernelSighting::from_tally(Some(&tally(true, 0)));
+        assert!(quiet.observed(), "this ring could have held a cycle");
+        assert_eq!(quiet.state(), KernelState::Down);
+        assert!(quiet.detail().contains("no control cycle was recorded"));
+
+        // And cycles. The only input in the system that separates a turning kernel from a hung
+        // one: both are an active unit to systemd, which is why this is not read off systemd.
+        let turning = KernelSighting::from_tally(Some(&tally(true, 200)));
+        assert!(turning.observed());
+        assert_eq!(turning.state(), KernelState::Live);
+        assert_eq!(turning, KernelSighting::Turning { cycles: 200 });
+        assert!(turning.detail().contains("200 control cycles"));
+    }
+
+    /// The events-only ring a shipping robot actually has, read through the real file.
+    ///
+    /// `from_tally` covers the rule; this covers the path to it, and the case it covers is the one
+    /// every robot is in today.
+    #[test]
+    fn a_supervisors_own_ring_says_nothing_about_a_kernel() {
+        let root = TempRoot::new("kernel-sighting");
+        let recorder = open(&root, events_only());
+        let sighting = recorder.sighting(0);
+        assert!(!sighting.observed());
+        assert_eq!(
+            sighting.state(),
+            skynet_contracts::opstate::KernelState::Down
+        );
+        assert!(sighting.detail().contains("no action channels"));
     }
 
     /// §26.2: the daemon attaches to a recording a control loop created, and takes its shape.

@@ -12228,3 +12228,61 @@ clean. `sh crates/skynetd-io/e2e.sh` — all checks passed.
      would have been read as a unit with no confinement, so `--dry-run` would fail a safety
      conformance test about a machine it never touched. The honest empty answer is an error
      carrying its reason.
+
+## 2026-09-07 (sixty-seventh) — the `kernel` condition stops being a default
+
+Round eleven restated this item and said why it had been misstated: nothing outside contract
+tests ever reports `KernelState::Live`, so `refresh_operating_state` derived from POST plus
+defaults and a running `skynetk` would change nothing observable. This is the first half.
+
+The obvious source is systemd, and it is wrong for one reason: **a hung kernel is an active
+unit.** `ActiveState=active` says a process exists, which is what a robot with a wedged control
+loop also has, and §27's most consequential condition cannot rest on the one signal that
+conflates the dangerous case with the healthy one. A turning loop **writes a cycle every pass**
+(§26), so liveness is cycles recorded since the last look and nothing else.
+
+It does not cross §33.1, and two properties are why. It fails closed — cycles seen is `Live`,
+and silence, an unreadable ring and no ring at all are all `Down`, so a wrong answer can hold a
+robot and never release one. And the daemon **cannot forge it**: §26.2 gives the supervisor the
+event channel and the loop the four cycle channels, so `skynetd` is structurally incapable of
+writing the record it reads.
+
+`KernelSighting` has three variants where §27 has two states, because a console needs the
+difference: a ring with no action channels *cannot* hold a cycle, so silence from it says nothing
+about a kernel — which is every robot on this edition — and showing "kernel: down" there would
+send somebody to restart a kernel that is not the problem. `GET /state` reports `observed` per
+condition, plus the reading, its detail and its source.
+
+The cursor is advanced every pass whether or not anything was counted, and is deliberately
+separate from `skills_sequence`: one cursor over one ring would make each consumer eat the
+other's evidence.
+
+It removes **one of seven** blockers, and the log says so rather than implying more. A robot with
+a turning kernel still derives `safe` with `rhal_lost`. What changed is that the next condition
+is a *mapping* rather than a channel: a cycle record already carries `rhal_result`, `state_flags`
+and `fault_code` (§24), so `Present`/`Degraded`/`Lost` is a decision about §24's semantics.
+
+### Numbers
+
+`cargo test --workspace` — **1,658 passed** (1,655 before), 0 failed. clippy clean, e2e green,
+§73 matches the tree. Four stale sentences corrected: the start-up banner, `GET /limits`'
+`partial` note, `warn_for_transition`'s header, and two rows of §73.
+
+### Findings, restated
+
+1-123 as before.
+
+124. **The signal that is one call away is the one that cannot see the failure.** `systemctl` can
+     tell a running kernel from a stopped one and not a turning one from a hung one, and the hung
+     one is the case §27 exists for. The evidence that separates them was already on disk,
+     written for another purpose.
+
+125. **Evidence a process cannot write about itself is worth more than evidence it promises not
+     to.** §26.2 split the channels for a different reason — two writers, one ring — and the
+     side effect is that `skynetd`'s liveness reading is unforgeable by construction rather than
+     by discipline.
+
+126. **A default and a reading are different even when they produce the same answer.** Every
+     robot on this edition reports `kernel: down` before and after this change. Before, because
+     nobody looked; after, because the recording cannot hold a cycle and says so. Only the second
+     tells an operator where not to go.

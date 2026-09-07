@@ -514,20 +514,37 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     // Which of the eight conditions anybody looked at. §48.5 made the same admission about POST's
     // own table and it is the same line being drawn: a supervisor claiming a state it derived from
     // defaults would be claiming to have observed a body it is forbidden to touch.
+    //
+    // Two of the eight are observed now. `kernel` joined `post` when §27's condition stopped being
+    // a default — and it is reported as *observed* only when the recording could have held a
+    // control cycle, because silence from a ring with no action channels says nothing about a
+    // kernel. That distinction is the whole reason `KernelSighting` has three variants and §27 has
+    // two: §27 is right to treat both as `down`, and a console showing "kernel: down" about a robot
+    // that has no command path at all would send somebody to restart a kernel that is not the
+    // problem.
+    let sighting = &context.daemon.kernel_sighting;
     let mut observed = Json::obj();
     observed.set("post", Json::Bool(true));
-    for condition in [
-        "kernel",
-        "rhal",
-        "homing",
-        "stop",
-        "guard_hold",
-        "guards",
-        "policy",
-    ] {
+    observed.set("kernel", Json::Bool(sighting.observed()));
+    for condition in ["rhal", "homing", "stop", "guard_hold", "guards", "policy"] {
         observed.set(condition, Json::Bool(false));
     }
     out.set("observed", observed);
+
+    // What was seen, in a sentence, beside the boolean. §32.2's rule about the on-robot console is
+    // that it must never show a value it did not receive; this is the value.
+    let mut kernel = Json::obj();
+    kernel.set("state", Json::from(sighting.state().as_str()));
+    kernel.set("observed", Json::Bool(sighting.observed()));
+    kernel.set("detail", Json::Str(sighting.detail()));
+    kernel.set(
+        "source",
+        Json::from(
+            "§13's ring: a turning control loop records a cycle every pass. Not systemd — a hung \
+             kernel is an active unit, and `ActiveState` cannot tell the two apart.",
+        ),
+    );
+    out.set("kernel", kernel);
 
     // §49.1's channel, on the route that reports the state whose transitions demand it. Not a
     // route of its own: a warning channel is not a subsystem an operator inspects on its own, it is
@@ -558,12 +575,14 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     out.set(
         "partial",
         Json::Str(
-            "one of §27's eight conditions was observed here: the self-test. §33.1 keeps skynetd \
-             from the actuator path, so the kernel, the RHAL, the guard set, the stop and the \
-             homing state are not this process's to read — and an unobserved condition is taken \
-             at the least capable value it could have, never at a hopeful one. So this answer is \
-             at least as pessimistic as the robot is, and the reason beside it names the \
-             condition that decided rather than a fault somebody found"
+            "two of §27's eight conditions were observed here: the self-test, and the kernel — \
+             read off §13's ring, where a turning control loop records a cycle every pass, rather \
+             than off systemd, which cannot tell a hung kernel from a healthy one. §33.1 keeps \
+             skynetd from the actuator path, so the RHAL, the guard set, the stop and the homing \
+             state are still not this process's to read — and an unobserved condition is taken at \
+             the least capable value it could have, never at a hopeful one. So this answer is at \
+             least as pessimistic as the robot is, and the reason beside it names the condition \
+             that decided rather than a fault somebody found"
                 .to_string(),
         ),
     );
