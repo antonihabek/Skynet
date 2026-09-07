@@ -1603,7 +1603,13 @@ fn print_state(document: &Json) {
             // quoted literals that a `|` or a `=>` follows, so spelling this as a pattern put
             // `live`, `present` and `passed` into the set of things `skynet <x>` may be — and the
             // check that counts CLI commands then reported 52 of them.
-            let good = state.is_none_or(|state| ["live", "present", "passed"].contains(&state))
+            // `none` joins the three because it is `policy`'s "nothing is wrong here" answer: a
+            // robot with nothing installed to command it is not a robot with a problem, and
+            // marking it would put a finding beside every bench machine. `held` is deliberately
+            // absent — something is installed and is not running it, which is exactly what an
+            // operator scanning this list is looking for.
+            let good = state
+                .is_none_or(|state| ["live", "present", "passed", "none"].contains(&state))
                 && !flagged(block);
             let mark = match (seen, good) {
                 (false, _) => term::dim("·"),
@@ -1641,11 +1647,27 @@ fn print_state(document: &Json) {
 /// boolean — the chain is open or it is not — so a mark derived only from `state` would draw a
 /// green tick beside a robot that has been stopped by its hardware, which is the same class of
 /// error as the tick this printer already had to fix for `kernel`.
+///
+/// Four keys rather than one, and `advisory` is the one worth defending. A guard that **demanded**
+/// a hold and was overruled by §7.4's tier is not a robot that is held — `held` is false and §27's
+/// state is unchanged — but it is emphatically something an operator should look at: a guard is
+/// firing and nothing is acting on it. Only a cycle where a guard actually fired sets it, so this
+/// does not mark every robot on the edition; it marks the ones where the guards have something to
+/// say and no authority to say it.
+///
+/// `unavailable` is §27's `guards` — a guard that cannot run at all, for want of a declaration or a
+/// calibration. It marks rather than ticks for the same reason: an operator scanning this list for
+/// what to look at should find the guard that is off, and the detail beside it already names which
+/// of the two it is.
 fn flagged(block: Option<&Json>) -> bool {
-    block
-        .and_then(|block| block.get("asserted"))
-        .and_then(Json::as_bool)
-        .unwrap_or(false)
+    ["asserted", "held", "advisory", "unavailable"]
+        .iter()
+        .any(|key| {
+            block
+                .and_then(|block| block.get(key))
+                .and_then(Json::as_bool)
+                .unwrap_or(false)
+        })
 }
 
 fn print_power(document: &Json) {

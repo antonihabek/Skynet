@@ -136,15 +136,11 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
     // No recorder yet at start-up: it is opened below, and the first look at §27's `kernel`
     // condition therefore reports unobservable rather than down. A daemon that reported the kernel
     // down before it had opened the recording would be announcing a fault it had not looked for.
-    observe_state(&mut daemon, None);
+    observe_state(&mut daemon, None, 0);
     // The count is derived, never typed. Three surfaces stated it by hand and one of them was
     // wrong on every pass — see `crate::observed`, which is the only thing in this process that
     // knows how many of §27's conditions were looked at.
-    let seen = skynetd_io::observed::Observed::of(
-        &daemon.kernel_sighting,
-        &daemon.rhal_sighting,
-        &daemon.stop_sighting,
-    );
+    let seen = skynetd_io::observed::Observed::of(&daemon.sightings());
     eprintln!(
         "skynetd: §27 state is `{}`, because {}. §33.4's barrier is `{}` says {}, narrowed by that \
          state — and the state rests on {}: {} — {}. Those are on §33.1's side of the line and \
@@ -295,7 +291,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
 
     if once {
         let now = monotonic(origin);
-        observe_state(&mut daemon, recorder.as_ref());
+        observe_state(&mut daemon, recorder.as_ref(), now);
         // Through the same function the loop uses, and that is the whole of the fix. `once` used to
         // converge directly and record nothing, so a robot operated entirely through it — which
         // §33's own documentation calls "a legitimate way to operate a robot" — had a black box
@@ -515,7 +511,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                 daemon.jitter = jitter_for(now);
                 // §11's loop: pull, then reconcile, then report. Each is the input to the next.
                 pull_desired(&mut daemon, &layout, now);
-                observe_state(&mut daemon, recorder.as_ref());
+                observe_state(&mut daemon, recorder.as_ref(), now);
                 let passes =
                     converge_and_record(&mut daemon, recorder.as_mut(), &layout, now, started_ms);
                 for (action, reason) in passes
@@ -1898,22 +1894,28 @@ fn wall_s() -> Option<f64> {
 fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>(
     daemon: &mut Daemon<L, S>,
     recorder: Option<&skynetd_io::blackbox::Recorder>,
+    now_ms: u64,
 ) {
     // §27's `kernel` condition, off §13's ring rather than off systemd — a hung kernel is an
     // active unit, and cycles recorded since the last look is the only evidence that separates the
     // two. The cursor is advanced whether or not anything was counted, so an interval that saw
     // nothing is not re-counted into the next one and a robot cannot report a kernel live on the
     // strength of cycles from ten minutes ago.
-    let (kernel, rhal, stop) = match recorder {
-        // All three off the same interval and the same records, because they are readings of one
+    let (kernel, rhal, stop, hold) = match recorder {
+        // All four off the same interval and the same records, because they are readings of one
         // instant and a robot whose kernel is turning while its driver has stopped answering has
         // to report exactly that pair rather than a plausible-looking one of them. The stop joins
         // them for the same reason: an open chain beside a silent kernel is a real state and two
-        // readings taken at two moments could show a combination that was never true.
+        // readings taken at two moments could show a combination that was never true. The guard
+        // hold is the fourth, and it is the one that makes the set worth taking together — a
+        // kernel that is turning, a driver that is answering and a guard that is holding is the
+        // combination an operator standing beside a stationary robot is trying to distinguish from
+        // a robot that has simply stopped.
         Some(recorder) => (
             recorder.sighting(daemon.kernel_sequence),
             recorder.body(daemon.kernel_sequence),
             recorder.chain(daemon.kernel_sequence),
+            recorder.guard(daemon.kernel_sequence),
         ),
         None => (
             skynetd_io::blackbox::KernelSighting::Unobservable(
@@ -1925,11 +1927,54 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
             skynetd_io::blackbox::StopSighting::Unobservable(
                 "this robot has no black box, so there is no record of the emergency-stop chain",
             ),
+            skynetd_io::blackbox::HoldSighting::Unobservable(
+                "this robot has no black box, so there is no record of a guard verdict",
+            ),
         ),
     };
     if let Some(recorder) = recorder {
         daemon.kernel_sequence = recorder.next_sequence();
     }
-    daemon.refresh_operating_state(wall_s(), &kernel, &rhal, &stop);
+
+    // §27's `guards`, and it comes from neither the ring nor the kernel: §7.6's partition resolves
+    // on this process from documents it already holds, and §45.5's expiry list sits beside it.
+    // Re-read every pass rather than cached, because a calibration expires on the clock and a
+    // profile arrives from the Hub between passes — a partition taken once at start-up would be a
+    // robot reporting the guards it had when it booted.
+    let layout = daemon.store.layout().clone();
+    let body = skynetd_io::embodiment::load(&layout);
+    let guards = skynetd_io::limits::guards(
+        &skynetd_io::limits::read(&layout, &body, skynetd_io::limits::ROBOT_TIER),
+        &skynetd_io::calibration::status(&layout, wall_s()).unavailable(),
+    );
+
+    // §27's `policy`, off the same two things this daemon already uses to size a recording: which
+    // package declares an action space, and whether its plan resolves onto this body. `false` for
+    // `allow_retarget` for the reason every other caller on this path passes it — §6.1 makes
+    // retargeting a decision somebody made, and there is no somebody in a reconcile pass.
+    //
+    // The unit state is the daemon's own action's result rather than a question to the kernel,
+    // which is what keeps this on the right side of §33.1: it launched the unit, so it may say
+    // whether the unit is running. What it may not say is whether the kernel granted a lease.
+    let actual = daemon.observe(now_ms);
+    let supervising = skynetd_io::shape::supervising(&daemon.store, &body, false);
+    let policy = skynetd_io::shape::PolicySighting::of(&supervising, |package| {
+        actual
+            .units
+            .iter()
+            .any(|unit| unit.id == package && unit.state == skynetd::actual::UnitState::Running)
+    });
+
+    daemon.refresh_operating_state(
+        wall_s(),
+        &skynetd_io::observed::Sightings {
+            kernel: &kernel,
+            rhal: &rhal,
+            stop: &stop,
+            hold: &hold,
+            guards: &guards,
+            policy: &policy,
+        },
+    );
     daemon.refresh_safe_state();
 }

@@ -307,6 +307,19 @@ pub struct Daemon<L: Launcher, S: Slots> {
     pub rhal_sighting: crate::blackbox::RhalSighting,
     /// What the last pass could see of §24's emergency-stop chain, kept for the same reason.
     pub stop_sighting: crate::blackbox::StopSighting,
+    /// What the last pass could see of §27's guard hold, kept for the same reason.
+    pub hold_sighting: crate::blackbox::HoldSighting,
+    /// What the last pass could see of §27's guard **set**, kept for the same reason.
+    ///
+    /// The one sighting that is not off §13's ring: §7.6's partition resolves on this daemon, and
+    /// §45.5's expiry list is beside it. Both are re-read each pass rather than cached from
+    /// start-up, because a calibration expires on the clock and a profile arrives from the Hub.
+    pub guards_sighting: crate::limits::GuardsSighting,
+    /// What the last pass could see of §27's `policy` condition.
+    ///
+    /// Off the store and the unit this daemon launched, never off §25.2's lease table — which is
+    /// why the one case that turns on a lease reports itself unobserved rather than guessing.
+    pub policy_sighting: crate::shape::PolicySighting,
     /// Who asked this daemon to stop, when somebody has (§82.4).
     ///
     /// A **request** rather than an action, and the split is the whole design. The route that takes
@@ -406,6 +419,18 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             stop_sighting: crate::blackbox::StopSighting::Unobservable(
                 "no reconcile pass has looked at the recording yet",
             ),
+            hold_sighting: crate::blackbox::HoldSighting::Unobservable(
+                "no reconcile pass has looked at the recording yet",
+            ),
+            guards_sighting: crate::limits::GuardsSighting::Unobservable(
+                "no reconcile pass has resolved the guard set yet",
+            ),
+            // Not `Nothing`: a daemon that has not looked at its store must not report that the
+            // store is empty. `LeaseUnknown` is the variant that reads as unobserved, and the
+            // package name is replaced by the first pass.
+            policy_sighting: crate::shape::PolicySighting::LeaseUnknown {
+                package: String::new(),
+            },
             shutdown_requested: None,
             // From the kernel's own interfaces, not through the layout — for `cpus`'s reason two
             // fields above: the pack and the thermal zones are properties of the machine and live
@@ -532,14 +557,36 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         self.safe_state = declared.and(SafeState::from_state(self.operating_state));
     }
 
+    /// The six readings this daemon last took, gathered.
+    ///
+    /// Two routes and the start-up banner all describe one pass, and before `crate::observed` they
+    /// disagreed about how much of it was observed. This is the other half of that fix: they take
+    /// the same six from the same place rather than each naming six fields.
+    pub fn sightings(&self) -> crate::observed::Sightings<'_> {
+        crate::observed::Sightings {
+            kernel: &self.kernel_sighting,
+            rhal: &self.rhal_sighting,
+            stop: &self.stop_sighting,
+            hold: &self.hold_sighting,
+            guards: &self.guards_sighting,
+            policy: &self.policy_sighting,
+        }
+    }
+
     /// Re-evaluate §27's operating state over what this process can observe.
     ///
-    /// **Most of §27's conditions are not `skynetd`'s to observe, and this method is written so
-    /// that shows.** §33.1 keeps the daemon away from the actuator path — CI asserts it cannot even
-    /// depend on `skynet-rhal` — and the kernel, the RHAL, the guard set and the homing state are
-    /// all on the far side of that line, exactly as §48.5 found for five of §48.2's eight checks.
-    /// So they are left at their defaults, which are the least capable readings, and the machine
-    /// answers `safe` with `rhal_lost`.
+    /// **This method's own history is the argument for how it is written.** It began with one of
+    /// §27's eight conditions supplied and seven left at their defaults, because §33.1 keeps the
+    /// daemon away from the actuator path — CI asserts it cannot even depend on `skynet-rhal` —
+    /// and every other condition was filed as the kernel's. Seven of the eight are supplied now,
+    /// and **not one of them arrived by relaxing §33.1**. Each was a case of the reason being a
+    /// true sentence about the wrong place: what decides whether a supervisor may observe a
+    /// condition is not whose fact it is, but whether the fact was written down somewhere this
+    /// process already holds — §13's ring for four of them, §7.6's own partition for the fifth,
+    /// and this daemon's store and units for the sixth.
+    ///
+    /// `homing` is the last, and it is the one where the original reason survives contact: §24
+    /// gives the ABI no flag for it, so it is not written down anywhere at all.
     ///
     /// That is not a placeholder producing a plausible-looking state. It is the true one:
     /// [`crate::post`] already says as much about the same edition — "`may_run` is false, and that
@@ -569,16 +616,29 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     ///
     /// `rhal` arrives the same way and from the same records, and the pair matters more than
     /// either: a robot whose kernel is turning while its driver has stopped answering has to be
-    /// able to report exactly that. The remaining five conditions are still defaults, so a robot
-    /// with a turning kernel and a live driver derives `safe` with `post_incomplete` or
-    /// `homing_pending` rather than anything commanding — which is the honest size of the step.
+    /// able to report exactly that. `stop` and `guard_hold` are read off that same newest cycle,
+    /// `guards` off §7.6's partition and §45.5's expiry, and `policy` off the store and the unit.
+    ///
+    /// # What seven of eight does not buy
+    ///
+    /// A robot that commands. `homing` is rule 5 of `derive` and defaults to `Pending`, so this
+    /// edition still resolves `unhomed` however good the six readings below it are — and that is
+    /// the honest size of the step rather than a disappointment. What changed is that the state now
+    /// rests on readings, and the conditions a console shows beside it are measurements rather than
+    /// defaults dressed as measurements.
     pub fn refresh_operating_state(
         &mut self,
         wall_s: Option<f64>,
-        kernel: &crate::blackbox::KernelSighting,
-        rhal: &crate::blackbox::RhalSighting,
-        stop: &crate::blackbox::StopSighting,
+        seen: &crate::observed::Sightings<'_>,
     ) -> Transition {
+        let crate::observed::Sightings {
+            kernel,
+            rhal,
+            stop,
+            hold,
+            guards,
+            policy,
+        } = seen;
         let report = crate::post::run(self.store.layout(), wall_s);
         let conditions = Conditions {
             post: report.post_verdict(),
@@ -594,6 +654,24 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             // of its own rather than `operator`, because the chain gives one bit and a light
             // curtain opens it too — see `StopSighting`.
             stop: stop.cause(),
+            // §27's fifth observed condition, off the guard verdict in that same newest cycle.
+            // True only for a hold the kernel **enforced**: §7.4 lets a tier that cannot promise a
+            // clamp record a verdict and forward the command anyway, and every robot on this
+            // edition is one — so `HoldSighting::held` is false for an advisory hold and the
+            // reading is still reported as an observation. A robot that said `HOLD` while its
+            // command went through would be the failure §7.4 exists to prevent.
+            guard_hold: hold.held(),
+            // §27's sixth observed condition, and the only one not off §13's ring: §7.6's
+            // partition resolves here and §45.5's expiry list sits beside it. It is what the
+            // guards *can* do given what the body declares and what a calibration still believes,
+            // never a reading of what the kernel had inputs for last cycle — see `GuardsSighting`,
+            // which says so where the mapping is rather than here.
+            guards_unavailable: guards.unavailable(),
+            // §27's seventh, off the store and the unit rather than off §25.2's lease table. Never
+            // `Ready` on any input — the one value that asserts a lease is the one this process
+            // must not produce — and never the `None` the default used to supply, which said "there
+            // is nothing to run" about a robot whose store this daemon holds and knows otherwise.
+            policy: policy.state(),
             // `stop_settled` is deliberately left false. For a hardware stop no edition can
             // observe it — the bit says the chain is open and says nothing about whether the body
             // came to rest — so the machine derives `stopping` and never `stop_complete`. A robot
@@ -615,9 +693,12 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
 
         self.operating_state = transition.to;
         self.state_reason = transition.reason;
-        self.kernel_sighting = kernel.clone();
-        self.rhal_sighting = rhal.clone();
-        self.stop_sighting = stop.clone();
+        self.kernel_sighting = (*kernel).clone();
+        self.rhal_sighting = (*rhal).clone();
+        self.stop_sighting = (*stop).clone();
+        self.hold_sighting = (*hold).clone();
+        self.guards_sighting = (*guards).clone();
+        self.policy_sighting = (*policy).clone();
         transition
     }
 

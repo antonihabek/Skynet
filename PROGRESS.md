@@ -12386,3 +12386,200 @@ tool green.
 132. **A number stated in four places and derived in none goes stale every time it changes.**
      Three rounds running, moving a condition has left the count wrong in the banner, in
      `GET /limits`' note and in two rows of §73. Filed rather than fixed in passing.
+
+## 2026-09-07 (seventieth) — §27's `guard_hold`, and three numbers that were published wrong
+
+An audit first, because the last round closed by saying the four remaining §27 conditions were all
+waiting on hardware or an ABI. One of the four was not, and finding that out was a matter of reading
+the reason rather than the sentence.
+
+`guard_hold` had been filed as **"the kernel's"**. So are `kernel`, `rhal` and `stop`, and all three
+were closed in the three rounds before this one — whose fact it is was never what decided them.
+What decides whether a supervisor may observe a condition is whether the kernel **wrote it down**,
+and §26's cycle record carries the guard verdict beside the flags this daemon already reads every
+pass. So `HoldSighting`, off the same newest cycle as the RHAL and the stop.
+
+### The two refusals, which are the whole of the design
+
+**An advisory hold is not a hold.** §7.4 lets a tier that cannot promise a clamp record a verdict
+and forward the command anyway, and every robot on this edition is one — so a recorded `Hold` here
+almost always describes a hold that was demanded and never applied. Mapping it onto §27 would report
+`HOLD` for a robot that is moving, which is what §7.4 and §42 both exist to prevent and what this
+repository already did once inside `decide` itself. `Advisory` is a third state: reported as an
+observation, because a guard fired; not a hold, because nothing was withheld. `GET /state` carries
+`held` and `advisory` together, since a console given only the first cannot tell a robot whose
+guards are being overruled from one no guard has touched.
+
+**A failed body read does not stop this one.** `stop` refuses such a cycle because §26.4's fill puts
+the previous cycle's flags in it. The guard verdict is not a fill — `decide` runs whatever the read
+returned, and what it produces is what the kernel did with the command. `rhal` and `stop` are facts
+about the body; this is a fact about the kernel, and that is the line the two readings fall on
+either side of.
+
+### What it does not move
+
+A robot's state. `guard_hold` is rule 7 of `derive` and `homing` is rule 5, defaulting to `Pending`
+on every robot here because §24 gives the ABI no flag for it. So this edition reports `unhomed`
+while carrying a good guard-hold observation, and the route test asserts that ordering rather than
+leaving it to be discovered. `homing` is now the only one of the eight that no reader can close.
+
+### And three published numbers
+
+The audit that opened the round found `reference/reports/editions.json` claiming 1,137 corpus cases
+against 1,142 actually passing — a figure the Hub mirrors and renders at `/skynet/os/editions`. The
+tool that catches it was not in CI, and every neighbouring check passed honestly: the mirror check
+compares two copies that were stale together, and a `--min-passed` ratchet cannot catch a stale
+exact figure. It runs in CI now. `scale-report.mjs` was separately looking for two spellings of the
+Hub's directory where the other two tools looked for seven, so it had been reporting §73's
+cross-repository figure unmeasured, and passing. One list, in `tools/hub-path.mjs`, and the mirror
+now measures.
+
+### Numbers
+
+`cargo test --workspace` — **1,680 passed** (1,676 before). clippy clean, fmt clean, e2e green
+against a real daemon and a real control loop, 1,142 of 1,142 in both editions, every check tool
+green. Hub: 1,895 unit tests, typecheck clean.
+
+### Findings, restated
+
+1-132 as before.
+
+133. **"Whose fact is it" and "who wrote it down" are different questions, and only the second
+     decides observability.** Four conditions were filed with the same one-word reason and three of
+     them have since been closed without that reason changing. A reason that would equally justify
+     leaving a condition open after it was closed is not a reason.
+
+134. **A ratchet cannot catch a stale exact figure.** A floor is the right shape for a number that
+     should only grow and the wrong shape for one that should be *equal* — and the difference is
+     invisible while the figure happens to be above the floor, which it was for as long as anybody
+     had been reading it.
+
+135. **A check that cannot find what it compares against exits zero.** Two tools found the Hub and a
+     third did not, because the third's list of directory names was five short. Nothing failed;
+     one figure simply stopped being checked, and the message saying so was one line among eight
+     that all said `ok`.
+
+## 2026-09-07 (seventy-first) — §27's `guards`, and the list the field's own documentation named
+
+The audit's other candidate, and it closed the same way as `guard_hold`: the reason for leaving it
+out was a true sentence about the wrong place. *"A cycle records what guards did, not which were
+available"* is correct about §13's ring, and §7.6's partition is not in the ring — it resolves **on
+this daemon**, is served at `GET /limits`, drawn by `skynet limits` and the console, and carried
+across §17 to the device page. The answer was being computed, rendered twice and reported to the
+Hub every check-in while §27 took it at a default.
+
+### The list nothing read
+
+`guards_unavailable` is annotated in `skynet-contracts` as *"§45.5 is the usual source"*, and
+§45.5's guard list — calibration expiry — is a **different** list from the resolver's, produced by
+a different module and already consumed by POST and by `skynet calibration`. Either alone is right
+about half the robots: a body that declares no IMU loses `balance` through the resolver with every
+calibration in date, and a body with a flawless descriptor and an extrinsic that expired last month
+loses `proximity` through §45.5 with nothing in the resolver noticing. The *usual* source was the
+missing one.
+
+So the condition is the union, merged rather than concatenated — one guard is one problem however
+many lists name it — and each entry says which source took it out, because *fit the sensor* and
+*recalibrate* send an operator to different parts of the building.
+
+### What it is not, said where it is rendered
+
+A **resolved** partition, never a per-cycle one: which guards can run given what the body declares
+and what a calibration still believes. §80's `inert` state exists because that differs from what the
+kernel had a reading for, and a declared sensor that fails at runtime is still invisible. The route
+says so in its own `source` string rather than leaving a reader to assume the stronger claim.
+
+And a robot **nobody has described** is `unobservable`, not a robot whose guards are all broken.
+With no descriptor the resolver correctly reports nearly every guard unavailable, which as an answer
+to §27 would send somebody to check wiring when what is missing is the document. The suite proves
+the variant is necessary by first asserting that the resolver does have plenty to say about such a
+body.
+
+### Numbers
+
+`cargo test --workspace` — **1,682 passed** (1,680 before). clippy clean, fmt clean, e2e green with
+six of §27's eight conditions observed on a running daemon, 1,142 of 1,142 in both editions, every
+check tool green. `homing` and `policy` remain, and `homing` is the only one with no path at all.
+
+### Findings, restated
+
+1-135 as before.
+
+136. **A field's own documentation can name a source the code never read.** `guards_unavailable`
+     has said *"§45.5 is the usual source"* since it was written, §45.5's list has existed for as
+     long, and the two had never met. The annotation was not wrong and not enough: nothing checks
+     that a doc comment naming a source is wired to it.
+
+137. **The absence of a document is not a reading of what it would have said.** An undescribed body
+     resolves to nearly every guard unavailable, which is correct arithmetic and a false report:
+     the remedy for "your guards are off" is a technician and the remedy for this is a descriptor.
+
+138. **A test helper that shadows the thing under test is a suite proving something about itself.**
+     `limits.rs`'s `guards` helper predated the module function of the same name by months and
+     would have silently taken every new call in the suite.
+
+## 2026-09-07 (seventy-second) — §27's `policy`, and the sentence that was false about this daemon's own store
+
+The last of §27's eight with a source in this process, and the only one whose honest answer is
+*partly* unobservable.
+
+`PolicyState` has three values and this daemon can establish two exactly. **`None`** — nothing
+installed declares an action space — is a question about a store this process holds. **`Held`** is
+four distinct facts it also holds: a refused plan, an unreadable manifest, two commanding packages,
+or a resolved plan whose unit is not running, because a policy whose process does not exist holds no
+lease. The third, **`Ready`**, asserts §25.2's lease. This daemon resolves the plan and launched the
+unit, so it has both halves of the *necessary*; the lease table is the Safety Kernel's. So that one
+case reports itself unobserved, is taken at `held`, and `ready` is a value the mapping cannot
+produce on any input.
+
+Reading the unit is not a §33.1 crossing, and the reason is worth keeping: the daemon **started**
+the unit, so whether it is running is its own action's result rather than a question to the kernel.
+
+### The defect it closed
+
+The condition sat at its default, which is `None` — and §27's rule 8 splits `no_policy` from
+`policy_not_ready` precisely because *"there is nothing to run"* and *"there is something and it has
+not got a lease"* are different sentences and the second is the one with a remedy. A robot with a
+commanding package installed and activated was reporting the first. That is not a cautious reading
+of an unobserved condition; it is a false statement about a store this process holds, made by the
+process that holds it — and the cautious reading was available the whole time, since `Held` is
+weaker than `Ready` and is the only one of the three that is true.
+
+It was latent because `homing` stops every robot here three rules earlier, which is why the suite
+drives §27's machine directly to reach rule 8 and assert both sentences.
+
+### Two things the tools caught before a person did
+
+Clippy refused `refresh_operating_state` at eight arguments, six of which read as "a sighting". They
+are a struct now, and the reason is stronger than ergonomics: §27's conditions are only comparable
+when they are readings of one instant, and a struct assembled once per pass says that where six
+parameters invite a caller to gather them at six different moments.
+
+And `scale-report --check` reported that it was guarding nothing. Four sentences reached **one**
+unobserved condition, one is singular, and rewording them made every pattern miss. The check counts
+what it matched separately from what failed, so a grammar change produced a message instead of a
+silent hole.
+
+### Numbers
+
+`cargo test --workspace` — **1,684 passed** (1,682 before). clippy clean with no warnings, fmt
+clean, e2e green with **seven of §27's eight conditions observed** on a running daemon and the
+policy condition naming the installed package, 1,142 of 1,142 in both editions, every check tool
+green.
+
+### Findings, restated
+
+1-138 as before.
+
+139. **A default that is safe can still be false.** `PolicyState::None` holds a robot, which is the
+     safe direction, and says the store is empty, which this process knows it is not. "Cautious"
+     has to be chosen among the values that are *true*, not among all of them.
+
+140. **A condition can be observable on some robots and not on others.** Six of §27's eight are
+     properties of the edition; `policy` is a property of the robot — answerable on every machine
+     except the one where a policy is actually about to run, which is the machine where it matters.
+     Reporting that per-robot is more honest than picking one answer for the fleet.
+
+141. **A check with English in it can go stale in its grammar.** Counting what a pattern matched,
+     separately from what failed, is what turns that from a silent pass into a message. The count
+     reached one; the sentences became singular; every pattern missed; the tool said so.

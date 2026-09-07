@@ -344,11 +344,7 @@ fn status<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     // The same reading `GET /state` renders, taken from the same two sightings. Two routes
     // describing one pass have to agree about how much of it was observed, and before
     // `crate::observed` they did not.
-    let seen = crate::observed::Observed::of(
-        &context.daemon.kernel_sighting,
-        &context.daemon.rhal_sighting,
-        &context.daemon.stop_sighting,
-    );
+    let seen = crate::observed::Observed::of(&context.daemon.sightings());
     let running = actual
         .units
         .iter()
@@ -537,10 +533,14 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     // two: §27 is right to treat both as `down`, and a console showing "kernel: down" about a robot
     // that has no command path at all would send somebody to restart a kernel that is not the
     // problem.
-    let sighting = &context.daemon.kernel_sighting;
-    let body = &context.daemon.rhal_sighting;
-    let chain = &context.daemon.stop_sighting;
-    let seen = crate::observed::Observed::of(sighting, body, chain);
+    let taken = context.daemon.sightings();
+    let sighting = taken.kernel;
+    let body = taken.rhal;
+    let chain = taken.stop;
+    let hold = taken.hold;
+    let guards = taken.guards;
+    let policy = taken.policy;
+    let seen = crate::observed::Observed::of(&taken);
     out.set("observed", seen.to_json());
 
     // What was seen, in a sentence, beside the boolean. §32.2's rule about the on-robot console is
@@ -597,6 +597,75 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     );
     out.set("stop", stop);
 
+    // §27's guard hold, off the guard verdict in that same newest cycle. The fourth reading of one
+    // instant, and the first that is a fact about the **kernel** rather than the body — which is
+    // why it is here beside them rather than on a route with the guard partition `GET /limits`
+    // renders. That route answers *which guards this robot has*; this answers *whether one of them
+    // is holding right now*, and the two have different sources and different lifetimes.
+    let mut guard_hold = Json::obj();
+    guard_hold.set("held", Json::Bool(hold.held()));
+    guard_hold.set("observed", Json::Bool(hold.observed()));
+    // `advisory` beside `held`, because at this tier they are almost always the interesting pair:
+    // false and true together is a guard that fired and changed nothing, and a console rendering
+    // only `held` would show that robot as unheld with no way to tell it from one no guard
+    // touched. §32.2's rule is that the console must never show a value it did not receive — this
+    // is the value it needs in order not to.
+    guard_hold.set(
+        "advisory",
+        Json::Bool(matches!(hold, crate::blackbox::HoldSighting::Advisory)),
+    );
+    guard_hold.set("detail", Json::Str(hold.detail()));
+    guard_hold.set(
+        "source",
+        Json::from(
+            "the guard verdict on the newest control cycle in §13's ring. Unlike `rhal` and              `stop` it is readable on a cycle whose body read failed: §26.4's fill replaces what              the driver reported, and the kernel's decision on that cycle is not a fill. §27's              condition is true only for a hold that was enforced — §7.4 lets a tier that cannot              promise a clamp forward the command anyway, and a robot reporting `HOLD` while its              command went through would be describing a robot that does not exist.",
+        ),
+    );
+    out.set("guard_hold", guard_hold);
+
+    // §27's guard **set**, which is the one condition on this route that does not come off §13's
+    // ring. It is here beside the other four because a reader asking "why is this robot degraded"
+    // needs the partition and the hold in one document — and because `GET /limits` answers a
+    // different and larger question, with the ceilings, the sources and every notice, which is not
+    // what a state page wants.
+    let mut guard_set = Json::obj();
+    guard_set.set("unavailable", Json::Bool(guards.unavailable()));
+    guard_set.set("observed", Json::Bool(guards.observed()));
+    guard_set.set("detail", Json::Str(guards.detail()));
+    // The guards as data, each naming which of the two sources took it out. §45.5's requirement is
+    // that an unavailable guard say *why* — "proximity unavailable" sends nobody anywhere — and a
+    // console that had only the sentence could not sort or group them.
+    let mut entries = Json::arr();
+    for entry in guards.entries() {
+        let mut row = Json::obj();
+        row.set("guard", Json::from(entry.guard.as_str()));
+        row.set("calibration", Json::Bool(entry.calibration));
+        entries.push(row);
+    }
+    guard_set.set("guards", entries);
+    guard_set.set(
+        "source",
+        Json::from(
+            "§7.6's resolved partition on this daemon, merged with §45.5's calibration expiry —              the two lists the condition can come from, and neither is the ring. It says which              guards *can* run given what the body declares and what a calibration still believes,              never which the kernel had inputs for last cycle: §80's `inert` state exists because              those differ, and a declared sensor that fails at runtime is not visible here.",
+        ),
+    );
+    out.set("guards", guard_set);
+
+    // §27's policy, off the store and the unit rather than off a lease table this process cannot
+    // read. The `observed` flag here is the one on this route that varies with the robot rather
+    // than with the edition, and the detail says which side of that line this robot is on.
+    let mut policy_block = Json::obj();
+    policy_block.set("state", Json::from(policy.state().as_str()));
+    policy_block.set("observed", Json::Bool(policy.observed()));
+    policy_block.set("detail", Json::Str(policy.detail()));
+    policy_block.set(
+        "source",
+        Json::from(
+            "this daemon's own store and the unit it launched (§33.5, §37.1). Two of §27's three              policy values are exactly knowable from those — nothing to run, and something that              is not ready — and the third asserts §25.2's lease, which the Safety Kernel grants              and this process cannot read. So a robot whose plan resolves and whose unit is              running reports this condition unobserved and is taken at `held`, never at `ready`.",
+        ),
+    );
+    out.set("policy", policy_block);
+
     // §49.1's channel, on the route that reports the state whose transitions demand it. Not a
     // route of its own: a warning channel is not a subsystem an operator inspects on its own, it is
     // a property of the transitions this document is about — and a console that had to fetch two
@@ -626,8 +695,9 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     out.set(
         "partial",
         Json::Str(format!(
-            "{} were observed here: {} — the kernel and the RHAL off §13's ring, where a turning \
-             control loop records a cycle every pass and says what its read of the body returned. \
+            "{} were observed here: {} — the self-test on this process, and every other one off \
+             §13's ring, where a turning control loop records a cycle every pass, says what its \
+             read of the body returned and carries the guard verdict beside it. \
              §33.1 keeps skynetd from the actuator path, so {} — and an unobserved condition is \
              taken at the least capable value it could have, never at a hopeful one. So this \
              answer is at least as pessimistic as the robot is, and the reason beside it names \
