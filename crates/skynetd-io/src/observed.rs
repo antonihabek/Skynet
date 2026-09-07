@@ -33,15 +33,26 @@
 //! taken from the same two sightings the machine itself was derived from, never a constant — a
 //! constant would be a fourth number to keep in step.
 //!
-//! `post` is the one condition this process owns outright (§48.5). `kernel`, `rhal` and `stop` are
-//! read off §13's ring, which is a file this process already holds rather than a channel to the
-//! kernel. The remaining four are on §33.1's side of the line: the daemon has no way to ask about
-//! the guard set, the guard hold, the homing state or the policy's lease, and inventing one would
-//! be the supervisor reporting a body it is forbidden to touch.
+//! `post` is the one condition this process owns outright (§48.5). `kernel`, `rhal`, `stop` and
+//! `guard_hold` are read off §13's ring, which is a file this process already holds rather than a
+//! channel to the kernel.
+//!
+//! `guard_hold` is the one that had to be argued for rather than mapped, because the reason
+//! written here for leaving it out — *"the kernel's"* — was true about the **subject** and false
+//! about the **evidence**. Every one of these four is the kernel's; what decides whether this
+//! daemon can observe one is whether the kernel wrote it down, and §26's cycle record carries the
+//! guard verdict beside the flags. See [`HoldSighting`] for what a failed read costs it, and for
+//! why an advisory hold is not one.
+//!
+//! The remaining three are on §33.1's side of the line: the daemon has no way to ask about the
+//! guard **set**, the homing state or the policy's lease, and inventing one would be the
+//! supervisor reporting a body it is forbidden to touch. `homing` is the sharpest of the three and
+//! the only one that cannot be closed by a reader: §24 gives the ABI no flag for it, so it needs a
+//! vendor to recompile rather than a daemon to look somewhere else.
 
 use skynet_json::Json;
 
-use crate::blackbox::{KernelSighting, RhalSighting, StopSighting};
+use crate::blackbox::{HoldSighting, KernelSighting, RhalSighting, StopSighting};
 
 /// §27's eight conditions, in the order [`skynet_contracts::opstate::evaluate`] consults them.
 ///
@@ -92,29 +103,34 @@ pub struct Observed {
 }
 
 impl Observed {
-    /// Read the three conditions that are evidence-dependent, and fix the five that are not.
+    /// Read the four conditions that are evidence-dependent, and fix the four that are not.
     ///
     /// `post` is always observed: [`crate::post::run`] executes on this process on every pass, and
     /// a robot whose self-test could not run reports a *failed* self-test rather than an absent
-    /// one (§48.4). The four that stay `false` are always unobserved on this edition, and are listed
-    /// rather than counted so that the day one of them gains a producer, this is the file that
-    /// changes and every sentence follows.
-    pub fn of(kernel: &KernelSighting, rhal: &RhalSighting, stop: &StopSighting) -> Observed {
+    /// one (§48.4). The three that stay `false` are always unobserved on this edition, and are
+    /// listed rather than counted so that the day one of them gains a producer, this is the file
+    /// that changes and every sentence follows.
+    pub fn of(
+        kernel: &KernelSighting,
+        rhal: &RhalSighting,
+        stop: &StopSighting,
+        hold: &HoldSighting,
+    ) -> Observed {
         Observed {
             seen: [
                 true,              // post — §48.5, this process's own
                 kernel.observed(), // §27, off §13's ring
                 rhal.observed(),   // §27, off the newest cycle in it
-                false,             // homing — driver-side, and nothing records it
+                false,             // homing — driver-side, and §24 gives the ABI no flag for it
                 stop.observed(),   // §27, off the same cycle's §24 flags
-                false,             // guard_hold — the kernel's
+                hold.observed(),   // §27, off the same cycle's guard verdict
                 false, // guards — a cycle records what guards did, not which were available
                 false, // policy — §25.2's lease table is the kernel's
             ],
         }
     }
 
-    /// How many were observed. Between one and four today, and never fewer than one.
+    /// How many were observed. Between one and five today, and never fewer than one.
     pub fn count(&self) -> usize {
         self.seen.iter().filter(|seen| **seen).count()
     }
@@ -228,7 +244,7 @@ mod tests {
     use super::*;
     use skynet_contracts::opstate::RhalState;
 
-    fn sightings(observed: bool) -> (KernelSighting, RhalSighting, StopSighting) {
+    fn sightings(observed: bool) -> (KernelSighting, RhalSighting, StopSighting, HoldSighting) {
         if observed {
             (
                 KernelSighting::Turning { cycles: 12 },
@@ -238,12 +254,14 @@ mod tests {
                     fault_code: 0,
                 },
                 StopSighting::Clear,
+                HoldSighting::Clear,
             )
         } else {
             (
                 KernelSighting::Unobservable("no ring"),
                 RhalSighting::Unobservable("no ring"),
                 StopSighting::Unobservable("no ring"),
+                HoldSighting::Unobservable("no ring"),
             )
         }
     }
@@ -256,8 +274,8 @@ mod tests {
     #[test]
     fn the_tally_and_the_names_are_the_same_reading() {
         for observed in [true, false] {
-            let (kernel, rhal, stop) = sightings(observed);
-            let seen = Observed::of(&kernel, &rhal, &stop);
+            let (kernel, rhal, stop, hold) = sightings(observed);
+            let seen = Observed::of(&kernel, &rhal, &stop, &hold);
 
             let named = seen.in_prose().split(", ").count();
             // "a and b" is one split and two names, so count the conjunction too.
@@ -283,33 +301,47 @@ mod tests {
     /// described a daemon that had looked at nine things.
     #[test]
     fn the_self_test_is_observed_even_when_nothing_else_is() {
-        let (kernel, rhal, stop) = sightings(false);
-        let seen = Observed::of(&kernel, &rhal, &stop);
+        let (kernel, rhal, stop, hold) = sightings(false);
+        let seen = Observed::of(&kernel, &rhal, &stop, &hold);
         assert_eq!(seen.count(), 1);
         assert_eq!(seen.unobserved(), 7);
         assert_eq!(seen.in_prose(), "the self-test");
         assert_eq!(seen.tally(), "one of §27's eight conditions");
     }
 
-    /// And with a turning loop it is four, which is what every surface should then say.
+    /// And with a turning loop it is five, which is what every surface should then say.
     #[test]
-    fn a_turning_loop_makes_it_four() {
-        let (kernel, rhal, stop) = sightings(true);
-        let seen = Observed::of(&kernel, &rhal, &stop);
-        assert_eq!(seen.count(), 4);
+    fn a_turning_loop_makes_it_five() {
+        let (kernel, rhal, stop, hold) = sightings(true);
+        let seen = Observed::of(&kernel, &rhal, &stop, &hold);
+        assert_eq!(seen.count(), 5);
         assert_eq!(
             seen.in_prose(),
-            "the self-test, the kernel, the RHAL and the stop"
+            "the self-test, the kernel, the RHAL, the stop and the guard hold"
         );
-        assert_eq!(seen.tally(), "four of §27's eight conditions");
-        assert_eq!(seen.unobserved_word(), "four");
+        assert_eq!(seen.tally(), "five of §27's eight conditions");
+        assert_eq!(seen.unobserved_word(), "three");
+    }
+
+    /// A hold that was demanded and not enforced is still an **observation**.
+    ///
+    /// The distinction §7.4 forces and the one this module is most likely to lose: `Advisory` says
+    /// the daemon looked and a guard fired, so it counts here exactly as `Held` does. What it must
+    /// not do is set §27's condition — that is [`HoldSighting::held`]'s job and it is asserted
+    /// where the mapping is, not here.
+    #[test]
+    fn an_advisory_hold_counts_as_looked_at() {
+        let (kernel, rhal, stop, _) = sightings(true);
+        let seen = Observed::of(&kernel, &rhal, &stop, &HoldSighting::Advisory);
+        assert_eq!(seen.count(), 5);
+        assert!(seen.to_json().get("guard_hold").is_some());
     }
 
     /// The object carries all eight, not only the true ones (§48.5).
     #[test]
     fn every_condition_is_reported_including_the_unobserved_ones() {
-        let (kernel, rhal, stop) = sightings(true);
-        let document = Observed::of(&kernel, &rhal, &stop).to_json();
+        let (kernel, rhal, stop, hold) = sightings(true);
+        let document = Observed::of(&kernel, &rhal, &stop, &hold).to_json();
         for condition in CONDITIONS {
             assert!(
                 document.get(condition).is_some(),

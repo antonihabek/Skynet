@@ -701,12 +701,18 @@ DESIRED
     pass "the loop attaches to the ring the daemon created (§26.2)"
   fi
 
-  # Four, not three: `stop` is read off §24's flags on the same newest cycle, so a ring that can
-  # hold a cycle makes it observable at the same moment the other two become observable.
-  want "and §27 now counts four observed conditions" \
-    "four of §27's eight conditions" "$K/after"
+  # Five, not four: `stop` and `guard_hold` are read off the same newest cycle as the RHAL — §24's
+  # flags for one and the kernel's guard verdict for the other — so a ring that can hold a cycle
+  # makes all four observable at the moment the loop writes into it.
+  want "and §27 now counts five observed conditions" \
+    "five of §27's eight conditions" "$K/after"
   want "the kernel is live, with the cycles that say so" "control cycles were recorded" "$K/after"
   want "and the RHAL is present, off the newest cycle" "read the body and reported it present" "$K/after"
+  # The guard hold, on a loop nothing is holding: the guards ran and none of them withheld the
+  # command. Asserting the *negative* is worth a line because the failure it guards against is a
+  # console that renders "held" for a robot that is running, and because it is the sentence a
+  # reader gets on every robot that has not tripped anything.
+  want "and no guard is holding the command" "none of them held the command" "$K/after"
   # Both off one interval and one set of records. A robot reporting a present driver beside a
   # silent kernel would be describing a pair that was true at no instant, which is the reason
   # §27 reads them together rather than on two routes.

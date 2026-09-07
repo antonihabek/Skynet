@@ -1641,11 +1641,20 @@ fn print_state(document: &Json) {
 /// boolean — the chain is open or it is not — so a mark derived only from `state` would draw a
 /// green tick beside a robot that has been stopped by its hardware, which is the same class of
 /// error as the tick this printer already had to fix for `kernel`.
+///
+/// Three keys rather than one, and `advisory` is the one worth defending. A guard that **demanded**
+/// a hold and was overruled by §7.4's tier is not a robot that is held — `held` is false and §27's
+/// state is unchanged — but it is emphatically something an operator should look at: a guard is
+/// firing and nothing is acting on it. Only a cycle where a guard actually fired sets it, so this
+/// does not mark every robot on the edition; it marks the ones where the guards have something to
+/// say and no authority to say it.
 fn flagged(block: Option<&Json>) -> bool {
-    block
-        .and_then(|block| block.get("asserted"))
-        .and_then(Json::as_bool)
-        .unwrap_or(false)
+    ["asserted", "held", "advisory"].iter().any(|key| {
+        block
+            .and_then(|block| block.get(key))
+            .and_then(Json::as_bool)
+            .unwrap_or(false)
+    })
 }
 
 fn print_power(document: &Json) {

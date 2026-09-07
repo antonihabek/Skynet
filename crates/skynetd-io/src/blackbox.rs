@@ -282,18 +282,39 @@ impl Recorder {
     /// The interval still matters for the other half — a robot with no cycles at all has nothing
     /// reading its body, which is `Lost` for a different reason and is reported as one.
     pub fn body(&self, since: u64) -> RhalSighting {
-        let Ok(store) = self.read() else {
-            return RhalSighting::Unobservable(
+        match self.newest_cycle(since) {
+            Err(NoCycle::Unreadable) => RhalSighting::Unobservable(
                 "the ring could not be read, so nothing can be said about the driver",
-            );
-        };
-        if self.ring.geometry().shape.channels == 0 {
-            return RhalSighting::Unobservable(
+            ),
+            Err(NoCycle::NoChannels) => RhalSighting::Unobservable(
                 "this recording has no action channels, so it holds no control cycles and cannot \
                  say whether anything is reading the body (§26, §74.3)",
-            );
+            ),
+            Ok(newest) => RhalSighting::of(newest.as_ref()),
         }
-        let newest = self
+    }
+
+    /// The newest control cycle at or after `since`, or why there could not be one.
+    ///
+    /// Three of §27's conditions are readings of this one record — `rhal`, `stop` and `guard_hold`
+    /// — and each of the three had its own copy of this scan. The copies were identical apart from
+    /// the sentence each returned when there was nothing to read, which is the half that has to
+    /// stay per-condition: §64 asks a refusal to name what is missing, and *"nothing can be said
+    /// about the driver"* and *"nothing can be said about the emergency-stop chain"* send an
+    /// operator to different places. So the scan is shared and the wording is not.
+    ///
+    /// Each caller still scans on its own pass. They are called back to back from one reconcile
+    /// pass, so they see the same newest cycle; if that ever stops being true they have to be
+    /// handed one record instead, because §27's conditions are only comparable when they are
+    /// readings of one instant.
+    fn newest_cycle(&self, since: u64) -> Result<Option<skynet_blackbox::Cycle>, NoCycle> {
+        let Ok(store) = self.read() else {
+            return Err(NoCycle::Unreadable);
+        };
+        if self.ring.geometry().shape.channels == 0 {
+            return Err(NoCycle::NoChannels);
+        }
+        Ok(self
             .ring
             .ordered(&store)
             .into_iter()
@@ -302,8 +323,7 @@ impl Recorder {
                 skynet_blackbox::record::Body::Cycle(cycle) => Some(cycle),
                 _ => None,
             })
-            .next_back();
-        RhalSighting::of(newest.as_ref())
+            .next_back())
     }
 
     /// §27's **stop** condition, off the same newest cycle as [`body`](Self::body).
@@ -314,28 +334,38 @@ impl Recorder {
     /// this ever moves off the same pass, it has to take the record instead — §27's conditions are
     /// only comparable when they are readings of one instant.
     pub fn chain(&self, since: u64) -> StopSighting {
-        let Ok(store) = self.read() else {
-            return StopSighting::Unobservable(
+        match self.newest_cycle(since) {
+            Err(NoCycle::Unreadable) => StopSighting::Unobservable(
                 "the ring could not be read, so nothing can be said about the emergency-stop chain",
-            );
-        };
-        if self.ring.geometry().shape.channels == 0 {
-            return StopSighting::Unobservable(
+            ),
+            Err(NoCycle::NoChannels) => StopSighting::Unobservable(
                 "this recording has no action channels, so it holds no control cycles and cannot \
                  say whether the emergency-stop chain is open (§26, §74.3)",
-            );
+            ),
+            Ok(newest) => StopSighting::of(newest.as_ref()),
         }
-        let newest = self
-            .ring
-            .ordered(&store)
-            .into_iter()
-            .filter(|record| record.sequence >= since)
-            .filter_map(|record| match record.body {
-                skynet_blackbox::record::Body::Cycle(cycle) => Some(cycle),
-                _ => None,
-            })
-            .next_back();
-        StopSighting::of(newest.as_ref())
+    }
+
+    /// §27's **guard hold** condition, off the same newest cycle as [`body`](Self::body).
+    ///
+    /// The fourth reading taken from this ring, and the first one that is a fact about the
+    /// **kernel** rather than about the body. That difference decides the one case the other three
+    /// had to rule out: a cycle whose `read_state` failed carries the previous cycle's flags and
+    /// positions (§26.4), so `rhal` and `stop` refuse to read it — but the guard verdict on that
+    /// cycle is not a fill. The kernel really did evaluate, really did decide, and really did
+    /// withhold or forward the command. §27 asks whether a guard is holding, and that is answerable
+    /// from a cycle whose body read failed, because it is a question about what the kernel did.
+    pub fn guard(&self, since: u64) -> HoldSighting {
+        match self.newest_cycle(since) {
+            Err(NoCycle::Unreadable) => HoldSighting::Unobservable(
+                "the ring could not be read, so nothing can be said about the guards",
+            ),
+            Err(NoCycle::NoChannels) => HoldSighting::Unobservable(
+                "this recording has no action channels, so it holds no control cycles and cannot \
+                 say whether a guard is holding a command (§26, §74.3)",
+            ),
+            Ok(newest) => HoldSighting::of(newest.as_ref()),
+        }
     }
 
     /// Count §74's counters over the records at or after `from_sequence`.
@@ -707,6 +737,120 @@ const RHAL_DEGRADED: u16 = 1 << 2;
 /// crate an edge to `skynet-rhal`, and a transitive dependency reaches an actuator exactly as well
 /// as a direct one. What crosses the line is the **number**, out of a record this process already
 /// holds — the same arrangement §26 makes for every other field in a cycle.
+/// Why [`Recorder::newest_cycle`] had no record to hand back.
+///
+/// Two reasons and not one, because they are opposite facts about a robot and §74.3 spends a whole
+/// rule on keeping that pair apart: a ring nobody can read is a fault, and a ring with no action
+/// channels is every robot on this edition working exactly as designed (§26.2). Collapsing them
+/// would make a disk failure indistinguishable from a shipping configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoCycle {
+    /// The recording could not be opened or decoded.
+    Unreadable,
+    /// The recording is shaped for events only, so a control cycle cannot be in it.
+    NoChannels,
+}
+
+/// What a daemon could see of §27's **guard hold** condition (`Conditions::guard_hold`).
+///
+/// The fourth reading off §13's ring, and a *state* like [`RhalSighting`] and [`StopSighting`]:
+/// "is a guard holding" is a question about now, so the newest cycle decides it.
+///
+/// # Why a failed read does not stop this one
+///
+/// [`StopSighting`] refuses a cycle whose `read_state` failed, because §24's flags in such a record
+/// are the previous cycle's (§26.4) and reading them would be reporting a fill as an observation.
+/// The guard verdict in the same record is **not** a fill. `decide` runs on every cycle, failed
+/// read or not, and what it produces — `Hold`, `Clamp`, a stop, or nothing — is what the kernel
+/// did with the command that cycle. So this reads a record the other two refuse, and the split is
+/// the point: `rhal` and `stop` are facts about the **body**, and this is a fact about the
+/// **kernel**.
+///
+/// What the verdict was *computed from* on such a cycle is a fair question and a different one. The
+/// guards saw the driver's last buffers and a zeroed flag word, so a workspace guard may have held
+/// on a stale position. It still held: the command was withheld, the robot did not move, and an
+/// operator asking why their robot is not moving needs that answer rather than a philosophical one
+/// about the quality of its inputs.
+///
+/// # `Advisory` is a hold that did not happen
+///
+/// §7.4 lets a tier that cannot promise a clamp run **advisory**: the guards evaluate, the verdict
+/// is recorded, and the command is forwarded anyway. Every robot on this edition is one
+/// (`limits::ROBOT_TIER` is guest), so `Some(FaultResponse::Hold)` in a record here almost always
+/// describes a hold that was demanded and not applied.
+///
+/// Mapping that onto §27's `guard_hold` would tell an operator their robot is held at the moment
+/// it is moving — which is the failure §7.4 and §42 exist to prevent, and which this repository
+/// already caught once inside `decide` itself, where the `Hold` arm zeroed the mask on every
+/// verdict including advisory ones. So it is a variant of its own: not observed-as-clear, because
+/// a guard did fire and somebody should see that; not held, because nothing was withheld.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HoldSighting {
+    /// Nothing could be read, with the reason. Not a reading.
+    Unobservable(&'static str),
+    /// The newest cycle's verdict was a hold, and it was enforced.
+    Held,
+    /// The newest cycle's verdict was a hold and the verdict was advisory, so nothing was withheld.
+    Advisory,
+    /// The newest cycle demanded no hold.
+    Clear,
+}
+
+impl HoldSighting {
+    /// Map the newest cycle onto §27's condition.
+    pub fn of(newest: Option<&skynet_blackbox::Cycle>) -> HoldSighting {
+        match newest {
+            None => HoldSighting::Unobservable(
+                "no control cycle was recorded in the last interval, so no guard has run",
+            ),
+            // `skynet_blackbox`'s re-export rather than `skynet_kernel` directly. This crate's
+            // dependency list is a safety property — it deliberately does not carry `skynet-rhal`,
+            // and CI asserts the edge is absent — so a new edge into the kernel to name one enum
+            // variant would be paying in the wrong currency for a convenience.
+            Some(cycle) => match cycle.response {
+                Some(skynet_blackbox::FaultResponse::Hold) if cycle.advisory => {
+                    HoldSighting::Advisory
+                }
+                Some(skynet_blackbox::FaultResponse::Hold) => HoldSighting::Held,
+                // Everything else is not a hold, and the list is deliberately not enumerated: a
+                // clamp forwards a reduced command, a stop is §27's own row above this one, and
+                // `None` is a cycle where the guards passed or nothing was posted. None of them
+                // withholds on the strength of a guard hold, which is the only thing this reports.
+                _ => HoldSighting::Clear,
+            },
+        }
+    }
+
+    /// §27's condition. True only for a hold that was **enforced**.
+    pub fn held(&self) -> bool {
+        matches!(self, HoldSighting::Held)
+    }
+
+    /// Whether this was an observation at all.
+    pub fn observed(&self) -> bool {
+        !matches!(self, HoldSighting::Unobservable(_))
+    }
+
+    /// What was seen, in a sentence.
+    pub fn detail(&self) -> String {
+        match self {
+            HoldSighting::Unobservable(why) => (*why).to_string(),
+            HoldSighting::Held => "a guard held the command on the newest cycle: the kernel \
+                                   withheld it on every channel and the last safe command stands"
+                .to_string(),
+            HoldSighting::Advisory => {
+                "a guard demanded a hold on the newest cycle and the verdict \
+                                       was advisory, so the command was forwarded unchanged. This \
+                                       tier observes and reports; it does not enforce (§7.4)"
+                    .to_string()
+            }
+            HoldSighting::Clear => {
+                "the newest cycle ran the guards and none of them held the command".to_string()
+            }
+        }
+    }
+}
+
 const RHAL_ESTOP: u16 = 1 << 0;
 
 /// What a daemon could see of §27's **stop** condition in one interval.

@@ -307,6 +307,8 @@ pub struct Daemon<L: Launcher, S: Slots> {
     pub rhal_sighting: crate::blackbox::RhalSighting,
     /// What the last pass could see of §24's emergency-stop chain, kept for the same reason.
     pub stop_sighting: crate::blackbox::StopSighting,
+    /// What the last pass could see of §27's guard hold, kept for the same reason.
+    pub hold_sighting: crate::blackbox::HoldSighting,
     /// Who asked this daemon to stop, when somebody has (§82.4).
     ///
     /// A **request** rather than an action, and the split is the whole design. The route that takes
@@ -404,6 +406,9 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
                 "no reconcile pass has looked at the recording yet",
             ),
             stop_sighting: crate::blackbox::StopSighting::Unobservable(
+                "no reconcile pass has looked at the recording yet",
+            ),
+            hold_sighting: crate::blackbox::HoldSighting::Unobservable(
                 "no reconcile pass has looked at the recording yet",
             ),
             shutdown_requested: None,
@@ -578,6 +583,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         kernel: &crate::blackbox::KernelSighting,
         rhal: &crate::blackbox::RhalSighting,
         stop: &crate::blackbox::StopSighting,
+        hold: &crate::blackbox::HoldSighting,
     ) -> Transition {
         let report = crate::post::run(self.store.layout(), wall_s);
         let conditions = Conditions {
@@ -594,6 +600,13 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             // of its own rather than `operator`, because the chain gives one bit and a light
             // curtain opens it too — see `StopSighting`.
             stop: stop.cause(),
+            // §27's fifth observed condition, off the guard verdict in that same newest cycle.
+            // True only for a hold the kernel **enforced**: §7.4 lets a tier that cannot promise a
+            // clamp record a verdict and forward the command anyway, and every robot on this
+            // edition is one — so `HoldSighting::held` is false for an advisory hold and the
+            // reading is still reported as an observation. A robot that said `HOLD` while its
+            // command went through would be the failure §7.4 exists to prevent.
+            guard_hold: hold.held(),
             // `stop_settled` is deliberately left false. For a hardware stop no edition can
             // observe it — the bit says the chain is open and says nothing about whether the body
             // came to rest — so the machine derives `stopping` and never `stop_complete`. A robot
@@ -618,6 +631,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         self.kernel_sighting = kernel.clone();
         self.rhal_sighting = rhal.clone();
         self.stop_sighting = stop.clone();
+        self.hold_sighting = hold.clone();
         transition
     }
 
