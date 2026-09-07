@@ -63,6 +63,45 @@ extern "C" {
 #define SKR_FLAG_DEGRADED  (1u << 2)  /* running, but something is wrong — thermal, a dead encoder */
 #define SKR_FLAG_BRAKED    (1u << 3)  /* holding brakes are engaged */
 
+/* ── Homing, bits 4-5 of the same word ───────────────────────────────────────
+ *
+ * §27 derives an operating state from eight conditions and this was the last one with no source
+ * anywhere in the system. It was recorded for months as needing an ABI break, and that turned out
+ * to be false in a way worth writing down: `flags` is already a bitwise-or of a 16-bit word with
+ * twelve bits spare, so a driver that has never heard of homing sets none of them and reads as
+ * exactly what it is. No struct moves, no offset changes, SKYNET_RHAL_ABI_VERSION does not bump,
+ * and a v1 driver compiled in 2026 keeps loading and keeps working.
+ *
+ * It is a two-bit *field* rather than two independent booleans, and that is the whole design:
+ *
+ *   0  SKR_HOMING_UNREPORTED    this driver does not answer the question
+ *   1  SKR_HOMING_NOT_REQUIRED  the joints carry absolute encoders; there is nothing to home
+ *   2  SKR_HOMING_PENDING       joint positions are not yet trustworthy
+ *   3  SKR_HOMING_COMPLETE      homed, and the positions mean what they say
+ *
+ * Zero is `unreported` and not `pending` because those are different sentences to the person
+ * holding the robot. *Pending* is a robot that will be ready when somebody homes it; *unreported*
+ * is a robot whose driver was written before this field existed, and telling an operator to home a
+ * machine that has absolute encoders sends them to the wrong part of the building. The OS treats
+ * both as "do not command" — it must — but it says which it is, and §7.2's rule is that a
+ * measurement nobody can attribute is not one.
+ *
+ * `SKR_HOMING_NOT_REQUIRED` is the driver's to declare and not the descriptor's, which was the
+ * other candidate and is the weaker one. Whether a body needs homing is a property of the encoders
+ * actually fitted to the machine in front of the driver, and a descriptor is a vendor claim
+ * written once and shipped — the two disagree the first time somebody retrofits an absolute
+ * encoder, and the descriptor is the half that would be wrong.
+ *
+ * A driver that sets these bits must set them on every read_state, including a read it is about to
+ * fail: the OS refuses the flags word of a failed read outright (§26.4), so a driver has nothing
+ * to gain by being clever here and one fewer branch by not trying. */
+#define SKR_HOMING_SHIFT           4
+#define SKR_HOMING_MASK            (3u << SKR_HOMING_SHIFT)
+#define SKR_HOMING_UNREPORTED      (0u << SKR_HOMING_SHIFT)
+#define SKR_HOMING_NOT_REQUIRED    (1u << SKR_HOMING_SHIFT)
+#define SKR_HOMING_PENDING         (2u << SKR_HOMING_SHIFT)
+#define SKR_HOMING_COMPLETE        (3u << SKR_HOMING_SHIFT)
+
 /* ── Control modes ───────────────────────────────────────────────────────── */
 #define SKR_MODE_POSITION  0   /* values are radians (or metres, for a prismatic joint) */
 #define SKR_MODE_VELOCITY  1   /* values are rad/s (or m/s) */

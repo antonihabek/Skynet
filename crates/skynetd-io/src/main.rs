@@ -1901,7 +1901,7 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
     // two. The cursor is advanced whether or not anything was counted, so an interval that saw
     // nothing is not re-counted into the next one and a robot cannot report a kernel live on the
     // strength of cycles from ten minutes ago.
-    let (kernel, rhal, stop, hold) = match recorder {
+    let (kernel, rhal, stop, hold, homing) = match recorder {
         // All four off the same interval and the same records, because they are readings of one
         // instant and a robot whose kernel is turning while its driver has stopped answering has
         // to report exactly that pair rather than a plausible-looking one of them. The stop joins
@@ -1910,12 +1910,15 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
         // hold is the fourth, and it is the one that makes the set worth taking together — a
         // kernel that is turning, a driver that is answering and a guard that is holding is the
         // combination an operator standing beside a stationary robot is trying to distinguish from
-        // a robot that has simply stopped.
+        // a robot that has simply stopped. The homing state is the fifth and the last of §27's
+        // conditions to have a producer at all: it rides in on the same flags word as the stop
+        // (§24), so it is the same record read one field along.
         Some(recorder) => (
             recorder.sighting(daemon.kernel_sequence),
             recorder.body(daemon.kernel_sequence),
             recorder.chain(daemon.kernel_sequence),
             recorder.guard(daemon.kernel_sequence),
+            recorder.homing(daemon.kernel_sequence),
         ),
         None => (
             skynetd_io::blackbox::KernelSighting::Unobservable(
@@ -1929,6 +1932,9 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
             ),
             skynetd_io::blackbox::HoldSighting::Unobservable(
                 "this robot has no black box, so there is no record of a guard verdict",
+            ),
+            skynetd_io::blackbox::HomingSighting::Unobservable(
+                "this robot has no black box, so there is no record of a homing state",
             ),
         ),
     };
@@ -1974,6 +1980,7 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
             hold: &hold,
             guards: &guards,
             policy: &policy,
+            homing: &homing,
         },
     );
     daemon.refresh_safe_state();

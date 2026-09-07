@@ -296,6 +296,16 @@ jobs:
       - name: The specification still states the size of the thing it specifies
         run: node tools/scale-report.mjs --check
 
+      # §31.2 keeps the RHAL ABI single-source, and three mechanisms already enforce that for
+      # struct *layout*. Nothing enforced it for the flag *values*, which are written in four
+      # places — and the fourth cannot be removed, because the job above asserts `skynetd-io` has
+      # no edge to `skynet-rhal` (§33.1) and it therefore restates the bits it reads. A wrong mask
+      # does not crash: it reads a different field, so a homing field overlapping SKR_FLAG_BRAKED
+      # would put "ready to command" on the console of a robot whose brakes are on, with both
+      # halves looking correct in isolation.
+      - name: §24's flag values agree in all four places they are written
+        run: node tools/check-rhal-flags.mjs
+
       # §65 promises that a vendor engineer reaches a moving robot without reading Parts II
       # through VII, and that "if they cannot, the fault is in the golden path rather than in
       # their patience." That is a promise about a document, and a document is the thing here with

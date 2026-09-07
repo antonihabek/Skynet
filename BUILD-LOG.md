@@ -6655,3 +6655,165 @@ rounds is that the state rests on readings, and every condition a console shows 
 measurement rather than a default dressed as one.
 
 Nothing is pushed.
+
+---
+
+# Round twenty-six — 2026-09-07
+
+## 84. §27's `homing` — the eighth, and the one whose reason was wrong rather than stale
+
+The last of §27's eight conditions, and it did not close the way the other seven did.
+
+Each of those closed by finding that the evidence was **already written down** somewhere this
+process holds — §13's ring for four, §7.6's partition for the fifth, the store and the units for
+the sixth and seventh. `homing` was not written down anywhere, and this repository had drawn a
+conclusion from that and stopped:
+
+> §24 gives the ABI no flag for it, so it is not written down anywhere at all and needs a vendor to
+> recompile rather than a daemon to look somewhere else.
+
+The first clause is true. **The second does not follow from it, and nobody rechecked it for
+months.** §24's `flags` is a `u16` carrying four flags — `ESTOP`, `FAULT`, `DEGRADED`, `BRAKED` —
+and **twelve spare bits**. A field added to a bitwise-or word moves no offset, changes no struct,
+bumps no `SKYNET_RHAL_ABI_VERSION`, and breaks no driver ever compiled against v1: a driver that
+has never heard of the field leaves it zero, and zero is a value that can mean *this driver does
+not answer*. The whole of "the ABI break" was a two-line `#define` block.
+
+What a vendor recompiles for is **answering**. That is a much smaller claim than the one that had
+been standing in for it, and it is the same claim already recorded against every other row in §73
+— no vendor has written a driver.
+
+### Four states, and the argument for the fourth
+
+```
+0  SKR_HOMING_UNREPORTED    this driver does not answer the question
+1  SKR_HOMING_NOT_REQUIRED  absolute encoders; there is nothing to home
+2  SKR_HOMING_PENDING       joint positions are not yet trustworthy
+3  SKR_HOMING_COMPLETE      homed, and the positions mean what they say
+```
+
+A single `SKR_FLAG_HOMED` bit was the obvious encoding and it is the wrong one. A clear bit would
+mean *this robot is not homed* **and** *this driver has never heard of homing* at the same time,
+and those two send an operator to different parts of the building — one to the homing routine, one
+to the vendor. §7.2's rule is that a measurement nobody can attribute is not one. Two bits carry on
+the wire the `Option` the type carries in memory, and the cost of the distinction is one sentence
+while the cost of losing it is telling somebody to home a machine that has no homing routine.
+
+`not_required` is the **driver's** to declare and not the descriptor's, which was the other
+candidate. Whether a body needs homing is a property of the encoders actually fitted to the machine
+in front of the driver; a descriptor is a vendor claim written once and shipped, and the two
+disagree the first time somebody retrofits an absolute encoder — with the descriptor being the half
+that is wrong.
+
+### Reading it is the reading the other four already do
+
+`HomingSighting` is off §13's ring, off the newest cycle, and it refuses a cycle whose `read_state`
+failed for **`StopSighting`'s** reason rather than `HoldSighting`'s: §26.4 fills a failed cycle's
+flags from the previous cycle, so the field in such a record is a copy. Reading `complete` off a
+fill would release a robot on evidence nobody gathered, which is the one direction this must never
+fail in. It parts company with `guard_hold` deliberately — a guard verdict on a failed cycle is
+what the kernel *did*, and this is a claim about what the driver *saw*.
+
+`Unreported` counts as **observed**, which is the one judgement in the type worth arguing. This
+daemon looked, the ring answered, the loop is turning, and what came back is a driver declining to
+say. That is a measurement of the driver. Counting it unobserved would put every robot on a v1
+driver back where the condition started and throw away the distinction the field was added to make.
+
+The bits reach `skynetd-io` as a **number out of a record it already holds**, restated rather than
+imported: §33.1 forbids that crate an edge to `skynet-rhal` and CI asserts the edge is absent. The
+variant carries §27's own `HomingState` rather than a second spelling of the enum, so only the wire
+numbers are duplicated.
+
+### What it moved, which is the first time closing a condition moved anything
+
+Seven of eight bought no change of state, because `homing` is **rule 5** of `derive` and sits above
+the kernel (6), the guard hold (7) and the policy (8). Every robot on this edition resolved
+`unhomed` however good the readings below it were — four conditions being read and reflected in
+nothing.
+
+A body reporting `not_required` now passes rule 5 and stops at **rule 8**. That is the honest
+blocker: §25.2's lease is the Safety Kernel's table and `PolicySighting` cannot produce `Ready` on
+any input. The robot's reason changes from *"nobody has homed this machine"* — false, about a
+machine with no homing routine — to *"there is nothing here holding a lease"*, which is true and
+has a remedy.
+
+### The driver set answers three different ways, on purpose
+
+| Driver | Reports | Why |
+|---|---|---|
+| `drivers/mock` | `not_required` | `ctx->position` **is** the joint position; there is no zero to lose |
+| `drivers/mujoco` | `not_required` | positions come out of `data.qpos`, same argument |
+| `drivers/lerobot` | **nothing** | and this is the interesting one |
+
+The LeRobot bridge is the one place in the driver set where the answer is genuinely unknown. Its
+robot classes expose no homing or referencing state: a follower arm may be at its calibrated zero
+or may have been power-cycled with the leader somewhere else, and nothing in the observation says
+which. `complete` would be inventing it, and `not_required` would be worse — these are relative
+encoders. So it leaves the field zero, which is exactly the state the fourth value exists to
+express, and the robot is held.
+
+## 85. A fourth spelling, and the mechanism that arrived with it
+
+§24's flag values are now written in four places: the C header, `skynet-rhal`, the Python binding
+and `skynetd-io`'s restatement. The fourth **cannot be removed** — an import there would put the
+supervisor one `use` away from the actuator path — so the duplication is load-bearing and
+permanent, which is §78's shape exactly and §78's rule is that the remedy is a mechanism.
+
+Three mechanisms already held the ABI's **layout** (`layout_matches_the_header`,
+`assert_abi_layout`, `header_check.cpp`). Nothing held the flag **values**, and the failure
+signature is why that matters: a wrong mask does not crash, it reads a different field. A homing
+field overlapping `SKR_FLAG_BRAKED` would put *ready to command* on the console of a robot whose
+brakes are on, with both halves looking correct in isolation.
+
+`tools/check-rhal-flags.mjs` parses all four and holds them to the header. It **found a real
+asymmetry on its first run**, and the fix was to teach the check rather than to change the code:
+the Rust view spells the four states as `enum Homing` rather than four constants, and that is
+*better* than C — the zero has no variant because it is `Option::None`, so a Rust driver author
+cannot treat "the driver did not answer" as a state. The check reads the discriminants and shifts
+them, and records `HOMING_UNREPORTED`'s absence there as correct, with the reason. A parser that
+had forced four flat constants into the crate would have made the code worse to satisfy a tool.
+
+The overlap assertion derives the flag union **from the header** rather than listing today's four,
+because the flag it would catch is the one somebody adds next — a hardcoded list goes stale in
+exactly the commit that introduces the collision, and then passes.
+
+Mutation-checked, three ways: a drifted Python shift, a drifted Rust enum discriminant, and a fifth
+C flag moved onto bit 4. All three fail; restoring each passes.
+
+### Two documents were wrong before this and the check said so
+
+`scale-report --check` failed on four sentences at once — §73's two rows, §81.5 and the README —
+which is what it is for. The count reached the boundary its own header predicted in writing
+(*"this comment is here because the next boundary is `none`"*), and `NUMBER_WORDS` already had
+`none: 0`, so the grammar held. The Rust line count moved 122,000 → 123,000 in the same pass.
+
+## Run
+
+```
+cargo test --workspace                      1,621 passed, 0 failed  (1,618 before; Windows host,
+                                            so the unix-gated tests are not in this number)
+cargo clippy --workspace --all-targets      clean, no warnings
+cargo fmt --all --check                     clean
+node tools/check-rhal-flags.mjs             10 constants agree across 4 definitions
+node tools/scale-report.mjs --check         §73 matches the tree
+node tools/check-mirrors.mjs                all shared documents match, re-pinned
+node tools/check-contract-mirrors.mjs       every mirrored contract matches
+node tools/check-golden-path.mjs            4 documents, 51 commands
+```
+
+`crates/skynetd-io/e2e.sh` and the Python corpus runner were **not** run this round: no POSIX
+daemon and no `python3` corpus host on this machine. Nothing in this round touches a contract, an
+edition or the corpus — §24's ABI is single-source by §31.2 and is deliberately not corpus material
+— so the editions are unaffected by construction rather than by assumption.
+
+## What round twenty-six leaves
+
+* **All eight of §27's conditions are readings.** There is no ninth, so this sequence is finished
+  rather than advanced.
+* **Rule 8 is the wall now**, and it is a real one: §25.2's lease is the kernel's table. A robot
+  reaching a commanding state — and therefore §49's tone ever sounding — needs that lease readable
+  or granted, which is the next thing in this area worth designing.
+* No robot has run any of this. The mock and MuJoCo answers are correct answers from simulated
+  bodies; a driver on real hardware reporting a real homing state is still a vendor's to write.
+
+Nothing is pushed.

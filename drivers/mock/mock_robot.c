@@ -180,6 +180,11 @@ static int mock_read_state(skr_ctx *ctx, skr_state *out, uint64_t deadline_ns) {
   out->flags = 0;
   if (ctx->estop_latched) out->flags |= SKR_FLAG_ESTOP;
   if (ctx->fault == MOCK_FAULT_DEGRADED) out->flags |= SKR_FLAG_DEGRADED;
+  /* §24's homing field, and the answer a simulated body has to give is `not required` rather than
+   * `complete`. There are no encoders here to lose their zero: `ctx->position` *is* the joint
+   * position, so there is no homing routine for an operator to run and reporting `complete` would
+   * claim one had been run. §27 treats the two identically; a person reading a console does not. */
+  out->flags |= SKR_HOMING_NOT_REQUIRED;
 
   /* Caller-allocated arrays; the driver fills and never retains the pointers. */
   if (out->position_rad != NULL) {

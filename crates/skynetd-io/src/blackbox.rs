@@ -346,6 +346,24 @@ impl Recorder {
         }
     }
 
+    /// §27's **homing** condition, off the same newest cycle as [`body`](Self::body).
+    ///
+    /// The sixth reading off this ring and the last of §27's eight to get one. What it is reading
+    /// is new: §24 gained a two-bit homing field in the `flags` word it already had, so the record
+    /// this scans is unchanged and the bits ride in on `state_flags` with no format change at all.
+    pub fn homing(&self, since: u64) -> HomingSighting {
+        match self.newest_cycle(since) {
+            Err(NoCycle::Unreadable) => HomingSighting::Unobservable(
+                "the ring could not be read, so nothing can be said about the homing state",
+            ),
+            Err(NoCycle::NoChannels) => HomingSighting::Unobservable(
+                "this recording has no action channels, so it holds no control cycles and cannot \
+                 say whether the body has been homed (§26, §74.3)",
+            ),
+            Ok(newest) => HomingSighting::of(newest.as_ref()),
+        }
+    }
+
     /// §27's **guard hold** condition, off the same newest cycle as [`body`](Self::body).
     ///
     /// The fourth reading taken from this ring, and the first one that is a fact about the
@@ -852,6 +870,156 @@ impl HoldSighting {
 }
 
 const RHAL_ESTOP: u16 = 1 << 0;
+
+/// §24's `SKR_HOMING_MASK`: bits 4-5 of the flags word, restated for [`RHAL_ESTOP`]'s reason.
+///
+/// The value `0` in this field is `SKR_HOMING_UNREPORTED` and is not one of §27's homing states,
+/// which is why [`HomingSighting`] has a variant the contract enum does not.
+const RHAL_HOMING_MASK: u16 = 0b11 << RHAL_HOMING_SHIFT;
+
+/// Where §24's homing field starts in the flags word.
+const RHAL_HOMING_SHIFT: u16 = 4;
+
+/// `SKR_HOMING_NOT_REQUIRED`, already shifted.
+const RHAL_HOMING_NOT_REQUIRED: u16 = 1 << RHAL_HOMING_SHIFT;
+
+/// `SKR_HOMING_PENDING`, already shifted.
+const RHAL_HOMING_PENDING: u16 = 2 << RHAL_HOMING_SHIFT;
+
+/// `SKR_HOMING_COMPLETE`, already shifted.
+const RHAL_HOMING_COMPLETE: u16 = 3 << RHAL_HOMING_SHIFT;
+
+/// What a daemon could see of §27's **homing** condition in one interval.
+///
+/// # The last of the eight, and the one whose reason was wrong rather than stale
+///
+/// The other seven closed by finding that the evidence was already written down somewhere this
+/// process could read. This one closed by finding that the *reason* it could not be read was a
+/// conclusion nobody had rechecked: §73 said §24 gave the ABI no flag for homing, which was true,
+/// and inferred that closing it needed a vendor to recompile, which did not follow. §24's `flags`
+/// is a `u16` carrying four flags and twelve spare bits, and a field added to a bitwise-or word
+/// moves no offset, breaks no driver and does not bump [`SKYNET_RHAL_ABI_VERSION`.
+/// The OS could define the bits and read them at any point in the last several months.
+///
+/// # Four answers, and the fourth is why this is not a boolean
+///
+/// §27's [`HomingState`](skynet_contracts::opstate::HomingState) has three values and the field's
+/// zero is a fourth thing: *this driver does not answer*. Folding that onto `Pending` was the
+/// tempting simplification and it is the one §7.2 forbids — the machine holds the robot either
+/// way, so the only thing the distinction costs is a sentence, and the only thing it buys is that
+/// an operator with an absolute-encoder robot is not sent to run a homing routine that does not
+/// exist.
+///
+/// The variant therefore carries §27's own enum rather than a second spelling of it. Only the wire
+/// **numbers** are restated in this crate, for [`RHAL_ESTOP`]'s reason: §33.1 forbids an edge to
+/// `skynet-rhal` and a number out of a record this process already holds is what crosses instead.
+///
+/// # Why a failed read is refused
+///
+/// The same rule as [`StopSighting`], for the same reason and off the same bytes: §26.4 fills a
+/// failed cycle's flags with the previous cycle's, so the homing field in such a record is a copy
+/// rather than a reading. It parts company with [`HoldSighting`] here, which reads exactly those
+/// records — the guard verdict on a failed cycle is what the kernel *did*, and this is a claim
+/// about what the driver *saw*.
+///
+/// # It never reports homing as it happens
+///
+/// §27 has three homing states and no fourth for *homing right now*. A driver mid-routine reports
+/// `Pending` — positions are not yet trustworthy, which is exactly true while an axis is seeking —
+/// and the transition to `Complete` is the only edge there is. That is a limit of §27's vocabulary
+/// rather than of this reading, and it is the fail-closed direction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HomingSighting {
+    /// Nothing could be read, with the reason. Not a reading.
+    Unobservable(&'static str),
+    /// A cycle was read and the driver declined to answer — `SKR_HOMING_UNREPORTED`.
+    ///
+    /// Distinct from [`HomingSighting::Unobservable`] on purpose: this robot's ring is readable,
+    /// its loop is turning and its driver reported a state. The one thing it did not report is
+    /// this, and that is a fact about the driver rather than about the evidence.
+    Unreported,
+    /// A cycle was read, and the driver answered with one of §27's three states.
+    Reported(skynet_contracts::opstate::HomingState),
+}
+
+impl HomingSighting {
+    /// Map the newest cycle onto §27's condition.
+    pub fn of(newest: Option<&skynet_blackbox::Cycle>) -> HomingSighting {
+        match newest {
+            None => HomingSighting::Unobservable(
+                "no control cycle was recorded in the last interval, so nothing has read the \
+                 homing state",
+            ),
+            Some(cycle) if !cycle.read.measured() => HomingSighting::Unobservable(
+                "the newest cycle's read of the body failed, so its flags are a fill value and \
+                 not a reading of the homing state (§26.4)",
+            ),
+            Some(cycle) => {
+                use skynet_contracts::opstate::HomingState;
+                match cycle.state_flags & RHAL_HOMING_MASK {
+                    RHAL_HOMING_NOT_REQUIRED => HomingSighting::Reported(HomingState::NotRequired),
+                    RHAL_HOMING_PENDING => HomingSighting::Reported(HomingState::Pending),
+                    RHAL_HOMING_COMPLETE => HomingSighting::Reported(HomingState::Complete),
+                    // `SKR_HOMING_UNREPORTED`, and the only remaining value the mask can yield.
+                    _ => HomingSighting::Unreported,
+                }
+            }
+        }
+    }
+
+    /// §27's condition.
+    ///
+    /// Everything that is not a reported state collapses onto
+    /// [`HomingState::Pending`](skynet_contracts::opstate::HomingState::Pending), which is the
+    /// value that holds the robot and is already `HomingState`'s own default. That is the
+    /// fail-closed direction and the only one available: a machine that cannot establish whether
+    /// joint positions mean anything must not be commanded off them.
+    pub fn state(&self) -> skynet_contracts::opstate::HomingState {
+        use skynet_contracts::opstate::HomingState;
+        match self {
+            HomingSighting::Reported(state) => *state,
+            HomingSighting::Unreported | HomingSighting::Unobservable(_) => HomingState::Pending,
+        }
+    }
+
+    /// Whether this was an observation at all.
+    ///
+    /// [`HomingSighting::Unreported`] counts as **observed**, and that is the one judgement in this
+    /// type worth arguing. This daemon looked, the ring answered, and what came back was a driver
+    /// declining to say — which is a measurement of the driver. Counting it unobserved would put
+    /// every robot on a v1 driver back where the condition started and lose the distinction the
+    /// two-bit field was added to make.
+    pub fn observed(&self) -> bool {
+        !matches!(self, HomingSighting::Unobservable(_))
+    }
+
+    /// What was seen, in a sentence.
+    pub fn detail(&self) -> String {
+        match self {
+            HomingSighting::Unobservable(why) => (*why).to_string(),
+            HomingSighting::Unreported => {
+                "the newest cycle read the body and the driver reported no homing state. §24's \
+                 field is two bits in the flags word and a driver built before it existed leaves \
+                 them zero, so this is a driver that has not been updated rather than a robot that \
+                 needs homing. The robot is held either way"
+                    .to_string()
+            }
+            HomingSighting::Reported(skynet_contracts::opstate::HomingState::NotRequired) => {
+                "the driver reports that this body needs no homing: its joints carry absolute \
+                 encoders, so the positions on every cycle mean what they say"
+                    .to_string()
+            }
+            HomingSighting::Reported(skynet_contracts::opstate::HomingState::Pending) => {
+                "the driver reports the body as not yet homed, so joint positions are not \
+                 trustworthy and nothing may be commanded from them"
+                    .to_string()
+            }
+            HomingSighting::Reported(skynet_contracts::opstate::HomingState::Complete) => {
+                "the driver reports the body as homed on the newest cycle".to_string()
+            }
+        }
+    }
+}
 
 /// What a daemon could see of §27's **stop** condition in one interval.
 ///

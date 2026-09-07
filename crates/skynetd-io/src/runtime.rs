@@ -320,6 +320,11 @@ pub struct Daemon<L: Launcher, S: Slots> {
     /// Off the store and the unit this daemon launched, never off §25.2's lease table — which is
     /// why the one case that turns on a lease reports itself unobserved rather than guessing.
     pub policy_sighting: crate::shape::PolicySighting,
+    /// What the last pass could see of §27's `homing` condition.
+    ///
+    /// Off §24's two-bit field on the same newest cycle as `stop`, and refused on the same terms:
+    /// §26.4 fills a failed read's flags from the previous cycle, so they are not a reading.
+    pub homing_sighting: crate::blackbox::HomingSighting,
     /// Who asked this daemon to stop, when somebody has (§82.4).
     ///
     /// A **request** rather than an action, and the split is the whole design. The route that takes
@@ -431,6 +436,9 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             policy_sighting: crate::shape::PolicySighting::LeaseUnknown {
                 package: String::new(),
             },
+            homing_sighting: crate::blackbox::HomingSighting::Unobservable(
+                "no reconcile pass has looked at the recording yet",
+            ),
             shutdown_requested: None,
             // From the kernel's own interfaces, not through the layout — for `cpus`'s reason two
             // fields above: the pack and the thermal zones are properties of the machine and live
@@ -570,6 +578,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             hold: &self.hold_sighting,
             guards: &self.guards_sighting,
             policy: &self.policy_sighting,
+            homing: &self.homing_sighting,
         }
     }
 
@@ -638,6 +647,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             hold,
             guards,
             policy,
+            homing,
         } = seen;
         let report = crate::post::run(self.store.layout(), wall_s);
         let conditions = Conditions {
@@ -672,6 +682,12 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             // must not produce — and never the `None` the default used to supply, which said "there
             // is nothing to run" about a robot whose store this daemon holds and knows otherwise.
             policy: policy.state(),
+            // §27's eighth, and the last to stop being a default. Off §24's homing field on the
+            // same newest cycle as `stop`, and everything that is not a reported state — an
+            // unreadable ring, a failed body read, a driver that declines to answer — collapses
+            // onto `Pending`, which is the value that holds the robot. See `HomingSighting`, and
+            // in particular for why a driver declining to answer is still an observation.
+            homing: homing.state(),
             // `stop_settled` is deliberately left false. For a hardware stop no edition can
             // observe it — the bit says the chain is open and says nothing about whether the body
             // came to rest — so the machine derives `stopping` and never `stop_complete`. A robot
@@ -699,6 +715,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         self.hold_sighting = (*hold).clone();
         self.guards_sighting = (*guards).clone();
         self.policy_sighting = (*policy).clone();
+        self.homing_sighting = (*homing).clone();
         transition
     }
 

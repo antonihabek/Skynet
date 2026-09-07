@@ -1433,6 +1433,7 @@ fn console_fixture() {
             hold: &blackbox::HoldSighting::Unobservable("no ring in this fixture"),
             guards: &crate::limits::GuardsSighting::Unobservable("no descriptor in this fixture"),
             policy: &crate::shape::PolicySighting::Nothing { no_body: true },
+            homing: &blackbox::HomingSighting::Unobservable("no ring in this fixture"),
         },
     );
     let vendor = driver_key(31);
@@ -3982,6 +3983,7 @@ fn status_carries_the_operating_state_and_the_reason_it_is_there() {
             hold: &blackbox::HoldSighting::Unobservable("no ring in this fixture"),
             guards: &crate::limits::GuardsSighting::Unobservable("no descriptor in this fixture"),
             policy: &crate::shape::PolicySighting::Nothing { no_body: true },
+            homing: &blackbox::HomingSighting::Unobservable("no ring in this fixture"),
         },
     );
     let (_, after) = fixture.request("GET", "/status", None, "");
@@ -4014,6 +4016,7 @@ fn the_state_route_admits_how_little_it_observed() {
             hold: &blackbox::HoldSighting::Unobservable("no ring in this fixture"),
             guards: &crate::limits::GuardsSighting::Unobservable("no descriptor in this fixture"),
             policy: &crate::shape::PolicySighting::Nothing { no_body: true },
+            homing: &blackbox::HomingSighting::Unobservable("no ring in this fixture"),
         },
     );
     let (status, body) = fixture.request("GET", "/state", Some("observer-token"), "");
@@ -4064,7 +4067,7 @@ fn the_state_route_admits_how_little_it_observed() {
 /// lacked and the only reason `crate::observed` exists.
 #[test]
 fn every_sentence_about_the_conditions_counts_the_same_object() {
-    for (kernel, rhal, stop, hold, guards, policy, expected) in [
+    for (kernel, rhal, stop, hold, guards, policy, homing, expected) in [
         (
             blackbox::KernelSighting::Unobservable("no ring in this fixture"),
             blackbox::RhalSighting::Unobservable("no ring in this fixture"),
@@ -4074,6 +4077,7 @@ fn every_sentence_about_the_conditions_counts_the_same_object() {
             crate::shape::PolicySighting::LeaseUnknown {
                 package: "com.example.walk".to_string(),
             },
+            blackbox::HomingSighting::Unobservable("no ring in this fixture"),
             1,
         ),
         (
@@ -4087,7 +4091,11 @@ fn every_sentence_about_the_conditions_counts_the_same_object() {
             blackbox::HoldSighting::Clear,
             crate::limits::GuardsSighting::AllAvailable,
             crate::shape::PolicySighting::Nothing { no_body: false },
-            7,
+            // A driver that answers §24's homing field, which is what makes this row eight rather
+            // than seven — and the row this test existed to protect: a condition gaining a
+            // producer moves the tally, the prose and the complement together and edits nothing.
+            blackbox::HomingSighting::Reported(skynet_contracts::opstate::HomingState::NotRequired),
+            8,
         ),
     ] {
         let mut fixture = Fixture::new("condition-count");
@@ -4101,6 +4109,7 @@ fn every_sentence_about_the_conditions_counts_the_same_object() {
                 hold: &hold,
                 guards: &guards,
                 policy: &policy,
+                homing: &homing,
             },
         );
 
@@ -4257,6 +4266,7 @@ fn an_open_stop_chain_is_its_own_cause_and_never_a_completed_stop() {
             hold: &blackbox::HoldSighting::Clear,
             guards: &crate::limits::GuardsSighting::AllAvailable,
             policy: &crate::shape::PolicySighting::Nothing { no_body: false },
+            homing: &blackbox::HomingSighting::Unreported,
         },
     );
 
@@ -4444,18 +4454,23 @@ fn a_guard_hold_is_read_off_the_verdict_and_only_when_it_was_enforced() {
     assert!(!none.held());
 }
 
-/// An enforced hold reaches the route — and does **not** reach §27's derived state, which is the
-/// honest size of this step.
+/// An enforced hold reaches the route — and does **not** reach §27's derived state.
 ///
-/// `guard_hold` is rule 7 of `derive`. Above it sit the self-test (4), homing (5) and the kernel
-/// (6), and `homing` is the one condition on this edition that no reader can close: §24 gives the
-/// ABI no flag for it, so it defaults to `Pending` and outranks every hold. A robot here therefore
-/// reports `unhomed` or `post` while carrying a perfectly good guard-hold observation.
+/// `guard_hold` is rule 7 of `derive` and homing is rule 5, so a robot whose homing state is
+/// `Pending` reports `unhomed` while carrying a perfectly good guard-hold observation.
+///
+/// **The reason this fixture is `Unreported` is the point of the test now.** It used to be that
+/// nothing could report homing at all; §24's two-bit field changed that, and what this fixture
+/// describes is a robot on a **v1 driver** — one that answers everything else and leaves the new
+/// field zero. That is the majority of the driver set on the day it was written and it fails
+/// closed exactly as before, which is what makes it the right fixture for asserting the ordering.
+/// The robot that gets past rule 5 is
+/// [`a_driver_that_answers_the_homing_field_reaches_the_condition_and_the_machine`].
 ///
 /// So this asserts the two things that did change — the condition is **observed**, and the block
 /// §32.2 requires renders what was seen — and asserts the ordering explicitly rather than leaving
 /// somebody to discover it. That `derive` turns `guard_hold` into `HOLD` is not this test's to
-/// prove; `opstate`'s own suite does it, on conditions a daemon cannot yet supply.
+/// prove; `opstate`'s own suite does it.
 #[test]
 fn an_enforced_hold_reaches_the_route_and_homing_still_outranks_it() {
     let mut fixture = Fixture::new("guard-hold-condition");
@@ -4473,6 +4488,7 @@ fn an_enforced_hold_reaches_the_route_and_homing_still_outranks_it() {
             hold: &blackbox::HoldSighting::Held,
             guards: &crate::limits::GuardsSighting::AllAvailable,
             policy: &crate::shape::PolicySighting::Nothing { no_body: false },
+            homing: &blackbox::HomingSighting::Unreported,
         },
     );
 
@@ -4504,6 +4520,106 @@ fn an_enforced_hold_reaches_the_route_and_homing_still_outranks_it() {
     );
 }
 
+/// A driver that answers §24's homing field reaches §27's condition, and moves the machine.
+///
+/// The cascade this whole change exists for, asserted in the two halves it actually has.
+///
+/// Rule 5 — *"joint positions are unknown, so a policy must not run"* — held **every robot on this
+/// edition** for as long as nothing could report a homing state, and it sits above the kernel (6),
+/// the guard hold (7) and the policy (8). So the four conditions below it were observations no
+/// robot's state ever reflected.
+///
+/// **The daemon's half** is that a driver's answer arrives as §27's condition and that all eight
+/// conditions are then readings. That is what `refresh_operating_state` is asserted on here, and it
+/// is asserted on the fixture's real state rather than a hoped-for one: this fixture's self-test
+/// does not pass, so rule 4 stops it before rule 5 and the *state* is `post` either way. Asserting
+/// a state this fixture cannot reach would be asserting the fixture, not the change.
+///
+/// **The machine's half** is the ordering, and it is driven directly — the only way to reach rule 5
+/// from here, and the same technique the `policy` condition's suite needed for rule 8. What it
+/// shows is that passing rule 5 does **not** buy a commanding robot: the machine stops at rule 8,
+/// because `PolicySighting` never produces `Ready` on any input and §25.2's lease is the Safety
+/// Kernel's table.
+///
+/// That is the honest size of the step, and it is a result rather than a disappointment: the
+/// robot's reason changes from *"nobody has homed this machine"* — false, about a machine with no
+/// homing routine — to *"there is nothing here holding a lease"*, which is true and has a remedy.
+#[test]
+fn a_driver_that_answers_the_homing_field_reaches_the_condition_and_the_machine() {
+    use skynet_contracts::opstate::{
+        evaluate, Conditions, HomingState, KernelState, OperatingState, PolicyState, PostVerdict,
+        RhalState, StateReason,
+    };
+
+    let mut fixture = Fixture::new("homing-answered");
+    fixture.provision();
+    fixture.daemon.refresh_operating_state(
+        None,
+        &crate::observed::Sightings {
+            kernel: &blackbox::KernelSighting::Turning { cycles: 40 },
+            rhal: &blackbox::RhalSighting::Seen {
+                state: RhalState::Present,
+                errno: None,
+                fault_code: 0,
+            },
+            stop: &blackbox::StopSighting::Clear,
+            hold: &blackbox::HoldSighting::Clear,
+            guards: &crate::limits::GuardsSighting::AllAvailable,
+            policy: &crate::shape::PolicySighting::Nothing { no_body: false },
+            homing: &blackbox::HomingSighting::Reported(HomingState::NotRequired),
+        },
+    );
+
+    let (status, state) = fixture.request("GET", "/state", Some("observer-token"), "");
+    assert_eq!(status, 200);
+
+    // Every one of §27's eight conditions is a reading now. This is the assertion that goes stale
+    // if a condition ever loses its producer, and it is deliberately over the whole list rather
+    // than over the one that was added.
+    let observed = state.get("observed").expect("the observation map");
+    for condition in crate::observed::CONDITIONS {
+        assert_eq!(
+            observed.get(condition).and_then(Json::as_bool),
+            Some(true),
+            "{condition} should be observed once a driver answers the homing field"
+        );
+    }
+
+    // The machine, driven directly past the self-test this fixture cannot pass. Everything below
+    // rule 5 is exactly what the sightings above reported.
+    let conditions = |homing| Conditions {
+        post: PostVerdict::Passed,
+        kernel: KernelState::Live,
+        rhal: RhalState::Present,
+        homing,
+        stop: None,
+        guard_hold: false,
+        policy: PolicyState::None,
+        ..Conditions::default()
+    };
+
+    // A v1 driver leaves the field zero, which reads as `Pending`, which is rule 5.
+    let v1 = evaluate(OperatingState::Post, &conditions(HomingState::Pending));
+    assert_eq!(v1.to, OperatingState::Unhomed);
+    assert_eq!(v1.reason, StateReason::HomingPending);
+
+    // A driver that answers passes it, and stops at the next rule that is actually true.
+    for answered in [HomingState::NotRequired, HomingState::Complete] {
+        let moved = evaluate(OperatingState::Post, &conditions(answered));
+        assert_ne!(
+            moved.to,
+            OperatingState::Unhomed,
+            "a body whose encoders are absolute is not a body waiting to be homed"
+        );
+        assert_eq!(moved.to, OperatingState::Hold);
+        assert_eq!(
+            moved.reason,
+            StateReason::NoPolicy,
+            "rule 8 is the next one that stops it, and it names the real blocker"
+        );
+    }
+}
+
 /// And the advisory case, on the route, which is the one every robot here produces.
 ///
 /// A guard fired and the command went through. The state must **not** be `hold`, the condition
@@ -4526,6 +4642,7 @@ fn an_advisory_hold_is_reported_without_holding_the_robot() {
             hold: &blackbox::HoldSighting::Advisory,
             guards: &crate::limits::GuardsSighting::AllAvailable,
             policy: &crate::shape::PolicySighting::Nothing { no_body: false },
+            homing: &blackbox::HomingSighting::Unreported,
         },
     );
 
@@ -5532,6 +5649,173 @@ mod recorder {
             older.state(),
             RhalState::Lost,
             "silence from a schema-1 record is not a good read"
+        );
+    }
+
+    /// §27's `homing` condition, mapped off §24's two-bit field on the newest cycle.
+    ///
+    /// The last of the eight to get a producer, and the four cases below are the whole argument
+    /// for why the field is two bits rather than one. A single `HOMED` flag would collapse the
+    /// first two rows into each other, and they are the pair an operator most needs kept apart:
+    ///
+    /// | The driver said | This reports | What an operator does |
+    /// |---|---|---|
+    /// | nothing (a v1 driver) | `Unreported` | update the driver, or ask the vendor |
+    /// | `SKR_HOMING_PENDING` | `Reported(Pending)` | run the homing routine |
+    /// | `SKR_HOMING_NOT_REQUIRED` | `Reported(NotRequired)` | nothing; the encoders are absolute |
+    /// | `SKR_HOMING_COMPLETE` | `Reported(Complete)` | nothing |
+    ///
+    /// Both of the first two hold the robot, so the distinction costs a sentence and buys an
+    /// operator not being sent to home a machine that has no homing routine.
+    #[test]
+    fn the_homing_state_is_the_newest_cycles_field() {
+        use crate::blackbox::HomingSighting;
+        use skynet_blackbox::record::ReadOutcome;
+        use skynet_contracts::opstate::HomingState;
+
+        fn cycle(read: ReadOutcome, flags: u16) -> skynet_blackbox::Cycle {
+            skynet_blackbox::Cycle {
+                read,
+                tick: 1,
+                observation: [0; 32],
+                policy: 0,
+                state_flags: flags,
+                fault_code: 0,
+                rhal_result: 0,
+                state_seq: 1,
+                state_stamp_ns: 0,
+                command_stamp_ns: 0,
+                command_seq: 0,
+                mode: 0,
+                advisory: false,
+                response: None,
+                tripped: Vec::new(),
+                capability: skynet_blackbox::record::NO_CAPABILITY,
+                nearest_person_m: f32::NAN,
+                base_pose: [f32::NAN; 7],
+                base_twist: [0.0; 6],
+                desired: Vec::new(),
+                command: Vec::new(),
+                mask: Vec::new(),
+                clamped: Vec::new(),
+                position: Vec::new(),
+                velocity: Vec::new(),
+                effort: Vec::new(),
+            }
+        }
+
+        // Nothing turned, so nothing read the homing state. Not an observation.
+        assert!(!HomingSighting::of(None).observed());
+        assert_eq!(HomingSighting::of(None).state(), HomingState::Pending);
+
+        // A v1 driver: it set the flags it knows about and left bits 4-5 zero. This *is* an
+        // observation — the ring answered and the driver declined — and it is the case the whole
+        // encoding exists to keep distinct from the row below.
+        let unreported = HomingSighting::of(Some(&cycle(ReadOutcome::Ok, 1 << 3)));
+        assert_eq!(unreported, HomingSighting::Unreported);
+        assert!(
+            unreported.observed(),
+            "the daemon looked and the driver answered everything else"
+        );
+        assert_eq!(
+            unreported.state(),
+            HomingState::Pending,
+            "it still holds the robot; what changes is what an operator is told to do"
+        );
+        assert!(unreported.detail().contains("has not been updated"));
+
+        // The three states a driver can report, each beside a flag a real driver also sets.
+        for (bits, expected) in [
+            (1u16 << 4, HomingState::NotRequired),
+            (2 << 4, HomingState::Pending),
+            (3 << 4, HomingState::Complete),
+        ] {
+            let seen = HomingSighting::of(Some(&cycle(ReadOutcome::Ok, bits | (1 << 3))));
+            assert_eq!(seen, HomingSighting::Reported(expected));
+            assert_eq!(seen.state(), expected);
+            assert!(seen.observed());
+        }
+
+        // §26.4, and the rule this shares with `StopSighting` rather than with `HoldSighting`: a
+        // failed read carries the *previous* cycle's flags, so the field in it is a copy. Reading
+        // `Complete` off one would release a robot on evidence nobody gathered — which is the one
+        // direction this must never fail in.
+        let filled = HomingSighting::of(Some(&cycle(ReadOutcome::Failed(-110), 3 << 4)));
+        assert!(!filled.observed());
+        assert_eq!(
+            filled.state(),
+            HomingState::Pending,
+            "a fill value that says `complete` must not read as homed (§26.4)"
+        );
+        assert!(filled.detail().contains("fill value"));
+
+        // A recording from before §26.4's field existed cannot say either.
+        let older = HomingSighting::of(Some(&cycle(ReadOutcome::Unrecorded, 3 << 4)));
+        assert!(!older.observed());
+        assert_eq!(older.state(), HomingState::Pending);
+    }
+
+    /// The homing field must not be readable out of the flags the other sightings act on.
+    ///
+    /// The failure this guards is a bit-mask collision, which would be silent and would cross two
+    /// subsystems: a braked robot reporting itself homed, or a homed robot reporting an emergency
+    /// stop. Both halves would look correct in isolation, which is why it is asserted from the
+    /// consumer side as well as inside `skynet-rhal`.
+    #[test]
+    fn the_homing_field_does_not_disturb_the_stop_or_the_rhal_state() {
+        use crate::blackbox::{HomingSighting, RhalSighting, StopSighting};
+        use skynet_blackbox::record::ReadOutcome;
+        use skynet_contracts::opstate::{HomingState, RhalState};
+
+        fn cycle(flags: u16) -> skynet_blackbox::Cycle {
+            skynet_blackbox::Cycle {
+                read: ReadOutcome::Ok,
+                tick: 1,
+                observation: [0; 32],
+                policy: 0,
+                state_flags: flags,
+                fault_code: 0,
+                rhal_result: 0,
+                state_seq: 1,
+                state_stamp_ns: 0,
+                command_stamp_ns: 0,
+                command_seq: 0,
+                mode: 0,
+                advisory: false,
+                response: None,
+                tripped: Vec::new(),
+                capability: skynet_blackbox::record::NO_CAPABILITY,
+                nearest_person_m: f32::NAN,
+                base_pose: [f32::NAN; 7],
+                base_twist: [0.0; 6],
+                desired: Vec::new(),
+                command: Vec::new(),
+                mask: Vec::new(),
+                clamped: Vec::new(),
+                position: Vec::new(),
+                velocity: Vec::new(),
+                effort: Vec::new(),
+            }
+        }
+
+        // Homed, and the chain is closed. A mask collision would read the chain as open.
+        let homed = cycle(3 << 4);
+        assert_eq!(
+            HomingSighting::of(Some(&homed)).state(),
+            HomingState::Complete
+        );
+        assert_eq!(StopSighting::of(Some(&homed)), StopSighting::Clear);
+        assert_eq!(RhalSighting::of(Some(&homed)).state(), RhalState::Present);
+
+        // Both true at once, and each read independently of the other.
+        let homed_and_stopped = cycle((3 << 4) | 1);
+        assert_eq!(
+            HomingSighting::of(Some(&homed_and_stopped)).state(),
+            HomingState::Complete
+        );
+        assert_eq!(
+            StopSighting::of(Some(&homed_and_stopped)),
+            StopSighting::Asserted
         );
     }
 
