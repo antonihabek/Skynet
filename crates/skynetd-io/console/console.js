@@ -390,6 +390,33 @@ function renderState(feed) {
   }
   add('Warning tone (§49.1)', heard)
 
+  // §27's guard hold, which needs a row of its own for one case that the state line cannot show.
+  //
+  // A hold that was **enforced** already appears above: §27 derives `hold` with `guard_hold` as the
+  // reason and the state line says so. The case with no other surface is the **advisory** one —
+  // §7.4 lets a tier that cannot promise a clamp record the verdict and forward the command anyway,
+  // which is every robot on this edition. There the guard fired, the robot moved, §27's state is
+  // unchanged, and the only trace anywhere is the word `guard_hold` in the observed list below —
+  // which says somebody looked, not what they saw. That is the distinction this panel exists to
+  // keep, and the row is dropped entirely when the condition was not observed rather than drawn as
+  // a reassuring "no".
+  const hold = s.guard_hold || {}
+  if (hold.observed) {
+    const guard = el('span')
+    if (hold.held) {
+      guard.appendChild(pill('HELD', 'bad'))
+    } else if (hold.advisory) {
+      guard.appendChild(pill('demanded, not enforced', 'warn'))
+    } else {
+      guard.appendChild(pill('no', 'ok'))
+    }
+    if (hold.detail) {
+      guard.appendChild(document.createTextNode(' '))
+      guard.appendChild(el('span', 'dim', hold.detail))
+    }
+    add('Guard holding (§27)', guard)
+  }
+
   // Which of §27's conditions anybody looked at. The list, not a count, because "1 of 9" tells an
   // operator how bad it is and this tells them which one they have.
   const observed = s.observed || {}

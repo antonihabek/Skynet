@@ -3,7 +3,7 @@
   "rust": {
     "crates": 23,
     "files": 173,
-    "lines": 120945
+    "lines": 121374
   },
   "reference_typescript": {
     "lines": 14239
@@ -25,8 +25,8 @@
   },
   "conditions": {
     "total": 8,
-    "observed": 4,
-    "unobserved": 4
+    "observed": 5,
+    "unobserved": 3
   },
   "hub_mirror": {
     "lines": 8452

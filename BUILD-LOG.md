@@ -6107,3 +6107,349 @@ that is not a decision and not code anybody can write today:
 
 §73's own summary of itself is now true without qualification: every subsystem that can be built
 without hardware has been.
+
+---
+
+# Round twenty-three — 2026-09-07
+
+## Audit — what is left, asked of the plan rather than of the last log
+
+No code this round. The instruction was to establish what remains for the **OS**, the **Hub** and
+the **Console** before building anything, on the suspicion that the plan might be finished. It is
+not finished, and the more useful result is that **round twenty-two's closing paragraph was wrong
+about three items** — it filed them as waiting on hardware when they are waiting on a reader.
+
+Everything below was checked against the tree on this machine rather than read out of a log.
+
+### Baseline, measured today (Linux, this container)
+
+```
+cargo test --workspace                    1,676 passed, 0 failed
+python3 editions/python/run_corpus.py     1,142 of 1,142, 33 corpora complete
+node tools/check-mirrors.mjs              all shared documents match
+node tools/check-contract-mirrors.mjs     every mirrored contract matches
+node tools/check-golden-path.mjs          4 documents, 51 commands
+node tools/scale-report.mjs --check       ok  (Hub mirror unmeasured: no checkout at the path it looks for)
+node tools/edition-report.mjs --check     FAILS — see defect 1
+node scripts/check-skynet-service.mjs     6 checks, no divergence          (Hub repo)
+```
+
+Both working trees are clean and level with `origin/main`.
+
+### Toolchains present, and what that decides
+
+`cargo` 1.94, `node` 22, `python3` 3.11, `gcc` 13, `systemd` 255, `psql` 16. **No `dotnet`, no
+`swift`, no Supabase credentials, no `node_modules`.** So the OS is fully buildable and testable
+here; the Hub is testable for units, types and lint once `npm install` runs and **not** against a
+database; the Console cannot be compiled at all, and an uncompiled native edit is an unverified
+one.
+
+---
+
+## Defects the audit found — all three are stale numbers, and all three are live
+
+**1. `reference/reports/editions.json` says 1,137 cases. Both editions pass 1,142.**
+The five cases the last commit added to the corpus never reached the generated report.
+`tools/edition-report.mjs --check` catches it and **CI does not run that tool** — the Python job
+gates on `--min-passed 1109`, a floor which 1,137 and 1,142 both clear. `check-contract-mirrors`
+passes because the Hub's mirror is byte-identical to the stale file, so the drift is *mirrored
+faithfully*: `/skynet/os/editions` renders "1,137 of 1,137" to the public today.
+
+**2. `tools/edition-report.mjs --check` is absent from CI.** `ci.yml` runs four of the five check
+tools in `tools/`; this is the fifth, and it is the only one that could have caught defect 1. Every
+neighbouring check passed honestly while the figure was wrong: `check-contract-mirrors` compares
+the Hub's copy to the reference's and both were stale together, and the corpus job's
+`--min-passed 1109` is a floor that 1,137 and 1,142 both clear. A ratchet cannot catch a stale
+exact figure; only re-deriving it can.
+
+*(An earlier draft of this paragraph also named `check-contract-mirrors` as absent. It is not —
+`ci.yml` line 273 — and the correction is left visible because the mistake is the one this section
+is about: a figure read off the wrong grep rather than off the file.)*
+
+**3. `scale-report --check` cannot see the Hub.** It reports *"the Hub's mirror was not measured:
+no checkout beside this one"* while the Hub checkout is at `../RobotOverflow`. The path it looks
+for is stale, so the one figure in §73 that spans both repositories is unchecked wherever the
+directory is not named what it used to be.
+
+None of these is a defect in a robot. All three are the failure mode this repository has documented
+five times: a number stated by hand in more places than it is derived in.
+
+---
+
+## OS — what is left
+
+### A. Buildable now, and round twenty-two said otherwise
+
+**Three of §27's four unobserved conditions have a producer already in the tree.** Round
+twenty-two's closing paragraph — *"None has a producer in any record"* — is true of `homing` and
+false of the other three. `crates/skynetd-io/src/observed.rs` fixes all four to `false` with a
+one-line reason each, and two of the reasons look at the wrong source:
+
+| Condition | What `observed.rs` says | What is actually available |
+|---|---|---|
+| `guard_hold` | *"the kernel's"* | `Cycle.response` is `Option<FaultResponse>` and `FaultResponse::Hold` is one of five variants, **recorded per cycle** in §13's ring. This is the same shape as `stop`: a state read off the newest cycle |
+| `guards` (`guards_unavailable`) | *"a cycle records what guards did, not which were available"* | Correct about the ring and it is not the source. `crate::limits` **resolves the guard partition on this daemon** (§7.6, `GET /limits`) — active, unavailable and, since §80, `inert`. "A guard is unavailable" is a value this process already computes and renders |
+| `policy` | *"§25.2's lease table is the kernel's"* | `Cycle.policy: u16` names the commanding policy on every recorded cycle, and `shape::supervising` already resolves which package holds the commanding plan. `Ready` is derivable the way `kernel` was |
+| `homing` | *"driver-side, and nothing records it"* | **True and unchanged.** §24 gives no flag for it, so it needs an **ABI change**, which is the one thing in this system a vendor compiles against |
+
+Whether all three should be built is a judgement about evidence, not a lookup — `guards` in
+particular changes what `DEGRADED` means on a robot that has never run a cycle — but they are code
+somebody can write today, which is the thing round twenty-two denied.
+
+### B. Buildable now, unambiguously
+
+* the three defects above;
+* a **third language edition** (§73, §31.3). Two editions can agree because the second was
+  transcribed from the first; the corpus proves its worth when an edition is written by somebody
+  who did not write the reference. 1,142 cases, 80 files, and the C edition is the one §31.3's
+  matrix puts at the certified ceiling.
+
+### C. Needs an owner's decision before any code
+
+* **A Hub countersignature on a conformance result** (§57.1, §80). §19 forbids a robot holding a
+  signing key, so the runner cannot sign; the Hub countersigning what a device credential delivered
+  is a *different claim* from the one §15 asks for. Open since the eleventh session.
+* **`farewell()` beyond `POST /shutdown`** — taken off the buildable list in round nineteen as a
+  decision, and the decision has not been made.
+
+### D. Needs hardware or a second machine
+
+The §73 last column, unchanged: a real RHAL driver under bench supervision, a physical joint under
+the kernel, the safety MCU and the certified tier's notified body, a TPM for
+`security.identity.attested`, §36.4's brownout input, RAUC and an OTA image actually applied, a
+capture backend (V4L2/GenICam) and §47.6's mapping half, a robot that trips a guard, a robot that
+sounds §49's tone, a field-conformance figure measured over a window something commanded, and a
+package built to attempt §15's forbidden hold **under a root systemd manager** (a rootless user
+manager forbids things the user could not do anyway, so a refusal there proves nothing).
+
+### E. Open questions, explicitly undecided (§30, §43, §53, §61)
+
+Retargeting fidelity, role-vocabulary governance, kernel formal verification, field-conformance
+privacy, multi-robot on one compute, safe-state discovery for mobile bases, package-level A/B for
+drivers, a Hub-brokered console relay, fleet-wide config convergence, fleet-scale calibration drift,
+`on_command_loss` per chain, entitlement for the OS itself, audio beyond warning and anomaly.
+
+---
+
+## Hub — what is left
+
+`skynet-build-plan.md` §33's twenty-fifth session says the Hub-side list *"is now empty except what
+needs a robot"*. Measured against §31's phases that is true of Phases 3–9 and **not** of 10, 11 and
+12, which the same log filed a fortnight ago as *"blocked on infrastructure that does not exist"*
+and has not restated since. Both sentences are in the document and they do not agree.
+
+Verified in the tree: 95 route files under `/api/skynet/v1`, 28 migrations, 53 Skynet unit-test
+files, 18 verifier scripts.
+
+### A. Already built, and the log says otherwise
+
+**`POST /repos/{handle}/{name}/restore` exists.** Session twenty-five records the restore surface as
+*"recorded for the owner rather than built"*; the route is in the tree, staff-gated, and was added
+in an earlier commit than the log entry that says it is absent. The item is closed and the log
+needs the correction.
+
+### B. Genuinely unbuilt, and not blocked on a robot
+
+| Plan | What is missing |
+|---|---|
+| **Phase 10** — real execution | `IN_PROCESS_JOB_KINDS` is `['dataset_index', 'search_reindex']`. `evaluation`, `simulation`, `training` and `deployment` are queued and stay queued. No reference worker image, no sandboxed workspace, no attestation, no quarantine for unverifiable runs |
+| **Phase 11** — Spaces and managed compute | `spaces.ts` resolves a `SimulationSpec` and nothing runs one. `training.ts` says so in its own header: *"the web tier orchestrates; it never trains"*. No inference endpoints exist as a surface at all |
+| **Phase 12** — teleoperation | The only trace of it in the schema is five `teleop_*` values in `skynet_episodes.source`. No operator session, no transport, no time sync, no intervention identity, no consent or retention path. The ingestion half exists; the operating half was never started |
+| **Phase 12** — rollout | No canary, no drift detection. `deployments` has desired state, check-in and rollback |
+| **Phase 9** — datasets | No preview, no sample/trajectory/video viewer, no split/shard manifest, no range or stream access, no quality report, no consent/licence lineage |
+| **Phase 9** — Git | No git interoperability and no external-Git mirror. `diff.ts` compares manifests and digests and states, correctly, that it never claims to compare content |
+
+Phases 10 and 11 need containers, a GPU and a signing pipeline that this environment does not have —
+but the *code* is writable and reviewable without them, and the plan's own Phase 8 gate says the
+opposite of what queuing a job proves.
+
+### C. Blocked here, not in principle
+
+* The **marketplace-side listing-transactions migration** (`20260905200100_…`) is still unapplied,
+  and this container has no database credentials, so it cannot be applied or verified here.
+* Every `skynet-verify-*.mjs` script (18 of them) needs a live database and a running server.
+
+### D. Needs a robot
+
+A field-conformance figure that is not null, a robot that produces a run bundle, and robot-signed
+conformance — which §19 makes a rule rather than a gap.
+
+---
+
+## Console — what is left
+
+`desktop/` in the Hub repository, per §83.3c. 1,148 lines of C#/XAML and 746 of Swift. §83.5 fixes
+the first version at five items and **two of them exist**: discovery and the window.
+
+| §83.5 | State |
+|---|---|
+| Discovery | **Built**, both platforms, over each OS's own DNS-SD resolver. `check-skynet-service.mjs` holds all three implementations to one contract — 6 checks, green today |
+| The window | **Built** on Windows. The macOS package is written and **has never been compiled**, on any machine |
+| Pairing | Not started (§10, §50) |
+| The on-robot console in a webview | Not started — no `WebView2`, no `WKWebView` |
+| Black box download and replay | Not started |
+
+Beyond the five: no USB path to a robot that has never been on a network, no tray stop (and when it
+exists it is a convenience, **never** an emergency stop), nothing signed, no installer, no
+Authenticode or notarisation, no published digest, no version-compatibility statement against
+`skynetd`'s local API, and **no download surface on the Hub** (§83.3d) — there is no Console page
+under `/skynet` at all.
+
+One stale claim, and it is in a document a new reader starts from: `desktop/README.md` says
+*"nothing advertises yet, so on a real network both applications find nothing"*. §82.4's responder
+shipped on 2026-09-06 and `skynetd --lan` answers a browse; the sixty-ninth session ran it between
+two daemons on one link. The sentence was true when it was written and is now the opposite of true.
+
+**Nothing here is buildable in this container.** No `dotnet`, no `swift`. What can be worked on is
+`desktop/shared`, the check script, the README, and the Hub-side download surface.
+
+---
+
+## What this round changes about the next one
+
+The audit produced three defects, one closed-but-logged-open Hub item, one stale README claim, and
+one correction to round twenty-two's closing paragraph. Nothing is committed and nothing is pushed.
+
+## 80. The three defects, closed — and one of them was a published number
+
+The audit's own list, worked in order.
+
+**`reference/reports/editions.json` now says 1,142.** Regenerated by running both editions, which
+is the only way that file is ever written — the generator refuses to compose one from a claim. The
+Hub's mirror was resynced in the same pass and `check-contract-mirrors` re-pinned both trees, so
+`/skynet/os/editions` stops rendering a figure five cases behind the corpus.
+
+**`tools/edition-report.mjs --check` runs in CI**, at the end of the `corpus` job — the only job
+where both editions have already been built. The comment beside it names the failure rather than the
+rule, because the rule is obvious and the failure was not: every neighbouring check passed honestly
+while the number was wrong. `check-contract-mirrors` compares the Hub's copy to the reference's and
+both were stale together; `--min-passed 1109` is a ratchet, and a ratchet cannot catch a stale exact
+figure because 1,137 clears it exactly as 1,142 does. Only re-deriving it can.
+
+**The Hub's checkout has one spelling.** `scale-report.mjs` looked for two directory names where
+`check-mirrors.mjs` and `check-contract-mirrors.mjs` looked for seven, so on this machine — Hub at
+`../RobotOverflow` — two of the three found it and the third reported *"the Hub's mirror was not
+measured: no checkout beside this one"* and exited zero. §73's one figure spanning both repositories
+was unchecked and nothing said so. `tools/hub-path.mjs` is now the single list; all three import it,
+and `scale-report --check` measures the mirror at 8,452 lines against §73's stated 8,000.
+
+Three tool messages named `BotMarket` in text an operator reads, including two that told somebody to
+run `--sync ../BotMarket` — a directory no clone has produced in months. Those are the current name
+now. The historical prose explaining *why* the list has seven spellings is left alone: it is the
+record of a rename, not an instruction.
+
+## 81. §27's `guard_hold` — and the sentence that was true about the subject and false about the evidence
+
+Round twenty-two closed by filing all four remaining §27 conditions as *"waiting on something that
+is not a decision and not code anybody can write today"*, on the grounds that `observed.rs` gave
+each a reason. Reading the reasons against the record format, one of them did not hold.
+
+`guard_hold` was filed as **"the kernel's"**. So are `kernel`, `rhal` and `stop`, and all three were
+closed in the previous rounds — because whose fact it is was never the question. What decides
+whether a supervisor may observe a condition is **whether the kernel wrote it down**, and §26's
+cycle record carries `response: Option<FaultResponse>` beside the flags this daemon already reads.
+
+So `HoldSighting`, off the same newest cycle as `rhal` and `stop`, and two things had to be got
+right that the field name does not suggest.
+
+### An advisory hold is not a hold
+
+§7.4 lets a tier that cannot promise a clamp run **advisory**: the guards evaluate, the verdict is
+recorded, and the command is forwarded anyway. `limits::ROBOT_TIER` is guest, so *every robot on
+this edition* is one — which means `Some(FaultResponse::Hold)` in a record here almost always
+describes a hold that was demanded and never applied.
+
+Mapping that onto §27's condition would report `HOLD` for a robot that is moving. That is the exact
+failure §7.4 and §42 exist to prevent, and this repository has already made it once, inside `decide`
+itself, where the `Hold` arm zeroed the mask on every verdict including advisory ones — *"a
+guest-tier robot withheld a command the kernel had said to forward"*.
+
+So `Advisory` is a **third state**, not a collapse into either neighbour. It is reported as an
+observation, because a guard fired and somebody should see that; §27's condition stays false,
+because nothing was withheld. `GET /state` carries `held` and `advisory` side by side for the same
+reason: a console given only `held` could not tell a robot whose guards are firing and being
+overruled from one no guard has touched, and those are opposite facts about the same still robot.
+
+### A failed body read does not stop this one
+
+`StopSighting` refuses a cycle whose `read_state` failed, and is right to: §26.4's fill puts the
+*previous* cycle's flags in that record, so reading them would report a fill as an observation.
+
+The guard verdict in the same record is **not a fill**. `decide` runs on every cycle, failed read or
+not, and what it produces is what the kernel did with the command. So this reads a record the other
+two refuse, and the split is the point — `rhal` and `stop` are facts about the **body**, and this is
+a fact about the **kernel**. What the verdict was computed *from* on such a cycle is a fair question
+and a different one: the guards saw stale positions, and the command was still withheld. A robot
+that is not moving is the fact an operator needs before a philosophical one about the quality of the
+inputs that stopped it.
+
+### What it does not do, which is most of what it changes
+
+Nothing about a robot's **state**. `guard_hold` is rule 7 of `derive`; above it sit the self-test
+(4), homing (5) and the kernel (6), and `homing` defaults to `Pending` on every robot here because
+§24 gives the ABI no flag for it. So this edition goes on reporting `unhomed` while carrying a
+perfectly good guard-hold observation, and the route test asserts that ordering rather than leaving
+somebody to discover it.
+
+`homing` is now the only one of §27's eight that no reader can close. `guards` and `policy` remain,
+and both have candidate sources in this process — the audit above names them.
+
+### The count moved in four documents, and the mechanism found all four
+
+`scale-report --check` parses the literal `false` entries out of `Observed::of` and holds four
+sentences to the result. Changing one entry failed the check in §73's `§27` row, §73's `Audio` row,
+§81's closing paragraph and the README simultaneously. That is the third round in which this figure
+would otherwise have gone stale somewhere, and the first in which nobody had to remember it.
+
+### Two surfaces gained something, and one deliberately did not
+
+`skynet state`'s per-condition mark reads `flagged()`, which knew one key — `asserted`, the stop's.
+A `guard_hold` block has `held` and `advisory` and no `state`, so the CLI would have drawn a green
+tick beside a robot whose command was being withheld: the same error the printer's own comment
+records having fixed once for `kernel`. It reads all three keys now, `advisory` included, because a
+guard firing into a tier that will not act on it is precisely something to look at.
+
+§32.2's console gained a **Guard holding** row, and only for the advisory case's sake: an enforced
+hold already shows in the state line as `hold · guard_hold`, and an advisory one had no surface
+anywhere except the word `guard_hold` in a list of conditions somebody looked at. The row is omitted
+entirely when the condition was not observed rather than drawn as a reassuring "no".
+
+The per-condition detail blocks for `kernel`, `rhal` and `stop` are still not rendered on that page
+and this did not add a fourth. Adding one would have made the panel inconsistent about three
+conditions in order to be complete about a fourth.
+
+## Run
+
+```
+cargo test --workspace                      1,680 passed, 0 failed  (1,676 before)
+cargo clippy --workspace --all-targets      clean
+cargo fmt --all --check                     clean
+sh crates/skynetd-io/e2e.sh                 all checks passed
+python3 editions/python/run_corpus.py       1,142 of 1,142, both editions
+node tools/edition-report.mjs --check       matches
+node tools/scale-report.mjs --check         §73 matches the tree, Hub mirror measured
+node tools/check-mirrors.mjs                all shared documents match, re-pinned
+node tools/check-contract-mirrors.mjs       every mirrored contract matches
+node tools/check-golden-path.mjs            4 documents, 51 commands
+Hub:  npx vitest run                        1,895 passed, 84 files
+      npm run typecheck                     clean
+      node scripts/check-skynet-service.mjs 6 checks, no divergence
+```
+
+The e2e ran against a real daemon and a real control loop in another process, and the guard-hold
+reading is taken off cycles that loop wrote: *"and no guard is holding the command"* is the
+negative asserted on a running machine rather than in a fixture. Its systemd launch step did not
+run — this container has the binaries but no manager (`systemctl`: *"System has not been booted
+with systemd as init system"*), which is an environment limitation and not a skip the suite chose.
+
+## What round twenty-three leaves
+
+* **`guards` and `policy`**, the two §27 conditions the audit found candidate sources for.
+  `guards_unavailable` is the sharper of the two: `crate::limits` already resolves the guard
+  partition on this daemon, so the reading exists and what has to be decided is whether a partition
+  computed from a descriptor is an *observation* in §27's sense on a robot that has never run a
+  cycle. That is a question about evidence, not a mapping.
+* **`homing`** — an ABI change, and the ABI is the one thing a vendor compiles against.
+* Everything the audit filed under hardware, an owner's decision, or the Hub's Phases 10–12.
+
+Nothing is committed and nothing is pushed.

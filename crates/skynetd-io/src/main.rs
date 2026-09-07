@@ -144,6 +144,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         &daemon.kernel_sighting,
         &daemon.rhal_sighting,
         &daemon.stop_sighting,
+        &daemon.hold_sighting,
     );
     eprintln!(
         "skynetd: §27 state is `{}`, because {}. §33.4's barrier is `{}` says {}, narrowed by that \
@@ -1904,16 +1905,21 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
     // two. The cursor is advanced whether or not anything was counted, so an interval that saw
     // nothing is not re-counted into the next one and a robot cannot report a kernel live on the
     // strength of cycles from ten minutes ago.
-    let (kernel, rhal, stop) = match recorder {
-        // All three off the same interval and the same records, because they are readings of one
+    let (kernel, rhal, stop, hold) = match recorder {
+        // All four off the same interval and the same records, because they are readings of one
         // instant and a robot whose kernel is turning while its driver has stopped answering has
         // to report exactly that pair rather than a plausible-looking one of them. The stop joins
         // them for the same reason: an open chain beside a silent kernel is a real state and two
-        // readings taken at two moments could show a combination that was never true.
+        // readings taken at two moments could show a combination that was never true. The guard
+        // hold is the fourth, and it is the one that makes the set worth taking together — a
+        // kernel that is turning, a driver that is answering and a guard that is holding is the
+        // combination an operator standing beside a stationary robot is trying to distinguish from
+        // a robot that has simply stopped.
         Some(recorder) => (
             recorder.sighting(daemon.kernel_sequence),
             recorder.body(daemon.kernel_sequence),
             recorder.chain(daemon.kernel_sequence),
+            recorder.guard(daemon.kernel_sequence),
         ),
         None => (
             skynetd_io::blackbox::KernelSighting::Unobservable(
@@ -1925,11 +1931,14 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
             skynetd_io::blackbox::StopSighting::Unobservable(
                 "this robot has no black box, so there is no record of the emergency-stop chain",
             ),
+            skynetd_io::blackbox::HoldSighting::Unobservable(
+                "this robot has no black box, so there is no record of a guard verdict",
+            ),
         ),
     };
     if let Some(recorder) = recorder {
         daemon.kernel_sequence = recorder.next_sequence();
     }
-    daemon.refresh_operating_state(wall_s(), &kernel, &rhal, &stop);
+    daemon.refresh_operating_state(wall_s(), &kernel, &rhal, &stop, &hold);
     daemon.refresh_safe_state();
 }

@@ -348,6 +348,7 @@ fn status<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
         &context.daemon.kernel_sighting,
         &context.daemon.rhal_sighting,
         &context.daemon.stop_sighting,
+        &context.daemon.hold_sighting,
     );
     let running = actual
         .units
@@ -540,7 +541,8 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     let sighting = &context.daemon.kernel_sighting;
     let body = &context.daemon.rhal_sighting;
     let chain = &context.daemon.stop_sighting;
-    let seen = crate::observed::Observed::of(sighting, body, chain);
+    let hold = &context.daemon.hold_sighting;
+    let seen = crate::observed::Observed::of(sighting, body, chain, hold);
     out.set("observed", seen.to_json());
 
     // What was seen, in a sentence, beside the boolean. §32.2's rule about the on-robot console is
@@ -597,6 +599,32 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     );
     out.set("stop", stop);
 
+    // §27's guard hold, off the guard verdict in that same newest cycle. The fourth reading of one
+    // instant, and the first that is a fact about the **kernel** rather than the body — which is
+    // why it is here beside them rather than on a route with the guard partition `GET /limits`
+    // renders. That route answers *which guards this robot has*; this answers *whether one of them
+    // is holding right now*, and the two have different sources and different lifetimes.
+    let mut guard_hold = Json::obj();
+    guard_hold.set("held", Json::Bool(hold.held()));
+    guard_hold.set("observed", Json::Bool(hold.observed()));
+    // `advisory` beside `held`, because at this tier they are almost always the interesting pair:
+    // false and true together is a guard that fired and changed nothing, and a console rendering
+    // only `held` would show that robot as unheld with no way to tell it from one no guard
+    // touched. §32.2's rule is that the console must never show a value it did not receive — this
+    // is the value it needs in order not to.
+    guard_hold.set(
+        "advisory",
+        Json::Bool(matches!(hold, crate::blackbox::HoldSighting::Advisory)),
+    );
+    guard_hold.set("detail", Json::Str(hold.detail()));
+    guard_hold.set(
+        "source",
+        Json::from(
+            "the guard verdict on the newest control cycle in §13's ring. Unlike `rhal` and              `stop` it is readable on a cycle whose body read failed: §26.4's fill replaces what              the driver reported, and the kernel's decision on that cycle is not a fill. §27's              condition is true only for a hold that was enforced — §7.4 lets a tier that cannot              promise a clamp forward the command anyway, and a robot reporting `HOLD` while its              command went through would be describing a robot that does not exist.",
+        ),
+    );
+    out.set("guard_hold", guard_hold);
+
     // §49.1's channel, on the route that reports the state whose transitions demand it. Not a
     // route of its own: a warning channel is not a subsystem an operator inspects on its own, it is
     // a property of the transitions this document is about — and a console that had to fetch two
@@ -626,8 +654,9 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     out.set(
         "partial",
         Json::Str(format!(
-            "{} were observed here: {} — the kernel and the RHAL off §13's ring, where a turning \
-             control loop records a cycle every pass and says what its read of the body returned. \
+            "{} were observed here: {} — the self-test on this process, and every other one off \
+             §13's ring, where a turning control loop records a cycle every pass, says what its \
+             read of the body returned and carries the guard verdict beside it. \
              §33.1 keeps skynetd from the actuator path, so {} — and an unobserved condition is \
              taken at the least capable value it could have, never at a hopeful one. So this \
              answer is at least as pessimistic as the robot is, and the reason beside it names \
