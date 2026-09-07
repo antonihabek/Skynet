@@ -1,0 +1,922 @@
+{
+  "corpus": "embodiment",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "a-body-with-no-sensors",
+      "note": "Nothing to ask. `proximity` reports unavailable naming a sensor that detects people, which is the guard reporting on the body rather than on the descriptor’s author.",
+      "input": {
+        "schema_version": 1,
+        "robot_slug": "test-arm",
+        "digest": "sha256:arm",
+        "verified": true,
+        "base": "fixed",
+        "dof": 3,
+        "joints": [
+          {
+            "name": "J1",
+            "role": "right_arm.shoulder.pitch",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 80
+            },
+            "control_modes": [
+              "torque",
+              "position"
+            ]
+          },
+          {
+            "name": "J2",
+            "role": "right_arm.elbow.flex",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 60
+            },
+            "control_modes": [
+              "torque",
+              "position"
+            ]
+          },
+          {
+            "name": "J3",
+            "role": "right_arm.wrist.roll",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 20
+            },
+            "control_modes": [
+              "position"
+            ]
+          }
+        ],
+        "end_effectors": [
+          {
+            "name": "hand",
+            "role": "right_hand.gripper.grip",
+            "kind": "gripper",
+            "dof": 1,
+            "max_grip_force_n": 40,
+            "max_opening_m": 0.08
+          }
+        ],
+        "sensors": [],
+        "control": {
+          "modes": [
+            "position",
+            "torque"
+          ],
+          "rate_hz_max": 200,
+          "rate_hz_min": 10,
+          "command_latency_ms": 4
+        },
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/arm.pdf"
+        },
+        "solvers": [
+          "trac_ik"
+        ]
+      },
+      "expected": "{\"people_detection\":false}"
+    },
+    {
+      "id": "nobody-was-asked",
+      "note": "Three cameras and not one of them carries the field — every descriptor written before §5 had it. Undeclared, so the guard is unavailable. This is the case that must not become `true` by somebody reasoning that three RGB streams are obviously enough to see a person: a camera is not a person detector, a camera plus a model somebody validated is, and only the vendor knows which of those they shipped.",
+      "input": {
+        "schema_version": 1,
+        "robot_slug": "test-arm",
+        "digest": "sha256:arm",
+        "verified": true,
+        "base": "fixed",
+        "dof": 3,
+        "joints": [
+          {
+            "name": "J1",
+            "role": "right_arm.shoulder.pitch",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 80
+            },
+            "control_modes": [
+              "torque",
+              "position"
+            ]
+          },
+          {
+            "name": "J2",
+            "role": "right_arm.elbow.flex",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 60
+            },
+            "control_modes": [
+              "torque",
+              "position"
+            ]
+          },
+          {
+            "name": "J3",
+            "role": "right_arm.wrist.roll",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 20
+            },
+            "control_modes": [
+              "position"
+            ]
+          }
+        ],
+        "end_effectors": [
+          {
+            "name": "hand",
+            "role": "right_hand.gripper.grip",
+            "kind": "gripper",
+            "dof": 1,
+            "max_grip_force_n": 40,
+            "max_opening_m": 0.08
+          }
+        ],
+        "sensors": [
+          {
+            "name": "head",
+            "role": null,
+            "modality": "rgb",
+            "width": 640,
+            "height": 480,
+            "fps": 30
+          },
+          {
+            "name": "left_wrist",
+            "role": null,
+            "modality": "rgb",
+            "width": 640,
+            "height": 480,
+            "fps": 30
+          },
+          {
+            "name": "right_wrist",
+            "role": null,
+            "modality": "rgb",
+            "width": 640,
+            "height": 480,
+            "fps": 30
+          }
+        ],
+        "control": {
+          "modes": [
+            "position",
+            "torque"
+          ],
+          "rate_hz_max": 200,
+          "rate_hz_min": 10,
+          "command_latency_ms": 4
+        },
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/arm.pdf"
+        },
+        "solvers": [
+          "trac_ik"
+        ]
+      },
+      "expected": "{\"people_detection\":false}"
+    },
+    {
+      "id": "declared-absent-on-every-sensor",
+      "note": "The same verdict as `nobody-was-asked` and a different descriptor, which is the whole reason `false` is worth writing. Downstream these two are one fact — the guard is unavailable — and to a person they are opposite ones: a vendor who answered the question, and a vendor who has not been asked it. An edition whose parser folds absent and `false` together passes every case in this file and has lost that.",
+      "input": {
+        "schema_version": 1,
+        "robot_slug": "test-arm",
+        "digest": "sha256:arm",
+        "verified": true,
+        "base": "fixed",
+        "dof": 3,
+        "joints": [
+          {
+            "name": "J1",
+            "role": "right_arm.shoulder.pitch",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 80
+            },
+            "control_modes": [
+              "torque",
+              "position"
+            ]
+          },
+          {
+            "name": "J2",
+            "role": "right_arm.elbow.flex",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 60
+            },
+            "control_modes": [
+              "torque",
+              "position"
+            ]
+          },
+          {
+            "name": "J3",
+            "role": "right_arm.wrist.roll",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 20
+            },
+            "control_modes": [
+              "position"
+            ]
+          }
+        ],
+        "end_effectors": [
+          {
+            "name": "hand",
+            "role": "right_hand.gripper.grip",
+            "kind": "gripper",
+            "dof": 1,
+            "max_grip_force_n": 40,
+            "max_opening_m": 0.08
+          }
+        ],
+        "sensors": [
+          {
+            "name": "head",
+            "role": null,
+            "modality": "rgb",
+            "width": 640,
+            "height": 480,
+            "fps": 30,
+            "detects_people": false
+          },
+          {
+            "name": "left_wrist",
+            "role": null,
+            "modality": "rgb",
+            "width": 640,
+            "height": 480,
+            "fps": 30,
+            "detects_people": false
+          }
+        ],
+        "control": {
+          "modes": [
+            "position",
+            "torque"
+          ],
+          "rate_hz_max": 200,
+          "rate_hz_min": 10,
+          "command_latency_ms": 4
+        },
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/arm.pdf"
+        },
+        "solvers": [
+          "trac_ik"
+        ]
+      },
+      "expected": "{\"people_detection\":false}"
+    },
+    {
+      "id": "one-camera-declares-it",
+      "note": "One is enough. The question is about the robot rather than about a stream, so there is no quorum and no “the best of them”: two detectors do not make the claim stronger and one that stopped working does not make it weaker, which is what the bench and field suites are for.",
+      "input": {
+        "schema_version": 1,
+        "robot_slug": "test-arm",
+        "digest": "sha256:arm",
+        "verified": true,
+        "base": "fixed",
+        "dof": 3,
+        "joints": [
+          {
+            "name": "J1",
+            "role": "right_arm.shoulder.pitch",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 80
+            },
+            "control_modes": [
+              "torque",
+              "position"
+            ]
+          },
+          {
+            "name": "J2",
+            "role": "right_arm.elbow.flex",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 60
+            },
+            "control_modes": [
+              "torque",
+              "position"
+            ]
+          },
+          {
+            "name": "J3",
+            "role": "right_arm.wrist.roll",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 20
+            },
+            "control_modes": [
+              "position"
+            ]
+          }
+        ],
+        "end_effectors": [
+          {
+            "name": "hand",
+            "role": "right_hand.gripper.grip",
+            "kind": "gripper",
+            "dof": 1,
+            "max_grip_force_n": 40,
+            "max_opening_m": 0.08
+          }
+        ],
+        "sensors": [
+          {
+            "name": "head",
+            "role": null,
+            "modality": "rgb",
+            "width": 640,
+            "height": 480,
+            "fps": 30,
+            "detects_people": true
+          },
+          {
+            "name": "left_wrist",
+            "role": null,
+            "modality": "rgb",
+            "width": 640,
+            "height": 480,
+            "fps": 30
+          },
+          {
+            "name": "right_wrist",
+            "role": null,
+            "modality": "rgb",
+            "width": 640,
+            "height": 480,
+            "fps": 30,
+            "detects_people": false
+          }
+        ],
+        "control": {
+          "modes": [
+            "position",
+            "torque"
+          ],
+          "rate_hz_max": 200,
+          "rate_hz_min": 10,
+          "command_latency_ms": 4
+        },
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/arm.pdf"
+        },
+        "solvers": [
+          "trac_ik"
+        ]
+      },
+      "expected": "{\"people_detection\":true}"
+    },
+    {
+      "id": "the-sensor-that-declares-it-is-not-a-camera",
+      "note": "A depth stream, and the case that would catch an edition adding a modality allow-list. §5 puts the reason on the field: filtering by modality here would be the contract overruling the party that built the sensing pipeline, on the strength of a vocabulary that describes what a sensor produces rather than what is measured in it.",
+      "input": {
+        "schema_version": 1,
+        "robot_slug": "test-arm",
+        "digest": "sha256:arm",
+        "verified": true,
+        "base": "fixed",
+        "dof": 3,
+        "joints": [
+          {
+            "name": "J1",
+            "role": "right_arm.shoulder.pitch",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 80
+            },
+            "control_modes": [
+              "torque",
+              "position"
+            ]
+          },
+          {
+            "name": "J2",
+            "role": "right_arm.elbow.flex",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 60
+            },
+            "control_modes": [
+              "torque",
+              "position"
+            ]
+          },
+          {
+            "name": "J3",
+            "role": "right_arm.wrist.roll",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 20
+            },
+            "control_modes": [
+              "position"
+            ]
+          }
+        ],
+        "end_effectors": [
+          {
+            "name": "hand",
+            "role": "right_hand.gripper.grip",
+            "kind": "gripper",
+            "dof": 1,
+            "max_grip_force_n": 40,
+            "max_opening_m": 0.08
+          }
+        ],
+        "sensors": [
+          {
+            "name": "torso_depth",
+            "role": null,
+            "modality": "depth",
+            "detects_people": true
+          }
+        ],
+        "control": {
+          "modes": [
+            "position",
+            "torque"
+          ],
+          "rate_hz_max": 200,
+          "rate_hz_min": 10,
+          "command_latency_ms": 4
+        },
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/arm.pdf"
+        },
+        "solvers": [
+          "trac_ik"
+        ]
+      },
+      "expected": "{\"people_detection\":true}"
+    },
+    {
+      "id": "an-implausible-declaration-is-still-a-declaration",
+      "note": "Person distance, declared on a force-torque sensor. This is the same rule as the case above and it is worth pinning separately, because it is the one where honouring the vendor looks wrong. It is still the right answer: the alternative is a list of modalities a detector may live behind, which is a vocabulary, which needs the governance §30 leaves open — and the wrong entry in it would silently disable a guard on a robot whose vendor had declared one.",
+      "input": {
+        "schema_version": 1,
+        "robot_slug": "test-arm",
+        "digest": "sha256:arm",
+        "verified": true,
+        "base": "fixed",
+        "dof": 3,
+        "joints": [
+          {
+            "name": "J1",
+            "role": "right_arm.shoulder.pitch",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 80
+            },
+            "control_modes": [
+              "torque",
+              "position"
+            ]
+          },
+          {
+            "name": "J2",
+            "role": "right_arm.elbow.flex",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 60
+            },
+            "control_modes": [
+              "torque",
+              "position"
+            ]
+          },
+          {
+            "name": "J3",
+            "role": "right_arm.wrist.roll",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 20
+            },
+            "control_modes": [
+              "position"
+            ]
+          }
+        ],
+        "end_effectors": [
+          {
+            "name": "hand",
+            "role": "right_hand.gripper.grip",
+            "kind": "gripper",
+            "dof": 1,
+            "max_grip_force_n": 40,
+            "max_opening_m": 0.08
+          }
+        ],
+        "sensors": [
+          {
+            "name": "wrist_ft",
+            "role": null,
+            "modality": "force_torque",
+            "detects_people": true
+          }
+        ],
+        "control": {
+          "modes": [
+            "position",
+            "torque"
+          ],
+          "rate_hz_max": 200,
+          "rate_hz_min": 10,
+          "command_latency_ms": 4
+        },
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/arm.pdf"
+        },
+        "solvers": [
+          "trac_ik"
+        ]
+      },
+      "expected": "{\"people_detection\":true}"
+    },
+    {
+      "id": "a-declaration-that-is-not-a-boolean",
+      "note": "The string “yes”. Refused in all three editions, and each refuses it by a different mechanism that has to agree: `=== true` in the reference, `as_bool()` returning `None` in Rust, and `is True` in Python — where `1 is True` is false and `1 == True` is not, so the transcription had a place to be wrong. Fail-closed is the only defensible direction on a guard input: a malformed declaration leaves `proximity` unavailable and naming what it wants, rather than active on a body nobody has established can see a person.",
+      "input": {
+        "schema_version": 1,
+        "robot_slug": "test-arm",
+        "digest": "sha256:arm",
+        "verified": true,
+        "base": "fixed",
+        "dof": 3,
+        "joints": [
+          {
+            "name": "J1",
+            "role": "right_arm.shoulder.pitch",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 80
+            },
+            "control_modes": [
+              "torque",
+              "position"
+            ]
+          },
+          {
+            "name": "J2",
+            "role": "right_arm.elbow.flex",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 60
+            },
+            "control_modes": [
+              "torque",
+              "position"
+            ]
+          },
+          {
+            "name": "J3",
+            "role": "right_arm.wrist.roll",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 20
+            },
+            "control_modes": [
+              "position"
+            ]
+          }
+        ],
+        "end_effectors": [
+          {
+            "name": "hand",
+            "role": "right_hand.gripper.grip",
+            "kind": "gripper",
+            "dof": 1,
+            "max_grip_force_n": 40,
+            "max_opening_m": 0.08
+          }
+        ],
+        "sensors": [
+          {
+            "name": "head",
+            "role": null,
+            "modality": "rgb",
+            "width": 640,
+            "height": 480,
+            "fps": 30,
+            "detects_people": "yes"
+          }
+        ],
+        "control": {
+          "modes": [
+            "position",
+            "torque"
+          ],
+          "rate_hz_max": 200,
+          "rate_hz_min": 10,
+          "command_latency_ms": 4
+        },
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/arm.pdf"
+        },
+        "solvers": [
+          "trac_ik"
+        ]
+      },
+      "expected": "{\"people_detection\":false}"
+    },
+    {
+      "id": "a-declaration-that-is-the-number-one",
+      "note": "The Python trap, pinned. `1 == True` is true in Python and `1 is True` is false, so an edition transcribing `=== true` as `== True` agrees with the reference on every other case in this file and disagrees here — which is a guard turned on by a descriptor that used `1` for yes. The reference and Rust reject it for their own reasons: `=== true` admits the boolean and nothing else, and `as_bool()` returns nothing for a number.",
+      "input": {
+        "schema_version": 1,
+        "robot_slug": "test-arm",
+        "digest": "sha256:arm",
+        "verified": true,
+        "base": "fixed",
+        "dof": 3,
+        "joints": [
+          {
+            "name": "J1",
+            "role": "right_arm.shoulder.pitch",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 80
+            },
+            "control_modes": [
+              "torque",
+              "position"
+            ]
+          },
+          {
+            "name": "J2",
+            "role": "right_arm.elbow.flex",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 60
+            },
+            "control_modes": [
+              "torque",
+              "position"
+            ]
+          },
+          {
+            "name": "J3",
+            "role": "right_arm.wrist.roll",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 20
+            },
+            "control_modes": [
+              "position"
+            ]
+          }
+        ],
+        "end_effectors": [
+          {
+            "name": "hand",
+            "role": "right_hand.gripper.grip",
+            "kind": "gripper",
+            "dof": 1,
+            "max_grip_force_n": 40,
+            "max_opening_m": 0.08
+          }
+        ],
+        "sensors": [
+          {
+            "name": "head",
+            "role": null,
+            "modality": "rgb",
+            "width": 640,
+            "height": 480,
+            "fps": 30,
+            "detects_people": 1
+          }
+        ],
+        "control": {
+          "modes": [
+            "position",
+            "torque"
+          ],
+          "rate_hz_max": 200,
+          "rate_hz_min": 10,
+          "command_latency_ms": 4
+        },
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/arm.pdf"
+        },
+        "solvers": [
+          "trac_ik"
+        ]
+      },
+      "expected": "{\"people_detection\":false}"
+    },
+    {
+      "id": "a-null-declaration",
+      "note": "Explicit `null`, which JSON produces where TypeScript would write `undefined`. Reads as undeclared, like absence, and not as a third thing.",
+      "input": {
+        "schema_version": 1,
+        "robot_slug": "test-arm",
+        "digest": "sha256:arm",
+        "verified": true,
+        "base": "fixed",
+        "dof": 3,
+        "joints": [
+          {
+            "name": "J1",
+            "role": "right_arm.shoulder.pitch",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 80
+            },
+            "control_modes": [
+              "torque",
+              "position"
+            ]
+          },
+          {
+            "name": "J2",
+            "role": "right_arm.elbow.flex",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 60
+            },
+            "control_modes": [
+              "torque",
+              "position"
+            ]
+          },
+          {
+            "name": "J3",
+            "role": "right_arm.wrist.roll",
+            "type": "revolute",
+            "limits": {
+              "position_min_rad": -3,
+              "position_max_rad": 3,
+              "velocity_max_rad_s": 2,
+              "effort_max_nm": 20
+            },
+            "control_modes": [
+              "position"
+            ]
+          }
+        ],
+        "end_effectors": [
+          {
+            "name": "hand",
+            "role": "right_hand.gripper.grip",
+            "kind": "gripper",
+            "dof": 1,
+            "max_grip_force_n": 40,
+            "max_opening_m": 0.08
+          }
+        ],
+        "sensors": [
+          {
+            "name": "head",
+            "role": null,
+            "modality": "rgb",
+            "width": 640,
+            "height": 480,
+            "fps": 30,
+            "detects_people": null
+          }
+        ],
+        "control": {
+          "modes": [
+            "position",
+            "torque"
+          ],
+          "rate_hz_max": 200,
+          "rate_hz_min": 10,
+          "command_latency_ms": 4
+        },
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/arm.pdf"
+        },
+        "solvers": [
+          "trac_ik"
+        ]
+      },
+      "expected": "{\"people_detection\":false}"
+    }
+  ]
+}

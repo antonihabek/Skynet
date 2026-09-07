@@ -236,7 +236,7 @@ pub const NOT_COVERED: &[(&str, &str)] = &[
     ),
     (
         "safety.policy.isolation",
-        "a runtime property — needs a sandbox, which no edition has yet",
+        "a runtime property — `skynet conformance`, against the unit systemd is running",
     ),
     (
         "package.signature.required",

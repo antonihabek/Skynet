@@ -1,0 +1,352 @@
+{
+  "corpus": "media",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "a-frame-published-lent-and-taken-back",
+      "note": "The whole loan, once. `latest` names what was just published, the identity that comes back is the frame that went in, and the counters say one of each.",
+      "input": {
+        "stream": "head_rgb",
+        "capacity": 4,
+        "ops": [
+          {
+            "op": "publish",
+            "sequence": 1,
+            "stamp_ns": 33333333
+          },
+          {
+            "op": "latest"
+          },
+          {
+            "op": "acquire",
+            "from": 0
+          },
+          {
+            "op": "release",
+            "from": 0
+          },
+          {
+            "op": "stats"
+          }
+        ]
+      },
+      "expected": "{\"final\":{\"latest\":{\"generation\":1,\"slot\":0,\"stream\":\"head_rgb\"},\"stats\":{\"acquired\":1,\"dropped\":0,\"published\":1,\"released\":1}},\"steps\":[{\"handle\":{\"generation\":1,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"publish\"},{\"handle\":{\"generation\":1,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"latest\"},{\"identity\":{\"sequence\":1,\"stamp_ns\":33333333,\"stream\":\"head_rgb\"},\"op\":\"acquire\"},{\"op\":\"release\",\"released\":true},{\"op\":\"stats\",\"stats\":{\"acquired\":1,\"dropped\":0,\"published\":1,\"released\":1}}]}"
+    },
+    {
+      "id": "four-frames-into-three-slots",
+      "note": "The case the six unit tests written with this reference could not see, because not one of them published twice into a pool with more than one slot. A pool exists so that a reader can hold a frame while capture keeps going, and the slot each publish lands in is the entire mechanism by which it does. Publishing into the *oldest released* slot spreads four frames over three slots and leaves the two most recent ones intact; taking the first slot that happens to be free instead puts all four in slot 0, which is a one-slot pool wearing a pool’s costume — and §47.4 already has a one-slot latest-wins channel, so that reading makes §47.6 a duplicate of the section above it.",
+      "input": {
+        "stream": "head_rgb",
+        "capacity": 3,
+        "ops": [
+          {
+            "op": "publish",
+            "sequence": 1,
+            "stamp_ns": 33333333
+          },
+          {
+            "op": "publish",
+            "sequence": 2,
+            "stamp_ns": 66666666
+          },
+          {
+            "op": "publish",
+            "sequence": 3,
+            "stamp_ns": 99999999
+          },
+          {
+            "op": "publish",
+            "sequence": 4,
+            "stamp_ns": 133333332
+          },
+          {
+            "op": "latest"
+          },
+          {
+            "op": "stats"
+          }
+        ]
+      },
+      "expected": "{\"final\":{\"latest\":{\"generation\":2,\"slot\":0,\"stream\":\"head_rgb\"},\"stats\":{\"acquired\":0,\"dropped\":0,\"published\":4,\"released\":0}},\"steps\":[{\"handle\":{\"generation\":1,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"publish\"},{\"handle\":{\"generation\":1,\"slot\":1,\"stream\":\"head_rgb\"},\"op\":\"publish\"},{\"handle\":{\"generation\":1,\"slot\":2,\"stream\":\"head_rgb\"},\"op\":\"publish\"},{\"handle\":{\"generation\":2,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"publish\"},{\"handle\":{\"generation\":2,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"latest\"},{\"op\":\"stats\",\"stats\":{\"acquired\":0,\"dropped\":0,\"published\":4,\"released\":0}}]}"
+    },
+    {
+      "id": "the-reader-that-looks-then-takes",
+      "note": "How a policy actually holds a frame: `latest`, then `acquire` on what it named. Between those two calls capture publishes, which is not a race being tolerated — it is the ordinary case at any frame rate above the reader’s turnaround. With more than one free slot the publish must land somewhere else and the acquire must still succeed; landing on the slot `latest` just named refuses the reader its frame on nearly every cycle and reports it as `stale_handle`, which reads as a reader bug.",
+      "input": {
+        "stream": "head_rgb",
+        "capacity": 3,
+        "ops": [
+          {
+            "op": "publish",
+            "sequence": 1,
+            "stamp_ns": 33333333
+          },
+          {
+            "op": "latest"
+          },
+          {
+            "op": "publish",
+            "sequence": 2,
+            "stamp_ns": 66666666
+          },
+          {
+            "op": "acquire",
+            "from": 1
+          },
+          {
+            "op": "stats"
+          }
+        ]
+      },
+      "expected": "{\"final\":{\"latest\":{\"generation\":1,\"slot\":1,\"stream\":\"head_rgb\"},\"stats\":{\"acquired\":1,\"dropped\":0,\"published\":2,\"released\":0}},\"steps\":[{\"handle\":{\"generation\":1,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"publish\"},{\"handle\":{\"generation\":1,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"latest\"},{\"handle\":{\"generation\":1,\"slot\":1,\"stream\":\"head_rgb\"},\"op\":\"publish\"},{\"identity\":{\"sequence\":1,\"stamp_ns\":33333333,\"stream\":\"head_rgb\"},\"op\":\"acquire\"},{\"op\":\"stats\",\"stats\":{\"acquired\":1,\"dropped\":0,\"published\":2,\"released\":0}}]}"
+    },
+    {
+      "id": "an-empty-pool-is-not-a-frame-of-zeros",
+      "note": "`latest` before anything is published is `null`. A zero frame is a measurement nobody took, and a policy handed one cannot tell it from a dark room.",
+      "input": {
+        "stream": "head_rgb",
+        "capacity": 2,
+        "ops": [
+          {
+            "op": "latest"
+          },
+          {
+            "op": "stats"
+          }
+        ]
+      },
+      "expected": "{\"final\":{\"latest\":null,\"stats\":{\"acquired\":0,\"dropped\":0,\"published\":0,\"released\":0}},\"steps\":[{\"handle\":null,\"op\":\"latest\"},{\"op\":\"stats\",\"stats\":{\"acquired\":0,\"dropped\":0,\"published\":0,\"released\":0}}]}"
+    },
+    {
+      "id": "a-stale-handle-never-shows-another-frame",
+      "note": "One slot, reused. The generation advances, so the first handle now names a frame that is not there — and the refusal is `stale_handle` rather than the frame that took its place. Slot reuse is the normal case here, not the edge, which is why the generation is not optional.",
+      "input": {
+        "stream": "head_rgb",
+        "capacity": 1,
+        "ops": [
+          {
+            "op": "publish",
+            "sequence": 1,
+            "stamp_ns": 33333333
+          },
+          {
+            "op": "acquire",
+            "from": 0
+          },
+          {
+            "op": "release",
+            "from": 0
+          },
+          {
+            "op": "publish",
+            "sequence": 2,
+            "stamp_ns": 66666666
+          },
+          {
+            "op": "acquire",
+            "from": 0
+          },
+          {
+            "op": "acquire",
+            "from": 3
+          },
+          {
+            "op": "stats"
+          }
+        ]
+      },
+      "expected": "{\"final\":{\"latest\":{\"generation\":2,\"slot\":0,\"stream\":\"head_rgb\"},\"stats\":{\"acquired\":2,\"dropped\":0,\"published\":2,\"released\":1}},\"steps\":[{\"handle\":{\"generation\":1,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"publish\"},{\"identity\":{\"sequence\":1,\"stamp_ns\":33333333,\"stream\":\"head_rgb\"},\"op\":\"acquire\"},{\"op\":\"release\",\"released\":true},{\"handle\":{\"generation\":2,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"publish\"},{\"op\":\"acquire\",\"refusal\":{\"code\":\"stale_handle\",\"message\":\"The slot has been reused since this handle was issued, so the handle names a frame that is no longer there.\"}},{\"identity\":{\"sequence\":2,\"stamp_ns\":66666666,\"stream\":\"head_rgb\"},\"op\":\"acquire\"},{\"op\":\"stats\",\"stats\":{\"acquired\":2,\"dropped\":0,\"published\":2,\"released\":1}}]}"
+    },
+    {
+      "id": "a-pinned-slot-drops-rather-than-stalling",
+      "note": "Every slot acquired, so the frame is dropped **and counted**. §47.4: capture is never stalled, because stalling capture to protect a slow reader starves the policy to protect the reader — the same error as starving the policy to protect the recording, one step over. The pinned frame is still the newest afterwards: the drop changed nothing a reader can see except the counter, which is where it belongs.",
+      "input": {
+        "stream": "head_rgb",
+        "capacity": 1,
+        "ops": [
+          {
+            "op": "publish",
+            "sequence": 1,
+            "stamp_ns": 33333333
+          },
+          {
+            "op": "acquire",
+            "from": 0
+          },
+          {
+            "op": "publish",
+            "sequence": 2,
+            "stamp_ns": 66666666
+          },
+          {
+            "op": "latest"
+          },
+          {
+            "op": "stats"
+          }
+        ]
+      },
+      "expected": "{\"final\":{\"latest\":{\"generation\":1,\"slot\":0,\"stream\":\"head_rgb\"},\"stats\":{\"acquired\":1,\"dropped\":1,\"published\":1,\"released\":0}},\"steps\":[{\"handle\":{\"generation\":1,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"publish\"},{\"identity\":{\"sequence\":1,\"stamp_ns\":33333333,\"stream\":\"head_rgb\"},\"op\":\"acquire\"},{\"op\":\"publish\",\"refusal\":{\"code\":\"pool_exhausted\",\"message\":\"Every slot is acquired, so frame 2 was dropped and counted rather than stalling capture.\"}},{\"handle\":{\"generation\":1,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"latest\"},{\"op\":\"stats\",\"stats\":{\"acquired\":1,\"dropped\":1,\"published\":1,\"released\":0}}]}"
+    },
+    {
+      "id": "a-loan-is-not-a-share",
+      "note": "A second acquire of a handle already checked out is refused by name, and so is a second release. Handles are single-owner loans rather than reference counts: a reader that cannot track its own loans is a reader whose next frame cannot be trusted either, and a double release would unpin a later loan taken on the same slot.",
+      "input": {
+        "stream": "head_rgb",
+        "capacity": 2,
+        "ops": [
+          {
+            "op": "publish",
+            "sequence": 1,
+            "stamp_ns": 33333333
+          },
+          {
+            "op": "acquire",
+            "from": 0
+          },
+          {
+            "op": "acquire",
+            "from": 0
+          },
+          {
+            "op": "release",
+            "from": 0
+          },
+          {
+            "op": "release",
+            "from": 0
+          },
+          {
+            "op": "stats"
+          }
+        ]
+      },
+      "expected": "{\"final\":{\"latest\":{\"generation\":1,\"slot\":0,\"stream\":\"head_rgb\"},\"stats\":{\"acquired\":1,\"dropped\":0,\"published\":1,\"released\":1}},\"steps\":[{\"handle\":{\"generation\":1,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"publish\"},{\"identity\":{\"sequence\":1,\"stamp_ns\":33333333,\"stream\":\"head_rgb\"},\"op\":\"acquire\"},{\"op\":\"acquire\",\"refusal\":{\"code\":\"already_acquired\",\"message\":\"This handle is already checked out; a handle is one loan, not a share.\"}},{\"op\":\"release\",\"released\":true},{\"op\":\"release\",\"refusal\":{\"code\":\"double_release\",\"message\":\"This handle was already released; releasing it twice would unpin a later loan.\"}},{\"op\":\"stats\",\"stats\":{\"acquired\":1,\"dropped\":0,\"published\":1,\"released\":1}}]}"
+    },
+    {
+      "id": "handles-and-frames-that-name-something-else",
+      "note": "A frame from another stream, a slot this pool does not hold, and a handle carrying a different stream name. All three are refused before anything is read, because a pool that accepted a handle from a neighbouring stream would hand a policy the wrong camera.",
+      "input": {
+        "stream": "head_rgb",
+        "capacity": 2,
+        "ops": [
+          {
+            "op": "publish",
+            "sequence": 1,
+            "stamp_ns": 33333333,
+            "stream": "wrist_cam"
+          },
+          {
+            "op": "acquire",
+            "handle": {
+              "stream": "head_rgb",
+              "slot": 7,
+              "generation": 1
+            }
+          },
+          {
+            "op": "release",
+            "handle": {
+              "stream": "other",
+              "slot": 0,
+              "generation": 1
+            }
+          },
+          {
+            "op": "stats"
+          }
+        ]
+      },
+      "expected": "{\"final\":{\"latest\":null,\"stats\":{\"acquired\":0,\"dropped\":0,\"published\":0,\"released\":0}},\"steps\":[{\"op\":\"publish\",\"refusal\":{\"code\":\"unknown_stream\",\"message\":\"This pool holds head_rgb and was handed a frame from wrist_cam.\"}},{\"op\":\"acquire\",\"refusal\":{\"code\":\"unknown_slot\",\"message\":\"The handle names a slot this pool does not hold.\"}},{\"op\":\"release\",\"refusal\":{\"code\":\"unknown_slot\",\"message\":\"The handle names a slot this pool does not hold.\"}},{\"op\":\"stats\",\"stats\":{\"acquired\":0,\"dropped\":0,\"published\":0,\"released\":0}}]}"
+    },
+    {
+      "id": "released-slots-go-oldest-first",
+      "note": "Two slots held, then both let go, then two more frames. The order the released slots come back in is the property: the one holding the older frame is reused first, so the newer of the two survives one more publish than it otherwise would. This is the same rule as `four-frames-into-three-slots` after a reader has been through, which is where an implementation that tracked \"oldest\" by slot index rather than by frame diverges.",
+      "input": {
+        "stream": "head_rgb",
+        "capacity": 3,
+        "ops": [
+          {
+            "op": "publish",
+            "sequence": 1,
+            "stamp_ns": 33333333
+          },
+          {
+            "op": "publish",
+            "sequence": 2,
+            "stamp_ns": 66666666
+          },
+          {
+            "op": "acquire",
+            "from": 0
+          },
+          {
+            "op": "acquire",
+            "from": 1
+          },
+          {
+            "op": "release",
+            "from": 1
+          },
+          {
+            "op": "release",
+            "from": 0
+          },
+          {
+            "op": "publish",
+            "sequence": 3,
+            "stamp_ns": 99999999
+          },
+          {
+            "op": "publish",
+            "sequence": 4,
+            "stamp_ns": 133333332
+          },
+          {
+            "op": "latest"
+          },
+          {
+            "op": "stats"
+          }
+        ]
+      },
+      "expected": "{\"final\":{\"latest\":{\"generation\":2,\"slot\":0,\"stream\":\"head_rgb\"},\"stats\":{\"acquired\":2,\"dropped\":0,\"published\":4,\"released\":2}},\"steps\":[{\"handle\":{\"generation\":1,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"publish\"},{\"handle\":{\"generation\":1,\"slot\":1,\"stream\":\"head_rgb\"},\"op\":\"publish\"},{\"identity\":{\"sequence\":1,\"stamp_ns\":33333333,\"stream\":\"head_rgb\"},\"op\":\"acquire\"},{\"identity\":{\"sequence\":2,\"stamp_ns\":66666666,\"stream\":\"head_rgb\"},\"op\":\"acquire\"},{\"op\":\"release\",\"released\":true},{\"op\":\"release\",\"released\":true},{\"handle\":{\"generation\":1,\"slot\":2,\"stream\":\"head_rgb\"},\"op\":\"publish\"},{\"handle\":{\"generation\":2,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"publish\"},{\"handle\":{\"generation\":2,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"latest\"},{\"op\":\"stats\",\"stats\":{\"acquired\":2,\"dropped\":0,\"published\":4,\"released\":2}}]}"
+    },
+    {
+      "id": "one-slot-and-nobody-reading",
+      "note": "The degenerate pool, which is a legal declaration rather than a mistake: a stream whose reader is always faster than capture needs no depth. Every publish reuses the one slot and the generation counts them, so a handle from three frames ago is refused rather than answered.",
+      "input": {
+        "stream": "head_rgb",
+        "capacity": 1,
+        "ops": [
+          {
+            "op": "publish",
+            "sequence": 1,
+            "stamp_ns": 33333333
+          },
+          {
+            "op": "publish",
+            "sequence": 2,
+            "stamp_ns": 66666666
+          },
+          {
+            "op": "publish",
+            "sequence": 3,
+            "stamp_ns": 99999999
+          },
+          {
+            "op": "latest"
+          },
+          {
+            "op": "acquire",
+            "from": 0
+          },
+          {
+            "op": "stats"
+          }
+        ]
+      },
+      "expected": "{\"final\":{\"latest\":{\"generation\":3,\"slot\":0,\"stream\":\"head_rgb\"},\"stats\":{\"acquired\":0,\"dropped\":0,\"published\":3,\"released\":0}},\"steps\":[{\"handle\":{\"generation\":1,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"publish\"},{\"handle\":{\"generation\":2,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"publish\"},{\"handle\":{\"generation\":3,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"publish\"},{\"handle\":{\"generation\":3,\"slot\":0,\"stream\":\"head_rgb\"},\"op\":\"latest\"},{\"op\":\"acquire\",\"refusal\":{\"code\":\"stale_handle\",\"message\":\"The slot has been reused since this handle was issued, so the handle names a frame that is no longer there.\"}},{\"op\":\"stats\",\"stats\":{\"acquired\":0,\"dropped\":0,\"published\":3,\"released\":0}}]}"
+    }
+  ]
+}

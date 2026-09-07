@@ -38,7 +38,9 @@ from typing import Any, Final
 __all__ = [
     "COLLISION_SHAPES",
     "FRAME_KINDS",
+    "detection_to_json",
     "frame_fault_to_json",
+    "has_people_detection",
     "validate_frame_bindings",
     "validate_frames",
 ]
@@ -253,3 +255,38 @@ def frame_fault_to_json(fault: dict[str, Any] | None) -> Any:
     if fault is None:
         return {"fault": None}
     return {"fault": {"code": fault["code"], "subjects": fault["subjects"], "detail": fault["detail"]}}
+
+
+# ── §5 detects_people ────────────────────────────────────────────────────────
+
+
+def has_people_detection(descriptor: dict[str, Any]) -> bool:
+    """Does this body declare something that reports person distance? (§5, §7.1's ``proximity``.)
+
+    The derivation ``resolve_limits``'s seventh ``available`` input has been waiting for. Its two
+    neighbours are read straight off the descriptor — a sensor whose modality is ``imu``, a base
+    that is ``legged`` — and this one could not be, because §5's modalities say what a sensor
+    *produces* and detection is what somebody does with the output.
+
+    **Any one sensor is enough.** The question is about the robot rather than about a stream, so
+    there is no quorum: two detectors do not make the claim stronger and one that stopped working
+    does not make it weaker, which is what the bench and field suites are for.
+
+    **A declaration is honoured and not checked against the modality**, because only the vendor
+    knows whether their depth stream is one a person is measured in — see the field's own note in
+    ``reference/typescript/embodiment.ts``.
+
+    ── The transcription trap ────────────────────────────────────────────────
+
+    ``is True``, never ``== True`` and never truthiness. The reference tests ``=== true``, which
+    admits the boolean and nothing else; ``==`` in Python admits ``1``, and a bare ``if`` admits
+    every non-empty string — so ``detects_people: "no"`` would read as a declaration that this
+    sensor detects people. Fail-closed is the only defensible direction on a guard input, and the
+    corpus pins it with ``a-declaration-that-is-not-a-boolean``.
+    """
+    return any(sensor.get("detects_people") is True for sensor in descriptor.get("sensors", []))
+
+
+def detection_to_json(descriptor: dict[str, Any]) -> Any:
+    """The corpus's shape: one derived boolean, off a whole descriptor."""
+    return {"people_detection": has_people_detection(descriptor)}

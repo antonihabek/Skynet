@@ -55,6 +55,7 @@ pub mod intent;
 pub mod json;
 pub mod kinematics;
 pub mod live;
+pub mod media;
 pub mod observation;
 pub mod opstate;
 pub mod ota;

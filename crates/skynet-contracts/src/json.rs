@@ -459,6 +459,12 @@ pub fn descriptor_from_json(value: &Json) -> Result<EmbodimentDescriptor, Decode
             fps: opt_f64(item, "fps"),
             frame: opt_string(item, "frame"),
             latency_ms: opt_f64(item, "latency_ms"),
+            // §5's three states survive because the field is `Option<bool>`: absent and an
+            // explicit `null` are both `None`, and `Some(false)` is a vendor who answered the
+            // question. `as_bool` is what makes that safe — it refuses a string and a number
+            // rather than coercing either, so a malformed declaration reads as undeclared and
+            // leaves `proximity` unavailable rather than active on an unestablished claim.
+            detects_people: item.get_present("detects_people").and_then(Json::as_bool),
         });
     }
 

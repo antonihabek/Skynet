@@ -36,10 +36,11 @@ import {
 } from '../../reference/typescript/blackbox.ts'
 import {
   ACTION_KINDS, BASE_KINDS, CANONICAL_AXES, CANONICAL_CHAINS, CONTROL_MODES,
-  EMBODIMENT_MODALITIES, JOINT_TYPES, parseRole, resolveTransport, roleKey,
+  EMBODIMENT_MODALITIES, hasPeopleDetection, JOINT_TYPES, parseRole, resolveTransport, roleKey,
   TRANSPORT_METHODS, TRANSPORT_VERDICTS, TRANSPORT_WARNING_CODES,
   validateFrameBindings, validateFrames,
-  type ActionChannel, type EmbodimentDescriptor, type FrameGraph, type FrameNode,
+  type ActionChannel, type EmbodimentDescriptor, type EmbodimentSensor, type FrameGraph,
+  type FrameNode,
   type ResolveTransportOptions, type SourceEmbodiment,
 } from '../../reference/typescript/embodiment.ts'
 import {
@@ -66,6 +67,9 @@ import {
 import {
   assembleObservation, latestCommonInstant, type Stream as ObservationStream,
 } from '../../reference/typescript/observation.ts'
+import {
+  FramePool, FRAME_REFUSAL_CODES, type FrameHandle,
+} from '../../reference/typescript/media.ts'
 import {
   ENFORCEMENT_MODES, evaluateCycle, FAULT_RESPONSES, GUARDS, OS_TIERS, resolveLimits, withGrants,
   type CommandCycle, type ResolveLimitsParams,
@@ -2271,6 +2275,7 @@ function bbCycle(overrides: Partial<Cycle> = {}): Cycle {
     stateFlags: 1,
     faultCode: 0,
     rhalResult: 0,
+    readResult: 0,
     stateSeq: 3,
     stateStampNs: 100n,
     commandStampNs: 90n,
@@ -2305,6 +2310,7 @@ function cycleInput(cycle: Cycle): unknown {
     state_flags: cycle.stateFlags,
     fault_code: cycle.faultCode,
     rhal_result: cycle.rhalResult,
+    read_result: cycle.readResult,
     state_seq: cycle.stateSeq,
     state_stamp_ns: String(cycle.stateStampNs),
     command_stamp_ns: String(cycle.commandStampNs),
@@ -2343,6 +2349,35 @@ recordCase(
   BB_SHAPE, 5n, 1234n,
   { kind: 'cycle', cycle: bbCycle() }, cycleInput(bbCycle()),
 )
+
+{
+  // The record this field was added for. Everything about the body in it is a fill value: §24's
+  // `Observed` is built with `map_or` defaults on a failed read, so the flags, the fault code and
+  // the sequence are zeros nobody measured, the stamp is the loop's own clock rather than an
+  // acquisition time, and the joint arrays hold whatever the driver's buffers last contained —
+  // which is the *previous* cycle's positions.
+  //
+  // Before `read_result`, this record and `cycle-quiet` differed only in values that are legal on
+  // a healthy robot. A replay of a driver that had stopped answering showed a robot holding still.
+  const unread = bbCycle({
+    readResult: -110,
+    stateFlags: 0,
+    stateSeq: 0,
+    position: [0.1, 0.2],
+    velocity: [0.0, Number.NaN],
+    effort: [1.5, Number.NaN],
+  })
+  recordCase(
+    'cycle-the-read-failed',
+    'A cycle whose `read_state` returned `-ETIMEDOUT`. The four bytes at 172 are what separate '
+    + 'this from a healthy cycle: every other body field here is a fill value or the previous '
+    + 'cycle’s data, and before the field existed a reader had no way to know that. The schema '
+    + 'byte is what makes it readable — in a schema-1 record those bytes are padding, so a zero '
+    + 'there means *unrecorded* rather than *the read succeeded*.',
+    BB_SHAPE, 9n, 3300n,
+    { kind: 'cycle', cycle: unread }, cycleInput(unread),
+  )
+}
 
 {
   const clamped = bbCycle({
@@ -7163,6 +7198,310 @@ vocabulary('bundle_checks',
   'What arrived, in the order the checks run. Size before digest, because a short file is a link '
   + 'that dropped and a wrong file is a question about where it came from.',
   BUNDLE_CHECKS)
+
+// ── §5 detects_people ────────────────────────────────────────────────────────
+//
+// The seventh of `resolveLimits`'s `available` inputs, and the last one with no path. Its two
+// neighbours are read straight off the descriptor — a sensor whose modality is `imu`, a base that
+// is `legged` — and this one could not be, because §5's modalities say what a sensor *produces*
+// and detection is what somebody does with the output.
+//
+// The input is a whole descriptor rather than a sensor list, deliberately: the derivation is one
+// line and the **parse** is where an edition diverges. What these cases pin is how each edition
+// reads the *value* — boolean, string, number, null — because each does it by a different
+// mechanism and every one of those mechanisms has a way to be wrong.
+//
+// What they cannot pin, and this is worth stating rather than implying: **absent and `false` are
+// indistinguishable downstream by construction**. Both make the guard unavailable, so no expected
+// value can separate them, and an edition whose parser folded the two together would pass every
+// case here. The distinction lives in the descriptor for a person to read; it is not a fact the
+// corpus can hold an edition to, and pretending otherwise would be a case that proves nothing.
+
+function detectionCase(
+  id: string, note: string, sensors: EmbodimentSensor[],
+): void {
+  const descriptor: EmbodimentDescriptor = { ...ARM, sensors }
+  add('embodiment', 'detection', {
+    id, note,
+    // The descriptor itself, not a shaped view of it: the parse is half of what this pins, and a
+    // view would be this file deciding which fields an edition gets to see.
+    input: descriptor,
+    expected: canonical({ people_detection: hasPeopleDetection(descriptor) }),
+  })
+}
+
+/** A camera, with whatever this case is about declared on it. */
+function cam(name: string, detects?: unknown): EmbodimentSensor {
+  return {
+    name, role: null, modality: 'rgb', width: 640, height: 480, fps: 30,
+    ...(detects === undefined ? {} : { detects_people: detects as boolean }),
+  }
+}
+
+detectionCase('a-body-with-no-sensors',
+  'Nothing to ask. `proximity` reports unavailable naming a sensor that detects people, which is '
+  + 'the guard reporting on the body rather than on the descriptor’s author.',
+  [])
+
+detectionCase('nobody-was-asked',
+  'Three cameras and not one of them carries the field — every descriptor written before §5 had '
+  + 'it. Undeclared, so the guard is unavailable. This is the case that must not become `true` by '
+  + 'somebody reasoning that three RGB streams are obviously enough to see a person: a camera is '
+  + 'not a person detector, a camera plus a model somebody validated is, and only the vendor knows '
+  + 'which of those they shipped.',
+  [cam('head'), cam('left_wrist'), cam('right_wrist')])
+
+detectionCase('declared-absent-on-every-sensor',
+  'The same verdict as `nobody-was-asked` and a different descriptor, which is the whole reason '
+  + '`false` is worth writing. Downstream these two are one fact — the guard is unavailable — and '
+  + 'to a person they are opposite ones: a vendor who answered the question, and a vendor who has '
+  + 'not been asked it. An edition whose parser folds absent and `false` together passes every '
+  + 'case in this file and has lost that.',
+  [cam('head', false), cam('left_wrist', false)])
+
+detectionCase('one-camera-declares-it',
+  'One is enough. The question is about the robot rather than about a stream, so there is no '
+  + 'quorum and no “the best of them”: two detectors do not make the claim stronger and one that '
+  + 'stopped working does not make it weaker, which is what the bench and field suites are for.',
+  [cam('head', true), cam('left_wrist'), cam('right_wrist', false)])
+
+detectionCase('the-sensor-that-declares-it-is-not-a-camera',
+  'A depth stream, and the case that would catch an edition adding a modality allow-list. §5 puts '
+  + 'the reason on the field: filtering by modality here would be the contract overruling the '
+  + 'party that built the sensing pipeline, on the strength of a vocabulary that describes what a '
+  + 'sensor produces rather than what is measured in it.',
+  [{ name: 'torso_depth', role: null, modality: 'depth', detects_people: true }])
+
+detectionCase('an-implausible-declaration-is-still-a-declaration',
+  'Person distance, declared on a force-torque sensor. This is the same rule as the case above '
+  + 'and it is worth pinning separately, because it is the one where honouring the vendor looks '
+  + 'wrong. It is still the right answer: the alternative is a list of modalities a detector may '
+  + 'live behind, which is a vocabulary, which needs the governance §30 leaves open — and the '
+  + 'wrong entry in it would silently disable a guard on a robot whose vendor had declared one.',
+  [{ name: 'wrist_ft', role: null, modality: 'force_torque', detects_people: true }])
+
+detectionCase('a-declaration-that-is-not-a-boolean',
+  'The string “yes”. Refused in all three editions, and each refuses it by a different mechanism '
+  + 'that has to agree: `=== true` in the reference, `as_bool()` returning `None` in Rust, and '
+  + '`is True` in Python — where `1 is True` is false and `1 == True` is not, so the transcription '
+  + 'had a place to be wrong. Fail-closed is the only defensible direction on a guard input: a '
+  + 'malformed declaration leaves `proximity` unavailable and naming what it wants, rather than '
+  + 'active on a body nobody has established can see a person.',
+  [cam('head', 'yes')])
+
+detectionCase('a-declaration-that-is-the-number-one',
+  'The Python trap, pinned. `1 == True` is true in Python and `1 is True` is false, so an edition '
+  + 'transcribing `=== true` as `== True` agrees with the reference on every other case in this '
+  + 'file and disagrees here — which is a guard turned on by a descriptor that used `1` for yes. '
+  + 'The reference and Rust reject it for their own reasons: `=== true` admits the boolean and '
+  + 'nothing else, and `as_bool()` returns nothing for a number.',
+  [cam('head', 1)])
+
+detectionCase('a-null-declaration',
+  'Explicit `null`, which JSON produces where TypeScript would write `undefined`. Reads as '
+  + 'undeclared, like absence, and not as a third thing.',
+  [cam('head', null)])
+
+// ── §47.6 Frame handles ──────────────────────────────────────────────────────
+//
+// A frame pool is the first thing in this corpus with **state**, and the shape of these cases is
+// the consequence. Every other family here is a pure function over one input: a cycle, a manifest,
+// a set of streams. A pool's whole subject is what happens on the *fourth* publish given what the
+// first three did, and a case that could only describe one call would freeze the uninteresting
+// half of it.
+//
+// So a case is a **script**: a pool of a declared capacity, a list of operations, and the outcome
+// of every one of them in order. `from` names an earlier step's handle, which is how a reader
+// actually holds one — `latest()` then `acquire()` — and it is the pattern the selection rule is
+// judged against, because between those two calls capture is free to publish.
+//
+// Nothing here exposes the pool's slots. The handles do that already: a handle carries the slot it
+// was issued against, so a case that publishes four frames into three slots pins the selection rule
+// in its expected bytes without an edition having to agree about how slots are stored.
+
+interface PoolOp {
+  op: 'publish' | 'latest' | 'acquire' | 'release' | 'stats'
+  /** `publish` only: the frame's stream, defaulting to the pool's. */
+  stream?: string
+  /** `publish` only. */
+  stamp_ns?: number
+  /** `publish` only. */
+  sequence?: number
+  /** `acquire` / `release`: an explicit handle, for the ones no step produced. */
+  handle?: { stream: string; slot: number; generation: number }
+  /** `acquire` / `release`: the handle step `from` returned. */
+  from?: number
+}
+
+/**
+ * Run a script against the reference and shape every step's outcome.
+ *
+ * The step index in `from` is the index in `ops`, so a case reads top to bottom without counting
+ * only the steps that produced a handle.
+ */
+function runPool(stream: string, capacity: number, ops: PoolOp[]): unknown {
+  const pool = new FramePool(stream, capacity)
+  const handles: (FrameHandle | null)[] = []
+  const steps: unknown[] = []
+
+  for (const op of ops) {
+    let handle: FrameHandle | null = null
+    let step: unknown
+    switch (op.op) {
+      case 'publish': {
+        const result = pool.publish({
+          stream: op.stream ?? stream,
+          stamp_ns: op.stamp_ns ?? 0,
+          sequence: op.sequence ?? 0,
+        })
+        step = 'handle' in result
+          ? { op: 'publish', handle: result.handle }
+          : { op: 'publish', refusal: result.refusal }
+        if ('handle' in result) handle = result.handle
+        break
+      }
+      case 'latest': {
+        handle = pool.latest()
+        step = { op: 'latest', handle }
+        break
+      }
+      case 'acquire': {
+        const named = op.handle ?? handles[op.from ?? -1] ?? null
+        if (named === null) throw new Error(`acquire names no handle`)
+        const result = pool.acquire(named)
+        step = 'identity' in result
+          ? { op: 'acquire', identity: result.identity }
+          : { op: 'acquire', refusal: result.refusal }
+        break
+      }
+      case 'release': {
+        const named = op.handle ?? handles[op.from ?? -1] ?? null
+        if (named === null) throw new Error(`release names no handle`)
+        const result = pool.release(named)
+        step = 'released' in result
+          ? { op: 'release', released: true }
+          : { op: 'release', refusal: result.refusal }
+        break
+      }
+      case 'stats': {
+        step = { op: 'stats', stats: pool.stats() }
+        break
+      }
+    }
+    handles.push(handle)
+    steps.push(step)
+  }
+
+  return { steps, final: { latest: pool.latest(), stats: pool.stats() } }
+}
+
+function poolCase(file: string, id: string, note: string, capacity: number, ops: PoolOp[]): void {
+  add('media', file, {
+    id, note,
+    input: { stream: 'head_rgb', capacity, ops },
+    expected: canonical(runPool('head_rgb', capacity, ops)),
+  })
+}
+
+/** A frame at 30 Hz, so a reader comparing stamps to sequences is looking at one camera. */
+function pub(sequence: number, stream?: string): PoolOp {
+  return { op: 'publish', sequence, stamp_ns: sequence * 33_333_333, ...(stream ? { stream } : {}) }
+}
+
+poolCase('pool', 'a-frame-published-lent-and-taken-back',
+  'The whole loan, once. `latest` names what was just published, the identity that comes back is '
+  + 'the frame that went in, and the counters say one of each.',
+  4,
+  [pub(1), { op: 'latest' }, { op: 'acquire', from: 0 }, { op: 'release', from: 0 }, { op: 'stats' }])
+
+poolCase('pool', 'four-frames-into-three-slots',
+  'The case the six unit tests written with this reference could not see, because not one of them '
+  + 'published twice into a pool with more than one slot. A pool exists so that a reader can hold '
+  + 'a frame while capture keeps going, and the slot each publish lands in is the entire mechanism '
+  + 'by which it does. Publishing into the *oldest released* slot spreads four frames over three '
+  + 'slots and leaves the two most recent ones intact; taking the first slot that happens to be '
+  + 'free instead puts all four in slot 0, which is a one-slot pool wearing a pool’s costume — and '
+  + '§47.4 already has a one-slot latest-wins channel, so that reading makes §47.6 a duplicate of '
+  + 'the section above it.',
+  3,
+  [pub(1), pub(2), pub(3), pub(4), { op: 'latest' }, { op: 'stats' }])
+
+poolCase('pool', 'the-reader-that-looks-then-takes',
+  'How a policy actually holds a frame: `latest`, then `acquire` on what it named. Between those '
+  + 'two calls capture publishes, which is not a race being tolerated — it is the ordinary case at '
+  + 'any frame rate above the reader’s turnaround. With more than one free slot the publish must '
+  + 'land somewhere else and the acquire must still succeed; landing on the slot `latest` just '
+  + 'named refuses the reader its frame on nearly every cycle and reports it as `stale_handle`, '
+  + 'which reads as a reader bug.',
+  3,
+  [pub(1), { op: 'latest' }, pub(2), { op: 'acquire', from: 1 }, { op: 'stats' }])
+
+poolCase('pool', 'an-empty-pool-is-not-a-frame-of-zeros',
+  '`latest` before anything is published is `null`. A zero frame is a measurement nobody took, and '
+  + 'a policy handed one cannot tell it from a dark room.',
+  2,
+  [{ op: 'latest' }, { op: 'stats' }])
+
+poolCase('pool', 'a-stale-handle-never-shows-another-frame',
+  'One slot, reused. The generation advances, so the first handle now names a frame that is not '
+  + 'there — and the refusal is `stale_handle` rather than the frame that took its place. Slot '
+  + 'reuse is the normal case here, not the edge, which is why the generation is not optional.',
+  1,
+  [pub(1), { op: 'acquire', from: 0 }, { op: 'release', from: 0 }, pub(2),
+    { op: 'acquire', from: 0 }, { op: 'acquire', from: 3 }, { op: 'stats' }])
+
+poolCase('pool', 'a-pinned-slot-drops-rather-than-stalling',
+  'Every slot acquired, so the frame is dropped **and counted**. §47.4: capture is never stalled, '
+  + 'because stalling capture to protect a slow reader starves the policy to protect the reader — '
+  + 'the same error as starving the policy to protect the recording, one step over. The pinned '
+  + 'frame is still the newest afterwards: the drop changed nothing a reader can see except the '
+  + 'counter, which is where it belongs.',
+  1,
+  [pub(1), { op: 'acquire', from: 0 }, pub(2), { op: 'latest' }, { op: 'stats' }])
+
+poolCase('pool', 'a-loan-is-not-a-share',
+  'A second acquire of a handle already checked out is refused by name, and so is a second '
+  + 'release. Handles are single-owner loans rather than reference counts: a reader that cannot '
+  + 'track its own loans is a reader whose next frame cannot be trusted either, and a double '
+  + 'release would unpin a later loan taken on the same slot.',
+  2,
+  [pub(1), { op: 'acquire', from: 0 }, { op: 'acquire', from: 0 }, { op: 'release', from: 0 },
+    { op: 'release', from: 0 }, { op: 'stats' }])
+
+poolCase('pool', 'handles-and-frames-that-name-something-else',
+  'A frame from another stream, a slot this pool does not hold, and a handle carrying a different '
+  + 'stream name. All three are refused before anything is read, because a pool that accepted a '
+  + 'handle from a neighbouring stream would hand a policy the wrong camera.',
+  2,
+  [pub(1, 'wrist_cam'),
+    { op: 'acquire', handle: { stream: 'head_rgb', slot: 7, generation: 1 } },
+    { op: 'release', handle: { stream: 'other', slot: 0, generation: 1 } },
+    { op: 'stats' }])
+
+poolCase('pool', 'released-slots-go-oldest-first',
+  'Two slots held, then both let go, then two more frames. The order the released slots come back '
+  + 'in is the property: the one holding the older frame is reused first, so the newer of the two '
+  + 'survives one more publish than it otherwise would. This is the same rule as '
+  + '`four-frames-into-three-slots` after a reader has been through, which is where an '
+  + 'implementation that tracked "oldest" by slot index rather than by frame diverges.',
+  3,
+  [pub(1), pub(2), { op: 'acquire', from: 0 }, { op: 'acquire', from: 1 },
+    { op: 'release', from: 1 }, { op: 'release', from: 0 },
+    pub(3), pub(4), { op: 'latest' }, { op: 'stats' }])
+
+poolCase('pool', 'one-slot-and-nobody-reading',
+  'The degenerate pool, which is a legal declaration rather than a mistake: a stream whose reader '
+  + 'is always faster than capture needs no depth. Every publish reuses the one slot and the '
+  + 'generation counts them, so a handle from three frames ago is refused rather than answered.',
+  1,
+  [pub(1), pub(2), pub(3), { op: 'latest' }, { op: 'acquire', from: 0 }, { op: 'stats' }])
+
+vocabulary('frame_refusal_codes',
+  'Everything a frame pool can refuse, in the order a reader meets them: the two that say the '
+  + 'handle names nothing here, the two that say the loan is not the reader’s to take, and the one '
+  + 'that is not a refusal of the reader at all — `pool_exhausted` is capture being told it may '
+  + 'not stall.',
+  FRAME_REFUSAL_CODES)
 
 // ── Write ────────────────────────────────────────────────────────────────────
 

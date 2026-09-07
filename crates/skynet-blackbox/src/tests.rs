@@ -16,7 +16,7 @@ use skynet_kernel::{
 use crate::mcap;
 use crate::record::{
     decode, encode, Body, CycleView, Entry, EventCode, EventView, FrameView, Gap, GapReason,
-    RecordError, Shape, NO_CAPABILITY,
+    ReadOutcome, RecordError, Shape, NO_CAPABILITY, RECORD_SCHEMA,
 };
 use crate::replay::{replay, replay_ring};
 use crate::ring::{Geometry, Meta, Ring, RingError};
@@ -77,6 +77,7 @@ fn plain_cycle(tick: u64) -> OwnedCycle {
         effort: vec![1.0, 2.0, f32::NAN],
         tripped: Vec::new(),
         response: None,
+        read_result: 0,
     }
 }
 
@@ -92,6 +93,8 @@ struct OwnedCycle {
     effort: Vec<f32>,
     tripped: Vec<Guard>,
     response: Option<FaultResponse>,
+    /// `0` unless a case is about a read that failed.
+    read_result: i32,
 }
 
 impl OwnedCycle {
@@ -103,6 +106,7 @@ impl OwnedCycle {
             state_flags: 0,
             fault_code: 0,
             rhal_result: 0,
+            read_result: self.read_result,
             state_seq: self.tick as u32,
             state_stamp_ns: 1_000 + self.tick,
             command_stamp_ns: 1_000 + self.tick,
@@ -127,6 +131,67 @@ impl OwnedCycle {
 }
 
 // ── The record ───────────────────────────────────────────────────────────────
+
+/// §24's read outcome, and the schema byte that makes a zero readable.
+///
+/// The whole point of the field is the case a recording could not previously express: a cycle in
+/// which the driver did not answer, encoded with zeroed flags, a zero sequence and the previous
+/// cycle's joint positions — a record indistinguishable from a healthy one.
+#[test]
+fn a_cycle_says_whether_the_read_succeeded() {
+    let shape = Shape {
+        joints: 2,
+        channels: 2,
+    };
+    let mut slot = vec![0u8; shape.record_size()];
+
+    let two = |tick: u64, read_result: i32| OwnedCycle {
+        tick,
+        desired: vec![0.10, 0.20],
+        command: vec![0.10, 0.20],
+        mask: vec![1, 1],
+        clamped: vec![false, false],
+        position: vec![0.09, 0.19],
+        velocity: vec![0.0, f32::NAN],
+        effort: vec![1.0, f32::NAN],
+        tripped: Vec::new(),
+        response: None,
+        read_result,
+    };
+
+    let healthy = two(1, 0);
+    encode(shape, &mut slot, 1, 100, Entry::Cycle(&healthy.view())).expect("a cycle");
+    assert_eq!(slot[5], RECORD_SCHEMA, "records carry the schema they are in");
+    let Body::Cycle(decoded) = decode(shape, &slot).map(|r| r.body).expect("decodes") else {
+        panic!("a cycle")
+    };
+    assert_eq!(decoded.read, ReadOutcome::Ok);
+    assert!(decoded.read.measured());
+
+    let timed_out = two(2, -110);
+    encode(shape, &mut slot, 2, 200, Entry::Cycle(&timed_out.view())).expect("a cycle");
+    let Body::Cycle(decoded) = decode(shape, &slot).map(|r| r.body).expect("decodes") else {
+        panic!("a cycle")
+    };
+    assert_eq!(decoded.read, ReadOutcome::Failed(-110));
+    assert!(
+        !decoded.read.measured(),
+        "the body fields in this record are fill values, and this is what says so"
+    );
+
+    // A record written before the field existed. Its 172..176 is reserved padding, so a reader must
+    // answer *unrecorded* — never `Ok`. Reading absence as success is what made a robot whose
+    // driver had stopped answering look healthy for as long as the recording lasted.
+    encode(shape, &mut slot, 3, 300, Entry::Cycle(&healthy.view())).expect("a cycle");
+    slot[5] = 1;
+    let crc = crate::crc32::crc32(&slot[4..]);
+    slot[0..4].copy_from_slice(&crc.to_le_bytes());
+    let Body::Cycle(decoded) = decode(shape, &slot).map(|r| r.body).expect("an older record still decodes") else {
+        panic!("a cycle")
+    };
+    assert_eq!(decoded.read, ReadOutcome::Unrecorded);
+    assert!(!decoded.read.measured());
+}
 
 #[test]
 fn a_cycle_survives_a_round_trip() {
@@ -886,6 +951,7 @@ fn a_recording_replays_against_the_kernel_that_made_it() {
             effort: vec![0.0; 3],
             tripped,
             response: verdict.response,
+            read_result: 0,
         };
         let mut view = owned.view();
         view.command_stamp_ns = tick * 1_000_000;
@@ -936,6 +1002,7 @@ fn a_changed_limit_diverges_rather_than_agreeing_quietly() {
         effort: vec![0.0; 3],
         tripped: vec![Guard::Envelope],
         response: Some(FaultResponse::Clamp),
+        read_result: 0,
     };
     let view = owned.view();
     ring.append(&mut store, 1_000_000, Entry::Cycle(&view))

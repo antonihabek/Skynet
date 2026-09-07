@@ -227,6 +227,85 @@ impl Recorder {
             .unwrap_or_else(|| self.ring.next_sequence())
     }
 
+    /// What this daemon can see of the Safety Kernel, off §13's ring (§27, §33.1).
+    ///
+    /// # Why the ring, and why not systemd
+    ///
+    /// §27 has a `kernel` condition and `skynetd` has never supplied it, because §33.1 keeps this
+    /// process away from the actuator path — CI asserts it cannot even depend on `skynet-rhal`. So
+    /// the machine has derived `safe` on every robot, always, from a default rather than from an
+    /// observation.
+    ///
+    /// The obvious source is systemd: the kernel is a unit, and this daemon already asks systemd
+    /// about units. It is the wrong source, and the reason is the case that matters. **A hung
+    /// kernel is an active unit.** `ActiveState=active` says a process exists, which is exactly
+    /// what a robot with a wedged control loop also has, and reporting that as `live` would put
+    /// §27's most consequential condition on the one signal that cannot tell the dangerous case
+    /// from the healthy one.
+    ///
+    /// A control loop that is turning **writes a cycle every pass** (§26). That record is produced
+    /// as a side effect of the kernel doing its job, it is already in a file this daemon holds, and
+    /// it cannot be produced by a loop that has stopped. So liveness is *cycles recorded since the
+    /// last look*, and nothing else.
+    ///
+    /// # Why this does not cross §33.1
+    ///
+    /// Nothing here asks the kernel anything, commands anything, or touches a driver: it reads a
+    /// file. The inference is one-directional and fails closed — cycles seen means `Live`, and
+    /// every other outcome, including an unreadable ring, means `Down`. This daemon can never
+    /// *raise* a robot's operating state on a guess; the strongest thing a wrong answer here can do
+    /// is hold a robot that could have been commanding, which is the direction §33.1 exists to
+    /// choose.
+    ///
+    /// # The three answers
+    ///
+    /// [`KernelSighting::Unobservable`] is not a reading. A ring with no action channels cannot
+    /// hold a control cycle at all (`Tally::commands`), so silence from it says nothing about a
+    /// kernel — which is the state of every robot on this edition, and the reason `GET /state`
+    /// reports this condition as unobserved rather than as `down`.
+    /// **This recorder cannot write a cycle**, and that is worth stating where the reading is
+    /// taken. §26.2 gives the supervisor the event channel and the control loop the four cycle
+    /// channels, so the evidence `skynetd` reads here is evidence it is structurally incapable of
+    /// manufacturing. A liveness signal a process can forge about itself is not one.
+    pub fn sighting(&self, since: u64) -> KernelSighting {
+        KernelSighting::from_tally(self.tally(since).as_ref())
+    }
+
+    /// What this daemon can see of the **RHAL**, off the same records (§27, §24).
+    ///
+    /// The companion to [`sighting`](Self::sighting), and it reads the *newest* cycle rather than
+    /// a count. §27's `rhal` is a **state**, so what decides it is the last thing the loop
+    /// observed, not what happened at some point in the interval: a driver that missed one read
+    /// out of two hundred is not lost, and one that has answered nothing for a second is, however
+    /// many good reads preceded it.
+    ///
+    /// The interval still matters for the other half — a robot with no cycles at all has nothing
+    /// reading its body, which is `Lost` for a different reason and is reported as one.
+    pub fn body(&self, since: u64) -> RhalSighting {
+        let Ok(store) = self.read() else {
+            return RhalSighting::Unobservable(
+                "the ring could not be read, so nothing can be said about the driver",
+            );
+        };
+        if self.ring.geometry().shape.channels == 0 {
+            return RhalSighting::Unobservable(
+                "this recording has no action channels, so it holds no control cycles and cannot \
+                 say whether anything is reading the body (§26, §74.3)",
+            );
+        }
+        let newest = self
+            .ring
+            .ordered(&store)
+            .into_iter()
+            .filter(|record| record.sequence >= since)
+            .filter_map(|record| match record.body {
+                skynet_blackbox::record::Body::Cycle(cycle) => Some(cycle),
+                _ => None,
+            })
+            .next_back();
+        RhalSighting::of(newest.as_ref())
+    }
+
     /// Count §74's counters over the records at or after `from_sequence`.
     ///
     /// Reads the whole file, for [`Recorder::read`]'s reason, and runs once per reconcile pass
@@ -471,6 +550,192 @@ impl Recording {
             // leaving a reader to assume they are attached.
             .set("uploaded", Json::Bool(false));
         out
+    }
+}
+
+/// What a daemon could see of the RHAL in one interval (§27's `rhal` condition).
+///
+/// Derived from the **newest** control cycle in the interval, because §27's `rhal` is a state and
+/// a state is what the last observation says. §24 gives three facts to read it from, and each maps
+/// onto exactly one of `RhalState`'s three values — which is why this is a mapping rather than a
+/// judgement:
+///
+/// | What the record says | State | Why |
+/// |---|---|---|
+/// | no cycle at all | `Lost` | nothing is reading the body |
+/// | `read_result` negative | `Lost` | the driver did not answer this cycle |
+/// | `read_result` unrecorded (schema 1) | `Lost` | an older recording cannot say, and this fails closed |
+/// | `RHAL_DEGRADED` in the flags | `Degraded` | §24: *"running, but something is wrong"* |
+/// | otherwise | `Present` | the driver answered and reported nothing wrong |
+///
+/// **`RHAL_FAULT` is deliberately not `Lost`.** §24 defines it as *"the drive has faulted; commands
+/// are being ignored"* — which is a fact about the **body**, not about the RHAL. A faulted drive
+/// still answers reads, so the kernel has not lost it, and §27's `rhal_lost` is the row that says
+/// *"nothing else can be known"* — no joint state, no estop reading, no guard that can evaluate.
+/// Mapping a faulted drive onto it would tell an operator the robot cannot be observed at the exact
+/// moment it can be observed and is telling them something. What a fault does belongs to §7's
+/// guards and to the fault code the record carries verbatim, not to this condition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RhalSighting {
+    /// Nothing could be read, with the reason. Not a reading.
+    Unobservable(&'static str),
+    /// A cycle was read, and this is what it said.
+    Seen {
+        /// §27's condition.
+        state: skynet_contracts::opstate::RhalState,
+        /// What `read_state` returned on that cycle: `None` when it succeeded.
+        errno: Option<i32>,
+        /// The driver's own fault code, verbatim (§24). Zero when it reported none.
+        fault_code: u32,
+    },
+    /// The recording can hold cycles and none was written in this interval.
+    Silent,
+}
+
+impl RhalSighting {
+    /// Map the newest cycle onto §27's condition. See the type's own table.
+    pub fn of(newest: Option<&skynet_blackbox::Cycle>) -> RhalSighting {
+        use skynet_blackbox::record::ReadOutcome;
+        use skynet_contracts::opstate::RhalState;
+
+        let Some(cycle) = newest else {
+            return RhalSighting::Silent;
+        };
+        let (state, errno) = match cycle.read {
+            ReadOutcome::Failed(code) => (RhalState::Lost, Some(code)),
+            // A recording from before §26.4. It cannot say, and a reader that took silence for
+            // success would be the failure that field was added to prevent — so `Lost`, which
+            // holds the robot rather than releasing it.
+            ReadOutcome::Unrecorded => (RhalState::Lost, None),
+            ReadOutcome::Ok if cycle.state_flags & RHAL_DEGRADED != 0 => (RhalState::Degraded, None),
+            ReadOutcome::Ok => (RhalState::Present, None),
+        };
+        RhalSighting::Seen {
+            state,
+            errno,
+            fault_code: cycle.fault_code,
+        }
+    }
+
+    /// §27's condition. Anything that is not a good read is `Lost`.
+    pub fn state(&self) -> skynet_contracts::opstate::RhalState {
+        match self {
+            RhalSighting::Seen { state, .. } => *state,
+            _ => skynet_contracts::opstate::RhalState::Lost,
+        }
+    }
+
+    /// Whether this was an observation at all.
+    pub fn observed(&self) -> bool {
+        !matches!(self, RhalSighting::Unobservable(_))
+    }
+
+    /// What a console shows beside the condition.
+    pub fn detail(&self) -> String {
+        match self {
+            RhalSighting::Unobservable(why) => (*why).to_string(),
+            RhalSighting::Silent => {
+                "no control cycle was recorded in the last interval, so nothing has read the body"
+                    .to_string()
+            }
+            RhalSighting::Seen {
+                state,
+                errno: Some(code),
+                ..
+            } => format!(
+                "the newest cycle's `read_state` returned {code} (§24), so the driver is {}",
+                state.as_str()
+            ),
+            RhalSighting::Seen {
+                state, fault_code, ..
+            } if *fault_code != 0 => format!(
+                "the driver answered and reported fault code {fault_code}, verbatim (§24). The \
+                 RHAL is {}: a faulted drive still answers reads, which is why a fault is not a \
+                 loss",
+                state.as_str()
+            ),
+            RhalSighting::Seen { state, .. } => {
+                format!("the newest cycle read the body and reported it {}", state.as_str())
+            }
+        }
+    }
+}
+
+/// §24's `RHAL_DEGRADED`: running, but something is wrong — thermal, a dead encoder.
+const RHAL_DEGRADED: u16 = 1 << 2;
+
+/// What a daemon could see of the Safety Kernel in one interval (§27's `kernel` condition).
+///
+/// Three answers rather than a boolean, because *"the ring said nothing"* and *"there is no ring
+/// that could have said anything"* are different facts and only the first is an observation. §27
+/// treats both as `down`, correctly; `GET /state` has to tell them apart, because one is a robot
+/// whose kernel has stopped and the other is every robot on this edition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KernelSighting {
+    /// Nothing could be read, with the reason. Not a reading, and reported as unobserved.
+    Unobservable(&'static str),
+    /// The recording can hold a control cycle and none was written in this interval.
+    Silent,
+    /// Cycles were recorded: a control loop turned.
+    Turning {
+        /// How many, which is the interval's own evidence rather than a rate.
+        cycles: u64,
+    },
+}
+
+impl KernelSighting {
+    /// The reading a tally implies, or its absence.
+    ///
+    /// Pure, so the rule can be tested without a disk — which matters more here than usual,
+    /// because the interesting case is a ring **with** cycles in it and only a control loop can
+    /// put one there (§26.2). A test that had to start one would be a rule nobody could check.
+    pub fn from_tally(tally: Option<&skynet_blackbox::tally::Tally>) -> KernelSighting {
+        let Some(tally) = tally else {
+            return KernelSighting::Unobservable(
+                "the ring could not be read, so nothing can be said about the control loop",
+            );
+        };
+        if !tally.commands {
+            return KernelSighting::Unobservable(
+                "this recording has no action channels, so it cannot hold a control cycle — \
+                 silence from it is not evidence about a kernel (§26, §74.3)",
+            );
+        }
+        if tally.cycles == 0 {
+            return KernelSighting::Silent;
+        }
+        KernelSighting::Turning {
+            cycles: tally.cycles,
+        }
+    }
+
+    /// §27's condition. `Live` for [`Turning`](KernelSighting::Turning) and nothing else.
+    pub fn state(&self) -> skynet_contracts::opstate::KernelState {
+        match self {
+            KernelSighting::Turning { .. } => skynet_contracts::opstate::KernelState::Live,
+            _ => skynet_contracts::opstate::KernelState::Down,
+        }
+    }
+
+    /// Whether this was an observation at all.
+    pub fn observed(&self) -> bool {
+        !matches!(self, KernelSighting::Unobservable(_))
+    }
+
+    /// What a console shows beside the condition.
+    pub fn detail(&self) -> String {
+        match self {
+            KernelSighting::Unobservable(why) => (*why).to_string(),
+            KernelSighting::Silent => {
+                "no control cycle was recorded in the last interval, so nothing shows the loop \
+                 turning. A hung kernel is an active unit, which is why this is read off the \
+                 records rather than off systemd"
+                    .to_string()
+            }
+            KernelSighting::Turning { cycles } => {
+                format!("{cycles} control cycles were recorded in the last interval")
+            }
+        }
     }
 }
 

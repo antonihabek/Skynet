@@ -123,6 +123,50 @@ pub const PREFIX: usize = 24;
 /// Where a [`Cycle`]'s arrays begin — everything before it is scalar and fixed.
 pub const CYCLE_FIXED: usize = 176;
 
+/// The per-record schema version this build writes.
+///
+/// Distinct from [`crate::FORMAT_VERSION`], which is the **ring header's** and refuses a whole
+/// recording whose layout it does not know. This one is per slot, for the reason its own comment
+/// has always given — *"a ring outlives a daemon upgrade, and a reader must be able to tell which
+/// layout a given slot is in"* — and until 2026-09-07 nothing read it, so it said `1` while the
+/// frame record had already grown a field.
+///
+/// **2** puts `read_state`'s outcome on the cycle record, in four bytes that were reserved padding,
+/// so nothing moved and no ring header version changed. What did change is what a zero there means:
+/// in a schema-1 record those bytes are padding and the read's outcome is *unrecorded*; in a
+/// schema-2 record a zero means the driver answered. A reader that ignored this byte would read
+/// every old recording as a robot whose every read succeeded, which is the failure this field
+/// exists to prevent.
+pub const RECORD_SCHEMA: u8 = 2;
+
+/// What `read_state` returned on the cycle this record describes (§24).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadOutcome {
+    /// A schema-1 record: the field did not exist, so nothing is known.
+    ///
+    /// Not `Ok`. Every body field in the record — the flags, the fault code, the sequence, the
+    /// stamp, the joint arrays — is either a measurement or a fill value, and this is the only
+    /// thing that says which. Reading absence as success is what made a robot whose driver had
+    /// stopped answering indistinguishable from a healthy one.
+    Unrecorded,
+    /// The driver answered and the body fields are measurements.
+    Ok,
+    /// It did not: a negative `errno`, surfaced verbatim (§24).
+    ///
+    /// **The body fields in this record are not measurements.** The flags, fault code and sequence
+    /// are fill values, and the joint arrays hold whatever the driver's buffers last contained —
+    /// which is the previous cycle's positions, so a replay of a failed read shows a robot holding
+    /// still rather than a robot nobody is measuring.
+    Failed(i32),
+}
+
+impl ReadOutcome {
+    /// Whether the body fields in this record are measurements.
+    pub fn measured(self) -> bool {
+        matches!(self, ReadOutcome::Ok)
+    }
+}
+
 /// The most guards that can trip in one cycle. Mirrors `skynet_kernel::MAX_TRIPPED`.
 pub const MAX_TRIPPED: usize = 8;
 
@@ -358,6 +402,14 @@ pub struct CycleView<'a> {
     /// and the mode gate treats the two differently (§7.2). Recorded because a verdict that cannot
     /// be recomputed is a verdict nobody can check.
     pub capability: u16,
+    /// What `read_state` returned this cycle: `0` for success, a negative `errno` otherwise (§24).
+    ///
+    /// §24 has always said *"errors are negative errno-style"* and the record has always carried
+    /// what `write_command` returned. It carried nothing about the **read**, so a cycle in which
+    /// the driver did not answer was encoded with zeroed flags, a zero fault code, a zero sequence,
+    /// the loop's own clock as the acquisition stamp, and the previous cycle's joint positions —
+    /// a record indistinguishable from a healthy one, on the failure that matters most.
+    pub read_result: i32,
     /// Distance to the nearest detected person, in metres; `NaN` when nothing was measuring it.
     pub nearest_person_m: f32,
     /// `x y z qx qy qz qw`, or all `NaN` when the base is not localised.
@@ -395,6 +447,11 @@ pub struct Cycle {
     pub fault_code: u32,
     /// See [`CycleView::rhal_result`].
     pub rhal_result: i32,
+    /// What `read_state` returned, or that the record predates the field.
+    ///
+    /// Derived from the record's own schema byte rather than from the four bytes alone, because a
+    /// zero there means two different things in the two schemas.
+    pub read: ReadOutcome,
     /// See [`CycleView::state_seq`].
     pub state_seq: u32,
     /// See [`CycleView::state_stamp_ns`].
@@ -818,7 +875,7 @@ pub fn encode(
     slot[4] = entry.kind() as u8;
     // The record schema version, per record rather than per file: a ring outlives a daemon upgrade,
     // and a reader must be able to tell which layout a given slot is in.
-    slot[5] = 1;
+    slot[5] = RECORD_SCHEMA;
     put_u64(slot, 8, sequence);
     put_u64(slot, 16, mono_ns);
 
@@ -885,6 +942,10 @@ fn encode_cycle(shape: Shape, slot: &mut [u8], cycle: &CycleView<'_>) -> Result<
     for (index, value) in cycle.base_twist.iter().enumerate() {
         put_f32(slot, 148 + index * 4, *value);
     }
+    // 172..176 was reserved padding, which is why this landed without moving a byte or bumping the
+    // ring's format. The schema byte above is what separates "reserved zero" from "the read
+    // succeeded".
+    put_u32(slot, 172, cycle.read_result as u32);
 
     let at = shape.cycle_offsets();
     for (index, value) in cycle.desired.iter().enumerate() {
@@ -1001,6 +1062,18 @@ fn decode_cycle(shape: Shape, slot: &[u8]) -> Cycle {
         *value = get_f32(slot, 148 + index * 4);
     }
 
+    // The schema byte decides what four bytes mean, which is the whole reason it is written. A
+    // schema-1 record's 172..176 is reserved padding, so the read's outcome is *unrecorded* — never
+    // "it succeeded", which is the reading that made a dead driver look healthy.
+    let read_outcome = if slot[5] >= 2 {
+        match get_u32(slot, 172) as i32 {
+            0 => ReadOutcome::Ok,
+            errno => ReadOutcome::Failed(errno),
+        }
+    } else {
+        ReadOutcome::Unrecorded
+    };
+
     let tripped_count = (slot[103] as usize).min(MAX_TRIPPED);
     let mut tripped = Vec::with_capacity(tripped_count);
     for index in 0..tripped_count {
@@ -1037,6 +1110,7 @@ fn decode_cycle(shape: Shape, slot: &[u8]) -> Cycle {
         state_flags: get_u16(slot, 66),
         fault_code: get_u32(slot, 68),
         rhal_result: get_u32(slot, 72) as i32,
+        read: read_outcome,
         state_seq: get_u32(slot, 76),
         state_stamp_ns: get_u64(slot, 80),
         command_stamp_ns: get_u64(slot, 88),

@@ -133,11 +133,16 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
 
     let mut daemon = Daemon::new(store, launcher, RaucSlots);
     daemon.reload();
-    observe_state(&mut daemon);
+    // No recorder yet at start-up: it is opened below, and the first look at §27's `kernel`
+    // condition therefore reports unobservable rather than down. A daemon that reported the kernel
+    // down before it had opened the recording would be announcing a fault it had not looked for.
+    observe_state(&mut daemon, None);
     eprintln!(
         "skynetd: §27 state is `{}`, because {}. §33.4's barrier is `{}` says {}, narrowed by that \
-         state — and the state rests on one of §27's eight conditions, because the other seven are \
-         the kernel's and there is no channel to ask (§33.1).",
+         state — and the state rests on three of §27's eight conditions: the self-test, the \
+         kernel and the RHAL, the last two read off §13's ring rather than off systemd, because a \
+         hung kernel is an active unit. The other five are on §33.1's side of the line and there \
+         is no channel to ask.",
         daemon.operating_state.as_str(),
         // The reason as well as the state. `safe` on its own reads as a robot somebody stopped
         // rather than as a robot nothing has observed, and those send an operator to opposite ends
@@ -280,7 +285,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
 
     if once {
         let now = monotonic(origin);
-        observe_state(&mut daemon);
+        observe_state(&mut daemon, recorder.as_ref());
         // Through the same function the loop uses, and that is the whole of the fix. `once` used to
         // converge directly and record nothing, so a robot operated entirely through it — which
         // §33's own documentation calls "a legitimate way to operate a robot" — had a black box
@@ -479,7 +484,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                 daemon.jitter = jitter_for(now);
                 // §11's loop: pull, then reconcile, then report. Each is the input to the next.
                 pull_desired(&mut daemon, &layout, now);
-                observe_state(&mut daemon);
+                observe_state(&mut daemon, recorder.as_ref());
                 let passes =
                     converge_and_record(&mut daemon, recorder.as_mut(), &layout, now, started_ms);
                 for (action, reason) in passes
@@ -1800,7 +1805,33 @@ fn wall_s() -> Option<f64> {
 /// started — is the pass that would apply a driver swap under it.
 fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>(
     daemon: &mut Daemon<L, S>,
+    recorder: Option<&skynetd_io::blackbox::Recorder>,
 ) {
-    daemon.refresh_operating_state(wall_s());
+    // §27's `kernel` condition, off §13's ring rather than off systemd — a hung kernel is an
+    // active unit, and cycles recorded since the last look is the only evidence that separates the
+    // two. The cursor is advanced whether or not anything was counted, so an interval that saw
+    // nothing is not re-counted into the next one and a robot cannot report a kernel live on the
+    // strength of cycles from ten minutes ago.
+    let (kernel, rhal) = match recorder {
+        // Both off the same interval and the same records, because they are two readings of one
+        // fact and a robot whose kernel is turning while its driver has stopped answering has to
+        // report exactly that pair rather than a plausible-looking one of them.
+        Some(recorder) => (
+            recorder.sighting(daemon.kernel_sequence),
+            recorder.body(daemon.kernel_sequence),
+        ),
+        None => (
+            skynetd_io::blackbox::KernelSighting::Unobservable(
+                "this robot has no black box, so there is no record of a control cycle to read",
+            ),
+            skynetd_io::blackbox::RhalSighting::Unobservable(
+                "this robot has no black box, so there is no record of a body read to read",
+            ),
+        ),
+    };
+    if let Some(recorder) = recorder {
+        daemon.kernel_sequence = recorder.next_sequence();
+    }
+    daemon.refresh_operating_state(wall_s(), &kernel, &rhal);
     daemon.refresh_safe_state();
 }

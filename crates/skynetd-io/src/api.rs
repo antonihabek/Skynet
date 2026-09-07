@@ -514,20 +514,57 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     // Which of the eight conditions anybody looked at. §48.5 made the same admission about POST's
     // own table and it is the same line being drawn: a supervisor claiming a state it derived from
     // defaults would be claiming to have observed a body it is forbidden to touch.
+    //
+    // Two of the eight are observed now. `kernel` joined `post` when §27's condition stopped being
+    // a default — and it is reported as *observed* only when the recording could have held a
+    // control cycle, because silence from a ring with no action channels says nothing about a
+    // kernel. That distinction is the whole reason `KernelSighting` has three variants and §27 has
+    // two: §27 is right to treat both as `down`, and a console showing "kernel: down" about a robot
+    // that has no command path at all would send somebody to restart a kernel that is not the
+    // problem.
+    let sighting = &context.daemon.kernel_sighting;
+    let body = &context.daemon.rhal_sighting;
     let mut observed = Json::obj();
     observed.set("post", Json::Bool(true));
-    for condition in [
-        "kernel",
-        "rhal",
-        "homing",
-        "stop",
-        "guard_hold",
-        "guards",
-        "policy",
-    ] {
+    observed.set("kernel", Json::Bool(sighting.observed()));
+    observed.set("rhal", Json::Bool(body.observed()));
+    for condition in ["homing", "stop", "guard_hold", "guards", "policy"] {
         observed.set(condition, Json::Bool(false));
     }
     out.set("observed", observed);
+
+    // What was seen, in a sentence, beside the boolean. §32.2's rule about the on-robot console is
+    // that it must never show a value it did not receive; this is the value.
+    let mut kernel = Json::obj();
+    kernel.set("state", Json::from(sighting.state().as_str()));
+    kernel.set("observed", Json::Bool(sighting.observed()));
+    kernel.set("detail", Json::Str(sighting.detail()));
+    kernel.set(
+        "source",
+        Json::from(
+            "§13's ring: a turning control loop records a cycle every pass. Not systemd — a hung \
+             kernel is an active unit, and `ActiveState` cannot tell the two apart.",
+        ),
+    );
+    out.set("kernel", kernel);
+
+    // The RHAL beside it, off the same records and the same interval. Two readings of one fact:
+    // a robot whose kernel is turning while its driver has stopped answering has to be able to
+    // report exactly that, and a page that fetched them separately could show a pair that was
+    // never true at any instant.
+    let mut rhal = Json::obj();
+    rhal.set("state", Json::from(body.state().as_str()));
+    rhal.set("observed", Json::Bool(body.observed()));
+    rhal.set("detail", Json::Str(body.detail()));
+    rhal.set(
+        "source",
+        Json::from(
+            "the newest control cycle in §13's ring. §27's `rhal` is a state, so the last \
+             observation decides it — and §24's `RHAL_FAULT` is deliberately not a loss: a \
+             faulted drive still answers reads.",
+        ),
+    );
+    out.set("rhal", rhal);
 
     // §49.1's channel, on the route that reports the state whose transitions demand it. Not a
     // route of its own: a warning channel is not a subsystem an operator inspects on its own, it is
@@ -558,12 +595,14 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     out.set(
         "partial",
         Json::Str(
-            "one of §27's eight conditions was observed here: the self-test. §33.1 keeps skynetd \
-             from the actuator path, so the kernel, the RHAL, the guard set, the stop and the \
-             homing state are not this process's to read — and an unobserved condition is taken \
-             at the least capable value it could have, never at a hopeful one. So this answer is \
-             at least as pessimistic as the robot is, and the reason beside it names the \
-             condition that decided rather than a fault somebody found"
+            "three of §27's eight conditions were observed here: the self-test, the kernel, and \
+             the RHAL — the last two off §13's ring, where a turning control loop records a cycle \
+             every pass and says what its read of the body returned. §33.1 keeps skynetd from \
+             the actuator path, so the guard set, the stop and the homing state are still not \
+             this process's to read — and an unobserved condition is taken at \
+             the least capable value it could have, never at a hopeful one. So this answer is at \
+             least as pessimistic as the robot is, and the reason beside it names the condition \
+             that decided rather than a fault somebody found"
                 .to_string(),
         ),
     );
@@ -775,6 +814,61 @@ fn package_plan<L: Launcher, S: Slots>(
 /// invites a route that has a side effect. Neither check has one: `admit_package` and
 /// `admit_bundle` are pure functions over synthetic documents, nothing is written, nothing is
 /// staged, and running this route a thousand times leaves the robot exactly as it was.
+/// One running non-driver unit, with what systemd says its confinement is (§8.3, §59).
+///
+/// **Which unit**: the first running non-driver package, by id. Which one hardly matters —
+/// `command_line` builds the same confinement for every policy, service and skill — and taking one
+/// rather than all of them is what keeps this a bounded read on a `GET`. What does matter is
+/// *non-driver*: §8.3 makes a driver native by design, so reading one and reporting the absent
+/// confinement as a failure would be this robot failing itself for obeying the specification.
+///
+/// `None` means no sandboxed unit is running, which is a skip and not a pass. A robot running
+/// nothing has not demonstrated its sandbox; it has had no opportunity to.
+fn sandboxed_unit<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+) -> Option<crate::conformance::Confinement> {
+    let units = context.daemon.launcher.observe().ok()?;
+    let mut running: Vec<String> = units
+        .into_iter()
+        .filter(|unit| matches!(unit.state, skynetd::actual::UnitState::Running))
+        .map(|unit| unit.id)
+        .collect();
+    running.sort();
+
+    for id in running {
+        // The kind comes from the installed manifest, the same place the reconciler reads it. A
+        // kind this edition does not recognise is skipped rather than assumed: guessing would put
+        // a driver under a policy's expectations or the reverse, and both directions are wrong.
+        let Some(kind) = PackageId::parse(&id)
+            .ok()
+            .and_then(|package| context.daemon.store.active_digest(&package))
+            .and_then(|digest| context.daemon.store.manifest(&digest).ok())
+            .and_then(|manifest| {
+                manifest
+                    .get_present("kind")
+                    .and_then(Json::as_str)
+                    .and_then(skynetd::desired::PackageKind::parse)
+            })
+        else {
+            continue;
+        };
+        if kind == skynetd::desired::PackageKind::Driver {
+            continue;
+        }
+        let observed = context
+            .daemon
+            .launcher
+            .confinement(&id)
+            .map_err(|error| error.detail);
+        return Some(crate::conformance::Confinement {
+            package: id,
+            kind,
+            observed,
+        });
+    }
+    None
+}
+
 fn conformance<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let layout = context.daemon.store.layout().clone();
     let body = crate::embodiment::load(&layout);
@@ -791,7 +885,19 @@ fn conformance<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
         .into_iter()
         .map(|(_package, token)| token)
         .collect();
-    let run = crate::conformance::run(&capacity, &body, &limits, &grants, &at);
+    // §15's `safety.policy.isolation`, and the one input to this run that is I/O. It is read here
+    // rather than inside `run` for the reason every other input is: `run` is a function over facts
+    // about the machine, and a conformance runner that shelled out mid-check would be one nobody
+    // could test without a systemd.
+    let isolation = sandboxed_unit(context);
+    let run = crate::conformance::run(
+        &capacity,
+        &body,
+        &limits,
+        &grants,
+        isolation.as_ref(),
+        &at,
+    );
     crate::conformance::to_json(
         &run,
         body.known().is_some_and(|known| known.descriptor.simulator),

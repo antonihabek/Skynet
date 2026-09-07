@@ -189,6 +189,38 @@ export interface EmbodimentSensor {
    * declaration into a measurement.
    */
   latency_ms?: number
+  /**
+   * Whether this stream reports **person distance** to the `proximity` guard (§5, §7.1).
+   *
+   * The seventh input to `resolveLimits` and the last one with no path. `available.imu` and
+   * `available.legged` are read off the descriptor — a sensor whose modality is `imu`, a base
+   * that is `legged` — and there is no equivalent read for a person detector, because §5's nine
+   * modalities describe what a sensor *produces* and detection is what somebody does with it.
+   * A camera is not a person detector; a camera plus a model somebody validated is. So the
+   * declaration cannot be inferred from a modality and has to be made.
+   *
+   * It is made **per sensor and by the vendor**, because only the party that built the sensing
+   * pipeline knows whether "a depth stream exists" means "a person in it is measured". Any sensor
+   * declaring `true` is enough for the body to have one — the question `hasPeopleDetection` asks
+   * is about the robot, and one detector answers it.
+   *
+   * Three states, and the third is why this is optional rather than defaulted:
+   *
+   * | | |
+   * |---|---|
+   * | absent | **undeclared** — nobody considered it. The guard reports unavailable (§7.2) |
+   * | `false` | **declared absent** — considered, and this stream does not do it. Same guard verdict |
+   * | `true` | this stream reports person distance |
+   *
+   * The first two read identically downstream and differently to a person, which is the whole
+   * reason `false` is worth writing: a descriptor full of `false` is a vendor who answered the
+   * question, and one with nothing is a vendor who has not been asked it yet.
+   *
+   * This needs no governance process, which is what unblocked it. §30 leaves *role vocabulary
+   * governance* open and §5.1's roles are a closed set somebody has to extend; this is a boolean
+   * on a sensor. There is nothing to version, and no existing descriptor breaks against it.
+   */
+  detects_people?: boolean
 }
 
 export interface EmbodimentDescriptor {
@@ -565,6 +597,36 @@ export function validateFrames(graph: FrameGraph): FrameFault | null {
  * §44.5 already has the guard report unavailable naming the frame it wanted. "Complete" here means
  * every name the graph uses resolves, not that the graph covers the body.
  */
+/**
+ * Does this body declare something that reports person distance? (§5, §7.1's `proximity`.)
+ *
+ * The derivation `resolveLimits`'s seventh `available` input has been waiting for. Its two
+ * neighbours are read the same way — `available.imu` is a sensor whose modality is `imu`,
+ * `available.legged` is a base that is `legged` — and this one could not be, because §5's
+ * modalities say what a sensor produces and detection is what somebody does with the output.
+ *
+ * **Any one sensor is enough.** The question is about the robot, not about a stream, so a body
+ * with a head camera that detects people and four that do not has a person detector. There is no
+ * quorum here and no "the best of them", because two detectors do not make a claim stronger and
+ * one that stopped working does not make it weaker — that is what the bench and field suites are
+ * for.
+ *
+ * **A declaration is honoured, and not checked against the modality.** §5 puts the reason on the
+ * field itself: only the vendor knows whether their depth stream is one a person is measured in.
+ * Filtering by modality here would be this function overruling the party that built the pipeline,
+ * on the strength of a vocabulary that describes something else.
+ *
+ * **What this does not establish** is that the guard will ever see a number. `proximity` acts on
+ * `cycle.nearest_person_m`, and a declaration says a stream exists rather than that anything is
+ * delivering it — the same gap `available.imu` has always had and one step wider, because no
+ * producer on this edition fills that field at all. A guard listed *active* that never trips reads
+ * as protection to anybody looking at the list, so §80 carries the question of whether that state
+ * deserves a name of its own.
+ */
+export function hasPeopleDetection(descriptor: EmbodimentDescriptor): boolean {
+  return descriptor.sensors.some(sensor => sensor.detects_people === true)
+}
+
 export function validateFrameBindings(
   graph: FrameGraph,
   joints: readonly string[],

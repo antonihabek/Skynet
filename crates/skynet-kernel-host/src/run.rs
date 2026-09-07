@@ -94,8 +94,9 @@ pub struct Turn {
     pub decision: Decision,
     /// What the ring had.
     pub reading: Reading,
-    /// Whether the driver's state read failed, and what it said.
-    pub read_error: Option<String>,
+    /// Whether the driver's state read failed, with the code the record keeps and the sentence a
+    /// person reads.
+    pub read_error: Option<crate::driver::ReadFailure>,
     /// Whether an emergency stop was demanded and the body has none.
     pub stop_unavailable: bool,
 }
@@ -398,6 +399,7 @@ impl<'a> Host<'a> {
             posted.as_ref(),
             &decision,
             rhal_result,
+            read_error.as_ref().map_or(0, |failure| failure.code),
         );
         if cycle.intervened() {
             self.summary.interventions += 1;
