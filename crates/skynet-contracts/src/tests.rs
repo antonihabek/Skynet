@@ -74,6 +74,8 @@ fn body() -> EmbodimentDescriptor {
             fps: Some(30.0),
             frame: Some("right_arm.tool0".to_string()),
             latency_ms: Some(28.0),
+            // Undeclared, which is what a descriptor written before §5 carried the field says.
+            detects_people: None,
         }],
         control: ControlProfile {
             modes: vec!["position".to_string(), "torque".to_string()],

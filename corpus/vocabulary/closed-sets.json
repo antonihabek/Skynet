@@ -585,6 +585,14 @@
         "set": "bundle_checks"
       },
       "expected": "[\"match\",\"short\",\"long\",\"digest_mismatch\"]"
+    },
+    {
+      "id": "frame_refusal_codes",
+      "note": "Everything a frame pool can refuse, in the order a reader meets them: the two that say the handle names nothing here, the two that say the loan is not the reader’s to take, and the one that is not a refusal of the reader at all — `pool_exhausted` is capture being told it may not stall.",
+      "input": {
+        "set": "frame_refusal_codes"
+      },
+      "expected": "[\"unknown_stream\",\"unknown_slot\",\"stale_handle\",\"already_acquired\",\"double_release\",\"pool_exhausted\"]"
     }
   ]
 }

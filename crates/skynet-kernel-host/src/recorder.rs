@@ -251,6 +251,13 @@ impl Recorder {
             state_flags: cycle.state_flags,
             fault_code: cycle.fault_code,
             rhal_result: cycle.rhal_result,
+            // `Unrecorded` cannot be written: a record this build produces always says what the
+            // read returned, and encoding "nothing is known" as a zero would put a schema-1 fact
+            // in a schema-2 record. It is only ever the answer a *decoder* gives.
+            read_result: match cycle.read {
+                skynet_blackbox::record::ReadOutcome::Failed(code) => code,
+                _ => 0,
+            },
             state_seq: cycle.state_seq,
             state_stamp_ns: cycle.state_stamp_ns,
             command_stamp_ns: cycle.command_stamp_ns,

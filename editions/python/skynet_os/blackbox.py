@@ -57,6 +57,7 @@ __all__ = [
     "CYCLE_FIXED",
     "EVENT_CODES",
     "FORMAT_VERSION",
+    "RECORD_SCHEMA",
     "GAP_REASONS",
     "GUARDS",
     "KINDS",
@@ -287,7 +288,7 @@ def encode_record(
     slot = _Cursor(record_size(shape))
     kind = entry.get("kind")
     slot.u8(4, KINDS[kind])
-    slot.u8(5, 1)
+    slot.u8(5, RECORD_SCHEMA)
     slot.u64(8, sequence)
     slot.u64(16, mono_ns)
 
@@ -353,6 +354,9 @@ def _encode_cycle(shape: dict[str, int], slot: _Cursor, cycle: dict[str, Any]) -
         slot.f32(120 + index * 4, value)
     for index, value in enumerate(_f_list(cycle.get("base_twist"))):
         slot.f32(148 + index * 4, value)
+    # 172..176 was reserved padding, which is why this landed without moving a byte or bumping the
+    # ring's format. The schema byte separates "reserved zero" from "the read succeeded".
+    slot.i32(172, int(cycle.get("read_result") or 0))
 
     at = _cycle_offsets(shape)
     for index, value in enumerate(desired):
@@ -417,6 +421,20 @@ CHANNEL_NAME: Final = 48
 #: had died: it recorded the survivors and said nothing about the rest, so a recording of a robot
 #: with two dead cameras read as a recording of a robot with one camera.
 FORMAT_VERSION: Final = 2
+
+#: The per-record schema version this edition writes.
+#:
+#: Distinct from :data:`FORMAT_VERSION`, which is the **ring header's** and refuses a whole
+#: recording whose layout it does not know. This one is per slot, for the reason the encoder has
+#: always given — a ring outlives a daemon upgrade and a reader must be able to tell which layout a
+#: given slot is in — and until 2026-09-07 nothing read it, so it said ``1`` while the frame record
+#: had already grown a field.
+#:
+#: **2** puts ``read_state``'s outcome on the cycle record, in four bytes (172..176) that were
+#: reserved padding, so nothing moved and ``FORMAT_VERSION`` did not change. What did change is
+#: what a zero there means: in a schema-1 record those bytes are padding and the read's outcome is
+#: *unrecorded*; in a schema-2 record a zero means the driver answered.
+RECORD_SCHEMA: Final = 2
 
 #: ``worst_skew_us`` when the skew is **not measurable**.
 #:

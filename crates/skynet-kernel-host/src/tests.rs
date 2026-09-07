@@ -622,6 +622,24 @@ fn a_failed_read_still_produces_a_record() {
     assert_eq!(turn.cycle.tick, 1, "the cycle happened and is numbered");
     assert_eq!(host.summary().read_failures, 1);
     assert_eq!(host.summary().cycles, 1);
+
+    // §24, and the reason the record needed a field. Until 2026-09-07 this cycle was encoded with
+    // zeroed flags, a zero fault code, a zero sequence and the previous cycle's joint positions —
+    // every one of them a legal value on a healthy robot — so a recording of a driver that had
+    // stopped answering was indistinguishable from a recording of one that had not. The counters
+    // above knew, and they live in this process's memory and die with it; the black box outlives
+    // the robot and is what an investigator has.
+    assert_eq!(
+        turn.cycle.read,
+        skynet_blackbox::record::ReadOutcome::Failed(-110),
+        "the record has to carry what the read returned, not only what the write did"
+    );
+    assert!(!turn.cycle.read.measured());
+    assert_eq!(
+        turn.read_error.as_ref().map(|failure| failure.code),
+        Some(-110),
+        "and the code an operator is shown is the code the recording keeps"
+    );
 }
 
 /// A body with no emergency stop cannot perform Cat 0, and the loop reports it rather than counting
@@ -737,6 +755,7 @@ fn an_unmeasured_separation_is_nan_and_not_zero() {
         &observed(&zeros),
         None,
         &decision,
+        0,
         0,
     );
 

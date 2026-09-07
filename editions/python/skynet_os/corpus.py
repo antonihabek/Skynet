@@ -49,6 +49,7 @@ from . import identity as identity_module
 from . import intent as intent_module
 from . import kinematics as kinematics_module
 from . import live as live_module
+from . import media as media_module
 from . import observation as observation_module
 from . import opstate as opstate_module
 from . import ota as ota_module
@@ -392,6 +393,16 @@ def _observation(label: str, case_input: dict[str, Any]) -> Any:
     raise Unimplemented("observation", label)
 
 
+def _embodiment(_label: str, case_input: dict[str, Any]) -> Any:
+    """§5's `detects_people`, off a whole descriptor because the parse is half of what is pinned."""
+    return embodiment_module.detection_to_json(case_input)
+
+
+def _media(_label: str, case_input: dict[str, Any]) -> Any:
+    """§47.6's scripts. The first family here with state, so a case is a sequence of operations."""
+    return media_module.script_to_json(case_input)
+
+
 def _limits(_label: str, case_input: dict[str, Any]) -> Any:
     return safety_module.limits_to_json(case_input)
 
@@ -493,9 +504,11 @@ HANDLERS: dict[str, Handler] = {
     "checkin": _checkin,
     "cycle": _cycle,
     "digest": _digest,
+    "embodiment": _embodiment,
     "fuzz": _fuzz,
     "limits": _limits,
     "live": _live,
+    "media": _media,
     "observation": _observation,
     "opstate": _opstate,
     "ota": _ota,

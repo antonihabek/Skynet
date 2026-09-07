@@ -212,6 +212,10 @@ pub fn records(input: &Json) -> Result<String, String> {
                 policy: u32_of(entry, "policy")? as u16,
                 state_flags: u32_of(entry, "state_flags")? as u16,
                 fault_code: u32_of(entry, "fault_code")?,
+                read_result: entry
+                    .get("read_result")
+                    .and_then(Json::as_f64)
+                    .unwrap_or(0.0) as i32,
                 rhal_result: entry
                     .get("rhal_result")
                     .and_then(Json::as_f64)

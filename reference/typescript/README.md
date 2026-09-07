@@ -39,6 +39,7 @@ against the implementation, is worth more than a comment block — and it is wha
 | `semver.ts` | Version parsing, ordering, and range satisfaction |
 | `skill.ts` | §54: preconditions, success judged by the OS, the timeout, and composition |
 | `cell.ts` | §55.2: the cell descriptor, its `env.*` facts and its workspace layer |
+| `media.ts` | §47.6: the frame pool, the loan, and which released slot a publish takes |
 
 `conformance.ts`, `package.ts`, `readiness.ts`, `digest.ts`, `canonical.ts`, `predicate.ts` and
 `semver.ts` are the Hub's `lib/skynet/os/*.ts`, changed only in their import paths. `blackbox.ts` and `kinematics.ts` never
@@ -52,6 +53,15 @@ tiers; it does not compute where an arm is, and it holds no `frames` to compute 
 divergence is deliberate. It is recorded rather than hidden because the sentence above it was
 false for two sessions, and a stale claim of identity is worse than an admitted difference: it is
 the reason nobody re-checks.
+
+**`media.ts` came the other way too and then kept going**, which makes it the first module to be
+returned rather than adopted. §47.6 was specified on 2026-09-06 with its reference in the Hub —
+`lib/skynet/os/media.ts`, six unit tests — and that was the wrong repository for it. The test
+`tools/check-contract-mirrors.mjs` applies to its list is *both sides compute this and neither is
+authoritative*, and nothing on the Hub owns a camera, publishes a frame or takes a loan on one. So
+the Hub's copy was a module nothing imported, which that file's own header calls the mistake the
+list exists to avoid. It is reference-only now, like `cell.ts` and `blackbox.ts`, and the Hub keeps
+no copy; the corpus holds the three editions to it instead of six tests holding one.
 
 **`predicate.ts` and `semver.ts` came the other way**, and they are the first two that did. They
 were the Hub's — `lib/skynet/compatibility/predicate.ts` and `lib/skynet/semver.ts`, written for

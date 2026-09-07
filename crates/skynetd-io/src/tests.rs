@@ -20,6 +20,7 @@ use skynetd::desired::PackageKind;
 use skynetd::reconcile::SafeState;
 
 use crate::api::{self, Context};
+use crate::blackbox;
 use crate::auth::{requirement, Credential, Credentials, Role};
 use crate::http;
 use crate::launch::{self, CpuError, Cpus, Limits, RecordingLauncher, SystemdLauncher, Unit};
@@ -724,6 +725,122 @@ fn every_non_driver_kind_carries_the_same_confinement() {
     assert!(launch::confinement_properties(PackageKind::Driver).is_empty());
 }
 
+/// What systemd printed, parsed. Blank lines and lines without `=` are not properties.
+#[test]
+fn a_property_block_parses_to_pairs() {
+    let text = "NoNewPrivileges=yes\nCapabilityBoundingSet=\nAllowedCPUs=0-3\n\nrubbish\n";
+    let parsed = launch::parse_properties(text);
+    assert_eq!(
+        parsed,
+        vec![
+            ("NoNewPrivileges".to_string(), "yes".to_string()),
+            // The empty value survives as an empty value rather than being dropped, which is the
+            // whole point of the directive it belongs to.
+            ("CapabilityBoundingSet".to_string(), String::new()),
+            ("AllowedCPUs".to_string(), "0-3".to_string()),
+        ]
+    );
+}
+
+/// A unit that landed everything §8.3 asks of a policy.
+#[test]
+fn a_fully_confined_unit_has_no_shortfall() {
+    let observed: Vec<(String, String)> = launch::confinement_properties(PackageKind::Policy)
+        .iter()
+        .map(|line| {
+            let (key, value) = line.split_once('=').expect("every directive is Key=Value");
+            (key.to_string(), value.to_string())
+        })
+        .collect();
+    assert!(launch::confinement_shortfall(PackageKind::Policy, &observed).is_empty());
+    // A driver asks for none, so it cannot fall short — §8.3 makes it native by design, and a
+    // driver reported as failing confinement would be this robot failing itself for obeying the
+    // specification.
+    assert!(launch::confinement_shortfall(PackageKind::Driver, &observed).is_empty());
+}
+
+/// The comparison that must be line-exact, and the reason it must be.
+///
+/// A unit holding `CapabilityBoundingSet=cap_sys_admin` has the key the launcher asked for and
+/// none of the property. A shortfall computed on keys would report this unit as fully confined,
+/// which is the single most misleading result this check could produce.
+#[test]
+fn a_capability_set_that_is_not_empty_is_a_shortfall() {
+    let mut observed: Vec<(String, String)> = launch::confinement_properties(PackageKind::Policy)
+        .iter()
+        .map(|line| {
+            let (key, value) = line.split_once('=').expect("Key=Value");
+            (key.to_string(), value.to_string())
+        })
+        .collect();
+    for entry in &mut observed {
+        if entry.0 == "CapabilityBoundingSet" {
+            entry.1 = "cap_sys_admin".to_string();
+        }
+    }
+    assert_eq!(
+        launch::confinement_shortfall(PackageKind::Policy, &observed),
+        vec!["CapabilityBoundingSet=".to_string()]
+    );
+}
+
+/// A directive systemd did not report counts as not landed.
+///
+/// Fail-closed, and the direction matters more here than almost anywhere: an unreported directive
+/// is one this code cannot show was applied, and a sandbox nobody can read is not a sandbox
+/// anybody should certify.
+#[test]
+fn an_unreported_directive_is_a_shortfall() {
+    let shortfall = launch::confinement_shortfall(PackageKind::Policy, &[]);
+    assert_eq!(
+        shortfall.len(),
+        launch::confinement_properties(PackageKind::Policy).len(),
+        "a unit systemd said nothing about has landed nothing this code can show"
+    );
+}
+
+/// The query and the comparison are one list, so a new directive cannot be half-added.
+///
+/// Adding a directive to `confinement_properties` and forgetting the `systemctl show -p` list
+/// would make it come back unreported, which the shortfall counts as not landed — a robot failing
+/// its own isolation test over a forgotten string, naming a directive that was in fact applied.
+#[test]
+fn every_directive_asked_for_is_a_directive_asked_about() {
+    let names = launch::confinement_property_names();
+    for kind in [
+        PackageKind::Policy,
+        PackageKind::Service,
+        PackageKind::Skill,
+        PackageKind::Driver,
+    ] {
+        for property in launch::confinement_properties(kind) {
+            let key = property.split('=').next().expect("Key=Value").to_string();
+            assert!(
+                names.contains(&key),
+                "{key} is asked of a unit and never asked about"
+            );
+        }
+    }
+    // And nothing else: a name in the query that no kind asks for would be a property read and
+    // never compared, which is cost without an assertion.
+    assert_eq!(
+        names.len(),
+        launch::confinement_properties(PackageKind::Policy).len()
+    );
+}
+
+/// A launcher that records rather than launching has nothing to read, and says so.
+///
+/// The alternative — reporting an empty confinement — would make `--dry-run` fail a safety
+/// conformance test on a machine it never touched.
+#[test]
+fn a_recording_launcher_refuses_to_describe_a_sandbox() {
+    let launcher = launch::RecordingLauncher::new();
+    let error = launch::Launcher::confinement(&launcher, "openrobot/holder")
+        .expect_err("nothing was launched");
+    assert!(error.detail.contains("records rather than launching"));
+}
+
 /// The restraint, pinned: none of these may appear without the design that makes them safe —
 /// a path-dependent directive against an unmeasured store layout, a device policy with no
 /// declared device set (§40.3), or a filter with no measured allow-list (§64).
@@ -1307,7 +1424,11 @@ fn console_fixture() {
     // the panel for a robot mid-boot rather than for the one the rest of this fixture describes,
     // which is the drift the fixture exists to prevent: the answers come from `api::handle` so
     // that the page is rendered against a robot that exists.
-    fixture.daemon.refresh_operating_state(None);
+    fixture.daemon.refresh_operating_state(
+        None,
+        &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
+        &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
+    );
     let vendor = driver_key(31);
     write_trust(&fixture, "bench-robotics", &public_hex(&vendor));
 
@@ -2216,6 +2337,60 @@ fn a_half_written_separation_block_does_not_acquire_a_default() {
     );
 }
 
+/// `GET /state` reports what was seen of the kernel, and whether anybody looked.
+///
+/// Two of §27's eight conditions are observed now. The one that matters on this route is the
+/// distinction §27 itself does not draw: a robot whose ring cannot hold a cycle and a robot whose
+/// kernel has stopped are both `down` to the machine and are not the same fact to a person. A
+/// console that showed "kernel: down" about the first would send somebody to restart a kernel that
+/// is not the problem.
+#[test]
+fn the_state_route_says_whether_the_kernel_was_observed_at_all() {
+    let mut fixture = Fixture::new("state-kernel");
+    fixture.provision();
+    let (status, body) = fixture.request("GET", "/state", Some("observer-token"), "");
+    assert_eq!(status, 200);
+
+    let observed = body.get("observed").cloned().expect("the condition table");
+    assert_eq!(observed.get("post"), Some(&Json::Bool(true)));
+    // This fixture's daemon has never run a pass, so nothing has looked.
+    assert_eq!(observed.get("kernel"), Some(&Json::Bool(false)));
+    assert_eq!(observed.get("rhal"), Some(&Json::Bool(false)));
+    for condition in ["homing", "stop", "guard_hold", "guards", "policy"] {
+        assert_eq!(
+            observed.get(condition),
+            Some(&Json::Bool(false)),
+            "{condition} is still §33.1's side of the line"
+        );
+    }
+
+    let kernel = body.get("kernel").cloned().expect("the reading beside it");
+    assert_eq!(kernel.get("state"), Some(&Json::from("down")));
+    assert_eq!(kernel.get("observed"), Some(&Json::Bool(false)));
+    // The source, because §32.2 says a console must never show a value it did not receive — and
+    // the *reason* this comes off the ring is the load-bearing half of the design.
+    let source = kernel
+        .get("source")
+        .and_then(Json::as_str)
+        .unwrap_or_default();
+    assert!(source.contains("§13's ring"));
+    assert!(
+        source.contains("hung kernel is an active unit"),
+        "the reason systemd is not the source has to travel with the reading"
+    );
+
+    // And the RHAL beside it, off the same records. A robot whose kernel is turning while its
+    // driver has stopped answering has to be able to report exactly that pair.
+    let rhal = body.get("rhal").cloned().expect("the RHAL reading");
+    assert_eq!(rhal.get("state"), Some(&Json::from("lost")));
+    assert_eq!(rhal.get("observed"), Some(&Json::Bool(false)));
+    assert!(rhal
+        .get("source")
+        .and_then(Json::as_str)
+        .unwrap_or_default()
+        .contains("faulted drive still answers reads"));
+}
+
 /// §15's runtime tests, over the real router.
 #[test]
 fn the_conformance_route_runs_what_it_can_and_names_what_it_cannot() {
@@ -2238,7 +2413,22 @@ fn the_conformance_route_runs_what_it_can_and_names_what_it_cannot() {
     // The one this edition passes, by running the function its own updater runs. Host-independent:
     // `admit_bundle` reads no file and asks the machine nothing.
     assert_eq!(by_id("ota.safety_gate"), "pass");
+    // Skipped here, and the reason is a property of the fixture rather than of the check: this
+    // route runs against a `RecordingLauncher` with nothing started, so there is no sandboxed unit
+    // to read. The three verdicts the check itself produces are asserted in `conformance`'s own
+    // suite, and the pass is asserted against a real systemd unit in `e2e.sh`.
     assert_eq!(by_id("safety.policy.isolation"), "skipped");
+    let isolation = body
+        .arr_or_empty("results")
+        .iter()
+        .find(|r| r.get("test_id").and_then(Json::as_str) == Some("safety.policy.isolation"))
+        .and_then(|r| r.get("detail").and_then(Json::as_str))
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        isolation.contains("no sandboxed unit is running"),
+        "a skip has to name what is missing: {isolation}"
+    );
 
     // And the one it fails, which is the point of running the suite on yourself — and the only row
     // whose verdict depends on the **host** rather than on the edition. §8.1's memory figure comes
@@ -3776,7 +3966,11 @@ fn status_carries_the_operating_state_and_the_reason_it_is_there() {
         "a daemon that has not observed has not observed a failure either"
     );
 
-    fixture.daemon.refresh_operating_state(None);
+    fixture.daemon.refresh_operating_state(
+        None,
+        &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
+        &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
+    );
     let (_, after) = fixture.request("GET", "/status", None, "");
     assert_eq!(after.get("state").and_then(Json::as_str), Some("safe"));
     assert_eq!(
@@ -3792,7 +3986,11 @@ fn status_carries_the_operating_state_and_the_reason_it_is_there() {
 fn the_state_route_admits_how_little_it_observed() {
     let mut fixture = Fixture::new("state-route");
     fixture.provision();
-    fixture.daemon.refresh_operating_state(None);
+    fixture.daemon.refresh_operating_state(
+        None,
+        &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
+        &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
+    );
     let (status, body) = fixture.request("GET", "/state", Some("observer-token"), "");
     assert_eq!(status, 200);
     assert_eq!(body.get("state").and_then(Json::as_str), Some("safe"));
@@ -4666,6 +4864,159 @@ mod recorder {
     fn open(root: &TempRoot, shape: Shape) -> Recorder {
         let layout = root.layout();
         Recorder::open(&layout, supervisor_meta(&layout), shape, BUDGET).expect("a recorder")
+    }
+
+    /// §27's `kernel` condition, off the records rather than off systemd.
+    ///
+    /// The three answers, in the order a robot meets them: a ring that cannot hold a cycle says
+    /// **nothing** about a kernel, a ring that can and holds none says the loop is not turning, and
+    /// a ring with cycles in it is the only thing that says it is.
+    ///
+    /// Driven through `from_tally` rather than a disk, because only a control loop can put a cycle
+    /// in a ring (§26.2) — which is also the property that makes this evidence worth having:
+    /// `skynetd` is structurally incapable of writing the record it reads here.
+    #[test]
+    fn a_kernel_is_live_only_when_it_recorded_cycles() {
+        use crate::blackbox::KernelSighting;
+        use skynet_blackbox::tally::Tally;
+        use skynet_contracts::opstate::KernelState;
+
+        fn tally(commands: bool, cycles: u64) -> Tally {
+            Tally {
+                commands,
+                cycles,
+                ..Tally::default()
+            }
+        }
+
+        // A ring that could not be read at all. Not a reading, and not a kernel fault.
+        let unread = KernelSighting::from_tally(None);
+        assert!(!unread.observed());
+        assert_eq!(unread.state(), KernelState::Down);
+
+        // Every robot on this edition: no commanding package, so the supervisor's ring has no
+        // action channels. Silence from it is not evidence, and §27 still holds — what changes is
+        // whether a console sends somebody to restart a kernel that is not the problem.
+        let inert = KernelSighting::from_tally(Some(&tally(false, 0)));
+        assert!(!inert.observed(), "no channels means no reading");
+        assert_eq!(inert.state(), KernelState::Down);
+        assert!(inert.detail().contains("no action channels"));
+
+        // A ring a control loop shaped, with nothing in it. Now silence *is* a reading.
+        let quiet = KernelSighting::from_tally(Some(&tally(true, 0)));
+        assert!(quiet.observed(), "this ring could have held a cycle");
+        assert_eq!(quiet.state(), KernelState::Down);
+        assert!(quiet.detail().contains("no control cycle was recorded"));
+
+        // And cycles. The only input in the system that separates a turning kernel from a hung
+        // one: both are an active unit to systemd, which is why this is not read off systemd.
+        let turning = KernelSighting::from_tally(Some(&tally(true, 200)));
+        assert!(turning.observed());
+        assert_eq!(turning.state(), KernelState::Live);
+        assert_eq!(turning, KernelSighting::Turning { cycles: 200 });
+        assert!(turning.detail().contains("200 control cycles"));
+    }
+
+    /// §27's `rhal` condition, mapped off the newest cycle (§24).
+    ///
+    /// Five inputs, three states, and the interesting one is `RHAL_FAULT`: §24 defines it as *"the
+    /// drive has faulted; commands are being ignored"*, which is a fact about the **body**. A
+    /// faulted drive still answers reads, so the kernel has not lost it — and §27's `rhal_lost` is
+    /// the row that says nothing else can be known, which would be false at exactly the moment the
+    /// robot is telling somebody something.
+    #[test]
+    fn the_rhal_state_is_the_newest_cycles_reading() {
+        use crate::blackbox::RhalSighting;
+        use skynet_blackbox::record::ReadOutcome;
+        use skynet_contracts::opstate::RhalState;
+
+        fn cycle(read: ReadOutcome, flags: u16, fault_code: u32) -> skynet_blackbox::Cycle {
+            skynet_blackbox::Cycle {
+                tick: 1,
+                observation: [0; 32],
+                policy: 0,
+                state_flags: flags,
+                fault_code,
+                rhal_result: 0,
+                read,
+                state_seq: 1,
+                state_stamp_ns: 0,
+                command_stamp_ns: 0,
+                command_seq: 0,
+                mode: 0,
+                advisory: false,
+                response: None,
+                tripped: Vec::new(),
+                capability: skynet_blackbox::record::NO_CAPABILITY,
+                nearest_person_m: f32::NAN,
+                base_pose: [f32::NAN; 7],
+                base_twist: [0.0; 6],
+                desired: Vec::new(),
+                command: Vec::new(),
+                mask: Vec::new(),
+                clamped: Vec::new(),
+                position: Vec::new(),
+                velocity: Vec::new(),
+                effort: Vec::new(),
+            }
+        }
+
+        // Nothing read the body at all.
+        assert_eq!(RhalSighting::of(None), RhalSighting::Silent);
+        assert_eq!(RhalSighting::of(None).state(), RhalState::Lost);
+
+        // A good read, nothing wrong.
+        let ok = RhalSighting::of(Some(&cycle(ReadOutcome::Ok, 0, 0)));
+        assert_eq!(ok.state(), RhalState::Present);
+
+        // §24's `RHAL_DEGRADED`: running, but something is wrong.
+        let degraded = RhalSighting::of(Some(&cycle(ReadOutcome::Ok, 1 << 2, 0)));
+        assert_eq!(degraded.state(), RhalState::Degraded);
+
+        // §24's `RHAL_FAULT`. The drive has faulted and the RHAL is fine — the read worked, which
+        // is how anybody knows about the fault at all.
+        let faulted = RhalSighting::of(Some(&cycle(ReadOutcome::Ok, 1 << 1, 0x2A)));
+        assert_eq!(
+            faulted.state(),
+            RhalState::Present,
+            "a faulted drive still answers reads; §27's rhal_lost means nothing can be known"
+        );
+        assert!(
+            faulted.detail().contains("fault code 42"),
+            "and the code travels verbatim (§24): {}",
+            faulted.detail()
+        );
+
+        // The read failed. This is the case §26.4 added a field for, and before it this record was
+        // indistinguishable from the healthy one above.
+        let lost = RhalSighting::of(Some(&cycle(ReadOutcome::Failed(-110), 0, 0)));
+        assert_eq!(lost.state(), RhalState::Lost);
+        assert!(lost.detail().contains("-110"));
+
+        // A recording from before the field existed cannot say, and fails closed.
+        let older = RhalSighting::of(Some(&cycle(ReadOutcome::Unrecorded, 0, 0)));
+        assert_eq!(
+            older.state(),
+            RhalState::Lost,
+            "silence from a schema-1 record is not a good read"
+        );
+    }
+
+    /// The events-only ring a shipping robot actually has, read through the real file.
+    ///
+    /// `from_tally` covers the rule; this covers the path to it, and the case it covers is the one
+    /// every robot is in today.
+    #[test]
+    fn a_supervisors_own_ring_says_nothing_about_a_kernel() {
+        let root = TempRoot::new("kernel-sighting");
+        let recorder = open(&root, events_only());
+        let sighting = recorder.sighting(0);
+        assert!(!sighting.observed());
+        assert_eq!(
+            sighting.state(),
+            skynet_contracts::opstate::KernelState::Down
+        );
+        assert!(sighting.detail().contains("no action channels"));
     }
 
     /// §26.2: the daemon attaches to a recording a control loop created, and takes its shape.
@@ -9552,6 +9903,7 @@ mod wire {
                 policy: 0,
                 state_flags: 0,
                 fault_code: 0,
+                read_result: 0,
                 rhal_result: 0,
                 state_seq: tick as u32,
                 state_stamp_ns: tick * 1_000_000,

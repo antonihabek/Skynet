@@ -12034,3 +12034,355 @@ checks passed, including the ten new unit-property reads.
      (`MemoryMax=67108864`) disagree with strings (`MemoryMax=64M`) in exactly the place a
      substring assertion would hide. Read back what the platform reports, in its units, or
      the check proves the request rather than the result.
+
+## 2026-09-07 (sixty-fourth) — §47.6's pool, and a rule the reference did not implement
+
+The audit that opened this round listed §47.6 as *specified 2026-09-06, awaiting the editions*.
+Filling it in looked like transcription: a TypeScript reference existed on the Hub, six unit
+tests sat beside it, and the Rust, the Python and the corpus were missing. §31.4's third rule —
+*a new case lands in the corpus before the fix lands in any edition* — is what turned it into
+something else.
+
+Ten scripted cases were written and **generated against the unfixed reference**, so the corpus's
+first record of §47.6 was what the reference did rather than what §47.6 said. Three came back
+wrong. §47.6 says `publish` *"reuses the oldest released slot"*; the reference took the
+**lowest-index** slot nobody was holding. Those agree while a pool holds one frame and diverge
+on every publish after that — and all six unit tests published exactly one frame into a
+multi-slot pool, so not one of them could see it.
+
+The cost lands on the reader. A policy holds a frame by calling `latest()` then `acquire()`, with
+no lock across the two — there cannot be one, because §47.4 forbids capture waiting on a reader.
+Capture publishes in between, and under the lowest-index rule that publish lands on the slot
+`latest()` just named: `stale_handle` on nearly every cycle, a four-slot pool absorbing none of
+the jitter it was declared for, and a symptom that reads as a slow policy. §47.4 already has a
+one-slot latest-wins channel; a §47.6 that collapses into one is a duplicate of the section above
+it rather than a weaker version of itself.
+
+The rule is now in §47.6a: among unacquired slots an **empty** slot wins outright, otherwise the
+**lowest sequence**, ties to the lower index — oldest by the frame, never by the slot's position,
+because the two stop agreeing the first time a reader holds a frame and lets it go.
+
+Three editions: `reference/typescript/media.ts`, `crates/skynet-contracts/src/media.rs`,
+`editions/python/skynet_os/media.py`. Both ports reproduced all ten cases on their first run,
+which proves nothing on its own — so the rule was reverted in each and the corpus re-run:
+**1,124 passed, 3 failed** in both, exactly the three cases written for it.
+
+The module also moved repositories. It was the Hub's, and `check-contract-mirrors.mjs` applies
+one test to that list — *both sides compute this and neither is authoritative*. Nothing on the
+Hub owns a camera, so the Hub's copy was a module nothing imported. `media` is reference-only
+now, like `cell` and `blackbox`; the orphan and its six tests were deleted there.
+
+`corpus/media/pool.json` is the first family in the corpus with **state**, so a case is a script:
+a capacity, a list of operations, and every outcome in order. Nothing in it exposes the pool's
+slots — the handles carry the slot they were issued against, which pins the selection rule
+without any edition having to agree about how a slot is stored.
+
+Four stale numbers turned up before anything was built, from the checks that exist for it: §73
+said 78 corpus files and 1,116 cases, and `README.md` said **1,055 cases and 77 files** — two
+sessions stale, in the table a vendor reads first.
+
+### Numbers
+
+`cargo test --workspace` — **1,641 passed** (1,631 before), 0 failed. Rust corpus **1,127 of
+1,127**; Python corpus **1,127 passed**. Hub: `npx vitest run` — 1,853 passed, 81 files;
+`npm run typecheck` clean. Every check tool green: mirrors, contract mirrors, golden path,
+scale (§73 matches the tree), edition report.
+
+### Findings, restated
+
+1-114 as before.
+
+115. **Six tests can pin a class and never once exercise its only decision.** Every one of
+     §47.6's unit tests published a single frame into a multi-slot pool, so the rule deciding
+     *which* slot a publish takes was unreached by all of them while each looked like a test of
+     the pool. The corpus caught it in the first case that published twice — and only because
+     the case was generated before the fix, which is what §31.4's third rule buys.
+
+116. **A degenerate implementation of a section is not a weak version of it, it is a copy of the
+     section above.** The lowest-index rule turns §47.6's pool into §47.4's latest-wins slot.
+     The failure is not "the pool is smaller than declared"; it is that a section deferring to
+     another one now has nothing to defer to.
+
+117. **The mirror list's test has a direction, and a module can fail it from the Hub's side.**
+     `media` was written where nothing consumes it. The list's own header names that mistake and
+     the check could not catch it, because a module that is not on the list is not compared —
+     absence from a mirror list is invisible to the mirror check by construction.
+
+## 2026-09-07 (sixty-fifth) — §5's `detects_people`, and the guard it turned on
+
+`resolveLimits` takes seven `available` inputs and the seventh had no path: §5's nine modalities
+say what a sensor **produces**, and detection is what somebody does with the output, so no body
+could declare a person detector and `skynetd` wrote `people_detection: false` on every robot.
+§80 had carried it for four sessions with that diagnosis and the specified close.
+
+Built as specified: `detects_people?: boolean` on the sensor, declared per sensor by the vendor,
+with `hasPeopleDetection` deriving the input. No vocabulary, so no governance — which is what
+unblocked it while §30's role vocabulary is still open. Three editions, nine cases in
+`corpus/embodiment/detection.json`, and the daemon derives it through the contract rather than
+three lines of its own so a Hub reading the same descriptor cannot answer differently.
+
+Absent and `false` are one fact downstream and two in the descriptor. The corpus header says so
+rather than implying a coverage it has not got: both make the guard unavailable, so no expected
+value can separate them and an edition that folded them together would pass every case.
+
+What the nine cases do pin is how each edition reads the **value**, because each does it by a
+different mechanism with its own way to be wrong — `=== true`, `as_bool()`, `is True`. Python's
+is the sharpest (`1 == True` is true, `1 is True` is not), so there is a case for the number one
+and the mutation run catches every substitution: `== True` fails one case, truthiness fails two,
+and Rust's `.is_some()` fails the declared-absent one.
+
+Two cases pin that the modality is **not** consulted, including a force-torque sensor declaring
+person distance. That looks wrong and is right: the alternative is a list of modalities a
+detector may live behind, which is a vocabulary needing the governance this design avoided, and
+whose wrong entry would disable a guard on a robot whose vendor had declared one.
+
+Then the honest half, which is the finding. `proximity` acts on `cycle.nearest_person_m` and
+**nothing on this edition produces that number**. A body that declares a detector now moves the
+guard out of *unavailable* and into *active*, where it will never trip — and *active* is what
+every surface renders as protection. §7.2's partition has no state for "every input resolves and
+the reading is not coming", and adding one changes a partition the console, the check-in, the
+device page and `skynet limits` all draw. So §80 gained a row rather than an answer, and
+`skynetd`'s limits document now names `cycle.nearest_person_m` in `unmeasured` on every robot.
+
+### Numbers
+
+`cargo test --workspace` — **1,645 passed** (1,641 before), 0 failed. Rust corpus **1,136 of
+1,136**; Python corpus **1,136 passed**. Hub: 1,853 passed, typecheck clean. Every check tool
+green.
+
+### Findings, restated
+
+1-117 as before.
+
+118. **Closing a hole can open a worse one one layer down, and the direction matters.** Before
+     this, `proximity` was unavailable and named what it wanted — honest, and useless. After it,
+     a declaring body gets a guard listed *active* that cannot trip — useful-looking, and a lie.
+     The first failure sends somebody to buy a sensor; the second tells a room full of people
+     they are being watched for.
+
+119. **A vocabulary avoided is a governance process avoided, and that is worth paying for.** The
+     obvious hardening — only honour `detects_people` on modalities a person could plausibly be
+     measured in — costs a list of modalities, which is a closed set, which needs the process §30
+     leaves open. And its wrong entry fails in the disabling direction on a robot whose vendor
+     declared a detector. A boolean the vendor writes has no such entry to get wrong.
+
+120. **Three editions is three ways to be wrong about one boolean.** `=== true`, `as_bool()` and
+     `is True` are the same rule and not the same code, and the Python one is a genuine trap:
+     `1 == True`. The case for the number one exists so that the paragraph describing the trap is
+     a check rather than a claim.
+
+## 2026-09-07 (sixty-sixth) — `safety.policy.isolation`, and the difference between argv and a unit
+
+Round eleven left this half-delivered: §59 built the confinement, `e2e.sh` read ten properties
+off a real unit, and the conformance runner still said **skipped**. The gap was not effort. §59's
+suite asserts what `command_line` builds, which proves what was *requested*, and a directive
+systemd rejected, dropped or does not support on this kernel produces exactly the same argv. It
+is also the wrong kind of result: a check whose subject is this repository's own constant is an
+**edition** property, which is what `safety.kernel.parity` two lines above is skipped for being.
+
+`Launcher::confinement(id)` runs `systemctl show <unit> -p <directives>`; `confinement_shortfall`
+names what did not land. Three decisions, each with an obvious wrong alternative:
+
+* the comparison is the whole `Key=Value` line, because `CapabilityBoundingSet=` is asked for as
+  the **empty** set and a key match would pass `cap_sys_admin`;
+* an unreported directive counts as not landed — a sandbox nobody can read is not one anybody
+  should certify;
+* the `--property=` query is **derived** from `confinement_properties` rather than typed beside
+  it, which removes a bug that was otherwise waiting: a directive added to the launcher and
+  forgotten in the query would fail the robot's own isolation test while naming a directive that
+  was in fact applied.
+
+The route reads the first running **non-driver** unit — §8.3 makes a driver native by design, so
+failing one for its absent confinement would be the robot failing itself for obeying the
+specification. `RecordingLauncher` returns an error rather than an empty list, because an empty
+list would make `--dry-run` fail a safety test on a machine it never touched. `conformance::run`
+stays a function over facts; the I/O is in `api.rs`.
+
+**What this session could not watch.** This container has `systemd-run` installed, no
+`/run/systemd/system`, and `process_api` as PID 1 — `systemctl --user is-system-running` answers
+`offline`. So `e2e.sh` took its no-systemd branch and asserted the **skip**. The pass assertion
+is in the file and runs on a machine with a user systemd; round eleven's had one and this one
+does not. The pass path has not been watched in this session, and reporting otherwise would be
+the exact failure this runner's header exists to name.
+
+### Numbers
+
+`cargo test --workspace` — **1,655 passed** (1,645 before), 0 failed. `cargo clippy --workspace`
+clean. `sh crates/skynetd-io/e2e.sh` — all checks passed.
+
+### Findings, restated
+
+1-120 as before.
+
+121. **A launcher's argv is a request, and a conformance suite that reads it is grading its own
+     homework.** The same seven flags are produced whether systemd honoured them, ignored them,
+     or does not implement them on this kernel. Two rounds separated "the confinement exists"
+     from "the confinement landed", and only the second is a fact about a robot.
+
+122. **A query derived from a constant cannot drift from it; a query typed beside one will.**
+     `--property=` and `confinement_properties` are the same list, and had they been two lists
+     the failure would have been a robot failing itself over a forgotten string while naming a
+     directive that was applied. The fix is one function, not one test.
+
+123. **A fake must refuse, not answer emptily.** `RecordingLauncher` returning no properties
+     would have been read as a unit with no confinement, so `--dry-run` would fail a safety
+     conformance test about a machine it never touched. The honest empty answer is an error
+     carrying its reason.
+
+## 2026-09-07 (sixty-seventh) — the `kernel` condition stops being a default
+
+Round eleven restated this item and said why it had been misstated: nothing outside contract
+tests ever reports `KernelState::Live`, so `refresh_operating_state` derived from POST plus
+defaults and a running `skynetk` would change nothing observable. This is the first half.
+
+The obvious source is systemd, and it is wrong for one reason: **a hung kernel is an active
+unit.** `ActiveState=active` says a process exists, which is what a robot with a wedged control
+loop also has, and §27's most consequential condition cannot rest on the one signal that
+conflates the dangerous case with the healthy one. A turning loop **writes a cycle every pass**
+(§26), so liveness is cycles recorded since the last look and nothing else.
+
+It does not cross §33.1, and two properties are why. It fails closed — cycles seen is `Live`,
+and silence, an unreadable ring and no ring at all are all `Down`, so a wrong answer can hold a
+robot and never release one. And the daemon **cannot forge it**: §26.2 gives the supervisor the
+event channel and the loop the four cycle channels, so `skynetd` is structurally incapable of
+writing the record it reads.
+
+`KernelSighting` has three variants where §27 has two states, because a console needs the
+difference: a ring with no action channels *cannot* hold a cycle, so silence from it says nothing
+about a kernel — which is every robot on this edition — and showing "kernel: down" there would
+send somebody to restart a kernel that is not the problem. `GET /state` reports `observed` per
+condition, plus the reading, its detail and its source.
+
+The cursor is advanced every pass whether or not anything was counted, and is deliberately
+separate from `skills_sequence`: one cursor over one ring would make each consumer eat the
+other's evidence.
+
+It removes **one of seven** blockers, and the log says so rather than implying more. A robot with
+a turning kernel still derives `safe` with `rhal_lost`. What changed is that the next condition
+is a *mapping* rather than a channel: a cycle record already carries `rhal_result`, `state_flags`
+and `fault_code` (§24), so `Present`/`Degraded`/`Lost` is a decision about §24's semantics.
+
+### Numbers
+
+`cargo test --workspace` — **1,658 passed** (1,655 before), 0 failed. clippy clean, e2e green,
+§73 matches the tree. Four stale sentences corrected: the start-up banner, `GET /limits`'
+`partial` note, `warn_for_transition`'s header, and two rows of §73.
+
+### Findings, restated
+
+1-123 as before.
+
+124. **The signal that is one call away is the one that cannot see the failure.** `systemctl` can
+     tell a running kernel from a stopped one and not a turning one from a hung one, and the hung
+     one is the case §27 exists for. The evidence that separates them was already on disk,
+     written for another purpose.
+
+125. **Evidence a process cannot write about itself is worth more than evidence it promises not
+     to.** §26.2 split the channels for a different reason — two writers, one ring — and the
+     side effect is that `skynetd`'s liveness reading is unforgeable by construction rather than
+     by discipline.
+
+126. **A default and a reading are different even when they produce the same answer.** Every
+     robot on this edition reports `kernel: down` before and after this change. Before, because
+     nobody looked; after, because the recording cannot hold a cycle and says so. Only the second
+     tells an operator where not to go.
+
+## 2026-09-07 (sixty-eighth) — the record could not say the read had failed
+
+Round fifteen named the next condition as a *mapping* over `rhal_result`, `state_flags` and
+`fault_code` — "not a channel that does not exist". Reading those fields to write the mapping
+found the channel missing after all, and worse than missing.
+
+On a failed `read_state` the loop builds its observation from defaults: zero flags, zero fault
+code, zero sequence, the loop's own clock as the acquisition stamp §24 says must be an acquisition
+time, and joint arrays copied from buffers still holding the **previous cycle's** positions. Every
+one of those is legal on a healthy robot. So a recording of a driver that had stopped answering
+was byte-comparable with a recording of one that had not, and a replay of it showed a robot
+holding still. `summary.read_failures` knew, and it dies with the process; the black box is what
+outlives the robot.
+
+`read_result` fits at offset 172 — **reserved padding**, so nothing moved and the ring's
+`FORMAT_VERSION` did not change. Which made the question: what does a zero there mean in a
+recording written last week?
+
+The answer was a byte that had never been read. `slot[5]` has carried a per-record schema version
+since the format was written, with a comment saying exactly why — *a ring outlives a daemon
+upgrade and a reader must be able to tell which layout a slot is in* — and nothing read it. It
+said `1` while the frame record had already grown a field, and `README.md` reported "Record format
+2" about it. It says `2` now, the decoder reads it, and a schema-1 record's read outcome is
+`Unrecorded` rather than `Ok`: reading absence as success is the failure the field exists to
+prevent.
+
+`Actuator::sample` now returns a code as well as a sentence. A recording is replayed by somebody
+without this build's error strings, and `-110` is a timeout in any language.
+
+### Numbers
+
+`cargo test --workspace` — **1,659 passed** (1,658 before). Both corpora **1,137 of 1,137**.
+Mutations: the Rust schema byte back to 1 fails 12 records; Python not writing the i32 fails the
+new case. clippy clean, e2e green, §73 matches the tree.
+
+### Findings, restated
+
+1-126 as before.
+
+127. **A record that fills its gaps with legal values is worse than one with a gap in it.** Zero
+     flags, a zero sequence and last cycle's positions are all things a healthy robot produces, so
+     the failure did not look like missing data — it looked like data. The counter that knew was
+     in memory, and memory is not what an investigator has.
+
+128. **A version byte nothing reads is not a version byte.** It had the right comment and the
+     right intention for as long as the format has existed, went stale silently when the frame
+     record grew, and was contradicted by the README. What made it real was needing it: four bytes
+     whose meaning depends on it.
+
+129. **Writing an edition before the reference is the wrong order, and the corpus is still the
+     arbiter.** Rust went first here. What kept §31.4's rule meaningful is that the reference was
+     written independently against the decision rather than transcribed from the Rust — had either
+     guessed a different offset or byte, the corpus would have failed one of them.
+
+## 2026-09-07 (sixty-ninth) — §27's `rhal`, and the flag that is not a loss
+
+The mapping §26.4 cleared the way for. Three of §27's eight conditions are observed now.
+
+`kernel` is an interval question — *cycles since the last look* — and `rhal` is not: §27's `rhal`
+is a **state**, so the **newest** cycle decides it. A driver that missed one read in two hundred is
+not lost; one that has answered nothing for a second is, however many good reads preceded it. Both
+are read from the same records over the same interval, because a robot whose kernel is turning
+while its driver has stopped answering has to report exactly that pair.
+
+Five inputs onto three states, four of them mechanical: no cycle at all, a negative `read_result`,
+and an unrecorded one (schema 1, which fails closed) are `Lost`; `RHAL_DEGRADED` is `Degraded`;
+otherwise `Present`.
+
+The fifth is a decision. **§24's `RHAL_FAULT` is not `Lost`.** It reads as though it should be —
+"the drive has faulted; commands are being ignored" — and §27 states why not about itself:
+`rhal_lost` is the row meaning *nothing else can be known*, first in `derive` because everything
+below it becomes unanswerable. A faulted drive still **answers reads**; that is how anybody knows
+about the fault, since the fault code is in the record because the read succeeded. Mapping it to
+`Lost` would tell an operator the robot cannot be observed at the moment it is telling them
+something, and would discard the code on the way. A fault is `Present` with the vendor's code
+verbatim, and what a fault *does* belongs to §7's guards.
+
+### Numbers
+
+`cargo test --workspace` — **1,660 passed** (1,659 before). clippy clean, e2e green, every check
+tool green.
+
+### Findings, restated
+
+1-129 as before.
+
+130. **"Is it turning" and "what is it" are different questions of the same records.** An interval
+     answers the first and only the newest record answers the second. Using one shape for both
+     would make a flapping driver read as present half the time, or a healthy one read as lost
+     because of a single missed read an hour ago.
+
+131. **The strongest-sounding flag is not the most severe state.** `RHAL_FAULT` sounds worse than
+     `RHAL_DEGRADED` and maps to a *better* condition, because §27's `rhal` asks whether the body
+     can be observed rather than whether it is well. The read that reported the fault is the proof
+     the answer is yes.
+
+132. **A number stated in four places and derived in none goes stale every time it changes.**
+     Three rounds running, moving a condition has left the count wrong in the banner, in
+     `GET /limits`' note and in two rows of §73. Filed rather than fixed in passing.
