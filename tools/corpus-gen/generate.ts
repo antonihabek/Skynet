@@ -2275,6 +2275,7 @@ function bbCycle(overrides: Partial<Cycle> = {}): Cycle {
     stateFlags: 1,
     faultCode: 0,
     rhalResult: 0,
+    readResult: 0,
     stateSeq: 3,
     stateStampNs: 100n,
     commandStampNs: 90n,
@@ -2309,6 +2310,7 @@ function cycleInput(cycle: Cycle): unknown {
     state_flags: cycle.stateFlags,
     fault_code: cycle.faultCode,
     rhal_result: cycle.rhalResult,
+    read_result: cycle.readResult,
     state_seq: cycle.stateSeq,
     state_stamp_ns: String(cycle.stateStampNs),
     command_stamp_ns: String(cycle.commandStampNs),
@@ -2347,6 +2349,35 @@ recordCase(
   BB_SHAPE, 5n, 1234n,
   { kind: 'cycle', cycle: bbCycle() }, cycleInput(bbCycle()),
 )
+
+{
+  // The record this field was added for. Everything about the body in it is a fill value: §24's
+  // `Observed` is built with `map_or` defaults on a failed read, so the flags, the fault code and
+  // the sequence are zeros nobody measured, the stamp is the loop's own clock rather than an
+  // acquisition time, and the joint arrays hold whatever the driver's buffers last contained —
+  // which is the *previous* cycle's positions.
+  //
+  // Before `read_result`, this record and `cycle-quiet` differed only in values that are legal on
+  // a healthy robot. A replay of a driver that had stopped answering showed a robot holding still.
+  const unread = bbCycle({
+    readResult: -110,
+    stateFlags: 0,
+    stateSeq: 0,
+    position: [0.1, 0.2],
+    velocity: [0.0, Number.NaN],
+    effort: [1.5, Number.NaN],
+  })
+  recordCase(
+    'cycle-the-read-failed',
+    'A cycle whose `read_state` returned `-ETIMEDOUT`. The four bytes at 172 are what separate '
+    + 'this from a healthy cycle: every other body field here is a fill value or the previous '
+    + 'cycle’s data, and before the field existed a reader had no way to know that. The schema '
+    + 'byte is what makes it readable — in a schema-1 record those bytes are padding, so a zero '
+    + 'there means *unrecorded* rather than *the read succeeded*.',
+    BB_SHAPE, 9n, 3300n,
+    { kind: 'cycle', cycle: unread }, cycleInput(unread),
+  )
+}
 
 {
   const clamped = bbCycle({

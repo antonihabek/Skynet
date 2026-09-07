@@ -14,13 +14,62 @@
 use skynet_dl::driver::{Buffers, Driver, DriverError, Sample};
 use std::path::Path;
 
+/// Why a state read failed, in the two forms a caller needs.
+///
+/// The code is what the record keeps and the sentence is what an operator reads. Splitting them is
+/// not tidiness: a recording is replayed months later by somebody who does not have this build's
+/// error strings, and a `-110` in a record is a timeout in any language.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadFailure {
+    /// Negative `errno` (§24). Never zero — zero is what a successful read writes.
+    pub code: i32,
+    /// What went wrong, for a person.
+    pub detail: String,
+}
+
+impl ReadFailure {
+    /// Build one from a driver error, mapping each variant onto the `errno` that is true of it.
+    ///
+    /// Every arm is a fact rather than a placeholder, which is the whole reason this is a `match`
+    /// and not a constant:
+    ///
+    /// * a call that returned a code carries **that** code, which is the case §24 is written for;
+    /// * a vtable with no `read_state` is `-ENOSYS`, the same answer `Rhal::command` already gives
+    ///   for a missing `write_command` — the entry point does not exist;
+    /// * a driver whose `open()` refused carries the code it refused with;
+    /// * a shared object that would not load, or a vtable this OS rejected, is `-ENODEV`: there is
+    ///   no device behind this handle at all. Neither is reachable once a loop is turning, and
+    ///   giving them a code rather than a panic is the same contract `command` states — a cycle
+    ///   always produces a record, and a record of `-ENODEV` is a true one.
+    pub fn from_driver(error: &skynet_dl::driver::DriverError) -> ReadFailure {
+        use skynet_dl::driver::DriverError;
+        let code = match error {
+            DriverError::Call { code, .. } => *code,
+            DriverError::Absent(_) => -38,
+            DriverError::Open(code) => *code,
+            DriverError::Load(_) | DriverError::Rejected(_) => -19,
+        };
+        ReadFailure {
+            // A driver that returned zero and called it an error is a driver disagreeing with §24.
+            // Recorded as `-EIO` rather than as a success, because the alternative is a record
+            // saying the read worked on the cycle the driver said it did not.
+            code: if code == 0 { -5 } else { code },
+            detail: error.to_string(),
+        }
+    }
+}
+
 /// A body the loop can read and command.
 pub trait Actuator {
     /// How many joints, which is the width of every array crossing this trait.
     fn joints(&self) -> usize;
 
     /// Read one state sample.
-    fn sample(&mut self, now_ns: u64) -> Result<Sample, String>;
+    ///
+    /// The failure carries a **code** as well as a sentence, because §26's cycle record now holds
+    /// what the read returned beside what the write did, and a string is not something a black box
+    /// can be replayed against. §24's rule applies to both directions: negative is an `errno`.
+    fn sample(&mut self, now_ns: u64) -> Result<Sample, ReadFailure>;
 
     /// Positions, velocities and efforts from the last successful [`Actuator::sample`].
     fn state(&self) -> (&[f32], &[f32], &[f32]);
@@ -80,10 +129,10 @@ impl Actuator for Rhal {
         self.joints
     }
 
-    fn sample(&mut self, now_ns: u64) -> Result<Sample, String> {
+    fn sample(&mut self, now_ns: u64) -> Result<Sample, ReadFailure> {
         self.driver
             .read_state(&mut self.buffers, now_ns)
-            .map_err(|error| error.to_string())
+            .map_err(|error| ReadFailure::from_driver(&error))
     }
 
     fn state(&self) -> (&[f32], &[f32], &[f32]) {
@@ -182,9 +231,14 @@ impl Actuator for Fake {
         self.position.len()
     }
 
-    fn sample(&mut self, now_ns: u64) -> Result<Sample, String> {
+    fn sample(&mut self, now_ns: u64) -> Result<Sample, ReadFailure> {
         if self.read_fails {
-            return Err("the fake was told to fail this read".to_string());
+            // `-ETIMEDOUT`, because that is the failure a bench driver actually produces and a
+            // fake that returned a code no real driver returns would exercise a path nothing takes.
+            return Err(ReadFailure {
+                code: -110,
+                detail: "the fake was told to fail this read".to_string(),
+            });
         }
         self.seq = self.seq.wrapping_add(1);
         Ok(Sample {

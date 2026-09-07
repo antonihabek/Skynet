@@ -12286,3 +12286,57 @@ and `fault_code` (§24), so `Present`/`Degraded`/`Lost` is a decision about §24
      robot on this edition reports `kernel: down` before and after this change. Before, because
      nobody looked; after, because the recording cannot hold a cycle and says so. Only the second
      tells an operator where not to go.
+
+## 2026-09-07 (sixty-eighth) — the record could not say the read had failed
+
+Round fifteen named the next condition as a *mapping* over `rhal_result`, `state_flags` and
+`fault_code` — "not a channel that does not exist". Reading those fields to write the mapping
+found the channel missing after all, and worse than missing.
+
+On a failed `read_state` the loop builds its observation from defaults: zero flags, zero fault
+code, zero sequence, the loop's own clock as the acquisition stamp §24 says must be an acquisition
+time, and joint arrays copied from buffers still holding the **previous cycle's** positions. Every
+one of those is legal on a healthy robot. So a recording of a driver that had stopped answering
+was byte-comparable with a recording of one that had not, and a replay of it showed a robot
+holding still. `summary.read_failures` knew, and it dies with the process; the black box is what
+outlives the robot.
+
+`read_result` fits at offset 172 — **reserved padding**, so nothing moved and the ring's
+`FORMAT_VERSION` did not change. Which made the question: what does a zero there mean in a
+recording written last week?
+
+The answer was a byte that had never been read. `slot[5]` has carried a per-record schema version
+since the format was written, with a comment saying exactly why — *a ring outlives a daemon
+upgrade and a reader must be able to tell which layout a slot is in* — and nothing read it. It
+said `1` while the frame record had already grown a field, and `README.md` reported "Record format
+2" about it. It says `2` now, the decoder reads it, and a schema-1 record's read outcome is
+`Unrecorded` rather than `Ok`: reading absence as success is the failure the field exists to
+prevent.
+
+`Actuator::sample` now returns a code as well as a sentence. A recording is replayed by somebody
+without this build's error strings, and `-110` is a timeout in any language.
+
+### Numbers
+
+`cargo test --workspace` — **1,659 passed** (1,658 before). Both corpora **1,137 of 1,137**.
+Mutations: the Rust schema byte back to 1 fails 12 records; Python not writing the i32 fails the
+new case. clippy clean, e2e green, §73 matches the tree.
+
+### Findings, restated
+
+1-126 as before.
+
+127. **A record that fills its gaps with legal values is worse than one with a gap in it.** Zero
+     flags, a zero sequence and last cycle's positions are all things a healthy robot produces, so
+     the failure did not look like missing data — it looked like data. The counter that knew was
+     in memory, and memory is not what an investigator has.
+
+128. **A version byte nothing reads is not a version byte.** It had the right comment and the
+     right intention for as long as the format has existed, went stale silently when the frame
+     record grew, and was contradicted by the README. What made it real was needing it: four bytes
+     whose meaning depends on it.
+
+129. **Writing an edition before the reference is the wrong order, and the corpus is still the
+     arbiter.** Rust went first here. What kept §31.4's rule meaningful is that the reference was
+     written independently against the decision rather than transcribed from the Rust — had either
+     guessed a different offset or byte, the corpus would have failed one of them.
