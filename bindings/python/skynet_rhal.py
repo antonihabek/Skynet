@@ -46,6 +46,13 @@ __all__ = [
     "FLAG_FAULT",
     "FLAG_DEGRADED",
     "FLAG_BRAKED",
+    "HOMING_SHIFT",
+    "HOMING_MASK",
+    "HOMING_UNREPORTED",
+    "HOMING_NOT_REQUIRED",
+    "HOMING_PENDING",
+    "HOMING_COMPLETE",
+    "HOMING_NAMES",
     "MODE_POSITION",
     "MODE_VELOCITY",
     "MODE_TORQUE",
@@ -86,6 +93,29 @@ FLAG_ESTOP = 1 << 0  #: an emergency stop is asserted
 FLAG_FAULT = 1 << 1  #: the drive has faulted; commands are being ignored
 FLAG_DEGRADED = 1 << 2  #: running, but something is wrong — thermal, a dead encoder
 FLAG_BRAKED = 1 << 3  #: holding brakes are engaged
+
+# ── Homing, bits 4-5 of the same word ─────────────────────────────────────────
+#
+# A two-bit field rather than two booleans, and zero is `unreported` rather than `pending` because
+# those are different sentences to whoever is holding the robot: *pending* is a machine somebody
+# has to home, *unreported* is a driver written before the field existed. The OS refuses to command
+# on either, and says which. Adding these bits is not an ABI break — the word had twelve bits
+# spare, no offset moves, and a driver that never sets them reads as exactly what it is.
+
+HOMING_SHIFT = 4
+HOMING_MASK = 3 << HOMING_SHIFT
+HOMING_UNREPORTED = 0 << HOMING_SHIFT  #: this driver does not answer the question
+HOMING_NOT_REQUIRED = 1 << HOMING_SHIFT  #: absolute encoders; there is nothing to home
+HOMING_PENDING = 2 << HOMING_SHIFT  #: joint positions are not yet trustworthy
+HOMING_COMPLETE = 3 << HOMING_SHIFT  #: homed, and the positions mean what they say
+
+#: The four spellings, for a driver that wants to log what it just reported.
+HOMING_NAMES = {
+    HOMING_UNREPORTED: "unreported",
+    HOMING_NOT_REQUIRED: "not_required",
+    HOMING_PENDING: "pending",
+    HOMING_COMPLETE: "complete",
+}
 
 # ── Control modes ─────────────────────────────────────────────────────────────
 

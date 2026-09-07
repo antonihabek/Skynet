@@ -360,6 +360,10 @@ class MujocoBridge:
         out.stamp_ns = int(round(float(data.time) * 1e9))
         out.seq = self._seq
         out.flags = rhal.FLAG_ESTOP if self._estopped else 0
+        # §24's homing field. A simulator's joint positions come straight out of `data.qpos`, so
+        # there is nothing whose zero could have been lost and no homing routine to run — the
+        # honest answer is `not required` rather than `complete`, which would claim a routine ran.
+        out.flags |= rhal.HOMING_NOT_REQUIRED
         # A full contact or constraint buffer means the solver silently dropped contacts: the body
         # may have passed through something. Running, and something is wrong, which is exactly what
         # `degraded` is for.

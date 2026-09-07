@@ -69,6 +69,75 @@ pub mod flags {
     pub const DEGRADED: u16 = 1 << 2;
     /// Holding brakes are engaged.
     pub const BRAKED: u16 = 1 << 3;
+
+    /// Where the homing field starts. Mirrors `SKR_HOMING_SHIFT`.
+    pub const HOMING_SHIFT: u16 = 4;
+    /// The two bits the homing field occupies. Mirrors `SKR_HOMING_MASK`.
+    pub const HOMING_MASK: u16 = 0b11 << HOMING_SHIFT;
+}
+
+/// §27's homing condition, as a driver reports it in [`State::flags`].
+///
+/// # Why this is in the flags word and did not need an ABI break
+///
+/// §73 carried `homing` as the last of §27's eight conditions for as long as this enum did not
+/// exist, with the reason *"§24 gives the ABI no flag for it, so it needs a vendor to recompile
+/// rather than a daemon to look somewhere else"*. The first half of that was true and the second
+/// half was the wrong conclusion drawn from it. `flags` is a `u16` with twelve bits spare and it is
+/// already a bitwise-or, so a field can be added to it without moving a byte: no offset changes,
+/// [`ABI_VERSION`] does not bump, and every driver ever compiled against v1 keeps loading. What a
+/// vendor has to recompile for is *answering*, which is a different and much smaller claim.
+///
+/// # Four states, because zero is not `Pending`
+///
+/// A single `SKR_FLAG_HOMED` bit would have been the obvious encoding and it conflates the two
+/// facts that matter most: a clear bit would mean *this robot is not homed* and *this driver has
+/// never heard of homing* at once. Those send an operator to different places — one to the homing
+/// routine, one to the vendor — and §7.2's rule is that a measurement nobody can attribute is not
+/// one. Two bits carry the [`Option`] on the wire that the type carries in memory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Homing {
+    /// `SKR_HOMING_NOT_REQUIRED`. Absolute encoders; there is nothing to home.
+    NotRequired = 1,
+    /// `SKR_HOMING_PENDING`. Joint positions are not yet trustworthy.
+    Pending = 2,
+    /// `SKR_HOMING_COMPLETE`. Homed, and the positions mean what they say.
+    Complete = 3,
+}
+
+impl Homing {
+    /// Read the field out of a [`State::flags`] word.
+    ///
+    /// `None` is `SKR_HOMING_UNREPORTED`, which is what every v1 driver reports by doing nothing.
+    /// It is deliberately not [`Homing::Pending`]: the OS declines to command on both, and it says
+    /// which, and the two have different remedies.
+    pub fn from_flags(flags: u16) -> Option<Homing> {
+        match flags & flags::HOMING_MASK {
+            0 => None,
+            value if value == (Homing::NotRequired as u16) << flags::HOMING_SHIFT => {
+                Some(Homing::NotRequired)
+            }
+            value if value == (Homing::Pending as u16) << flags::HOMING_SHIFT => {
+                Some(Homing::Pending)
+            }
+            _ => Some(Homing::Complete),
+        }
+    }
+
+    /// The bits this state occupies in a flags word, for a driver assembling one.
+    pub fn to_flags(self) -> u16 {
+        (self as u16) << flags::HOMING_SHIFT
+    }
+
+    /// The wire spelling, which is §27's.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Homing::NotRequired => "not_required",
+            Homing::Pending => "pending",
+            Homing::Complete => "complete",
+        }
+    }
 }
 
 /// Control modes, mirroring `SKR_MODE_*`.
@@ -452,5 +521,48 @@ mod tests {
     fn unknown_modes_do_not_default() {
         assert_eq!(Mode::from_u8(2), Some(Mode::Torque));
         assert_eq!(Mode::from_u8(7), None);
+    }
+
+    /// The claim that makes the homing field not an ABI break: it uses bits nothing else does.
+    ///
+    /// Asserted rather than read off, because the failure mode is silent in the worst way — a
+    /// homing field overlapping `SKR_FLAG_BRAKED` would make a braked robot report itself homed,
+    /// and both halves would look correct in isolation.
+    #[test]
+    fn the_homing_field_occupies_bits_nothing_else_claims() {
+        let existing = flags::ESTOP | flags::FAULT | flags::DEGRADED | flags::BRAKED;
+        assert_eq!(existing & flags::HOMING_MASK, 0);
+        assert_eq!(flags::HOMING_MASK, 0b0011_0000);
+    }
+
+    /// A driver that has never heard of homing reports *unreported*, not *pending*.
+    ///
+    /// This is the whole reason the field is two bits, and it is the case that keeps every v1
+    /// driver loading unchanged: it sets flags it knows about and the field stays zero.
+    #[test]
+    fn a_v1_driver_reports_nothing_rather_than_a_state() {
+        assert_eq!(Homing::from_flags(0), None);
+        assert_eq!(Homing::from_flags(flags::ESTOP | flags::BRAKED), None);
+    }
+
+    #[test]
+    fn every_homing_state_survives_a_round_trip_through_the_word() {
+        for state in [Homing::NotRequired, Homing::Pending, Homing::Complete] {
+            assert_eq!(Homing::from_flags(state.to_flags()), Some(state));
+            // And beside the flags a real driver also sets, which is how it arrives.
+            assert_eq!(
+                Homing::from_flags(state.to_flags() | flags::DEGRADED | flags::ESTOP),
+                Some(state)
+            );
+        }
+    }
+
+    /// Setting the field must not disturb the four flags below it, nor they it.
+    #[test]
+    fn the_two_halves_of_the_word_do_not_disturb_each_other() {
+        let word = Homing::Complete.to_flags() | flags::BRAKED;
+        assert_eq!(word & flags::BRAKED, flags::BRAKED);
+        assert_eq!(word & flags::ESTOP, 0);
+        assert_eq!(Homing::from_flags(word), Some(Homing::Complete));
     }
 }

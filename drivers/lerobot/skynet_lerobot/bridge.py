@@ -272,6 +272,13 @@ class LeRobotBridge:
         out.stamp_ns = stamp
         out.seq = self._seq
         out.flags = rhal.FLAG_ESTOP if self._estopped else 0
+        # §24's homing field, and this bridge is the one place in the driver set where the answer
+        # is genuinely unknown. LeRobot's robot classes expose no homing or referencing state
+        # through this interface: a follower arm may be at its calibrated zero or may have been
+        # power-cycled with the leader somewhere else, and nothing in the observation says which.
+        # Reporting `complete` would be inventing it and reporting `not_required` would be worse —
+        # these are relative encoders. So the field is left `unreported`, which is the state §24
+        # added it to be able to express, and the robot is held.
         out.fault_code = 0
         out.position_rad = positions
         out.velocity_rad_s = velocities

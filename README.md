@@ -290,10 +290,12 @@ raises an incident — which §34.4 never drops — carrying the transition, the
 robot believed its warning channel was. Refusing to command a body that cannot warn is the right rule
 for a certified tier and it belongs in the kernel's interlock, where the transition is.
 
-No robot has sounded one. One of §27's eight conditions is unobserved on this edition, so the
-machine derives `safe` every pass and no robot ever enters a commanding state — the tone is in the
-same position as the black box's cycle counters: the path exists, is tested against the real
-producer, and is gated on a property rather than on a constant.
+No robot has sounded one. None of §27's eight conditions are unobserved on this edition any
+more — `homing` was the last, closed on 2026-09-07 by putting a two-bit field in twelve spare bits
+of §24's flags word — but the machine still never enters a commanding state, because §25.2's lease
+is the Safety Kernel's and the daemon cannot read it. The tone is in the same position as the black
+box's cycle counters: the path exists, is tested against the real producer, and is gated on a
+property rather than on a constant.
 
 One thing found beside it and fixed: **a capability grant left no record at all.** §38.3 asks for a
 black box event and an audit-log entry on every configuration change, and a grant is the change with
