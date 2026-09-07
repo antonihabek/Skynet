@@ -6453,3 +6453,117 @@ with systemd as init system"*), which is an environment limitation and not a ski
 * Everything the audit filed under hardware, an owner's decision, or the Hub's Phases 10–12.
 
 Nothing is committed and nothing is pushed.
+
+---
+
+# Round twenty-four — 2026-09-07
+
+## 82. §27's `guards`, and the second source the field's own documentation named
+
+The audit's other candidate, and it went the same way as `guard_hold`: the reason for leaving it
+out was a true sentence about the wrong place.
+
+`observed.rs` had it as *"a cycle records what guards did, not which were available"*. Correct about
+§13's ring, and §7.6's partition does not live there — it is resolved **on this daemon**, by
+`resolve_limits`, served at `GET /limits`, rendered by `skynet limits` and the on-robot console, and
+carried across §17 to the device page. *Which guards are unavailable* was being computed, drawn in
+two places and reported to the Hub every check-in, while §27 took it at a default.
+
+So `GuardsSighting`, and it is the first of §27's conditions that comes off no ring at all.
+
+### The second list, which the condition documents and nothing read
+
+`skynet-contracts` annotates `guards_unavailable` as *"§27's `DEGRADED` row: a guard is unavailable.
+**§45.5 is the usual source**"* — and §45.5 is calibration expiry, whose guard list is
+`calibration::Status::unavailable`. That is a **different list** from `resolve_limits`'s, produced
+by a different module, already consumed by `skynet calibration` and by POST's own
+`calibration_expiry` check, and it had never met §27.
+
+Either list alone is right about half the robots. A body that declares no IMU loses `balance`
+through the resolver with every calibration in date; a body with a flawless descriptor and a camera
+extrinsic that expired forty days ago loses `proximity` through §45.5 and nothing in the resolver
+notices. The *usual* source is the one that was missing.
+
+So the condition is the union, merged rather than concatenated — a guard that loses both its
+declaration and its calibration is one problem, not two — and each entry says which source took it
+out, because *fit the sensor* and *recalibrate* send an operator to different parts of the building.
+Where both are true the calibration wins the label: it is the one they can act on today.
+
+### Resolved, not per-cycle, and said so on every surface
+
+What this observes is which guards **can** run given what the body declares and what a calibration
+still believes. It is not a reading of which guards the kernel had inputs for on the last cycle, and
+those differ — §80's `inert` state exists because of exactly that gap. A declared sensor that fails
+at runtime is still invisible here, and that is a per-cycle fact belonging with the ring readings.
+Claiming it would be the overreach the type is arranged against, so `GET /state`'s `source` string
+says what it is and what it is not rather than leaving a reader to assume the stronger reading.
+
+### A robot nobody described is not a robot with broken guards
+
+With no descriptor `resolve_limits` finds nothing declared and reports nearly every guard
+unavailable. Arithmetically right, and as an answer to §27 it would tell an operator their guards
+are broken when what is missing is the document describing the robot. So `Unobservable` is a
+variant, decided on a new `described` flag rather than on `envelope.is_some()` — a descriptor with
+no `envelope` block is a body somebody described without ceilings, and a robot with no descriptor is
+a different thing that leaves the same field `None`.
+
+The suite asserts the distinction the hard way: it first checks that the resolver *does* report
+guards unavailable for an undescribed body, so the variant is proven necessary rather than
+decorative.
+
+### Surfaces
+
+`GET /state` gains a `guards` block — the boolean, the observation, the sentence, and the guards as
+data with their source, because §45.5's requirement is that an unavailable guard say *why* and a
+console given only a sentence cannot group them.
+
+`skynet state`'s `flagged()` reads a fourth key. The on-robot console gains a **Guard set** row
+beside the guard-hold one, and the pairing is the point: *is a guard acting right now* and *can they
+act at all* are different questions, and an operator told "no guard is holding" about a robot whose
+proximity guard has no calibration has been told something true and reassuring about a robot that is
+not protected.
+
+A test helper named `guards` in `limits.rs`'s suite was renamed to `partition`. It predated the
+module function and would have shadowed it — a helper shadowing the thing under test is how a suite
+ends up proving something about itself.
+
+### The count, again
+
+Six of eight now, and `scale-report --check` failed in four documents plus the line count, which had
+crossed a thousand-line boundary in the same pass. Second round running that this mechanism has
+caught every stale copy without anybody remembering where they were.
+
+## Run
+
+```
+cargo test --workspace                      1,682 passed, 0 failed  (1,680 before)
+cargo clippy --workspace --all-targets      clean
+cargo fmt --all --check                     clean
+sh crates/skynetd-io/e2e.sh                 all checks passed — six observed conditions on a
+                                            running daemon, and the partition naming what each
+                                            guard wants
+python3 editions/python/run_corpus.py       1,142 of 1,142, both editions
+node tools/edition-report.mjs --check       matches
+node tools/scale-report.mjs --check         §73 matches the tree
+node tools/check-mirrors.mjs                all shared documents match, re-pinned
+node tools/check-contract-mirrors.mjs       every mirrored contract matches
+node tools/check-golden-path.mjs            4 documents, 51 commands
+```
+
+The e2e assertion is the **positive** one — the mock body declares no IMU and no person detector, so
+the check is that guards are unavailable and the robot says which and why, rather than a hopeful
+"all available" that would pass on a robot that had resolved nothing.
+
+## What round twenty-four leaves
+
+* **`policy`** — the last of §27's eight with a candidate source in this process. `Cycle.policy`
+  names the commanding policy on every recorded cycle and `shape::supervising` already resolves
+  which package holds the commanding plan. What has to be decided is whether *a policy is
+  commanding* and *a lease is granted* are the same fact, because §25.2's lease table is the
+  kernel's and the ring shows the consequence rather than the grant.
+* **`homing`** — an ABI change, and the ABI is the one thing a vendor compiles against. It is now
+  the only one of the eight with no path at all.
+* A **runtime** guard availability reading, which is what would close the gap this round's type
+  documents: a declared sensor that fails mid-run is still invisible.
+
+Nothing is pushed.

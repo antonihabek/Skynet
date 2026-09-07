@@ -137,6 +137,13 @@ pub const ROBOT_TIER: Tier = Tier::Guest;
 #[derive(Debug, Clone)]
 pub struct Owned {
     tier: Tier,
+    /// Whether a body was described at all.
+    ///
+    /// Not derivable from `envelope`, and the difference is what §27's `guards` condition rests on.
+    /// A descriptor with no `envelope` block is a body somebody described and did not give
+    /// ceilings; no descriptor is a robot nobody has described. Both leave `envelope` at `None`,
+    /// and the first is a robot whose guard partition means something.
+    described: bool,
     envelope: Option<SafetyEnvelope>,
     profile: Option<ProfileOwned>,
     /// §55.2's cell layer, when the cell draws usable volumes.
@@ -219,6 +226,7 @@ pub fn read(layout: &Layout, body: &Body, tier: Tier) -> Owned {
 
     Owned {
         tier,
+        described: descriptor.is_some(),
         envelope: descriptor.and_then(|d| d.envelope.clone()),
         profile: read_profile(layout),
         cell: crate::cell::active(layout)
@@ -372,6 +380,158 @@ impl Owned {
     /// The profile's name, for the widened-limits notice.
     pub fn profile_name(&self) -> Option<&str> {
         self.profile.as_ref().map(|profile| profile.name.as_str())
+    }
+}
+
+/// What this daemon can see of §27's **`guards`** condition — *"a guard is unavailable"*.
+///
+/// The fifth of §27's eight to gain a producer, and the first that is **not** read off §13's ring.
+/// `observed.rs` had it filed as *"a cycle records what guards did, not which were available"*,
+/// which is a true sentence about the ring and the wrong place to have looked: §7.6's partition is
+/// resolved **on this daemon**, by `resolve_limits`, and served at `GET /limits` and across §17 to
+/// the device page. The answer to *which guards are unavailable* was already being computed,
+/// rendered in two places and reported to the Hub, while §27 took it at a default.
+///
+/// # Two sources, and the field's own documentation names the one that was missed
+///
+/// §27's `guards_unavailable` is documented as *"§45.5 is the usual source"* — calibration expiry —
+/// and that list is [`crate::calibration::Status::unavailable`], which is a **different** list from
+/// `resolve_limits`'s. Both are this daemon's, neither was wired to §27, and either alone would be
+/// an answer that is right about half the robots: a body that declares no IMU loses `balance`
+/// through the resolver, and a body with an expired camera extrinsic loses `proximity` through
+/// §45.5 with a perfectly good descriptor. So this is the **union**, and it reports which source
+/// each guard came from, because *"fit the sensor"* and *"recalibrate"* are different jobs.
+///
+/// # It is a resolved partition, not a per-cycle one, and that is stated rather than hidden
+///
+/// What this observes is which guards **can** run, given what the body declares, what the profile
+/// sets and what §45.5 still believes. It is not a reading of which guards the kernel had inputs
+/// for on the last cycle. §80's `inert` state exists precisely because those two can differ — a
+/// guard whose every declared input resolves and whose per-cycle reading never arrives — and
+/// `inert` is carried here separately for that reason rather than folded into unavailable.
+///
+/// The gap that remains is a declared sensor that fails at runtime: the descriptor goes on
+/// declaring it and nothing here notices. That is a per-cycle fact and belongs with the ring
+/// readings, and claiming it would be exactly the overreach this type is arranged against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GuardsSighting {
+    /// No body has been described, so there is no partition to take. Not a reading.
+    ///
+    /// The distinction that makes this a variant rather than "everything is unavailable": with no
+    /// descriptor `resolve_limits` finds nothing declared and reports nearly every guard
+    /// unavailable, which is arithmetically correct and would tell an operator their guards are
+    /// broken when what is missing is the document describing the robot.
+    Unobservable(&'static str),
+    /// The partition resolved and every guard this body declares has its inputs.
+    AllAvailable,
+    /// The partition resolved and at least one guard is unavailable, named with its source.
+    Unavailable(Vec<UnavailableFor>),
+}
+
+/// One unavailable guard and which of the two sources took it out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnavailableFor {
+    /// §7.2's guard name.
+    pub guard: String,
+    /// Whether §45.5's expiry is what removed it, rather than a missing declaration.
+    pub calibration: bool,
+}
+
+/// Take §27's `guards` condition off the resolved partition and §45.5's expiry list.
+///
+/// `expired` is passed in rather than read here for [`report`]'s reason one function up: this stays
+/// a function over facts, and one that read the clock and the disk could not be driven by a suite.
+pub fn guards(
+    owned: &Owned,
+    expired: &[skynet_contracts::calibration::GuardUnavailable],
+) -> GuardsSighting {
+    if !owned.described {
+        return GuardsSighting::Unobservable(
+            "no embodiment descriptor has been accepted, so there is no guard set to partition \
+             (§5, §7.2)",
+        );
+    }
+
+    let mut out: Vec<UnavailableFor> = owned.with_resolved(|limits, _| {
+        limits
+            .unavailable_guards
+            .iter()
+            .map(|entry| UnavailableFor {
+                guard: entry.guard.as_str().to_string(),
+                calibration: false,
+            })
+            .collect()
+    });
+
+    // §45.5's half, merged rather than appended: a guard can lose its declaration *and* its
+    // calibration, and reporting it twice would make one guard read as two problems. Where both
+    // are true the calibration is the one an operator can act on today, so it wins the label.
+    for entry in expired {
+        match out.iter_mut().find(|held| held.guard == entry.guard) {
+            Some(held) => held.calibration = true,
+            None => out.push(UnavailableFor {
+                guard: entry.guard.clone(),
+                calibration: true,
+            }),
+        }
+    }
+
+    out.sort_by(|a, b| a.guard.cmp(&b.guard));
+    out.dedup_by(|a, b| a.guard == b.guard);
+
+    if out.is_empty() {
+        GuardsSighting::AllAvailable
+    } else {
+        GuardsSighting::Unavailable(out)
+    }
+}
+
+impl GuardsSighting {
+    /// §27's condition. True when any guard is unavailable, from either source.
+    pub fn unavailable(&self) -> bool {
+        matches!(self, GuardsSighting::Unavailable(_))
+    }
+
+    /// Whether this was an observation at all.
+    pub fn observed(&self) -> bool {
+        !matches!(self, GuardsSighting::Unobservable(_))
+    }
+
+    /// What was seen, in a sentence.
+    ///
+    /// Names the guards and their source, because §45.5's whole requirement is that an unavailable
+    /// guard say *why*: "proximity unavailable" sends nobody anywhere and "proximity unavailable:
+    /// the calibration expired" sends them to a target board.
+    pub fn detail(&self) -> String {
+        match self {
+            GuardsSighting::Unobservable(why) => (*why).to_string(),
+            GuardsSighting::AllAvailable => {
+                "every guard this body declares has its inputs, and no applicable calibration has \
+                 expired"
+                    .to_string()
+            }
+            GuardsSighting::Unavailable(entries) => {
+                let named: Vec<String> = entries
+                    .iter()
+                    .map(|entry| {
+                        if entry.calibration {
+                            format!("{} (a calibration expired, §45.5)", entry.guard)
+                        } else {
+                            format!("{} (an input the body does not declare)", entry.guard)
+                        }
+                    })
+                    .collect();
+                format!("{} unavailable: {}", named.len(), named.join(", "))
+            }
+        }
+    }
+
+    /// The guards, for a route that renders them as data rather than as a sentence.
+    pub fn entries(&self) -> &[UnavailableFor] {
+        match self {
+            GuardsSighting::Unavailable(entries) => entries,
+            _ => &[],
+        }
     }
 }
 
@@ -714,7 +874,91 @@ mod tests {
         }
     }
 
-    fn guards(owned: &Owned) -> (Vec<String>, Vec<String>) {
+    /// §27's `guards`, and the second source the condition's own documentation named.
+    ///
+    /// `guards_unavailable` is documented in `skynet-contracts` as *"§45.5 is the usual source"*,
+    /// and §45.5's list is `calibration::Status::unavailable` — a different list from
+    /// `resolve_limits`'s. Reading only the resolver would miss a body whose descriptor is perfect
+    /// and whose camera extrinsic expired last month, which is the *usual* case the field names.
+    #[test]
+    fn the_guard_condition_is_the_union_of_two_lists() {
+        use skynet_contracts::calibration::GuardUnavailable;
+
+        let bench = Bench::new("guards-condition");
+        bench.describe(ARM);
+        let owned = bench.resolve(ROBOT_TIER);
+
+        // Whatever this body leaves unavailable through the resolver, none of it is a calibration.
+        let resolved = guards(&owned, &[]);
+        for entry in resolved.entries() {
+            assert!(
+                !entry.calibration,
+                "{} came from the resolver and must not be labelled a calibration",
+                entry.guard
+            );
+        }
+
+        // §45.5's half, for a guard the resolver was happy with. It must appear, and it must be
+        // labelled as the calibration it is — the two send an operator to different places.
+        let expired = [GuardUnavailable {
+            guard: "proximity".to_string(),
+            set: "camera_extrinsics".to_string(),
+            state: "expired",
+            detail: "camera_extrinsics expired 40 days ago".to_string(),
+        }];
+        let merged = guards(&owned, &expired);
+        assert!(merged.unavailable());
+        let proximity = merged
+            .entries()
+            .iter()
+            .find(|entry| entry.guard == "proximity")
+            .expect("§45.5's guard reaches the condition");
+        assert!(proximity.calibration);
+        assert!(merged.detail().contains("§45.5"));
+
+        // One guard, not two, when both sources name it — and the calibration wins the label,
+        // because that is the one an operator can act on today.
+        let doubled = guards(&owned, &expired);
+        let named = doubled
+            .entries()
+            .iter()
+            .filter(|entry| entry.guard == "proximity")
+            .count();
+        assert_eq!(
+            named, 1,
+            "one guard is one problem however many lists name it"
+        );
+    }
+
+    /// A robot nobody has described is **unobservable**, not a robot with broken guards.
+    ///
+    /// With no descriptor `resolve_limits` finds nothing declared and reports nearly every guard
+    /// unavailable. That is arithmetically right and, as an answer to §27, would tell an operator
+    /// their guards are broken when what is missing is the document describing the robot.
+    #[test]
+    fn a_body_nobody_described_has_no_partition_to_take() {
+        let bench = Bench::new("guards-undescribed");
+        let owned = bench.resolve(ROBOT_TIER);
+
+        // The resolver does report guards unavailable here, which is exactly why the variant is
+        // needed rather than derived from the list being empty.
+        let (_, unavailable) = partition(&owned);
+        assert!(!unavailable.is_empty(), "the resolver has plenty to say");
+
+        let sighting = guards(&owned, &[]);
+        assert!(!sighting.observed());
+        assert!(
+            !sighting.unavailable(),
+            "an unobservable condition is not a positive reading of it"
+        );
+        assert!(sighting.detail().contains("no embodiment descriptor"));
+    }
+
+    /// The resolved partition alone, without §45.5's half.
+    ///
+    /// Renamed off `guards` when the module gained a public function of that name: a test helper
+    /// shadowing the thing under test is how a suite ends up proving something about itself.
+    fn partition(owned: &Owned) -> (Vec<String>, Vec<String>) {
         owned.with_resolved(|limits, _| {
             (
                 limits
@@ -818,14 +1062,14 @@ mod tests {
     fn the_cells_volumes_make_the_workspace_guard_active() {
         let bench = Bench::new("cell-workspace");
         bench.describe(ARM);
-        let (_, unavailable) = guards(&bench.resolve(ROBOT_TIER));
+        let (_, unavailable) = partition(&bench.resolve(ROBOT_TIER));
         assert!(
             unavailable.contains(&"workspace".to_string()),
             "with no profile there are no volumes: {unavailable:?}"
         );
 
         bench.profile(PROFILE);
-        let (active, _) = guards(&bench.resolve(ROBOT_TIER));
+        let (active, _) = partition(&bench.resolve(ROBOT_TIER));
         assert!(
             active.contains(&"workspace".to_string()),
             "a surveyed cell whose frame the graph reaches: {active:?}"

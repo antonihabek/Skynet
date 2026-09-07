@@ -290,7 +290,7 @@ raises an incident — which §34.4 never drops — carrying the transition, the
 robot believed its warning channel was. Refusing to command a body that cannot warn is the right rule
 for a certified tier and it belongs in the kernel's interlock, where the transition is.
 
-No robot has sounded one. Three of §27's eight conditions are unobserved on this edition, so the
+No robot has sounded one. Two of §27's eight conditions are unobserved on this edition, so the
 machine derives `safe` every pass and no robot ever enters a commanding state — the tone is in the
 same position as the black box's cycle counters: the path exists, is tested against the real
 producer, and is gated on a property rather than on a constant.

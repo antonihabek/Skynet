@@ -44,15 +44,22 @@
 //! guard verdict beside the flags. See [`HoldSighting`] for what a failed read costs it, and for
 //! why an advisory hold is not one.
 //!
-//! The remaining three are on §33.1's side of the line: the daemon has no way to ask about the
-//! guard **set**, the homing state or the policy's lease, and inventing one would be the
-//! supervisor reporting a body it is forbidden to touch. `homing` is the sharpest of the three and
-//! the only one that cannot be closed by a reader: §24 gives the ABI no flag for it, so it needs a
-//! vendor to recompile rather than a daemon to look somewhere else.
+//! `guards` is the fifth and the only one **not** off the ring. Its reason here was *"a cycle
+//! records what guards did, not which were available"* — true about the ring, and the wrong place
+//! to have been looking: §7.6's partition is resolved on this daemon and already served at
+//! `GET /limits`. See [`GuardsSighting`], and in particular for the second source the condition's
+//! own documentation named and nothing read.
+//!
+//! The remaining two are on §33.1's side of the line: the daemon has no way to ask about the
+//! homing state or the policy's lease, and inventing one would be the supervisor reporting a body
+//! it is forbidden to touch. `homing` is the sharper of the two and the only one that cannot be
+//! closed by a reader: §24 gives the ABI no flag for it, so it needs a vendor to recompile rather
+//! than a daemon to look somewhere else.
 
 use skynet_json::Json;
 
 use crate::blackbox::{HoldSighting, KernelSighting, RhalSighting, StopSighting};
+use crate::limits::GuardsSighting;
 
 /// §27's eight conditions, in the order [`skynet_contracts::opstate::evaluate`] consults them.
 ///
@@ -103,11 +110,11 @@ pub struct Observed {
 }
 
 impl Observed {
-    /// Read the four conditions that are evidence-dependent, and fix the four that are not.
+    /// Read the five conditions that are evidence-dependent, and fix the three that are not.
     ///
     /// `post` is always observed: [`crate::post::run`] executes on this process on every pass, and
     /// a robot whose self-test could not run reports a *failed* self-test rather than an absent
-    /// one (§48.4). The three that stay `false` are always unobserved on this edition, and are
+    /// one (§48.4). The two that stay `false` are always unobserved on this edition, and are
     /// listed rather than counted so that the day one of them gains a producer, this is the file
     /// that changes and every sentence follows.
     pub fn of(
@@ -115,6 +122,7 @@ impl Observed {
         rhal: &RhalSighting,
         stop: &StopSighting,
         hold: &HoldSighting,
+        guards: &GuardsSighting,
     ) -> Observed {
         Observed {
             seen: [
@@ -124,13 +132,13 @@ impl Observed {
                 false,             // homing — driver-side, and §24 gives the ABI no flag for it
                 stop.observed(),   // §27, off the same cycle's §24 flags
                 hold.observed(),   // §27, off the same cycle's guard verdict
-                false, // guards — a cycle records what guards did, not which were available
-                false, // policy — §25.2's lease table is the kernel's
+                guards.observed(), // §27, off §7.6's partition and §45.5's expiry — not the ring
+                false,             // policy — §25.2's lease table is the kernel's
             ],
         }
     }
 
-    /// How many were observed. Between one and five today, and never fewer than one.
+    /// How many were observed. Between one and six today, and never fewer than one.
     pub fn count(&self) -> usize {
         self.seen.iter().filter(|seen| **seen).count()
     }
@@ -244,7 +252,16 @@ mod tests {
     use super::*;
     use skynet_contracts::opstate::RhalState;
 
-    fn sightings(observed: bool) -> (KernelSighting, RhalSighting, StopSighting, HoldSighting) {
+    #[allow(clippy::type_complexity)]
+    fn sightings(
+        observed: bool,
+    ) -> (
+        KernelSighting,
+        RhalSighting,
+        StopSighting,
+        HoldSighting,
+        GuardsSighting,
+    ) {
         if observed {
             (
                 KernelSighting::Turning { cycles: 12 },
@@ -255,6 +272,7 @@ mod tests {
                 },
                 StopSighting::Clear,
                 HoldSighting::Clear,
+                GuardsSighting::AllAvailable,
             )
         } else {
             (
@@ -262,6 +280,7 @@ mod tests {
                 RhalSighting::Unobservable("no ring"),
                 StopSighting::Unobservable("no ring"),
                 HoldSighting::Unobservable("no ring"),
+                GuardsSighting::Unobservable("no descriptor"),
             )
         }
     }
@@ -274,8 +293,8 @@ mod tests {
     #[test]
     fn the_tally_and_the_names_are_the_same_reading() {
         for observed in [true, false] {
-            let (kernel, rhal, stop, hold) = sightings(observed);
-            let seen = Observed::of(&kernel, &rhal, &stop, &hold);
+            let (kernel, rhal, stop, hold, guards) = sightings(observed);
+            let seen = Observed::of(&kernel, &rhal, &stop, &hold, &guards);
 
             let named = seen.in_prose().split(", ").count();
             // "a and b" is one split and two names, so count the conjunction too.
@@ -301,26 +320,27 @@ mod tests {
     /// described a daemon that had looked at nine things.
     #[test]
     fn the_self_test_is_observed_even_when_nothing_else_is() {
-        let (kernel, rhal, stop, hold) = sightings(false);
-        let seen = Observed::of(&kernel, &rhal, &stop, &hold);
+        let (kernel, rhal, stop, hold, guards) = sightings(false);
+        let seen = Observed::of(&kernel, &rhal, &stop, &hold, &guards);
         assert_eq!(seen.count(), 1);
         assert_eq!(seen.unobserved(), 7);
         assert_eq!(seen.in_prose(), "the self-test");
         assert_eq!(seen.tally(), "one of §27's eight conditions");
     }
 
-    /// And with a turning loop it is five, which is what every surface should then say.
+    /// And with a turning loop and a described body it is six, which is what every surface should
+    /// then say.
     #[test]
-    fn a_turning_loop_makes_it_five() {
-        let (kernel, rhal, stop, hold) = sightings(true);
-        let seen = Observed::of(&kernel, &rhal, &stop, &hold);
-        assert_eq!(seen.count(), 5);
+    fn a_turning_loop_makes_it_six() {
+        let (kernel, rhal, stop, hold, guards) = sightings(true);
+        let seen = Observed::of(&kernel, &rhal, &stop, &hold, &guards);
+        assert_eq!(seen.count(), 6);
         assert_eq!(
             seen.in_prose(),
-            "the self-test, the kernel, the RHAL, the stop and the guard hold"
+            "the self-test, the kernel, the RHAL, the stop, the guard hold and the guard set"
         );
-        assert_eq!(seen.tally(), "five of §27's eight conditions");
-        assert_eq!(seen.unobserved_word(), "three");
+        assert_eq!(seen.tally(), "six of §27's eight conditions");
+        assert_eq!(seen.unobserved_word(), "two");
     }
 
     /// A hold that was demanded and not enforced is still an **observation**.
@@ -331,17 +351,17 @@ mod tests {
     /// where the mapping is, not here.
     #[test]
     fn an_advisory_hold_counts_as_looked_at() {
-        let (kernel, rhal, stop, _) = sightings(true);
-        let seen = Observed::of(&kernel, &rhal, &stop, &HoldSighting::Advisory);
-        assert_eq!(seen.count(), 5);
+        let (kernel, rhal, stop, _, guards) = sightings(true);
+        let seen = Observed::of(&kernel, &rhal, &stop, &HoldSighting::Advisory, &guards);
+        assert_eq!(seen.count(), 6);
         assert!(seen.to_json().get("guard_hold").is_some());
     }
 
     /// The object carries all eight, not only the true ones (§48.5).
     #[test]
     fn every_condition_is_reported_including_the_unobserved_ones() {
-        let (kernel, rhal, stop, hold) = sightings(true);
-        let document = Observed::of(&kernel, &rhal, &stop, &hold).to_json();
+        let (kernel, rhal, stop, hold, guards) = sightings(true);
+        let document = Observed::of(&kernel, &rhal, &stop, &hold, &guards).to_json();
         for condition in CONDITIONS {
             assert!(
                 document.get(condition).is_some(),

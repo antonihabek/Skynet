@@ -12458,3 +12458,62 @@ green. Hub: 1,895 unit tests, typecheck clean.
      third did not, because the third's list of directory names was five short. Nothing failed;
      one figure simply stopped being checked, and the message saying so was one line among eight
      that all said `ok`.
+
+## 2026-09-07 (seventy-first) — §27's `guards`, and the list the field's own documentation named
+
+The audit's other candidate, and it closed the same way as `guard_hold`: the reason for leaving it
+out was a true sentence about the wrong place. *"A cycle records what guards did, not which were
+available"* is correct about §13's ring, and §7.6's partition is not in the ring — it resolves **on
+this daemon**, is served at `GET /limits`, drawn by `skynet limits` and the console, and carried
+across §17 to the device page. The answer was being computed, rendered twice and reported to the
+Hub every check-in while §27 took it at a default.
+
+### The list nothing read
+
+`guards_unavailable` is annotated in `skynet-contracts` as *"§45.5 is the usual source"*, and
+§45.5's guard list — calibration expiry — is a **different** list from the resolver's, produced by
+a different module and already consumed by POST and by `skynet calibration`. Either alone is right
+about half the robots: a body that declares no IMU loses `balance` through the resolver with every
+calibration in date, and a body with a flawless descriptor and an extrinsic that expired last month
+loses `proximity` through §45.5 with nothing in the resolver noticing. The *usual* source was the
+missing one.
+
+So the condition is the union, merged rather than concatenated — one guard is one problem however
+many lists name it — and each entry says which source took it out, because *fit the sensor* and
+*recalibrate* send an operator to different parts of the building.
+
+### What it is not, said where it is rendered
+
+A **resolved** partition, never a per-cycle one: which guards can run given what the body declares
+and what a calibration still believes. §80's `inert` state exists because that differs from what the
+kernel had a reading for, and a declared sensor that fails at runtime is still invisible. The route
+says so in its own `source` string rather than leaving a reader to assume the stronger claim.
+
+And a robot **nobody has described** is `unobservable`, not a robot whose guards are all broken.
+With no descriptor the resolver correctly reports nearly every guard unavailable, which as an answer
+to §27 would send somebody to check wiring when what is missing is the document. The suite proves
+the variant is necessary by first asserting that the resolver does have plenty to say about such a
+body.
+
+### Numbers
+
+`cargo test --workspace` — **1,682 passed** (1,680 before). clippy clean, fmt clean, e2e green with
+six of §27's eight conditions observed on a running daemon, 1,142 of 1,142 in both editions, every
+check tool green. `homing` and `policy` remain, and `homing` is the only one with no path at all.
+
+### Findings, restated
+
+1-135 as before.
+
+136. **A field's own documentation can name a source the code never read.** `guards_unavailable`
+     has said *"§45.5 is the usual source"* since it was written, §45.5's list has existed for as
+     long, and the two had never met. The annotation was not wrong and not enough: nothing checks
+     that a doc comment naming a source is wired to it.
+
+137. **The absence of a document is not a reading of what it would have said.** An undescribed body
+     resolves to nearly every guard unavailable, which is correct arithmetic and a false report:
+     the remedy for "your guards are off" is a technician and the remedy for this is a descriptor.
+
+138. **A test helper that shadows the thing under test is a suite proving something about itself.**
+     `limits.rs`'s `guards` helper predated the module function of the same name by months and
+     would have silently taken every new call in the suite.

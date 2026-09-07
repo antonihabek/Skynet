@@ -145,6 +145,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         &daemon.rhal_sighting,
         &daemon.stop_sighting,
         &daemon.hold_sighting,
+        &daemon.guards_sighting,
     );
     eprintln!(
         "skynetd: §27 state is `{}`, because {}. §33.4's barrier is `{}` says {}, narrowed by that \
@@ -1939,6 +1940,19 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
     if let Some(recorder) = recorder {
         daemon.kernel_sequence = recorder.next_sequence();
     }
-    daemon.refresh_operating_state(wall_s(), &kernel, &rhal, &stop, &hold);
+
+    // §27's `guards`, and it comes from neither the ring nor the kernel: §7.6's partition resolves
+    // on this process from documents it already holds, and §45.5's expiry list sits beside it.
+    // Re-read every pass rather than cached, because a calibration expires on the clock and a
+    // profile arrives from the Hub between passes — a partition taken once at start-up would be a
+    // robot reporting the guards it had when it booted.
+    let layout = daemon.store.layout().clone();
+    let body = skynetd_io::embodiment::load(&layout);
+    let guards = skynetd_io::limits::guards(
+        &skynetd_io::limits::read(&layout, &body, skynetd_io::limits::ROBOT_TIER),
+        &skynetd_io::calibration::status(&layout, wall_s()).unavailable(),
+    );
+
+    daemon.refresh_operating_state(wall_s(), &kernel, &rhal, &stop, &hold, &guards);
     daemon.refresh_safe_state();
 }
