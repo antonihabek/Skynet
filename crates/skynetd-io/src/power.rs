@@ -12,7 +12,7 @@
 //! | `state_of_charge` | `/sys/class/power_supply/<pack>/capacity`, per cent — only when there is no `energy_now` |
 //! | `temperature_c` | the hottest `/sys/class/thermal/thermal_zone*/temp`, millidegrees |
 //! | `throttled_for_ms` | this module, from the instant the temperature first crossed the threshold |
-//! | `rhal_degraded`, `fault_code` | **nothing** — see below |
+//! | `rhal_degraded`, `fault_code` | §13's ring, off the newest control cycle — see below |
 //!
 //! # Which supply is the pack
 //!
@@ -38,16 +38,39 @@
 //! answer to. Which of two batteries drives the legs is a different kind of question, and this
 //! module does not answer those.
 //!
-//! # What it cannot read, and will not pretend to
+//! # §36.4's input, and where the reason for its absence was wrong
 //!
-//! `rhal_degraded` and `fault_code` are §36.4's whole input, and they come from the RHAL. §33.1
-//! keeps this daemon off that path — `skynetd-io` does not depend on `skynet-rhal` and CI asserts
-//! the edge is absent — so on this edition the brownout override has no source and never fires.
+//! `rhal_degraded` and `fault_code` are §36.4's whole input. This module said for as long as it
+//! existed that they *"come from the RHAL, and §33.1 keeps this daemon off that path — so on this
+//! edition the brownout override has no source and never fires"*.
 //!
-//! That is the same gap §48.2's self-test has, recorded the same way: named in §73's last column
-//! rather than papered over with a `false` that looks like an observation. A `false` here is *no
-//! RHAL flag was observed*, and the difference matters because the contract's answer to a degraded
-//! RHAL with no declared codes is a fault an operator should be seeing.
+//! The premise is true and the conclusion is not, and it is the same mistake §74.6 records for the
+//! telemetry counters and §27's conditions record five times over: **what decides whether a
+//! supervisor may observe a fact is not whose fact it is, but whether it was written down
+//! somewhere this process already holds.** §26's cycle record carries `state_flags` and
+//! `fault_code` verbatim, and [`crate::blackbox::RhalSighting`] has been reading both of them off
+//! that record — for §27's `rhal` condition — since before this paragraph was written. The
+//! brownout override was one struct field away from an input the whole time.
+//!
+//! So the two fields arrive as a [`BusReading`], derived from that same sighting, and §33.1 is
+//! untouched: no RHAL dependency, no actuator path, a number out of a file this daemon holds.
+//!
+//! # The two kinds of `false`, which is what this had right
+//!
+//! `PowerObservation::rhal_degraded` is a `bool`, so *the bus was read and is healthy* and *nothing
+//! has read the bus* both arrive at [`skynet_contracts::power::assess`] as `false`. The old
+//! paragraph was correct that the difference matters, and it survives here rather than being lost
+//! to the plumbing: [`BusReading`] keeps the third state, `GET /power` says which one it is in as
+//! many words, and the note is no longer a constant claiming a robot can never report a brownout.
+//!
+//! The contract is deliberately **not** changed to an `Option`. It is mirrored into three editions
+//! and pinned by the corpus (§31.4, reference-first), and the fact that would justify the ripple —
+//! *this particular robot's ring has no control cycles in it* — is a property of the daemon rather
+//! than of §36's rules. The party that knows says so, on its own surface.
+//!
+//! Fail-open is the honest description of the remaining gap and it is stated rather than implied: a
+//! robot whose ring holds no cycles reports `normal` while its bus sags. That is what §26.2 costs
+//! a supervisor, it is the same shape as §27's `kernel` reading, and the route says so.
 
 use std::path::{Path, PathBuf};
 
@@ -70,6 +93,8 @@ pub const THERMAL_ROOT: &str = "/sys/class/thermal";
 pub struct Reading {
     /// The observation, for [`skynet_contracts::power::assess`].
     pub observation: PowerObservation,
+    /// What the bus said, including the case the observation above cannot carry.
+    pub bus: BusReading,
     /// Why a field is absent, in the order the fields are listed above. Empty when everything the
     /// host exposes was read.
     pub notes: Vec<String>,
@@ -140,7 +165,13 @@ impl Sensors {
     /// `profile` is consulted for one thing only — the throttle threshold, which decides whether
     /// the clock in [`Self::throttling_since_ms`] is running. Everything else the profile says is
     /// the contract's business, and mixing the two here would put §36.1's bands in two places.
-    pub fn read(&mut self, profile: &PowerProfile, declared: &Declared, now_ms: u64) -> Reading {
+    pub fn read(
+        &mut self,
+        profile: &PowerProfile,
+        declared: &Declared,
+        bus: BusReading,
+        now_ms: u64,
+    ) -> Reading {
         let mut notes = Vec::new();
         let (charge, energy, supply) = self.gauge(declared, &mut notes);
         let (temperature, zones) = self.temperature(&mut notes);
@@ -166,6 +197,7 @@ impl Sensors {
         };
 
         Reading {
+            bus,
             charge_fraction,
             observation: PowerObservation {
                 state_of_charge: charge,
@@ -178,9 +210,12 @@ impl Sensors {
                 throttled_for_ms: self
                     .throttling_since_ms
                     .map_or(0, |since| now_ms.saturating_sub(since)),
-                // §33.1. See the module header: no RHAL from here, so no brownout on this edition.
-                rhal_degraded: false,
-                fault_code: None,
+                // §36.4, off §13's ring rather than off the RHAL — see the module header for why
+                // that is not a §33.1 crossing. `Unobserved` collapses to `false` here because
+                // the contract's field is a `bool`; `Reading::bus` keeps the distinction for the
+                // surfaces that can render it.
+                rhal_degraded: bus.degraded(),
+                fault_code: bus.fault_code(),
             },
             notes,
             supply,
@@ -336,12 +371,110 @@ pub fn observe(
     sensors: &mut Sensors,
     layout: &crate::layout::Layout,
     body: &crate::embodiment::Body,
+    bus: BusReading,
     now_ms: u64,
 ) -> (PowerProfile, Reading) {
     let profile = profile_of(body);
     let declared = Declared::read(&layout.power());
-    let reading = sensors.read(&profile, &declared, now_ms);
+    let reading = sensors.read(&profile, &declared, bus, now_ms);
     (profile, reading)
+}
+
+/// What §13's ring said about the RHAL, in the two fields §36.4 acts on.
+///
+/// # Why this exists rather than two `Option`s at the call site
+///
+/// §36.4's rule reads a flag **and** a code together — *"`RHAL_DEGRADED` with a vendor fault
+/// code"* — and the contract matches the code against the descriptor's declared list. A pair of
+/// loose options invites a caller to have one and not the other, and the interesting failure is
+/// exactly that: a degraded bus whose code was not carried is
+/// [`PowerFaultCode::BrownoutUndeclarable`](skynet_contracts::power::PowerFaultCode::BrownoutUndeclarable),
+/// which is a real answer an operator needs, and it must not be produced by this module losing the
+/// number on the way.
+///
+/// # The third state
+///
+/// [`BusReading::Unobserved`] is the one the contract's `bool` cannot hold, and it is the common
+/// case on a shipping robot: §26.2 gives `skynetd` the event channel and the control loop the
+/// cycle channels, so a supervisor's own ring holds no control cycles and nothing has read the bus
+/// at all. It reaches `assess` as `false` — there is no other value — and every surface that
+/// renders power says which of the two it was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BusReading {
+    /// No control cycle has been recorded, or the ring could not be read. Not an observation.
+    #[default]
+    Unobserved,
+    /// A cycle was read and the RHAL was answering without `RHAL_DEGRADED`.
+    Healthy,
+    /// A cycle was read and the RHAL reported `RHAL_DEGRADED`, with the vendor code it carried.
+    Degraded {
+        /// §24's `fault_code`, verbatim. Never interpreted here — §36.4 matches it against the
+        /// descriptor's declared list, which is what keeps §24's *"vendor-specific"* rule intact.
+        fault_code: u32,
+    },
+}
+
+impl BusReading {
+    /// Derive it from §27's `rhal` sighting, which reads the same record for a different question.
+    ///
+    /// One source rather than a second scan of the ring: two readings of one instant taken at two
+    /// moments could show a combination that was never true, which is the rule
+    /// [`crate::blackbox::Recorder::newest_cycle`] states where the scan is.
+    ///
+    /// A **faulted or lost** RHAL is `Unobserved` rather than `Healthy`, and that is the one
+    /// mapping decision here. §36.4 asks whether the bus is sagging; a driver that has stopped
+    /// answering has not said it is not, and reporting `Healthy` would be this module inventing
+    /// the reassuring half of a fact it does not have.
+    pub fn of(sighting: &crate::blackbox::RhalSighting) -> BusReading {
+        use skynet_contracts::opstate::RhalState;
+        match sighting {
+            crate::blackbox::RhalSighting::Seen {
+                state: RhalState::Degraded,
+                fault_code,
+                ..
+            } => BusReading::Degraded {
+                fault_code: *fault_code,
+            },
+            crate::blackbox::RhalSighting::Seen {
+                state: RhalState::Present,
+                ..
+            } => BusReading::Healthy,
+            _ => BusReading::Unobserved,
+        }
+    }
+
+    /// What [`PowerObservation::rhal_degraded`] gets. `Unobserved` is `false`, necessarily.
+    pub fn degraded(self) -> bool {
+        matches!(self, BusReading::Degraded { .. })
+    }
+
+    /// The vendor code, when there is one.
+    pub fn fault_code(self) -> Option<u32> {
+        match self {
+            BusReading::Degraded { fault_code } => Some(fault_code),
+            _ => None,
+        }
+    }
+
+    /// Whether anything read the bus at all.
+    pub fn observed(self) -> bool {
+        !matches!(self, BusReading::Unobserved)
+    }
+
+    /// §36.4's state of affairs, for the route that has to say what `normal` means here.
+    pub fn note(self) -> &'static str {
+        match self {
+            BusReading::Unobserved => {
+                "nothing has read the bus: §26.2 gives a supervisor's ring the event channel and                  a control loop the cycle channels, so a robot running no control loop records no                  cycle for §36.4 to read. A state of `normal` here means the gauge agrees, not                  that the bus does"
+            }
+            BusReading::Healthy => {
+                "the newest control cycle read the RHAL and it was not degraded, so §36.4's                  override does not apply and `normal` means both the gauge and the bus"
+            }
+            BusReading::Degraded { .. } => {
+                "the newest control cycle reported `RHAL_DEGRADED`. Whether that is a voltage sag                  is decided by matching the vendor's fault code against the descriptor's                  `brownout_fault_codes` — §24 forbids this OS interpreting a code it was not given                  the meaning of"
+            }
+        }
+    }
 }
 
 /// What an operator has declared about this machine's power hardware.
@@ -490,9 +623,12 @@ mod tests {
         let machine = Machine::new("power-energy");
         machine.supply("BAT0", "Battery", &[("energy_now", "45000000\n")]);
         machine.supply("AC", "Mains", &[]);
-        let reading = machine
-            .sensors()
-            .read(&profile(), &Declared::default(), 1_000);
+        let reading = machine.sensors().read(
+            &profile(),
+            &Declared::default(),
+            BusReading::Unobserved,
+            1_000,
+        );
 
         assert_eq!(reading.observation.energy_remaining_wh, Some(45.0));
         assert_eq!(
@@ -507,9 +643,12 @@ mod tests {
     fn a_gauge_with_only_a_percentage_reports_a_fraction() {
         let machine = Machine::new("power-percent");
         machine.supply("BAT0", "Battery", &[("capacity", "62\n")]);
-        let reading = machine
-            .sensors()
-            .read(&profile(), &Declared::default(), 1_000);
+        let reading = machine.sensors().read(
+            &profile(),
+            &Declared::default(),
+            BusReading::Unobserved,
+            1_000,
+        );
 
         assert_eq!(reading.observation.state_of_charge, Some(0.62));
         assert_eq!(reading.observation.energy_remaining_wh, None);
@@ -519,9 +658,12 @@ mod tests {
     fn a_mains_only_machine_reads_no_gauge_and_says_it_is_the_descriptors_business() {
         let machine = Machine::new("power-mains");
         machine.supply("AC", "Mains", &[]);
-        let reading = machine
-            .sensors()
-            .read(&profile(), &Declared::default(), 1_000);
+        let reading = machine.sensors().read(
+            &profile(),
+            &Declared::default(),
+            BusReading::Unobserved,
+            1_000,
+        );
 
         assert_eq!(reading.observation.state_of_charge, None);
         assert_eq!(reading.supply, None);
@@ -538,9 +680,12 @@ mod tests {
         let machine = Machine::new("power-two");
         machine.supply("BAT0", "Battery", &[("energy_now", "45000000")]);
         machine.supply("BAT1", "Battery", &[("energy_now", "10000000")]);
-        let reading = machine
-            .sensors()
-            .read(&profile(), &Declared::default(), 1_000);
+        let reading = machine.sensors().read(
+            &profile(),
+            &Declared::default(),
+            BusReading::Unobserved,
+            1_000,
+        );
 
         assert_eq!(reading.observation.energy_remaining_wh, None);
         let note = reading.notes.first().expect("a note");
@@ -557,7 +702,9 @@ mod tests {
         let declared = Declared {
             supply: Some("BAT1".to_string()),
         };
-        let reading = machine.sensors().read(&profile(), &declared, 1_000);
+        let reading = machine
+            .sensors()
+            .read(&profile(), &declared, BusReading::Unobserved, 1_000);
 
         assert_eq!(reading.observation.energy_remaining_wh, Some(10.0));
         assert_eq!(reading.supply.as_deref(), Some("BAT1"));
@@ -578,7 +725,9 @@ mod tests {
         let declared = Declared {
             supply: Some("PACK".to_string()),
         };
-        let reading = machine.sensors().read(&profile(), &declared, 1_000);
+        let reading = machine
+            .sensors()
+            .read(&profile(), &declared, BusReading::Unobserved, 1_000);
 
         assert_eq!(reading.observation.energy_remaining_wh, None);
         assert!(reading.notes[0].contains("`PACK`"), "{:?}", reading.notes);
@@ -589,9 +738,12 @@ mod tests {
     fn a_battery_with_neither_reading_is_named_rather_than_read_as_empty() {
         let machine = Machine::new("power-quiet");
         machine.supply("BAT0", "Battery", &[("charge_now", "3000000")]);
-        let reading = machine
-            .sensors()
-            .read(&profile(), &Declared::default(), 1_000);
+        let reading = machine.sensors().read(
+            &profile(),
+            &Declared::default(),
+            BusReading::Unobserved,
+            1_000,
+        );
 
         assert_eq!(reading.observation.state_of_charge, None);
         assert_eq!(reading.observation.energy_remaining_wh, None);
@@ -611,9 +763,12 @@ mod tests {
     fn a_file_that_is_not_a_number_reads_as_absent_rather_than_zero() {
         let machine = Machine::new("power-garbage");
         machine.supply("BAT0", "Battery", &[("energy_now", "unavailable\n")]);
-        let reading = machine
-            .sensors()
-            .read(&profile(), &Declared::default(), 1_000);
+        let reading = machine.sensors().read(
+            &profile(),
+            &Declared::default(),
+            BusReading::Unobserved,
+            1_000,
+        );
         assert_eq!(reading.observation.energy_remaining_wh, None);
     }
 
@@ -624,9 +779,12 @@ mod tests {
         let machine = Machine::new("power-zones");
         machine.supply("BAT0", "Battery", &[("energy_now", "45000000")]);
         machine.zone(0, "42000").zone(1, "78500").zone(2, "31000");
-        let reading = machine
-            .sensors()
-            .read(&profile(), &Declared::default(), 1_000);
+        let reading = machine.sensors().read(
+            &profile(),
+            &Declared::default(),
+            BusReading::Unobserved,
+            1_000,
+        );
 
         assert_eq!(reading.observation.temperature_c, Some(78.5));
         assert_eq!(reading.zones, 3);
@@ -637,9 +795,12 @@ mod tests {
         let machine = Machine::new("power-zone-broken");
         machine.supply("BAT0", "Battery", &[("energy_now", "45000000")]);
         machine.zone(0, "42000").zone(1, "n/a");
-        let reading = machine
-            .sensors()
-            .read(&profile(), &Declared::default(), 1_000);
+        let reading = machine.sensors().read(
+            &profile(),
+            &Declared::default(),
+            BusReading::Unobserved,
+            1_000,
+        );
 
         assert_eq!(reading.observation.temperature_c, Some(42.0));
         assert_eq!(reading.zones, 1);
@@ -650,9 +811,12 @@ mod tests {
     fn a_machine_with_no_zones_reads_no_temperature_and_says_so() {
         let machine = Machine::new("power-no-zones");
         machine.supply("BAT0", "Battery", &[("energy_now", "45000000")]);
-        let reading = machine
-            .sensors()
-            .read(&profile(), &Declared::default(), 1_000);
+        let reading = machine.sensors().read(
+            &profile(),
+            &Declared::default(),
+            BusReading::Unobserved,
+            1_000,
+        );
 
         assert_eq!(reading.observation.temperature_c, None);
         assert_eq!(reading.zones, 0);
@@ -672,10 +836,20 @@ mod tests {
         machine.zone(0, "75000");
         let mut sensors = machine.sensors();
 
-        let first = sensors.read(&profile(), &Declared::default(), 10_000);
+        let first = sensors.read(
+            &profile(),
+            &Declared::default(),
+            BusReading::Unobserved,
+            10_000,
+        );
         assert_eq!(first.observation.throttled_for_ms, 0, "it starts here");
 
-        let later = sensors.read(&profile(), &Declared::default(), 40_000);
+        let later = sensors.read(
+            &profile(),
+            &Declared::default(),
+            BusReading::Unobserved,
+            40_000,
+        );
         assert_eq!(later.observation.throttled_for_ms, 30_000);
     }
 
@@ -688,14 +862,29 @@ mod tests {
         machine.supply("BAT0", "Battery", &[("energy_now", "45000000")]);
         machine.zone(0, "75000");
         let mut sensors = machine.sensors();
-        sensors.read(&profile(), &Declared::default(), 10_000);
+        sensors.read(
+            &profile(),
+            &Declared::default(),
+            BusReading::Unobserved,
+            10_000,
+        );
 
         machine.zone(0, "50000");
-        let cooled = sensors.read(&profile(), &Declared::default(), 40_000);
+        let cooled = sensors.read(
+            &profile(),
+            &Declared::default(),
+            BusReading::Unobserved,
+            40_000,
+        );
         assert_eq!(cooled.observation.throttled_for_ms, 0);
 
         machine.zone(0, "75000");
-        let hot_again = sensors.read(&profile(), &Declared::default(), 50_000);
+        let hot_again = sensors.read(
+            &profile(),
+            &Declared::default(),
+            BusReading::Unobserved,
+            50_000,
+        );
         assert_eq!(
             hot_again.observation.throttled_for_ms, 0,
             "the second excursion is its own window"
@@ -712,8 +901,8 @@ mod tests {
             ..profile()
         };
         let mut sensors = machine.sensors();
-        sensors.read(&bare, &Declared::default(), 10_000);
-        let later = sensors.read(&bare, &Declared::default(), 90_000);
+        sensors.read(&bare, &Declared::default(), BusReading::Unobserved, 10_000);
+        let later = sensors.read(&bare, &Declared::default(), BusReading::Unobserved, 90_000);
 
         assert_eq!(
             later.observation.throttled_for_ms, 0,
@@ -730,8 +919,18 @@ mod tests {
         machine.supply("BAT0", "Battery", &[("energy_now", "45000000")]);
         machine.zone(0, "75000");
         let mut sensors = machine.sensors();
-        sensors.read(&profile(), &Declared::default(), 100_000);
-        let corrected = sensors.read(&profile(), &Declared::default(), 40_000);
+        sensors.read(
+            &profile(),
+            &Declared::default(),
+            BusReading::Unobserved,
+            100_000,
+        );
+        let corrected = sensors.read(
+            &profile(),
+            &Declared::default(),
+            BusReading::Unobserved,
+            40_000,
+        );
         assert_eq!(corrected.observation.throttled_for_ms, 0);
     }
 
@@ -741,9 +940,12 @@ mod tests {
     fn no_rhal_flag_is_ever_observed_from_here() {
         let machine = Machine::new("power-rhal");
         machine.supply("BAT0", "Battery", &[("energy_now", "45000000")]);
-        let reading = machine
-            .sensors()
-            .read(&profile(), &Declared::default(), 1_000);
+        let reading = machine.sensors().read(
+            &profile(),
+            &Declared::default(),
+            BusReading::Unobserved,
+            1_000,
+        );
         assert!(!reading.observation.rhal_degraded);
         assert_eq!(reading.observation.fault_code, None);
     }
