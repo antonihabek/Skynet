@@ -4896,3 +4896,112 @@ node tools/edition-report.mjs --check — 2 editions, 1,127 cases each
 * **Vision**, still waiting on the first capture backend and the inference backend §23.3 leaves
   vacant. One item shorter than it was.
 * **Device confinement**, unblocked by a vendor runtime that reports accelerator memory.
+
+# Round thirteen — 2026-09-07
+
+## 64. §5's `detects_people` — and the hole that opened behind it
+
+`resolveLimits` takes seven `available` inputs. Six had a path. The seventh —
+`people_detection` — had none, and §80 had carried it as an open row for four sessions with a
+precise diagnosis: *"it is not a missing delivery, it is that no body can declare a person
+detector"*. §5's nine modalities say what a sensor **produces**, and detection is what somebody
+does with the output; a camera is not a person detector, a camera plus a model somebody
+validated is. So `skynetd` wrote `people_detection: false` on every robot, with a comment
+saying why, and `proximity` was a guard the platform could not run however a body was
+described.
+
+### The shape, which is a boolean and deliberately not a vocabulary
+
+`detects_people?: boolean` on the sensor, declared **per sensor and by the vendor**, because
+only the party that built the sensing pipeline knows whether their depth stream is one a person
+is measured in. This is why it did not need §30's *role vocabulary governance* first: there is
+no vocabulary in it, nothing to version, and no existing descriptor breaks against an optional
+boolean.
+
+Three states, and the third is the reason it is optional rather than defaulted:
+
+| | |
+|---|---|
+| absent | undeclared — nobody considered it |
+| `false` | declared absent — considered, and this stream does not do it |
+| `true` | this stream reports person distance |
+
+The first two are **one fact downstream and two in the descriptor**, and that is worth stating
+because it decides what the corpus can and cannot hold an edition to. Both make the guard
+unavailable, so no expected value separates them: an edition whose parser folded them together
+would pass every case in the file. `corpus/embodiment/detection.json` says so in its own header
+rather than implying a coverage it has not got.
+
+### Nine cases, and three ways to be wrong about a boolean
+
+`hasPeopleDetection` is one line. The **parse** is where editions diverge, and each edition
+refuses a malformed declaration by a different mechanism:
+
+| Edition | Mechanism | Its way of being wrong |
+|---|---|---|
+| reference | `=== true` | — |
+| Rust | `Json::as_bool()` returning `None` | `.is_some()`, which admits `Some(false)` |
+| Python | `is True` | `== True` admits `1`; truthiness admits `"no"` |
+
+Python's is the sharpest, because `1 == True` is true and `1 is True` is not. So there is a case
+for the number one, and it exists precisely so the paragraph about it is checked rather than
+claimed. Every mutation is caught and each catches only what it should:
+
+```
+python  `is True` → `== True`     1,135 passed, 1 failed   (the number-one case)
+python  `is True` → truthiness    1,134 passed, 2 failed   (that, and the string "yes")
+rust    `== Some(true)` → `.is_some()`   1,135 of 1,136    (declared-absent-on-every-sensor)
+```
+
+Two cases pin that the **modality is not consulted**: a depth sensor declaring it, and a
+force-torque sensor declaring it. The second looks wrong and is the right answer, because the
+alternative is a list of modalities a detector may live behind — which is a vocabulary, which
+needs the governance this design avoided, and whose wrong entry would silently disable a guard
+on a robot whose vendor had declared one.
+
+### The daemon, and the hole this opened
+
+`skynetd` derives it through `has_people_detection` rather than three lines of its own, so a Hub
+reading the same descriptor cannot answer differently. `embodiment` is a mirrored contract, so
+the change landed on both sides in one `--sync`.
+
+And then the honest half. **`proximity` acts on `cycle.nearest_person_m`, and nothing on this
+edition produces that number.** No capture backend, no perception component, no path from a
+declaration to a distance. So a body that declares a detector moves the guard out of
+*unavailable* and into *active*, where it will never trip — and *active* is what every surface in
+this system renders as protection. That is a worse failure than the one this closed.
+
+It is the same shape `available.imu` has always had, one step wider, because that field at least
+has a RHAL reading behind it. Two things follow, and only one of them is a fix:
+
+* `skynetd`'s limits document now names **`cycle.nearest_person_m`** in `unmeasured` on every
+  robot, replacing the `available.people_detection` entry that this change made false. The
+  inertness is stated rather than inferred from the absence of a trip.
+* §80 gained a row rather than an answer: **does a guard whose inputs resolve and whose producer
+  does not exist deserve a third state?** §7.2 partitions guards into active and unavailable, and
+  this is neither. It is a change to a partition the console, the check-in, the device page and
+  `skynet limits` all draw, so it is a decision and not a field.
+
+`a_declared_detector_activates_a_guard_nothing_can_trip` is the test that holds it: the guard
+resolves active, is no longer reported unavailable, and the document names the reading that is
+not coming. Reverting the daemon's derivation fails exactly that test.
+
+### Run
+
+```
+cargo test --workspace          — 1,645 passed, 0 failed  (1,641 before; +3 contracts, +1 skynetd-io)
+cargo run -p skynet-corpus      — 1,136 of 1,136, 0 unimplemented
+python3 editions/python/run_corpus.py — 1,136 passed, 0 failed
+Hub: npx vitest run — 1,853 passed, 81 files; npm run typecheck — clean
+mirrors, contract mirrors, golden path, scale (§73 matches), edition report — all green
+```
+
+## What round thirteen leaves
+
+* **A guard active with no producer.** New, and the sharpest thing on this list because it is a
+  reporting failure rather than a missing feature. §80 has it; it needs deciding.
+* **The mapping half of §47.6**, and the capture backend behind it. Unchanged.
+* **Kernel liveness into the daemon's conditions, then skynetk in the e2e loop.** Design work
+  within §33.1. Unchanged.
+* **The conformance flip for isolation.** Unchanged.
+* **Device confinement**, unblocked by a vendor runtime that reports accelerator memory.

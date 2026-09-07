@@ -1043,6 +1043,21 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             out
         }
 
+        // §5. Whether this body declares something that reports person distance — the seventh of
+        // `resolve_limits`'s `available` inputs and the last one that had no path. The input is a
+        // whole descriptor because the **parse** is half of what is pinned: a parser reading
+        // `detects_people` with its ordinary optional-field helper folds an explicit `false` into
+        // an absent one, which is right downstream and wrong in the descriptor.
+        "embodiment" if label.contains("detection") => {
+            let descriptor = json::descriptor_from_json(input).map_err(|e| e.to_string())?;
+            let mut out = Json::obj();
+            out.set(
+                "people_detection",
+                Json::Bool(contracts_embodiment::has_people_detection(&descriptor)),
+            );
+            out
+        }
+
         // §47.6. The first family in this corpus with **state**, and the runner reflects that: a
         // case is a script rather than one input, because a pool's whole subject is what the
         // fourth publish does given what the first three did. Nothing here reads the pool's

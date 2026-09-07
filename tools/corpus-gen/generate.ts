@@ -36,10 +36,11 @@ import {
 } from '../../reference/typescript/blackbox.ts'
 import {
   ACTION_KINDS, BASE_KINDS, CANONICAL_AXES, CANONICAL_CHAINS, CONTROL_MODES,
-  EMBODIMENT_MODALITIES, JOINT_TYPES, parseRole, resolveTransport, roleKey,
+  EMBODIMENT_MODALITIES, hasPeopleDetection, JOINT_TYPES, parseRole, resolveTransport, roleKey,
   TRANSPORT_METHODS, TRANSPORT_VERDICTS, TRANSPORT_WARNING_CODES,
   validateFrameBindings, validateFrames,
-  type ActionChannel, type EmbodimentDescriptor, type FrameGraph, type FrameNode,
+  type ActionChannel, type EmbodimentDescriptor, type EmbodimentSensor, type FrameGraph,
+  type FrameNode,
   type ResolveTransportOptions, type SourceEmbodiment,
 } from '../../reference/typescript/embodiment.ts'
 import {
@@ -7166,6 +7167,109 @@ vocabulary('bundle_checks',
   'What arrived, in the order the checks run. Size before digest, because a short file is a link '
   + 'that dropped and a wrong file is a question about where it came from.',
   BUNDLE_CHECKS)
+
+// ── §5 detects_people ────────────────────────────────────────────────────────
+//
+// The seventh of `resolveLimits`'s `available` inputs, and the last one with no path. Its two
+// neighbours are read straight off the descriptor — a sensor whose modality is `imu`, a base that
+// is `legged` — and this one could not be, because §5's modalities say what a sensor *produces*
+// and detection is what somebody does with the output.
+//
+// The input is a whole descriptor rather than a sensor list, deliberately: the derivation is one
+// line and the **parse** is where an edition diverges. What these cases pin is how each edition
+// reads the *value* — boolean, string, number, null — because each does it by a different
+// mechanism and every one of those mechanisms has a way to be wrong.
+//
+// What they cannot pin, and this is worth stating rather than implying: **absent and `false` are
+// indistinguishable downstream by construction**. Both make the guard unavailable, so no expected
+// value can separate them, and an edition whose parser folded the two together would pass every
+// case here. The distinction lives in the descriptor for a person to read; it is not a fact the
+// corpus can hold an edition to, and pretending otherwise would be a case that proves nothing.
+
+function detectionCase(
+  id: string, note: string, sensors: EmbodimentSensor[],
+): void {
+  const descriptor: EmbodimentDescriptor = { ...ARM, sensors }
+  add('embodiment', 'detection', {
+    id, note,
+    // The descriptor itself, not a shaped view of it: the parse is half of what this pins, and a
+    // view would be this file deciding which fields an edition gets to see.
+    input: descriptor,
+    expected: canonical({ people_detection: hasPeopleDetection(descriptor) }),
+  })
+}
+
+/** A camera, with whatever this case is about declared on it. */
+function cam(name: string, detects?: unknown): EmbodimentSensor {
+  return {
+    name, role: null, modality: 'rgb', width: 640, height: 480, fps: 30,
+    ...(detects === undefined ? {} : { detects_people: detects as boolean }),
+  }
+}
+
+detectionCase('a-body-with-no-sensors',
+  'Nothing to ask. `proximity` reports unavailable naming a sensor that detects people, which is '
+  + 'the guard reporting on the body rather than on the descriptor’s author.',
+  [])
+
+detectionCase('nobody-was-asked',
+  'Three cameras and not one of them carries the field — every descriptor written before §5 had '
+  + 'it. Undeclared, so the guard is unavailable. This is the case that must not become `true` by '
+  + 'somebody reasoning that three RGB streams are obviously enough to see a person: a camera is '
+  + 'not a person detector, a camera plus a model somebody validated is, and only the vendor knows '
+  + 'which of those they shipped.',
+  [cam('head'), cam('left_wrist'), cam('right_wrist')])
+
+detectionCase('declared-absent-on-every-sensor',
+  'The same verdict as `nobody-was-asked` and a different descriptor, which is the whole reason '
+  + '`false` is worth writing. Downstream these two are one fact — the guard is unavailable — and '
+  + 'to a person they are opposite ones: a vendor who answered the question, and a vendor who has '
+  + 'not been asked it. An edition whose parser folds absent and `false` together passes every '
+  + 'case in this file and has lost that.',
+  [cam('head', false), cam('left_wrist', false)])
+
+detectionCase('one-camera-declares-it',
+  'One is enough. The question is about the robot rather than about a stream, so there is no '
+  + 'quorum and no “the best of them”: two detectors do not make the claim stronger and one that '
+  + 'stopped working does not make it weaker, which is what the bench and field suites are for.',
+  [cam('head', true), cam('left_wrist'), cam('right_wrist', false)])
+
+detectionCase('the-sensor-that-declares-it-is-not-a-camera',
+  'A depth stream, and the case that would catch an edition adding a modality allow-list. §5 puts '
+  + 'the reason on the field: filtering by modality here would be the contract overruling the '
+  + 'party that built the sensing pipeline, on the strength of a vocabulary that describes what a '
+  + 'sensor produces rather than what is measured in it.',
+  [{ name: 'torso_depth', role: null, modality: 'depth', detects_people: true }])
+
+detectionCase('an-implausible-declaration-is-still-a-declaration',
+  'Person distance, declared on a force-torque sensor. This is the same rule as the case above '
+  + 'and it is worth pinning separately, because it is the one where honouring the vendor looks '
+  + 'wrong. It is still the right answer: the alternative is a list of modalities a detector may '
+  + 'live behind, which is a vocabulary, which needs the governance §30 leaves open — and the '
+  + 'wrong entry in it would silently disable a guard on a robot whose vendor had declared one.',
+  [{ name: 'wrist_ft', role: null, modality: 'force_torque', detects_people: true }])
+
+detectionCase('a-declaration-that-is-not-a-boolean',
+  'The string “yes”. Refused in all three editions, and each refuses it by a different mechanism '
+  + 'that has to agree: `=== true` in the reference, `as_bool()` returning `None` in Rust, and '
+  + '`is True` in Python — where `1 is True` is false and `1 == True` is not, so the transcription '
+  + 'had a place to be wrong. Fail-closed is the only defensible direction on a guard input: a '
+  + 'malformed declaration leaves `proximity` unavailable and naming what it wants, rather than '
+  + 'active on a body nobody has established can see a person.',
+  [cam('head', 'yes')])
+
+detectionCase('a-declaration-that-is-the-number-one',
+  'The Python trap, pinned. `1 == True` is true in Python and `1 is True` is false, so an edition '
+  + 'transcribing `=== true` as `== True` agrees with the reference on every other case in this '
+  + 'file and disagrees here — which is a guard turned on by a descriptor that used `1` for yes. '
+  + 'The reference and Rust reject it for their own reasons: `=== true` admits the boolean and '
+  + 'nothing else, and `as_bool()` returns nothing for a number.',
+  [cam('head', 1)])
+
+detectionCase('a-null-declaration',
+  'Explicit `null`, which JSON produces where TypeScript would write `undefined`. Reads as '
+  + 'undeclared, like absence, and not as a third thing.',
+  [cam('head', null)])
 
 // ── §47.6 Frame handles ──────────────────────────────────────────────────────
 //
