@@ -293,6 +293,16 @@ pub struct Daemon<L: Launcher, S: Slots> {
     /// Zero is a robot that has not advanced a skill yet — or has no recorder — and reads as "count
     /// the whole recording", which is what a first pass should see.
     pub skills_sequence: u64,
+    /// Where §27's `kernel` condition was counted from, advanced every pass.
+    ///
+    /// Separate from [`skills_sequence`](Self::skills_sequence) even though both are cursors over
+    /// the same ring, because they answer over different intervals and sharing one would make each
+    /// consume the other's evidence: a pass that counted interventions for an episode would leave
+    /// the kernel observation nothing to see, and the robot would report its kernel down.
+    pub kernel_sequence: u64,
+    /// What the last pass could see of the Safety Kernel, kept so `GET /state` reports the reading
+    /// rather than re-deriving one from a ring the route would have to open.
+    pub kernel_sighting: crate::blackbox::KernelSighting,
     /// The last release-catalogue pull (§12, §57).
     ///
     /// Kept here for `last_pull`'s reason: `GET /releases` reports what happened rather than making
@@ -372,6 +382,12 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             last_pull: None,
             counting: crate::telemetry::Counting::default(),
             skills_sequence: 0,
+            kernel_sequence: 0,
+            // Nothing has been read yet, and a daemon that started with `Silent` would be
+            // reporting an observation it has not made.
+            kernel_sighting: crate::blackbox::KernelSighting::Unobservable(
+                "no reconcile pass has looked at the recording yet",
+            ),
             // From the kernel's own interfaces, not through the layout — for `cpus`'s reason two
             // fields above: the pack and the thermal zones are properties of the machine and live
             // at `/sys` on every one of them, whatever `/data` a store was rooted at.
@@ -515,10 +531,36 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     /// The self-test is the one condition this process owns, and it is supplied. `wall_s` is passed
     /// for the reason it is everywhere else: calibration expiry is a comparison against a clock,
     /// and a function that read one could not be tested against a fixed one (§35.2).
-    pub fn refresh_operating_state(&mut self, wall_s: Option<f64>) -> Transition {
+    ///
+    /// # The second condition, and how it arrives
+    ///
+    /// `kernel` is now supplied too, and the sentence above about §33.1 needed narrowing rather
+    /// than deleting. The line §33.1 draws is around the **command path**: this process must never
+    /// be between a policy and a joint. Reading a file the kernel wrote is not that, and it is not
+    /// asking the kernel anything either — a turning control loop records a cycle every pass (§26)
+    /// as a side effect of doing its job, and this daemon already holds the recording.
+    ///
+    /// It arrives as a [`KernelSighting`](crate::blackbox::KernelSighting) from the caller rather
+    /// than being read here, for the reason `post` is a report and not a syscall: this method is a
+    /// function over facts, and one that opened a ring could not be driven by a suite.
+    ///
+    /// The direction is the safety argument. Cycles seen is `Live` and **everything else** —
+    /// silence, an unreadable ring, no ring at all — is `Down`. A wrong answer can only hold a
+    /// robot that could have been commanding; it can never raise one. The other six conditions are
+    /// still defaults, so a robot with a turning kernel derives `safe` with `rhal_lost` rather than
+    /// anything new: this removes one of seven blockers and is honest about being one of seven.
+    pub fn refresh_operating_state(
+        &mut self,
+        wall_s: Option<f64>,
+        kernel: &crate::blackbox::KernelSighting,
+    ) -> Transition {
         let report = crate::post::run(self.store.layout(), wall_s);
         let conditions = Conditions {
             post: report.post_verdict(),
+            // §27's second observed condition. `Down` unless a control loop wrote cycles, which is
+            // the only evidence that separates a turning kernel from a hung one — an active unit is
+            // both.
+            kernel: kernel.state(),
             // Everything below is §33.1's line. Left at the default rather than assigned a
             // hopeful value, because a supervisor that reported a plausible fleet status from
             // nothing is the exact failure this project is arranged around.
@@ -534,6 +576,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
 
         self.operating_state = transition.to;
         self.state_reason = transition.reason;
+        self.kernel_sighting = kernel.clone();
         transition
     }
 
@@ -541,7 +584,8 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     ///
     /// A method rather than four lines inside [`Daemon::refresh_operating_state`], and the reason is
     /// that the interesting half of it is unreachable from there **on this edition**: §33.1 leaves
-    /// seven of §27's eight conditions unobserved, so the machine derives `safe` every pass and
+    /// six of §27's eight conditions unobserved — the kernel joined the self-test on 2026-09-07 and
+    /// the RHAL did not — so the machine derives `safe` every pass and
     /// `warning_required` is never true. A robot here never enters a commanding state, so the tone
     /// never sounds and the incident is never raised — for the same reason §74.6's counters report
     /// nothing on a shipping robot.

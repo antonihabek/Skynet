@@ -5107,3 +5107,107 @@ node tools/scale-report.mjs --check — §73 matches the tree
 * **Kernel liveness into the daemon's conditions, then skynetk in the e2e loop.** Design work
   within §33.1.
 * **Device confinement**, unblocked by a vendor runtime that reports accelerator memory.
+
+# Round fifteen — 2026-09-07
+
+## 66. §27's `kernel` condition stops being a default
+
+Round eleven's audit restated this item and explained why it had been misstated:
+
+> Nothing outside contract tests ever reports `RhalState::Present`, `KernelState::Live`, or
+> homing complete, so `refresh_operating_state` derives from post plus defaults — RHAL lost
+> means `safe` on every robot, always.
+
+So a running `skynetk` changed nothing observable, and *"skynetk in the e2e loop"* was the
+second half of a task whose first half did not exist. This is the first half: one of the seven
+defaults becomes a reading.
+
+### The source, and the one that looks obvious and is wrong
+
+`skynetd` already asks systemd about units, the kernel is a unit, and `ActiveState=active` is
+one call away. It is the wrong source, and the reason is the case that matters:
+
+> **A hung kernel is an active unit.**
+
+`active` says a process exists, which is exactly what a robot with a wedged control loop also
+has. Putting §27's most consequential condition on the one signal that cannot separate the
+dangerous case from the healthy one would be worse than leaving it a default, because a default
+is at least honest about knowing nothing.
+
+A control loop that is turning **writes a cycle every pass** (§26). That record is a side effect
+of the kernel doing its job, it is in a file this daemon already holds, and a stopped loop
+cannot produce it. So `KernelState::Live` means *cycles recorded since the last look*, and
+nothing else.
+
+### Why this does not cross §33.1
+
+§33.1's line is around the **command path**: `skynetd` must never be between a policy and a
+joint. Reading a file the kernel wrote is not that, and it is not asking the kernel anything
+either. Two properties keep it that way:
+
+* **It fails closed, in the only direction that is safe.** Cycles seen is `Live`; silence, an
+  unreadable ring, and no ring at all are all `Down`. A wrong answer here can hold a robot that
+  could have been commanding and can never release one that should not be.
+* **The daemon cannot forge it.** §26.2 gives the supervisor the event channel and the control
+  loop the four cycle channels, so `skynetd` is structurally incapable of writing the record it
+  reads. A liveness signal a process can manufacture about itself is not one, and this is a
+  property of the format rather than of anybody's restraint.
+
+### Three answers, because §27 has two and a console needs three
+
+`KernelSighting` is `Unobservable(why)`, `Silent`, or `Turning { cycles }`. §27 maps the first
+two to `down` and is right to. `GET /state` has to tell them apart:
+
+| | |
+|---|---|
+| `Unobservable` | the recording has no action channels, so it *cannot* hold a cycle (§74.3's `commands`). Silence from it says nothing about a kernel |
+| `Silent` | the ring could have held one and did not. The loop is not turning |
+| `Turning` | cycles were recorded in this interval |
+
+Every robot on this edition is in the first state, because no commanding package is resolved and
+the supervisor's ring has no action channels. A console showing *"kernel: down"* about that robot
+would send somebody to restart a kernel that is not the problem — so `observed` is `false` there
+and `true` for the other two, and the reading travels with its reason and its source.
+
+### The cursor, which is what makes it an interval
+
+`daemon.kernel_sequence` is advanced every pass whether or not anything was counted, so a robot
+cannot report a kernel live on the strength of cycles from ten minutes ago. It is deliberately
+**separate** from `skills_sequence` even though both are cursors over the same ring: sharing one
+would make each consume the other's evidence, and a pass that counted interventions for an
+episode would leave the kernel observation nothing to see.
+
+### What it changes, and what it does not
+
+It removes **one of seven** blockers. A robot with a turning kernel still derives `safe` with
+`rhal_lost`, because the RHAL, the guard set, the stop and the homing state are all still
+defaults. That is not a disappointing result, it is the honest size of the step, and the entry in
+§73 says so.
+
+What it *does* change is that the next one is now a mapping rather than a channel. A cycle record
+already carries `rhal_result`, `state_flags` and `fault_code` (§24). Turning those into
+`Present`/`Degraded`/`Lost` is a decision about §24's semantics — which errno is degraded and
+which is lost — and it is a decision, so it is written down here rather than made in passing.
+
+### Run
+
+```
+cargo test --workspace  — 1,658 passed, 0 failed  (1,655 before)
+cargo clippy --workspace — clean
+sh crates/skynetd-io/e2e.sh — all checks passed
+node tools/scale-report.mjs --check — §73 matches the tree
+```
+
+Four stale sentences corrected on the way: the start-up banner, `GET /limits`' `partial` note,
+`warn_for_transition`'s header and two rows of §73 all said *seven of eight* or *one of eight*.
+
+## What round fifteen leaves
+
+* **`RhalState` from the cycle record.** A mapping decision over §24's `rhal_result`,
+  `state_flags` and `fault_code`, not a missing channel. Next.
+* **`skynetk` in the e2e loop**, which now *would* change something observable: a turning kernel
+  flips a condition a route reports.
+* **A package that attempts the forbidden hold** (§15's isolation, round fourteen).
+* **A guard active with no producer** (§80, round thirteen). Still a decision.
+* **The mapping half of §47.6**, and the capture backend behind it.
+* **Device confinement**, unblocked by a vendor runtime that reports accelerator memory.

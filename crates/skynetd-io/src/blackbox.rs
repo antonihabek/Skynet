@@ -227,6 +227,50 @@ impl Recorder {
             .unwrap_or_else(|| self.ring.next_sequence())
     }
 
+    /// What this daemon can see of the Safety Kernel, off §13's ring (§27, §33.1).
+    ///
+    /// # Why the ring, and why not systemd
+    ///
+    /// §27 has a `kernel` condition and `skynetd` has never supplied it, because §33.1 keeps this
+    /// process away from the actuator path — CI asserts it cannot even depend on `skynet-rhal`. So
+    /// the machine has derived `safe` on every robot, always, from a default rather than from an
+    /// observation.
+    ///
+    /// The obvious source is systemd: the kernel is a unit, and this daemon already asks systemd
+    /// about units. It is the wrong source, and the reason is the case that matters. **A hung
+    /// kernel is an active unit.** `ActiveState=active` says a process exists, which is exactly
+    /// what a robot with a wedged control loop also has, and reporting that as `live` would put
+    /// §27's most consequential condition on the one signal that cannot tell the dangerous case
+    /// from the healthy one.
+    ///
+    /// A control loop that is turning **writes a cycle every pass** (§26). That record is produced
+    /// as a side effect of the kernel doing its job, it is already in a file this daemon holds, and
+    /// it cannot be produced by a loop that has stopped. So liveness is *cycles recorded since the
+    /// last look*, and nothing else.
+    ///
+    /// # Why this does not cross §33.1
+    ///
+    /// Nothing here asks the kernel anything, commands anything, or touches a driver: it reads a
+    /// file. The inference is one-directional and fails closed — cycles seen means `Live`, and
+    /// every other outcome, including an unreadable ring, means `Down`. This daemon can never
+    /// *raise* a robot's operating state on a guess; the strongest thing a wrong answer here can do
+    /// is hold a robot that could have been commanding, which is the direction §33.1 exists to
+    /// choose.
+    ///
+    /// # The three answers
+    ///
+    /// [`KernelSighting::Unobservable`] is not a reading. A ring with no action channels cannot
+    /// hold a control cycle at all (`Tally::commands`), so silence from it says nothing about a
+    /// kernel — which is the state of every robot on this edition, and the reason `GET /state`
+    /// reports this condition as unobserved rather than as `down`.
+    /// **This recorder cannot write a cycle**, and that is worth stating where the reading is
+    /// taken. §26.2 gives the supervisor the event channel and the control loop the four cycle
+    /// channels, so the evidence `skynetd` reads here is evidence it is structurally incapable of
+    /// manufacturing. A liveness signal a process can forge about itself is not one.
+    pub fn sighting(&self, since: u64) -> KernelSighting {
+        KernelSighting::from_tally(self.tally(since).as_ref())
+    }
+
     /// Count §74's counters over the records at or after `from_sequence`.
     ///
     /// Reads the whole file, for [`Recorder::read`]'s reason, and runs once per reconcile pass
@@ -471,6 +515,81 @@ impl Recording {
             // leaving a reader to assume they are attached.
             .set("uploaded", Json::Bool(false));
         out
+    }
+}
+
+/// What a daemon could see of the Safety Kernel in one interval (§27's `kernel` condition).
+///
+/// Three answers rather than a boolean, because *"the ring said nothing"* and *"there is no ring
+/// that could have said anything"* are different facts and only the first is an observation. §27
+/// treats both as `down`, correctly; `GET /state` has to tell them apart, because one is a robot
+/// whose kernel has stopped and the other is every robot on this edition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KernelSighting {
+    /// Nothing could be read, with the reason. Not a reading, and reported as unobserved.
+    Unobservable(&'static str),
+    /// The recording can hold a control cycle and none was written in this interval.
+    Silent,
+    /// Cycles were recorded: a control loop turned.
+    Turning {
+        /// How many, which is the interval's own evidence rather than a rate.
+        cycles: u64,
+    },
+}
+
+impl KernelSighting {
+    /// The reading a tally implies, or its absence.
+    ///
+    /// Pure, so the rule can be tested without a disk — which matters more here than usual,
+    /// because the interesting case is a ring **with** cycles in it and only a control loop can
+    /// put one there (§26.2). A test that had to start one would be a rule nobody could check.
+    pub fn from_tally(tally: Option<&skynet_blackbox::tally::Tally>) -> KernelSighting {
+        let Some(tally) = tally else {
+            return KernelSighting::Unobservable(
+                "the ring could not be read, so nothing can be said about the control loop",
+            );
+        };
+        if !tally.commands {
+            return KernelSighting::Unobservable(
+                "this recording has no action channels, so it cannot hold a control cycle — \
+                 silence from it is not evidence about a kernel (§26, §74.3)",
+            );
+        }
+        if tally.cycles == 0 {
+            return KernelSighting::Silent;
+        }
+        KernelSighting::Turning {
+            cycles: tally.cycles,
+        }
+    }
+
+    /// §27's condition. `Live` for [`Turning`](KernelSighting::Turning) and nothing else.
+    pub fn state(&self) -> skynet_contracts::opstate::KernelState {
+        match self {
+            KernelSighting::Turning { .. } => skynet_contracts::opstate::KernelState::Live,
+            _ => skynet_contracts::opstate::KernelState::Down,
+        }
+    }
+
+    /// Whether this was an observation at all.
+    pub fn observed(&self) -> bool {
+        !matches!(self, KernelSighting::Unobservable(_))
+    }
+
+    /// What a console shows beside the condition.
+    pub fn detail(&self) -> String {
+        match self {
+            KernelSighting::Unobservable(why) => (*why).to_string(),
+            KernelSighting::Silent => {
+                "no control cycle was recorded in the last interval, so nothing shows the loop \
+                 turning. A hung kernel is an active unit, which is why this is read off the \
+                 records rather than off systemd"
+                    .to_string()
+            }
+            KernelSighting::Turning { cycles } => {
+                format!("{cycles} control cycles were recorded in the last interval")
+            }
+        }
     }
 }
 
