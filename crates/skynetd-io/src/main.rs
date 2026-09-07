@@ -136,17 +136,11 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
     // No recorder yet at start-up: it is opened below, and the first look at §27's `kernel`
     // condition therefore reports unobservable rather than down. A daemon that reported the kernel
     // down before it had opened the recording would be announcing a fault it had not looked for.
-    observe_state(&mut daemon, None);
+    observe_state(&mut daemon, None, 0);
     // The count is derived, never typed. Three surfaces stated it by hand and one of them was
     // wrong on every pass — see `crate::observed`, which is the only thing in this process that
     // knows how many of §27's conditions were looked at.
-    let seen = skynetd_io::observed::Observed::of(
-        &daemon.kernel_sighting,
-        &daemon.rhal_sighting,
-        &daemon.stop_sighting,
-        &daemon.hold_sighting,
-        &daemon.guards_sighting,
-    );
+    let seen = skynetd_io::observed::Observed::of(&daemon.sightings());
     eprintln!(
         "skynetd: §27 state is `{}`, because {}. §33.4's barrier is `{}` says {}, narrowed by that \
          state — and the state rests on {}: {} — {}. Those are on §33.1's side of the line and \
@@ -297,7 +291,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
 
     if once {
         let now = monotonic(origin);
-        observe_state(&mut daemon, recorder.as_ref());
+        observe_state(&mut daemon, recorder.as_ref(), now);
         // Through the same function the loop uses, and that is the whole of the fix. `once` used to
         // converge directly and record nothing, so a robot operated entirely through it — which
         // §33's own documentation calls "a legitimate way to operate a robot" — had a black box
@@ -517,7 +511,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                 daemon.jitter = jitter_for(now);
                 // §11's loop: pull, then reconcile, then report. Each is the input to the next.
                 pull_desired(&mut daemon, &layout, now);
-                observe_state(&mut daemon, recorder.as_ref());
+                observe_state(&mut daemon, recorder.as_ref(), now);
                 let passes =
                     converge_and_record(&mut daemon, recorder.as_mut(), &layout, now, started_ms);
                 for (action, reason) in passes
@@ -1900,6 +1894,7 @@ fn wall_s() -> Option<f64> {
 fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>(
     daemon: &mut Daemon<L, S>,
     recorder: Option<&skynetd_io::blackbox::Recorder>,
+    now_ms: u64,
 ) {
     // §27's `kernel` condition, off §13's ring rather than off systemd — a hung kernel is an
     // active unit, and cycles recorded since the last look is the only evidence that separates the
@@ -1953,6 +1948,33 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
         &skynetd_io::calibration::status(&layout, wall_s()).unavailable(),
     );
 
-    daemon.refresh_operating_state(wall_s(), &kernel, &rhal, &stop, &hold, &guards);
+    // §27's `policy`, off the same two things this daemon already uses to size a recording: which
+    // package declares an action space, and whether its plan resolves onto this body. `false` for
+    // `allow_retarget` for the reason every other caller on this path passes it — §6.1 makes
+    // retargeting a decision somebody made, and there is no somebody in a reconcile pass.
+    //
+    // The unit state is the daemon's own action's result rather than a question to the kernel,
+    // which is what keeps this on the right side of §33.1: it launched the unit, so it may say
+    // whether the unit is running. What it may not say is whether the kernel granted a lease.
+    let actual = daemon.observe(now_ms);
+    let supervising = skynetd_io::shape::supervising(&daemon.store, &body, false);
+    let policy = skynetd_io::shape::PolicySighting::of(&supervising, |package| {
+        actual
+            .units
+            .iter()
+            .any(|unit| unit.id == package && unit.state == skynetd::actual::UnitState::Running)
+    });
+
+    daemon.refresh_operating_state(
+        wall_s(),
+        &skynetd_io::observed::Sightings {
+            kernel: &kernel,
+            rhal: &rhal,
+            stop: &stop,
+            hold: &hold,
+            guards: &guards,
+            policy: &policy,
+        },
+    );
     daemon.refresh_safe_state();
 }

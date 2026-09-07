@@ -344,13 +344,7 @@ fn status<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     // The same reading `GET /state` renders, taken from the same two sightings. Two routes
     // describing one pass have to agree about how much of it was observed, and before
     // `crate::observed` they did not.
-    let seen = crate::observed::Observed::of(
-        &context.daemon.kernel_sighting,
-        &context.daemon.rhal_sighting,
-        &context.daemon.stop_sighting,
-        &context.daemon.hold_sighting,
-        &context.daemon.guards_sighting,
-    );
+    let seen = crate::observed::Observed::of(&context.daemon.sightings());
     let running = actual
         .units
         .iter()
@@ -539,12 +533,14 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     // two: §27 is right to treat both as `down`, and a console showing "kernel: down" about a robot
     // that has no command path at all would send somebody to restart a kernel that is not the
     // problem.
-    let sighting = &context.daemon.kernel_sighting;
-    let body = &context.daemon.rhal_sighting;
-    let chain = &context.daemon.stop_sighting;
-    let hold = &context.daemon.hold_sighting;
-    let guards = &context.daemon.guards_sighting;
-    let seen = crate::observed::Observed::of(sighting, body, chain, hold, guards);
+    let taken = context.daemon.sightings();
+    let sighting = taken.kernel;
+    let body = taken.rhal;
+    let chain = taken.stop;
+    let hold = taken.hold;
+    let guards = taken.guards;
+    let policy = taken.policy;
+    let seen = crate::observed::Observed::of(&taken);
     out.set("observed", seen.to_json());
 
     // What was seen, in a sentence, beside the boolean. §32.2's rule about the on-robot console is
@@ -654,6 +650,21 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
         ),
     );
     out.set("guards", guard_set);
+
+    // §27's policy, off the store and the unit rather than off a lease table this process cannot
+    // read. The `observed` flag here is the one on this route that varies with the robot rather
+    // than with the edition, and the detail says which side of that line this robot is on.
+    let mut policy_block = Json::obj();
+    policy_block.set("state", Json::from(policy.state().as_str()));
+    policy_block.set("observed", Json::Bool(policy.observed()));
+    policy_block.set("detail", Json::Str(policy.detail()));
+    policy_block.set(
+        "source",
+        Json::from(
+            "this daemon's own store and the unit it launched (§33.5, §37.1). Two of §27's three              policy values are exactly knowable from those — nothing to run, and something that              is not ready — and the third asserts §25.2's lease, which the Safety Kernel grants              and this process cannot read. So a robot whose plan resolves and whose unit is              running reports this condition unobserved and is taken at `held`, never at `ready`.",
+        ),
+    );
+    out.set("policy", policy_block);
 
     // §49.1's channel, on the route that reports the state whose transitions demand it. Not a
     // route of its own: a warning channel is not a subsystem an operator inspects on its own, it is

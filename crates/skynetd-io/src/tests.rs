@@ -1426,11 +1426,14 @@ fn console_fixture() {
     // that the page is rendered against a robot that exists.
     fixture.daemon.refresh_operating_state(
         None,
-        &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
-        &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
-        &blackbox::StopSighting::Unobservable("no ring in this fixture"),
-        &blackbox::HoldSighting::Unobservable("no ring in this fixture"),
-        &crate::limits::GuardsSighting::Unobservable("no descriptor in this fixture"),
+        &crate::observed::Sightings {
+            kernel: &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
+            rhal: &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
+            stop: &blackbox::StopSighting::Unobservable("no ring in this fixture"),
+            hold: &blackbox::HoldSighting::Unobservable("no ring in this fixture"),
+            guards: &crate::limits::GuardsSighting::Unobservable("no descriptor in this fixture"),
+            policy: &crate::shape::PolicySighting::Nothing { no_body: true },
+        },
     );
     let vendor = driver_key(31);
     write_trust(&fixture, "bench-robotics", &public_hex(&vendor));
@@ -3972,11 +3975,14 @@ fn status_carries_the_operating_state_and_the_reason_it_is_there() {
 
     fixture.daemon.refresh_operating_state(
         None,
-        &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
-        &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
-        &blackbox::StopSighting::Unobservable("no ring in this fixture"),
-        &blackbox::HoldSighting::Unobservable("no ring in this fixture"),
-        &crate::limits::GuardsSighting::Unobservable("no descriptor in this fixture"),
+        &crate::observed::Sightings {
+            kernel: &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
+            rhal: &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
+            stop: &blackbox::StopSighting::Unobservable("no ring in this fixture"),
+            hold: &blackbox::HoldSighting::Unobservable("no ring in this fixture"),
+            guards: &crate::limits::GuardsSighting::Unobservable("no descriptor in this fixture"),
+            policy: &crate::shape::PolicySighting::Nothing { no_body: true },
+        },
     );
     let (_, after) = fixture.request("GET", "/status", None, "");
     assert_eq!(after.get("state").and_then(Json::as_str), Some("safe"));
@@ -3986,20 +3992,29 @@ fn status_carries_the_operating_state_and_the_reason_it_is_there() {
     );
 }
 
-/// `GET /state` says which of §27's eight conditions anybody looked at, and this edition looks at
-/// one. A page that showed the state without that would be reporting a robot as safe when the
-/// truth is that nothing has looked at it.
+/// `GET /state` says which of §27's eight conditions anybody looked at, and on a robot with no
+/// ring, no descriptor and nothing installed it looks at two. A page that showed the state without
+/// that would be reporting a robot as safe when the truth is that almost nothing has looked at it.
+///
+/// The two are `post` — this process's own self-test — and `policy`, and the second is worth
+/// stating: *nothing is installed that declares an action space* is a fact this daemon holds the
+/// store for, and answering it is not a §33.1 crossing. What would be one is claiming §25.2's
+/// lease, which is why the fixture that has a package installed reports this condition unobserved
+/// and this one does not.
 #[test]
 fn the_state_route_admits_how_little_it_observed() {
     let mut fixture = Fixture::new("state-route");
     fixture.provision();
     fixture.daemon.refresh_operating_state(
         None,
-        &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
-        &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
-        &blackbox::StopSighting::Unobservable("no ring in this fixture"),
-        &blackbox::HoldSighting::Unobservable("no ring in this fixture"),
-        &crate::limits::GuardsSighting::Unobservable("no descriptor in this fixture"),
+        &crate::observed::Sightings {
+            kernel: &blackbox::KernelSighting::Unobservable("no ring in this fixture"),
+            rhal: &blackbox::RhalSighting::Unobservable("no ring in this fixture"),
+            stop: &blackbox::StopSighting::Unobservable("no ring in this fixture"),
+            hold: &blackbox::HoldSighting::Unobservable("no ring in this fixture"),
+            guards: &crate::limits::GuardsSighting::Unobservable("no descriptor in this fixture"),
+            policy: &crate::shape::PolicySighting::Nothing { no_body: true },
+        },
     );
     let (status, body) = fixture.request("GET", "/state", Some("observer-token"), "");
     assert_eq!(status, 200);
@@ -4012,19 +4027,23 @@ fn the_state_route_admits_how_little_it_observed() {
 
     let observed = body.get("observed").expect("the observation map");
     assert_eq!(observed.get("post").and_then(Json::as_bool), Some(true));
-    for unobserved in [
-        "kernel",
-        "rhal",
-        "homing",
-        "stop",
-        "guard_hold",
-        "guards",
-        "policy",
-    ] {
+    assert_eq!(
+        observed.get("policy").and_then(Json::as_bool),
+        Some(true),
+        "`policy` is answerable here: nothing is installed, and this daemon holds the store"
+    );
+    assert_eq!(
+        body.get("policy")
+            .and_then(|block| block.get("state"))
+            .and_then(Json::as_str),
+        Some("none"),
+        "and the answer is `none`, which is the sentence with no remedy rather than the one with"
+    );
+    for unobserved in ["kernel", "rhal", "homing", "stop", "guard_hold", "guards"] {
         assert_eq!(
             observed.get(unobserved).and_then(Json::as_bool),
             Some(false),
-            "`{unobserved}` is not this process's to observe (§33.1)"
+            "`{unobserved}` is not observable on this fixture"
         );
     }
 }
@@ -4045,13 +4064,16 @@ fn the_state_route_admits_how_little_it_observed() {
 /// lacked and the only reason `crate::observed` exists.
 #[test]
 fn every_sentence_about_the_conditions_counts_the_same_object() {
-    for (kernel, rhal, stop, hold, guards, expected) in [
+    for (kernel, rhal, stop, hold, guards, policy, expected) in [
         (
             blackbox::KernelSighting::Unobservable("no ring in this fixture"),
             blackbox::RhalSighting::Unobservable("no ring in this fixture"),
             blackbox::StopSighting::Unobservable("no ring in this fixture"),
             blackbox::HoldSighting::Unobservable("no ring in this fixture"),
             crate::limits::GuardsSighting::Unobservable("no descriptor in this fixture"),
+            crate::shape::PolicySighting::LeaseUnknown {
+                package: "com.example.walk".to_string(),
+            },
             1,
         ),
         (
@@ -4064,14 +4086,23 @@ fn every_sentence_about_the_conditions_counts_the_same_object() {
             blackbox::StopSighting::Clear,
             blackbox::HoldSighting::Clear,
             crate::limits::GuardsSighting::AllAvailable,
-            6,
+            crate::shape::PolicySighting::Nothing { no_body: false },
+            7,
         ),
     ] {
         let mut fixture = Fixture::new("condition-count");
         fixture.provision();
-        fixture
-            .daemon
-            .refresh_operating_state(None, &kernel, &rhal, &stop, &hold, &guards);
+        fixture.daemon.refresh_operating_state(
+            None,
+            &crate::observed::Sightings {
+                kernel: &kernel,
+                rhal: &rhal,
+                stop: &stop,
+                hold: &hold,
+                guards: &guards,
+                policy: &policy,
+            },
+        );
 
         let (_, state) = fixture.request("GET", "/state", Some("observer-token"), "");
         let observed = state.get("observed").expect("the observation map");
@@ -4215,15 +4246,18 @@ fn an_open_stop_chain_is_its_own_cause_and_never_a_completed_stop() {
     fixture.provision();
     fixture.daemon.refresh_operating_state(
         None,
-        &blackbox::KernelSighting::Turning { cycles: 40 },
-        &blackbox::RhalSighting::Seen {
-            state: skynet_contracts::opstate::RhalState::Present,
-            errno: None,
-            fault_code: 0,
+        &crate::observed::Sightings {
+            kernel: &blackbox::KernelSighting::Turning { cycles: 40 },
+            rhal: &blackbox::RhalSighting::Seen {
+                state: skynet_contracts::opstate::RhalState::Present,
+                errno: None,
+                fault_code: 0,
+            },
+            stop: &blackbox::StopSighting::Asserted,
+            hold: &blackbox::HoldSighting::Clear,
+            guards: &crate::limits::GuardsSighting::AllAvailable,
+            policy: &crate::shape::PolicySighting::Nothing { no_body: false },
         },
-        &blackbox::StopSighting::Asserted,
-        &blackbox::HoldSighting::Clear,
-        &crate::limits::GuardsSighting::AllAvailable,
     );
 
     let (status, state) = fixture.request("GET", "/state", Some("observer-token"), "");
@@ -4428,15 +4462,18 @@ fn an_enforced_hold_reaches_the_route_and_homing_still_outranks_it() {
     fixture.provision();
     fixture.daemon.refresh_operating_state(
         None,
-        &blackbox::KernelSighting::Turning { cycles: 40 },
-        &blackbox::RhalSighting::Seen {
-            state: skynet_contracts::opstate::RhalState::Present,
-            errno: None,
-            fault_code: 0,
+        &crate::observed::Sightings {
+            kernel: &blackbox::KernelSighting::Turning { cycles: 40 },
+            rhal: &blackbox::RhalSighting::Seen {
+                state: skynet_contracts::opstate::RhalState::Present,
+                errno: None,
+                fault_code: 0,
+            },
+            stop: &blackbox::StopSighting::Clear,
+            hold: &blackbox::HoldSighting::Held,
+            guards: &crate::limits::GuardsSighting::AllAvailable,
+            policy: &crate::shape::PolicySighting::Nothing { no_body: false },
         },
-        &blackbox::StopSighting::Clear,
-        &blackbox::HoldSighting::Held,
-        &crate::limits::GuardsSighting::AllAvailable,
     );
 
     let (status, state) = fixture.request("GET", "/state", Some("observer-token"), "");
@@ -4478,15 +4515,18 @@ fn an_advisory_hold_is_reported_without_holding_the_robot() {
     fixture.provision();
     fixture.daemon.refresh_operating_state(
         None,
-        &blackbox::KernelSighting::Turning { cycles: 40 },
-        &blackbox::RhalSighting::Seen {
-            state: skynet_contracts::opstate::RhalState::Present,
-            errno: None,
-            fault_code: 0,
+        &crate::observed::Sightings {
+            kernel: &blackbox::KernelSighting::Turning { cycles: 40 },
+            rhal: &blackbox::RhalSighting::Seen {
+                state: skynet_contracts::opstate::RhalState::Present,
+                errno: None,
+                fault_code: 0,
+            },
+            stop: &blackbox::StopSighting::Clear,
+            hold: &blackbox::HoldSighting::Advisory,
+            guards: &crate::limits::GuardsSighting::AllAvailable,
+            policy: &crate::shape::PolicySighting::Nothing { no_body: false },
         },
-        &blackbox::StopSighting::Clear,
-        &blackbox::HoldSighting::Advisory,
-        &crate::limits::GuardsSighting::AllAvailable,
     );
 
     let (status, state) = fixture.request("GET", "/state", Some("observer-token"), "");

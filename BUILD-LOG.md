@@ -6567,3 +6567,91 @@ the check is that guards are unavailable and the robot says which and why, rathe
   documents: a declared sensor that fails mid-run is still invisible.
 
 Nothing is pushed.
+
+---
+
+# Round twenty-five — 2026-09-07
+
+## 83. §27's `policy` — the only condition whose honest answer is *partly* unobservable
+
+The last of §27's eight with a source in this process, and the first where the answer is not simply
+*yes it is readable* or *no it is not*.
+
+`PolicyState` has three values. Two of them this daemon can establish **exactly**:
+
+* **`None`** — *nothing to run.* Nothing installed declares an action space, or nothing describes
+  the body. This process holds the store; that is not a question for anybody else.
+* **`Held`** — *something to run that is not ready to*, in four distinct ways: the plan is refused,
+  the manifest cannot be read, two packages both command (§80 leaves both without a ring for the
+  same reason), or the plan resolves and the unit is not running — a policy whose process does not
+  exist holds no lease.
+
+The third is `Ready` — *lease granted and plan resolved* — and it is not this daemon's on any
+input. It resolves the plan itself and it launched the unit, so it has both halves of the
+*necessary*; §25.2's lease is the Safety Kernel's table and no amount of care here reads it. So that
+one case reports itself **unobserved**, is taken at `held`, and `ready` is a value `PolicySighting`
+cannot produce. The unit check is not a §33.1 crossing for a reason worth stating: the daemon
+started the unit, so whether the unit is running is its own action's result rather than a question
+to the kernel.
+
+### And it closed a defect that had been live since §27's machine was written
+
+The condition sat at `Conditions::default()`, which is `PolicyState::None`. §27's rule 8 splits
+`no_policy` from `policy_not_ready` deliberately — *"there is nothing to run"* and *"there is
+something and it has not got a lease"* are different sentences and the second is the one with a
+remedy, because §25.2's arbitration is where an operator goes to find out who else is holding the
+arm.
+
+So a robot with a commanding package installed **and activated** was reporting *there is nothing to
+run*. That is not a cautious reading of an unobserved condition. It is a false statement about a
+store this process holds, made by the process that holds it, and the cautious reading was available
+the whole time: `Held` is weaker than `Ready` and is the only one of the three that is true.
+
+It was latent because `homing` is rule 5 and stops every robot on this edition three rules earlier,
+which is why the suite drives §27's machine directly — `post` passed, `homing` not required,
+`kernel` live, `rhal` present — to reach rule 8 and assert both sentences.
+
+### Clippy caught the shape before a person did
+
+`refresh_operating_state` reached eight arguments, six of which read as "a sighting". They are a
+struct now — `observed::Sightings` — and the reason is not only ergonomics: **§27's conditions are
+only comparable when they are readings of one instant**, which `Recorder::chain` already says where
+the ring is scanned. A struct assembled once per pass says that; six parameters invite a caller to
+gather them at six different moments. `Daemon::sightings()` is the other half — two routes and the
+banner take the same six from one place rather than each naming six fields.
+
+### The count check needed English
+
+Four sentences reached **one** unobserved condition, and one is singular. Rewording them made every
+pattern in `scale-report --check` miss — and the check said so, reporting *"no document states how
+many of §27's conditions are unobserved any more, so this check is guarding nothing"* rather than
+passing. That `found` is counted separately from the failures is what turned a grammar change from
+a silent hole into a message. The patterns take `is` or `are` now, and carry a note that the next
+boundary is `none`.
+
+## Run
+
+```
+cargo test --workspace                      1,684 passed, 0 failed  (1,682 before)
+cargo clippy --workspace --all-targets      clean, no warnings
+cargo fmt --all --check                     clean
+sh crates/skynetd-io/e2e.sh                 all checks passed — seven observed conditions on a
+                                            running daemon, and the policy condition naming the
+                                            installed package instead of reporting nothing to run
+python3 editions/python/run_corpus.py       1,142 of 1,142, both editions
+every check tool                            exit 0
+```
+
+## Where this leaves §27
+
+**Seven of eight.** `homing` is the last, and it is the only one where the reason first written for
+all eight survives contact: §24 gives the ABI no flag for it, so it is not written down anywhere
+this process — or any process — could read. Closing it is an ABI change, and the ABI is the one
+thing in this system a vendor compiles against.
+
+Seven of eight does not buy a robot that commands. `homing` is rule 5 of `derive`, so this edition
+still resolves `unhomed` however good the six readings below it are. What changed over these three
+rounds is that the state rests on readings, and every condition a console shows beside it is a
+measurement rather than a default dressed as one.
+
+Nothing is pushed.

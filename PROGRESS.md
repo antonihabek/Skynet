@@ -12517,3 +12517,69 @@ check tool green. `homing` and `policy` remain, and `homing` is the only one wit
 138. **A test helper that shadows the thing under test is a suite proving something about itself.**
      `limits.rs`'s `guards` helper predated the module function of the same name by months and
      would have silently taken every new call in the suite.
+
+## 2026-09-07 (seventy-second) — §27's `policy`, and the sentence that was false about this daemon's own store
+
+The last of §27's eight with a source in this process, and the only one whose honest answer is
+*partly* unobservable.
+
+`PolicyState` has three values and this daemon can establish two exactly. **`None`** — nothing
+installed declares an action space — is a question about a store this process holds. **`Held`** is
+four distinct facts it also holds: a refused plan, an unreadable manifest, two commanding packages,
+or a resolved plan whose unit is not running, because a policy whose process does not exist holds no
+lease. The third, **`Ready`**, asserts §25.2's lease. This daemon resolves the plan and launched the
+unit, so it has both halves of the *necessary*; the lease table is the Safety Kernel's. So that one
+case reports itself unobserved, is taken at `held`, and `ready` is a value the mapping cannot
+produce on any input.
+
+Reading the unit is not a §33.1 crossing, and the reason is worth keeping: the daemon **started**
+the unit, so whether it is running is its own action's result rather than a question to the kernel.
+
+### The defect it closed
+
+The condition sat at its default, which is `None` — and §27's rule 8 splits `no_policy` from
+`policy_not_ready` precisely because *"there is nothing to run"* and *"there is something and it has
+not got a lease"* are different sentences and the second is the one with a remedy. A robot with a
+commanding package installed and activated was reporting the first. That is not a cautious reading
+of an unobserved condition; it is a false statement about a store this process holds, made by the
+process that holds it — and the cautious reading was available the whole time, since `Held` is
+weaker than `Ready` and is the only one of the three that is true.
+
+It was latent because `homing` stops every robot here three rules earlier, which is why the suite
+drives §27's machine directly to reach rule 8 and assert both sentences.
+
+### Two things the tools caught before a person did
+
+Clippy refused `refresh_operating_state` at eight arguments, six of which read as "a sighting". They
+are a struct now, and the reason is stronger than ergonomics: §27's conditions are only comparable
+when they are readings of one instant, and a struct assembled once per pass says that where six
+parameters invite a caller to gather them at six different moments.
+
+And `scale-report --check` reported that it was guarding nothing. Four sentences reached **one**
+unobserved condition, one is singular, and rewording them made every pattern miss. The check counts
+what it matched separately from what failed, so a grammar change produced a message instead of a
+silent hole.
+
+### Numbers
+
+`cargo test --workspace` — **1,684 passed** (1,682 before). clippy clean with no warnings, fmt
+clean, e2e green with **seven of §27's eight conditions observed** on a running daemon and the
+policy condition naming the installed package, 1,142 of 1,142 in both editions, every check tool
+green.
+
+### Findings, restated
+
+1-138 as before.
+
+139. **A default that is safe can still be false.** `PolicyState::None` holds a robot, which is the
+     safe direction, and says the store is empty, which this process knows it is not. "Cautious"
+     has to be chosen among the values that are *true*, not among all of them.
+
+140. **A condition can be observable on some robots and not on others.** Six of §27's eight are
+     properties of the edition; `policy` is a property of the robot — answerable on every machine
+     except the one where a policy is actually about to run, which is the machine where it matters.
+     Reporting that per-robot is more honest than picking one answer for the fleet.
+
+141. **A check with English in it can go stale in its grammar.** Counting what a pattern matched,
+     separately from what failed, is what turns that from a silent pass into a message. The count
+     reached one; the sentences became singular; every pattern missed; the tool said so.
