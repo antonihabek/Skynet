@@ -298,21 +298,37 @@ const NUMBER_WORDS = {
  * from `Observed::of`, so a condition gaining a producer fails this check in four places at once
  * and the fix is to write the new number, not to remember that there was one.
  */
+/**
+ * `is` as well as `are`, because the count reached **one** on 2026-09-07 and English changed under
+ * the check.
+ *
+ * The first draft matched only the plural, so rewording four sentences into the singular they now
+ * require made every pattern miss — and the check reported *"no document states how many of §27's
+ * conditions are unobserved any more"* rather than passing, which is the whole reason `found` is
+ * counted separately from the failures. A check whose grammar can go stale has to notice that it
+ * matched nothing; this one does, and this comment is here because the next boundary is `none`.
+ */
+const IS_OR_ARE = String.raw`(?:is|are)`
+
 const CONDITION_SENTENCES = [
   {
     file: SPEC,
     label: '§73/§81',
-    pattern: /([\w-]+) of (?:§27's eight|the eight) conditions are still (?:unobserved|the kernel's)/gi,
+    pattern: new RegExp(
+      String.raw`([\w-]+) of (?:§27's eight|the eight) conditions ${IS_OR_ARE} still `
+      + String.raw`(?:unobserved|the kernel's)`, 'gi'),
   },
   {
     file: SPEC,
     label: '§73',
-    pattern: /([\w-]+) of the eight are still the kernel's/gi,
+    pattern: new RegExp(
+      String.raw`([\w-]+) of the eight ${IS_OR_ARE} still the kernel's`, 'gi'),
   },
   {
     file: join(ROOT, 'README.md'),
     label: 'README',
-    pattern: /([\w-]+) of §27's eight conditions are unobserved/gi,
+    pattern: new RegExp(
+      String.raw`([\w-]+) of §27's eight conditions ${IS_OR_ARE} unobserved`, 'gi'),
   },
 ]
 

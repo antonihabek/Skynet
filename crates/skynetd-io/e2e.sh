@@ -706,8 +706,8 @@ DESIRED
   # makes all four observable at the moment the loop writes into it. `guards` is the sixth and it
   # is observable **before** any of them: §7.6's partition resolves off the descriptor this package
   # staged, with no ring involved at all.
-  want "and §27 now counts six observed conditions" \
-    "six of §27's eight conditions" "$K/after"
+  want "and §27 now counts seven observed conditions" \
+    "seven of §27's eight conditions" "$K/after"
   want "the kernel is live, with the cycles that say so" "control cycles were recorded" "$K/after"
   want "and the RHAL is present, off the newest cycle" "read the body and reported it present" "$K/after"
   # The guard hold, on a loop nothing is holding: the guards ran and none of them withheld the
@@ -720,6 +720,11 @@ DESIRED
   # condition says which and why — rather than a hopeful "all available" that would prove nothing.
   want "and the guard set is partitioned, naming what each guard wants" \
     "unavailable:" "$K/after"
+  # §27's policy, off the store rather than off §25.2's lease table. A commanding package is
+  # installed and activated by this point, so the assertion is that the daemon says so — the
+  # sentence `no_policy` would have been false here, and was, on every robot until this round.
+  want "and the policy condition names the package rather than reporting nothing to run" \
+    "openrobot/reach" "$K/after"
   # Both off one interval and one set of records. A robot reporting a present driver beside a
   # silent kernel would be describing a pair that was true at no instant, which is the reason
   # §27 reads them together rather than on two routes.

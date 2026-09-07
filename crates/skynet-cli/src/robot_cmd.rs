@@ -1603,7 +1603,13 @@ fn print_state(document: &Json) {
             // quoted literals that a `|` or a `=>` follows, so spelling this as a pattern put
             // `live`, `present` and `passed` into the set of things `skynet <x>` may be — and the
             // check that counts CLI commands then reported 52 of them.
-            let good = state.is_none_or(|state| ["live", "present", "passed"].contains(&state))
+            // `none` joins the three because it is `policy`'s "nothing is wrong here" answer: a
+            // robot with nothing installed to command it is not a robot with a problem, and
+            // marking it would put a finding beside every bench machine. `held` is deliberately
+            // absent — something is installed and is not running it, which is exactly what an
+            // operator scanning this list is looking for.
+            let good = state
+                .is_none_or(|state| ["live", "present", "passed", "none"].contains(&state))
                 && !flagged(block);
             let mark = match (seen, good) {
                 (false, _) => term::dim("·"),
