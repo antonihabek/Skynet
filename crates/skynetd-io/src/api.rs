@@ -540,6 +540,7 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     let hold = taken.hold;
     let guards = taken.guards;
     let policy = taken.policy;
+    let homing = taken.homing;
     let seen = crate::observed::Observed::of(&taken);
     out.set("observed", seen.to_json());
 
@@ -596,6 +597,32 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
         ),
     );
     out.set("stop", stop);
+
+    // §27's homing, off §24's two-bit field on that same newest cycle. It is here beside the stop
+    // because it rides in on the same flags word and is refused on the same terms (§26.4) — and
+    // because the e2e found it rendering as a bare tick with nothing beside it, which is the shape
+    // §32.2 forbids: a console showing that a condition was observed and not what was observed.
+    let mut homing_block = Json::obj();
+    homing_block.set("state", Json::from(homing.state().as_str()));
+    homing_block.set("observed", Json::Bool(homing.observed()));
+    // The distinction the two-bit field exists to make, as its own field rather than only in the
+    // sentence. A console that had to grep the prose to tell *this driver does not answer* from
+    // *this robot is not homed* would eventually stop trying.
+    homing_block.set(
+        "reported",
+        Json::Bool(matches!(
+            homing,
+            crate::blackbox::HomingSighting::Reported(_)
+        )),
+    );
+    homing_block.set("detail", Json::Str(homing.detail()));
+    homing_block.set(
+        "source",
+        Json::from(
+            "§24's two-bit homing field in the flags word of the newest control cycle in §13's              ring. Zero is `unreported` and not `pending`: both hold the robot, and only one of              them means somebody should go and home the machine. A cycle whose body read failed              carries the previous cycle's flags (§26.4), so its field is a fill and is refused.",
+        ),
+    );
+    out.set("homing", homing_block);
 
     // §27's guard hold, off the guard verdict in that same newest cycle. The fourth reading of one
     // instant, and the first that is a fact about the **kernel** rather than the body — which is

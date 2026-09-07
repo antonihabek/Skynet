@@ -1608,9 +1608,25 @@ fn print_state(document: &Json) {
             // marking it would put a finding beside every bench machine. `held` is deliberately
             // absent — something is installed and is not running it, which is exactly what an
             // operator scanning this list is looking for.
-            let good = state
-                .is_none_or(|state| ["live", "present", "passed", "none"].contains(&state))
-                && !flagged(block);
+            //
+            // `not_required` and `complete` are §27's two good homing answers and joined the list
+            // when `homing` gained a source (§24's two-bit field). `pending` is deliberately
+            // absent, and it is the row an operator most needs marked: it covers both *this
+            // machine has not been homed* and *this driver does not report homing*, which are the
+            // two states that hold a robot at rule 5. Which of the two it is, is in the detail
+            // beside it and in the block's `reported` flag — the mark says only that there is
+            // something here to read.
+            let good = state.is_none_or(|state| {
+                [
+                    "live",
+                    "present",
+                    "passed",
+                    "none",
+                    "not_required",
+                    "complete",
+                ]
+                .contains(&state)
+            }) && !flagged(block);
             let mark = match (seen, good) {
                 (false, _) => term::dim("·"),
                 (true, true) => term::ok("✓"),
