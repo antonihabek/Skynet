@@ -7104,3 +7104,93 @@ What is genuinely left in the OS is short, and none of it is a reasoning error:
 * **Hardware** — the certified tier, a physical joint, a TPM, a vendor driver, an applied OTA.
 
 Nothing is pushed.
+
+---
+
+# Round thirty — 2026-09-07
+
+## 93. Run on a Linux machine, and the e2e found what four unit suites could not
+
+The four rounds above were verified on a Windows host, where every `#[cfg(unix)]` test is compiled
+out and `e2e.sh` cannot run at all. A WSL2 Ubuntu with a Rust toolchain was sitting on the same
+machine, which makes the honest verification available rather than deferred — so it was run.
+
+**1,702 tests rather than 1,631**, and the seventy-one difference is entirely the POSIX-gated ones:
+symlink activation, Unix sockets, `SCM_RIGHTS`, the cross-process handoff. All pass.
+
+`e2e.sh` — a real `skynetd`, a real `skynetk` against the mock driver, two processes sharing one
+recording — reported **one failing check**, and it is the useful kind:
+
+```
+✗ and §27 now counts seven observed conditions
+  expected 'seven of §27's eight conditions'
+```
+
+The script's own expectation was the stale thing. The daemon under it was reporting:
+
+```
+✓ homing
+  eight of §27's eight conditions were observed here
+```
+
+So `homing` is observed **on a running robot**, off a driver that answers, through the ring — which
+is the verification round twenty-six could describe and not perform. Both counts are now asserted
+and the script says why they are two lines rather than one: a driver that had *not* been updated
+would leave §24's field zero and the count would still be eight, because `unreported` is an
+observation. So the second line asserts the **answer** — the mock's `not_required` — and the first
+asserts the count.
+
+## 94. A tick with nothing beside it, which §32.2 forbids
+
+The e2e's rendering showed the defect the unit tests could not, because no unit test renders:
+
+```
+✓ rhal        present  the newest cycle read the body and reported it present
+✓ homing
+```
+
+`HomingSighting::detail()` existed, was tested, and reached no surface: `GET /state` carries a block
+per condition — `stop`, `guard_hold`, `guards` — and `homing` had none. A console showing that a
+condition **was observed** while showing nothing about **what was observed** is exactly §32.2's
+rule failing, and it would have shipped as a green tick.
+
+The block carries `state`, `observed`, `detail`, `source`, and one field that is not on its
+neighbours: **`reported`**, the boolean separating *this driver does not answer* from *this robot is
+not homed*. That distinction is the reason §24's field is two bits, and a console that had to grep
+the prose for it would eventually stop trying.
+
+The CLI needed one more thing. Its `good` vocabulary — the list deciding a green tick from a warning
+mark — was `["live", "present", "passed", "none"]`, so `not_required` drew a **warning** on a
+perfectly healthy bench robot. `not_required` and `complete` join it; `pending` deliberately does
+not, and it is the row an operator most needs marked, because it covers both *nobody has homed this
+machine* and *this driver does not report homing*. Which of the two is in the detail beside it.
+
+## Run — on Linux this time
+
+```
+cargo test --workspace                      1,702 passed, 0 failed   (1,631 on the Windows host)
+cargo clippy --workspace --all-targets      clean, no warnings
+cargo fmt --all --check                     clean
+sh crates/skynetd-io/e2e.sh                 all checks passed — eight observed conditions on a
+                                            running daemon, and the homing state naming the
+                                            driver's answer
+python3 editions/python/run_corpus.py       1,142 of 1,142, both editions
+node tools/check-rhal-flags.mjs             10 constants agree across 4 definitions
+node tools/scale-report.mjs --check         §73 matches the tree
+node tools/check-mirrors.mjs                all shared documents match
+node tools/check-contract-mirrors.mjs       every mirrored contract matches
+node tools/check-golden-path.mjs            4 documents, 51 commands
+node tools/edition-report.mjs --check       matches
+```
+
+## What round thirty leaves
+
+The lesson is one this log keeps relearning from a different direction: **a suite that cannot render
+cannot see a rendering defect.** Four rounds of unit tests, a mutation-checked parity tool and a
+green clippy did not catch a condition reaching a console with no sentence attached. One run of the
+thing an operator actually looks at did, immediately.
+
+The verification environment is no longer a limitation to note in a log — it is a `wsl -e` away, and
+every round from here should use it.
+
+Nothing is pushed.

@@ -701,13 +701,23 @@ DESIRED
     pass "the loop attaches to the ring the daemon created (§26.2)"
   fi
 
-  # Six, not four: `stop` and `guard_hold` are read off the same newest cycle as the RHAL — §24's
-  # flags for one and the kernel's guard verdict for the other — so a ring that can hold a cycle
-  # makes all four observable at the moment the loop writes into it. `guards` is the sixth and it
-  # is observable **before** any of them: §7.6's partition resolves off the descriptor this package
-  # staged, with no ring involved at all.
-  want "and §27 now counts seven observed conditions" \
-    "seven of §27's eight conditions" "$K/after"
+  # **All eight**, and this is the line that says §27's sequence is finished rather than advanced.
+  # Four come off the same newest cycle as the RHAL — §24's flags for `stop` and `homing`, the
+  # kernel's guard verdict for `guard_hold` — so a ring that can hold a cycle makes them observable
+  # at the moment the loop writes into it. `guards` needs no ring at all: §7.6's partition resolves
+  # off the descriptor this package staged. `post` is this daemon's own, and `policy` is the store's.
+  #
+  # `homing` is the newest, and it is the only one that depends on the **driver** rather than on
+  # the ring being readable. A driver that had not been updated would leave §24's field zero and
+  # this count would still be eight — `unreported` is an observation, which is the whole point of
+  # the two-bit encoding — so the line after it asserts the answer rather than only the count.
+  want "and §27 now counts all eight observed conditions" \
+    "eight of §27's eight conditions" "$K/after"
+  # The mock reports `SKR_HOMING_NOT_REQUIRED`: a simulated body's joint positions *are* the body,
+  # so there is no encoder zero to lose and no homing routine for an operator to run. Reporting
+  # `complete` would claim one had been run.
+  want "and the homing state is the driver's answer rather than a default" \
+    "needs no homing" "$K/after"
   want "the kernel is live, with the cycles that say so" "control cycles were recorded" "$K/after"
   want "and the RHAL is present, off the newest cycle" "read the body and reported it present" "$K/after"
   # The guard hold, on a loop nothing is holding: the guards ran and none of them withheld the
