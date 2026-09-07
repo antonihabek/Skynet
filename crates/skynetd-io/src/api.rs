@@ -723,8 +723,14 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
 fn power<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let layout = context.daemon.store.layout().clone();
     let body = crate::embodiment::load(&layout);
-    let (profile, reading) =
-        crate::power::observe(&mut context.daemon.power, &layout, &body, context.now_ms);
+    let bus = crate::power::BusReading::of(&context.daemon.rhal_sighting);
+    let (profile, reading) = crate::power::observe(
+        &mut context.daemon.power,
+        &layout,
+        &body,
+        bus,
+        context.now_ms,
+    );
 
     // The budget is not asked about here and the field is null rather than absent, for the reason
     // §57.1 gives about assertions: no package on this robot declares an `inference_budget_ms` that
@@ -757,17 +763,16 @@ fn power<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
                 .is_some_and(|known| known.descriptor.power.is_some()),
         ),
     );
-    // §33.1, said out loud on the one route where its absence changes an answer. §36.4's override
-    // is the only rule that can reach `critical` past a healthy gauge, and it has no input here —
-    // so a console reading `normal` on this route is reading *the gauge agrees*, not *the bus does*.
-    out.set(
-        "brownout_note",
-        Json::from(
-            "§36.4's override reads `RHAL_DEGRADED` and a vendor fault code, and §33.1 keeps this \
-             daemon off the RHAL — so on this edition nothing here can ever report a brownout. A \
-             state of `normal` on this route means the gauge agrees, not that the bus does.",
-        ),
-    );
+    // §36.4's override is the only rule that can reach `critical` past a healthy gauge, and this
+    // is the route where the difference between its two `false`s changes an answer. It was a
+    // constant sentence saying no robot here could ever report a brownout; it is a reading now.
+    //
+    // `bus_observed` is the field a console should branch on rather than parsing the note: a
+    // `normal` beside `false` is *the gauge agrees and nobody asked the bus*, and a `normal`
+    // beside `true` is *both*. §32.2's rule is that a console never shows a value it did not
+    // receive, and "did anybody look" is part of the value.
+    out.set("bus_observed", Json::Bool(reading.bus.observed()));
+    out.set("brownout_note", Json::from(reading.bus.note()));
     out
 }
 

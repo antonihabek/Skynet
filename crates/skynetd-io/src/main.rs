@@ -1444,7 +1444,10 @@ fn report_checkin<L, S>(
     // level-triggered (§33.3), and a power profile cached at start-up would survive a descriptor
     // somebody replaced on a running robot.
     let body = skynetd_io::embodiment::load(layout);
-    let (_, reading) = skynetd_io::power::observe(&mut daemon.power, layout, &body, now_ms);
+    // §36.4's input, off the sighting this pass already took of §13's ring. `observe_state` runs
+    // before this, so the sighting is this pass's rather than the previous one's.
+    let bus = skynetd_io::power::BusReading::of(&daemon.rhal_sighting);
+    let (_, reading) = skynetd_io::power::observe(&mut daemon.power, layout, &body, bus, now_ms);
     let health = daemon.health(&actual, now_ms, Some(&reading), daemon.read_headroom());
     let policy = skynetd_io::identity::running_policy(&daemon.store, &actual);
     let attestation =

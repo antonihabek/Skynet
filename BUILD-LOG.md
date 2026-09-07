@@ -6817,3 +6817,94 @@ edition or the corpus — §24's ABI is single-source by §31.2 and is deliberat
   bodies; a driver on real hardware reporting a real homing state is still a vendor's to write.
 
 Nothing is pushed.
+
+---
+
+# Round twenty-seven — 2026-09-07
+
+## 86. §36.4's brownout override — the same wrong reason, one section over
+
+Round twenty-six's finding was that §73 had inferred *"needs a vendor to recompile"* from *"§24 has
+no flag"*, and that the inference was invalid. Looking for the same shape elsewhere found it
+immediately, in §36.5:
+
+> **§36.4's override has no input on this edition.** `RHAL_DEGRADED` and its fault code come from
+> the RHAL, and §33.1 keeps `skynetd` off that path — the daemon does not depend on the RHAL crate
+> and CI asserts the edge is absent.
+
+Every clause of that is true. The conclusion does not follow, and this is now the **seventh** time
+in this repository that the same invalid step has been taken: *what decides whether a supervisor may
+observe a fact is not whose fact it is, but whether it was written down somewhere this process
+already holds.* §26's cycle record carries `state_flags` and `fault_code` verbatim, and
+`RhalSighting` — §27's `rhal` condition — had been reading **both of them off that record** since
+before the paragraph above was written. §36.4's override was one struct field away from an input.
+
+§33.1 is untouched: no RHAL dependency, no actuator path, a number out of a file the daemon holds.
+
+### What it turns on
+
+The contract half was complete and tested the whole time. `assess` matches the vendor's code against
+the descriptor's `brownout_fault_codes` — never interpreting it, which is what keeps §24's
+*"vendor-specific"* rule intact — and produces `critical`/`brownout` past a healthy gauge, or
+`brownout_undeclarable` when the list is empty. Both are reachable now, and neither had ever been
+produced by any robot.
+
+### `BusReading`, and the third state the contract cannot hold
+
+`PowerObservation::rhal_degraded` is a `bool`, so *the bus was read and is healthy* and *nothing has
+read the bus* both arrive at §36's rules as `false`. The old module header was right that the
+difference matters, and it is kept rather than lost to the plumbing: `BusReading` has three
+variants, `GET /power` carries `bus_observed` beside the state, and the note is a reading instead of
+a constant sentence claiming no robot could ever report a brownout.
+
+The contract is deliberately **not** widened to an `Option`. It is mirrored into three editions and
+pinned by the corpus (§31.4, reference-first), and the fact that would justify that ripple — *this
+robot's ring holds no control cycles* — is a property of one daemon rather than of §36's rules. The
+party that knows says so, on its own surface. That also keeps this round inside one repository,
+which is the constraint the `detects_people` attempt discovered the hard way.
+
+**A faulted or lost RHAL is `Unobserved`, not `Healthy`.** The one mapping decision here. §36.4 asks
+whether the bus is sagging, and a driver that has stopped answering has not said that it is not;
+reporting the reassuring half of a fact nobody has is the failure this module is arranged against.
+
+The gap that remains is **fail-open** and is now named rather than implied: §26.2 gives a
+supervisor's ring the event channel and a control loop the cycle channels, so a robot running no
+control loop records no cycle for this to read, and reports `normal` while its bus sags. Same shape
+as §27's `kernel` reading, and the route says so.
+
+## 87. The half that is genuinely §33.1's, checked rather than assumed
+
+§36.1's `reserve` and `critical` rows ask for a **controlled stop**, and the audit listed it beside
+the brownout as though the two would close together. They do not, and reading §36.1 is what settles
+it: a controlled stop is a ramp to a park, sit or dock pose — *motion* — and §36.1 says in its own
+words that *"a policy dropped mid-motion is the failure a controlled stop exists to avoid"*.
+
+A supervisor stopping the commanding unit would be doing precisely the thing the row exists to
+prevent, dressed as compliance with it. So this half stays open, and §73's row now says which half
+is which instead of pairing a correctable claim with an uncorrectable one.
+
+## Run
+
+```
+cargo test --workspace                      1,623 passed, 0 failed  (1,621 before)
+cargo clippy --workspace --all-targets      clean, no warnings
+cargo fmt --all --check                     clean
+node tools/scale-report.mjs --check         §73 matches the tree
+node tools/check-rhal-flags.mjs             10 constants agree across 4 definitions
+node tools/check-mirrors.mjs                all shared documents match, re-pinned
+node tools/check-golden-path.mjs            4 documents, 51 commands
+```
+
+Three new tests: the route in all three bus states, `brownout_undeclarable` on a body that declares
+a pack and no codes, and the mapping — including that a lost RHAL carrying a fault code takes
+neither the flag nor the number.
+
+## What round twenty-seven leaves
+
+The pattern is now worth stating as a rule rather than as an anecdote: **before recording that a
+fact is unobservable because of §33.1, check whether §26 already writes it down.** Seven of the
+things this repository filed under "the kernel's" were in the ring the whole time. The ones that are
+genuinely not are the ones requiring the daemon to *act* on an actuator — asserting a stop, ramping
+to a park pose — rather than to know something.
+
+Nothing is pushed.

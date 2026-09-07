@@ -1857,6 +1857,31 @@ const POWERED_ARM: &str = r#"{
   "joints": [{"name": "shoulder", "type": "revolute", "control_modes": ["position"]}]
 }"#;
 
+/// The same body, declaring a pack and **no** `brownout_fault_codes`.
+///
+/// §36.4: an empty list is *nobody has said*, which is a different answer from a list that does not
+/// contain the code that arrived. `POWERED_ARM` declares `[4097]` and therefore exercises the
+/// second; this one exercises the first, which is the case that raises a fault.
+const POWERED_ARM_NO_CODES: &str = r#"{
+  "schema": 1,
+  "robot_id": "arm-1",
+  "power": {
+    "pack_capacity_wh": 500,
+    "reserve_fraction": 0.15,
+    "thermal_throttle_c": 70
+  },
+  "joints": [{"name": "shoulder", "type": "revolute", "control_modes": ["position"]}]
+}"#;
+
+/// Put a §27 `rhal` sighting on the daemon, as a reconcile pass would have.
+///
+/// The routes read `daemon.rhal_sighting` rather than the ring, because §36.4's bus reading and
+/// §27's condition have to be one reading of one instant — so a test that wrote cycles into a ring
+/// would be exercising `RhalSighting::of`, which has its own suite, rather than the wiring.
+fn set_rhal_sighting(fixture: &mut Fixture, sighting: blackbox::RhalSighting) {
+    fixture.daemon.rhal_sighting = sighting;
+}
+
 /// A machine with a battery, under the fixture's own root.
 fn with_gauge(fixture: &mut Fixture, files: &[(&str, &str)], zones: &[&str]) {
     let supplies = fixture.root.path().join("power_supply");
@@ -1987,20 +2012,185 @@ fn a_throttling_body_sheds_three_rungs_and_never_the_kernel() {
     );
 }
 
-/// §33.1, on the one route where its absence changes an answer.
+/// §36.4 on the route, in all three of the states the bus can be in.
+///
+/// This test used to assert the *reason* §36.4 had no input — that §33.1 kept the daemon off the
+/// RHAL — and it passed for as long as that reason went unexamined. The premise was true and the
+/// conclusion was not: §26's cycle record carries `state_flags` and `fault_code` verbatim, and
+/// `RhalSighting` was already reading both for §27's `rhal` condition. So the note is a reading
+/// now, and what this asserts is that the two kinds of `normal` are told apart.
+///
+/// | The bus | `state` | `bus_observed` | What `normal` would mean |
+/// |---|---|---|---|
+/// | nothing read it | `normal` | `false` | the gauge agrees; nobody asked the bus |
+/// | read, healthy | `normal` | `true` | both |
+/// | read, degraded, code declared | `critical` | `true` | — |
 #[test]
-fn the_power_route_says_it_cannot_see_the_bus() {
+fn the_power_route_reports_what_the_bus_said_in_each_of_its_three_states() {
     let mut fixture = Fixture::new("power-route-bus");
     fixture.provision();
     write_embodiment(&fixture, POWERED_ARM);
     with_gauge(&mut fixture, &[("energy_now", "400000000")], &[]);
 
-    let (_, body) = fixture.request("GET", "/power", Some("observer-token"), "");
-    assert_eq!(body.get("state").and_then(Json::as_str), Some("normal"));
-    assert!(body
+    // 1. Nothing has read the bus, which is every robot whose ring holds no control cycles
+    //    (§26.2). Still `normal`, and the route says the word is carrying less than it looks.
+    let (_, unobserved) = fixture.request("GET", "/power", Some("observer-token"), "");
+    assert_eq!(
+        unobserved.get("state").and_then(Json::as_str),
+        Some("normal")
+    );
+    assert_eq!(
+        unobserved.get("bus_observed").and_then(Json::as_bool),
+        Some(false)
+    );
+    assert!(unobserved
         .get("brownout_note")
         .and_then(Json::as_str)
-        .is_some_and(|note| note.contains("§33.1") && note.contains("§36.4")));
+        .is_some_and(|note| note.contains("nothing has read the bus")));
+
+    // 2. A cycle read the RHAL and it was answering. Same state, and now the word means both.
+    set_rhal_sighting(
+        &mut fixture,
+        blackbox::RhalSighting::Seen {
+            state: skynet_contracts::opstate::RhalState::Present,
+            errno: None,
+            fault_code: 0,
+        },
+    );
+    let (_, healthy) = fixture.request("GET", "/power", Some("observer-token"), "");
+    assert_eq!(healthy.get("state").and_then(Json::as_str), Some("normal"));
+    assert_eq!(
+        healthy.get("bus_observed").and_then(Json::as_bool),
+        Some(true)
+    );
+    assert!(healthy
+        .get("brownout_note")
+        .and_then(Json::as_str)
+        .is_some_and(|note| note.contains("not degraded")));
+
+    // 3. `RHAL_DEGRADED` carrying a code the descriptor declares as sag. §36.4's override reaches
+    //    `critical` past a gauge reporting a healthy pack — which is the entire point of the rule,
+    //    and the first time any robot on this edition could produce it.
+    set_rhal_sighting(
+        &mut fixture,
+        blackbox::RhalSighting::Seen {
+            state: skynet_contracts::opstate::RhalState::Degraded,
+            errno: None,
+            fault_code: 4097,
+        },
+    );
+    let (_, sagging) = fixture.request("GET", "/power", Some("observer-token"), "");
+    assert_eq!(
+        sagging.get("state").and_then(Json::as_str),
+        Some("critical"),
+        "a gauge that disagrees with the bus is a gauge that is wrong (§36.4)"
+    );
+    assert_eq!(
+        sagging.get("reason").and_then(Json::as_str),
+        Some("brownout")
+    );
+    assert_eq!(
+        sagging.get("bus_observed").and_then(Json::as_bool),
+        Some(true)
+    );
+}
+
+/// A degraded bus whose code nobody declared is a fault, not a brownout and not silence.
+///
+/// §36.4: *"an empty list is not 'this body cannot brown out'. It is nobody has said."* The robot
+/// keeps working — a hole in a vendor's declaration is a reason to say so, not a reason to stop a
+/// machine that is running — and the fault appears at the moment it matters, which is when the RHAL
+/// is actually degraded and nothing on the robot can say why.
+///
+/// This is the answer the old module header said an operator *should* be seeing and could not,
+/// because nothing supplied the flag. It is reachable now.
+#[test]
+fn a_degraded_bus_with_no_declared_codes_raises_brownout_undeclarable() {
+    let mut fixture = Fixture::new("power-route-undeclarable");
+    fixture.provision();
+    write_embodiment(&fixture, POWERED_ARM_NO_CODES);
+    with_gauge(&mut fixture, &[("energy_now", "400000000")], &[]);
+    set_rhal_sighting(
+        &mut fixture,
+        blackbox::RhalSighting::Seen {
+            state: skynet_contracts::opstate::RhalState::Degraded,
+            errno: None,
+            fault_code: 9001,
+        },
+    );
+
+    let (_, body) = fixture.request("GET", "/power", Some("observer-token"), "");
+    assert!(
+        body.arr_or_empty("faults").iter().any(|fault| {
+            fault.get("code").and_then(Json::as_str) == Some("brownout_undeclarable")
+        }),
+        "a degraded bus nobody can explain is a fault an operator should be seeing"
+    );
+    assert_ne!(
+        body.get("reason").and_then(Json::as_str),
+        Some("brownout"),
+        "an undeclared code is not a sag — it is the dead encoder that flag also covers"
+    );
+    assert_eq!(
+        body.get("bus_observed").and_then(Json::as_bool),
+        Some(true),
+        "the bus was read; what is missing is the vendor's list, not the reading"
+    );
+}
+
+/// A faulted or lost RHAL is `Unobserved`, and deliberately not `Healthy`.
+///
+/// The one mapping decision in `BusReading`. §36.4 asks whether the bus is sagging, and a driver
+/// that has stopped answering has not said that it is not — reporting the reassuring half of a
+/// fact nobody has would be the failure this whole module is arranged against.
+#[test]
+fn a_bus_nobody_can_read_is_not_a_healthy_bus() {
+    use crate::power::BusReading;
+
+    assert_eq!(
+        BusReading::of(&blackbox::RhalSighting::Silent),
+        BusReading::Unobserved
+    );
+    assert_eq!(
+        BusReading::of(&blackbox::RhalSighting::Unobservable("no ring")),
+        BusReading::Unobserved
+    );
+    // Lost, and carrying a fault code. Neither the flag nor the code is taken.
+    assert_eq!(
+        BusReading::of(&blackbox::RhalSighting::Seen {
+            state: skynet_contracts::opstate::RhalState::Lost,
+            errno: Some(-110),
+            fault_code: 4097,
+        }),
+        BusReading::Unobserved
+    );
+
+    // And the two that are readings.
+    assert_eq!(
+        BusReading::of(&blackbox::RhalSighting::Seen {
+            state: skynet_contracts::opstate::RhalState::Present,
+            errno: None,
+            fault_code: 0,
+        }),
+        BusReading::Healthy
+    );
+    assert_eq!(
+        BusReading::of(&blackbox::RhalSighting::Seen {
+            state: skynet_contracts::opstate::RhalState::Degraded,
+            errno: None,
+            fault_code: 4097,
+        }),
+        BusReading::Degraded { fault_code: 4097 }
+    );
+
+    // The pair travels together: a degraded bus always carries whatever code it had, so
+    // `brownout_undeclarable` is never produced by this module losing the number.
+    assert_eq!(
+        BusReading::Degraded { fault_code: 4097 }.fault_code(),
+        Some(4097)
+    );
+    assert_eq!(BusReading::Healthy.fault_code(), None);
+    assert!(!BusReading::Unobserved.observed());
 }
 
 #[test]

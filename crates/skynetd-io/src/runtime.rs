@@ -1872,7 +1872,11 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     pub fn read_power(&mut self, now_ms: u64) -> crate::power::Reading {
         let layout = self.store.layout().clone();
         let body = crate::embodiment::load(&layout);
-        let (_, reading) = crate::power::observe(&mut self.power, &layout, &body, now_ms);
+        // §36.4's input, off §27's `rhal` sighting rather than off the RHAL. The sighting is the
+        // pass's own reading of §13's ring, so the bus reading and the operating state cannot
+        // disagree about one instant — which is the rule `Recorder::newest_cycle` states.
+        let bus = crate::power::BusReading::of(&self.rhal_sighting);
+        let (_, reading) = crate::power::observe(&mut self.power, &layout, &body, bus, now_ms);
         reading
     }
 
