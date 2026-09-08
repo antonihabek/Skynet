@@ -30,6 +30,34 @@ want() { # want <description> <expected substring> <file>
   if grep -q -- "$2" "$3"; then pass "$1"; else fail "$1 - expected '$2' in:"; sed 's/^/      /' "$3"; fi
 }
 
+# Every background process this script starts, so the exit trap can end all of them.
+#
+# This is not tidiness. Until this round the trap killed **one** of the five — `$DAEMON` — and the
+# other four (`$MDNS`, `$KDAEMON`, `$KLOOP`, `$KSTOP`) were killed only by the lines that follow
+# them, which an early exit never reaches. A leftover `skynetd` is not a stray process: §33's unit
+# names are `skynet:<ns>:<name>.service` in **one** user manager, so a second supervisor observes
+# the first one's units, finds them absent from its own desired state, and stops them. Two daemons
+# on one machine fight over every package on it.
+#
+# What that cost: a `skynetd` abandoned by an aborted run three hours earlier was still stopping
+# `openrobot/holder` half a second after each start, so §59's ten confinement checks read
+# `systemctl show`'s defaults for a collected unit and reported ten directives as not landed, and
+# §15's isolation test found no sandboxed unit to run against. Every one of those failures named
+# the wrong thing, and the run they came from looked like a regression in the daemon.
+#
+# A robot has one `skynetd`, so none of this is a defect in the daemon — it is a defect in a script
+# that starts five and cleans up one.
+TRACKED=""
+track() { TRACKED="$TRACKED $1"; }
+kill_tracked() {
+  for pid in $TRACKED; do
+    kill "$pid" 2>/dev/null || true
+  done
+  # And anything this script's own binaries left behind under this root — a process whose pid this
+  # shell never learned, because `$!` is only ever the pid of the last one started.
+  pkill -f "skynetd --root $ROOT" 2>/dev/null || true
+}
+
 # Start the daemon and wait until it actually answers.
 #
 # Waiting for the socket *file* is not enough, and finding that out here is the point: a Unix socket
@@ -39,6 +67,7 @@ start_daemon() {
   rm -f "$ROOT/run/skynetd.sock"
   "$SKYNETD" --root "$ROOT" --user --interval 1000 > "$ROOT/daemon.log" 2>&1 &
   DAEMON=$!
+  track "$DAEMON"
   i=0
   while [ $i -lt 60 ]; do
     if "$SKYNET" status --socket "$ROOT/run/skynetd.sock" >/dev/null 2>&1; then return 0; fi
@@ -74,6 +103,29 @@ case "$(uname -s 2>/dev/null || echo unknown)" in
     exit 1
     ;;
 esac
+
+# A second supervisor on this machine invalidates the run, so refuse rather than produce failures
+# that name the wrong thing.
+#
+# §33's unit names live in one user manager, so any other `skynetd` observes the units this script
+# starts, finds them absent from its own desired state, and stops them — within a second, on a
+# level-triggered loop. What that produces is not an obvious error: it is `systemctl show` printing
+# the manager's defaults for a collected unit, which reads as ten confinement directives that did
+# not land, and `safety.policy.isolation` skipping because no sandboxed unit is running. Both name
+# the daemon, and the daemon is fine.
+#
+# The refusal is by name and by pid because "something else is running" is not actionable and
+# "this pid, this root" is.
+OTHERS=$(pgrep -a skynetd 2>/dev/null | grep -v "skynetd once" || true)
+if [ -n "$OTHERS" ]; then
+  echo "Another skynetd is already running on this machine:"
+  echo "$OTHERS" | sed 's/^/  /'
+  echo
+  echo "§33's unit names are global to one user manager, so that daemon will stop the packages"
+  echo "this run starts and the failures will name confinement rather than the second supervisor."
+  echo "Stop it and run again. A robot has one skynetd; so does this script."
+  exit 1
+fi
 
 rm -rf "$ROOT"
 mkdir -p "$ROOT/pkg/bin" "$ROOT/data/state"
@@ -146,8 +198,38 @@ if command -v systemd-run >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
   # §59's confinement, read back off the real unit rather than the argv that requested it.
   # The suite asserts what `command_line` builds; only this asks systemd what landed — and a
   # launcher whose sandbox is only ever seen by systemd is a sandbox nobody has read. The
-  # holder is the unit to read: it runs for the whole script, so there is no race, and it
-  # travels the same `command_line` as every other policy.
+  # holder is the unit to read: it travels the same `command_line` as every other policy.
+  #
+  # `LoadState` is asked for with the directives, and it is not decoration. `systemctl show`
+  # **exits 0 for a unit it has never heard of** and prints the manager's defaults for every
+  # property named — every directive present, every one of them `no`, `infinity` or the full
+  # capability set. So the ten checks below cannot tell *the sandbox did not land* from *there
+  # is no unit*, and they read the second as the first: ten failures, one per directive, every
+  # one of them naming something that was in fact applied. This ran red that way for a whole
+  # session before anybody asked what the dump was.
+  #
+  # The comment here used to say the holder "runs for the whole script, so there is no race".
+  # That is what the code believed and it is not true of a transient unit: `--collect` reaps it
+  # the moment it goes inactive. So wait for it the way `start_daemon` waits for an answer
+  # rather than for a socket file — and if it never loads, fail **once**, saying which.
+  unit_load_state() {
+    systemctl --user show "skynet:openrobot:holder.service" -p LoadState 2>/dev/null \
+      | sed -n 's/^LoadState=//p'
+  }
+  i=0
+  while [ "$(unit_load_state)" != "loaded" ] && [ $i -lt 50 ]; do
+    i=$((i + 1)); sleep 0.1
+  done
+  LOADED="$(unit_load_state)"
+  STARTED=1
+else
+  want "the start fails, saying it could not reach systemd" "start_package openrobot/holder → failed" "$ROOT/out"
+  pass "no systemd here, so the launch step is reported rather than skipped"
+  STARTED=0
+  LOADED="no systemd"
+fi
+
+if [ "$LOADED" = "loaded" ]; then
   systemctl --user show "skynet:openrobot:holder.service" \
     -p NoNewPrivileges,ProtectSystem,ProtectKernelTunables,ProtectKernelModules,ProtectControlGroups,RestrictSUIDSGID,CapabilityBoundingSet,MemoryMax,TasksMax,AllowedCPUs \
     > "$ROOT/unit" 2>&1 || true
@@ -172,11 +254,15 @@ if command -v systemd-run >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
   grep -q "^AllowedCPUs=[0-9]" "$ROOT/unit" \
     && pass "and the unit holds a real cpuset" \
     || { fail "no cpuset on the unit:"; sed 's/^/      /' "$ROOT/unit"; }
-  STARTED=1
-else
-  want "the start fails, saying it could not reach systemd" "start_package openrobot/holder → failed" "$ROOT/out"
-  pass "no systemd here, so the launch step is reported rather than skipped"
-  STARTED=0
+elif [ "$LOADED" != "no systemd" ]; then
+  # The package started and there is no unit to read it off. One failure rather than ten, and it
+  # says what happened rather than listing directives: a transient unit is collected when it goes
+  # inactive, so this is the package having stopped between being started and being read — which
+  # is silent about the confinement in both directions. Ten "directive missing" lines here would
+  # be ten false sentences, which is worse than one true one.
+  fail "the unit was started and is not there to read: LoadState=${LOADED:-<nothing>}. §59's
+      confinement is neither confirmed nor refuted by this run — \`systemctl show\` prints the
+      manager's defaults for a unit it has never heard of, and exits 0 doing it"
 fi
 
 # §33 calls `once` "a legitimate way to operate a robot", so its record has to be the same record.
@@ -192,7 +278,7 @@ fi
 
 say "4. The local socket, and the CLI over it (§33.7)"
 DAEMON=""
-trap 'kill "$DAEMON" 2>/dev/null || true' EXIT
+trap kill_tracked EXIT
 start_daemon
 pass "the daemon answers on its socket"
 
@@ -342,6 +428,7 @@ rm -rf "$ROOT/mdns" && mkdir -p "$ROOT/mdns"
 MTOKEN=$("$SKYNETD" credential add --root "$ROOT/mdns" --label bye --role admin 2>/dev/null)
 "$SKYNETD" --root "$ROOT/mdns" --user --interval 1000 --lan 127.0.0.1:8099 \n  --advertise skynet-e2e > "$ROOT/mdns.log" 2>&1 &
 MDNS=$!
+track "$MDNS"
 # Wait for the *claim*, not for the start-up line. The daemon prints "announcing ..." before it has
 # probed, and a browse sent in that window is a browse the robot is right not to answer — which
 # would have made this check a race rather than a test.
@@ -648,6 +735,7 @@ DESIRED
   rm -f "$K/run/skynetd.sock"
   "$SKYNETD" --root "$K" --user --interval 500 > "$K/d.log" 2>&1 &
   KDAEMON=$!
+  track "$KDAEMON"
   i=0
   while [ $i -lt 60 ]; do
     "$SKYNET" status --socket "$K/run/skynetd.sock" >/dev/null 2>&1 && break
@@ -679,6 +767,7 @@ DESIRED
     --watchdog-ms 50 --hz 200 --cycles 6000 --channels J1,J2,J3 \
     --blackbox "$K/data/blackbox" > "$K/k.log" 2>&1 &
   KLOOP=$!
+  track "$KLOOP"
 
   # Poll for the condition rather than sleeping a fixed span: the daemon re-reads the ring once an
   # interval, and a fixed sleep is a race on a loaded machine and a wait on a fast one.
@@ -780,6 +869,7 @@ DESIRED
     --velocity-max 2.0 --jerk 0.1 --watchdog-ms 50 --hz 200 --cycles 6000 --channels J1,J2,J3 \
     --blackbox "$K/data/blackbox" > "$K/k2.log" 2>&1 &
   KSTOP=$!
+  track "$KSTOP"
 
   i=0
   while [ $i -lt 90 ]; do
