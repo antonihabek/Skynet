@@ -61,7 +61,7 @@ fn a_policy_in_another_process_fills_a_ring_this_one_created() {
     // is why the port is level-triggered rather than a single accept.
     let deadline = Instant::now() + Duration::from_secs(10);
     while port.handed() == 0 && Instant::now() < deadline {
-        port.offer(&mapping, &body);
+        port.offer(&mapping, &body, None);
         std::thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(port.handed(), 1, "the policy never took the descriptor");
@@ -168,7 +168,7 @@ fn a_command_from_another_process_is_a_function_of_the_body_this_one_published()
 
     let deadline = Instant::now() + Duration::from_secs(15);
     while port.handed() == 0 && Instant::now() < deadline {
-        port.offer(&commands, &body);
+        port.offer(&commands, &body, None);
         std::thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(port.handed(), 1, "the policy never took the descriptors");
@@ -263,7 +263,7 @@ fn a_policy_finds_the_ring_through_the_environment_when_nothing_is_on_its_comman
 
     let deadline = Instant::now() + Duration::from_secs(15);
     while port.handed() == 0 && Instant::now() < deadline {
-        port.offer(&commands, &body);
+        port.offer(&commands, &body, None);
         std::thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(port.handed(), 1, "the policy never took the descriptors");
@@ -277,4 +277,127 @@ fn a_policy_finds_the_ring_through_the_environment_when_nothing_is_on_its_comman
 
     let status = policy.wait().expect("skynetp exits");
     assert!(status.success(), "skynetp failed: {status}");
+}
+
+/// §47.6's pool crosses the same socket as the rings, and the other process can address it.
+///
+/// This is the part §80 recorded as missing after `skynet-frames` existed: the crate's own suite
+/// maps a pool in one process, which proves the arithmetic and proves nothing about the hand-off.
+/// Here the region is created by this process, the descriptors go over `SCM_RIGHTS` with the two
+/// rings in one message, and the geometry is never told to the child — it reads the slot count and
+/// the slot size out of the pool's own header, which is the reason `adopt_declared` exists.
+///
+/// The frame is published **before** the child connects, on purpose. A pool that had published
+/// nothing would exercise the same mapping and the same header, and would pass identically if
+/// `latest` were hard-coded to `None`; a frame already in it makes the assertion say which slot.
+#[test]
+fn a_frame_pool_crosses_with_the_rings_and_the_policy_reads_its_shape_from_it() {
+    use skynet_frames::{Geometry, Writer};
+
+    let path = socket_path("frames");
+    let (commands, body, mut port) = Port::open(&path, 16, 16).expect("the runtime's rings");
+
+    // Three slots and 24 bytes: numbers no default would produce, so a child that reported them
+    // read them rather than assumed them.
+    let mut pool = Writer::create(
+        "test_rgb",
+        Geometry {
+            slots: 3,
+            slot_bytes: 24,
+        },
+    )
+    .expect("a pool");
+    pool.publish(1, 5_000, b"pixels").expect("published");
+
+    let policy = Command::new(env!("CARGO_BIN_EXE_skynetp"))
+        .args([
+            "run",
+            "--hz",
+            "200",
+            "--cycles",
+            "20",
+            "--channels",
+            "1",
+            "--backend",
+            "trajectory",
+            "--setpoints",
+            "0:0.25",
+            "--ring-socket",
+            path.to_str().expect("a utf-8 path"),
+        ])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("skynetp starts");
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while port.handed() == 0 && Instant::now() < deadline {
+        port.offer(&commands, &body, Some(&pool));
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(port.handed(), 1, "the policy never took the descriptors");
+
+    let output = policy.wait_with_output().expect("skynetp exits");
+    assert!(output.status.success(), "skynetp failed: {}", output.status);
+    let said = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        said.contains(r#"frame pool "test_rgb" received with the rings"#),
+        "the policy did not report the pool it was handed. It said:\n{said}",
+    );
+    // Slot 0, because the pool was empty and §47.6 fills the lowest free slot. What matters is that
+    // the child named a slot at all: it could only have done so by reading the header's `latest`.
+    assert!(
+        said.contains("newest frame in slot 0"),
+        "the policy mapped the pool and did not see the frame in it. It said:\n{said}",
+    );
+
+    // And the loans region really is the child's to write: it exited, so nothing holds a slot, and
+    // the writer can take the one the frame is in.
+    pool.publish(2, 6_000, b"again").expect("the slot is free");
+}
+
+/// A runtime with no pool hands over two descriptors, and the policy says nothing about frames.
+///
+/// The other half of the count being the announcement. Without this, "four descriptors means a
+/// pool" would be asserted and "two means no pool" would be assumed, and the assumption is the one
+/// that fails quietly — a policy that printed a frame line on every robot would be claiming a
+/// camera that is not there, which §34.3 is exactly about.
+#[test]
+fn a_runtime_with_no_pool_hands_over_two_descriptors_and_the_policy_claims_no_camera() {
+    let path = socket_path("no-frames");
+    let (commands, body, mut port) = Port::open(&path, 16, 16).expect("the runtime's rings");
+
+    let policy = Command::new(env!("CARGO_BIN_EXE_skynetp"))
+        .args([
+            "run",
+            "--hz",
+            "200",
+            "--cycles",
+            "20",
+            "--channels",
+            "1",
+            "--backend",
+            "trajectory",
+            "--setpoints",
+            "0:0.25",
+            "--ring-socket",
+            path.to_str().expect("a utf-8 path"),
+        ])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("skynetp starts");
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while port.handed() == 0 && Instant::now() < deadline {
+        port.offer(&commands, &body, None);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(port.handed(), 1, "the policy never took the descriptors");
+
+    let output = policy.wait_with_output().expect("skynetp exits");
+    assert!(output.status.success(), "skynetp failed: {}", output.status);
+    let said = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !said.contains("frame pool"),
+        "a policy handed no pool talked about one. It said:\n{said}",
+    );
 }

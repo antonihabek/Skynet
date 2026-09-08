@@ -68,6 +68,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "skynet-frames"
+version = "0.1.0"
+dependencies = [
+ "skynet-contracts",
+ "skynet-ring-shm",
+]
+
+[[package]]
 name = "skynet-json"
 version = "0.1.0"
 
@@ -81,6 +89,7 @@ version = "0.1.0"
 dependencies = [
  "skynet-blackbox",
  "skynet-dl",
+ "skynet-frames",
  "skynet-kernel",
  "skynet-lock",
  "skynet-obs",
@@ -108,6 +117,7 @@ version = "0.1.0"
 name = "skynet-policy-host"
 version = "0.1.0"
 dependencies = [
+ "skynet-frames",
  "skynet-kernel",
  "skynet-kernel-host",
  "skynet-obs",

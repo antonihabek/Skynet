@@ -7194,3 +7194,92 @@ The verification environment is no longer a limitation to note in a log — it i
 every round from here should use it.
 
 Nothing is pushed.
+
+---
+
+# Round thirty-one — §47.6's mapping half, and the number that did not have to cross
+
+The last in-repo OS item. `skynet-frames` existed at the end of round thirty as a crate with twelve
+passing tests and **no caller**, which is precisely §79.7's shape — a module nothing imports. This
+round gives it the route.
+
+## What landed
+
+**`crates/skynet-frames`** — the Linux mapping half of §47.6. Two shared regions per pool: pixels
+mapped read-only into the reader, and a loans region of one `u64` per slot mapped writable. It
+carries no copy of the selection rule; that rule is `skynet-contracts`' `FramePool`, reproduced by
+three editions and pinned by `corpus/media/pool.json`, and §47.6a is the record of what a second
+implementation of it costs even when it looks equivalent. `#![forbid(unsafe_code)]` — the one
+`mmap` is `skynet-ring-shm`'s.
+
+**`Reader::adopt_declared`** — the pool describes its own shape, so its geometry never crosses out
+of band. The alternative was four lines: `SKYNET_RING_CHANNELS` already crosses beside the rings and
+a `SKYNET_FRAME_POOL=<slots>x<bytes>` beside it would have worked. It would also have been a second
+copy of a number the region already states, and the failure when the two disagree is *not an error*
+— it is a reader addressing the wrong offset for every slot past the first and finding plausible
+pixels there. So a receiver maps 64 bytes of a duplicate descriptor, checks the magic and version,
+reads the geometry out of the header, and only then maps the region. It consumes both descriptors
+on every path including the refusals, and a test asserts that by calling `dup` on them afterwards
+and requiring it to fail.
+
+**`pass::MAX_FDS` two → four**, and `pass::close`. The pool crosses in the *same* `SCM_RIGHTS`
+message as the two rings — pixels third, loans fourth — for the reason the observation ring crosses
+with the commands: a policy handed some of them and not others is a program running on a world it
+half has, and both halves of that failure are silent.
+
+**The count is the announcement.** Two descriptors is a runtime with no camera; four is one with a
+pool. Not two-plus-optional, and never three — a policy handed pixels and no loans region can read a
+frame and cannot stop the writer taking the slot out from under it, which is the one property the
+pool exists to provide. `adopt_from` refuses any other count by name.
+
+**`skynetk --frame-pool <stream>:<slots>x<bytes>`** creates the region and hands it over, and
+refuses without `--policy-socket` — a pool nobody receives is a mapping a process talks to itself
+through. It does **not** publish into it: this build has no capture backend, so the pool stays empty
+for the whole run and the summary *says so* rather than implying it (§34.3). The region and the
+hand-off are the operating system's; the pixels are a vendor driver's.
+
+**Two integration tests start `skynetp` as a real child** and read its stdout: one where a pool
+crosses and the policy names the slot the frame is in, one where none does and the policy says
+nothing about frames. The second exists because "four means a pool" asserted and "two means no pool"
+assumed is exactly the pair where the assumption fails quietly — a policy that printed a frame line
+on every robot would be claiming a camera that is not there.
+
+## Documented
+
+§47.6c is new: the mapping half, the loan's narrow property, the geometry that stays in the header,
+and the count as the announcement. §73's media row and scale paragraph updated (24 crates, 126,000
+lines), §80's *what a policy can see* row now says the mapping is built and names what is still open
+— **where the pixels come from** and **what infers on them**, both a vendor's rather than this
+system's. Both mirrors edited and re-pinned.
+
+## Run
+
+```
+cargo test --workspace                      1,718 passed, 0 failed   (1,702 last round)
+cargo clippy --workspace --all-targets      clean, no warnings
+cargo fmt --all --check                     clean
+python3 editions/python/run_corpus.py       1,142 of 1,142, both editions
+python3 editions/python/self_check.py       44 checks
+node tools/scale-report.mjs --check         §73 matches the tree
+node tools/check-mirrors.mjs                all shared documents match
+sh crates/skynetd-io/e2e.sh                 3 check(s) failed — NOT YET DIAGNOSED
+```
+
+## What round thirty-one leaves
+
+**`e2e.sh` reports three failing checks and I have not diagnosed them.** That is the honest state.
+The first run of it this round reported *eleven*, and every one of those was my own harness error:
+I ran the script from `crates/skynetd-io`, and its mock-driver compile step uses a path relative to
+the repository root, so `cc` could not find `drivers/mock/mock_robot.c` and ten checks cascaded off
+one missing `.so`. Re-run from the root, eleven became three. Whether those three are a regression
+from this round or were already there is exactly what has not been established — do not assume
+either. **This is the first thing the next round picks up.**
+
+Worth keeping beside it: the script fails informatively for a missing compiler and does not fail
+informatively for the wrong working directory. That is a gap in a check whose whole job is to be the
+thing an operator actually runs.
+
+The OS is otherwise closed apart from the third language edition, which the owner excluded from this
+pass. Next area is the Console (§83.5).
+
+Nothing is pushed.

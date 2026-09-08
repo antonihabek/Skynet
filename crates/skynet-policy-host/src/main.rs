@@ -68,19 +68,23 @@ fn main() {
 /// geometry, and one that is told the wrong number is refused rather than mapping a ring at the
 /// wrong stride.
 #[cfg(unix)]
-fn adopt_from(path: &std::path::Path, slots: usize) -> Result<(Mapping, Mapping), String> {
+fn adopt_from(path: &std::path::Path, slots: usize) -> Result<Adopted, String> {
     use skynet_ring_shm::Access;
     use std::os::fd::AsRawFd;
 
     let socket = std::os::unix::net::UnixStream::connect(path)
         .map_err(|error| format!("no runtime is listening on {}: {error}", path.display()))?;
-    let mut fds = [-1; 2];
+    let mut fds = [-1; 4];
     let taken = skynet_ring_shm::pass::recv_fds(socket.as_raw_fd(), &mut fds)
         .map_err(|error| format!("{} offered no ring: {error}", path.display()))?;
-    if taken != 2 {
+    // Two or four, and nothing else. Two is a runtime with no frame pool, four is one with §47.6's
+    // — the count is the whole of how the arrangement is announced, which is why any other number
+    // is an error rather than a pool this side quietly does without. A runtime that sent three sent
+    // pixels with no loans region, and a reader with no loans cannot stop a slot moving under it.
+    if taken != 2 && taken != 4 {
         return Err(format!(
-            "{} sent {taken} descriptor(s) and a policy needs two: the command ring it writes, \
-             and the observation ring it reads",
+            "{} sent {taken} descriptor(s). A policy needs two — the command ring it writes and \
+             the observation ring it reads — or four, when the frame pool comes with them",
             path.display()
         ));
     }
@@ -98,12 +102,45 @@ fn adopt_from(path: &std::path::Path, slots: usize) -> Result<(Mapping, Mapping)
             path.display()
         )
     })?;
-    Ok((commands, body))
+    // The pool, when one came with them. Its shape is read out of its own header rather than from
+    // an environment variable beside `SKYNET_RING_CHANNELS`, because a second copy of the slot
+    // count is a number that can disagree with the region it describes — and the failure when it
+    // does is not an error, it is this process addressing the wrong offset for every slot past the
+    // first and finding plausible pixels there.
+    let frames = match taken {
+        4 => Some(
+            skynet_frames::Reader::adopt_declared(fds[2], fds[3]).map_err(|error| {
+                format!(
+                    "the frame descriptors from {} are not a pool: {error}",
+                    path.display()
+                )
+            })?,
+        ),
+        _ => None,
+    };
+    Ok(Adopted {
+        commands,
+        body,
+        frames,
+    })
+}
+
+/// What arrived over §25's socket.
+///
+/// A struct rather than a tuple because there are now three of them and the third is optional, and
+/// `(Mapping, Mapping, Option<Reader>)` at a call site is three positions a reader has to count
+/// rather than three names they can read.
+struct Adopted {
+    commands: Mapping,
+    body: Mapping,
+    /// §47.6's pool, when the runtime offered one. `None` is a robot with no camera, which is most
+    /// of them, and is not a degraded version of having one.
+    frames: Option<skynet_frames::Reader>,
 }
 
 /// Not Unix: there is no socket to receive a descriptor over.
 #[cfg(not(unix))]
-fn adopt_from(_path: &std::path::Path, _slots: usize) -> Result<(Mapping, Mapping), String> {
+fn adopt_from(_path: &std::path::Path, _slots: usize) -> Result<Adopted, String> {
     Err("a ring is handed over a Unix socket, and this is not a Unix (§23.5)".to_string())
 }
 
@@ -409,10 +446,10 @@ fn run(args: &[String]) -> i32 {
     //
     // **Private**, otherwise: a ring in this process's own memory, which is what every run of this
     // binary was until the hand-off existed, and it says so on the line below.
-    let (shared, body) = match options.ring_socket.as_deref() {
-        None => (None, None),
+    let (shared, body, frames) = match options.ring_socket.as_deref() {
+        None => (None, None, None),
         Some(path) => match adopt_from(path, slots) {
-            Ok((commands, observations)) => (Some(commands), Some(observations)),
+            Ok(adopted) => (Some(adopted.commands), Some(adopted.body), adopted.frames),
             // Refused rather than fallen back to a private ring. A policy asked to join a robot's
             // ring and quietly publishing into its own address space is a producer that looks like
             // it is commanding and is not.
@@ -467,6 +504,20 @@ fn run(args: &[String]) -> i32 {
             "skynetp: {} at {:.0} Hz, {} channel(s), {ring_is}",
             options.backend, options.hz, options.channels
         );
+        // Said once, on the line after the ring, because it is a fact about what this process can
+        // see rather than a per-cycle event. A pool that has published nothing says so: §47.6's
+        // sentinel is what distinguishes *no frame yet* from a frame of zeros, and reporting the
+        // second as the first is the one lie the sentinel exists to prevent.
+        if let Some(pool) = frames.as_ref() {
+            let newest = match pool.latest() {
+                Some(handle) => format!("newest frame in slot {}", handle.slot),
+                None => "no frame published yet".to_string(),
+            };
+            println!(
+                "skynetp: frame pool \"{}\" received with the rings, {newest}",
+                pool.stream()
+            );
+        }
     }
 
     // The observation reaches the backend through here, which is why the closure takes it rather

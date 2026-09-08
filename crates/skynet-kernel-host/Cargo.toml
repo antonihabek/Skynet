@@ -15,6 +15,12 @@ path = "src/main.rs"
 [dependencies]
 skynet-blackbox = { path = "../skynet-blackbox" }
 skynet-dl = { path = "../skynet-dl" }
+
+# §47.6's mapping half. Carried through the hand-off rather than created here: this process owns
+# §25's rings because §25 says the runtime does, and it owns no camera.
+skynet-frames = { path = "../skynet-frames" }
+
+
 skynet-kernel = { path = "../skynet-kernel" }
 skynet-lock = { path = "../skynet-lock" }
 skynet-obs = { path = "../skynet-obs" }

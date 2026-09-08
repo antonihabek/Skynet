@@ -18,6 +18,11 @@ path = "src/main.rs"
 # the failure looks like patience. It is back because the other half exists: `skynet-kernel-host`'s
 # `handoff::Port` creates the ring and offers it, and `--ring-socket` is the side that takes it.
 [dependencies]
+
+# §47.6's mapping half, on the receiving side. The pool arrives over the same socket as the rings
+# and describes its own shape, so nothing about its geometry is configured here.
+skynet-frames = { path = "../skynet-frames" }
+
 skynet-obs = { path = "../skynet-obs" }
 skynet-ring = { path = "../skynet-ring" }
 skynet-ring-shm = { path = "../skynet-ring-shm" }

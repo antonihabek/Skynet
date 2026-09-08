@@ -354,8 +354,11 @@ impl Mapping {
 
     #[cfg(target_os = "linux")]
     fn create_inner(name: &str, slot_count: usize) -> Result<Mapping, ShmError> {
-        let bytes = bytes_for(slot_count);
+        Self::create_sized(name, bytes_for(slot_count), slot_count)
+    }
 
+    #[cfg(target_os = "linux")]
+    fn create_sized(name: &str, bytes: usize, slot_count: usize) -> Result<Mapping, ShmError> {
         // A C string on the stack. The name is a debugging aid, so a long one is truncated rather
         // than refused — and an interior NUL is truncated at, which is what the syscall would do
         // with it anyway.
@@ -418,6 +421,66 @@ impl Mapping {
         Self::map(fd, bytes_for(slot_count), slot_count, access)
     }
 
+    /// Create a mapping of an explicit **byte** size, for a protocol whose unit is not a ring slot.
+    ///
+    /// §47.6's frame pool is why this exists. A ring slot is 4 KiB and a 1080p frame is not, so
+    /// sizing in slots would round every pool up to the nearest ring and lay a `[AtomicU32]` over
+    /// pixels — two wrong shapes to get one mapping. The sealing, the `MFD_CLOEXEC` and the
+    /// `MAP_SHARED` are identical; what differs is only the arithmetic and the accessor the caller
+    /// reaches for afterwards ([`Mapping::bytes_slice`] rather than [`Mapping::words`]).
+    ///
+    /// `slot_count` is carried through unvalidated and uninterpreted — the caller's own notion of a
+    /// slot, recorded so both ends can agree on it without a second channel. It is **not** a power
+    /// of two here, because a frame pool's capacity is a vendor's declaration (§47.5) and rounding
+    /// somebody's four-slot pool to eight would silently change what §47.6's drop-and-count rule
+    /// counts.
+    #[cfg(target_os = "linux")]
+    pub fn create_bytes(name: &str, bytes: usize, slots: usize) -> Result<Mapping, ShmError> {
+        if bytes == 0 || slots == 0 {
+            return Err(ShmError::Geometry);
+        }
+        Self::create_sized(name, bytes, slots)
+    }
+
+    /// Map a byte-sized region somebody else created and passed over.
+    ///
+    /// **Takes ownership of `fd`**, like every other `adopt` here. Nothing about the contents is
+    /// validated: that is the caller's, for [`Mapping::adopt_raw`]'s reason.
+    ///
+    /// `bytes` must be what the creator sized it to. A receiver that maps fewer sees a prefix,
+    /// which is a protocol error rather than a memory-safety one; a receiver that maps *more* would
+    /// be a `SIGBUS` waiting for the first read past the end, which is why the creator's size
+    /// crosses beside the descriptor rather than being guessed from the geometry.
+    #[cfg(target_os = "linux")]
+    pub fn adopt_bytes(
+        fd: core::ffi::c_int,
+        bytes: usize,
+        slots: usize,
+        access: Access,
+    ) -> Result<Mapping, ShmError> {
+        if bytes == 0 || slots == 0 {
+            return Err(ShmError::Geometry);
+        }
+        Self::map(fd, bytes, slots, access)
+    }
+
+    /// Not supported off Linux, for [`Mapping::create`]'s reason.
+    #[cfg(not(target_os = "linux"))]
+    pub fn create_bytes(_name: &str, _bytes: usize, _slots: usize) -> Result<Mapping, ShmError> {
+        Err(ShmError::Unsupported)
+    }
+
+    /// Not supported off Linux, for [`Mapping::create`]'s reason.
+    #[cfg(not(target_os = "linux"))]
+    pub fn adopt_bytes(
+        _fd: core::ffi::c_int,
+        _bytes: usize,
+        _slots: usize,
+        _access: Access,
+    ) -> Result<Mapping, ShmError> {
+        Err(ShmError::Unsupported)
+    }
+
     #[cfg(target_os = "linux")]
     fn map(
         fd: core::ffi::c_int,
@@ -455,6 +518,33 @@ impl Mapping {
             slot_count,
             access,
         })
+    }
+
+    /// The mapping as bytes, for a protocol whose unit is a byte rather than a word.
+    ///
+    /// `AtomicU8` rather than `u8`, and the reason is the same one [`Mapping::words`] gives for
+    /// `AtomicU32`: another process writes this memory while this one reads it, which is a data
+    /// race for any type without interior mutability — including for pixels nobody will ever
+    /// compare. A relaxed load compiles to the same byte move a plain read would, so the atomicity
+    /// costs nothing and is what makes the read defined.
+    ///
+    /// It carries **no ordering of its own**. §47.6's tear rule is the caller's: a reader that
+    /// wants a frame rather than a smear reads the generation, reads the bytes, and reads the
+    /// generation again.
+    #[cfg(target_os = "linux")]
+    pub fn bytes_slice(&self) -> &[core::sync::atomic::AtomicU8] {
+        // SAFETY: identical to `words` below, one element type narrower. `addr` came from a
+        // successful `mmap` of `self.bytes` bytes and is unmapped only by `Drop`; `mmap` returns
+        // page-aligned memory, which is aligned for `AtomicU8` trivially; the region is
+        // `MAP_SHARED` over a `memfd`, so every byte is readable and initialised, and every bit
+        // pattern is a valid `AtomicU8`; and the lifetime is `&self`, so no slice outlives the
+        // mapping.
+        unsafe {
+            core::slice::from_raw_parts(
+                self.addr as *const core::sync::atomic::AtomicU8,
+                self.bytes,
+            )
+        }
     }
 
     #[cfg(target_os = "linux")]
