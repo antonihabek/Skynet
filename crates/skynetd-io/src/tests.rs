@@ -841,6 +841,83 @@ fn a_recording_launcher_refuses_to_describe_a_sandbox() {
     assert!(error.detail.contains("records rather than launching"));
 }
 
+/// What `systemctl show` really prints for a unit it has never heard of.
+///
+/// Copied from a run rather than invented, because the whole hazard is that it looks like an
+/// answer: every directive present, every one of them a refusal, and exit status 0.
+const SHOW_UNIT_NOT_FOUND: &str = "AllowedCPUs=\n\
+     MemoryMax=infinity\n\
+     TasksMax=37039\n\
+     CapabilityBoundingSet=cap_chown cap_dac_override cap_sys_admin\n\
+     ProtectKernelTunables=no\n\
+     ProtectKernelModules=no\n\
+     ProtectControlGroups=no\n\
+     ProtectSystem=no\n\
+     NoNewPrivileges=no\n\
+     RestrictSUIDSGID=no\n\
+     LoadState=not-found\n";
+
+/// A unit systemd has never heard of is refused, not read as a sandbox that landed nothing.
+///
+/// The two are opposite facts and `systemctl show` gives them the same exit status, so the load
+/// state is the only thing that separates them. Read as a shortfall it fails
+/// `safety.policy.isolation` and names seven directives that were in fact applied — to a unit that
+/// was collected when it went inactive, which is the ordinary end of a transient unit.
+#[test]
+fn a_unit_systemd_has_never_heard_of_is_not_a_sandbox_that_failed() {
+    let error = launch::confinement_from_show(SHOW_UNIT_NOT_FOUND)
+        .expect_err("there is no unit to describe");
+    assert!(
+        error.contains("no unit by that name"),
+        "the refusal must say there is no unit, not that a directive is missing: {error}"
+    );
+
+    // What the old reading did with the same bytes, kept as an assertion so the fix cannot be
+    // undone quietly: every directive §8.3 asks for, reported as not landed.
+    let misread = launch::parse_properties(SHOW_UNIT_NOT_FOUND);
+    assert_eq!(
+        launch::confinement_shortfall(PackageKind::Policy, &misread).len(),
+        launch::confinement_properties(PackageKind::Policy).len(),
+        "this is the failure the load state prevents, and it has to stay demonstrable"
+    );
+}
+
+/// A loaded unit answers with its directives, and the load state is not one of them.
+///
+/// Stripped rather than passed through: `confinement_shortfall` compares against
+/// `confinement_properties`, and a pair that is not a directive would be a property read and never
+/// compared — which `every_directive_asked_for_is_a_directive_asked_about` forbids for the query
+/// and this keeps true of the answer.
+#[test]
+fn a_loaded_unit_answers_with_its_directives_alone() {
+    let text =
+        "NoNewPrivileges=yes\nCapabilityBoundingSet=\nLoadState=loaded\nMemoryMax=67108864\n";
+    let observed = launch::confinement_from_show(text).expect("the unit is loaded");
+    assert_eq!(
+        observed,
+        vec![
+            ("NoNewPrivileges".to_string(), "yes".to_string()),
+            ("CapabilityBoundingSet".to_string(), String::new()),
+            ("MemoryMax".to_string(), "67108864".to_string()),
+        ]
+    );
+}
+
+/// Any load state but `loaded` is a refusal that names it, and a missing one fails closed.
+///
+/// `masked` and `error` are not `not-found` and an operator sent to the wrong one of the three has
+/// been told the wrong thing — the same reason §27 keeps `unreported` apart from `pending`.
+#[test]
+fn a_unit_that_is_not_loaded_says_which_it_is() {
+    let masked = launch::confinement_from_show("NoNewPrivileges=no\nLoadState=masked\n")
+        .expect_err("a masked unit describes nothing");
+    assert!(masked.contains("masked"), "{masked}");
+
+    let silent = launch::confinement_from_show("NoNewPrivileges=yes\n")
+        .expect_err("no load state, so no way to know what was described");
+    assert!(silent.contains("LoadState"), "{silent}");
+}
+
 /// The restraint, pinned: none of these may appear without the design that makes them safe —
 /// a path-dependent directive against an unmeasured store layout, a device policy with no
 /// declared device set (§40.3), or a filter with no measured allow-list (§64).

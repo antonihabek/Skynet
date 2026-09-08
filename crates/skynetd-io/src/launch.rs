@@ -180,6 +180,71 @@ pub fn confinement_property_names() -> Vec<String> {
     names
 }
 
+/// The property that says whether there is a unit to read at all.
+///
+/// Deliberately not part of [`confinement_property_names`], which is *the directives §8.3 asks
+/// for* and is pinned to that length by a test. This is a different question asked in the same
+/// call, and merging the two would put a non-directive into a list [`confinement_shortfall`]
+/// compares against.
+const LOAD_STATE: &str = "LoadState";
+
+/// The directives systemd reports for a unit, or why there is no unit to report them for.
+///
+/// # The failure this exists to prevent
+///
+/// `systemctl show` **exits 0 for a unit it has never heard of**, and prints the manager's
+/// *defaults* for every property named — `NoNewPrivileges=no`, `ProtectSystem=no`,
+/// `CapabilityBoundingSet=` the full set, `MemoryMax=infinity`. Every one of those is a directive
+/// §8.3 asks for, reported as not landed, by a manager that is not describing anything.
+///
+/// So a reader that trusts the exit status cannot tell *the sandbox did not land* from *there is
+/// no unit*, and the two are opposite facts about a robot. A transient unit is collected the
+/// moment it goes inactive (`--collect`, and §33.5 wants it that way), so the second is an
+/// ordinary thing to observe: a policy that stopped between being listed and being read. Read as
+/// the first, it makes §15's `safety.policy.isolation` **fail**, naming seven directives that were
+/// in fact applied — the exact shape [`confinement_property_names`] documents one cause of and
+/// this is another.
+///
+/// `Err` rather than an empty list, because `policy_isolation` already distinguishes them: a
+/// confinement that could not be read is a **skip** with the reason, and a sandbox nobody could
+/// read is not one this robot certifies either way.
+///
+/// Pure, so the distinction can be tested on a machine with no systemd — which is most of them,
+/// and which is why the bug survived: every test of this path fed it a unit that existed.
+pub fn confinement_from_show(text: &str) -> Result<Vec<(String, String)>, String> {
+    let properties = parse_properties(text);
+    let load_state = properties
+        .iter()
+        .find(|(key, _)| key == LOAD_STATE)
+        .map(|(_, value)| value.as_str());
+    match load_state {
+        Some("loaded") => Ok(properties
+            .into_iter()
+            .filter(|(key, _)| key != LOAD_STATE)
+            .collect()),
+        // `not-found` is the ordinary one and deserves its own sentence: it is what a transient
+        // unit leaves behind, and an operator reading "systemd has no unit by that name" should
+        // not be sent looking for a broken sandbox.
+        Some("not-found") => Err(
+            "systemd has no unit by that name any more. A transient unit is collected when it goes \
+             inactive, so the package stopped between being listed as running and being read — \
+             which says nothing either way about the confinement it was launched under"
+                .to_string(),
+        ),
+        Some(other) => Err(format!(
+            "systemd reports the unit as `{other}` rather than loaded, so what it prints for the \
+             confinement directives is its own defaults and not this unit's"
+        )),
+        // No `LoadState` line at all: a systemctl that answered something else entirely, or a
+        // version that stopped reporting it. Fail closed rather than reading the rest as if it
+        // were about a unit.
+        None => Err(format!(
+            "systemctl printed no {LOAD_STATE}, so whether it was describing a unit at all cannot \
+             be established from its output"
+        )),
+    }
+}
+
 /// The two facts the **kernel** exposes about a confined process, from `/proc/<pid>/status`.
 ///
 /// # Why a second layer, when `systemctl show` already answers
@@ -617,8 +682,13 @@ impl Launcher for SystemdLauncher {
         // hundred lines, and a check that scanned them would be one whose cost grows with
         // systemd's feature list. The names come from `confinement_properties` itself, so a
         // directive added there is asked for here without anybody remembering to.
+        //
+        // `LoadState` rides along because the exit status does not carry it: see
+        // `confinement_from_show`. Asking in the same call rather than a second one is deliberate
+        // — two calls could straddle the moment the unit is collected, and then the answer would
+        // be about two different states of the machine.
         argv.push(format!(
-            "--property={}",
+            "--property={},{LOAD_STATE}",
             confinement_property_names().join(",")
         ));
         let output = Command::new("systemctl")
@@ -641,7 +711,12 @@ impl Launcher for SystemdLauncher {
                 ),
             });
         }
-        Ok(parse_properties(&String::from_utf8_lossy(&output.stdout)))
+        confinement_from_show(&String::from_utf8_lossy(&output.stdout)).map_err(|detail| {
+            LaunchError {
+                id: id.to_string(),
+                detail: format!("{}.service: {detail}", unit_name(id)),
+            }
+        })
     }
 
     fn applied(&self, id: &str) -> Result<Vec<(String, String)>, LaunchError> {

@@ -7283,3 +7283,128 @@ The OS is otherwise closed apart from the third language edition, which the owne
 pass. Next area is the Console (§83.5).
 
 Nothing is pushed.
+
+# Round thirty-two — the three failing checks, and the second supervisor
+
+Round thirty-one left one thing: *"`e2e.sh` reports three failing checks and I have not diagnosed
+them. Do not assume either."* Good instruction. It was not three, it was not a regression, and it
+was not in the daemon.
+
+## What the number actually was
+
+The first run this round reported **thirteen**, and they were one cluster: every §59 confinement
+read-back in section 3, plus §15's `safety.policy.isolation` and the two assertions about what its
+pass says. Round thirty-one's three were the same cluster in a luckier moment.
+
+Each failure dumped this:
+
+```
+AllowedCPUs=
+MemoryMax=infinity
+TasksMax=37039
+CapabilityBoundingSet=cap_chown cap_dac_override … cap_sys_admin … cap_checkpoint_restore
+ProtectKernelTunables=no
+ProtectSystem=no
+NoNewPrivileges=no
+```
+
+Every directive present, every one of them a refusal. It reads as a sandbox that landed nothing.
+It is **`systemctl show`'s output for a unit it has never heard of**: the manager's own defaults,
+printed for whatever properties you name, with **exit status 0**.
+
+Reproduced by hand in the same environment, against the same store: `NoNewPrivileges=yes`,
+`ProtectSystem=yes`, `MemoryMax=67108864`, `TasksMax=128`, `CapabilityBoundingSet=` empty,
+`AllowedCPUs=0-15`. The confinement lands. There was no unit to read it off.
+
+## Why there was no unit
+
+The package started and was stopped again about half a second later, over and over — start, stop,
+start, on a level-triggered loop. Nothing in `skynetd` was doing it: `GET /plan` never contained a
+`StopPackage`, no skill existed to emit `Effect::Stop`, and nobody called `POST /stop`.
+
+Two units, identical but for their names, settled it. `probe-plain.service` stayed up indefinitely;
+`skynet:openrobot:probe.service` was stopped 1.7 s after starting, every time. At `log-level debug`
+the manager showed the shape of it — a `GetAll` on the unit, then
+`Trying to enqueue job skynet:openrobot:probe.service/stop/replace`. That is not systemd's
+housekeeping. That is `observe()` followed by `stop()`.
+
+```
+$ ps -eo pid,etime,args | grep skynetd
+3030  03:30:57  /tmp/sk-target/debug/skynetd --root /tmp/skynet-e2e/kernel --user --interval 500
+```
+
+**A `skynetd` abandoned by an aborted run three and a half hours earlier.** §33's unit names —
+`skynet:<ns>:<name>.service` — live in **one** user manager, so a second supervisor observes the
+first one's units, finds them absent from its own desired state, and stops them. Two daemons on one
+machine fight over every package on it. A robot has one `skynetd`, so this is not a defect in the
+daemon; it is a defect in a script that starts five background processes and cleans up one.
+
+The trap read `trap 'kill "$DAEMON" …' EXIT`. `$MDNS`, `$KDAEMON`, `$KLOOP` and `$KSTOP` were killed
+only by the lines that follow them, which an early exit never reaches. Every aborted run since that
+trap was written has left a supervisor on the machine, and it outlives the checkout that made it.
+
+## Fixed in three places, and only one of them is the script
+
+**1. `confinement()` was reading an answer that was not about a unit.** A new pure
+`confinement_from_show` asks for `LoadState` alongside the directives — in the *same* call, because
+two calls could straddle the moment a transient unit is collected — and returns `Err` unless it is
+`loaded`. `not-found` gets its own sentence, because it is the ordinary one: `--collect` reaps a
+transient unit when it goes inactive, so a policy that stopped between being listed and being read
+is a thing that happens, and it says nothing either way about the confinement it ran under.
+
+That matters beyond this script. `policy_isolation` already treats an unreadable confinement as a
+**skip** with the reason, and a shortfall as a **fail**. So before this, a robot whose policy had
+stopped would fail its own `safety.policy.isolation` and name seven directives that were in fact
+applied — the failure `confinement_property_names` documents one cause of, arriving by another
+route. `applied()` had the honest version of this all along (`MainPID` of 0 → *"It stopped between
+being listed and being read"*); the rung above it did not.
+
+Three tests, including one that keeps the old misreading demonstrable: the real not-found dump,
+parsed the old way, still produces a shortfall of exactly seven, so nobody can quietly undo this.
+
+**2. The script kills what it starts.** `track` records every background pid and `kill_tracked` is
+the trap, with a `pkill -f "skynetd --root $ROOT"` after it for a process whose pid this shell never
+learned — `$!` is only ever the last one.
+
+**3. The script refuses to run beside another supervisor**, naming the pid and the root rather than
+saying something is wrong. A run against a poisoned machine that reports ten confinement failures is
+worse than one that does not start.
+
+## What the read-back does when there is no unit
+
+One failure, not ten, and it says what happened: *"the unit was started and is not there to read"*.
+Ten "directive missing" lines would be ten false sentences. It also waits for the unit the way
+`start_daemon` waits for an answer rather than for a socket file — the comment claiming *"it runs
+for the whole script, so there is no race"* was a belief about a transient unit, and `--collect`
+does not share it.
+
+## Run
+
+```
+sh crates/skynetd-io/e2e.sh          98 checks, 0 failed        (was 13 failed / 85 passed)
+cargo test --workspace               1,721 passed, 0 failed     (1,718 last round)
+cargo clippy --workspace --all-targets   clean
+cargo fmt --all --check              clean
+python3 editions/python/run_corpus.py    1,142 of 1,142, both editions
+python3 editions/python/self_check.py    44 checks
+node tools/scale-report.mjs --check      §73 matches the tree
+node tools/check-mirrors.mjs             all shared documents match
+node tools/check-rhal-flags.mjs          green
+```
+
+The three mechanisms were verified rather than assumed: a clean run leaves no `skynetd`; a run
+started beside a stray refuses with exit 1 naming its pid; and a run interrupted mid-way leaves
+zero daemons where it used to leave one for ever.
+
+No contract, edition or corpus change. `reference/reports/scale.json` regenerated for the 152 added
+lines of Rust; §73's rounded figure is unchanged, so no document moved.
+
+## What round thirty-two leaves
+
+The e2e is green, and the reason it was not is a class of bug worth naming rather than a one-off:
+**a check that reads a tool's output without reading whether the tool was describing anything.**
+It is the same shape as round thirty-one's wrong-working-directory note, and both cost a session.
+
+Next is the Console (§83.5), per the owner.
+
+Nothing is pushed.
