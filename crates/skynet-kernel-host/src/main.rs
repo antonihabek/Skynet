@@ -72,6 +72,13 @@ skynetk run --driver <library> [options]
                         descriptor to whatever connects here (§25). Without it the
                         ring is private to this process and every cycle reads an
                         empty one, which is a robot with no policy.
+  --frame-pool <spec>   create §47.6's frame pool as `<stream>:<slots>x<bytes>` and
+                        hand it over with the rings. The numbers are declared, not
+                        measured (§47.5). This build has no capture backend, so the
+                        pool it offers stays empty and the summary says so — what
+                        the flag provides is the region and the hand-off, and the
+                        pixels are a vendor driver's to write.
+                        Needs --policy-socket: a pool nobody receives is a mapping.
   --quiet               only print the summary.
 
 skynetk blackbox <dir>
@@ -103,7 +110,47 @@ struct Options {
     watchdog_ms: Option<f64>,
     blackbox: Option<PathBuf>,
     policy_socket: Option<PathBuf>,
+    frame_pool: Option<(String, skynet_frames::Geometry)>,
     quiet: bool,
+}
+
+/// `"head_rgb:4x2073600"` — a stream name, a colon, slots, an `x`, bytes per slot.
+///
+/// Parsed strictly, and every failure names the fix (§64). The three numbers are a **declaration**
+/// (§47.5): they are not derived from anything this process can see, because the frames come from a
+/// capture device and this build has no capture backend. What the flag buys is the region and the
+/// hand-off — the pixels are the vendor driver's to write.
+fn parse_frame_pool(text: &str) -> Result<(String, skynet_frames::Geometry), String> {
+    let (stream, shape) = text.split_once(':').ok_or_else(|| {
+        format!("--frame-pool wants `<stream>:<slots>x<bytes>`, and this is `{text}`")
+    })?;
+    if stream.is_empty() || stream.len() > skynet_frames::MAX_NAME {
+        return Err(format!(
+            "`{stream}` is not a stream name: it must be between 1 and {} bytes, because the name              is written into the pool's header where a receiver reads it back",
+            skynet_frames::MAX_NAME
+        ));
+    }
+    let (slots, bytes) = shape.split_once('x').ok_or_else(|| {
+        format!("--frame-pool wants `<slots>x<bytes>` after the stream name, and this is `{shape}`")
+    })?;
+    let slots: usize = slots
+        .trim()
+        .parse()
+        .map_err(|_| format!("`{}` is not a slot count", slots.trim()))?;
+    let slot_bytes: usize = bytes
+        .trim()
+        .parse()
+        .map_err(|_| format!("`{}` is not a byte count", bytes.trim()))?;
+    if slots == 0 || slot_bytes == 0 {
+        return Err(
+            "a pool wants at least one slot of at least one byte; a pool of neither holds no              frames and offering it would tell a policy it has a camera"
+                .to_string(),
+        );
+    }
+    Ok((
+        stream.to_string(),
+        skynet_frames::Geometry { slots, slot_bytes },
+    ))
 }
 
 /// How many slots the command ring holds.
@@ -132,6 +179,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         watchdog_ms: None,
         blackbox: None,
         policy_socket: None,
+        frame_pool: None,
         quiet: false,
     };
 
@@ -217,6 +265,10 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 options.policy_socket = Some(PathBuf::from(value()?));
                 index += 2;
             }
+            "--frame-pool" => {
+                options.frame_pool = Some(parse_frame_pool(&value()?)?);
+                index += 2;
+            }
             "--quiet" => {
                 options.quiet = true;
                 index += 1;
@@ -234,6 +286,15 @@ fn parse(args: &[String]) -> Result<Options, String> {
     }
     if !(options.hz > 0.0 && options.hz.is_finite()) {
         return Err("--hz must be a positive rate".to_string());
+    }
+    // A pool with nobody to hand it to is a mapping this process talks to itself through. Refused
+    // here rather than created and left unoffered, because the second is a run that looks like it
+    // is serving frames and is not — §79.7's shape, at a smaller scale.
+    if options.frame_pool.is_some() && options.policy_socket.is_none() {
+        return Err(
+            "--frame-pool creates a region for a policy to map, and without --policy-socket there              is nobody to hand it to. Add --policy-socket <path>, or drop --frame-pool"
+                .to_string(),
+        );
     }
     Ok(options)
 }
@@ -405,6 +466,12 @@ fn run(args: &[String]) -> i32 {
     let mut shared = None;
     let mut body_ring = None;
     let mut port = None;
+    // §47.6's pool, created here and handed over below. Empty for the whole run: publishing into it
+    // needs a capture backend, and this build has none, which the summary says rather than implies
+    // (§34.3 — measure what you can, declare what you cannot). A reader that maps it sees a pool
+    // with no frame yet, which is exactly what a camera that has not delivered one looks like, and
+    // is the reason §47.6 has a sentinel for it rather than slot 0.
+    let mut frames = None;
     match options.policy_socket.as_deref() {
         None => {}
         Some(path) => match handoff::Port::open(path, RING_SLOTS, RING_SLOTS) {
@@ -417,6 +484,25 @@ fn run(args: &[String]) -> i32 {
                 shared = Some(mapping);
                 body_ring = Some(observations);
                 port = Some(opened);
+
+                if let Some((stream, geometry)) = options.frame_pool.as_ref() {
+                    match skynet_frames::Writer::create(stream, *geometry) {
+                        Ok(pool) => {
+                            if !options.quiet {
+                                println!(
+                                    "frames     pool \"{stream}\" offered with the rings, {} × {} B                                      — empty, because this build has no capture backend (§47.6)",
+                                    geometry.slots, geometry.slot_bytes
+                                );
+                                println!();
+                            }
+                            frames = Some(pool);
+                        }
+                        // Refused rather than run without it, for the reason the ring above is.
+                        Err(error) => {
+                            return fail(&format!("--frame-pool could not be created: {error}"))
+                        }
+                    }
+                }
             }
             // Refused rather than fallen back to a private ring. A loop that quietly ran with a
             // ring nobody can reach, after being asked for one that could be, is a robot that looks
@@ -551,8 +637,12 @@ fn run(args: &[String]) -> i32 {
         if let (Some(mapping), Some(body), Some(port)) =
             (shared.as_ref(), body_ring.as_ref(), port.as_mut())
         {
-            if port.offer(mapping, body) > 0 && !options.quiet {
-                println!("policy     took the rings ({} so far)", port.handed());
+            if port.offer(mapping, body, frames.as_ref()) > 0 && !options.quiet {
+                let took = match frames.as_ref() {
+                    Some(_) => "took the rings and the frame pool",
+                    None => "took the rings",
+                };
+                println!("policy     {took} ({} so far)", port.handed());
             }
         }
 

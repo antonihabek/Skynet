@@ -1,0 +1,25 @@
+[package]
+name = "skynet-frames"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "§47.6's mapping half: a frame pool two processes share, and the loans that keep a slot from moving under a reader."
+
+[dependencies]
+# The bookkeeping — which slot a publish takes, which handle an acquire refuses, and why — lives in
+# the contract, is reproduced by three editions and is pinned by `corpus/media/pool.json`. This
+# crate is the *mapping*, and it must never be a second implementation of the rule: §47.6a is the
+# record of what one costs, where a `findIndex` that looked equivalent cost the reader its frame on
+# nearly every cycle.
+skynet-contracts = { path = "../skynet-contracts" }
+
+# The one `mmap`, borrowed rather than repeated. CI asserts that only the ABI, the loader and the
+# three syscall crates carry `unsafe`, and this crate is deliberately not among them — everything
+# here is arithmetic over `&[AtomicU8]` and `&[AtomicU64]`, which the compiler checks.
+skynet-ring-shm = { path = "../skynet-ring-shm" }
+
+[lints.rust]
+missing_docs = "warn"

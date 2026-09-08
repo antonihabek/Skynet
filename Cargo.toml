@@ -23,6 +23,7 @@ members = [
   "crates/skynet-obs",
   "crates/skynet-ring-shm",
   "crates/skynet-capture",
+  "crates/skynet-frames",
   "crates/skynet-kernel",
   "crates/skynet-kernel-host",
   "crates/skynet-policy-host",

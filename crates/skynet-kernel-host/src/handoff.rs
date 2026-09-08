@@ -7,13 +7,24 @@
 //! here is `std` and there is no `unsafe` in this file, which is the split the shm crate's header
 //! argues for.
 //!
-//! # Two rings, one message
+//! # Two rings, one message — and a frame pool beside them when there is one
 //!
 //! A policy needs both: §25's command ring, which it writes, and the observation ring, which it
 //! reads. They cross in a **single** `SCM_RIGHTS` message, so a policy receives both or neither —
 //! two messages would make a closed-loop program that got the commands and not the body reachable,
 //! and that is a policy commanding blind. The order is the order they are sent in: commands first,
 //! then the body.
+//!
+//! §47.6's frame pool crosses in that same message, when the runtime has one: pixels third, loans
+//! fourth. Same argument, one section along — a policy handed pixels and no loans region can read a
+//! frame but cannot stop the writer taking the slot out from under it, which is the one property
+//! the pool exists to provide. The count is what tells the receiver which arrangement it got: two
+//! descriptors is a robot with no camera, four is a robot with one, and neither is a degraded
+//! version of the other.
+//!
+//! The pool is **not** created here. `Port` creates the rings because §25 says the runtime does;
+//! the pool is created by whatever captures into it and is only carried through, because a port
+//! that created an empty pool would be answering a question about hardware that it cannot see.
 //!
 //! The directions are opposite and deliberate. The policy maps the command ring **writable** and
 //! the runtime maps it read-only; the runtime maps the observation ring writable and the policy
@@ -146,23 +157,44 @@ impl Port {
         ))
     }
 
-    /// Hand both descriptors to anything waiting, and return how many took them this call.
+    /// Hand the descriptors to anything waiting, and return how many took them this call.
+    ///
+    /// `frames` is §47.6's pool when the runtime has one and `None` when it does not, and that is
+    /// the *only* difference the receiver sees: with a pool the message carries four descriptors,
+    /// without one it carries two. There is deliberately no third arrangement — no pool of zero
+    /// slots, no descriptor for a region nobody wrote — because a receiver's first question is
+    /// "have I got pixels", and an empty pool answers it wrongly.
     ///
     /// Never blocks and never fails the caller: a policy that connected and went away before the
     /// send is a policy that did not start, which is a thing the loop keeps running through.
-    pub fn offer(&mut self, commands: &Mapping, observations: &Mapping) -> usize {
+    pub fn offer(
+        &mut self,
+        commands: &Mapping,
+        observations: &Mapping,
+        frames: Option<&skynet_frames::Writer>,
+    ) -> usize {
+        // Built once rather than per connection: the descriptors are the same for every policy
+        // that connects, and `SCM_RIGHTS` duplicates them at the kernel rather than here.
+        let mut carried = [commands.fd(), observations.fd(), -1, -1];
+        let count = match frames {
+            None => 2,
+            Some(pool) => {
+                let [pixels, loans] = pool.descriptors();
+                carried[2] = pixels;
+                carried[3] = loans;
+                4
+            }
+        };
         let mut handed = 0;
         loop {
             match self.listener.accept() {
-                Ok((stream, _)) => {
-                    match pass::send_fds(stream.as_raw_fd(), &[commands.fd(), observations.fd()]) {
-                        Ok(()) => {
-                            self.handed += 1;
-                            handed += 1;
-                        }
-                        Err(_) => self.refused += 1,
+                Ok((stream, _)) => match pass::send_fds(stream.as_raw_fd(), &carried[..count]) {
+                    Ok(()) => {
+                        self.handed += 1;
+                        handed += 1;
                     }
-                }
+                    Err(_) => self.refused += 1,
+                },
                 // Nothing waiting. The ordinary result on almost every cycle.
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
                 Err(_) => {
@@ -224,7 +256,12 @@ impl Port {
     }
 
     /// Nothing can connect, so nothing takes anything.
-    pub fn offer(&mut self, _commands: &Mapping, _observations: &Mapping) -> usize {
+    pub fn offer(
+        &mut self,
+        _commands: &Mapping,
+        _observations: &Mapping,
+        _frames: Option<&skynet_frames::Writer>,
+    ) -> usize {
         0
     }
 
@@ -261,10 +298,14 @@ mod tests {
     fn a_policy_that_connects_gets_a_ring_it_can_write() {
         let path = scratch("one");
         let (mapping, body, mut port) = Port::open(&path, 4, 4).expect("open");
-        assert_eq!(port.offer(&mapping, &body), 0, "nobody has connected yet");
+        assert_eq!(
+            port.offer(&mapping, &body, None),
+            0,
+            "nobody has connected yet"
+        );
 
         let client = UnixStream::connect(&path).expect("connect");
-        assert_eq!(port.offer(&mapping, &body), 1);
+        assert_eq!(port.offer(&mapping, &body, None), 1);
         assert_eq!(port.handed(), 1);
 
         let mut fds = [-1; 2];
@@ -318,7 +359,7 @@ mod tests {
         producer.publish(&sample).expect("publish");
 
         let client = UnixStream::connect(&path).expect("connect");
-        assert_eq!(port.offer(&commands, &body), 1);
+        assert_eq!(port.offer(&commands, &body, None), 1);
         let mut fds = [-1; 2];
         assert_eq!(
             pass::recv_fds(client.as_raw_fd(), &mut fds).expect("receive"),

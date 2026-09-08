@@ -82,15 +82,23 @@ mod sys {
 
     /// How many descriptors one message may carry.
     ///
-    /// Two: §25's command ring and the observation ring that answers it. A fixed number rather than
-    /// a slice, because the buffer's size and alignment are what the kernel reads and a
-    /// compile-time type is the only version of that a reviewer can check by looking.
-    pub const MAX_FDS: usize = 2;
+    /// Four: §25's command ring, the observation ring that answers it, and §47.6's two frame-pool
+    /// regions — the pixels and the loans.
+    ///
+    /// A fixed number rather than a slice, because the buffer's size and alignment are what the
+    /// kernel reads and a compile-time type is the only version of that a reviewer can check by
+    /// looking.
+    ///
+    /// It was two until §47.6's mapping half existed, and raising it is the whole of what that
+    /// cost here: the regions travel in the **same message** as the rings for the reason the
+    /// observation ring travels with the commands — a policy handed some of them and not others is
+    /// a program running on a world it half has, and both halves of that failure are silent.
+    pub const MAX_FDS: usize = 4;
 
     /// One control message carrying up to [`MAX_FDS`] descriptors.
     ///
-    /// `CMSG_SPACE(sizeof(int) * MAX_FDS)` expressed as a type. Two ints are exactly one word on an
-    /// LP64 target, so there is no trailing padding to write out; the test below asserts that
+    /// `CMSG_SPACE(sizeof(int) * MAX_FDS)` expressed as a type. Four ints are exactly two words on
+    /// an LP64 target, so there is no trailing padding to write out; the test below asserts that
     /// rather than assuming it, because it is the target where that stops being true that would
     /// otherwise pass a buffer the kernel refuses.
     #[repr(C)]
@@ -108,6 +116,58 @@ mod sys {
         pub fn sendmsg(socket: c_int, message: *const MsgHdr, flags: c_int) -> isize;
         pub fn recvmsg(socket: c_int, message: *mut MsgHdr, flags: c_int) -> isize;
     }
+}
+
+/// Duplicate a descriptor, as `SCM_RIGHTS` does when one crosses a socket.
+///
+/// Here because this is where the workspace's fd plumbing lives and because the crates that need
+/// it forbid `unsafe`. A test that maps a pool it also created needs two independent descriptors
+/// for the same reason a receiver does: both ends close what they hold on drop, and one fd closed
+/// twice is a bug that shows up somewhere else entirely.
+#[cfg(target_os = "linux")]
+pub fn dup(fd: core::ffi::c_int) -> Result<core::ffi::c_int, ShmError> {
+    extern "C" {
+        fn dup(fd: core::ffi::c_int) -> core::ffi::c_int;
+    }
+    // SAFETY: one syscall over a descriptor the caller owns. It creates a new one or returns -1.
+    let copy = unsafe { dup(fd) };
+    if copy < 0 {
+        return Err(ShmError::Create(super::sys::errno()));
+    }
+    Ok(copy)
+}
+
+/// Give a descriptor back to the kernel.
+///
+/// Here for [`dup`]'s reason and no other: the crates that receive descriptors over this socket
+/// forbid `unsafe`, so without this the only way for one of them to release an fd it decided not to
+/// map is to map it and drop it — which is a syscall, an address-space entry and a page fault to
+/// achieve a `close`.
+///
+/// Errors are not reported, because there is nothing a caller could do with one. `close` fails on a
+/// descriptor that was already closed or was never a descriptor, and both of those are defects in
+/// the caller rather than conditions in the world; on Linux the descriptor is released even when it
+/// returns an error, so retrying would close somebody else's.
+#[cfg(target_os = "linux")]
+pub fn close(fd: core::ffi::c_int) {
+    extern "C" {
+        fn close(fd: core::ffi::c_int) -> core::ffi::c_int;
+    }
+    // SAFETY: one syscall over a descriptor the caller is giving up. It returns a status this
+    // deliberately ignores, and touches no memory.
+    unsafe {
+        close(fd);
+    }
+}
+
+/// Not supported off Linux, like everything else here.
+#[cfg(not(target_os = "linux"))]
+pub fn close(_fd: core::ffi::c_int) {}
+
+/// Not supported off Linux, like everything else here.
+#[cfg(not(target_os = "linux"))]
+pub fn dup(_fd: core::ffi::c_int) -> Result<core::ffi::c_int, ShmError> {
+    Err(ShmError::Unsupported)
 }
 
 /// Send `fds` over `socket`, which must be a connected Unix socket.
@@ -398,5 +458,11 @@ mod tests {
         assert_eq!(core::mem::align_of::<sys::Control>(), word);
         assert_eq!(sys::cmsg_len(1), header + 4);
         assert_eq!(sys::cmsg_len(2), header + 8);
+        // The four §47.6 made necessary: two rings, and a frame pool's pixels and loans.
+        assert_eq!(sys::cmsg_len(4), header + 16);
+        assert_eq!(
+            sys::cmsg_len(sys::MAX_FDS),
+            core::mem::size_of::<sys::Control>()
+        );
     }
 }
