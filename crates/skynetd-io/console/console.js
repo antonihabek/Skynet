@@ -2214,6 +2214,63 @@ function renderTrust(feed) {
  * holds the life of the machine, and the question "when did somebody trust that key" is nearly
  * always older than the ring.
  */
+/**
+ * §41.3's events, with the gaps drawn as loudly as the entries either side of them.
+ *
+ * The one thing this must not do is render a tidy list. Two events with four hundred dropped
+ * records between them are **not** consecutive, and somebody scanning a column will read them as
+ * consecutive unless the hole is on the page — which is the whole reason §26 annotates a gap rather
+ * than leaving a quiet interval.
+ */
+function renderEvents(feed) {
+  const body = clear($('events-body'))
+  if (!feed.value) {
+    body.appendChild(el('p', 'note', feed.detail || 'no answer yet'))
+    return
+  }
+  const e = feed.value
+  const rows = e.events || []
+
+  if (rows.length === 0) {
+    body.appendChild(el('p', 'note',
+      'No events. §13 records lease grants, stops, seals, installs, grants and gaps; a ring with ' +
+      'none of them is a robot to which none of those has happened since it started recording.'))
+    return
+  }
+
+  const table = el('table')
+  const head = el('tr')
+  for (const label of ['Seq', 'What', 'Subject', 'Detail']) head.appendChild(el('th', null, label))
+  table.appendChild(head)
+
+  for (const row of rows) {
+    const line = el('tr')
+    line.appendChild(el('td', 'mono', String(row.sequence)))
+    if (row.kind === 'gap') {
+      line.appendChild(el('td', 'bad', 'gap'))
+      line.appendChild(el('td', null, row.dropped + ' record(s) lost'))
+      line.appendChild(el('td', 'dim', 'from tick ' + row.first_tick + ' — ' + row.code))
+    } else {
+      line.appendChild(el('td', null, row.code))
+      line.appendChild(el('td', 'mono', row.subject || ''))
+      line.appendChild(el('td', 'dim', row.detail || ''))
+    }
+    table.appendChild(line)
+  }
+  body.appendChild(table)
+
+  // The denominator, always. "100 of 12,000" and "100 of 100" are different robots, and a list that
+  // showed only its own length would let the second be read as the first.
+  const held = typeof e.held === 'number' ? e.held : rows.length
+  if (held > rows.length) {
+    body.appendChild(el('p', 'note',
+      'The most recent ' + rows.length + ' of ' + held + ' in the ring. The rest are in the ' +
+      'recording — seal and download it above.'))
+  } else {
+    body.appendChild(el('p', 'note', rows.length + ' of ' + held + ' in the ring.'))
+  }
+}
+
 function renderAudit(feed) {
   const body = clear($('audit-body'))
   if (!feed.value) {
@@ -2282,6 +2339,11 @@ const feeds = [
   new Feed('skills', '/skills', renderSkills),
   new Feed('health', '/health', renderHealth),
   new Feed('blackbox', '/blackbox', renderBlackbox),
+  // A hundred rather than the route's default fifty: this panel is read by scrolling, and the cost
+  // of the larger answer is paid by a daemon that is already serving the page. The ceiling is the
+  // route's (500) and it reports what it applied, so asking for more here could never silently
+  // produce less than it says.
+  new Feed('events', '/blackbox/events?limit=100', renderEvents),
   new Feed('post', '/post', renderPost),
   new Feed('watchdog', '/watchdog', renderWatchdog),
   new Feed('outbound', '/outbound', renderOutbound),

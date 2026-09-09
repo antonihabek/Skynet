@@ -96,7 +96,13 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 
 use skynet_contracts::media::{FrameHandle, FrameIdentity, FramePool, FrameRefusalCode};
-use skynet_ring_shm::{Access, Mapping, ShmError};
+use skynet_ring_shm::{Mapping, ShmError};
+
+// Every use of `Access` is inside a `cfg(target_os = "linux")` function, because every mapping is.
+// Imported unconditionally it is an unused import on every other host — the warning half of the same
+// boundary `skynet-ring-shm`'s `bytes_slice` stub closes the compile half of.
+#[cfg(target_os = "linux")]
+use skynet_ring_shm::Access;
 
 /// `"SKYFRM01"` little-endian. Different from §25's ring and §25's observation ring, deliberately.
 pub const MAGIC: u64 = 0x3130_4d52_4659_4b53;
@@ -242,6 +248,9 @@ fn write_u64(bytes: &[AtomicU8], at: usize, value: u64) {
     }
 }
 
+/// Both callers are `Reader`'s, and both are Linux-only. `read_u64` beside it has a caller that is
+/// not (`len_at`), which is why only this one carries the gate.
+#[cfg(target_os = "linux")]
 fn read_u32(bytes: &[AtomicU8], at: usize) -> u32 {
     let mut value = [0u8; 4];
     for (index, slot) in value.iter_mut().enumerate() {

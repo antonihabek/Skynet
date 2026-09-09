@@ -488,15 +488,26 @@ export function wire(): { id: number; topic: string; name: string; definition: s
       seq: field('integer', 'rhal_state.seq.'),
       flags: field('integer', 'Bitwise-or of the RHAL flags: estop, fault, degraded, braked.'),
       fault_code: field('integer', 'Vendor-specific, surfaced verbatim (§24).'),
+      read_result: maybe(
+        'integer',
+        'What read_state returned this cycle: 0, or a negative errno (§24). Null in a recording '
+        + 'sealed before the field existed, which is not the same as a read that succeeded (§26.4).',
+      ),
+      nearest_person_m: maybe(
+        'number',
+        'Distance to the nearest detected person, in metres; null when nothing was measuring it. '
+        + 'An input to the proximity guard rather than a reading the RHAL supplies (§7.1).',
+      ),
       position_rad: numberArray('Measured joint positions.'),
       velocity_rad_s: numberArray('Measured velocities; null where the joint does not measure it.'),
       effort_nm: numberArray('Measured efforts; null where unmeasured.'),
       base_pose: numberArray('x y z qx qy qz qw; all null when the base is not localised.'),
       base_twist: numberArray('vx vy vz wx wy wz.'),
     }, [
-      'mono_ns', 'stamp_ns', 'seq', 'flags', 'fault_code',
+      'mono_ns', 'stamp_ns', 'seq', 'flags', 'fault_code', 'read_result', 'nearest_person_m',
       'position_rad', 'velocity_rad_s', 'effort_nm', 'base_pose', 'base_twist',
-    ], "One sample of the robot's state, as the RHAL reported it (§24).")],
+    ], "One sample of the robot's state: what the RHAL reported (§24), whether the read succeeded, "
+      + 'and the proximity reading the guards saw.')],
 
     [2, '/sk/desired', 'sk_desired', object({
       mono_ns: mono(),
@@ -509,13 +520,19 @@ export function wire(): { id: number; topic: string; name: string; definition: s
         'Hex SHA-256 of the package version that produced this, or empty when the recording'
         + "'s digest table did not hold it.",
       ),
+      capability: maybe(
+        'string',
+        'The capability token this command exercised, or null when the runtime did not say — which '
+        + 'is not the same as no capability, and the mode gate treats the two differently (§7.2).',
+      ),
       observation: field(
         'string',
         'Hex SHA-256 of the observation frame the policy was given. A hash, never the bytes: an '
         + 'hour of three-camera video is not something the robot can keep (§26).',
       ),
       values: channelValues('What the policy asked for.'),
-    }, ['mono_ns', 'tick', 'stamp_ns', 'seq', 'mode', 'policy_digest', 'observation', 'values'],
+    }, ['mono_ns', 'tick', 'stamp_ns', 'seq', 'mode', 'policy_digest', 'capability', 'observation',
+      'values'],
       'What the policy asked for, before the Safety Kernel saw it.')],
 
     [3, '/sk/verdict', 'sk_verdict', object({

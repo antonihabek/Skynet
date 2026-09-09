@@ -191,6 +191,11 @@ pub fn handle<L: Launcher, S: Slots>(
         ("GET", ["logs", id]) => logs(id, request),
         ("GET", ["blackbox"]) => blackbox_index(context),
         ("POST", ["blackbox", "seal"]) => blackbox_seal(context),
+        // Before the download arm, which would otherwise take `events` for a file name. It could
+        // not actually serve one — `read_sealed` refuses anything not ending `.mcap` — so the
+        // failure would be a 404 for a route that exists, which is the confusing half of a name
+        // collision rather than the dangerous half. Ordered anyway, and asserted in the suite.
+        ("GET", ["blackbox", "events"]) => blackbox_events(context, request),
         ("GET", ["blackbox", name]) => blackbox_download(context, name),
         ("POST", ["packages", id, "start"]) => act(context, id, Verb::Start),
         ("POST", ["packages", id, "stop"]) => act(context, id, Verb::Stop),
@@ -2321,6 +2326,46 @@ fn blackbox_index<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Res
 ///
 /// §13 seals on a fault, an estop, or an operator request, and this is the third. The seal is
 /// itself recorded as an event first, so the file it produces contains the reason it was produced.
+/// How many events one request may take when it does not say.
+///
+/// Enough to cover a boot and whatever went wrong after it, and small enough that a supervisor
+/// encoding the answer is not spending its pass on it (§33.2's single thread is the budget here).
+const EVENTS_DEFAULT: usize = 50;
+
+/// The most this route will return however large a `limit` is asked for.
+///
+/// A route that can be asked for the whole ring is a route through which one caller can make a
+/// supervisor serialise a hundred thousand records — and the caller who most wants that number is
+/// not the operator this route is for. The cap is reported in the answer rather than applied
+/// silently, so a client asking for more learns it got fewer and why.
+const EVENTS_CEILING: usize = 500;
+
+/// §41.3's *"last N black box events"*, which nothing could produce until this route.
+///
+/// The `limit` is clamped rather than refused. A refusal would be defensible and is the wrong trade
+/// for a diagnostic route: somebody typing `?limit=100000` at three in the morning wants the events,
+/// and an error message about a ceiling is one more round trip between them and the answer. So the
+/// answer carries `limit` as applied, and `held` as what the ring actually has, and the two together
+/// say exactly what was left out.
+fn blackbox_events<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    request: &Request,
+) -> Response {
+    let asked = request
+        .param("limit")
+        .and_then(|raw| raw.parse::<usize>().ok())
+        .unwrap_or(EVENTS_DEFAULT);
+    // Zero is a request for nothing, and it is answered with nothing rather than corrected upward:
+    // a client polling `held` without wanting the rows is a reasonable thing to be.
+    let limit = asked.min(EVENTS_CEILING);
+    let Some(recorder) = context.blackbox.as_ref() else {
+        return error(503, UNAVAILABLE);
+    };
+    let mut document = recorder.events(limit);
+    document.set("ceiling", Json::Num(EVENTS_CEILING as f64));
+    ok(document)
+}
+
 fn blackbox_seal<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Response {
     let mono_ns = context.mono_ns;
     let Some(recorder) = context.blackbox.as_mut() else {

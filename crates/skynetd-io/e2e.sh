@@ -82,7 +82,7 @@ stop_daemon() {
 }
 
 if [ -z "$BIN" ]; then
-  cargo build -p skynetd-io -p skynet-cli -p skynet-kernel-host >/dev/null
+  cargo build -p skynetd-io -p skynet-cli -p skynet-kernel-host -p skynet-policy-host >/dev/null
   BIN="$(cargo metadata --format-version 1 --no-deps 2>/dev/null | sed 's/.*"target_directory":"\([^"]*\)".*/\1/')/debug"
 fi
 SKYNETD="$BIN/skynetd"
@@ -299,6 +299,10 @@ say "5. A credential, issued by presence on the machine (§39.2)"
 stop_daemon
 TOKEN=$("$SKYNETD" credential add --root "$ROOT" --label suite --role operator 2>"$ROOT/out")
 want "the token is printed once and only a hash is stored" "only a salted hash" "$ROOT/out"
+# A second credential at the narrower role, so the checks that are *about* §39.1's line between
+# observer and operator can be made with a credential that is actually on the observer side of it.
+# An operator token proves a route is reachable; it cannot prove a route is not gated too widely.
+OBSERVER=$("$SKYNETD" credential add --root "$ROOT" --label suite-observer --role observer 2>/dev/null)
 grep -q "$TOKEN" "$ROOT/data/state/credentials.json"   && fail "the token itself is on disk" || pass "the token itself is not on disk"
 
 start_daemon
@@ -403,6 +407,73 @@ cmp -s "$ROOT/$SEALED" "$ROOT/data/blackbox/sealed/$SEALED" \
 
 (cd "$ROOT" && "$SKYNET" blackbox get "../../etc/shadow" $SOCK --token "$TOKEN") > "$ROOT/out" 2>&1 || true
 want "a path in the name is refused" "not a sealed recording" "$ROOT/out"
+
+# §41.3's events. The daemon's own ring holds events and no cycles, so this half checks the list
+# exists and reports its denominator; the cycle exclusion is checked in section 12, against the
+# kernel host's ring, which is the only ring on this machine that has cycles in it.
+"$SKYNET" blackbox events $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+want "the event list answers" "in the ring" "$ROOT/out"
+want "and names an event this run produced" "recording_started" "$ROOT/out"
+
+# The route must not be taken for a file name. It sits above the download arm in both the router
+# and the authorisation table, and if it ever stops doing so this asks for `events` with an
+# observer credential and gets a 403 for the operator role the download needs.
+"$SKYNET" blackbox events $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1
+want "an observer may read the events (§39.1)" "in the ring" "$ROOT/out"
+
+# §13's other half: reading a sealed recording back, with no robot involved. The file downloaded a
+# few lines above is the input, so this is the whole round trip — a robot sealed it, a workstation
+# opened it — and it runs against the *downloaded copy* rather than the one on the robot's disk,
+# because the copy is what a support conversation actually has.
+(cd "$ROOT" && "$SKYNET" blackbox inspect "$SEALED") > "$ROOT/out" 2>&1
+want "a sealed recording can be opened off a robot" "provenance" "$ROOT/out"
+want "and says whether it is complete (§26.3)" "complete" "$ROOT/out"
+want "and names the topics it holds" "/sk/event" "$ROOT/out"
+want "and does not claim to have replayed it" "other question" "$ROOT/out"
+# Each topic once. MCAP repeats the channels in the summary, and a reader that counted both would
+# report every topic twice — which is what it did until a real recording was put through it.
+EVENTLINES=$(grep -c "/sk/event" "$ROOT/out")
+[ "$EVENTLINES" -eq 1 ] \
+  && pass "each topic once, not once per section" || fail "/sk/event appears $EVENTLINES times"
+
+# A file that is not a recording, and one that stops early. Two different answers, because a
+# truncated transfer is resumable (§79) and a damaged file is not.
+printf 'not an mcap file' > "$ROOT/notmcap"
+(cd "$ROOT" && "$SKYNET" blackbox inspect "$ROOT/notmcap") > "$ROOT/out" 2>&1 || true
+want "a file that is not a recording says so" "not begin with MCAP" "$ROOT/out"
+head -c 400 "$ROOT/data/blackbox/sealed/$SEALED" > "$ROOT/cut.mcap"
+(cd "$ROOT" && "$SKYNET" blackbox inspect "$ROOT/cut.mcap") > "$ROOT/out" 2>&1 || true
+want "and a cut one reads as a transfer that stopped" "ends in the middle" "$ROOT/out"
+
+say "5c. §41.3's bundle, against a running robot"
+# The command a support conversation starts with. Run here rather than in a unit test because what
+# it is *for* is aggregating eleven live routes, and a doctor over doubles would be a doctor that
+# had never met a 503 or a 403 — which are the two answers it exists to record faithfully.
+(cd "$ROOT" && "$SKYNET" doctor $SOCK --token "$TOKEN" --out "$ROOT/doctor.json") > "$ROOT/out" 2>&1
+want "the summary leads with §27's state" "state" "$ROOT/out"
+want "and names the version it is talking to" "skynetd" "$ROOT/out"
+want "and says how many sections it read" "sections read" "$ROOT/out"
+[ -f "$ROOT/doctor.json" ] && pass "the bundle is a file" || fail "no bundle at $ROOT/doctor.json"
+grep -q '"schema":"skynet.doctor.v1"' "$ROOT/doctor.json" \
+  && pass "and it names its schema" || fail "the bundle has no schema"
+# Every section is present whatever happened to it. A bundle that dropped the refusals would be one
+# that erased its two most interesting findings, which is the rule the module is built on.
+SECTIONS=$(grep -o '"section":' "$ROOT/doctor.json" | wc -l)
+[ "$SECTIONS" -eq 12 ] \
+  && pass "and carries all 12 sections" || fail "the bundle carries $SECTIONS sections"
+grep -q '"route":"GET /limits"' "$ROOT/doctor.json" \
+  && pass "including §7.6's guards and limits" || fail "no limits section"
+grep -q '"route":"GET /blackbox/events"' "$ROOT/doctor.json" \
+  && pass "and §41.3's events" || fail "no events section"
+
+# Without a credential the observer routes still answer and the rest are recorded as refused. That
+# is a *readable* bundle rather than a failed run, and it is how somebody with no token gets a file
+# worth sending — so it is asserted rather than assumed.
+(cd "$ROOT" && "$SKYNET" doctor $SOCK --out "$ROOT/doctor-anon.json") > "$ROOT/out" 2>&1
+want "an uncredentialed run still writes a bundle" "sections read" "$ROOT/out"
+want "and says which sections were refused" "unread" "$ROOT/out"
+grep -q 'this needs the' "$ROOT/doctor-anon.json" \
+  && pass "recording the role each refusal wanted" || fail "no refusal reason in the anonymous bundle"
 
 say "6. The console refuses a routable address (§34.2)"
 "$SKYNETD" --root "$ROOT/other" --lan 0.0.0.0:8099 > "$ROOT/out" 2>&1 || true
@@ -899,6 +970,95 @@ DESIRED
   wait "$KDAEMON" 2>/dev/null || true
 fi
 
+
+say "11. A window replays against the limits it was recorded under (§13, §83.5)"
+# §13's argument is that a recording turns "the robot did something strange on Tuesday" into a
+# regression test. That only holds if somebody can put the window back through the Safety Kernel,
+# and until 2026-09-09 nothing could: the reader existed, `replay()` existed, and nothing joined
+# them.
+#
+# This is the whole chain in one place and none of it is a double: a real driver, a real policy in
+# its own process, a real ring shared between them, a real MCAP seal, and the file read back and
+# re-evaluated by the same `evaluate_cycle` the loop ran. What it asserts is the only thing worth
+# asserting about a replay — that it reaches the verdicts the recording holds — plus the two
+# failures that would make a green result meaningless.
+if [ -z "$CC" ]; then
+  printf '  \033[2m- no C compiler, so no mock robot and no window to replay. Set CC.\033[0m\n'
+else
+  R="$ROOT/replay"
+  rm -rf "$R" && mkdir -p "$R/bb"
+  "$CC" -std=c11 -O2 -fPIC -shared -I bindings/c -o "$R/mock.so" \
+      drivers/mock/mock_robot.c -lm 2>"$R/cc.log" \
+    && pass "the mock robot compiles" \
+    || { fail "the mock robot did not compile:"; sed 's/^/      /' "$R/cc.log"; }
+
+  # A short socket path. `sun_path` is 108 bytes and $ROOT can be anywhere.
+  RSOCK="$(mktemp -u /tmp/skynet-replay-XXXXXX).sock"
+  "$SKYNETK" run --driver "$R/mock.so" --tier host --velocity-max 2.0 --jerk 0.1 \
+    --watchdog-ms 200 --hz 100 --cycles 150 --channels J1,J2,J3 \
+    --blackbox "$R/bb" --policy-socket "$RSOCK" > "$R/k.log" 2>&1 &
+  RLOOP=$!
+  track "$RLOOP"
+
+  # Wait for the socket rather than sleeping a fixed span: on a loaded runner a fixed sleep is a
+  # race, and a policy that connects to nothing produces a window with no commands in it — which
+  # this section would then report as a replay that refused, for a reason that is about the runner.
+  i=0
+  while [ $i -lt 60 ] && [ ! -S "$RSOCK" ]; do i=$((i + 1)); sleep 0.25; done
+
+  "$BIN/skynetp" run --hz 100 --cycles 140 --channels 3 --backend trajectory \
+    --setpoints "0:0.1,0.2,0.3;40:0.5,0.6,0.7;90:1.9,1.9,1.9" \
+    --ring-socket "$RSOCK" > "$R/p.log" 2>&1 || true
+  wait "$RLOOP" 2>/dev/null || true
+  rm -f "$RSOCK"
+
+  WINDOW=$(ls "$R/bb/sealed/"*.mcap 2>/dev/null | head -1)
+  if [ -z "$WINDOW" ]; then
+    fail "the loop sealed no window:"; sed 's/^/      /' "$R/k.log"
+  else
+    pass "the loop sealed a window on the way out"
+
+    # The limits beside it, without which nothing off this bench could ever be replayed: `skynetd`
+    # resolves its own from a descriptor and a plan, which are not what this loop ran under.
+    [ -f "${WINDOW%.mcap}.limits.json" ] \
+      && pass "and wrote the limits it ran under beside it" \
+      || fail "no limits document beside ${WINDOW}"
+    grep -q '"watchdog_ms"' "${WINDOW%.mcap}.limits.json" \
+      && pass "including the envelope, which is where the watchdog's window lives" \
+      || fail "the limits document carries no envelope, so the watchdog cannot be reconstructed"
+
+    # `|| RC=$?` rather than a bare call: this script runs under `set -e` and this command
+    # deliberately exits non-zero to say *the window did not reproduce*, which is an answer rather
+    # than a failure. Without the guard the first divergence check below would kill the run before
+    # printing anything, which is exactly what it did.
+    RC=0; "$SKYNET" blackbox replay "$WINDOW" > "$R/replay.out" 2>&1 || RC=$?
+    [ "$RC" -eq 0 ] \
+      && pass "and the window replays: every evaluated cycle reproduces (exit 0)" \
+      || { fail "the window did not replay (exit $RC):"; sed 's/^/      /' "$R/replay.out"; }
+    want "it says how many cycles it evaluated" "evaluated cycles reproduced" "$R/replay.out"
+    # §25: the loop returns before the kernel when nothing was posted, so those cycles carry no
+    # verdict. Asserted rather than assumed — a policy that connects late is the ordinary case on a
+    # bench, and a replay that evaluated those cycles reported the watchdog tripping on every one.
+    want "and counts the cycles nobody posted a command on (§25)" "nothing posted" "$R/replay.out"
+
+    # Load-bearing, proven by breaking it. A window read against a tier that was not in force must
+    # diverge loudly rather than agree quietly — that is what makes a green replay mean something.
+    sed 's/"tier":"host"/"tier":"guest"/; s/"enforcement":"enforcing"/"enforcement":"advisory"/' \
+      "${WINDOW%.mcap}.limits.json" > "$R/wrong.json"
+    RC=0; "$SKYNET" blackbox replay "$WINDOW" --limits "$R/wrong.json" > "$R/wrong.out" 2>&1 || RC=$?
+    [ "$RC" -eq 2 ] \
+      && pass "and the wrong tier diverges rather than agreeing quietly (exit 2)" \
+      || { fail "a replay against the wrong tier answered $RC:"; sed 's/^/      /' "$R/wrong.out"; }
+    want "naming the field that disagreed" "advisory" "$R/wrong.out"
+
+    # And the refusal, which is the other half of not lying: a document with no envelope cannot
+    # reconstruct the watchdog, and the watchdog decided every cycle in this window.
+    sed 's/,"envelope":{[^}]*}//' "${WINDOW%.mcap}.limits.json" > "$R/noenv.json"
+    "$SKYNET" blackbox replay "$WINDOW" --limits "$R/noenv.json" > "$R/noenv.out" 2>&1 || true
+    want "a document that cannot reconstruct an active guard is refused, not guessed at" \
+      "envelope.watchdog_ms" "$R/noenv.out"
+  fi
+fi
 
 printf '\n'
 if [ "$FAILED" -eq 0 ]; then

@@ -13,6 +13,7 @@ name = "skynet"
 path = "src/main.rs"
 
 [dependencies]
+skynet-blackbox = { path = "../skynet-blackbox" }
 skynet-contracts = { path = "../skynet-contracts" }
 skynet-dl = { path = "../skynet-dl" }
 skynet-json = { path = "../skynet-json" }

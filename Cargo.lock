@@ -23,6 +23,7 @@ version = "0.1.0"
 name = "skynet-cli"
 version = "0.1.0"
 dependencies = [
+ "skynet-blackbox",
  "skynet-contracts",
  "skynet-dl",
  "skynet-json",
@@ -88,8 +89,10 @@ name = "skynet-kernel-host"
 version = "0.1.0"
 dependencies = [
  "skynet-blackbox",
+ "skynet-contracts",
  "skynet-dl",
  "skynet-frames",
+ "skynet-json",
  "skynet-kernel",
  "skynet-lock",
  "skynet-obs",

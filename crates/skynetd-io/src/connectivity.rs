@@ -847,9 +847,18 @@ fn run_curl(url: &str, credential: Option<&str>, body: &Path) -> Result<Posted, 
 /// `/proc/<pid>/cmdline` is world-readable, so the credential goes into curl's own config on stdin
 /// and nothing about it is ever an argument.
 ///
-/// There is no body, so there is no file. That is the whole of the difference between the two, and
-/// it is why they are two functions rather than one with an `Option<&str>` body — a reader looking
-/// for the argv rule should find it twice in eight lines rather than once behind a branch.
+/// There is no body, so there is no file. That is the whole of the *intended* difference between
+/// the two, and it is why they are two functions rather than one with an `Option<&str>` body — a
+/// reader looking for the argv rule should find it twice in eight lines rather than once behind a
+/// branch.
+///
+/// The unintended difference was `--location`, and the sentence above is what hid it: two functions
+/// side by side, described as differing in one way, differing in two. [`post_json`] gained the flag
+/// when a canonicalising Hub was found to be swallowing every check-in; this one did not, and
+/// nothing noticed until a robot was pointed at that same Hub and could not read its own desired
+/// state. The two callers are §11's reconciliation and §12's release list — so a robot against a
+/// Hub that adds a trailing slash was one that could not be told what to run and could not be told
+/// there was an update, and reported both as *the Hub answered HTTP 308*.
 pub fn get_json(url: &str, credential: Option<&str>) -> Result<Posted, String> {
     use std::io::Write;
 
@@ -874,6 +883,10 @@ pub fn get_json(url: &str, credential: Option<&str>) -> Result<Posted, String> {
         "GET",
         "--header",
         "accept: application/json",
+        // The same flag and the same reasoning as [`post_json`], including the deliberate absence
+        // of `--location-trusted`: a redirect is an address, not a refusal, and the credential does
+        // not follow one across hosts.
+        "--location",
         "--max-time",
         "30",
         "--write-out",

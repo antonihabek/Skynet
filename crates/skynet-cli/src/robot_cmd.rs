@@ -88,17 +88,21 @@ skynet — talking to a running robot (§33.7)
   --socket <path>   Default /run/skynetd.sock
   --host <addr:port>  The LAN console instead of the socket
   --token <t>       Or $SKYNET_TOKEN. Not needed for `status` or `estop`.
-  --root <dir>      For `install`: where /data lives. Default `/`.";
+  --root <dir>      For `install`: where /data lives. Default `/`.
+  --limit <n>       For `blackbox events`: how many. Default 50, ceiling 500.
+
+  `blackbox inspect <file>` talks to no robot: it opens a sealed recording on this machine
+  and prints its provenance, whether it is complete, and the events in it.";
 
 /// Where to send a request.
-enum Target {
+pub(crate) enum Target {
     /// The local socket.
     Socket(std::path::PathBuf),
     /// The LAN console.
     Host(String),
 }
 
-fn target(argv: &[String]) -> Target {
+pub(crate) fn target(argv: &[String]) -> Target {
     if let Some(host) = flag(argv, "--host") {
         return Target::Host(host);
     }
@@ -2093,10 +2097,241 @@ fn blackbox(argv: &[String]) -> i32 {
             };
             download(&drop_first(&rest), name)
         }
+        Some("events") => {
+            let limit = flag(argv, "--limit").unwrap_or_else(|| "50".to_string());
+            let path = format!("/blackbox/events?limit={limit}");
+            show(&drop_first(&rest), "GET", &path, None, print_events)
+        }
+        Some("replay") => {
+            let names = positional(argv);
+            let Some(path) = names.get(1) else {
+                return term::fail(
+                    "skynet blackbox replay <file> --limits <file> — a sealed recording on \
+                     this machine, and the limits that were in force. Needs no robot.",
+                );
+            };
+            replay_file(path, argv)
+        }
+        Some("inspect") => {
+            let names = positional(argv);
+            let Some(path) = names.get(1) else {
+                return term::fail(
+                    "skynet blackbox inspect <file> — a sealed recording on this machine. \
+                     Needs no robot.",
+                );
+            };
+            inspect(path)
+        }
         Some(other) => term::fail(&format!(
-            "`blackbox {other}` is not a subcommand. They are `index`, `seal` and `get`."
+            "`blackbox {other}` is not a subcommand. They are `index`, `events`, `inspect`, \
+             `replay`, `seal` and `get`."
         )),
     }
+}
+
+/// `skynet blackbox inspect <file>` — what a sealed recording says, with no robot involved.
+///
+/// # The one command here that talks to nothing
+///
+/// Every other robot command is a request over §33.7. This one opens a file, and that is the point:
+/// the recording of the day a robot failed is most often looked at *after* the robot is off a bench,
+/// on a workstation, by somebody it was emailed to. Until [`skynet_blackbox::read`] existed there
+/// was no way to answer *"what is in this file"* except to ask the robot that produced it — which
+/// works until the robot is the thing that is broken.
+///
+/// It stops short of replay deliberately. Replaying a window against resolved limits is the more
+/// valuable thing and needs the cycles reassembled out of the four messages each is written as;
+/// doing it as a side effect of "open the file" would produce a bad version of both. What this
+/// prints is what a person opens a recording to find out: where it came from, whether it is whole,
+/// and what happened.
+fn inspect(path: &str) -> i32 {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return term::fail(&format!("`{path}` could not be read: {error}"));
+        }
+    };
+
+    let recording = match skynet_blackbox::read::read(&bytes) {
+        Ok(recording) => recording,
+        Err(error) => return term::fail(&error.detail()),
+    };
+
+    let meta = |key: &str| recording.meta(key).unwrap_or("—");
+
+    println!("{}", term::bold("provenance"));
+    println!("  robot        {}", meta("robot_id"));
+    println!("  embodiment   {}", meta("embodiment_digest"));
+    println!("  os image     {}", meta("os_image_digest"));
+    println!(
+        "  tier         {} · enforcement {} · simulator {}",
+        meta("tier"),
+        meta("enforcement"),
+        meta("simulator")
+    );
+    println!("  sealed       {}", meta("sealed_reason"));
+
+    // §26.3's continuity, printed as the two facts that decide whether this file is evidence.
+    println!();
+    println!("{}", term::bold("continuity"));
+    let complete = recording.meta("complete") == Some("true");
+    println!(
+        "  {} records, sequences {}–{}",
+        meta("records"),
+        meta("first_sequence"),
+        meta("last_sequence")
+    );
+    if complete {
+        println!(
+            "  {}",
+            term::ok("complete — no record between those is missing")
+        );
+    } else {
+        // Named individually. "Incomplete" covers three different things and they are not equally
+        // bad: a torn slot is a damaged disk, a dropped record is a writer that fell behind, and a
+        // hole is a range the ring wrapped past.
+        println!(
+            "  {}",
+            term::bad(&format!(
+                "incomplete — {} damaged, {} dropped, holes {}",
+                meta("damaged_slots"),
+                meta("dropped_records"),
+                if recording.meta("holes").is_some_and(|h| h.is_empty()) {
+                    "none"
+                } else {
+                    meta("holes")
+                }
+            ))
+        );
+    }
+
+    println!();
+    println!("{}", term::bold("what it holds"));
+    let mut topics: Vec<(u16, &str, usize)> = recording
+        .channels
+        .iter()
+        .map(|(id, topic)| (*id, topic.as_str(), recording.on(*id).count()))
+        .collect();
+    topics.sort_by_key(|(id, _, _)| *id);
+    for (_, topic, count) in &topics {
+        println!("  {count:>8}  {topic}");
+    }
+    if recording.skipped_records > 0 {
+        // A file mostly made of records this edition does not understand is worth saying out loud:
+        // it is what a reader from one edition looking at a newer file sees.
+        println!(
+            "  {}",
+            term::dim(&format!(
+                "{} record(s) this edition does not interpret, skipped by length",
+                recording.skipped_records
+            ))
+        );
+    }
+
+    // The events, because they are what a person is looking for and they are already JSON objects
+    // on one channel — no reassembly, unlike a cycle.
+    let events: Vec<_> = recording.on(skynet_blackbox::schema::id::EVENT).collect();
+    if !events.is_empty() {
+        println!();
+        println!("{}", term::bold("events"));
+        for message in events {
+            let Ok(document) = Json::parse(&message.payload) else {
+                println!(
+                    "  {}",
+                    term::dim("(a payload this edition could not parse)")
+                );
+                continue;
+            };
+            let text = |key: &str| {
+                document
+                    .get_present(key)
+                    .and_then(Json::as_str)
+                    .unwrap_or("")
+                    .to_string()
+            };
+            println!(
+                "  {:>8}  {:<20} {:<24} {}",
+                message.sequence,
+                term::bold(&text("event")),
+                text("subject"),
+                term::dim(&text("detail"))
+            );
+        }
+    }
+
+    println!();
+    println!(
+        "{}",
+        term::dim(
+            "What is above is the file's own account of itself. `skynet blackbox replay` is the \
+             other question — whether this window still produces these verdicts — and it needs \
+             the limits that were in force, which a recording names and does not carry."
+        )
+    );
+    0
+}
+
+/// §41.3's events, printed so the gaps are as visible as the events either side of them.
+///
+/// The one thing this must not do is print a tidy list. A recording with four hundred dropped
+/// records in the middle of it is a recording whose two neighbouring lines are **not** consecutive,
+/// and a reader scanning a column of timestamps will believe they are unless the hole is drawn as
+/// loudly as the entries.
+fn print_events(document: &Json) {
+    let rows = document.arr_or_empty("events");
+    let held = document.get("held").and_then(Json::as_f64).unwrap_or(0.0);
+    let returned = rows.len();
+
+    if rows.is_empty() {
+        println!(
+            "{}",
+            term::dim(
+                "no events. §13 records lease grants, stops, seals, installs and gaps; a ring \
+                 with none of them is a robot to which none of those has happened since it \
+                 started recording."
+            )
+        );
+        return;
+    }
+
+    for row in rows {
+        let text = |key: &str| {
+            row.get_present(key)
+                .and_then(Json::as_str)
+                .unwrap_or("")
+                .to_string()
+        };
+        let number = |key: &str| row.get(key).and_then(Json::as_f64).unwrap_or(0.0);
+        let sequence = number("sequence") as u64;
+        if text("kind") == "gap" {
+            println!(
+                "  {:>8}  {}",
+                sequence,
+                term::bad(&format!(
+                    "gap — {} record(s) lost from tick {} ({})",
+                    number("dropped") as u64,
+                    number("first_tick") as u64,
+                    text("code"),
+                )),
+            );
+            continue;
+        }
+        println!(
+            "  {:>8}  {:<22} {:<28} {}",
+            sequence,
+            term::bold(&text("code")),
+            text("subject"),
+            term::dim(&text("detail")),
+        );
+    }
+
+    // The denominator, always. "50 of 12,000" and "50 of 50" are different robots, and a list that
+    // printed only its own length would let the second be read as the first.
+    println!();
+    println!(
+        "{}",
+        term::dim(&format!("{returned} of {} in the ring", held as u64))
+    );
 }
 
 /// Drop the subcommand word, so the flag parser sees only flags and the remaining positionals.
@@ -2401,7 +2636,7 @@ fn request_raw(
     Ok((status, body))
 }
 
-fn request(
+pub(crate) fn request(
     argv: &[String],
     method: &str,
     path: &str,
@@ -2426,6 +2661,403 @@ fn exchange<S: Read + Write>(stream: &mut S, request: &[u8]) -> Result<Vec<u8>, 
         .read_to_end(&mut response)
         .map_err(|error| format!("could not read the answer: {error}"))?;
     Ok(response)
+}
+
+/// `skynet blackbox replay <file> --limits <file>` — would this window still produce these verdicts?
+///
+/// # The second of the two questions a person asks about a recording
+///
+/// `inspect` answers *what is in this file*. This answers the harder one, and §13's whole argument
+/// rests on it: a recording turns *"the robot did something strange on Tuesday"* into a regression
+/// test, and it only does that if somebody can put the window back through the Safety Kernel and
+/// see whether it still reaches the verdicts it reached then. It fails when the kernel changed
+/// under an upgrade, when two editions disagree, or when the limits handed to it are not the ones
+/// that were in force — and the third is worth as much as the other two, because it means an
+/// incident is being read against the wrong configuration.
+///
+/// # Why the limits are a separate file rather than something in the recording
+///
+/// They are not in it, deliberately (§26): a window carries what happened, and the ceilings it
+/// happened under are resolved from the embodiment descriptor, the operator profile and the
+/// transport clamp. The recording *names* the embodiment through its digest without carrying it.
+///
+/// `skynetk` therefore writes the set it ran under **beside** every window it seals, and that
+/// sibling is what this reads when no `--limits` is given. It is the ordinary case: somebody was
+/// handed a recording off a bench and has one file to point at. `--limits` stays for the other
+/// thing replay is for — asking what this window would have done under a profile that was not in
+/// force.
+///
+/// It takes either a `GET /limits` document or a whole **`skynet doctor` bundle**, which carries
+/// it as a section. The second is the one an operator
+/// is likely to have: §41.3's bundle is what a support conversation opens with, and a tool that
+/// made somebody cut a subsection out of it by hand would be reintroducing the interview that
+/// section exists to end. A bundle whose `limits` section is a **refusal** says so with the
+/// robot’s own reason, which is more useful than a parse error about a missing field.
+///
+/// Handing them in is therefore also the check: a replay run against the wrong profile diverges
+/// loudly rather than agreeing quietly.
+///
+/// # What it refuses, and it is not a shortage of effort
+///
+/// A limits document renders the guard *partition* for a console and leaves out two things the
+/// kernel evaluates — §7.1's separation thresholds and §8.2's capability grants. That is harmless
+/// for a window which never engaged either guard, and it is fatal for one that did: the replay
+/// would run with the guard active and no input, recompute every cycle the guard decided, and
+/// present the difference as the kernel disagreeing with itself.
+///
+/// So the window is asked. A guard the document could not reconstruct is fine when nothing in the
+/// recording engaged it, and a refusal otherwise — including when the recording is too old to say,
+/// because *cannot tell* is not *did not happen*.
+fn replay_file(path: &str, argv: &[String]) -> i32 {
+    // Beside the window unless told otherwise. `skynetk` writes the limits it ran under next to
+    // every window it seals, so the ordinary case — somebody handed a recording off a bench —
+    // needs no second argument, and `--limits` stays for the other thing replay is for: asking
+    // what this window would have done under a profile that was not in force.
+    let beside = std::path::Path::new(path).with_extension("limits.json");
+    let limits_path = match flag(argv, "--limits") {
+        Some(given) => given,
+        None if beside.is_file() => beside.to_string_lossy().into_owned(),
+        None => {
+            return term::fail(&format!(
+                "no limits to replay against. `{}` is not beside the recording, so pass \
+                 --limits <file> — the body of `GET /limits` from the robot, or a \
+                 `skynet doctor` bundle carrying that section. They are not in the recording: \
+                 a window carries what happened, not the ceilings it happened under.",
+                beside.display()
+            ));
+        }
+    };
+
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) => return term::fail(&format!("`{path}` could not be read: {error}")),
+    };
+    let recording = match skynet_blackbox::read::read(&bytes) {
+        Ok(recording) => recording,
+        Err(error) => return term::fail(&error.detail()),
+    };
+    let put_back = match skynet_blackbox::assemble::assemble(&recording) {
+        Ok(put_back) => put_back,
+        Err(error) => return term::fail(&error.detail()),
+    };
+    if put_back.records.is_empty() {
+        // Vacuous truth is the failure mode of every conformance predicate. A replay of no cycles
+        // agrees about everything.
+        return term::fail(
+            "this recording holds no cycles, so there is nothing to replay. A window of events \
+             and gaps is a robot that recorded no control loop — which `skynet blackbox inspect` \
+             will show.",
+        );
+    }
+
+    let limits_text = match std::fs::read_to_string(limits_path.as_str()) {
+        Ok(text) => text,
+        Err(error) => {
+            return term::fail(&format!("`{limits_path}` could not be read: {error}"));
+        }
+    };
+    let document = match Json::parse(&limits_text) {
+        Ok(document) => document,
+        Err(_) => {
+            return term::fail(&format!(
+                "`{limits_path}` is not JSON. It should be the body of `GET /limits`."
+            ));
+        }
+    };
+    let document = match limits_section(&document) {
+        Ok(document) => document,
+        Err(reason) => return term::fail(&reason),
+    };
+    let owned = match skynet_contracts::safety::limits_from_json(document) {
+        Ok(owned) => owned,
+        Err(error) => return term::fail(&error.detail()),
+    };
+
+    // The refusal, per guard the document could not supply an input for.
+    for entry in owned.unreconstructed() {
+        match engagement(&put_back, entry.guard) {
+            Engagement::Never => {}
+            Engagement::Somewhere => {
+                return term::fail(&format!(
+                    "the `{}` guard was active on this robot, {} is not in a limits document, and \
+                     this window contains {}. Replaying it would recompute every cycle that guard \
+                     decided against an input nothing here can reconstruct.",
+                    entry.guard.as_str(),
+                    entry.missing,
+                    entry.engaged_by
+                ));
+            }
+            Engagement::NoRule => {
+                return term::fail(&format!(
+                    "the `{}` guard was active on this robot and {} is not in a limits \
+                     document, and this tool has no rule for deciding whether this window \
+                     engaged it. That is a gap here rather than in the recording, and \
+                     guessing either way would be worse than saying so.",
+                    entry.guard.as_str(),
+                    entry.missing
+                ));
+            }
+            Engagement::Unknowable => {
+                return term::fail(&format!(
+                    "the `{}` guard was active on this robot, {} is not in a limits document, and \
+                     this recording is too old to say whether it contains {}. Cannot tell is not \
+                     did not happen, so this window cannot be replayed against this document.",
+                    entry.guard.as_str(),
+                    entry.missing,
+                    entry.engaged_by
+                ));
+            }
+        }
+    }
+
+    let result = owned.with_resolved(|limits, envelope| {
+        skynet_blackbox::replay::replay(
+            &put_back.records,
+            &put_back.channels,
+            &put_back.capabilities,
+            limits,
+            envelope,
+        )
+    });
+
+    println!("{}", term::bold("replayed"));
+    println!(
+        "  {} cycles from `{}`, against the limits in `{}`",
+        result.cycles, path, limits_path
+    );
+    println!(
+        "  tier {} · enforcement {}",
+        owned.tier().as_str(),
+        owned.enforcement().as_str()
+    );
+    println!(
+        "  {} of the {} cycles had a predecessor, so the rate limit was evaluated as it was on \
+         the robot",
+        result.warmed,
+        result.evaluated()
+    );
+
+    // §25: the loop returns before the kernel when the policy posted nothing, so those cycles
+    // carry no verdict to reproduce. Said before the result rather than after it, because a
+    // window that is mostly idle makes the line below mean much less than it looks like.
+    if result.unposted > 0 {
+        println!(
+            "  {}",
+            term::warn(&format!(
+                "{} of the {} cycles had nothing posted, so the kernel was never asked and there \
+                 is no verdict in them to reproduce",
+                result.unposted, result.cycles
+            ))
+        );
+    }
+    if result.evaluated() == 0 {
+        println!();
+        return term::fail(
+            "no policy commanded anything anywhere in this window, so there is nothing to \
+             replay. This is a recording of a robot whose loop turned and whose policy never \
+             spoke — `skynet blackbox inspect` will show what it does hold.",
+        );
+    }
+
+    println!();
+    if result.deterministic() {
+        println!(
+            "{}",
+            term::ok(&format!(
+                "all {} evaluated cycles reproduced — this edition's Safety Kernel reaches every \
+                 verdict the recording holds",
+                result.agreed
+            ))
+        );
+    } else {
+        println!(
+            "{}",
+            term::bad(&format!(
+                "{} of {} evaluated cycles diverged",
+                result.diverged.len(),
+                result.evaluated()
+            ))
+        );
+        for outcome in result.diverged.iter().take(20) {
+            for divergence in &outcome.divergences {
+                println!(
+                    "  tick {:<10} {:<10} recorded {:<24} recomputed {}",
+                    outcome.tick, divergence.field, divergence.recorded, divergence.recomputed
+                );
+            }
+        }
+        if result.diverged.len() > 20 {
+            println!(
+                "  {}",
+                term::dim(&format!("and {} more", result.diverged.len() - 20))
+            );
+        }
+    }
+
+    // §26.4. A cycle whose read failed replays perfectly and shows a robot holding still, and an
+    // investigator drawing "the arm was stationary" out of it is reading the previous cycle's
+    // positions repeated. So it is said here rather than left for somebody to notice.
+    if let Some(note) = result.observation_note() {
+        println!();
+        println!("{}", term::warn(&note));
+    }
+
+    if !put_back.incomplete.is_empty() {
+        println!();
+        println!(
+            "{}",
+            term::warn(&format!(
+                "{} cycle(s) were not replayed because the file does not hold all four of their \
+                 messages",
+                put_back.incomplete.len()
+            ))
+        );
+        for gap in put_back.incomplete.iter().take(5) {
+            println!("  {}  {}", gap.cycle, term::dim(&gap.reason));
+        }
+    }
+
+    // The guards that were active and had nothing behind them, said out loud even when the window
+    // never engaged them — because "it did not matter here" is a different sentence from "it was
+    // checked", and only the first is true.
+    if !owned.unreconstructed().is_empty() {
+        println!();
+        for entry in owned.unreconstructed() {
+            println!(
+                "{}",
+                term::dim(&format!(
+                    "`{}` was active and {} is not in a limits document. Nothing in this window \
+                     engaged it, so no verdict here depended on it.",
+                    entry.guard.as_str(),
+                    entry.missing
+                ))
+            );
+        }
+    }
+
+    // The documented exception to `term::fail`’s *exit 1 throughout*, and it is the same
+    // exception `driver check` takes: this command **answers a question**, and *the window did
+    // not reproduce* is an answer rather than a failure to run. Collapsing the two would be
+    // worst for the caller that needs them apart — Skynet Console shells out to this, and a pane
+    // that rendered a divergence as "the tool failed" would hide the finding under a tooling
+    // complaint.
+    //
+    //     0  every evaluated cycle reproduced
+    //     1  it could not be run: no file, no limits, or a guard whose input is missing
+    //     2  it ran, and the window did not reproduce
+    if !result.deterministic() {
+        return 2;
+    }
+    0
+}
+
+/// Whether a window ever engaged a guard whose input the limits document could not supply.
+enum Engagement {
+    /// No cycle in the window carried the input, so the guard decided nothing here.
+    Never,
+    /// At least one did.
+    Somewhere,
+    /// The recording predates the field, so the question cannot be answered from it.
+    Unknowable,
+    /// This tool has no rule for that guard, which is a gap here rather than in the recording.
+    ///
+    /// Separate from [`Engagement::Unknowable`] because the two send somebody to different
+    /// places, and conflating them was a real defect: the watchdog arrived with no rule and
+    /// was reported as *"this recording is too old to say"* about a recording sealed minutes
+    /// earlier. A refusal that misnames its own cause is worse than one that admits ignorance.
+    NoRule,
+}
+
+fn engagement(
+    put_back: &skynet_blackbox::assemble::Assembled,
+    guard: skynet_blackbox::Guard,
+) -> Engagement {
+    let cycles = |body: &skynet_blackbox::Body| matches!(body, skynet_blackbox::Body::Cycle(_));
+    let total = put_back
+        .records
+        .iter()
+        .filter(|record| cycles(&record.body))
+        .count();
+    match guard {
+        skynet_blackbox::Guard::Proximity => {
+            if put_back.absent.nearest_person_m == total {
+                return Engagement::Unknowable;
+            }
+            for record in &put_back.records {
+                if let skynet_blackbox::Body::Cycle(cycle) = &record.body {
+                    if cycle.nearest_person_m.is_finite() {
+                        return Engagement::Somewhere;
+                    }
+                }
+            }
+            Engagement::Never
+        }
+        skynet_blackbox::Guard::ModeGate => {
+            if put_back.absent.capability == total {
+                return Engagement::Unknowable;
+            }
+            for record in &put_back.records {
+                if let skynet_blackbox::Body::Cycle(cycle) = &record.body {
+                    if cycle.capability != skynet_blackbox::record::NO_CAPABILITY {
+                        return Engagement::Somewhere;
+                    }
+                }
+            }
+            Engagement::Never
+        }
+        // Every cycle the kernel was asked about is one the watchdog decided: it is the first
+        // guard in the ladder and it runs on the command itself rather than on a reading. So
+        // the question is whether this window has any command in it at all, which §24 answers
+        // with the sequence — zero is *no command has ever arrived*, and the record has
+        // carried it since it was written, so there is no older recording that cannot say.
+        skynet_blackbox::Guard::Watchdog => {
+            for record in &put_back.records {
+                if let skynet_blackbox::Body::Cycle(cycle) = &record.body {
+                    if cycle.command_seq != 0 || cycle.command_stamp_ns != 0 {
+                        return Engagement::Somewhere;
+                    }
+                }
+            }
+            Engagement::Never
+        }
+        // A guard that becomes unreconstructable later must arrive here with its own answer
+        // rather than borrowing one that happens to look safe.
+        _ => Engagement::NoRule,
+    }
+}
+
+/// The limits document itself, or the `limits` section of a `skynet doctor` bundle.
+///
+/// A bundle is recognised by its own `schema` rather than by guessing from the shape, because
+/// the two documents have no field in common and a guess would misreport one as the other. The
+/// interesting branch is the third: §41.3’s bundle records a route it could not read **as
+/// unread, with the reason**, so a bundle collected without a credential carries a `limits`
+/// section that is a refusal. Passing the robot’s own sentence back is the whole value of that
+/// design, and reporting it as a malformed document would throw it away.
+fn limits_section(document: &Json) -> Result<&Json, String> {
+    if document.get("schema").and_then(Json::as_str) != Some("skynet.doctor.v1") {
+        return Ok(document);
+    }
+    for section in document.arr_or_empty("sections") {
+        if section.get("section").and_then(Json::as_str) != Some("limits") {
+            continue;
+        }
+        if let Some(held) = section.get_present("document") {
+            return Ok(held);
+        }
+        let reason = section
+            .get_present("unread")
+            .and_then(Json::as_str)
+            .unwrap_or("no reason was recorded");
+        return Err(format!(
+            "this doctor bundle could not read the robot’s limits, so there is nothing to replay \
+             against. The robot said: {reason}"
+        ));
+    }
+    Err(String::from(
+        "this doctor bundle has no `limits` section, so it was written by a tool that does not \
+         collect one. Use the body of `GET /limits` instead.",
+    ))
 }
 
 #[cfg(test)]

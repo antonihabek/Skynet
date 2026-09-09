@@ -1250,6 +1250,14 @@ struct Fixture {
     root: TempRoot,
     daemon: Daemon<RecordingLauncher, FixedSlots>,
     credentials: Credentials,
+    /// A recorder, when a test wants the routes that need one to answer with something.
+    ///
+    /// `None` by default and for almost every test: the suite exercises the API without a
+    /// recorder, the routes that need one answer 503, and the rest do not care. The console
+    /// fixture is the exception, and the reason is worth stating — a fixture whose black box
+    /// and events panels can only ever render *unavailable* is a fixture in which nobody has ever
+    /// looked at either panel, which is the one thing a fixture exists to make possible.
+    recorder: Option<crate::blackbox::Recorder>,
 }
 
 impl Fixture {
@@ -1276,7 +1284,25 @@ impl Fixture {
             root,
             daemon,
             credentials: Credentials::empty(),
+            recorder: None,
         }
+    }
+
+    /// Open a recorder over this fixture's own layout, so §13's routes answer.
+    fn record(&mut self) -> &mut crate::blackbox::Recorder {
+        let layout = self.daemon.store.layout().clone();
+        self.recorder.get_or_insert_with(|| {
+            crate::blackbox::Recorder::open(
+                &layout,
+                crate::blackbox::supervisor_meta(&layout),
+                skynet_blackbox::record::Shape {
+                    joints: 0,
+                    channels: 0,
+                },
+                64 * 1024,
+            )
+            .expect("a recorder over the fixture's layout")
+        })
     }
 
     fn provision(&mut self) {
@@ -1321,9 +1347,9 @@ impl Fixture {
             credentials: &credentials,
             now_ms: 1_000,
             started_ms: 0,
-            // The suite exercises the API without a recorder: the routes that need one
-            // answer 503, and the rest do not care.
-            blackbox: None,
+            // See `Fixture::recorder`: `None` for almost every test, and the console fixture
+            // opens one so §13's panels have something to draw.
+            blackbox: self.recorder.as_mut(),
             mono_ns: 0,
             // The sink a robot actually has today, and the reason it has nothing else. A fixture
             // that said "a test" here would render the console panel in a state no robot is in,
@@ -1356,7 +1382,7 @@ impl Fixture {
             credentials: &credentials,
             now_ms: 1_000,
             started_ms: 0,
-            blackbox: None,
+            blackbox: self.recorder.as_mut(),
             mono_ns: 0,
             // The sink a robot actually has today, and the reason it has nothing else. A fixture
             // that said "a test" here would render the console panel in a state no robot is in,
@@ -1387,6 +1413,9 @@ const CONSOLE_FIXTURE_ROUTES: &[&str] = &[
     "packages",
     "health",
     "blackbox",
+    // The limit is part of the request, exactly as the package is for `limits` above: the page asks
+    // for a hundred and the fixture has to answer the request the page makes, not a similar one.
+    "blackbox/events?limit=100",
     "capacity",
     "grants",
     "trust",
@@ -1413,9 +1442,16 @@ const CONSOLE_FIXTURE_ROUTES: &[&str] = &[
 /// asked for the second. `console/fixture-serve.mjs` computes the same name; the two are one rule
 /// in two languages, and the rule is written where the server reads it.
 fn fixture_name(route: &str) -> String {
+    // **The path is flattened too, and it has to be.** `/blackbox` and `/blackbox/events` are both
+    // routes, so a scheme that kept the separator would need `blackbox` to be a file and a
+    // directory at once — which is not a subtle failure, it is `AlreadyExists` on the second write,
+    // and it arrives the first time anybody adds a route under an existing one. Flat names have no
+    // such shape.
+    let path_of = |path: &str| path.replace('/', "-");
     let Some((path, query)) = route.split_once('?') else {
-        return route.to_string();
+        return path_of(route);
     };
+    let path = path_of(path);
     let flattened: String = query
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
@@ -1717,6 +1753,76 @@ fn console_fixture() {
     ));
     fixture.daemon.reload();
     let _ = fixture.daemon.reconcile(1_000);
+
+    // §13's recording, so the two panels that need one have something to draw.
+    //
+    // Until this the fixture had no recorder at all, so `blackbox` and `events` both answered 503
+    // and every look at this page saw the same two grey boxes. That is a legitimate state and it
+    // is *one* of them; a fixture that can only produce it is a fixture in which the interesting
+    // half of both panels has never been on screen.
+    //
+    // What goes in is chosen the way everything else here is — one of each case the panel has to
+    // keep apart. A grant, an install, a package starting and stopping, a seal, and **a gap in the
+    // middle of them**, because two events either side of four hundred lost records read as
+    // consecutive and the panel's whole job is to stop that.
+    {
+        use skynet_blackbox::record::{EventCode, Gap, GapReason};
+        let recorder = fixture.record();
+        for (mono, code, subject, detail) in [
+            (
+                1_000_u64,
+                EventCode::RecordingStarted,
+                "skynetd",
+                "ring opened at 64 KiB",
+            ),
+            (
+                2_000,
+                EventCode::Admission,
+                "openrobot/grasp",
+                "admitted: signature verified",
+            ),
+            (
+                3_000,
+                EventCode::GrantChanged,
+                "camera.front",
+                "granted to openrobot/grasp",
+            ),
+            (
+                4_000,
+                EventCode::PackageStarted,
+                "openrobot/grasp",
+                "unit started",
+            ),
+        ] {
+            recorder.event(mono, code, subject, detail).unwrap();
+        }
+        recorder
+            .gap(
+                5_000,
+                Gap {
+                    dropped: 412,
+                    first_tick: 9_100,
+                    reason: GapReason::WriterBehind,
+                },
+            )
+            .unwrap();
+        for (mono, code, subject, detail) in [
+            (
+                6_000_u64,
+                EventCode::PackageStopped,
+                "openrobot/grasp",
+                "unit exited 0",
+            ),
+            (
+                7_000,
+                EventCode::Sealed,
+                "operator",
+                "sealed through the local API",
+            ),
+        ] {
+            recorder.event(mono, code, subject, detail).unwrap();
+        }
+    }
 
     let out = std::env::var("SKYNET_CONSOLE_FIXTURE")
         .map(PathBuf::from)
@@ -5658,9 +5764,10 @@ mod listeners {
             credentials: &credentials,
             now_ms: 1_000,
             started_ms: 0,
-            // The suite exercises the API without a recorder: the routes that need one
-            // answer 503, and the rest do not care.
-            blackbox: None,
+            // This one builds its `Context` by hand rather than through `Fixture::raw`, because
+            // it is about the socket rather than about a route — so it takes the recorder the
+            // fixture has, which for this test is none.
+            blackbox: fixture.recorder.as_mut(),
             mono_ns: 0,
             // The sink a robot actually has today, and the reason it has nothing else.
             outbound_sink: &sink,
@@ -6692,7 +6799,100 @@ fn the_blackbox_routes_need_the_roles_39_1_gives_them() {
         requirement("GET", &["blackbox", "0001-estop.mcap"]).0,
         Role::Operator
     );
+    // §41.3's events go with the index, not with the file. The arm has to come *before* the
+    // download arm in the table, and a table that had them the other way round would answer
+    // `Operator` here — silently putting the one route a support conversation starts with behind
+    // the role most people watching a robot do not hold.
+    assert_eq!(
+        requirement("GET", &["blackbox", "events"]).0,
+        Role::Observer
+    );
 }
+
+/// A recorder over an events-only ring, for §41.3's list.
+fn events_recorder(label: &str) -> (TempRoot, crate::blackbox::Recorder) {
+    let root = TempRoot::new(label);
+    let layout = root.layout();
+    let recorder = crate::blackbox::Recorder::open(
+        &layout,
+        crate::blackbox::supervisor_meta(&layout),
+        skynet_blackbox::record::Shape {
+            joints: 0,
+            channels: 0,
+        },
+        64 * 1024,
+    )
+    .expect("recorder");
+    (root, recorder)
+}
+
+/// §41.3's events: what happened, in order, with the gaps left in.
+#[test]
+fn the_event_list_carries_the_gaps_and_says_what_it_left_out() {
+    use skynet_blackbox::record::{EventCode, Gap, GapReason};
+
+    let (_root, mut recorder) = events_recorder("bb-events");
+
+    // Six events and, between the third and the fourth, a gap. The gap is the point: two events
+    // either side of four hundred dropped records read as consecutive unless the hole is in the
+    // list with them.
+    for index in 1..4u64 {
+        recorder
+            .event(index, EventCode::LeaseGranted, "acme/pick", "granted")
+            .expect("event");
+    }
+    recorder
+        .gap(
+            4,
+            Gap {
+                dropped: 400,
+                first_tick: 900,
+                reason: GapReason::WriterBehind,
+            },
+        )
+        .expect("gap");
+    for index in 5..8u64 {
+        recorder
+            .event(index, EventCode::LeaseReleased, "acme/pick", "released")
+            .expect("event");
+    }
+
+    let all = recorder.events(50);
+    let rows = all.arr_or_empty("events");
+    assert_eq!(rows.len(), 7, "six events and the gap between them");
+    assert_eq!(all.get("held").and_then(Json::as_f64), Some(7.0));
+    // Newest last: a list read top to bottom ends where the robot is now.
+    assert_eq!(
+        rows.last()
+            .and_then(|row| row.get("detail"))
+            .and_then(Json::as_str),
+        Some("released")
+    );
+    // The gap is in its place, neither appended nor dropped.
+    let gap = &rows[3];
+    assert_eq!(gap.get("kind").and_then(Json::as_str), Some("gap"));
+    assert_eq!(gap.get("dropped").and_then(Json::as_f64), Some(400.0));
+
+    // A limit takes the *recent* end. Taking the oldest is the natural way to write this and would
+    // answer the opposite of the question — "what happened before it stopped".
+    let last_two = recorder.events(2);
+    let rows = last_two.arr_or_empty("events");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows[0].get("detail").and_then(Json::as_str),
+        Some("released")
+    );
+    // And `held` still reports the whole ring, so a two-row answer is never read as a robot that
+    // has done two things.
+    assert_eq!(last_two.get("held").and_then(Json::as_f64), Some(7.0));
+}
+
+// **Cycles are excluded, and that is asserted where cycles exist.** `Recorder` here writes events
+// and gaps and nothing else — the kernel host is what records a cycle (§26.2's two roles) — so a
+// unit test in this crate cannot put one in a ring to leave out of a list. `e2e.sh` can and does:
+// it runs `skynetk` against the mock driver, which fills a ring with over a thousand cycles, and
+// then asks `skynet blackbox events` what it holds. A test that cannot construct the thing it is
+// excluding proves nothing about the exclusion.
 
 #[test]
 fn a_robot_with_no_recorder_says_so_rather_than_pretending() {
@@ -11742,8 +11942,8 @@ mod cell {
 mod upload {
     use super::*;
     use crate::upload::{
-        advance, extract, next_pending, report, sealed, slice_len, url_for, Answer, Probe, Push,
-        Receipt, Step, Uploader, SLICE_BYTES, SLICE_BYTES_CEILING,
+        advance, extract, next_pending, report, sealed, slice_len, upload_target, url_for, Answer,
+        Probe, Push, Receipt, Step, Uploader, SLICE_BYTES, SLICE_BYTES_CEILING,
     };
 
     /// What a scripted receiver does about one request.
@@ -11903,6 +12103,33 @@ mod upload {
             url,
             "https://hub.example/api/skynet/v1/devices/dev_1/recordings/sha256%3Aabc"
         );
+    }
+
+    /// A `PUT` never goes to a URL ending in a slash, whatever the probe came back with.
+    ///
+    /// The rule is curl's rather than §79's: `--upload-file` against a slash-terminated URL appends
+    /// the *local* file's name, so a push aimed at the canonical address of a window would be sent
+    /// to a path named after this daemon's scratch file. It is not a hypothetical shape — a Hub
+    /// with `trailingSlash` canonicalisation answers 308 to the form `url_for` builds, and
+    /// [`advance`] then reuses that effective URL precisely so a redirect does not cost a re-sent
+    /// window.
+    ///
+    /// Asserted here and not in `curl_push`, which spawns a process. What this pins is the pure
+    /// half — the one line that decides whether the bytes reach the route.
+    #[test]
+    fn a_canonicalised_address_is_trimmed_before_it_reaches_curl() {
+        let canonical = "https://hub.example/api/skynet/v1/devices/dev_1/recordings/sha256%3Aabc/";
+        assert_eq!(
+            upload_target(canonical),
+            "https://hub.example/api/skynet/v1/devices/dev_1/recordings/sha256%3Aabc",
+        );
+        // And the ordinary case is untouched, so nothing about a receiver that does not
+        // canonicalise changes.
+        let plain = url_for("https://hub.example/api/skynet/v1", "dev_1", "sha256:abc");
+        assert_eq!(upload_target(&plain), plain);
+        // The address this daemon constructs never ends in one to begin with. If that ever stops
+        // being true, the trim above is doing work nobody expects it to do.
+        assert!(!plain.ends_with('/'));
     }
 
     #[test]

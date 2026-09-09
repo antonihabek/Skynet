@@ -407,6 +407,14 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         // §39.1 gives observer "the black box index" and operator "seal and download the black
         // box". The index is a count and a window; the file is every command the robot was given.
         ("GET", ["blackbox"]) => Role::Observer,
+        // §41.3's events, and they go with the index rather than with the download. The line §39.1
+        // draws is between *what the recording is* and *what the robot was told to do*: the file
+        // carries every commanded position, and this carries lease grants, stops, seals and gaps —
+        // package ids and image slots, the same class of fact `/audit` and `/packages` already give
+        // an observer. Above the index arm for the same reason it is above the download arm in the
+        // router: `events` must not be read as a file name here either, or the events route would
+        // quietly need the operator role the download has.
+        ("GET", ["blackbox", "events"]) => Role::Observer,
         // What the robot has been asked to do and how it went. §39.1 gives observer "read health,
         // guards, plan", and a list of invocations is the same kind of fact — it names no
         // arguments a caller supplied and no criterion a publisher wrote, only the ladder.

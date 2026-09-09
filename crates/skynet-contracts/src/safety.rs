@@ -16,11 +16,11 @@ use alloc::vec::Vec;
 use skynet_json::Json;
 
 pub use skynet_kernel::{
-    can_start, evaluate_cycle, evaluate_cycle_with_body, kinematics, resolve_limits, Available,
-    Body, Clamped, CommandCycle, CycleVerdict, Enforcement, Envelope, FaultResponse, Guard,
-    NoticeCode, OperatorProfile, PoseOutcome, PoseTrip, Proximity, ResolveLimitsParams,
-    ResolvedLimits, SafetyNotice, Tier, TransportClamp, UnavailableGuard, WarningChannel, GUARDS,
-    MAX_CHANNELS, SAFETY_CLAIM_RULE,
+    can_start, evaluate_cycle, evaluate_cycle_with_body, fixed::FixedVec, kinematics,
+    resolve_limits, Available, Body, Clamped, CommandCycle, CycleVerdict, Enforcement, Envelope,
+    FaultResponse, Guard, NoticeCode, OperatorProfile, PoseOutcome, PoseTrip, Proximity,
+    ResolveLimitsParams, ResolvedLimits, SafetyNotice, Tier, TransportClamp, UnavailableGuard,
+    WarningChannel, GUARDS, MAX_CHANNELS, SAFETY_CLAIM_RULE,
 };
 
 /// The English for a notice, given its code and what it names.
@@ -391,4 +391,312 @@ mod tests {
             r#"{"advisory":false,"clamped":[{"channel":"elbow","from":120,"to":80}],"command":{"elbow":80},"pose":{"evaluated":false,"lookahead":false,"trips":[],"truncated":false,"unresolved":[]},"response":"clamp","tripped":["envelope"]}"#
         );
     }
+}
+
+// ── Reading a resolved limit set back (§13, §83.5) ───────────────────────────
+
+/// Why a `GET /limits` document could not be turned back into a limit set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LimitsError {
+    /// The document was not a JSON object, or a required field was missing or the wrong shape.
+    Malformed {
+        /// The field that was wrong, or absent.
+        field: &'static str,
+    },
+    /// A tier or enforcement spelling this edition does not know.
+    Unknown {
+        /// Which field carried it.
+        field: &'static str,
+    },
+}
+
+/// A guard the document says was **active** whose input the document does not carry.
+///
+/// `GET /limits` is written for an operator reading a console: it renders the guard *partition* and
+/// the ceilings, and leaves out two things the kernel evaluates — §7.1's separation thresholds and
+/// the operator's capability grants. So a limit set read back from one has those two guards active
+/// with nothing behind them.
+///
+/// This is reported rather than refused, and where the line falls is the whole point. `mode_gate` is
+/// active on every ordinary robot, so refusing here would refuse every real document; and it does
+/// nothing at all on a cycle that exercised no capability. Whether the absence matters is a fact
+/// about the **window**, not about the document, so the decision belongs to whoever holds both. A
+/// caller replaying a window in which the input never appears is on safe ground and should say so;
+/// one replaying a window in which it does appear is comparing against a robot that is not the one
+/// that produced it, and must refuse.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unreconstructed {
+    /// The guard the document listed as active.
+    pub guard: Guard,
+    /// The input a limits document does not carry.
+    pub missing: &'static str,
+    /// What in a recording would have engaged it, so a caller can look for exactly that.
+    pub engaged_by: &'static str,
+}
+
+impl LimitsError {
+    /// One sentence, naming the fix (§64).
+    pub fn detail(&self) -> String {
+        match self {
+            LimitsError::Malformed { field } => format!(
+                "the limits document has no usable `{field}`. It should be the body of \
+                 `GET /limits` from the robot, as `skynet limits --json` prints it."
+            ),
+            LimitsError::Unknown { field } => format!(
+                "the limits document's `{field}` is a spelling this edition does not know. A \
+                 newer robot's document may need a newer `skynet`."
+            ),
+        }
+    }
+}
+
+/// A limit set read back from a document, holding the strings the borrowed form points at.
+///
+/// The same shape `skynetd`'s own limits take, and for the same reason: [`ResolvedLimits`] borrows
+/// its per-channel table and its provenance string, so something has to own them for as long as the
+/// borrow lives. [`OwnedLimits::with_resolved`] is that scope.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OwnedLimits {
+    tier: Tier,
+    enforcement: Enforcement,
+    joint_velocity_max_rad_s: Option<f64>,
+    joint_torque_max_nm: Option<f64>,
+    base_velocity_max_m_s: Option<f64>,
+    min_control_hz: Option<f64>,
+    max_delta_per_cycle: Option<f64>,
+    self_collision_margin_m: Option<f64>,
+    per_channel: Vec<(String, f64)>,
+    active_guards: Vec<Guard>,
+    unreconstructed: Vec<Unreconstructed>,
+    source: Option<String>,
+    envelope: Option<OwnedEnvelope>,
+}
+
+/// The declared envelope, when the document carries one. See [`OwnedLimits::with_resolved`].
+#[derive(Debug, Clone, PartialEq)]
+struct OwnedEnvelope {
+    joint_velocity_max_rad_s: Option<f64>,
+    joint_torque_max_nm: Option<f64>,
+    base_velocity_max_m_s: Option<f64>,
+    watchdog_ms: Option<f64>,
+    estop: Option<bool>,
+    source: Option<String>,
+}
+
+impl OwnedLimits {
+    /// The tier the document was resolved at.
+    pub fn tier(&self) -> Tier {
+        self.tier
+    }
+
+    /// The enforcement mode the document reported.
+    pub fn enforcement(&self) -> Enforcement {
+        self.enforcement
+    }
+
+    /// The guards the document said would run.
+    pub fn active_guards(&self) -> &[Guard] {
+        &self.active_guards
+    }
+
+    /// Active guards this document could not supply an input for. See [`Unreconstructed`].
+    pub fn unreconstructed(&self) -> &[Unreconstructed] {
+        &self.unreconstructed
+    }
+
+    /// Hand the borrowed form to `f`, with the envelope when the document carried one.
+    ///
+    /// # The envelope is not decoration, and leaving it out made every real replay wrong
+    ///
+    /// `resolve_limits` folds an envelope into the ceilings, so the resolved set is complete
+    /// for seven of the eight guards and the envelope beside it looks like provenance. It is
+    /// not, for one field: [`evaluate_cycle`] reads `watchdog_ms` **off the envelope**, because
+    /// staleness is a property of the declaration rather than a resolved ceiling. So a limit
+    /// set reconstructed without one has `watchdog` active and no window to measure against,
+    /// and every cycle whose command was stale replays as one that was not.
+    ///
+    /// That was found by replaying a real 300-cycle window against its own `GET /limits`
+    /// document and watching two recorded `stop_cat2` verdicts come back as `none` — a replay
+    /// saying the robot kept going where the recording says it stopped, which is the one
+    /// direction this must never be wrong in.
+    pub fn with_resolved<T>(
+        &self,
+        f: impl FnOnce(&ResolvedLimits<'_>, Option<&Envelope<'_>>) -> T,
+    ) -> T {
+        let per_channel: Vec<(&str, f64)> = self
+            .per_channel
+            .iter()
+            .map(|(name, value)| (name.as_str(), *value))
+            .collect();
+        let mut active = FixedVec::new();
+        for guard in &self.active_guards {
+            active.push(*guard);
+        }
+        let envelope = self.envelope.as_ref().map(|held| Envelope {
+            joint_velocity_max_rad_s: held.joint_velocity_max_rad_s,
+            joint_torque_max_nm: held.joint_torque_max_nm,
+            base_velocity_max_m_s: held.base_velocity_max_m_s,
+            watchdog_ms: held.watchdog_ms,
+            estop: held.estop,
+            source: held.source.as_deref(),
+        });
+        let limits = ResolvedLimits {
+            tier: self.tier,
+            enforcement: self.enforcement,
+            joint_velocity_max_rad_s: self.joint_velocity_max_rad_s,
+            joint_torque_max_nm: self.joint_torque_max_nm,
+            base_velocity_max_m_s: self.base_velocity_max_m_s,
+            min_control_hz: self.min_control_hz,
+            max_delta_per_cycle: self.max_delta_per_cycle,
+            proximity: None,
+            per_channel: &per_channel,
+            active_guards: active,
+            unavailable_guards: FixedVec::new(),
+            inert_guards: FixedVec::new(),
+            source: self.source.as_deref(),
+            notices: FixedVec::new(),
+            grants: &[],
+            frames: None,
+            workspace: &[],
+            self_collision_margin_m: self.self_collision_margin_m,
+        };
+        f(&limits, envelope.as_ref())
+    }
+}
+
+/// Read back what [`limits_to_json`] wrote.
+///
+/// The inverse lives beside the forward direction for §78's reason: two spellings of one document
+/// in two files agree until somebody changes one of them, and this pair is read by a replay whose
+/// whole value is that it is comparing against the limits that were actually in force.
+///
+/// It is **not** a complete inverse and says so by refusing rather than by filling in. See
+/// [`LimitsError::GuardWithoutInput`].
+pub fn limits_from_json(document: &Json) -> Result<OwnedLimits, LimitsError> {
+    if document.as_obj().is_none() {
+        return Err(LimitsError::Malformed { field: "(root)" });
+    }
+
+    let tier = document
+        .get("tier")
+        .and_then(Json::as_str)
+        .ok_or(LimitsError::Malformed { field: "tier" })?;
+    let tier = Tier::parse(tier).ok_or(LimitsError::Unknown { field: "tier" })?;
+
+    let enforcement =
+        document
+            .get("enforcement")
+            .and_then(Json::as_str)
+            .ok_or(LimitsError::Malformed {
+                field: "enforcement",
+            })?;
+    let enforcement = Enforcement::parse(enforcement).ok_or(LimitsError::Unknown {
+        field: "enforcement",
+    })?;
+
+    let mut per_channel = Vec::new();
+    match document.get("per_channel") {
+        Some(value) => {
+            let Some(table) = value.as_obj() else {
+                return Err(LimitsError::Malformed {
+                    field: "per_channel",
+                });
+            };
+            for (name, limit) in table {
+                let Some(limit) = limit.as_f64() else {
+                    return Err(LimitsError::Malformed {
+                        field: "per_channel",
+                    });
+                };
+                per_channel.push((name.clone(), limit));
+            }
+        }
+        None => {
+            return Err(LimitsError::Malformed {
+                field: "per_channel",
+            })
+        }
+    }
+
+    // Optional, and its absence is the ordinary case: `GET /limits` does not carry one, so a
+    // document straight off a robot reaches here without it. `skynetk` writes one beside every
+    // window it seals precisely so that a replay of that window has the field the watchdog is
+    // measured against.
+    let envelope = document.get_present("envelope").map(|held| OwnedEnvelope {
+        joint_velocity_max_rad_s: number(held, "joint_velocity_max_rad_s"),
+        joint_torque_max_nm: number(held, "joint_torque_max_nm"),
+        base_velocity_max_m_s: number(held, "base_velocity_max_m_s"),
+        watchdog_ms: number(held, "watchdog_ms"),
+        estop: held.get("estop").and_then(Json::as_bool),
+        source: held
+            .get("source")
+            .and_then(Json::as_str)
+            .map(ToString::to_string),
+    });
+
+    let mut active_guards = Vec::new();
+    let mut unreconstructed = Vec::new();
+    let Some(listed) = document.get("active_guards").and_then(Json::as_arr) else {
+        return Err(LimitsError::Malformed {
+            field: "active_guards",
+        });
+    };
+    for entry in listed {
+        let Some(name) = entry.as_str() else {
+            return Err(LimitsError::Malformed {
+                field: "active_guards",
+            });
+        };
+        let guard = Guard::parse(name).ok_or(LimitsError::Unknown {
+            field: "active_guards",
+        })?;
+        if guard == Guard::Watchdog && envelope.is_none() {
+            unreconstructed.push(Unreconstructed {
+                guard,
+                missing: "the command timeout it measures staleness against \
+                          (`envelope.watchdog_ms`)",
+                engaged_by: "a cycle carrying a command",
+            });
+        }
+        if guard == Guard::Proximity {
+            unreconstructed.push(Unreconstructed {
+                guard,
+                missing: "the separation thresholds (§7.1's stop and slow distances, and the \
+                          slow factor)",
+                engaged_by: "a cycle carrying a proximity reading",
+            });
+        }
+        if guard == Guard::ModeGate {
+            unreconstructed.push(Unreconstructed {
+                guard,
+                missing: "the operator's capability grants (§8.2)",
+                engaged_by: "a cycle carrying a capability token",
+            });
+        }
+        active_guards.push(guard);
+    }
+
+    Ok(OwnedLimits {
+        tier,
+        enforcement,
+        joint_velocity_max_rad_s: number(document, "joint_velocity_max_rad_s"),
+        joint_torque_max_nm: number(document, "joint_torque_max_nm"),
+        base_velocity_max_m_s: number(document, "base_velocity_max_m_s"),
+        min_control_hz: number(document, "min_control_hz"),
+        max_delta_per_cycle: number(document, "max_delta_per_cycle"),
+        self_collision_margin_m: number(document, "self_collision_margin_m"),
+        per_channel,
+        active_guards,
+        unreconstructed,
+        envelope,
+        source: document
+            .get("source")
+            .and_then(Json::as_str)
+            .map(ToString::to_string),
+    })
+}
+
+/// A ceiling the document writes as a number or as `null`, where `null` is *no ceiling declared*.
+fn number(document: &Json, key: &str) -> Option<f64> {
+    document.get(key).and_then(Json::as_f64)
 }

@@ -708,11 +708,20 @@ fn run(args: &[String]) -> i32 {
     // are only evidence once they are a file.
     if let Some(recorder) = recorder.as_ref() {
         match recorder.seal(Reason::Shutdown, origin.elapsed().as_nanos() as u64) {
-            Ok((sealed, path)) => println!(
-                "\nsealed          {} — {} bytes",
-                path.display(),
-                sealed.bytes.len(),
-            ),
+            Ok((sealed, path)) => {
+                println!(
+                    "\nsealed          {} — {} bytes",
+                    path.display(),
+                    sealed.bytes.len(),
+                );
+                match write_limits_beside(&path, &limits, Some(&envelope)) {
+                    Ok(beside) => println!("limits          {}", beside.display()),
+                    Err(error) => println!(
+                        "the window was sealed and its limits could not be written beside it: \
+                         {error}"
+                    ),
+                }
+            }
             Err(error) => println!("\nthe window could not be sealed: {error}"),
         }
     }
@@ -882,4 +891,81 @@ fn blackbox(args: &[String]) -> i32 {
     }
 
     0
+}
+
+/// Write the limits this loop ran under beside the window it sealed.
+///
+/// # Why it is here and not in the recording
+///
+/// §26 keeps the two apart on purpose: a window carries what happened, and the ceilings it
+/// happened under are *resolved* — from the embodiment descriptor, the operator profile and the
+/// transport clamp — so a recording names them through its embodiment digest without carrying
+/// them. Replay then takes them as a separate input, which is also the check: a window replayed
+/// against a profile that was not in force diverges loudly rather than agreeing quietly.
+///
+/// # Why it has to be written at all
+///
+/// Because otherwise **nothing can state them**. This process resolves the limits from its own
+/// flags; `skynetd` resolves its own from the descriptor and whatever transport plan is in
+/// force, which on a bench is neither the same set nor a wrong one — it is a different robot’s
+/// answer to a different question. So a window sealed here and taken away could be inspected and
+/// never replayed, which is half of what §13 says a recording is for.
+///
+/// It is the **same document** `GET /limits` returns, deliberately: `skynet blackbox replay`
+/// then has one shape to read whether the limits came off a robot, out of a `skynet doctor`
+/// bundle, or off the disk beside the window.
+///
+/// What it is not is *bound* to the window. Nothing ties this file to that one but the name —
+/// the recording carries an embodiment digest and a limits document carries none — so a
+/// replay is evidence about the limits it was handed, and a reader who wants more than that
+/// must check the provenance `skynet blackbox inspect` prints.
+fn write_limits_beside(
+    sealed: &std::path::Path,
+    limits: &skynet_kernel::ResolvedLimits<'_>,
+    envelope: Option<&skynet_kernel::Envelope<'_>>,
+) -> Result<std::path::PathBuf, String> {
+    let mut document = skynet_contracts::safety::limits_to_json(limits, None);
+    // Beside the resolved set rather than folded into it, because it is not a resolved
+    // ceiling: `evaluate_cycle` reads `watchdog_ms` off the **declaration**, and a replay
+    // handed the resolved set alone has the watchdog guard active with no window to measure
+    // staleness against. `GET /limits` does not carry this and does not need to — a console
+    // renders ceilings — so it is added here rather than by widening that route’s document.
+    if let Some(envelope) = envelope {
+        let mut held = skynet_json::Json::obj();
+        let number = |value: Option<f64>| match value {
+            Some(value) => skynet_json::Json::Num(value),
+            None => skynet_json::Json::Null,
+        };
+        held.set(
+            "joint_velocity_max_rad_s",
+            number(envelope.joint_velocity_max_rad_s),
+        );
+        held.set("joint_torque_max_nm", number(envelope.joint_torque_max_nm));
+        held.set(
+            "base_velocity_max_m_s",
+            number(envelope.base_velocity_max_m_s),
+        );
+        held.set("watchdog_ms", number(envelope.watchdog_ms));
+        held.set(
+            "estop",
+            match envelope.estop {
+                Some(fitted) => skynet_json::Json::Bool(fitted),
+                None => skynet_json::Json::Null,
+            },
+        );
+        held.set(
+            "source",
+            match envelope.source {
+                Some(source) => skynet_json::Json::from(source),
+                None => skynet_json::Json::Null,
+            },
+        );
+        document.set("envelope", held);
+    }
+    let text = document
+        .to_canonical()
+        .map_err(|_| String::from("the limit set would not serialise"))?;
+    let beside = sealed.with_extension("limits.json");
+    std::fs::write(&beside, text).map_err(|error| error.to_string())?;
+    Ok(beside)
 }
