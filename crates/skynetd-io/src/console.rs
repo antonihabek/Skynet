@@ -196,6 +196,69 @@ mod tests {
         }
     }
 
+    /// Every panel on the page is filled by a feed, and every feed has a panel to fill.
+    ///
+    /// Three files that have to agree about a name, and nothing checked that they did. The failure
+    /// is silent in both directions and neither one looks like a bug: a `<section id="panel-x">`
+    /// with no `Feed('x', …)` renders an empty box for ever, and a `Feed('x', …)` with no section
+    /// polls the robot on every tick and throws the answer away. The `data-age` attribute is the
+    /// third spelling — it is what `paintAges` looks the panel up by — so a panel whose age label
+    /// carries a different name than its section silently stops showing how stale it is.
+    ///
+    /// Added when the events panel was written, because writing it meant getting the same name
+    /// right in three places by hand.
+    #[test]
+    fn every_panel_has_a_feed_and_every_feed_has_a_panel() {
+        let names = |text: &str, open: &str, close: char| -> Vec<String> {
+            text.split(open)
+                .skip(1)
+                .filter_map(|rest| rest.split(close).next().map(str::to_string))
+                .collect()
+        };
+
+        let panels = names(HTML, "id=\"panel-", '"');
+        let ages = names(HTML, "data-age=\"", '"');
+        let feeds = names(JS, "new Feed('", '\'');
+
+        assert!(!panels.is_empty(), "the page has panels");
+
+        // The invariant is stated around the **age label**, and getting there took two wrong
+        // attempts worth recording, because each was wrong about a shape the page legitimately has.
+        //
+        // *"Every panel has a feed"* is false: `panel-access` is a token field — a form, not a view
+        // of the robot — and giving it an age would draw a staleness for a value the robot never
+        // sent. *"Every feed has a panel"* is false too: `releases` renders into a subpanel of
+        // `panel-ota`, because §12's verdict and the pull that produced it are one answer and were
+        // deliberately not split into two boxes.
+        //
+        // What is true of all three files at once is the age: a `data-age` is what `paintAges`
+        // looks a panel up by, so it needs a section to find and a feed to have a timestamp. And a
+        // panel that is fed needs one, or it silently stops showing how old what it displays is —
+        // on a page whose whole rule is that it must never show a value it did not receive (§32.2),
+        // an undated panel is the one way left to imply a value is current when it is not.
+        for age in &ages {
+            assert!(
+                panels.contains(age),
+                "`data-age=\"{age}\"` labels a panel that is not on the page"
+            );
+            assert!(
+                feeds.contains(age),
+                "`data-age=\"{age}\"` dates a panel nothing polls, so the age never changes"
+            );
+        }
+        for panel in &panels {
+            // `bodyFeed` and `packagesFeed` are constructed on their own lines and named there;
+            // both spell their name in the same `Feed('…'` form, so this finds them too.
+            if feeds.contains(panel) {
+                assert!(
+                    ages.contains(panel),
+                    "panel `{panel}` is fed and carries no `data-age`: it will show values without \
+                     ever saying how old they are"
+                );
+            }
+        }
+    }
+
     /// §32.2's second constraint, checked where it can be: the script must have the vocabulary for
     /// an absent value, and must not be building markup out of strings.
     ///

@@ -8286,3 +8286,532 @@ still needs the call.
 
 Unchanged: the restore surface (owner's call, above), the Hub countersignature (owner's call),
 the robot-dependent items, and the marketplace-side migration.
+
+---
+
+## Session — 2026-09-08 (twenty-sixth): Console pairing pane + Hub console download surface
+
+Two items from the §83.5 / §83.3d remainder, both closed. Per-session note: this shell is WSL1
+with no Linux toolchain, but the Windows binaries run — `node.exe` (v22.23.2) and `dotnet.exe`
+(10.0.400) by absolute path — so everything below was verified, not read.
+
+### 1. Console: the pairing pane (§83.5's next item after the webview)
+
+`POST /identity/pair` takes `{code, endpoint}` and needs `Role::Admin`, and an unprovisioned
+robot has no credentials by design (§39.2: no default password, physical presence bootstraps).
+So this is assisted pairing, honestly scoped: it pairs a provisioned robot and names the state
+it found otherwise — it does not invent a bootstrap mechanism, which would be an owner decision
+in the same class as the FFI boundary and the countersignature.
+
+* `desktop/windows/Services/PairingCode.cs` — the third spelling of
+  `normalize_pairing_code` (§10.1): strip five separators, expand-then-fold per code point,
+  Crockford alphabet, length 8 in code points, 1-based fault position, `skd_` refused by name.
+* The `.NET` correction this found: invariant upper-casing uses the *simple* (1:1) mapping —
+  `ß` becomes `ẞ` and `ﬁ` stays `ﬁ` — while Rust and JS use the *full* mapping (`SS`, `FI`).
+  Probed on two runtimes before writing the table. `ExpandUpper` carries exactly the decided
+  expansions (sharp s + Latin ligatures FB00–FB06); the residue fails loud here and the robot,
+  which re-normalizes whatever arrives, has the final say either way.
+* `desktop/windows/Services/RobotPairing.cs` — one `HttpClient` call with an injectable
+  handler: 201 names the fleet, 400 passes the robot's detail through, 401 distinguishes *no
+  credential sent* (names provisioning) from *credential rejected* (names the credential, never
+  the code), 403 names the missing admin role, 409 passes the already-paired sentence through.
+  The credential travels in one header, lives in memory only, and never appears in a result.
+* ViewModel: two-pane switch becomes a three-pane `DetailPane` enum (a bool pair would admit a
+  fourth state); pairing fields, `PairCommand`, per-outcome sentences; the credential clears on
+  selection change. XAML binds `PasswordBox` for the credential and a third radio for the pane.
+* `MissingList`'s `pairing` entry is now `bootstrap`: pairing a never-provisioned robot, which
+  still needs physical presence at the machine.
+
+Verified: `dotnet test` **51/51** (29 before, +22: local-normalization corpus incl. the
+sharp-s/ligature/astral-plane cases, plus one test per robot answer) · `dotnet build`
+0 warnings / 0 errors under warnings-as-errors (XAML bindings compile) ·
+`check-skynet-service.mjs` 6 checks, no divergence. macOS untouched: SwiftUI still has no
+compiler on this machine, and uncompiled native edits stay deferred.
+
+### 2. Hub: the §83.3d download surface (was: no `Skynet Console` string in app/lib/messages)
+
+* `lib/skynet/console-releases.ts` — the shape of a published entry (semver version, platform,
+  https URL, `sha256:` digest, platform signature, `minSkynetdVersion`) with fail-closed
+  validation, per-platform latest, and the compat rule (robot at least the declared minimum).
+  `CONSOLE_RELEASES` is empty: no pipeline has published a build, and a download row without a
+  digest is what this surface exists to prevent.
+* `app/[locale]/skynet/console/page.tsx` — SSR, `buildSkynetMetadata` + breadcrumbs, subnav
+  entry, honest per-platform empty state naming what a published entry will carry.
+* i18n: 11 `skynet_console_*` + `skynet_nav_console` keys in `en.json`, `sync` clean
+  (374 additions, 0 invalidations), audit OK at 6,115 keys. `translate-with-openai.mjs` NOT
+  run — needs direct approval. Scan ratchet: the new files contribute zero findings.
+
+Verified: `skynet-console-releases.test.ts` 6/6 · full `tsc --noEmit` clean · eslint clean on
+touched files.
+
+### Still not built
+
+Console: black box download and replay (behind it the undecided §83.3a FFI boundary), USB /
+serial, the tray stop, signing / notarisation / installer / release pipeline (with the Hub
+item above — the page is the surface, the pipeline is still outstanding), macOS (uncompiled,
+and now a pairing pane behind Windows). Hub: the restore surface and the countersignature
+(both owner's calls), robot-dependent items, the marketplace-side migration. Nothing is
+committed. Nothing is pushed.
+
+---
+
+## Session — 2026-09-08 (twenty-seventh): Console black box download
+
+The next §83.5 item after pairing. Download half only, on purpose: replaying a recording
+locally needs the black box reader in this application, which is the §83.3a FFI decision (C
+ABI or written twice) — taking it early on no evidence is how a bad boundary gets designed.
+A file saved to disk is useful without it.
+
+* `desktop/windows/Services/BlackBox.cs` — `GET /blackbox` (observer), `POST /blackbox/seal`
+  (operator, 201 carries name/bytes/digest/reason/records/cycles/complete), `GET
+  /blackbox/{name}` (operator, raw MCAP bytes back). The sealed list is read from
+  `collection.windows`, the one list that says whether the Hub has a copy — the CLI prints
+  from it for the same reason. Names are validated client-side by the daemon's own rule
+  (`.mcap`, no path), so a traversal fails at the keyboard rather than as a 404.
+* `desktop/windows/Services/RobotJson.cs` — the shared JSON readers (`detail`, text, number,
+  flag, child, tolerant parse), extracted when the second client needed the same three lines.
+  `RobotPairing.cs` now uses it; its tests still pass unchanged. Sentences stay per operation:
+  pairing needs admin, the index observer, seal/download operator.
+* ViewModel: `DetailPane.BlackBox`, index/seal/download commands, one session credential
+  shared with pairing (`PairingCredential` → `LocalCredential`; an admin outranks all three
+  roles), per-outcome sentences, picked-file tracking across re-reads. XAML fourth pane with
+  the sealed list (name, size in words, on-the-Hub/here-only), seal + save-picker download.
+  The picker is the overwrite confirmation — the CLI refuses implicit overwrites because its
+  destination is implicit; here the destination *is* the confirmation.
+* `MissingList`'s `blackbox` entry is now `replay`: the one half still behind the FFI call.
+
+Two defects caught by the gates, both fixed: `sealed` as a variable name (a C# keyword — the
+test run found it, not a reader), and `Windows.Storage.Pickers` resolving against the app's
+own namespace (needs `global::`). The record gained a `Summary` mirroring the CLI's print so
+the two never become two spellings of a window.
+
+Verified: `dotnet test` **78/78** (51 before, +27: name validation incl. traversal, index
+parse incl. Hub-copy flags, seal/download/auth/unreachable mapping, garbage-tolerance) ·
+`dotnet build` 0 warnings / 0 errors (XAML bindings compile) · `check-skynet-service.mjs` 6
+checks, no divergence. No Hub changes this turn — the desktop app is English-only by its own
+standing convention, so no locale keys. Nothing is committed. Nothing is pushed.
+
+### Still not built
+
+Console: black box **replay** (still behind the §83.3a FFI call), USB / serial, the tray
+stop, signing / notarisation / installer / release pipeline, macOS (uncompiled, now two panes
+behind Windows). Hub: the restore surface and the countersignature (both owner's calls),
+robot-dependent items, the marketplace-side migration.
+
+---
+
+## Session — 2026-09-08 (twenty-eighth): sitemap entry, README drift, and two deferrals
+
+No new feature this session: the two remaining Console items were assessed and both deferred
+with reasons rather than built blind.
+
+* **Tray stop + global hotkey — deferred.** No tray package exists in the offline NuGet cache,
+  so this would be raw Win32 (`Shell_NotifyIcon` plus a subclassed proc for `WM_HOTKEY`) in an
+  unpackaged WinUI 3 app — the class of code whose failures (missed messages, icon ghosts,
+  hotkey conflicts) are all runtime, on a machine where the app cannot run. Compile-checked
+  interop is not verified interop. There is also a product question inside it: with several
+  robots discovered, a global hotkey needs to name which robot it stops, and guessing that is
+  not this session's call.
+* **USB / serial — blocked.** No USB transport exists on the robot (`skynetd-io` has no serial
+  route; §50's provisioning assumes a network or physical presence at the machine), and there
+  is no hardware here. A Console USB pane now would be half a wire with nothing to talk to —
+  the same reason pairing did not invent a bootstrap mechanism.
+
+Built instead, both small and both verifiable:
+
+* Hub: `/skynet/console/` added to `app/sitemap-skynet.xml/route.ts` (weekly, 0.6). One line.
+* `desktop/README.md` drift, three places: test count 29 → 78; "no black box download or
+  replay" → download built, replay waits on §83.3a; "Hub download surface unbuilt" →
+  surface built, pipeline outstanding. Plus the pane sentence (two panes → four) and two
+  short sections documenting the pairing and black box panes where the code cannot speak.
+
+Also normalized two files to HEAD's LF: the sitemap route and the README arrived in the
+working tree as CRLF (pre-existing dirt from another process, same as the subnav last
+session) and now diff minimally.
+
+Verified: full `tsc --noEmit` clean · eslint clean on the sitemap route · no locale changes
+(desktop docs are English-only by standing convention; the sitemap carries no strings).
+Nothing is committed. Nothing is pushed.
+
+### Still not built
+
+Unchanged: Console replay (§83.3a), USB/serial, tray stop + hotkey, signing/installer/
+pipeline, macOS; Hub restore surface and countersignature (owner's calls), robot-dependent
+items, the marketplace-side migration.
+
+---
+
+## Session — 2026-09-08 (twenty-ninth): Console remainder audit, no code
+
+Asked whether anything on the Console list is still buildable. Audited each item against this
+machine rather than the plan's prose. Nothing is — each has a different blocker, and none of
+them is effort:
+
+* **Replay** — the §83.3a FFI decision (C ABI or written twice). Owner's call, explicitly not
+  to be taken early. Unchanged.
+* **USB / serial** — no transport exists on the robot (`skynetd-io` has no serial route) and
+  no hardware exists here. A pane now would be half a wire with nothing to talk to.
+* **Tray stop + global hotkey** — three independent blockers: no tray package in the offline
+  NuGet cache (raw `Shell_NotifyIcon` + a subclassed proc instead); every failure of that
+  interop is runtime-only on a machine where the app cannot run, so it would ship
+  compile-checked and behavior-unverified; and a product question — with several robots
+  discovered, a global hotkey must name which robot it stops. Any one of the three defers it.
+* **CLI as a subprocess** (§83.3a's third row) — the binary lives in the other repository and
+  there is no robot to point it at. Same half-a-wire shape as USB.
+* **Signing / installer / pipeline** — needs certificates and the release pipeline itself.
+* **macOS** — the Swift toolchain here is still the Windows one: no SwiftUI, no `Network`.
+  The two new panes widen the gap to four panes behind Windows.
+
+Hub side re-checked in passing: the device page already shows incidents and black box state
+(`recordings.ts` + the `[id]` page), the sitemap carries the console page, and everything
+else Hub-side is an owner's call or robot-dependent. No code this session. Nothing is
+committed. Nothing is pushed.
+
+---
+
+## Session — 2026-09-09 (thirtieth): §79's receiver meets a real robot, and two defects on the other side of it
+
+`scripts/skynet-verify-recordings.mjs` has proved this repository's §79 **receiver** against a real
+server, a real database and real object storage since the twentieth session. Its sender is
+`randomBytes` — a shape, not a robot. On the other side of the repository split, the OS proves its
+**sender** against a scripted receiver. Each half has only ever met a model of the other.
+
+New: `scripts/skynet-verify-recordings-robot.mjs` (50 checks). No doubles on either side.
+
+* `skynetk` turns the control loop against the mock RHAL driver, records the cycles into §13's ring
+  and seals a real MCAP window on exit.
+* One unpaired `skynetd once` reshapes the ring — §26.3 — sealing the loop's recording rather than
+  discarding it, so there are **two** windows and §79's *one subject per pass, oldest first* is
+  exercised rather than assumed.
+* A throwaway namespace, device and credential; then `skynetd once` in a loop until §79 reports
+  `Idle`, which is precisely *every sealed window here has a receipt*.
+* Then: a receipt beside each window on the robot naming the digest the recorder sealed, a
+  recording row and an artifact each on this Hub, the namespace charged for both, and the object in
+  the bucket **byte-identical** to the file on the robot's disk — the two digests computed
+  independently by two implementations that share no code. Everything removed in a `finally`,
+  including the objects, and every removal's error printed rather than swallowed.
+
+It also asserts what crossed **beside** the window. Every pass builds §17's check-in and drains
+§34.4's queue, so the same run puts a document through `POST /devices/{id}/checkin` — a route
+that had likewise only ever met a double, since this repository's suite posts a document it wrote
+and the robot's suite posts to a sink it wrote. What is checked is the part neither double can
+vouch for: the document the real producer built arrived, was stored whole, and the lifted columns
+agree with it — §17 forbids the Hub restating a robot's word as its own, so `reported` is the
+evidence and the columns are derived from it.
+
+### And the column this platform has never filled from a real robot
+
+With the transport proven the fault path costs one more section, and it closes a claim this log has
+carried since the fifteenth session: `skynet_incidents.artifact_id` is filled by §79's upload. True,
+and only ever demonstrated against doubles — the join in `recordings.ts` was exercised by incident
+rows a script inserted.
+
+§38.1 supplies a fault that needs no hardware: a profile whose signature was made over *other
+bytes*. A real Ed25519 key, really in the robot's trust store, and a real signature — over a
+different message. `raise_incident` then did everything itself: sealed the window, cited it so §80's
+reclaim can never take it, and queued the alarm with the recording's identity inside it (§77.2). The
+drain delivered the alarm to `POST /devices/{id}/incidents`; the next passes delivered the window;
+`attachToIncidents` matched on `body->recording->>digest` and filled the column.
+
+Asserted as filled **by the right window** — the artifact's own `sha256` against the digest inside
+the incident — because a join that matched any window this device had sent would look identical and
+be wrong. That is the branch worth pinning: `attachToIncidents` deliberately looks in two places,
+because §77.2 puts the digest in a block while `recordIncident` lifts a top-level one into a column,
+and the sealed-window path uses the first. Matching only the column would leave every sealed-window
+incident unjoined, which is the failure that whole path exists to end — and nothing until now had
+exercised the branch that avoids it with a document a robot actually produced.
+
+It also asserts one **absence**, because it is correct rather than missing: no §74 telemetry
+window crosses. `Counting` lives in memory on the daemon, so every `skynetd once` opens a window and
+closes none — and repeated single passes do not accumulate one either, because each is a new
+process. That is right: §74.2's window carries both clocks and a monotonic interval does not
+survive a process boundary, so a window bounded by two processes would be a fabricated duration,
+which is what §74.3's null-versus-zero column exists to keep out of this table. Unlike §79's
+upload, which is in the `once` path deliberately, this one cannot be. Asserted rather than left
+silent, so a later reader does not take it for a gap.
+
+It reports **UNCHECKED** rather than passing when it cannot run — no OS checkout beside this
+repository, no built binaries, no mock driver, no `curl`, no service key — each with its own
+sentence, following `check-skynet-service.mjs`'s precedent. A check that quietly does not run is the
+failure §15 spends a rule on.
+
+### Both defects were on the robot's side, and both are about this Hub's trailing slash
+
+Neither was reachable from either suite alone, and both are the consequence of a decision this
+repository made for good reasons elsewhere: `trailingSlash: true`, which is an SEO V3
+non-negotiable and applies to the API routes as well.
+
+1. **`curl --upload-file` appends the local filename to a URL that ends in a slash.** The push went
+   to `…/recordings/sha256%3A<hex>/slice` — a path with no route — while the probe, a `GET`,
+   answered normally. From the sending side that is §79.7's exact signature: the window never stops
+   being pending.
+2. **`connectivity::get_json` had no `--location`**, where its sibling `post_json` gained one after
+   the same class of failure was found swallowing check-ins. Its callers are §11's desired state and
+   §12's release list, so a robot paired to this Hub could not be told what to run and could not be
+   told there was an update. It reported *the Hub answered HTTP 308* every pass.
+
+Both fixed in the OS repository (`upload::upload_target`, `--location` on `get_json`), and both
+proven load-bearing by reverting each and re-running: the first fails 7 checks, the second fails
+exactly one.
+
+**Nothing on the Hub side needed to change.** The route, the resume rule, the digest verification,
+the artifact registration and the storage accounting all behaved as their own verifier says they do
+— against a sender that had never spoken to them.
+
+### Numbers
+
+* `scripts/skynet-verify-recordings-robot.mjs` — **Both halves of §79 hold, against each other**
+  (new; 36 checks).
+* No lib, route, schema or catalogue changes. `tsc --noEmit` clean. No locale changes — the script
+  carries no user-facing strings, in line with the other verify scripts.
+* OS side: `cargo test --workspace` 1,722 passed, clippy and fmt clean, `e2e.sh` 98/98.
+
+### Still not built
+
+Unchanged: Console replay (§83.3a's FFI call), USB/serial, tray stop + hotkey, signing/installer/
+pipeline, macOS; Hub restore surface and countersignature (both owner's calls), robot-dependent
+items, the marketplace-side migration.
+
+Newly narrowed rather than closed: the crossing above ran `skynetd once` on Windows rather than the
+supervised loop on Linux, and §10's pairing did not run — WSL on this machine cannot reach the
+Windows host, and opening that path is a firewall change rather than a build. Both are named in
+§79.6 rather than implied.
+
+Nothing is committed. Nothing is pushed.
+
+---
+
+## Session — 2026-09-09 (thirty-first): the Console gets the three things an operator reaches for
+
+Asked to make the Console usable and to give it the features a robot operator would actually want.
+Every item on its outstanding list had been deferred with a reason, and re-reading those reasons
+found that two of them were about a decision nobody had to take and one was about a feature that had
+never been asked the right question.
+
+### The stop, in the header (§83.2)
+
+§83.2 puts *an always-reachable stop* on the short list of things this application owns, and it had
+been deferred over a product question: with three robots discovered, which one does it stop?
+
+**The selected one, named in the sentence it produces.** That is the only answer that cannot
+surprise anybody — a stop that inferred its target would eventually stop the wrong machine on a
+bench — and once it is written down the rest is small. It is in the header rather than in a pane,
+because a stop behind a pane switch is a browser tab wearing different clothes. It is never disabled
+for want of a credential: §39.1 makes `POST /stop` anonymous precisely so a stop cannot wait for
+one, and `RobotStop` therefore has no credential parameter at all — not an optional one, because an
+optional parameter is an invitation to pass one.
+
+The caption under it says *a convenience, not an E-stop*, and that is load-bearing rather than
+decorative. The failure §83.2 is arranged to avoid is this control being read as a safety control.
+
+The sentence a robot that **does not answer** produces is the one that took the most care: it says
+the robot may still be running and to use the physical stop. This application does not know whether
+it stopped, and implying that it did would be the worst possible lie for this particular control.
+
+### Diagnostics, by running the tool that owns §41.3
+
+The pane collects §41.3's bundle by invoking `skynet doctor` as a subprocess. A pane that fetched
+the twelve routes itself and assembled its own bundle would be a second implementation of §41.3,
+drifting from the first the moment either changed — §78's shape, which this codebase has paid for
+once. §83.3a's third row already sanctions the route taken: *"the CLI's commands, invoked as a
+subprocess by either application, which is what a CLI is for."*
+
+The decisions are in C# and tested — which arguments, from what, where the file goes, what an exit
+code means; starting the process is four lines. The subtlety pinned hardest: the tool exits **zero**
+having written a bundle in which every section is a refusal, because that is a bundle and a readable
+one, so the gate is the file rather than the robot's cooperation. And the converse — a zero exit
+with no file is not a success.
+
+A workstation without the OS tools gets a sentence naming `SKYNET_CLI` rather than a button that
+does nothing.
+
+### The black box pane reads what it downloads
+
+A recording that has been downloaded and never opened is a file somebody has to find a tool for
+later. This pane now opens it the moment it lands, and shows the file's own account of itself.
+
+**Both things that blocked this turned out not to be where they looked.**
+
+* Nothing anywhere could read a sealed recording. §13's seal has written MCAP since the fifteenth
+  session's ancestor and no code had ever read one back. That is now `skynet-blackbox::read` and
+  `skynet blackbox inspect`, in the OS repository, with the round trip asserted in `e2e.sh`.
+* §83.3a's FFI decision **does not have to be taken**. That section leaves open whether the reader
+  crosses into these applications through a C ABI or is written twice, and warns against deciding
+  early on no evidence. A file path is the whole of the interface a subprocess needs.
+
+Replay is still out and the pane says so. *What is in this file* and *would this window still
+produce these verdicts* are different questions, and only the second needs the kernel.
+
+### Numbers
+
+* `desktop/tests` — **113 passed** (was 78). New: `RobotStopTests` (7), `DiagnosticsTests` (18).
+* `dotnet build -p:Platform=x64` — succeeded, warnings-as-errors. The application was launched and
+  held its window for five seconds with the new markup, which is the check that matters for XAML:
+  it compiles clean and fails at load.
+* No Hub lib, route, schema or catalogue changes. `tsc --noEmit` clean. No locale changes — desktop
+  documentation is English-only by standing convention.
+* OS side: `cargo test --workspace` 1,728 passed, `e2e.sh` 119 checks (was 98), clippy and fmt clean.
+
+### Still not built
+
+**Console:** the tray icon and global hotkey; USB/serial; signing, notarisation, installer and the
+release pipeline; macOS, now much further behind. The tray stop's reason has changed and is worth
+restating: it is no longer *no tray package and an undecided product question* — the product
+question is answered above and the interop can be written by hand. It is that `Shell_NotifyIcon`
+and `RegisterHotKey` fail at runtime, on a machine where this application cannot be run, and for a
+control labelled a stop *silently doing nothing* is the one failure mode that must not ship
+unexercised. The header stop is reachable while the window is on screen, which is most of what
+§83.2 asks for and all of what can be verified here.
+
+**Hub:** the restore surface and the countersignature (both owner's calls), robot-dependent items,
+the marketplace-side migration.
+
+Nothing is committed. Nothing is pushed.
+
+---
+
+## Session — 2026-09-09 (thirty-second): the Console's last first-version item, and the audit that found three logs wrong
+
+Asked to establish whether the plan is finished before building anything, and then to build. The
+audit answered *no*, and its useful half was that three of the things it checked were **already
+closed and still listed as open** — which is round thirty-three's lesson arriving from a fourth
+direction.
+
+### The audit, in the order the corrections matter
+
+* **The Hub's restore surface is built.** Both logs have carried it since session twenty-five as an
+  owner's call with *"no route calls it"*. `app/api/skynet/v1/repos/[handle]/[name]/restore/route.ts`
+  exists, is committed, is staff-gated and calls `restoreRepo`. What it actually lacked was a live
+  verifier: **nothing had ever called it**, unit test or probe.
+* **Skynet Console can be run on this machine.** The tray stop is deferred on the grounds that
+  `Shell_NotifyIcon` and `RegisterHotKey` fail only at runtime *"on a machine where this application
+  cannot be run"* — and the session that wrote that also launched the application and held its
+  window for five seconds. The interop is runtime-verifiable here. That deferral needs re-taking on
+  its merits rather than on that reason.
+* **Replay was not blocked on §83.3a.** §83.5 listed it as the one first-version item still waiting
+  on the FFI decision. The OS's `replay()` has evaluated recorded cycles against resolved limits for
+  weeks, and its own doc comment says it takes records rather than a ring *"so that a recording read
+  from a sealed file … replays through the same function"*. Nothing joined them. A file path is the
+  whole of the interface a subprocess needs, which is the same answer the diagnostics pane reached
+  last session.
+
+Also checked and unchanged: 95 Skynet routes, 29 migrations, `tsc --noEmit` carrying eight errors —
+**all of them in `lib/__tests__/semantic-vector-store.test.ts`**, none Skynet — and 1,948 unit tests
+green.
+
+### The replay pane, which is §83.5's last first-version item
+
+The OS gained `skynet blackbox replay` this round; the Console runs it as a subprocess on the
+recording it has just downloaded, which is §83.3a's third row for the third time and leaves that
+section's FFI boundary undecided on no evidence, as it asks.
+
+It is a **separate button** rather than something the download does. Replaying a window is minutes
+of cycles, and its answer means something different from the download's: a divergence is a finding
+about the OS or about the configuration an incident is being read against, not about the file.
+
+**Three answers, not two, and that is the whole of the design here.** `DoctorKind` gained
+`Diverged`, and `InterpretReplay` reads three exit codes: `0` reproduced, `2` ran and did not, `1`
+could not run. The middle one is why this is not the inspect path — *this window does not reproduce*
+is the most interesting thing this application can report, and rendering it as a failed tool would
+put it behind a sentence that reads as a broken installation. The tool's own output is shown for a
+divergence as well as for a reproduction, because the list of cycles and the field each disagreed
+about is the whole of what an investigator came for; a refusal has no output and its sentence is the
+tool's own, because *there are no limits beside this recording* and *a guard's input cannot be
+reconstructed* send somebody somewhere different.
+
+No limits are passed from here. `skynetk` writes the set a window was recorded under beside every
+window it seals, so the ordinary case is one button; choosing a different profile to replay against
+is a real thing an operator wants and it is a question with a second file in it, which is not this
+control.
+
+### The restore route, called for the first time
+
+`scripts/skynet-verify-decisions.mjs` gained a fifth phase rather than gaining a sibling. Restore is
+the **reverse of the act phase four performs**, and a separate probe would have stood up the same
+three accounts, the same two repositories and the same report to reach the state that script is
+already in — and it would have tested the two halves apart, when the property that matters is that
+they work as a pair. A takedown nobody can undo is a takedown that has to be right the first time,
+which is precisely why the route exists.
+
+Nine checks, against the running server and the real database: the namespace that was taken down
+cannot restore itself and neither can a stranger (403 both, which is the whole point of withholding
+not being `visibility`); staff can, and the repository opens anonymously again; **the report still
+says `upheld`** and the withholding audit row is still there with the restore logged beside it,
+because the history that matters is *"it was withheld and then restored"* rather than *"the report
+changed its mind"*; restoring one that is not withheld answers `false` rather than a 404, since the
+repository exists; and an unknown one is 404.
+
+**And one correction to this session's own audit.** It said the route also lacked a row in the API
+docs table. It does, and that is **not a gap**: the sibling staff route — `POST
+/reports/{id}/decision` — is absent from that table too, and both are absent for the same good
+reason, that the table is a public developer reference and the staff role deliberately has no grant
+path. The audit compared restore against ordinary routes instead of against the one route shaped
+like it, which is how a consistent design gets reported as an omission. No change made.
+
+### The tray stop, and a deferral that was wrong rather than resolved
+
+Every ground for deferring §83.2's tray item and global hotkey turned out to be one of three things,
+and only one of them was effort.
+
+* **No tray package in the offline NuGet cache.** True, and it is sixty lines of `Shell_NotifyIcon`
+  and `RegisterHotKey` by hand — a smaller decision than adding a dependency to draw one icon.
+* **A product question: with three robots on a bench, which one does a global hotkey stop?**
+  Answered when the header stop was built, and the answer is the same one: *the selected robot,
+  named in the sentence it produces.*
+* **"Both interops fail at runtime, on a machine where this application cannot be run."** This is
+  the one that had kept it shut, and it was **false when it was written** — the session that wrote
+  it launched the application and held its window for five seconds. A stated blocker that is not
+  true is worse than an unstated one, because nobody re-checks it.
+
+So it was exercised, and the exercise is the point rather than the code. Launched: the icon appears
+and `Ctrl+Alt+.` registers — and a **second process is then refused that combination with
+`ERROR_HOTKEY_ALREADY_REGISTERED`**, which is the proof that matters, because a call returning true
+is not a hotkey somebody holds. Killed: the combination is free again. Launched with another process
+holding it first: the application reports *"already registered by another application … use the tray
+item or the STOP in the header"* rather than lacking a hotkey in silence.
+
+That last one is the whole design. Every outcome reaches the status line and the startup log,
+**success included**, because for a control labelled a stop *silently doing nothing* is the failure
+that must not ship — an operator who believes they have one will reach for it. A refusal is drawn in
+the caution colour and names what is still there; the likeliest refusal has its own sentence, since
+a generic "could not register" would send somebody looking at this application for a problem that is
+in another one. And `MOD_NOREPEAT` is asserted as a bit rather than trusted to a comment: without
+it a held key repeats at the keyboard rate and each press sends a request, so leaning on the key
+becomes tens of stops a second at a robot — a denial of service delivered by the safety control.
+
+The interop is in `TrayIcon.cs` and is deliberately **not** linked into the test project, which
+keeps its rule that a file it links must not touch WinUI or WinRT. Everything it would otherwise
+decide is in `TrayStop.cs`, which is.
+
+### One thing the Hub owed, and paid
+
+The OS added three fields to §26's sealed-file schemas — the capability token, the proximity reading
+and §26.4's read outcome — because a replay evaluates two of them and the file did not carry any of
+them. The schemas are embedded in every sealed window, so every window's size and digest moved, and
+`reference/wire/incident.json` stopped matching its pin. Re-frozen on the OS side and resynced here
+through `check-contract-mirrors.mjs`; `docs/skynet-os-architecture.md` re-mirrored and re-pinned.
+The Hub's own suite had nothing to say about it, which is the correct outcome and was worth checking
+rather than assuming.
+
+### Numbers
+
+* `desktop/tests` — **137 passed** (was 113). New: `ReplayTests` (12), `TrayStopTests` (12).
+* `node scripts/skynet-verify-decisions.mjs` — **29 checks** (was 20), against the running server and the real database. Nine of them are the restore route, which nothing had called before.
+* `dotnet build -p:Platform=x64` — succeeded, warnings-as-errors; the application was launched and
+  held its window with the new markup, which is the check that matters for XAML. The tray stop was
+  exercised at runtime rather than compile-checked: registered, held against a second process,
+  released on exit, and refused-with-a-sentence when another process held it first.
+* Hub: `vitest` 1,948 passed. No lib, route, schema or catalogue changes; no locale changes —
+  desktop documentation is English-only by standing convention.
+* OS side: `cargo test --workspace` 1,739 on Linux and 1,652 on Windows, `e2e.sh` 129 checks (was
+  119), clippy and fmt clean on both hosts.
+
+### Still not built
+
+**Console:** USB/serial; signing, notarisation, installer and the release pipeline; macOS, now six
+panes and a tray behind Windows. Every first-version item in §83.5 is now built.
+
+**Hub:** the countersignature (an owner's call); robot-dependent items; the marketplace-side
+migration. And, outside Skynet, the eight `tsc` errors in `semantic-vector-store.test.ts`.
+
+Nothing is committed. Nothing is pushed.

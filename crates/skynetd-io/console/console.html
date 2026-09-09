@@ -198,6 +198,20 @@
     <div id="blackbox-body"></div>
   </section>
 
+  <!--
+    ── Events ─────────────────────────────────────────────────────────────
+    Directly under the black box, because the two answer one question from opposite ends: the panel
+    above says how much recording there is, and this says what is in the recent end of it. §41.3
+    asks for "the last N black box events" and until `GET /blackbox/events` existed nothing on this
+    page could show one — the index reports a window's *shape*, and a shape does not answer "what
+    happened just before it stopped", which is what somebody standing in front of a stopped robot
+    is actually asking.
+  -->
+  <section class="panel" id="panel-events">
+    <h2>Events <span class="age" data-age="events"></span></h2>
+    <div id="events-body"></div>
+  </section>
+
   <!-- ── Self-test ──────────────────────────────────────────────────────── -->
   <!--
     High on the page, under Status, because §48.1 puts POST before HOLD: whether this robot may run

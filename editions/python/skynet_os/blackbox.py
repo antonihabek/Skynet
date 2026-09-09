@@ -596,6 +596,18 @@ def wire() -> list[dict[str, Any]]:
                         "Bitwise-or of the RHAL flags: estop, fault, degraded, braked.",
                     ),
                     "fault_code": _field("integer", "Vendor-specific, surfaced verbatim (§24)."),
+                    "read_result": _maybe(
+                        "integer",
+                        "What read_state returned this cycle: 0, or a negative errno (§24). Null "
+                        "in a recording sealed before the field existed, which is not the same as "
+                        "a read that succeeded (§26.4).",
+                    ),
+                    "nearest_person_m": _maybe(
+                        "number",
+                        "Distance to the nearest detected person, in metres; null when nothing was "
+                        "measuring it. An input to the proximity guard rather than a reading the "
+                        "RHAL supplies (§7.1).",
+                    ),
                     "position_rad": _number_array("Measured joint positions."),
                     "velocity_rad_s": _number_array(
                         "Measured velocities; null where the joint does not measure it."
@@ -612,13 +624,16 @@ def wire() -> list[dict[str, Any]]:
                     "seq",
                     "flags",
                     "fault_code",
+                    "read_result",
+                    "nearest_person_m",
                     "position_rad",
                     "velocity_rad_s",
                     "effort_nm",
                     "base_pose",
                     "base_twist",
                 ],
-                "One sample of the robot's state, as the RHAL reported it (§24).",
+                "One sample of the robot's state: what the RHAL reported (§24), whether the "
+                "read succeeded, and the proximity reading the guards saw.",
             ),
         ),
         (
@@ -640,6 +655,12 @@ def wire() -> list[dict[str, Any]]:
                         "Hex SHA-256 of the package version that produced this, or empty when the "
                         "recording's digest table did not hold it.",
                     ),
+                    "capability": _maybe(
+                        "string",
+                        "The capability token this command exercised, or null when the runtime did "
+                        "not say — which is not the same as no capability, and the mode gate "
+                        "treats the two differently (§7.2).",
+                    ),
                     "observation": _field(
                         "string",
                         "Hex SHA-256 of the observation frame the policy was given. A hash, never "
@@ -655,6 +676,7 @@ def wire() -> list[dict[str, Any]]:
                     "seq",
                     "mode",
                     "policy_digest",
+                    "capability",
                     "observation",
                     "values",
                 ],

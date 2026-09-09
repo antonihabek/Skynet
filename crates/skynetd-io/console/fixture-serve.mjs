@@ -44,13 +44,19 @@ const TYPES = {
  * §32.2 violation this fixture exists to make visible rather than to commit.
  *
  * The query is flattened into the name because a `?` is not a filename on every platform this is
- * looked at from. `skynetd-io`'s fixture writer computes the same name; the two are one rule in two
- * languages and the rule is written here.
+ * looked at from. **The path is flattened for a sharper reason:** `/blackbox` and
+ * `/blackbox/events` are both routes, and keeping the separator would need `blackbox` to be a file
+ * and a directory at once. That is not a subtle failure — it is `AlreadyExists` on the second
+ * write — and it arrives the first time anybody adds a route underneath an existing one, which is
+ * exactly what §41.3's events did.
+ *
+ * `skynetd-io`'s fixture writer computes the same name; the two are one rule in two languages and
+ * the rule is written here.
  */
 function fixtureName(url) {
   const [path, query] = (url || '/').split('?')
   if (path === '/') return 'index.html'
-  const base = decodeURIComponent(path.slice(1))
+  const base = decodeURIComponent(path.slice(1)).replace(/\//g, '-')
   return query ? `${base}__${query.replace(/[^A-Za-z0-9]+/g, '-')}` : base
 }
 

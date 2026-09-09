@@ -997,3 +997,126 @@ mod the_warning_channel {
     // One of the assertions it carried was `!warning_required("hold", "degraded")`, frozen as
     // correct. It was not. See `opstate.rs`.
 }
+
+// ── A limit set, written down and read back (§13, §78, §83.5) ────────────────
+//
+// `limits_to_json` has had no inverse since it was written, which was fine while the only consumer
+// was a console rendering it. Replaying a sealed window off a workstation needs the limits that
+// were in force, and the only document that carries them is this one.
+
+fn limits_document(velocity: f64, per_channel: &[(&str, f64)]) -> skynet_json::Json {
+    use crate::safety::{
+        limits_to_json, resolve_limits, Available, Envelope, ResolveLimitsParams, Tier,
+        TransportClamp,
+    };
+    let envelope = Envelope {
+        joint_velocity_max_rad_s: Some(velocity),
+        ..Envelope::default()
+    };
+    let params = ResolveLimitsParams {
+        tier: Tier::Host,
+        envelope: Some(envelope),
+        transport: Some(TransportClamp {
+            joint_velocity_max_rad_s: Some(velocity),
+            per_channel,
+            ..TransportClamp::default()
+        }),
+        profile: None,
+        frames: None,
+        available: Available::default(),
+    };
+    let limits = resolve_limits(&params);
+    limits_to_json(&limits, None)
+}
+
+#[test]
+fn a_limit_set_survives_being_written_down_and_read_back() {
+    use crate::safety::{limits_from_json, Enforcement, Guard, Tier};
+
+    let document = limits_document(1.25, &[("elbow", 1.25), ("shoulder", 0.5)]);
+    let owned = limits_from_json(&document).expect("the robot's own document reads back");
+
+    assert_eq!(owned.tier(), Tier::Host);
+    assert_eq!(owned.enforcement(), Enforcement::Enforcing);
+    assert!(owned.active_guards().contains(&Guard::Envelope));
+
+    owned.with_resolved(|limits, _envelope| {
+        assert_eq!(limits.joint_velocity_max_rad_s, Some(1.25));
+        // The per-channel table is where a joint's real ceiling comes from (§6.3), so it is the
+        // part of this document a replay cannot do without.
+        assert_eq!(limits.ceiling_for("elbow"), Some(1.25));
+        assert_eq!(limits.ceiling_for("shoulder"), Some(0.5));
+        assert_eq!(limits.ceiling_for("wrist"), None);
+        assert!(limits.is_active(Guard::Envelope));
+    });
+}
+
+#[test]
+fn an_active_guard_whose_input_is_not_in_the_document_is_reported_rather_than_reconstructed() {
+    use crate::safety::{limits_from_json, Guard};
+    use skynet_json::Json;
+
+    // §7.1's thresholds and §8's grants are not in a limits document and nothing can invent them.
+    // A reader that quietly reconstructed the set without them would leave the guard active with
+    // no input — which recomputes every cycle it decided and reports the difference as the kernel
+    // contradicting itself — so both are named, with what would have engaged them.
+    let mut document = limits_document(1.0, &[("elbow", 1.0)]);
+    let mut guards = Json::arr();
+    guards.push(Json::from("envelope"));
+    guards.push(Json::from("proximity"));
+    guards.push(Json::from("mode_gate"));
+    document.set("active_guards", guards);
+
+    let owned = limits_from_json(&document).expect("a document is still readable");
+    let named: Vec<Guard> = owned.unreconstructed().iter().map(|u| u.guard).collect();
+    assert_eq!(named, vec![Guard::Proximity, Guard::ModeGate]);
+    // Envelope is not among them: every ceiling it enforces is in the document.
+    assert!(!named.contains(&Guard::Envelope));
+
+    for entry in owned.unreconstructed() {
+        assert!(!entry.missing.is_empty());
+        assert!(
+            entry.engaged_by.starts_with("a cycle carrying"),
+            "a caller has to be able to look for exactly this: {}",
+            entry.engaged_by
+        );
+    }
+}
+
+/// `mode_gate` is active on an ordinary robot, and that is why the refusal is not here.
+///
+/// A reader that refused a document listing an unreconstructable guard would refuse every real
+/// one. Recorded as a test because it is the reason the design is shaped the way it is, and a
+/// later simplification that moved the refusal back into the reader would pass every other test in
+/// this file.
+#[test]
+fn an_ordinary_robots_document_reads_back_even_though_mode_gate_is_active() {
+    use crate::safety::{limits_from_json, Guard};
+
+    let document = limits_document(1.0, &[("elbow", 1.0)]);
+    let listed = document
+        .get("active_guards")
+        .and_then(skynet_json::Json::as_arr)
+        .expect("the document lists its active guards");
+    assert!(
+        listed.iter().any(|g| g.as_str() == Some("mode_gate")),
+        "this test is about a robot on which mode_gate is active"
+    );
+
+    let owned = limits_from_json(&document).expect("and it still reads back");
+    assert!(owned.active_guards().contains(&Guard::ModeGate));
+    assert_eq!(owned.unreconstructed().len(), 1);
+}
+
+#[test]
+fn every_limits_refusal_names_what_to_do_about_it() {
+    use crate::safety::LimitsError;
+    // §64: a refusal that does not say what to do about it is a refusal somebody re-runs.
+    for error in [
+        LimitsError::Malformed { field: "tier" },
+        LimitsError::Unknown { field: "tier" },
+    ] {
+        let detail = error.detail();
+        assert!(detail.len() > 40, "{error:?} says too little: {detail}");
+    }
+}

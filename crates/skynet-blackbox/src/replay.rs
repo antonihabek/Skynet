@@ -154,6 +154,19 @@ pub struct Replay {
     pub unmeasured: usize,
     /// Cycles from a schema-1 recording, which cannot say whether the read succeeded.
     pub unrecorded: usize,
+    /// Cycles on which the policy posted nothing, so the kernel was never asked (§25).
+    ///
+    /// Not a skip and not a divergence. `skynet-kernel-host`'s loop returns before
+    /// `evaluate_cycle` when nothing was posted — *"with nothing posted there is nothing to
+    /// evaluate and nothing to send"* — and records the cycle with an all-`NaN` `desired` and a
+    /// mask of zeros. There is therefore **no verdict in the recording to reproduce**, and a
+    /// replay that evaluated one anyway would invent a comparison: the watchdog trips on a
+    /// sequence that never advanced, and every idle cycle in the window is reported as the
+    /// kernel contradicting itself.
+    ///
+    /// Counted because a window that is mostly this is a bench recording with no policy in it,
+    /// and *"all cycles reproduced"* over four of four hundred is a sentence that flatters it.
+    pub unposted: usize,
     /// The distinct `errno`s the driver returned, in first-seen order (§24).
     ///
     /// Bounded by the vocabulary rather than by the window, and this is the actionable half: a
@@ -169,7 +182,18 @@ impl Replay {
     /// alternative — `agreed == cycles` while a third of the window went unevaluated — is a green
     /// light that means nothing.
     pub fn deterministic(&self) -> bool {
-        self.diverged.is_empty() && self.skipped.is_empty() && self.cycles > 0
+        self.diverged.is_empty() && self.skipped.is_empty() && self.evaluated() > 0
+    }
+
+    /// Cycles the kernel was actually asked about.
+    ///
+    /// [`Replay::cycles`] counts what is in the window; this counts what a verdict was recorded
+    /// for. The two differ by the idle cycles, and the difference is why `deterministic` is
+    /// written against this one: a window of four hundred cycles on which no policy ever spoke
+    /// has nothing in it to reproduce, and answering *yes* about it would be vacuous truth —
+    /// the failure mode §15 spends a rule on.
+    pub fn evaluated(&self) -> usize {
+        self.cycles - self.unposted
     }
 
     /// Whether every cycle in the window was a measurement (§26.4).
@@ -263,6 +287,7 @@ pub fn replay(
         skipped: Vec::new(),
         unmeasured: 0,
         unrecorded: 0,
+        unposted: 0,
         read_errors: Vec::new(),
     };
 
@@ -301,12 +326,39 @@ pub fn replay(
             continue;
         }
 
+        // A channel the policy did not command is **absent**, not present with a value, and
+        // the record says which by writing `NaN` there. `run.rs` builds the posted list the
+        // same way from §24’s mask — *"a channel the policy masked out is one it is not
+        // commanding, so it is absent from `desired` rather than present with a value"* — and a
+        // replay that passed all of them would have the envelope guard check a number nobody
+        // asked for.
         let desired: Vec<(&str, f64)> = cycle
             .desired
             .iter()
             .enumerate()
+            .filter(|(_, value)| !value.is_nan())
             .map(|(index, value)| (channels[index].as_str(), *value as f64))
             .collect();
+
+        // Nothing posted: the loop returns before the kernel when the policy has not spoken —
+        // *"with nothing posted there is nothing to evaluate and nothing to send"* — so there
+        // is no verdict here to reproduce.
+        //
+        // The signal is the **sequence**, not the desired values, and the difference is a third
+        // of a real window. A policy that publishes a hold masks every channel out, so its
+        // cycles also record an all-`NaN` `desired` — and the kernel *was* asked about those,
+        // with an empty command, and did answer. Reading emptiness as absence collapsed a
+        // 300-cycle recording to two evaluated cycles. A cycle nobody posted carries §24’s
+        // "no command has ever arrived" instead: sequence zero, which the ring forbids of a
+        // real command, and a stamp to match.
+        if cycle.command_seq == 0 && cycle.command_stamp_ns == 0 {
+            result.unposted += 1;
+            // `previous` still follows the recorded mask, because the loop clears it every
+            // cycle and refills it from the decision: an idle cycle leaves it empty, and the
+            // cycle after one therefore has no predecessor.
+            previous = carry(channels, cycle);
+            continue;
+        }
         let carried: Option<Vec<(&str, f64)>> = previous.as_ref().map(|held| {
             held.iter()
                 .map(|(name, value)| (name.as_str(), *value))
@@ -369,14 +421,7 @@ pub fn replay(
         // history; carrying the recomputed command forward would compare the second cycle against a
         // world the robot never entered, and one divergence would cascade into every cycle after
         // it.
-        previous = Some(
-            channels
-                .iter()
-                .take(cycle.command.len())
-                .cloned()
-                .zip(cycle.command.iter().copied())
-                .collect(),
-        );
+        previous = carry(channels, cycle);
         last_sequence = Some(cycle.command_seq as u64);
     }
 
@@ -454,6 +499,23 @@ fn compare(
             }),
         }
     }
+}
+
+/// What the next cycle sees as its predecessor.
+///
+/// The loop clears this every cycle and refills it only from channels the decision's mask left
+/// live, so a held or idle cycle leaves it **empty** and the cycle after one is evaluated with no
+/// predecessor at all. Replaying with the previous command still in hand would give the rate
+/// limit something to compare against that the robot did not have.
+fn carry(channels: &[String], cycle: &Cycle) -> Option<Vec<(String, f64)>> {
+    let held: Vec<(String, f64)> = channels
+        .iter()
+        .take(cycle.command.len())
+        .enumerate()
+        .filter(|(index, _)| cycle.mask.get(*index).is_some_and(|byte| *byte != 0))
+        .map(|(index, name)| (name.clone(), cycle.command[index]))
+        .collect();
+    (!held.is_empty()).then_some(held)
 }
 
 fn names(guards: &[Guard]) -> String {

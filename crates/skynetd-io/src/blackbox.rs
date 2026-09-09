@@ -45,7 +45,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use skynet_blackbox::record::{Entry, EventCode, EventView, Gap, Shape};
+use skynet_blackbox::record::{Body, Entry, EventCode, EventView, Gap, Shape};
 use skynet_blackbox::ring::{Geometry, Meta, Ring};
 use skynet_blackbox::seal::{seal, Reason, Sealed};
 use skynet_json::Json;
@@ -549,6 +549,82 @@ impl Recorder {
             return None;
         }
         fs::read(self.sealed.join(name)).ok()
+    }
+
+    /// The most recent events in the recording, newest last (§41.3).
+    ///
+    /// §41.3's bundle asks for *"the last N black box events"* and nothing could produce them:
+    /// [`Recorder::index`] reports the window's **shape** — how many records, over what interval,
+    /// with what continuity — and a shape does not answer *what happened just before it stopped*,
+    /// which is the question a support conversation opens with.
+    ///
+    /// # Gaps are events here, and that is the point
+    ///
+    /// A [`Body::Gap`] is not a [`Body::Event`] in the type system, and omitting it would be the
+    /// obvious reading of "events". It would also present a **continuous list over a discontinuous
+    /// recording**: two events either side of four hundred dropped records would read as
+    /// consecutive, which is exactly the misreading §26 annotates gaps to prevent. So a gap appears
+    /// in the sequence, in its place, saying how many records went missing and why.
+    ///
+    /// Cycles never appear. They are what a recording is almost entirely made of, they are the
+    /// download's business (§39.1 puts the file behind a wider role than the index for that
+    /// reason), and a "last 50 events" that returned fifty cycles would answer nothing.
+    ///
+    /// # `held` is not `returned`, and a reader needs both
+    ///
+    /// *"The ring holds 12,000 events and you are looking at the last 50"* and *"the ring holds
+    /// 50"* are different facts about a robot, and a list that carried only its own length would
+    /// let the second be read as the first — a recorder that has been running for a week looking
+    /// like one that just started.
+    pub fn events(&self, limit: usize) -> Json {
+        let store = self.read().unwrap_or_default();
+        let ordered = self.ring.ordered(&store);
+
+        // Counted over the whole ring before anything is dropped, so `held` is about the recording
+        // rather than about this request.
+        let held = ordered
+            .iter()
+            .filter(|record| {
+                matches!(record.body, Body::Event(_)) || matches!(record.body, Body::Gap(_))
+            })
+            .count();
+
+        let mut rows: Vec<Json> = Vec::new();
+        for record in ordered.iter().rev() {
+            if rows.len() >= limit {
+                break;
+            }
+            let mut row = Json::obj();
+            row.set("sequence", Json::Num(record.sequence as f64));
+            row.set("mono_ns", Json::Num(record.mono_ns as f64));
+            match &record.body {
+                Body::Event(event) => {
+                    row.set("kind", Json::from("event"));
+                    row.set("code", Json::from(event.code.as_str()));
+                    row.set("subject", Json::Str(event.subject.clone()));
+                    row.set("detail", Json::Str(event.detail.clone()));
+                }
+                Body::Gap(gap) => {
+                    row.set("kind", Json::from("gap"));
+                    row.set("code", Json::from(gap.reason.as_str()));
+                    row.set("dropped", Json::Num(gap.dropped as f64));
+                    row.set("first_tick", Json::Num(gap.first_tick as f64));
+                }
+                Body::Cycle(_) | Body::Frame(_) => continue,
+            }
+            rows.push(row);
+        }
+        // Newest last, because a list somebody reads top to bottom should end where the robot is
+        // now. Collected newest-first above so the `limit` takes the *recent* end rather than the
+        // oldest records still in the ring.
+        rows.reverse();
+
+        let mut document = Json::obj();
+        document.set("events", Json::Arr(rows.clone()));
+        document.set("returned", Json::Num(rows.len() as f64));
+        document.set("held", Json::Num(held as f64));
+        document.set("limit", Json::Num(limit as f64));
+        document
     }
 
     /// What the console and `skynet blackbox` show: the window, and what is not in it.

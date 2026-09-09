@@ -152,6 +152,16 @@ impl Enforcement {
             Enforcement::EnforcingRedundant => "enforcing_redundant",
         }
     }
+
+    /// Parse the wire spelling. Unknown values are `None`, for [`Tier::parse`]'s reason.
+    pub fn parse(text: &str) -> Option<Enforcement> {
+        match text {
+            "advisory" => Some(Enforcement::Advisory),
+            "enforcing" => Some(Enforcement::Enforcing),
+            "enforcing_redundant" => Some(Enforcement::EnforcingRedundant),
+            _ => None,
+        }
+    }
 }
 
 /// The sentence the product is not allowed to shorten.
@@ -246,6 +256,27 @@ impl Guard {
         }
     }
 
+    /// Parse the wire spelling. Unknown names are `None`.
+    ///
+    /// The inverse of [`Guard::as_str`], and it lives beside it for §78's reason: a recording
+    /// sealed by one edition is read back by another, so the two spellings are one definition or
+    /// they are two that agree until somebody renames a guard. `None` rather than a default,
+    /// because a guard nobody recognised is not the same as no guard, and folding it into either
+    /// would silently rewrite a verdict.
+    pub fn parse(text: &str) -> Option<Guard> {
+        match text {
+            "watchdog" => Some(Guard::Watchdog),
+            "envelope" => Some(Guard::Envelope),
+            "rate_limit" => Some(Guard::RateLimit),
+            "workspace" => Some(Guard::Workspace),
+            "self_collision" => Some(Guard::SelfCollision),
+            "balance" => Some(Guard::Balance),
+            "proximity" => Some(Guard::Proximity),
+            "mode_gate" => Some(Guard::ModeGate),
+            _ => None,
+        }
+    }
+
     /// What this guard does when its check fails.
     pub fn response(self) -> FaultResponse {
         match self {
@@ -290,6 +321,22 @@ impl FaultResponse {
             FaultResponse::StopCat2 => "stop_cat2",
             FaultResponse::StopCat1 => "stop_cat1",
             FaultResponse::StopCat0 => "stop_cat0",
+        }
+    }
+
+    /// Parse the wire spelling. Unknown names are `None`, for [`Guard::parse`]'s reason.
+    ///
+    /// Note that a *recorded* response of `null` is not an unknown name — it is *nothing tripped*,
+    /// which is a fact rather than an absence. A caller reading a recording must keep the two
+    /// apart before it reaches this function.
+    pub fn parse(text: &str) -> Option<FaultResponse> {
+        match text {
+            "clamp" => Some(FaultResponse::Clamp),
+            "hold" => Some(FaultResponse::Hold),
+            "stop_cat2" => Some(FaultResponse::StopCat2),
+            "stop_cat1" => Some(FaultResponse::StopCat1),
+            "stop_cat0" => Some(FaultResponse::StopCat0),
+            _ => None,
         }
     }
 }

@@ -39,7 +39,7 @@ use skynet_json::Json;
 use skynet_sha256::digest;
 
 use crate::mcap::{hex, Writer};
-use crate::record::{Body, Cycle, Event, Frame, Gap, Record};
+use crate::record::{Body, Cycle, Event, Frame, Gap, ReadOutcome, Record, NO_CAPABILITY};
 use crate::ring::Ring;
 use crate::schema::{self, id};
 use crate::LIBRARY;
@@ -231,6 +231,7 @@ pub fn seal(ring: &Ring, store: &[u8], reason: Reason, mono_ns: u64) -> Sealed {
 
     let channels = &meta.channels;
     let digests = ring.digests();
+    let capabilities = ring.capabilities();
     for record in &held {
         let log_time = wall_of(meta.wall_epoch_ns, meta.mono_ns, record.mono_ns);
         match &record.body {
@@ -239,7 +240,7 @@ pub fn seal(ring: &Ring, store: &[u8], reason: Reason, mono_ns: u64) -> Sealed {
                 writer.message(
                     id::DESIRED,
                     log_time,
-                    &desired_message(record, cycle, channels, digests),
+                    &desired_message(record, cycle, channels, digests, capabilities),
                 );
                 writer.message(
                     id::VERDICT,
@@ -423,6 +424,18 @@ fn state_message(record: &Record, cycle: &Cycle) -> String {
     document.set("seq", Json::Num(cycle.state_seq as f64));
     document.set("flags", Json::Num(cycle.state_flags as f64));
     document.set("fault_code", Json::Num(cycle.fault_code as f64));
+    // `null` is *unrecorded*, not *succeeded* — the distinction §26.4 exists to keep, carried into
+    // the file so a reader of a schema-1 window is told it cannot know rather than told the read
+    // was fine.
+    document.set(
+        "read_result",
+        match cycle.read {
+            ReadOutcome::Unrecorded => Json::Null,
+            ReadOutcome::Ok => Json::Num(0.0),
+            ReadOutcome::Failed(errno) => Json::Num(errno as f64),
+        },
+    );
+    document.set("nearest_person_m", number(cycle.nearest_person_m as f64));
     document.set("position_rad", numbers(&cycle.position));
     document.set("velocity_rad_s", numbers(&cycle.velocity));
     document.set("effort_nm", numbers(&cycle.effort));
@@ -436,6 +449,7 @@ fn desired_message(
     cycle: &Cycle,
     channels: &[String],
     digests: &[[u8; 32]],
+    capabilities: &[String],
 ) -> String {
     let mut document = Json::obj();
     document.set("mono_ns", Json::Num(record.mono_ns as f64));
@@ -451,6 +465,21 @@ fn desired_message(
                 .map(|digest| hex(digest))
                 .unwrap_or_default(),
         ),
+    );
+    // The token rather than the index, for `policy_digest`'s reason one field up: a sealed window
+    // travels away from the ring that holds the table, and an index into a table nobody has is not
+    // a fact. `NO_CAPABILITY` is `null`, which is *the runtime did not say* rather than *no
+    // capability* — §7.2 treats the two differently and so must the file.
+    document.set(
+        "capability",
+        if cycle.capability == NO_CAPABILITY {
+            Json::Null
+        } else {
+            match capabilities.get(cycle.capability as usize) {
+                Some(token) => Json::Str(token.clone()),
+                None => Json::Null,
+            }
+        },
     );
     document.set("observation", Json::Str(hex(&cycle.observation)));
     let desired: Vec<f64> = cycle.desired.iter().map(|value| *value as f64).collect();

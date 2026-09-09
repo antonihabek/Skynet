@@ -1500,3 +1500,559 @@ fn a_zero_sequence_is_refused_rather_than_wrapped_onto_the_last_slot() {
         Ok(_) => panic!("a zero sequence was accepted, which is a record written over another one"),
     }
 }
+
+// ── Reading a sealed recording back (§13, §41.3) ─────────────────────────────
+//
+// The seal has written MCAP since the sixth session and nothing has ever read one. These are the
+// round trip: what `seal` wrote is what `read` finds, and a file that has been damaged in each of
+// the ways a transferred file is damaged is refused by name rather than misread.
+
+/// A window with events, a gap and cycles in it, sealed.
+fn sealed_bytes() -> Vec<u8> {
+    use crate::record::{Gap, GapReason};
+
+    let (mut ring, mut store) = ring_of(16);
+
+    ring.append(
+        &mut store,
+        1_000,
+        Entry::Event(&EventView {
+            code: EventCode::RecordingStarted,
+            subject: "skynetd",
+            detail: "ring opened",
+        }),
+    )
+    .expect("an event");
+    for tick in 1..=3u64 {
+        let cycle = plain_cycle(tick);
+        ring.append(&mut store, 2_000 + tick, Entry::Cycle(&cycle.view()))
+            .expect("a cycle");
+    }
+    ring.append(
+        &mut store,
+        6_000,
+        Entry::Gap(Gap {
+            dropped: 41,
+            first_tick: 900,
+            reason: GapReason::WriterBehind,
+        }),
+    )
+    .expect("a gap");
+
+    crate::seal::seal(&ring, &store, crate::seal::Reason::Operator, 9_000).bytes
+}
+
+#[test]
+fn what_the_seal_wrote_is_what_the_reader_finds() {
+    let bytes = sealed_bytes();
+    let recording = crate::read::read(&bytes).expect("a sealed window is readable");
+
+    // §56.2's provenance, in the file rather than beside it. A recording that arrives without its
+    // embodiment digest cannot be replayed against anything.
+    assert_eq!(recording.meta("robot_id"), Some("dev-0001"));
+    assert_eq!(recording.meta("sealed_reason"), Some("operator"));
+    assert_eq!(recording.meta("simulator"), Some("false"));
+    assert!(recording
+        .meta("embodiment_digest")
+        .is_some_and(|d| d.len() == 64));
+
+    // The topics, so a message can be named rather than numbered.
+    assert_eq!(recording.topic(crate::schema::id::EVENT), Some("/sk/event"));
+    assert_eq!(
+        recording.topic(crate::schema::id::COMMAND),
+        Some("/sk/command")
+    );
+
+    // **Once each.** MCAP repeats the channels in the summary, so a reader that pushed every
+    // `Channel` record would report every topic twice — which is what the first version did, and
+    // what `skynet blackbox inspect` printed until a real recording was put through it.
+    let mut ids: Vec<u16> = recording.channels.iter().map(|(id, _)| *id).collect();
+    let before = ids.len();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), before, "a channel is declared once to a reader");
+
+    // An empty metadata value reads as absent rather than as a blank fact: the seal writes every
+    // key whether or not the robot had something to put in it.
+    assert_eq!(
+        recording.meta("holes"),
+        None,
+        "no holes is not a hole list of one empty string"
+    );
+
+    // Three cycles, each written as four messages, plus the opening event, the gap, and the seal's
+    // own closing event. The counts are asserted per channel because a reader that dropped one
+    // channel entirely would still produce a plausible total.
+    assert_eq!(recording.on(crate::schema::id::STATE).count(), 3);
+    assert_eq!(recording.on(crate::schema::id::COMMAND).count(), 3);
+    assert_eq!(
+        recording.on(crate::schema::id::EVENT).count(),
+        3,
+        "start, gap, seal"
+    );
+
+    // The payloads are the JSON the seal wrote, not bytes the reader guessed at.
+    let last = recording
+        .on(crate::schema::id::EVENT)
+        .last()
+        .expect("the seal's own event");
+    assert!(last.payload.contains("\"sealed\""), "{}", last.payload);
+}
+
+#[test]
+fn a_file_that_is_not_a_recording_says_so_rather_than_being_parsed() {
+    // The first thing anybody does with a reader is point it at the wrong file.
+    match crate::read::read(b"{\"not\":\"mcap\"}") {
+        Err(crate::read::ReadError::NotMcap) => {}
+        other => panic!("{other:?}"),
+    }
+    match crate::read::read(&[]) {
+        Err(crate::read::ReadError::NotMcap) => {}
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_transfer_that_stopped_is_a_different_answer_from_a_file_that_is_damaged() {
+    // The distinction sends somebody somewhere different: a truncated file is a transfer to resume
+    // (§79), and a damaged one is a file to replace. A reader that called both "bad file" would
+    // hide the one that has a remedy.
+    let bytes = sealed_bytes();
+
+    let cut = &bytes[..bytes.len() - 200];
+    match crate::read::read(cut) {
+        Err(crate::read::ReadError::Truncated { .. }) => {}
+        other => panic!("a cut file should read as truncated: {other:?}"),
+    }
+
+    // A length field that claims more than the file holds. Overwritten in place so the magic at
+    // both ends still matches — which is what makes this "damaged" rather than "truncated".
+    let mut damaged = bytes.clone();
+    let length_at = crate::mcap::MAGIC.len() + 1;
+    damaged[length_at..length_at + 8].copy_from_slice(&u64::MAX.to_le_bytes());
+    match crate::read::read(&damaged) {
+        Err(crate::read::ReadError::Overrun { .. }) => {}
+        other => panic!("a bad length should read as an overrun: {other:?}"),
+    }
+}
+
+#[test]
+fn every_refusal_has_a_sentence_naming_what_it_is_about() {
+    // §64: a refusal that does not say what to do about it is a refusal somebody re-runs.
+    for error in [
+        crate::read::ReadError::NotMcap,
+        crate::read::ReadError::Truncated { at: 12 },
+        crate::read::ReadError::Overrun {
+            opcode: 5,
+            at: 9,
+            wanted: 1 << 40,
+        },
+        crate::read::ReadError::Malformed {
+            opcode: 12,
+            field: "key",
+        },
+    ] {
+        let detail = error.detail();
+        assert!(detail.len() > 40, "{error:?} says too little: {detail}");
+        assert!(
+            detail.ends_with('.'),
+            "{error:?} is a sentence and should end like one: {detail}"
+        );
+    }
+}
+
+// ── Reassembly, and replaying a window that has left the robot (§13, §83.5) ──
+//
+// `replay` was written to take records and name tables rather than a `Ring` — its own doc says so,
+// "so that a recording read from a sealed file … replays through the same function". Nothing did.
+// These are that join, and the assertion that matters is the one comparing the two: a replay off
+// the file and a replay off the ring must reach the same verdict about the same window, or the
+// seal has lost something the kernel evaluates.
+
+/// A window recorded the way a control loop records one, returned as both a ring and a sealed file.
+///
+/// The capability token and the proximity reading are the point. They are the two inputs the kernel
+/// *evaluates* that reached the ring and did not reach the file until 2026-09-09, and a fixture
+/// that left them at their defaults would pass whether or not the seal writes them.
+fn window_with_a_capability_and_a_person(ceiling: f64) -> (Ring, Vec<u8>, Vec<u8>) {
+    let (mut ring, mut store) = ring_of(16);
+    let token = ring
+        .intern_capability(&mut store, "arm.move")
+        .expect("a capability token interns");
+
+    for tick in 1..=4u64 {
+        let asked = if tick == 4 { 2.5f32 } else { 0.4f32 };
+        let owned = OwnedCycle {
+            tick,
+            desired: vec![asked; 3],
+            command: vec![asked.min(ceiling as f32) as f64; 3],
+            mask: vec![1, 1, 1],
+            clamped: vec![tick == 4; 3],
+            position: vec![0.09, 0.19, f32::NAN],
+            velocity: vec![0.0, 0.0, f32::NAN],
+            effort: vec![1.0, 2.0, f32::NAN],
+            tripped: if tick == 4 {
+                vec![Guard::Envelope]
+            } else {
+                vec![]
+            },
+            response: if tick == 4 {
+                Some(FaultResponse::Clamp)
+            } else {
+                None
+            },
+            read_result: if tick == 3 { -110 } else { 0 },
+        };
+        let mut view = owned.view();
+        view.command_stamp_ns = tick * 1_000_000;
+        view.command_seq = tick as u32;
+        view.capability = token;
+        // A person, closer each cycle. `NaN` on one of them, because "nothing was measuring it"
+        // has to survive the round trip as itself rather than as a number.
+        view.nearest_person_m = if tick == 2 {
+            f32::NAN
+        } else {
+            3.0 - tick as f32
+        };
+        ring.append(&mut store, tick * 1_000_000, Entry::Cycle(&view))
+            .expect("a cycle");
+    }
+
+    let bytes = crate::seal::seal(&ring, &store, crate::seal::Reason::Operator, 9_000).bytes;
+    (ring, store, bytes)
+}
+
+#[test]
+fn a_sealed_window_reassembles_into_the_cycles_it_was_written_from() {
+    let (ring, store, bytes) = window_with_a_capability_and_a_person(1.0);
+    let recording = crate::read::read(&bytes).expect("a sealed window is readable");
+    let put_back = crate::assemble::assemble(&recording).expect("it reassembles");
+
+    assert_eq!(put_back.records.len(), 4);
+    assert!(put_back.incomplete.is_empty(), "{:?}", put_back.incomplete);
+
+    // The file carried every field a replay evaluates. This is the assertion that fails the day
+    // somebody removes one from the seal.
+    assert_eq!(put_back.absent, crate::assemble::Absent::default());
+    assert!(put_back.absent.verdict_inputs_all_recorded());
+
+    // The channel table came out of the values arrays rather than out of a ring nobody has.
+    let names: Vec<String> = CHANNELS.iter().map(|name| name.to_string()).collect();
+    assert_eq!(put_back.channels, names);
+    assert_eq!(put_back.capabilities, vec![String::from("arm.move")]);
+
+    // Field by field against the ring, on the cycle where every interesting one is set.
+    let held = ring.ordered(&store);
+    for (from_ring, from_file) in held.iter().zip(put_back.records.iter()) {
+        let (Body::Cycle(was), Body::Cycle(now)) = (&from_ring.body, &from_file.body) else {
+            panic!("both are cycles")
+        };
+        assert_eq!(was.tick, now.tick);
+        assert_eq!(was.tripped, now.tripped);
+        assert_eq!(was.response, now.response);
+        assert_eq!(was.advisory, now.advisory);
+        assert_eq!(was.clamped, now.clamped);
+        assert_eq!(was.command_seq, now.command_seq);
+        assert_eq!(was.command_stamp_ns, now.command_stamp_ns);
+        assert_eq!(was.read, now.read, "§26.4's outcome survives the seal");
+        // Bit equality, because `NaN` is a value here rather than an error, and the cycle that
+        // carries one is the cycle testing that "nothing measured it" is not read as a number.
+        assert_eq!(
+            was.nearest_person_m.to_bits(),
+            now.nearest_person_m.to_bits()
+        );
+        // The index may differ — the file's table is built in first-seen order — so what has to
+        // match is the token it resolves to.
+        assert_eq!(
+            ring.capabilities().get(was.capability as usize),
+            put_back.capabilities.get(now.capability as usize)
+        );
+    }
+}
+
+#[test]
+fn a_replay_off_the_file_reaches_the_same_verdict_as_a_replay_off_the_ring() {
+    let ceiling = 1.0;
+    let envelope = Envelope {
+        joint_velocity_max_rad_s: Some(ceiling),
+        ..Envelope::default()
+    };
+    let clamp = clamp_at(ceiling);
+    let params = limits_params(envelope, &clamp);
+    let limits = resolve_limits(&params);
+
+    let (ring, store, bytes) = window_with_a_capability_and_a_person(ceiling);
+    let from_ring = replay_ring(&ring, &store, &limits, Some(&envelope));
+
+    let recording = crate::read::read(&bytes).expect("a sealed window is readable");
+    let put_back = crate::assemble::assemble(&recording).expect("it reassembles");
+    let from_file = replay(
+        &put_back.records,
+        &put_back.channels,
+        &put_back.capabilities,
+        &limits,
+        Some(&envelope),
+    );
+
+    // The whole point. Two replays of one window, one off the ring it was written to and one off
+    // the file it was sealed into, and every figure the same.
+    assert_eq!(from_file.cycles, from_ring.cycles);
+    assert_eq!(from_file.agreed, from_ring.agreed);
+    assert_eq!(from_file.warmed, from_ring.warmed);
+    assert_eq!(from_file.diverged.len(), from_ring.diverged.len());
+    assert_eq!(from_file.unmeasured, from_ring.unmeasured);
+    assert_eq!(from_file.read_errors, from_ring.read_errors);
+    assert_eq!(from_file.deterministic(), from_ring.deterministic());
+
+    // And it is not passing by being empty on both sides.
+    assert_eq!(from_ring.cycles, 4);
+    assert_eq!(
+        from_ring.unmeasured, 1,
+        "the third cycle's read failed and the file has to say so"
+    );
+}
+
+#[test]
+fn a_recording_sealed_before_the_fields_existed_is_counted_rather_than_guessed() {
+    // The same window with the three keys stripped out of the payloads, which is what a file
+    // sealed by an older edition looks like. It must still assemble — a reader that refused would
+    // make every older recording unopenable — and it must say, per field, how many cycles could
+    // not supply it, so nothing downstream reports a verdict comparison as though the inputs were
+    // known.
+    let (_, _, bytes) = window_with_a_capability_and_a_person(1.0);
+    let mut recording = crate::read::read(&bytes).expect("a sealed window is readable");
+    for message in &mut recording.messages {
+        for key in ["nearest_person_m", "read_result", "capability"] {
+            message.payload = strip_key(&message.payload, key);
+        }
+    }
+
+    let put_back = crate::assemble::assemble(&recording).expect("an older file still opens");
+    assert_eq!(put_back.records.len(), 4);
+    assert_eq!(put_back.absent.capability, 4);
+    assert_eq!(put_back.absent.nearest_person_m, 4);
+    assert_eq!(put_back.absent.read_result, 4);
+    assert!(!put_back.absent.verdict_inputs_all_recorded());
+
+    // And the values are the ring's own "not known" ones rather than plausible defaults.
+    let Body::Cycle(first) = &put_back.records[0].body else {
+        panic!("a cycle")
+    };
+    assert_eq!(first.capability, NO_CAPABILITY);
+    assert!(first.nearest_person_m.is_nan());
+    assert_eq!(first.read, crate::record::ReadOutcome::Unrecorded);
+}
+
+/// Remove one top-level key from a canonical JSON object, the way an older writer's absence looks.
+fn strip_key(payload: &str, key: &str) -> String {
+    let needle = alloc::format!("\"{key}\":");
+    let Some(start) = payload.find(&needle) else {
+        return payload.to_string();
+    };
+    let bytes = payload.as_bytes();
+    let mut depth = 0usize;
+    let mut end = start + needle.len();
+    while end < bytes.len() {
+        match bytes[end] {
+            b'[' | b'{' => depth += 1,
+            b']' | b'}' if depth > 0 => depth -= 1,
+            b'}' => break,
+            b',' if depth == 0 => {
+                end += 1;
+                break;
+            }
+            _ => {}
+        }
+        end += 1;
+    }
+    let mut out = String::from(&payload[..start]);
+    out.push_str(&payload[end..]);
+    // A key removed from the end leaves the comma before it behind.
+    out.replace(",}", "}")
+}
+
+#[test]
+fn a_cycle_missing_one_of_its_four_messages_is_reported_rather_than_assembled() {
+    // The failure a positional join has: a file truncated between two of a cycle's four messages
+    // would otherwise assemble every cycle after it out of two different ones, and every field in
+    // the result would look plausible.
+    let (_, _, bytes) = window_with_a_capability_and_a_person(1.0);
+    let mut recording = crate::read::read(&bytes).expect("a sealed window is readable");
+    let before = recording.messages.len();
+    recording
+        .messages
+        .retain(|m| !(m.channel_id == crate::schema::id::VERDICT && m.sequence == 2));
+    assert_eq!(recording.messages.len(), before - 1);
+
+    let put_back = crate::assemble::assemble(&recording).expect("the rest still assembles");
+    assert_eq!(put_back.records.len(), 3, "one cycle is short a message");
+    assert_eq!(put_back.incomplete.len(), 1);
+    assert_eq!(put_back.incomplete[0].cycle, 2);
+}
+
+/// A cycle nobody posted a command on carries no verdict, and replaying one invents a comparison.
+///
+/// Found by replaying a real 300-cycle window off a bench: `skynetk` turned at 100 Hz while a
+/// policy connected two seconds later, and the 167 cycles before it came back as 167 divergences
+/// in which the watchdog tripped on a sequence that had never advanced. The loop had not asked the
+/// kernel about any of them — *"with nothing posted there is nothing to evaluate and nothing to
+/// send"* — so there was nothing in the recording to reproduce.
+#[test]
+fn a_cycle_the_kernel_was_never_asked_about_is_not_replayed() {
+    let (mut ring, mut store) = ring_of(16);
+
+    // Three idle cycles, exactly as `record()` writes one: no command has ever arrived, so the
+    // sequence and stamp are zero, every channel is masked out, and `desired` is all `NaN`.
+    for tick in 1..=3u64 {
+        let owned = OwnedCycle {
+            tick,
+            desired: vec![f32::NAN; 3],
+            command: vec![0.0; 3],
+            mask: vec![0, 0, 0],
+            clamped: vec![false; 3],
+            position: vec![0.0; 3],
+            velocity: vec![0.0; 3],
+            effort: vec![0.0; 3],
+            tripped: Vec::new(),
+            response: None,
+            read_result: 0,
+        };
+        let mut view = owned.view();
+        view.command_stamp_ns = 0;
+        view.command_seq = 0;
+        ring.append(&mut store, tick * 1_000_000, Entry::Cycle(&view))
+            .expect("a cycle");
+    }
+
+    let envelope = Envelope {
+        joint_velocity_max_rad_s: Some(1.0),
+        // The window that made the real failure visible: with one declared, an idle cycle's zero
+        // stamp is stale by the whole uptime of the robot.
+        watchdog_ms: Some(50.0),
+        ..Envelope::default()
+    };
+    let clamp = clamp_at(1.0);
+    let params = limits_params(envelope, &clamp);
+    let limits = resolve_limits(&params);
+
+    let result = replay_ring(&ring, &store, &limits, Some(&envelope));
+    assert_eq!(result.cycles, 3);
+    assert_eq!(result.unposted, 3, "none of them was posted");
+    assert_eq!(result.evaluated(), 0);
+    assert!(
+        result.diverged.is_empty(),
+        "a cycle the robot never evaluated cannot disagree with anything: {:?}",
+        result.diverged
+    );
+    // And the window does not read as reproduced, because nothing in it was.
+    assert!(
+        !result.deterministic(),
+        "vacuous truth: a window with nothing evaluated in it reproduced nothing"
+    );
+}
+
+/// A held cycle **was** evaluated, and the emptiness of its `desired` is not what says otherwise.
+///
+/// The distinction cost a third of a real window. A policy publishing a hold masks every channel
+/// out, so its cycles record an all-`NaN` `desired` exactly as an idle one does — and the kernel was
+/// asked about those and did answer. Reading emptiness as absence collapsed a 300-cycle recording
+/// to two evaluated cycles; §24's sequence is what separates them, because zero is a value a real
+/// command can never carry.
+#[test]
+fn a_held_cycle_was_evaluated_even_though_it_commanded_nothing() {
+    let (mut ring, mut store) = ring_of(16);
+    let owned = OwnedCycle {
+        tick: 1,
+        desired: vec![f32::NAN; 3],
+        command: vec![0.0; 3],
+        mask: vec![0, 0, 0],
+        clamped: vec![false; 3],
+        position: vec![0.0; 3],
+        velocity: vec![0.0; 3],
+        effort: vec![0.0; 3],
+        // What the kernel answered: a command arrived once and has not advanced since.
+        tripped: vec![Guard::Watchdog],
+        response: Some(FaultResponse::StopCat2),
+        read_result: 0,
+    };
+    let mut view = owned.view();
+    // A command *has* arrived — this is a hold, not an idle cycle.
+    view.command_seq = 7;
+    view.command_stamp_ns = 1_000;
+    ring.append(&mut store, 900_000_000, Entry::Cycle(&view))
+        .expect("a cycle");
+
+    let envelope = Envelope {
+        joint_velocity_max_rad_s: Some(1.0),
+        watchdog_ms: Some(50.0),
+        ..Envelope::default()
+    };
+    let clamp = clamp_at(1.0);
+    let params = limits_params(envelope, &clamp);
+    let limits = resolve_limits(&params);
+
+    let result = replay_ring(&ring, &store, &limits, Some(&envelope));
+    assert_eq!(result.unposted, 0, "a command had arrived");
+    assert_eq!(result.evaluated(), 1);
+    assert_eq!(
+        result.agreed, 1,
+        "the stale command trips the watchdog on replay exactly as it did on the robot: {:?}",
+        result.diverged
+    );
+}
+
+/// The predecessor follows §24's mask, because the loop refills it from the decision every cycle.
+///
+/// A held or idle cycle leaves the loop's `previous` **empty**, so the cycle after one is evaluated
+/// with no predecessor and the rate limit has nothing to compare against. A replay that carried the
+/// last command forward would hand that guard a comparison the robot never made.
+#[test]
+fn a_held_cycle_leaves_the_next_one_without_a_predecessor() {
+    let (mut ring, mut store) = ring_of(16);
+    for (tick, mask) in [
+        (1u64, vec![1u8, 1, 1]),
+        (2, vec![0, 0, 0]),
+        (3, vec![1, 1, 1]),
+    ] {
+        let commanding = mask[0] != 0;
+        let owned = OwnedCycle {
+            tick,
+            desired: if commanding {
+                vec![0.4; 3]
+            } else {
+                vec![f32::NAN; 3]
+            },
+            command: vec![0.4; 3],
+            mask,
+            clamped: vec![false; 3],
+            position: vec![0.0; 3],
+            velocity: vec![0.0; 3],
+            effort: vec![0.0; 3],
+            tripped: Vec::new(),
+            response: None,
+            read_result: 0,
+        };
+        let mut view = owned.view();
+        view.command_seq = tick as u32;
+        view.command_stamp_ns = tick * 1_000_000;
+        ring.append(&mut store, tick * 1_000_000, Entry::Cycle(&view))
+            .expect("a cycle");
+    }
+
+    let envelope = Envelope {
+        joint_velocity_max_rad_s: Some(1.0),
+        ..Envelope::default()
+    };
+    let clamp = clamp_at(1.0);
+    let params = limits_params(envelope, &clamp);
+    let limits = resolve_limits(&params);
+
+    let result = replay_ring(&ring, &store, &limits, Some(&envelope));
+    assert_eq!(result.evaluated(), 3);
+    // The second cycle inherits the first's command; the third inherits nothing, because the
+    // second held every channel.
+    assert_eq!(
+        result.warmed, 1,
+        "only the cycle after a commanding one has a predecessor"
+    );
+}

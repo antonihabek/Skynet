@@ -592,6 +592,20 @@ impl Mapping {
     }
 
     #[cfg(not(target_os = "linux"))]
+    /// Nothing is mapped here, so there are no bytes.
+    ///
+    /// The twin of [`Mapping::words`]'s stub, and it was missing when §47.6c's mapping half landed.
+    /// `skynet-frames` calls `bytes_slice` from ten places and gates none of them — correctly, since
+    /// a pool cannot be *constructed* off Linux and therefore cannot be read there either. So the
+    /// absent stub was never a runtime hole; it was a **compile** failure, and it took the whole
+    /// workspace down on every host that is not the robot. That is the one thing the comment above
+    /// this block promises will not happen, which is why the stub is the fix rather than a `cfg` on
+    /// each of the ten callers.
+    pub fn bytes_slice(&self) -> &[core::sync::atomic::AtomicU8] {
+        &[]
+    }
+
+    #[cfg(not(target_os = "linux"))]
     /// Nothing is mapped here, so there are no words.
     pub fn words(&self) -> &[AtomicU32] {
         &[]

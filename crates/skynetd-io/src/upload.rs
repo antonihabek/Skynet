@@ -384,8 +384,11 @@ fn curl_push(ask: &Push) -> Answer {
     if ask.credential.is_some() {
         command.args(["--config", "-"]);
     }
-    command.arg(&ask.url);
-    let answer = interpret(command, ask.credential.as_deref(), &ask.url, "sending");
+    // Never `ask.url` directly: see [`upload_target`] for the one character that decides whether
+    // these bytes reach the route or a path invented from the scratch file's name.
+    let target = upload_target(&ask.url);
+    command.arg(target);
+    let answer = interpret(command, ask.credential.as_deref(), target, "sending");
     // The slice has done its job whether or not the request worked, and a copy of a recording left
     // on the disk §28 reserves for recordings is the one thing this file must not become.
     let _ = std::fs::remove_file(&ask.scratch);
@@ -708,6 +711,36 @@ pub fn url_for(endpoint: &str, device: &str, digest: &str) -> String {
         encode(device.trim()),
         encode(digest.trim()),
     )
+}
+
+/// The address a `PUT` may be sent to, which is not always the address a `GET` came back from.
+///
+/// # curl appends a filename to a URL that ends in a slash
+///
+/// `--upload-file` has a documented behaviour that is a footgun here and nowhere else in this
+/// daemon: *if the URL ends with a slash, curl appends the local file's name to it.* The local file
+/// is [`Layout::upload_slice`]'s scratch copy, so a push aimed at
+/// `…/recordings/sha256%3A<hex>/` is sent to `…/recordings/sha256%3A<hex>/slice` — a path no
+/// receiver has a route for.
+///
+/// That would be an obscure curiosity if a slash-terminated URL were unusual. It is the **normal**
+/// answer from the Hub this robot talks to: it canonicalises with a trailing slash and answers 308
+/// to the form without one, so [`advance`] reusing `probed.effective_url` — which is right, and is
+/// what keeps a redirect from costing a re-send of the window — hands exactly the shape curl will
+/// not accept. Found by running the real uploader against the real receiver for the first time; the
+/// robot's own suite could not see it, because a double has no opinion about trailing slashes, and
+/// the receiver's own suite could not see it either, because its client was `fetch`.
+///
+/// The failure it produced is the one §79.7 is about: the probe answered, the push 404ed, the
+/// window stayed pending, and every surface said the robot was trying.
+///
+/// So the push trims the slash and lets `--location` follow the redirect back to it. That costs one
+/// round trip per slice and does **not** cost a re-sent body: curl sends `Expect: 100-continue` for
+/// a `PUT` body of this size and the 308 arrives before the body does. Trimming here rather than in
+/// [`advance`] is deliberate — this is a property of curl, not of §79, and an uploader written
+/// against a different client should not inherit a workaround for a client it does not use.
+pub fn upload_target(url: &str) -> &str {
+    url.trim_end_matches('/')
 }
 
 /// Percent-encode one path component.

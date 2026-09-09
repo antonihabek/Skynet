@@ -36,6 +36,7 @@ mod args;
 mod check;
 mod descriptor_cmd;
 mod discover_cmd;
+mod doctor;
 mod driver_cmd;
 mod frames_cmd;
 mod robot_cmd;
@@ -60,6 +61,8 @@ skynet — Skynet OS workstation tools
   discover                        Which robots are on this link (§82)
   role <role>...                  Parse canonical roles (§5.1)
   version                         Version, ABI version and contract version
+  doctor                          One bundle for what is wrong with this robot (§41.3).
+                                  Works over the socket and over --host, from a bench.
 
   Talking to a robot (§33.7), over /run/skynetd.sock or --host:
 
@@ -67,7 +70,8 @@ skynet — Skynet OS workstation tools
   conformance · limits · identity · pair · unpair · checkin · intent · releases · ota · shutdown
   skills · skill run <ns/name> · skill stop <inv-id>
   install <dir> --id <ns/name> --kind <k> --version <v> --digest <hex>
-  blackbox [index] · blackbox seal · blackbox get <name>
+  blackbox [index] · blackbox events · blackbox seal · blackbox get <name>
+  blackbox inspect <file>         What a sealed recording says. Needs no robot.
 
   --help after any command prints its options.";
 
@@ -107,6 +111,7 @@ fn dispatch(argv: &[String]) -> i32 {
             )),
         },
         "discover" => run_or_help(rest, discover_cmd::USAGE, discover_cmd::run),
+        "doctor" => doctor::run(rest),
         "driver" => driver_cmd::run(rest),
         "transport" => run_or_help(rest, transport_cmd::USAGE, transport_cmd::run),
         "frames" => run_or_help(rest, frames_cmd::USAGE, frames_cmd::run),

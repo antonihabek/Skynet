@@ -77,8 +77,10 @@
 
 extern crate alloc;
 
+pub mod assemble;
 pub mod crc32;
 pub mod mcap;
+pub mod read;
 pub mod record;
 pub mod replay;
 pub mod ring;

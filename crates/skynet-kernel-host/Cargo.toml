@@ -14,7 +14,14 @@ path = "src/main.rs"
 
 [dependencies]
 skynet-blackbox = { path = "../skynet-blackbox" }
+
+# So a sealed window can be written down beside the limits it was recorded under. `skynetk`
+# resolves those limits and nothing else on the machine knows them: the daemon resolves its own
+# from the descriptor and a transport plan, which on a bench are not what the loop ran with. A
+# window whose ceilings nobody can state is a window nobody can replay.
+skynet-contracts = { path = "../skynet-contracts" }
 skynet-dl = { path = "../skynet-dl" }
+skynet-json = { path = "../skynet-json" }
 
 # §47.6's mapping half. Carried through the hand-off rather than created here: this process owns
 # §25's rings because §25 says the runtime does, and it owns no camera.
