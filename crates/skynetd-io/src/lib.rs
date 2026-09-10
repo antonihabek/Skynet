@@ -82,6 +82,7 @@ pub mod power;
 pub mod releases;
 pub mod retention;
 pub mod runtime;
+pub mod session;
 pub mod shape;
 pub mod skill;
 pub mod store;

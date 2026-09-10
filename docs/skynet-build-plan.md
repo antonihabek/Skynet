@@ -9065,3 +9065,76 @@ Still not built, Console side: USB and serial; signing, notarisation and the ins
 which is now four panes, the stop and the bench behind.
 
 Nothing is pushed.
+
+---
+
+## Session — 2026-09-10 (thirty-fourth): the layer a bench engineer reaches for, which did not exist
+
+Asked what a robotics engineer who has just installed Skynet OS would want on the Console to
+*optimize, adjust, customize*. The answer was not a list of panes — §83.2 rules most of that out in
+advance, since the Console embeds the page the robot already serves and everything on it is already
+reachable. The useful question is narrower: **what can an engineer not adjust anywhere at all?**
+
+Three things. The largest is §38.2's **session override**, and it turned out to be an OS gap the
+Console sits downstream of rather than a Console gap — a pane cannot offer a control for a route
+that does not exist.
+
+### The finding
+
+§38.2 lays out five layers — `vendor defaults → fleet profile → site profile → cell profile →
+session override` — and the fifth is the only one a person sets at the machine. It did not exist:
+`session_override` appeared once in the whole Rust workspace, in a doc comment. No route, no CLI
+verb, nothing to expire it. Meanwhile **§43's open list said *"Profiles layer cleanly on one robot
+(§38.2)"***, deferring only the fleet-wide version — a settled-sounding sentence about four layers
+where the specification names five.
+
+The OS work is recorded in `PROGRESS.md`/`BUILD-LOG.md` on the other side of §72.1's split. What
+landed here is the Console half and the Hub-side mirror of the contracts.
+
+### The Console's session pane
+
+Reads `GET /session`, sets with `POST`, clears with `DELETE`. Three states kept apart rather than
+two — **live**, **expired**, **none** — because a robot whose override has expired is not a robot
+that never had one, and *"nothing is set"* leaves whoever set it wondering why it sped up.
+
+**Nothing is clamped in this client, on purpose.** The robot composes the override by minimum with
+every layer above it and reports a request to raise a ceiling as discarded; pre-checking that here
+would be a second implementation of the narrowing rule — §83.2's drift — and it would be wrong on
+any robot whose profile this application has not read. The pane shows the robot's answer.
+
+**The form cannot express "no deadline".** §38.2's hazard is a robot left quietly slow, and a
+control offering *until I clear it* is what creates one. The duration box is pre-filled rather than
+empty, so the shape of a valid request is the default one.
+
+Reading needs an observer credential and setting needs an operator's, which is the role §39.1
+already gives capability grants — those *widen* what a package may do, and a control that can only
+make a robot slower is strictly less dangerous.
+
+### The Hub side
+
+`reference/typescript/safety.ts` gained the layer and `lib/skynet/os/` mirrors it, resynced through
+`check-contract-mirrors.mjs`. `docs/skynet-os-architecture.md` re-mirrored and re-pinned, carrying
+§38.2's new paragraph and three corrected figures in §73.
+
+No lib, route, schema or catalogue changes; no locale changes — desktop documentation is
+English-only by standing convention.
+
+### Numbers
+
+* `desktop/tests` — **190 passed** (173 before). New: `RobotSessionTests` (17).
+* Hub: `tsc --noEmit` clean, `vitest` **1,963 passed**.
+* OS side: `cargo test --workspace` **1,775**, `e2e.sh` **133 checks**, corpus **1,148 of 1,148** in
+  both editions with 243 lines added and none removed.
+
+### Still not built
+
+**Console:** USB/serial; signing, notarisation and the installer; macOS, now five panes, the stop
+and the bench behind. And the session and bench panes' **interfaces have never been compiled** —
+their logic is covered by 53 tests that build and run here, the `ConsoleViewModel` wiring and the
+XAML are written and not built, and `desktop/README.md` says so under *What is not here*. One
+`dotnet build -p:Platform=x64` on Windows settles both.
+
+**Hub:** the countersignature (an owner's call); robot-dependent items; the marketplace-side
+migration.
+
+Nothing is pushed.

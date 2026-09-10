@@ -53,6 +53,7 @@ fn available() -> Available {
 fn host_limits() -> ResolvedLimits<'static> {
     resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(envelope()),
         transport: Some(clamp()),
         profile: Some(profile()),
@@ -118,6 +119,7 @@ fn limits_compose_by_minimum_never_by_precedence() {
     };
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(envelope()),
         transport: Some(clamp()),
         profile: Some(narrow_profile),
@@ -136,6 +138,7 @@ fn a_profile_cannot_widen_and_is_told_that_it_tried() {
     };
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(envelope()),
         transport: Some(clamp()),
         profile: Some(greedy),
@@ -160,6 +163,7 @@ fn an_absent_source_never_widens_the_result() {
     // Only the transport clamp declares a torque ceiling; the answer is that ceiling, not None.
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: None,
         transport: Some(clamp()),
         profile: Some(profile()),
@@ -173,6 +177,7 @@ fn an_absent_source_never_widens_the_result() {
 fn a_body_with_no_envelope_says_so_rather_than_assuming_one() {
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: None,
         transport: None,
         profile: None,
@@ -195,6 +200,7 @@ fn limits_without_provenance_are_reported_as_such() {
     };
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(unsourced),
         transport: None,
         profile: Some(profile()),
@@ -211,6 +217,7 @@ fn limits_without_provenance_are_reported_as_such() {
 fn the_guest_tier_says_it_enforces_nothing() {
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Guest,
+        session: None,
         envelope: Some(envelope()),
         transport: Some(clamp()),
         profile: Some(profile()),
@@ -230,6 +237,7 @@ fn the_guest_tier_says_it_enforces_nothing() {
 fn a_guard_whose_inputs_are_missing_is_unavailable_not_passing() {
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(envelope()),
         transport: Some(clamp()),
         profile: Some(profile()),
@@ -249,6 +257,7 @@ fn a_guard_whose_inputs_are_missing_is_unavailable_not_passing() {
 fn balance_on_a_wheeled_base_reads_as_inapplicable_not_broken() {
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(envelope()),
         transport: Some(clamp()),
         profile: Some(profile()),
@@ -280,6 +289,7 @@ fn balance_on_a_wheeled_base_reads_as_inapplicable_not_broken() {
 fn a_legged_body_without_an_imu_is_missing_an_imu() {
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(envelope()),
         transport: Some(clamp()),
         profile: Some(profile()),
@@ -301,6 +311,7 @@ fn a_legged_body_without_an_imu_is_missing_an_imu() {
 fn no_jerk_ceiling_disables_the_rate_limiter_and_says_so_twice() {
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(envelope()),
         transport: Some(clamp()),
         profile: None,
@@ -322,6 +333,7 @@ fn no_jerk_ceiling_disables_the_rate_limiter_and_says_so_twice() {
 fn every_guard_is_either_active_or_reported_unavailable() {
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: None,
         transport: None,
         profile: None,
@@ -414,6 +426,7 @@ fn the_watchdog_cannot_fire_when_no_window_was_declared() {
     };
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(no_window),
         transport: Some(clamp()),
         profile: Some(profile()),
@@ -474,6 +487,7 @@ fn the_base_channel_is_bounded_by_the_base_velocity_ceiling() {
 fn advisory_mode_forwards_the_desired_command_and_still_records_the_verdict() {
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Guest,
+        session: None,
         envelope: Some(envelope()),
         transport: Some(clamp()),
         profile: Some(profile()),
@@ -501,6 +515,7 @@ fn advisory_mode_forwards_the_desired_command_and_still_records_the_verdict() {
 fn an_advisory_stop_still_forwards_because_there_is_nothing_underneath_to_stop() {
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Guest,
+        session: None,
         envelope: Some(envelope()),
         transport: Some(clamp()),
         profile: Some(profile()),
@@ -561,6 +576,7 @@ fn proximity_stops_inside_the_stop_distance() {
     };
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(envelope()),
         transport: Some(clamp()),
         profile: Some(OperatorProfile {
@@ -588,6 +604,7 @@ fn proximity_slows_between_the_two_distances() {
     };
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(envelope()),
         transport: Some(clamp()),
         profile: Some(OperatorProfile {
@@ -625,6 +642,7 @@ fn the_response_is_the_strongest_any_tripped_guard_demanded() {
     };
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(envelope()),
         transport: Some(clamp()),
         profile: Some(OperatorProfile {
@@ -660,6 +678,7 @@ fn slowing_for_a_person_is_reported_as_a_reduction_and_not_as_a_stop() {
     };
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(envelope()),
         transport: Some(clamp()),
         profile: Some(OperatorProfile {
@@ -718,6 +737,7 @@ fn a_tier_that_promised_enforcement_and_resolved_to_advisory_cannot_start() {
 fn a_guest_tier_robot_starts_despite_advisory_enforcement() {
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Guest,
+        session: None,
         envelope: Some(envelope()),
         transport: Some(clamp()),
         profile: Some(profile()),
@@ -731,6 +751,7 @@ fn a_guest_tier_robot_starts_despite_advisory_enforcement() {
 fn notices_and_imperfections_do_not_block_a_start() {
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: None,
         transport: None,
         profile: None,
@@ -789,6 +810,7 @@ fn a_host_robot_without_a_warning_channel_still_starts() {
 fn a_guest_robot_without_a_warning_channel_still_starts() {
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Guest,
+        session: None,
         envelope: Some(envelope()),
         transport: Some(clamp()),
         profile: Some(profile()),
@@ -897,6 +919,7 @@ fn pose_limits<'a>(
     let set = FrameSet::new(frames).expect("the fixture is topological");
     resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(envelope()),
         transport: None,
         profile: Some(OperatorProfile {
@@ -935,6 +958,7 @@ fn the_workspace_guard_needs_volumes_and_a_tree_and_names_which_is_missing() {
     }];
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(envelope()),
         transport: None,
         profile: Some(OperatorProfile {
@@ -1163,6 +1187,7 @@ fn the_pose_checked_is_the_one_after_clamping_and_not_the_one_asked_for() {
     let per_channel = [("shoulder", 0.0)];
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(envelope()),
         transport: Some(TransportClamp {
             per_channel: &per_channel,
@@ -1330,6 +1355,7 @@ fn one_collision_body_is_not_a_guard() {
     let set = FrameSet::new(&frames).unwrap();
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(envelope()),
         transport: None,
         profile: Some(profile()),
@@ -1387,4 +1413,265 @@ fn a_guard_that_is_unavailable_does_not_run_and_the_pose_block_says_so() {
     );
     assert!(!verdict.pose.evaluated);
     assert!(verdict.pose.trips.is_empty());
+}
+
+// ── §38.2's session override ─────────────────────────────────────────────────
+//
+// The fifth layer, and the only one a person sets at the machine. Two properties carry the whole
+// design: it can **only narrow**, which is arithmetic rather than a rule to remember, and a robot
+// under one **says so**, because §38.2's stated hazard is not a slow robot but a robot that is
+// quietly slow for a week.
+
+/// A session narrowing joint velocity to a quarter of the envelope.
+fn session() -> SessionOverride<'static> {
+    SessionOverride {
+        name: "maintenance",
+        joint_velocity_max_rad_s: Some(0.5),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_session_override_narrows_the_ceiling_in_force() {
+    let limits = resolve_limits(&ResolveLimitsParams {
+        tier: Tier::Host,
+        session: Some(session()),
+        envelope: Some(envelope()),
+        transport: Some(clamp()),
+        profile: Some(profile()),
+        frames: None,
+        available: available(),
+    });
+
+    assert_eq!(limits.joint_velocity_max_rad_s, Some(0.5));
+}
+
+#[test]
+fn a_session_override_cannot_widen_and_is_told_that_it_tried() {
+    // §38.2: "Attempted widenings are recorded and discarded, so an operator who believes they
+    // have raised a limit is told they have not." Both halves are asserted, and the second is the
+    // one that would rot silently — a discarded widening with no notice is a bench session where
+    // somebody thinks the robot is faster than it is.
+    let greedy = SessionOverride {
+        name: "faster-please",
+        joint_velocity_max_rad_s: Some(9.0),
+        joint_torque_max_nm: Some(500.0),
+        ..Default::default()
+    };
+    let limits = resolve_limits(&ResolveLimitsParams {
+        tier: Tier::Host,
+        session: Some(greedy),
+        envelope: Some(envelope()),
+        transport: Some(clamp()),
+        profile: Some(profile()),
+        frames: None,
+        available: available(),
+    });
+
+    assert_eq!(limits.joint_velocity_max_rad_s, Some(2.0), "envelope holds");
+    assert_eq!(limits.joint_torque_max_nm, Some(80.0), "envelope holds");
+
+    let widened = limits
+        .notices
+        .iter()
+        .find(|notice| notice.code == NoticeCode::SessionWidened)
+        .expect("a session that over-reached is told so");
+    // No `collect` — this crate does not link `alloc`, which is the property §23.1 makes
+    // compile-time rather than a review promise, and a test that needed a `Vec` would break it.
+    assert!(widened
+        .subjects
+        .iter()
+        .any(|subject| *subject == "joint_velocity_max_rad_s"));
+    assert!(widened
+        .subjects
+        .iter()
+        .any(|subject| *subject == "joint_torque_max_nm"));
+}
+
+#[test]
+fn a_session_is_measured_against_what_is_in_force_not_against_the_envelope() {
+    // The distinction §38.2 draws with "each layer may only narrow what the layer above it
+    // allows". A session asking for 1.0 under a profile allowing 0.5 has not widened the
+    // *envelope* — 1.0 is well inside 2.0 — but it has asked to raise the number actually in
+    // force, which is the one the operator can see and the one they will believe they changed.
+    let narrow = OperatorProfile {
+        name: "cell-a",
+        joint_velocity_max_rad_s: Some(0.5),
+        ..profile()
+    };
+    let over = SessionOverride {
+        name: "bench",
+        joint_velocity_max_rad_s: Some(1.0),
+        ..Default::default()
+    };
+    let limits = resolve_limits(&ResolveLimitsParams {
+        tier: Tier::Host,
+        session: Some(over),
+        envelope: Some(envelope()),
+        transport: Some(clamp()),
+        profile: Some(narrow),
+        frames: None,
+        available: available(),
+    });
+
+    assert_eq!(
+        limits.joint_velocity_max_rad_s,
+        Some(0.5),
+        "the profile holds"
+    );
+    assert!(limits
+        .notices
+        .iter()
+        .any(|notice| notice.code == NoticeCode::SessionWidened));
+}
+
+#[test]
+fn a_widening_session_is_never_reported_as_a_widening_profile() {
+    // Two documents, two sentences. Telling somebody their signed profile over-reached when it was
+    // their bench override would send them to edit a file that is not the problem.
+    let greedy = SessionOverride {
+        name: "faster-please",
+        joint_velocity_max_rad_s: Some(9.0),
+        ..Default::default()
+    };
+    let limits = resolve_limits(&ResolveLimitsParams {
+        tier: Tier::Host,
+        session: Some(greedy),
+        envelope: Some(envelope()),
+        transport: Some(clamp()),
+        profile: Some(profile()),
+        frames: None,
+        available: available(),
+    });
+
+    assert!(!limits
+        .notices
+        .iter()
+        .any(|notice| notice.code == NoticeCode::ProfileWidened));
+}
+
+#[test]
+fn a_robot_under_a_session_override_says_so_and_names_it() {
+    // §38.2's hazard is "a 'maintenance mode, half speed' that outlives the maintenance", and it is
+    // a hazard because a slowed robot looks like a working one. The notice is how it stops looking
+    // like one, and it carries the name so the sentence says what to clear.
+    let limits = resolve_limits(&ResolveLimitsParams {
+        tier: Tier::Host,
+        session: Some(session()),
+        envelope: Some(envelope()),
+        transport: Some(clamp()),
+        profile: Some(profile()),
+        frames: None,
+        available: available(),
+    });
+
+    let notice = limits
+        .notices
+        .iter()
+        .find(|notice| notice.code == NoticeCode::SessionOverride)
+        .expect("an override announces itself");
+    assert_eq!(notice.subjects.len(), 1);
+    assert_eq!(notice.subjects.iter().next().copied(), Some("maintenance"));
+}
+
+#[test]
+fn no_session_says_nothing_at_all() {
+    // The other half of the sentence above, and the property that kept the corpus byte-identical:
+    // a robot with no override emits neither notice, so every case written before this layer
+    // existed resolves exactly as it did.
+    let limits = resolve_limits(&ResolveLimitsParams {
+        tier: Tier::Host,
+        session: None,
+        envelope: Some(envelope()),
+        transport: Some(clamp()),
+        profile: Some(profile()),
+        frames: None,
+        available: available(),
+    });
+
+    assert!(!limits.notices.iter().any(|notice| matches!(
+        notice.code,
+        NoticeCode::SessionOverride | NoticeCode::SessionWidened
+    )));
+}
+
+#[test]
+fn a_session_can_narrow_the_jerk_ceiling_below_the_profiles() {
+    let gentler = SessionOverride {
+        name: "gentle",
+        max_delta_per_cycle: Some(0.05),
+        ..Default::default()
+    };
+    let limits = resolve_limits(&ResolveLimitsParams {
+        tier: Tier::Host,
+        session: Some(gentler),
+        envelope: Some(envelope()),
+        transport: Some(clamp()),
+        profile: Some(profile()),
+        frames: None,
+        available: available(),
+    });
+
+    assert_eq!(limits.max_delta_per_cycle, Some(0.05));
+}
+
+#[test]
+fn a_session_jerk_ceiling_turns_the_rate_limit_guard_on() {
+    // The one field that can make a guard *runnable*. `rate_limit` is unavailable when nothing sets
+    // `max_delta_per_cycle` (§7.2), so a bench override that sets one on a robot whose profile does
+    // not has strictly reduced what the robot may do — which is what "only ever narrows" means,
+    // even though it is the opposite of removing a guard.
+    let bare = OperatorProfile {
+        name: "cell-a",
+        max_delta_per_cycle: None,
+        ..Default::default()
+    };
+    let gentle = SessionOverride {
+        name: "gentle",
+        max_delta_per_cycle: Some(0.1),
+        ..Default::default()
+    };
+
+    let without = resolve_limits(&ResolveLimitsParams {
+        tier: Tier::Host,
+        session: None,
+        envelope: Some(envelope()),
+        transport: Some(clamp()),
+        profile: Some(bare),
+        frames: None,
+        available: available(),
+    });
+    assert!(!without.active_guards.iter().any(|g| *g == Guard::RateLimit));
+
+    let with = resolve_limits(&ResolveLimitsParams {
+        tier: Tier::Host,
+        session: Some(gentle),
+        envelope: Some(envelope()),
+        transport: Some(clamp()),
+        profile: Some(bare),
+        frames: None,
+        available: available(),
+    });
+    assert!(with.active_guards.iter().any(|g| *g == Guard::RateLimit));
+    assert!(!with
+        .notices
+        .iter()
+        .any(|notice| notice.code == NoticeCode::NoRateLimit));
+}
+
+#[test]
+fn a_session_with_no_profile_at_all_still_narrows() {
+    // An unprovisioned robot on a bench is the likeliest place for this layer to be used, and it is
+    // the case where every layer above it is absent.
+    let limits = resolve_limits(&ResolveLimitsParams {
+        tier: Tier::Host,
+        session: Some(session()),
+        envelope: Some(envelope()),
+        transport: None,
+        profile: None,
+        frames: None,
+        available: available(),
+    });
+
+    assert_eq!(limits.joint_velocity_max_rad_s, Some(0.5));
 }

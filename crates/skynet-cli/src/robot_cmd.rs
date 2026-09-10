@@ -161,6 +161,7 @@ pub fn run(command: &str, argv: &[String]) -> i32 {
         "estop" => show(argv, "POST", "/stop", Some(String::new()), print_stop),
         "logs" => logs(argv),
         "grants" => grants(argv),
+        "session" => session(argv),
         "rollback" => rollback(argv),
         "install" => install(argv),
         "blackbox" => blackbox(argv),
@@ -1217,6 +1218,191 @@ fn logs(argv: &[String]) -> i32 {
         }
         Err(reason) => term::fail(&reason),
     }
+}
+
+/// `skynet session` — §38.2's time-boxed narrowing, from the machine.
+///
+/// The verb a robotics engineer standing at a bench actually reaches for: *slow this thing down
+/// while I have my hands near it, and do not let me forget I did.*
+///
+///     skynet session                                          what is in force
+///     skynet session set --for 20m --velocity 0.25            narrow, for twenty minutes
+///     skynet session clear                                    put it back
+///
+/// **`--for` is required and there is no way to omit it.** §38.2 time-boxes this layer, and a
+/// default of "until somebody notices" is exactly the hazard it names — *"a 'maintenance mode, half
+/// speed' that outlives the maintenance is a hazard that looks like a setting."*
+fn session(argv: &[String]) -> i32 {
+    let args = positional(argv);
+    match args.first().map(|s| s.as_str()) {
+        None => show(argv, "GET", "/session", None, print_session),
+        Some("clear") => show(argv, "DELETE", "/session", Some(String::new()), print_note),
+        Some("set") => {
+            let Some(duration) = flag(argv, "--for") else {
+                return term::fail(concat!(
+                    "skynet session set --for <duration> [--velocity R] [--torque N] ",
+                    "[--base M] [--jerk F] [--name NAME] [--reason WHY]\n\n",
+                    "--for is required. A session override is time-boxed (§38.2): there is no way ",
+                    "to ask for one that does not end.\n",
+                    "Durations: 90s, 20m, 2h."
+                ));
+            };
+            let Some(duration_ms) = parse_duration_ms(&duration) else {
+                return term::fail(&format!(
+                    "`{duration}` is not a duration. Use 90s, 20m or 2h."
+                ));
+            };
+
+            let mut document = Json::obj();
+            document.set(
+                "name",
+                Json::from(flag(argv, "--name").unwrap_or_else(|| "bench".to_string()).as_str()),
+            );
+            document.set("duration_ms", Json::Num(duration_ms as f64));
+            if let Some(reason) = flag(argv, "--reason") {
+                document.set("reason", Json::from(reason.as_str()));
+            }
+            let mut narrowed = false;
+            for (name, key) in [
+                ("--velocity", "joint_velocity_max_rad_s"),
+                ("--torque", "joint_torque_max_nm"),
+                ("--base", "base_velocity_max_m_s"),
+                ("--jerk", "max_delta_per_cycle"),
+            ] {
+                if let Some(raw) = flag(argv, name) {
+                    let Ok(number) = raw.parse::<f64>() else {
+                        return term::fail(&format!("`{raw}` is not a number for {name}"));
+                    };
+                    document.set(key, Json::Num(number));
+                    narrowed = true;
+                }
+            }
+            if !narrowed {
+                return term::fail(concat!(
+                    "A session override has to narrow something. Give at least one of ",
+                    "--velocity, --torque, --base or --jerk."
+                ));
+            }
+
+            show(
+                argv,
+                "POST",
+                "/session",
+                Some(document.to_canonical().unwrap_or_default()),
+                print_session,
+            )
+        }
+        Some(other) => term::fail(&format!(
+            "`{other}` is not a session command. Try `skynet session`, `skynet session set` or `skynet session clear`."
+        )),
+    }
+}
+
+/// `90s`, `20m`, `2h` — in milliseconds.
+///
+/// Suffixed rather than bare, and the reason is the unit a mistake costs. A bare `20` is twenty of
+/// something, and the two readings a person is likeliest to have in mind here — minutes and seconds
+/// — are sixty times apart on a control that slows a robot down.
+fn parse_duration_ms(text: &str) -> Option<i64> {
+    let (digits, scale) = match text.chars().last()? {
+        's' => (&text[..text.len() - 1], 1_000),
+        'm' => (&text[..text.len() - 1], 60_000),
+        'h' => (&text[..text.len() - 1], 3_600_000),
+        _ => return None,
+    };
+    let value: f64 = digits.parse().ok()?;
+    if !value.is_finite() || value <= 0.0 {
+        return None;
+    }
+    Some((value * scale as f64) as i64)
+}
+
+/// What `GET /session` and `POST /session` answer.
+fn print_session(document: &Json) {
+    let state = document
+        .get("state")
+        .and_then(Json::as_str)
+        .unwrap_or("unknown");
+    let Some(over) = document.get_present("override") else {
+        // `if` rather than `match` on the state name, and the reason is a tool rather than taste:
+        // `tools/check-golden-path.mjs` counts CLI commands by taking every string literal on a
+        // match arm across this crate, and a `match` over state names here would put `none` and
+        // `unreadable` into the count §73 publishes. The counting rule is broad by design — it
+        // exists so that adding a command never fails the build falsely — and the cost of that
+        // breadth is paid here, where a state name is not a command.
+        if state == "unreadable" {
+            println!(
+                "{} {}",
+                term::warn("!"),
+                document
+                    .get("detail")
+                    .and_then(Json::as_str)
+                    .unwrap_or("the override could not be read")
+            );
+        } else {
+            println!(
+                "{}",
+                term::dim("no session override — this robot is at the ceilings its profile sets")
+            );
+        }
+        return;
+    };
+
+    let name = over.get("name").and_then(Json::as_str).unwrap_or("");
+    // Expired is drawn in the caution colour and live in the ordinary one. The two are different
+    // facts and the difference is the whole reason this route reports three states rather than two.
+    if state == "expired" {
+        println!(
+            "{} session override {} has expired — this robot is back at its profile's ceilings",
+            term::warn("!"),
+            term::bold(name)
+        );
+    } else {
+        let remaining = over
+            .get("remaining_ms")
+            .and_then(Json::as_f64)
+            .unwrap_or(0.0) as i64;
+        println!(
+            "{} session override {} — {} left",
+            term::ok("●"),
+            term::bold(name),
+            human_duration(remaining)
+        );
+    }
+
+    for (key, label, unit) in [
+        ("joint_velocity_max_rad_s", "joint velocity", "rad/s"),
+        ("joint_torque_max_nm", "joint torque", "Nm"),
+        ("base_velocity_max_m_s", "base velocity", "m/s"),
+        ("max_delta_per_cycle", "jerk", "of the ceiling per cycle"),
+    ] {
+        if let Some(number) = over.get_present(key).and_then(Json::as_f64) {
+            println!("  {:<16} {} {}", label, number, term::dim(unit));
+        }
+    }
+
+    if let Some(reason) = over.get_present("reason").and_then(Json::as_str) {
+        println!("  {:<16} {}", "reason", term::dim(reason));
+    }
+    if let Some(who) = over.get_present("set_by").and_then(Json::as_str) {
+        println!("  {:<16} {}", "set by", term::dim(who));
+    }
+}
+
+/// A millisecond count as something a person reads off a bench.
+fn human_duration(ms: i64) -> String {
+    if ms <= 0 {
+        return "no time".to_string();
+    }
+    let seconds = ms / 1_000;
+    if seconds < 60 {
+        return format!("{seconds}s");
+    }
+    let minutes = seconds / 60;
+    if minutes < 60 {
+        return format!("{minutes}m");
+    }
+    format!("{}h{:02}m", minutes / 60, minutes % 60)
 }
 
 fn grants(argv: &[String]) -> i32 {

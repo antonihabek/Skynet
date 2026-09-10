@@ -396,6 +396,12 @@ fn run(args: &[String]) -> i32 {
         envelope: Some(envelope),
         transport,
         profile,
+        // §38.2's session override is a supervisor's, not a control loop's. `skynetd` holds the
+        // store and the clock that expires it; `skynetk` is handed a body, a plan and a rate on a
+        // command line and runs them. A loop that read the override itself would be a second place
+        // deciding what this robot's ceilings are, which is the one thing this module's own header
+        // says must not happen.
+        session: None,
         available: Available {
             imu: false,
             people_detection: false,

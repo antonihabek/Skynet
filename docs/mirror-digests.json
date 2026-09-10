@@ -1,8 +1,8 @@
 {
   "note": "sha256 of each document shared with BotMarket, pinned so a divergence is caught with one checkout — which is what CI has. Written by tools/check-mirrors.mjs --sync (take their copies, then pin) or --pin (move nothing, pin what already agrees). A document the two trees differ on keeps its last agreed digest rather than being re-pinned or dropped. Never edit by hand: a digest somebody updated to match a local edit is a check that has been switched off.",
   "digests": {
-    "docs/skynet-os-architecture.md": "ab08829155dfdfeeec87b41bcbb7438f3df9192f3dfabd28ea53625c592b8c74",
+    "docs/skynet-os-architecture.md": "ee5d4259ebb4260e2ab28b8b1e86721910ebe89daa16a2ba1d9ccc8db7500575",
     "docs/skynet-architecture.md": "17b0fa4f48f5887563c97b49f69980fe7ff19aecf0c0dc790b535d3964adeaa3",
-    "docs/skynet-build-plan.md": "78218cdb142b26dcd493c07b0da88869a8c59b64023a91d1fdba936213a10ea9"
+    "docs/skynet-build-plan.md": "014eaf1c01bfaeb9613e04085abbcf6960b81d930637b3545a890f336afb51a3"
   }
 }

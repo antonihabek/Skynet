@@ -8263,3 +8263,167 @@ contract mirrors, golden path, RHAL flags and `scale-report --check` all green. 
 no figure in §73 moved.
 
 Committed. **Nothing is pushed.**
+
+---
+
+# Round thirty-eight — §38.2's fifth layer, which the specification described and nothing implemented
+
+Asked what a robotics engineer who has just installed Skynet OS would want on the Console to
+*optimize, adjust, customize* — and whether the Console has it.
+
+The answer came out of §83.2 rather than out of a wishlist, because that section forbids most of
+the obvious one in advance: the Console is *a shell, not a client*, and everything the on-robot
+console renders is already there through the embedded page. So the question narrows to **what can
+an engineer not adjust anywhere at all** — not in the Console, not on the robot's own page, not
+from the CLI.
+
+Three things, and the first is the one this round is about.
+
+## The finding
+
+§38.2 lays out safety configuration as five layers:
+
+> `vendor defaults → fleet profile → site profile → cell profile → session override`
+>
+> *"Session overrides are time-boxed and expire — a 'maintenance mode, half speed' that outlives the
+> maintenance is a hazard that looks like a setting."*
+
+The fifth is the only one a person sets **at the machine**, and it is the verb a bench engineer
+actually has: *slow this thing down while my hands are near it.* It did not exist.
+
+* `session_override` appeared **once** in 131,000 lines of Rust — in a doc comment, as a concept.
+* `ResolveLimitsParams` had five inputs and none of them was a session.
+* No route wrote one. No CLI verb set one. Nothing expired one.
+* And **§43's open list said *"Profiles layer cleanly on one robot (§38.2)"*** — deferring only the
+  fleet-wide version, which reads as a settled sentence about four layers where the specification
+  names five.
+
+That is the same shape as the stale READMEs two rounds ago, one level deeper: a document believed
+for free, and the belief cost the feature.
+
+## Why the Console could not have it
+
+The Console is downstream. A pane cannot offer a control for a route that does not exist, so the
+work is the OS's — which is also the half this machine can actually verify, unlike the WinUI half.
+
+## What the kernel gained, and the one design decision in it
+
+`SessionOverride` joins the same `narrowest()` minimum as every other layer, which is what makes
+*"it only ever narrows"* a property of the arithmetic rather than a rule to remember. A widening is
+recorded and discarded by the same expression that composes a legitimate narrowing.
+
+**Checked against what the layer above allows, not against the envelope**, which is §38.2's own
+wording and the case a reader would not think to write: a session asking for 1 rad/s under a profile
+allowing 0.5 has not widened the *envelope* — 1 is well inside 2 — but it has asked to raise the
+number actually in force, which is the one the operator can see and the one they will believe they
+changed. It is a corpus case now.
+
+Reported as `session_widened` rather than folded into `profile_widened`. Two documents, two
+sentences: telling somebody their signed profile over-reached when it was their bench override sends
+them to edit a file that is not the problem.
+
+**Expiry is deliberately not in the kernel.** §35.2 keeps time out of it — `now_ms` is a parameter
+to a cycle, never something the kernel reads — so it cannot ask whether a deadline has passed.
+`skynetd` holds the deadline and simply stops handing the override to `resolve_limits`. One clock in
+the system rather than two that can disagree.
+
+## The output shape, which is why the corpus did not move
+
+The obvious build adds a `session` key to the resolved limits. `limits_to_json` writes every key
+explicitly with `null` for absent scalars, so that would have changed **every one of 1,142
+expected byte-strings** across three editions, for a field that is null in all of them.
+
+Instead the session reaches an operator two ways it already had: the **numbers move**, and a
+`session_override` **notice** announces it by name. Notices are a list, so a robot with no override
+emits nothing new — and the diff on `corpus/limits/resolution.json` is **243 insertions and zero
+deletions**. Six new cases, 1,142 unchanged, and both editions still reproduce all 1,148 byte for
+byte.
+
+That the notice is emitted at all is the point rather than a courtesy. §38.2's hazard is not a slow
+robot; it is a robot that is *quietly* slow for a week and a team that concludes the arm is faulty.
+The notice reaches every surface that renders one — `skynet limits`, the robot's own console, the
+Hub's device page — without any of them knowing this layer exists.
+
+## The daemon, and what a bench actually gets
+
+`crates/skynetd-io/src/session.rs`: a store with three readings — **live**, **expired**, and
+**unreadable** — kept apart rather than collapsed. Composing a ceiling has no use for the
+difference; telling an operator does, and a console showing an expired override as "nothing set"
+leaves somebody wondering why the robot sped up.
+
+Wall time rather than monotonic, by §45.4's reasoning: a deadline has to survive a reboot, and a
+machine switched off for a day comes back with the override expired rather than reapplied.
+
+**Eight hours maximum**, refused past it with the reason in the sentence: longer than a bench
+session is a change to how the robot behaves, and that is what §38.1 signs profiles for. A ceiling
+of zero or less is refused too — `narrowest()` would take it as the tightest input and produce a
+robot that cannot move at all, which is safe and undiagnosable from a limits page.
+
+`GET|POST|DELETE /session`, operator role for the two that write. Operator rather than admin because
+the layer can only narrow, and §39.1 already gives an operator *capability grants*, which widen what
+a package may do. Also because §38.2's argument is practical: if this is hard to reach, nobody uses
+it and they work on a robot at full speed instead.
+
+Both of §38.3's records are written, and the audit row carries **the previous value** — the half
+that is easy to skip and the half that makes a log answer *what did somebody change* rather than
+*what is it now*.
+
+`skynet session [set|clear]`, with `--for` required and no way to omit it. Durations are suffixed
+(`20m`, `2h`) rather than bare, because the two readings a person is likeliest to have in mind —
+minutes and seconds — are sixty times apart on a control that slows a robot down.
+
+## What the suite caught that no unit test could
+
+`with_session` existed and **nothing called it**. The API test that asserts `GET /limits` moves
+after a `POST /session` failed on its first run, which is the same lesson as round thirty-four's:
+two halves that have only met doubles have not met. It is a helper now — `live_session()` — used at
+every one of the five places a ceiling is composed, including §17's check-in, because a Hub device
+page drawing ceilings this robot is not running at is the same drift by a different road.
+
+## And one the e2e caught, where the test was wrong rather than the code
+
+The bench assertion *"a widening override is refused"* failed, and the code was right. That robot
+has no declared envelope and no profile ceilings, so there is nothing above the session to widen: a
+high number there is not a widening at all, it is the only ceiling the robot has, and going from
+*unbounded* to *99 rad/s* is a narrowing however alarming it looks written down. The check now
+asserts that property under its own name, and the refusal is pinned where a body with declared
+ceilings exists — the kernel's suite, and six corpus cases across three editions.
+
+## Numbers
+
+* `cargo test --workspace` — **1,775 passed** (1,739 before). Kernel 116, and the store's own 17.
+* `sh crates/skynetd-io/e2e.sh` — **133 checks, 0 failed** (117 before), against a running daemon.
+* `node tools/edition-report.mjs` — **1,148 of 1,148** in Rust and Python.
+* `corpus/limits/resolution.json` — +243 lines, **0 removed**.
+* clippy clean, fmt clean, `thumbv7em-none-eabihf` still builds with no allocator.
+* Hub: `tsc --noEmit` clean, `vitest` 1,963 passed. `desktop/tests` **190 passed** (173 before).
+* §73 corrected: 131,000 lines of Rust, 1,148 corpus cases, 58 CLI commands.
+
+## One thing found and left alone, deliberately
+
+`tools/check-golden-path.mjs` counts CLI commands by taking every string literal on a match arm
+across the crate — broad by design, so that adding a command never fails a build falsely. That
+breadth was equal to the true count by coincidence, and this round broke the coincidence: a `match`
+over state names inside a printer put two non-commands into a figure §73 publishes.
+
+The counting rule was **not** changed. Narrowing it to `main.rs`'s dispatch gives 34, and §73's
+"55" has always meant the whole surface including subcommands — so a "fix" here would have silently
+redefined a published number. The two spurious literals were removed from the printer instead, with
+the reason written where somebody would otherwise reintroduce them, and the honest count (58) went
+into §73. The fragility is real and is recorded here rather than papered over: the next unrelated
+`match` over strings in this crate will move that number again.
+
+## What round thirty-eight leaves
+
+Two of the three things an engineer cannot adjust are still open, and both are smaller than this
+one was:
+
+* **local unsigned configuration** — §38.1 names *"log level, telemetry sampling, console theme"*
+  as unsigned and local, and there is no route, no CLI verb and no file for any of them;
+* **calibration** — `GET /calibration` reports; nothing runs or refreshes one.
+
+The Console's session pane and bench pane are both **written and not compiled**, which is unchanged
+and is stated in `desktop/README.md` under *What is not here* rather than implied. One
+`dotnet build -p:Platform=x64` on Windows settles both.
+
+Nothing is pushed.

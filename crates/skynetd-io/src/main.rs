@@ -1473,12 +1473,17 @@ fn report_checkin<L, S>(
         &skynetd_io::intent::held_digest(layout),
         // §7.6. Over the `body` this pass already loaded, so the check-in and `GET /limits` cannot
         // report two different limit sets for one robot.
-        Some(skynetd_io::limits::report(&skynetd_io::limits::read(
-            layout,
-            &body,
-            skynetd_io::limits::ROBOT_TIER,
-            &daemon.proximity_sighting,
-        ))),
+        // With §38.2's layer, for the same reason the route carries it: two reports of one robot's
+        // ceilings that disagree are worse than one report nobody has.
+        Some(skynetd_io::limits::report(
+            &skynetd_io::limits::read(
+                layout,
+                &body,
+                skynetd_io::limits::ROBOT_TIER,
+                &daemon.proximity_sighting,
+            )
+            .with_session(skynetd_io::api::live_session(layout)),
+        )),
     );
     let queue = skynetd_io::outbound::Queue::of(layout);
     match skynetd_io::checkin::enqueue(&queue, &identity, &built) {
@@ -1964,12 +1969,16 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
         ),
     };
     let guards = skynetd_io::limits::guards(
+        // §27's guard condition, and the session matters to it rather than only to the numbers: a
+        // session jerk ceiling on a robot whose profile has none makes `rate_limit` runnable, so
+        // omitting the layer here would report a guard unavailable that is about to run.
         &skynetd_io::limits::read(
             &layout,
             &body,
             skynetd_io::limits::ROBOT_TIER,
             &daemon.proximity_sighting,
-        ),
+        )
+        .with_session(skynetd_io::api::live_session(&layout)),
         &skynetd_io::calibration::status(&layout, wall_s()).unavailable(),
     );
 

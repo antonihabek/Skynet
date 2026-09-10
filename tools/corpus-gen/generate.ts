@@ -951,6 +951,31 @@ limitsCase('profile-widens-all-three', 'Every widened field is named.',
     name: 'greedy', joint_torque_max_nm: 500, joint_velocity_max_rad_s: 9,
     base_velocity_max_m_s: 9, max_delta_per_cycle: 0.25,
   } }))
+// §38.2's fifth layer. Six cases, and the two that matter most are the pair at the top: a session
+// narrows, and a session that asks to widen is refused *and told*. The third is the one a reader
+// would not think to write — a session inside the envelope but outside the profile, which is the
+// difference between "may only narrow" and "may only narrow what the layer above it allows".
+limitsCase('session-narrows', 'A session override narrows the ceiling in force.',
+  hostParams({ session: { name: 'maintenance', joint_velocity_max_rad_s: 0.5 } }))
+limitsCase('session-widens', 'A session override may not widen, and is told that it tried.',
+  hostParams({ session: { name: 'faster-please', joint_velocity_max_rad_s: 9 } }))
+limitsCase('session-widens-past-the-profile-not-the-envelope',
+  'Inside the envelope, outside the profile: still a widening, because the layer above is what is in force.',
+  hostParams({
+    profile: { name: 'cell-a', joint_velocity_max_rad_s: 0.5, max_delta_per_cycle: 0.25 },
+    session: { name: 'bench', joint_velocity_max_rad_s: 1 },
+  }))
+limitsCase('session-narrows-the-jerk-ceiling', 'A session may ask for gentler ramps than the profile.',
+  hostParams({ session: { name: 'gentle', max_delta_per_cycle: 0.05 } }))
+limitsCase('session-supplies-the-only-jerk-ceiling',
+  'A session sets a jerk ceiling the profile has not, which makes the rate_limit guard runnable.',
+  hostParams({
+    profile: { name: 'cell-a' },
+    session: { name: 'gentle', max_delta_per_cycle: 0.1 },
+  }))
+limitsCase('session-on-an-unprovisioned-robot',
+  'A bench robot with no profile at all is where this layer is likeliest to be used.',
+  hostParams({ profile: null, session: { name: 'maintenance', joint_velocity_max_rad_s: 0.5 } }))
 limitsCase('nothing-available', 'A robot that can supply no guard inputs at all.',
   hostParams({ available: {} }))
 limitsCase('wheeled-base', 'Balance on a wheeled base is inapplicable, not broken.',
