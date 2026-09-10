@@ -9138,3 +9138,91 @@ XAML are written and not built, and `desktop/README.md` says so under *What is n
 migration.
 
 Nothing is pushed.
+
+## Session — 2026-09-10 (thirty-fifth): the settings pane, and two UI questions with checkable answers
+
+### The Console's settings pane
+
+§38.1's other half, mirroring the OS work of the same day: *"non-safety configuration — log level,
+telemetry sampling, console theme — is unsigned and local. The line between the two is drawn by
+whether the value can reach the kernel."*
+
+A pane beside the session one, and the difference between them is the point of both. A session
+override changes **what the robot may do**; nothing in this pane does. So there is no duration, no
+expiry and no warning under the buttons — a log level does not need to undo itself — and the pane
+says that rather than leaving it to be inferred from the absence of a deadline.
+
+Three decisions worth recording:
+
+* **The rows come from the robot, and so do the choices.** An `ItemsControl` over whatever
+  `GET /settings` listed, not three hand-written rows. A robot with a fourth setting renders as
+  four; a build that had hardcoded a dropdown of log levels would look authoritative while silently
+  dropping the one nobody here had heard of. Same reasoning as the session pane showing the robot's
+  duration cap rather than assuming it.
+* **A key this build does not know keeps its wire name.** `RobotSetting.Label` is a fixed map and
+  not a general un-snake-caser, because a prettifier returns a label that looks like something
+  somebody wrote for a key nobody here has ever seen — §32.2's rule, in a small place.
+* **A failed request does not clear the rows.** The last known configuration stays where it is with
+  the failure's sentence beside it. Clearing would say this robot has no settings, which is never
+  true.
+
+### Two UI questions, answered with evidence rather than opinion
+
+**The Windows console.** 134 `ThemeResource` references, zero hardcoded colours, native WinUI
+controls throughout — better than it looked. Two real gaps:
+
+* **No keyboard route to the stop.** §83.2 gives it a line of its own for being *always reachable*
+  and the only route was the pointer. `Ctrl+Shift+S` now reaches it, fires from inside a text box
+  on §39.1's own argument, and is a chord rather than a bare key only so that typing a credential
+  does not stop a robot. `Ctrl+.` was rejected on a fact: the period is `VK_OEM_PERIOD`,
+  `VirtualKey` has no name for it, and a numeric `Key="190"` is not something the XAML enum
+  converter accepts.
+* **No `AutomationProperties` anywhere.** The decorative header glyph announced itself; the two
+  progress rings and the two buttons whose captions change had no stable name.
+
+**The Hub had no light theme at all**, and the failure was visible rather than theoretical.
+`Navbar` and `Footer` render *inside* `.skynet` and are themed by `globals.css`, which carries 285
+light-mode overrides; `skynet.css` carried none. A reader on light mode got a paper navbar, a paper
+footer, and a pure-black page between them.
+
+Fixed at the tokens rather than rule by rule. Four values had been written into rules instead of
+declared — a subnav hover at 5% white, a table rule at 4.5% white — and each became a token first,
+because a list of per-rule light overrides is a list that grows. The palette is built on the
+marketplace's own (`#f0ece4` here is `--app-bg` there) so the shell and the Hub agree by
+construction. What does not come from there is Skynet's identity: the signal blue stays signal
+blue, darkened to `#1a56c4` because `#4d8dff` on paper is about 2.4:1.
+
+### On whether the Hub has everything the plan asks for
+
+It is complete against `docs/skynet-architecture.md`: §6's API surface is built, and §9's phases
+A–G are **evidence gates against a deployed system** — a repository cannot close them by containing
+code, because what they ask for is a real release, a real worker and a real device.
+
+What it does not have is GitHub's *shape*: no issues, no notifications, no labels, no watch, no
+blame, no milestones, no command palette, no keyboard shortcuts. None of those is in the plan. Both
+sentences are worth saying because only one of them is *"complete"*: measured against its own
+specification the Hub is done, and measured against GitHub it is a different product with a
+narrower surface.
+
+### Numbers
+
+* `desktop/tests` — **205 passed** (190 before). New: `RobotSettingsTests` (15).
+* OS side: `cargo test --workspace` **1,807** (1,775), `e2e.sh` **149 checks, 0 failed** (133).
+* CLI commands (§73): **60** (58). `session` had never been in the CLI's own `USAGE` text — found
+  while adding `settings`, and both are there now.
+
+### Still not built
+
+**Console:** USB/serial; signing, notarisation and the installer; macOS, now six panes, the stop
+and the bench behind. And the bench, session and settings panes' **interfaces have never been
+compiled** — their logic is covered by 68 tests that build and run here, the `ConsoleViewModel`
+wiring and the XAML are written and not built, and `desktop/README.md` says so under *What is not
+here*. One `dotnet build -p:Platform=x64` on Windows settles all three.
+
+**Hub:** the countersignature (an owner's call); robot-dependent items; the marketplace-side
+migration.
+
+**OS:** calibration is the last of the three things round thirty-eight's audit found an engineer
+cannot adjust — `GET /calibration` reports, and nothing runs or refreshes one.
+
+Nothing is pushed.

@@ -433,6 +433,57 @@ pass "it can be cleared"
 "$SKYNET" limits $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1
 grep -q "session_override" "$ROOT/out"   && fail "the robot still says it is held back"   || pass "and the robot stops saying it is held back"
 
+say "5a2. §38.1's unsigned local configuration, on a running robot"
+# §38.1's other half: *"non-safety configuration — log level, telemetry sampling, console theme —
+# is unsigned and local. The line between the two is drawn by whether the value can reach the
+# kernel."* Nothing implemented any of it until 2026-09-10.
+#
+# The check worth having here is not that the file round-trips — the suite pins that — but that the
+# setting **reaches the thing it names**. So the console page is fetched off the socket with curl,
+# twice, and the assertion is about the bytes a browser would receive.
+
+"$SKYNET" settings $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1
+want "an observer may read what this robot is set to" "log_level" "$ROOT/out"
+want "and a robot nobody configured says so rather than hiding the setting" "default" "$ROOT/out"
+
+"$SKYNET" settings set log_level debug $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1 || true
+want "an observer may not change one" "needs the operator role" "$ROOT/out"
+
+# §38.1's line, over the socket. The store enforces it; this is the assertion that the route has no
+# path around it.
+"$SKYNET" settings set joint_velocity_max_rad_s 99 $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1 || true
+want "a kernel ceiling is refused here" "Safety Kernel" "$ROOT/out"
+want "and the refusal says where such a value does live" "38.2" "$ROOT/out"
+
+curl -s --unix-socket "$ROOT/run/skynetd.sock" http://robot/ > "$ROOT/page-before" 2>&1 || true
+grep -q 'data-theme' "$ROOT/page-before"   && fail "a robot at the default should pin nothing and let the browser decide"   || pass "the console page pins no theme by default (§38.1)"
+
+"$SKYNET" settings set console_theme light $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+want "an operator may set one" "light" "$ROOT/out"
+want "and is told what it was" "was system" "$ROOT/out"
+
+curl -s --unix-socket "$ROOT/run/skynetd.sock" http://robot/ > "$ROOT/page-after" 2>&1 || true
+grep -q 'data-theme="light"' "$ROOT/page-after"   && pass "and the page the robot serves now carries it — the two halves have met"   || { fail "the setting did not reach the console"; head -c 400 "$ROOT/page-after" | sed 's/^/      /'; }
+curl -s --unix-socket "$ROOT/run/skynetd.sock" http://robot/console.css > "$ROOT/out" 2>&1 || true
+grep -q 'html\[data-theme="light"\]' "$ROOT/out"   && pass "with a stylesheet that acts on it, rather than an attribute nothing reads"   || fail "the pinned theme is decoration"
+
+"$SKYNET" settings set telemetry_sampling 0 $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1 || true
+want "a sampling rate of zero is refused rather than read as off" "There is no zero" "$ROOT/out"
+"$SKYNET" settings set telemetry_sampling 4 $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+want "and a real one is taken" "telemetry_sampling" "$ROOT/out"
+
+# §38.3's two records, for a change that is not a safety change. The section says *every* change.
+grep -q '"action":"setting"' "$ROOT/data/state/audit.jsonl"   && pass "the change left an audit row (§38.3)" || fail "a configuration change left no audit row"
+# The previous value, and it says the value it replaced was a *default* rather than something
+# somebody had chosen. Those are different facts about a robot and §38.3 asks for the one actually
+# in force, so the row carries both.
+grep -q '"previous":"system (the default)"' "$ROOT/data/state/audit.jsonl" && pass "carrying the value it replaced, and that nobody had chosen it" || { fail "the audit row cannot say what changed"; grep '"action":"setting"' "$ROOT/data/state/audit.jsonl" | sed 's/^/      /'; }
+
+"$SKYNET" settings reset console_theme $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+want "a setting can be put back" "default" "$ROOT/out"
+curl -s --unix-socket "$ROOT/run/skynetd.sock" http://robot/ > "$ROOT/out" 2>&1 || true
+grep -q 'data-theme' "$ROOT/out"   && fail "the page still pins a theme after the setting was reset"   || pass "and the page stops pinning one"
+
 say "5b. The black box, on a disk (§13, §26, §28)"
 [ -f "$ROOT/data/blackbox/ring" ] \
   && pass "the ring was preallocated at start" || fail "no ring at data/blackbox/ring"
@@ -473,6 +524,12 @@ want "a path in the name is refused" "not a sealed recording" "$ROOT/out"
 # kernel host's ring, which is the only ring on this machine that has cycles in it.
 "$SKYNET" blackbox events $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
 want "the event list answers" "in the ring" "$ROOT/out"
+# `--limit 500` rather than the default 50, and the reason is a real property of the route this
+# check had been quietly leaning on: `recording_started` is the *first* event in the ring and the
+# route answers with the *last* N, so the assertion only held while this suite produced fewer than
+# fifty events before reaching here. §38.1's three configuration changes above pushed it past that
+# and the check failed — correctly, about a route behaving exactly as specified.
+"$SKYNET" blackbox events --limit 500 $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
 want "and names an event this run produced" "recording_started" "$ROOT/out"
 
 # The route must not be taken for a file name. It sits above the download arm in both the router

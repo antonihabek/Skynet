@@ -96,7 +96,13 @@ pub fn handle<L: Launcher, S: Slots>(
     // carry no robot state — every number on the page arrives later, from a route that enforces
     // its own role — and a console you must authenticate to *load* is a console whose stop button
     // is behind a login form (§39).
-    if let Some(response) = crate::console::asset(&request.method, &segments) {
+    if let Some(response) = crate::console::asset(
+        &request.method,
+        &segments,
+        crate::settings::read(context.daemon.store.layout())
+            .settings
+            .console_theme,
+    ) {
         return response;
     }
 
@@ -104,6 +110,15 @@ pub fn handle<L: Launcher, S: Slots>(
         .credentials
         .role_of_header(request.header("authorization"));
     let needed = requirement(&request.method, &segments);
+
+    // The other half of the bench question: not *did it arrive* but *what did this robot make of
+    // my credential*. A 403 says the token was not enough; this says what it was taken for, which
+    // is the difference between "my token is wrong" and "I am using the wrong token".
+    crate::log_debug!(
+        "  credential reads as {}; this route wants {}",
+        role.as_str(),
+        needed.0.as_str()
+    );
 
     if !needed.satisfied_by(role) {
         // 401 when nothing was presented and 403 when something was: a client that sent no
@@ -214,6 +229,8 @@ pub fn handle<L: Launcher, S: Slots>(
         ("GET", ["session"]) => session_read(context),
         ("POST", ["session"]) => session_set(context, request),
         ("DELETE", ["session"]) => session_clear(context, request),
+        ("GET", ["settings"]) => settings_read(context),
+        ("POST", ["settings"]) => settings_write(context, request),
         ("GET", ["skills"]) => ok(context.daemon.skills.to_json()),
         ("GET", ["skills", id]) => match context.daemon.skills.get(id) {
             Some(invocation) => ok(invocation.to_json()),
@@ -265,6 +282,7 @@ fn known_path(segments: &[&str]) -> bool {
             | ["releases"]
             | ["telemetry"]
             | ["session"]
+            | ["settings"]
             | ["skills"]
             | ["skills", _]
             | ["skills", _, _]
@@ -1886,6 +1904,250 @@ pub fn live_session(layout: &crate::layout::Layout) -> Option<crate::session::St
     match crate::session::read(layout, wall_ms() as i64) {
         crate::session::Reading::Live(stored) => Some(stored),
         _ => None,
+    }
+}
+
+/// §38.1's unsigned local configuration, read.
+///
+/// Reports **every** setting, including the ones nobody chose, with the value in force and whether
+/// it is a default. A page that listed only what somebody had set would answer "what did I change"
+/// and never "what is this robot doing", and the second is the question somebody at a bench has.
+fn settings_read<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Response {
+    let layout = context.daemon.store.layout();
+    ok(settings_json(&crate::settings::read(layout)))
+}
+
+/// One reading, rendered.
+fn settings_json(reading: &crate::settings::Reading) -> Json {
+    let mut list = Json::arr();
+    for setting in crate::settings::Setting::ALL {
+        let mut entry = Json::obj();
+        entry.set("setting", Json::from(setting.as_str()));
+        entry.set(
+            "value",
+            Json::from(reading.settings.value_of(setting).as_str()),
+        );
+        entry.set(
+            "default",
+            Json::from(crate::settings::default_of(setting).as_str()),
+        );
+        entry.set("is_default", Json::Bool(!reading.was_set(setting)));
+        // §38.3's provenance, and §38.3's word for one nobody recorded. A setting at its default
+        // has none at all — nobody set it, so there is no "who" to be missing.
+        match reading.provenance(setting) {
+            Some(provenance) => {
+                entry.set("set_by", Json::from(provenance.set_by_or_unrecorded()));
+                entry.set(
+                    "set_at_ms",
+                    match provenance.set_at_ms {
+                        Some(at) => Json::Num(at as f64),
+                        None => Json::Null,
+                    },
+                );
+            }
+            None => {
+                entry.set("set_by", Json::Null);
+                entry.set("set_at_ms", Json::Null);
+            }
+        }
+        entry.set("choices", settings_choices(setting));
+        list.push(entry);
+    }
+
+    let mut body = Json::obj();
+    body.set("settings", list);
+    // Anything on the disk this robot could not use. Never dropped: a setting somebody wrote and
+    // this robot ignored is the fact they are missing.
+    let mut notes = Json::arr();
+    for note in &reading.notes {
+        notes.push(Json::from(note.as_str()));
+    }
+    body.set("notes", notes);
+    body
+}
+
+/// What one setting will accept, so a form can offer it rather than guess.
+fn settings_choices(setting: crate::settings::Setting) -> Json {
+    let mut choices = Json::arr();
+    match setting {
+        crate::settings::Setting::LogLevel => {
+            for level in crate::settings::Level::ALL {
+                choices.push(Json::from(level.as_str()));
+            }
+        }
+        crate::settings::Setting::ConsoleTheme => {
+            for theme in crate::settings::Theme::ALL {
+                choices.push(Json::from(theme.as_str()));
+            }
+        }
+        // A range rather than a list. Sixty entries in a dropdown is a list nobody reads.
+        crate::settings::Setting::TelemetrySampling => {
+            choices.push(Json::from("1"));
+            choices.push(Json::from(
+                crate::settings::MAX_SAMPLING.to_string().as_str(),
+            ));
+        }
+    }
+    choices
+}
+
+/// §38.1's unsigned local configuration, changed.
+///
+/// One route for both setting and resetting, distinguished by `reset` in the body, rather than a
+/// `DELETE` carrying the name of what to delete. Two reasons: a `DELETE /settings` with no body
+/// would read as *reset everything*, which is not an operation anybody asked for and is one keystroke
+/// from being performed by accident; and a body-bearing `DELETE` is the shape most HTTP clients
+/// handle worst.
+fn settings_write<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    request: &Request,
+) -> Response {
+    let Ok(text) = std::str::from_utf8(&request.body) else {
+        return error(400, "the body is not UTF-8");
+    };
+    let Ok(document) = Json::parse(text) else {
+        return error(400, "the body is not JSON");
+    };
+    let Some(key) = document.get_present("setting").and_then(Json::as_str) else {
+        return error(
+            400,
+            "expected `setting` — one of log_level, telemetry_sampling, console_theme",
+        );
+    };
+    let setting = match crate::settings::Setting::of(key) {
+        Ok(setting) => setting,
+        Err(said) => return error(400, &said),
+    };
+    let reset = document
+        .get_present("reset")
+        .and_then(Json::as_bool)
+        .unwrap_or(false);
+
+    let now_ms = wall_ms() as i64;
+    let actor = actor_of(context, request);
+    let layout = context.daemon.store.layout().clone();
+
+    let outcome = if reset {
+        crate::settings::clear(&layout, setting).map(|change| (change, true))
+    } else {
+        let Some(value) = settings_value_word(&document) else {
+            return error(
+                400,
+                "expected `value` — the new value, or `reset` to put this setting back to its default",
+            );
+        };
+        crate::settings::set(&layout, setting, &value, &actor, now_ms)
+            .map(|change| (Some(change), false))
+    };
+
+    let (change, was_reset) = match outcome {
+        Ok(pair) => pair,
+        Err(refusal) => {
+            let status = match refusal {
+                crate::settings::Refusal::Write(_) => 500,
+                _ => 400,
+            };
+            return error(status, &refusal.detail());
+        }
+    };
+
+    if let Some(change) = &change {
+        settings_recorded(context, change, &actor, was_reset);
+    }
+    // Take effect now rather than on the next reconcile pass. The route runs in the daemon's own
+    // process, so an operator who turns the log level up and reads the next line should see it —
+    // and a setting that needs ten seconds to apply is one somebody sets twice.
+    crate::log::refresh(&layout);
+
+    let reading = crate::settings::read(&layout);
+    let mut body = settings_json(&reading);
+    let detail = match &change {
+        None => "That setting was already at its default. Nothing changed.".to_string(),
+        Some(change) if !change.moved() => format!(
+            "`{}` was already {}. Nothing changed, and the asking is recorded.",
+            change.setting.as_str(),
+            change.to
+        ),
+        Some(change) => format!(
+            "`{}` is {} — it was {}{}.",
+            change.setting.as_str(),
+            change.to,
+            change.from,
+            if change.from_was_default {
+                " (the default)"
+            } else {
+                ""
+            }
+        ),
+    };
+    body.set("detail", Json::Str(detail));
+    ok(body)
+}
+
+/// The new value out of the body, as a word.
+///
+/// A number is accepted as readily as a string, because `{"value": 4}` for a sampling rate is what
+/// anybody would write and refusing it would be pedantry with a 400 attached.
+fn settings_value_word(document: &Json) -> Option<String> {
+    let value = document.get_present("value")?;
+    if let Some(word) = value.as_str() {
+        return Some(word.to_string());
+    }
+    let number = value.as_f64()?;
+    Some(if number.is_finite() && number.fract() == 0.0 {
+        format!("{}", number as i64)
+    } else {
+        format!("{number}")
+    })
+}
+
+/// §38.3's two records for one change to a setting.
+///
+/// The same pair the session override writes, and for the same reason: the audit log is what an
+/// operator reads afterwards and the black box is what an investigator reads beside the cycles. A
+/// robot whose telemetry sampling changed at 14:02 is a fact whose value is being beside 14:02.
+fn settings_recorded<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    change: &crate::settings::Change,
+    actor: &str,
+    was_reset: bool,
+) {
+    let line = if was_reset {
+        format!(
+            "setting {} reset to its default, {}",
+            change.setting.as_str(),
+            change.to
+        )
+    } else {
+        format!("setting {} set to {}", change.setting.as_str(), change.to)
+    };
+
+    let layout = context.daemon.store.layout().clone();
+    // §38.3's previous value. The value in force before, which on a robot nobody had configured is
+    // the default — said so, because "it was info" and "nobody had ever chosen" are different
+    // facts and only one of them is a change somebody made.
+    let was = if change.from_was_default {
+        format!("{} (the default)", change.from)
+    } else {
+        change.from.clone()
+    };
+    let _ = crate::audit::Audit::of(&layout).append(
+        &crate::audit::rfc3339(wall_ms()),
+        actor,
+        "setting",
+        change.setting.as_str(),
+        &line,
+        Some(&was),
+    );
+
+    let mono_ns = context.mono_ns;
+    if let Some(recorder) = context.blackbox.as_mut() {
+        let _ = recorder.event(
+            mono_ns,
+            skynet_blackbox::record::EventCode::ConfigChanged,
+            "operator",
+            &line,
+        );
     }
 }
 

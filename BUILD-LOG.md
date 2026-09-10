@@ -8427,3 +8427,147 @@ and is stated in `desktop/README.md` under *What is not here* rather than implie
 `dotnet build -p:Platform=x64` on Windows settles both.
 
 Nothing is pushed.
+
+# Round thirty-nine — §38.1's other half, and the two UI questions that had evidence-based answers
+
+Three things this round, and the first is the one round thirty-eight left at the top of its own
+list.
+
+## §38.1's unsigned local configuration
+
+> *"Non-safety configuration — log level, telemetry sampling, console theme — is unsigned and
+> local. The line between the two is drawn by whether the value can reach the kernel."*
+
+There was no route, no verb and no file for any of the three. `log_level` did not exist as a
+concept: the daemon had seventy-two `eprintln!` calls and no notion of a level to filter them by,
+so a robot in production said exactly as much as a robot on a bench, and neither could be told to
+say more.
+
+### The line, made mechanical rather than left in prose
+
+The interesting design question is not where to put the file. It is that §38.1 states a **rule about
+which values may live in it**, and a rule stated in prose is one a later hand widens without
+noticing — the same shape as the stale-document failure round thirty-seven spent its whole audit
+on, one level down.
+
+So the store holds a **closed set**. `Setting` is an enum with three variants and there is no code
+path that writes a key it does not name. That is the enforcement, and it is worth being precise
+about why it is the right one: a *blocklist* of kernel-reaching names would have to be kept in step
+with a kernel that grows, and the failure mode of falling behind is an unsigned path to a ceiling.
+An *allowlist of three* cannot fall behind anything.
+
+`Setting::of` does also recognise the kernel's own ceiling names, and the module says in as many
+words that this is **a courtesy and not a safety property**: somebody who types
+`joint_velocity_max_rad_s` gets the sentence naming where such a value does live — a signed profile
+(§38.1), or a session override (§38.2) — rather than a bare *unknown setting*. If that little list
+ever falls behind, the key is still refused; it is refused with the duller sentence.
+
+The property is pinned by a test that names itself: `no_value_the_kernel_enforces_can_be_written_here`.
+
+### Everything in it is read by something
+
+A settings store whose values nothing consults is a page of controls that lie, which §32.2 forbids
+in the plainest terms it uses anywhere. So each of the three was wired, and two of them needed real
+work rather than a lookup:
+
+* **`log_level`** meant building a level at all. `crate::log` holds one process-global atomic;
+  twenty-nine of the daemon's running-path messages were classified and converted. Deliberately
+  **not** converted: the `skynetd credential`, `skynetd trust` and usage output. Those are command
+  output, not logging, and a log level that silenced `skynetd trust add`'s error message would be a
+  bug wearing a feature's clothes.
+
+  Two consequences were written down rather than left to be discovered. A change through
+  `POST /settings` takes effect **immediately** — the route runs in the daemon's process and sets
+  the atomic — while a change made by editing the file takes effect **on the next reconcile pass**,
+  up to ten seconds. And the output is byte-identical to what it was: a message that prints at all
+  prints `skynetd: …` with no level tag, because the end-to-end suite greps that prefix and a log
+  line's shape is an interface even where nobody wrote it down as one.
+
+  `debug` had to be worth turning on, or one of the four values would do nothing. It now prints one
+  line per request with the status, and one saying what the credential was taken for and what the
+  route wanted — which are the two questions actually asked at a bench: *did it arrive*, and *what
+  did this robot make of my token*.
+
+* **`telemetry_sampling`** makes windows **longer, never sparser**, and that is the whole design.
+  Dropping three windows in four would manufacture §47.4's *"gap that looks like a quiet period"* on
+  purpose. A window carries its own `from_ms`, `to_ms` and `elapsed_ms`, so a four-pass window is
+  self-describing and every counter in it is a sum over the interval it names. The implementation is
+  six lines at the close site: below the rate, return without closing, and the next pass keeps
+  counting into the same window.
+
+  Zero is refused rather than read as *off*, and the refusal says why: a robot that quietly stopped
+  sending windows reads on the Hub as a robot that stopped.
+
+* **`console_theme`** is pinned onto the served HTML rather than fetched by the page's script. A
+  page that fetched its own theme would render in the browser's colours and swap — and the swap is
+  most visible on exactly the machine the setting exists for, a bench under shop lighting with a
+  workstation configured dark. `Theme::System` substitutes nothing at all, so a robot nobody
+  configured serves the file byte for byte and `prefers-color-scheme` decides as before.
+
+  The substitution target is a constant, `ROOT_ELEMENT`, asserted against the page itself. Without
+  that assertion, reformatting `<html lang="en">` in `console.html` would leave the setting silently
+  doing nothing with the page still serving perfectly.
+
+### What the suite caught
+
+The e2e's `recording_started` check failed, and the code was right. `blackbox events` answers with
+the **last** N and defaults to fifty; the assertion had been leaning on this suite producing fewer
+than fifty events before reaching that line, and three configuration changes pushed it over. Fixed
+by asking for the events rather than by moving the section, with the dependency written down.
+
+The audit assertion failed for a better reason than it was written: the row says
+`"previous":"system (the default)"`, because *"it was system"* and *"nobody had ever chosen"* are
+different facts about a robot and §38.3 asks for the one actually in force. The assertion was wrong;
+the behaviour was right, and is now asserted under its own name.
+
+## The Console, and the two questions
+
+Both were asked as questions and both had answers that could be checked rather than asserted.
+
+**The Windows console's markup is in better shape than it looked**: 134 `ThemeResource` references,
+zero hardcoded colours, native WinUI controls throughout. Two real gaps, and one of them mattered:
+
+* **zero `KeyboardAccelerator`s.** §83.2 gives the stop a line of its own for being *always
+  reachable*, and the only route to it was the pointer — which is most of that sentence missing.
+  `Ctrl+Shift+S` now reaches it. It fires from inside a text box too, on the same argument §39.1
+  makes for the route being anonymous: an unintended stop costs a restart, and a stop that waits
+  costs whatever the robot was doing. It is a chord rather than a bare key only so that typing a
+  credential does not stop a robot. `Ctrl+.` was the first choice and was rejected on a fact rather
+  than a preference: the period is `VK_OEM_PERIOD`, `VirtualKey` has no name for it, and a numeric
+  `Key="190"` is not something the XAML enum converter accepts — a chord that fails to compile is
+  no keyboard route at all.
+* **zero `AutomationProperties`.** The decorative header glyph announced itself; the two progress
+  rings and the two buttons whose captions change had no stable name. Named now, and the glyph is
+  `AccessibilityView="Raw"`.
+
+**The Hub had no light theme at all, and the failure was visible rather than theoretical.** `Navbar`
+and `Footer` are rendered *inside* `.skynet` and are themed by `globals.css`, which carries 285
+light-mode overrides. `skynet.css` carried none. So a reader on light mode got a paper navbar, a
+paper footer, and a pure-black page between them.
+
+Fixed at the tokens rather than rule by rule. Four values had been written into rules instead of
+declared — a subnav hover at 5% white, a table rule at 4.5% white — and each was turned into a token
+first, because a list of per-rule light overrides is a list that grows. The light palette is built
+on the marketplace's own (`#f0ece4` here is `--app-bg` there) so the shell and the Hub agree by
+construction, and what does not come from there is Skynet's identity: the signal blue stays signal
+blue, darkened to `#1a56c4` because `#4d8dff` on paper is about 2.4:1 and fails every contrast rule
+there is.
+
+On the feature question: the Hub is complete against `docs/skynet-architecture.md` — its §6 API
+surface is built, and §9's phases A–G are **evidence gates against a deployed system**, which no
+repository can close by containing code. What it does not have is GitHub's *shape*: no issues, no
+notifications, no labels, no watch, no blame, no milestones, no command palette, no keyboard
+shortcuts. None of those is in the plan, and the plan is the standard this is measured against —
+but it is worth saying plainly that "complete against the plan" and "as good as GitHub" are two
+different sentences, and only the first is true.
+
+## Numbers
+
+| | before | after |
+|---|---|---|
+| `cargo test --workspace` | 1,775 | 1,807 |
+| `desktop/tests` | 190 | 205 |
+| CLI commands (§73) | 58 | 60 |
+
+`session` had never been listed in the CLI's own `USAGE` text — found while adding `settings`, and
+both are there now.

@@ -13877,3 +13877,264 @@ fn an_expired_override_reads_as_expired_and_stops_narrowing() {
         "and it does not claim the robot is held back"
     );
 }
+
+// ── §38.1's unsigned local configuration, over the local API ─────────────────
+
+/// A fixture with an operator credential, which is the role that changes a setting.
+fn configured(tag: &str) -> Fixture {
+    let mut fixture = Fixture::new(tag);
+    fixture.provision();
+    fixture.credentials.add(Credential::issue(
+        "bench",
+        Role::Operator,
+        "cc",
+        "operator-token",
+    ));
+    fixture
+}
+
+#[test]
+fn a_robot_nobody_configured_reports_every_setting_with_its_default() {
+    // Every one, not only the ones somebody set. A page listing only changes answers "what did I
+    // change" and never "what is this robot doing", and the second is the bench's question.
+    let mut fixture = configured("settings-defaults");
+    let (status, body) = fixture.request("GET", "/settings", Some("observer-token"), "");
+
+    assert_eq!(status, 200);
+    let settings = body
+        .get("settings")
+        .and_then(Json::as_arr)
+        .expect("settings");
+    assert_eq!(settings.len(), 3);
+    for entry in settings {
+        assert_eq!(entry.get("is_default").and_then(Json::as_bool), Some(true));
+        assert_eq!(
+            entry.get("value").and_then(Json::as_str),
+            entry.get("default").and_then(Json::as_str),
+            "a robot nobody configured runs its defaults"
+        );
+        // §38.3's provenance: absent, because nobody set it. Not "unrecorded" — there is no
+        // missing record here, there is no record because there was no decision.
+        assert!(matches!(entry.get("set_by"), Some(Json::Null)));
+        assert!(!entry
+            .get("choices")
+            .and_then(Json::as_arr)
+            .expect("choices")
+            .is_empty());
+    }
+    assert!(body
+        .get("notes")
+        .and_then(Json::as_arr)
+        .expect("notes")
+        .is_empty());
+}
+
+#[test]
+fn setting_the_console_theme_changes_the_page_the_robot_serves() {
+    // The test that would have caught a store nothing consults. `POST /settings` and the console
+    // asset route know nothing about each other; they meet in the served bytes, which is the only
+    // place the setting is worth anything.
+    let mut fixture = configured("settings-theme-serves");
+
+    let before = fixture.raw("GET", "/", None);
+    assert!(
+        !String::from_utf8_lossy(&before.body).contains("data-theme"),
+        "a robot at the default pins nothing and lets the browser decide"
+    );
+
+    let (status, body) = fixture.request(
+        "POST",
+        "/settings",
+        Some("operator-token"),
+        r#"{"setting":"console_theme","value":"light"}"#,
+    );
+    assert_eq!(status, 200, "{body:?}");
+
+    let after = fixture.raw("GET", "/", None);
+    assert!(
+        String::from_utf8_lossy(&after.body).contains("data-theme=\"light\""),
+        "the page the robot serves has to carry the theme somebody set"
+    );
+}
+
+#[test]
+fn setting_the_log_level_changes_what_this_process_prints() {
+    // The other half that has to meet: a value on disk and a process-global that decides whether a
+    // line is printed. The route sets it directly rather than waiting for a reconcile pass,
+    // because a level that took ten seconds to apply is one somebody sets twice.
+    let _guard = crate::log::TEST_LOCK
+        .lock()
+        .unwrap_or_else(|held| held.into_inner());
+    let mut fixture = configured("settings-log-level");
+    let restore = crate::log::level();
+
+    assert!(crate::log::enabled(crate::log::Level::Info));
+    assert!(!crate::log::enabled(crate::log::Level::Debug));
+
+    let (status, _) = fixture.request(
+        "POST",
+        "/settings",
+        Some("operator-token"),
+        r#"{"setting":"log_level","value":"debug"}"#,
+    );
+    assert_eq!(status, 200);
+    assert!(
+        crate::log::enabled(crate::log::Level::Debug),
+        "the route has to take effect in this process, not on the next pass"
+    );
+
+    fixture.request(
+        "POST",
+        "/settings",
+        Some("operator-token"),
+        r#"{"setting":"log_level","value":"error"}"#,
+    );
+    assert!(!crate::log::enabled(crate::log::Level::Warn));
+
+    crate::log::set_level(restore);
+}
+
+#[test]
+fn a_value_the_kernel_enforces_is_refused_by_the_route_as_well_as_by_the_store() {
+    // §38.1's line, reached over HTTP. The store is where it is enforced; this asserts that the
+    // route does not have a path around it.
+    let mut fixture = configured("settings-kernel-key");
+    let (status, body) = fixture.request(
+        "POST",
+        "/settings",
+        Some("operator-token"),
+        r#"{"setting":"joint_velocity_max_rad_s","value":"99"}"#,
+    );
+
+    assert_eq!(status, 400);
+    let detail = body
+        .get("detail")
+        .and_then(Json::as_str)
+        .unwrap_or_default();
+    assert!(detail.contains("Safety Kernel"), "detail: {detail}");
+    assert!(
+        detail.contains("§38.2"),
+        "it should say where such a value lives: {detail}"
+    );
+}
+
+#[test]
+fn changing_a_setting_needs_an_operator_and_reading_one_does_not() {
+    let mut fixture = configured("settings-roles");
+
+    let (read, _) = fixture.request("GET", "/settings", Some("observer-token"), "");
+    assert_eq!(read, 200, "an observer may see what this robot is set to");
+
+    let (write, _) = fixture.request(
+        "POST",
+        "/settings",
+        Some("observer-token"),
+        r#"{"setting":"log_level","value":"debug"}"#,
+    );
+    assert_eq!(write, 403, "an observer may not change one");
+
+    let (anonymous, _) = fixture.request("GET", "/settings", None, "");
+    assert_eq!(
+        anonymous, 401,
+        "and §39.2 gives an unprovisioned caller nothing here"
+    );
+}
+
+#[test]
+fn resetting_puts_one_back_and_says_so_without_claiming_it_moved_something() {
+    let mut fixture = configured("settings-reset");
+    fixture.request(
+        "POST",
+        "/settings",
+        Some("operator-token"),
+        r#"{"setting":"console_theme","value":"dark"}"#,
+    );
+
+    let (status, body) = fixture.request(
+        "POST",
+        "/settings",
+        Some("operator-token"),
+        r#"{"setting":"console_theme","reset":true}"#,
+    );
+    assert_eq!(status, 200);
+    assert!(
+        body.get("detail")
+            .and_then(Json::as_str)
+            .unwrap_or_default()
+            .contains("was dark"),
+        "{body:?}"
+    );
+
+    let (_, again) = fixture.request(
+        "POST",
+        "/settings",
+        Some("operator-token"),
+        r#"{"setting":"console_theme","reset":true}"#,
+    );
+    assert!(
+        again
+            .get("detail")
+            .and_then(Json::as_str)
+            .unwrap_or_default()
+            .contains("already at its default"),
+        "{again:?}"
+    );
+}
+
+#[test]
+fn every_change_leaves_the_audit_entry_and_the_previous_value_it_owes() {
+    // §38.3: *"every change is a black box event and an audit-log entry, carrying who, when, which
+    // layer, and the previous value."* On a robot nobody had configured, the previous value is the
+    // default — said so, because "it was info" and "nobody had ever chosen" differ.
+    let mut fixture = configured("settings-audit");
+    fixture.request(
+        "POST",
+        "/settings",
+        Some("operator-token"),
+        r#"{"setting":"telemetry_sampling","value":6}"#,
+    );
+    fixture.request(
+        "POST",
+        "/settings",
+        Some("operator-token"),
+        r#"{"setting":"telemetry_sampling","value":12}"#,
+    );
+
+    let entries = crate::audit::Audit::of(fixture.daemon.store.layout())
+        .read()
+        .entries;
+    let ours: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.action == "setting")
+        .collect();
+    assert_eq!(ours.len(), 2, "one entry per change");
+    assert_eq!(ours[0].previous.as_deref(), Some("1 (the default)"));
+    assert_eq!(ours[1].previous.as_deref(), Some("6"));
+    assert!(ours[1].detail.contains("telemetry_sampling"));
+    // §39.2's credentials name a role and never a person, and the record says a role.
+    assert!(
+        ours[0].actor.contains("operator"),
+        "actor: {}",
+        ours[0].actor
+    );
+}
+
+#[test]
+fn a_setting_written_by_hand_that_this_build_cannot_use_is_reported_on_the_route() {
+    // Never swallowed. Somebody wrote that key expecting something to happen.
+    let mut fixture = configured("settings-notes");
+    std::fs::write(
+        fixture.daemon.store.layout().settings(),
+        r#"{"log_level":"chatty"}"#,
+    )
+    .expect("write");
+
+    let (status, body) = fixture.request("GET", "/settings", Some("observer-token"), "");
+    assert_eq!(status, 200, "a bad setting does not break the route");
+    let notes = body.get("notes").and_then(Json::as_arr).expect("notes");
+    assert_eq!(notes.len(), 1);
+    assert!(notes[0]
+        .as_str()
+        .unwrap_or_default()
+        .contains("error, warn, info, debug"));
+}
