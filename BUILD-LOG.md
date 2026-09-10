@@ -8114,3 +8114,118 @@ What it adds is a rule, and it is the third round in a row to earn one:
 > ceilings are.
 
 Nothing is committed. Nothing is pushed.
+
+---
+
+# Round thirty-seven — the audit, run on a machine that is not the one the last four rounds ran on
+
+Asked to establish what is left before writing anything, because the plan *might be finished*. No
+code this round. Every item below was checked against **this** tree and **this** machine rather
+than against the prose that claims it, which is round thirty-three's rule and the one three rounds
+running have earned.
+
+The machine matters more than usual this time, and it is the round's largest finding.
+
+## What was run, and what it said
+
+| | |
+|---|---|
+| `cargo test --workspace` | **1,739 passed**, exit 0, on Linux |
+| `sh crates/skynetd-io/e2e.sh` | **117 checks, 0 failed** — every one that does not need a systemd user manager, which this container has no PID 1 for. The script says so itself rather than passing quietly |
+| `node tools/scale-report.mjs --check` | §73 matches the tree at all eight figures |
+| `node tools/check-mirrors.mjs` | all three shared documents match |
+| `node tools/check-contract-mirrors.mjs` | all eighteen contracts match |
+| `node tools/check-golden-path.mjs` | every link resolves, every make target exists, every command is one of the 55 |
+| `node tools/check-rhal-flags.mjs` | every flag accounted for across the four bindings |
+| Hub: `npx tsc --noEmit` | **exit 0** |
+| Hub: `npx vitest run` | **1,963 passed**, 93 files, exit 0 |
+| Hub: routes, migrations | **95** routes under `/api/skynet/v1`, **29** migrations (27 Skynet) |
+
+## The finding: the environment blocker is gone, and nobody has noticed yet
+
+Round thirty-four wrote down the reason §10's pairing and the supervised loop had not met a real
+Hub, and it was a fact about a particular machine rather than about the code:
+
+> *"`skynetd` serves on a Unix socket and launches through systemd, so the daemon proper runs in
+> WSL. The Hub runs on Windows. **WSL cannot reach the Windows host on this machine** … So the
+> crossing runs entirely on Windows, through `skynetd once`."*
+
+`scripts/skynet-verify-recordings-robot.mjs` says the same thing in its own header — *"§10's
+pairing runs over `skynetd`'s Unix socket, which does not exist on Windows"*.
+
+**This session is one Linux host with both repositories checked out on it, a working Docker
+daemon, `psql`, and Node.** The daemon's socket exists here; the e2e proves it by talking to a
+running `skynetd` over it 117 times. Nothing has to cross a firewall, because there is no second
+machine. So the item round thirty-four left — *the daemon ran single passes, not the supervised
+loop, and §10's pairing did not run* — is the first thing on the list that is neither a vendor's,
+a machine's nor the owner's **on this machine**, and it has been carried as blocked for three
+rounds on a blocker that was never about the code.
+
+What still has to be true for it: a real Supabase behind the Hub, which means image pulls. That is
+the first thing to try rather than the thing to assume.
+
+## Three documents behind the tree, again
+
+The failure §73's own header is written against, and the third round in a row to find it.
+
+* **`PROGRESS.md` is six rounds behind.** `docs/README.md` names it the OS repository's log —
+  *"Where progress is logged: in `PROGRESS.md`, here"* — and this file's own header says its
+  findings *"are folded into those two when a round closes"*. Rounds thirty-one through
+  thirty-six are closed and none of them is in it: the last entry is the seventy-second,
+  2026-09-07, §27's `policy`. Missing from the canonical log: §47.6's mapping half, the second
+  supervisor, the audit, §79's two halves meeting, `skynet doctor` and a black box that can be
+  read, and replay. A reader of the repository's own log would plan around six rounds of holes.
+* **`desktop/README.md`'s *"What is not here"* names three things that were built on 2026-09-09.**
+  It says *"no tray icon and no global hotkey"* — `windows/Services/TrayIcon.cs` and `TrayStop.cs`
+  are in the tree with twelve tests — and *"no black box replay"*, which the same file describes
+  at length two hundred lines earlier under a heading of its own. The stale half and the current
+  half are in one document, which is the shape that costs a reader the most.
+* **Its pane count is wrong in both directions.** The same file says *"one of five panes"* in one
+  place and *"macOS is seven panes and two features behind"* in another; `DetailPane` has five
+  values and macOS has none of them. Session thirty-two's log said *"six panes and a tray"*. Three
+  numbers, one enum, and the enum is two lines long.
+
+## And one correction to the Hub's own log, in the other direction
+
+Session thirty-two recorded `tsc --noEmit` as *"carrying eight errors — all of them in
+`lib/__tests__/semantic-vector-store.test.ts`"*. It carries **none**; the file typechecks. Whatever
+closed it was the owner's marketplace work in the commits after that session, and it is worth
+recording that a stale *"still broken"* is the same defect as a stale *"still missing"* — a reader
+believes it for free, and it makes the tree look worse than it is instead of better.
+
+## The list, restated against this tree
+
+**Buildable here, on this machine, needing nobody:** the three documents above, and §10's pairing
+plus the supervised loop against a real Hub if Supabase will come up.
+
+**A vendor's:** a capture backend to fill §47.6's pool; inference on what it captures; one real
+RHAL driver.
+
+**The owner's:** a third language edition; the countersignature on a conformance result (§80, and
+§83.4 makes an operator attestation a third claim again); which robot data survives a marketplace
+listing (`20260905200100_marketplace_listing_transactions.sql`).
+
+**Hardware's:** a physical joint under the kernel; a TPM for `security.identity.attested`; an OTA
+image this Hub has applied; three of §15's eight runtime tests; the certified tier's MCU and its
+notified body; `vram_mb` and the `DeviceAllow` behind it.
+
+**The Hub's infrastructure, and correctly queued rather than faked:** Phase 10's real worker (the
+in-process runner does dataset-index and search-reindex and says so in its own header), Phase 11's
+GPU training, inference endpoints and Spaces, and Phase 12's teleoperation session.
+
+**The Console's:** USB and serial (no route on the robot to talk to); signing, notarisation and the
+installer (certificates, and `CONSOLE_RELEASES` is deliberately empty until a pipeline fills it);
+macOS, which has never been compiled and cannot be compiled here either — SwiftUI, `Network` and
+`WKWebView` are Apple frameworks and this is a Linux container.
+
+**Designed-open on purpose:** §30, §43, §53, §58.3, unchanged.
+
+## One thing about the state of the branch, which neither log says
+
+Both logs end *"Nothing is committed. Nothing is pushed."* Both are out of date: this repository has
+**33 commits** past `origin/main` and BotMarket **27**, and in both cases `origin/claude/vibrant-ramanujan-wif8q6`
+is level with `HEAD` — so the work is on the remote already, on a branch rather than on `main`.
+Nothing has been merged. Said here because a sentence claiming nothing is pushed is exactly the kind
+of sentence somebody plans around.
+
+Nothing is committed this round. Nothing is pushed.
