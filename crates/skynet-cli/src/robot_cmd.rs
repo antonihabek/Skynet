@@ -74,6 +74,11 @@ skynet — talking to a running robot (§33.7)
   skill run <ns/name> [--args <json>] [--parent <inv-id>] [--overrun <factor>]
                               Invoke a skill; needs operator
   skill stop <inv-id>         Make a running skill return; needs operator
+  calibration                 §45: which parameter sets are believed, and which guards lost
+                              their input because one is not
+  calibration event <event> [--note WHY]
+                              Record an impact, a tool change or a swap (§45.4). It expires
+                              every calibration whose policy names it; re-measuring clears it
   session                     §38.2's session override: what is narrowing this robot now
   session set --for <90s|20m|2h> [--velocity R] [--torque N] [--base M] [--jerk F]
               [--name NAME] [--reason WHY]
@@ -175,6 +180,7 @@ pub fn run(command: &str, argv: &[String]) -> i32 {
         "grants" => grants(argv),
         "session" => session(argv),
         "settings" => settings(argv),
+        "calibration" => calibration(argv),
         "rollback" => rollback(argv),
         "install" => install(argv),
         "blackbox" => blackbox(argv),
@@ -1308,6 +1314,121 @@ fn session(argv: &[String]) -> i32 {
         Some(other) => term::fail(&format!(
             "`{other}` is not a session command. Try `skynet session`, `skynet session set` or `skynet session clear`."
         )),
+    }
+}
+
+/// `skynet calibration` — §45, from the machine.
+///
+///     skynet calibration                     what is believed, and which guards lost their input
+///     skynet calibration event collision     record an impact (§45.4)
+///
+/// The report existed on the robot and nothing on a bench could ask for it, which is half of §45's
+/// value missing: *"an expired extrinsic disables the proximity guard"* is a statement an operator
+/// can act on only if somebody tells them.
+///
+/// **Recording an event is the one write here, and it only ever takes trust away.** §45.4: *"a
+/// robot that has just hit something has, by definition, possibly moved its cameras, and continuing
+/// to trust yesterday's extrinsics is exactly the wrong response to an impact."* There is
+/// deliberately no verb that clears one — re-measuring the set is what clears it, which is the
+/// thing that was actually supposed to happen.
+fn calibration(argv: &[String]) -> i32 {
+    let args = positional(argv);
+    match args.first().map(|s| s.as_str()) {
+        None => show(argv, "GET", "/calibration", None, print_calibration),
+        Some("event") => {
+            let Some(event) = args.get(1) else {
+                return term::fail(concat!(
+                    "skynet calibration event <event> [--note WHY]\n\n",
+                    "§45.4's five: collision, estop_under_load, tool_change, driver_replaced, ",
+                    "mainboard_swap.\n",
+                    "Recording one expires every calibration measured before now whose policy ",
+                    "names it. Re-measuring the set is what clears it."
+                ));
+            };
+            let mut document = Json::obj();
+            document.set("event", Json::from(event.as_str()));
+            if let Some(note) = flag(argv, "--note") {
+                document.set("note", Json::from(note.as_str()));
+            }
+            show(
+                argv,
+                "POST",
+                "/calibration/events",
+                Some(document.to_canonical().unwrap_or_default()),
+                print_calibration,
+            )
+        }
+        Some(other) => term::fail(&format!(
+            "`{other}` is not a calibration command. Try `skynet calibration` or `skynet calibration event`."
+        )),
+    }
+}
+
+/// What `GET /calibration` and `POST /calibration/events` answer.
+///
+/// The guards come last and are the part worth reading. A table of parameter sets is a table of
+/// nouns; *"proximity is unavailable because camera_extrinsics expired"* is the sentence §45.2's
+/// table exists to make sayable.
+fn print_calibration(document: &Json) {
+    if let Some(detail) = document.get_present("detail").and_then(Json::as_str) {
+        println!("{} {detail}\n", term::ok("✓"));
+    }
+
+    for row in document.arr_or_empty("sets") {
+        let set = row.get("set").and_then(Json::as_str).unwrap_or("");
+        let state = row.get("state").and_then(Json::as_str).unwrap_or("");
+        let mark = if state == "valid" {
+            term::ok("✓")
+        } else if state == "absent" {
+            term::dim("·")
+        } else {
+            term::warn("!")
+        };
+        // The reason beside the state, because §45.4's conditions are the whole policy: `expired`
+        // on its own does not say whether this robot drifted, was hit, or simply got old, and the
+        // three have different fixes.
+        let reason = row
+            .get_present("reason")
+            .and_then(Json::as_str)
+            .map(|reason| format!(" ({reason})"))
+            .unwrap_or_default();
+        println!("  {mark} {set:<20} {state}{reason}");
+        if let Some(detail) = row.get_present("detail").and_then(Json::as_str) {
+            if !detail.is_empty() {
+                println!("      {}", term::dim(&term::wrap(detail, 6)));
+            }
+        }
+    }
+
+    let unavailable = document.arr_or_empty("unavailable");
+    if unavailable.is_empty() {
+        println!("\n{}", term::dim("no guard has lost its input"));
+    } else {
+        println!("\n{}", term::bold("guards without their input (§45.5)"));
+        for entry in unavailable {
+            println!(
+                "  {} {:<16} {}",
+                term::warn("!"),
+                entry.get("guard").and_then(Json::as_str).unwrap_or(""),
+                term::dim(entry.get("detail").and_then(Json::as_str).unwrap_or(""))
+            );
+        }
+    }
+
+    // What this robot could not measure, which is the difference between a robot that drifted and
+    // one that cannot tell. §45.4's rule is that a missing current reading expires a record rather
+    // than extending it, so this list explains expiries that are about the robot and not the work.
+    let unmeasured = document.arr_or_empty("unmeasured");
+    if !unmeasured.is_empty() {
+        let names: Vec<&str> = unmeasured.iter().filter_map(Json::as_str).collect();
+        println!(
+            "\n{}",
+            term::dim(&format!(
+                "this robot cannot read: {} — a missing reading expires a record rather than \
+                 extending it (§45.4)",
+                names.join(", ")
+            ))
+        );
     }
 }
 

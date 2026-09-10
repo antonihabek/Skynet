@@ -14138,3 +14138,216 @@ fn a_setting_written_by_hand_that_this_build_cannot_use_is_reported_on_the_route
         .unwrap_or_default()
         .contains("error, warn, info, debug"));
 }
+
+// ── §45.4's event triggers, over the local API ───────────────────────────────
+
+/// A robot with one camera-extrinsics record, measured `age_s` ago, that a collision invalidates.
+///
+/// The set is chosen from §45.2's own table: extrinsics drift with *"vibration, thermal cycling,
+/// knocks"* and feed `proximity` and `workspace`, which is exactly §45.1's opening failure — a
+/// camera four centimetres out means the proximity guard measures separation to the wrong place
+/// while reporting perfectly healthy.
+fn calibrated(tag: &str, age_s: f64) -> Fixture {
+    let mut fixture = Fixture::new(tag);
+    fixture.provision();
+    fixture.credentials.add(Credential::issue(
+        "bench",
+        Role::Operator,
+        "cc",
+        "operator-token",
+    ));
+
+    let directory = fixture.daemon.store.layout().calibration();
+    std::fs::create_dir_all(&directory).expect("calibration directory");
+    let now_s = crate::api::wall_ms() as f64 / 1000.0;
+    std::fs::write(
+        directory.join("camera_extrinsics.json"),
+        format!(
+            "{{\"set\":\"camera_extrinsics\",\"method\":\"charuco-12x9, 40 poses\",\
+              \"residual\":0.4,\"residual_threshold\":1,\"operator\":\"alice\",\
+              \"conditions\":{{\"at_s\":{}}},\
+              \"policy\":{{\"invalidating_events\":[\"collision\"]}}}}",
+            now_s - age_s
+        ),
+    )
+    .expect("record");
+    fixture
+}
+
+fn validity_of(body: &Json, set: &str) -> Option<String> {
+    body.get("sets")
+        .and_then(Json::as_arr)?
+        .iter()
+        .find(|row| row.get("set").and_then(Json::as_str) == Some(set))
+        .and_then(|row| row.get("state").and_then(Json::as_str))
+        .map(str::to_string)
+}
+
+/// Why one set is in the state it is, from §45.4's closed vocabulary.
+fn expiry_reason_of(body: &Json, set: &str) -> Option<String> {
+    body.get("sets")
+        .and_then(Json::as_arr)?
+        .iter()
+        .find(|row| row.get("set").and_then(Json::as_str) == Some(set))
+        .and_then(|row| row.get_present("reason").and_then(Json::as_str))
+        .map(str::to_string)
+}
+
+#[test]
+fn recording_a_collision_expires_the_calibrations_it_could_have_disturbed() {
+    // The whole point, end to end, and the thing that was unreachable: `events_since` came from the
+    // stored record and from nowhere else, so a collision that happened this morning invalidated
+    // nothing. Neither route knows about the other — they meet in `evaluate`, which is the only
+    // place a calibration's validity is decided.
+    let mut fixture = calibrated("calibration-event-expires", 3_600.0);
+
+    let (before, body) = fixture.request("GET", "/calibration", Some("observer-token"), "");
+    assert_eq!(before, 200);
+    assert_eq!(
+        validity_of(&body, "camera_extrinsics").as_deref(),
+        Some("valid"),
+        "the fixture would prove nothing otherwise"
+    );
+
+    let (status, answered) = fixture.request(
+        "POST",
+        "/calibration/events",
+        Some("operator-token"),
+        r#"{"event":"collision","note":"clipped the fixture"}"#,
+    );
+    assert_eq!(status, 200, "{answered:?}");
+    // The status comes straight back, so the answer is *which sets this retired* rather than an
+    // acknowledgement the operator has to follow with a second request.
+    assert_eq!(
+        validity_of(&answered, "camera_extrinsics").as_deref(),
+        Some("expired")
+    );
+    // The reason as well as the state, from §45.4's closed vocabulary. `expired` on its own would
+    // pass for a record that had simply aged out, which is a different fact and a different fix.
+    assert_eq!(
+        expiry_reason_of(&answered, "camera_extrinsics").as_deref(),
+        Some("event")
+    );
+
+    let (_, after) = fixture.request("GET", "/calibration", Some("observer-token"), "");
+    assert_eq!(
+        validity_of(&after, "camera_extrinsics").as_deref(),
+        Some("expired"),
+        "and it stays expired on the next read, because the journal is on the disk"
+    );
+}
+
+#[test]
+fn a_calibration_measured_after_the_impact_is_not_invalidated_by_it() {
+    // Without this rule re-measuring would be impossible: the set would expire again the instant it
+    // was written, and there would be no way to clear an impact off a robot.
+    let mut fixture = calibrated("calibration-event-after", 3_600.0);
+    fixture.request(
+        "POST",
+        "/calibration/events",
+        Some("operator-token"),
+        r#"{"event":"collision"}"#,
+    );
+
+    // The same robot, re-measured now — which is what an engineer does after an impact.
+    let directory = fixture.daemon.store.layout().calibration();
+    let now_s = crate::api::wall_ms() as f64 / 1000.0;
+    std::fs::write(
+        directory.join("camera_extrinsics.json"),
+        format!(
+            "{{\"set\":\"camera_extrinsics\",\"method\":\"charuco-12x9, 40 poses\",\
+              \"residual\":0.4,\"residual_threshold\":1,\"operator\":\"alice\",\
+              \"conditions\":{{\"at_s\":{}}},\
+              \"policy\":{{\"invalidating_events\":[\"collision\"]}}}}",
+            now_s + 60.0
+        ),
+    )
+    .expect("re-measured");
+
+    let (_, after) = fixture.request("GET", "/calibration", Some("observer-token"), "");
+    assert_eq!(
+        validity_of(&after, "camera_extrinsics").as_deref(),
+        Some("valid"),
+        "re-measuring has to be able to clear an impact"
+    );
+}
+
+#[test]
+fn an_event_a_records_policy_does_not_name_leaves_it_alone() {
+    // §45.4 invalidates *"the calibrations the impact could plausibly have disturbed"*, and which
+    // those are is the record's own policy to say — it was written by whoever knew the method. A
+    // tool change does not move a camera.
+    let mut fixture = calibrated("calibration-event-unrelated", 3_600.0);
+
+    let (status, answered) = fixture.request(
+        "POST",
+        "/calibration/events",
+        Some("operator-token"),
+        r#"{"event":"tool_change"}"#,
+    );
+    assert_eq!(status, 200);
+    assert_eq!(
+        validity_of(&answered, "camera_extrinsics").as_deref(),
+        Some("valid")
+    );
+}
+
+#[test]
+fn an_event_this_vocabulary_does_not_have_is_refused_by_the_route() {
+    // A `collison` recorded with a typo matches no policy and invalidates nothing, leaving an
+    // operator believing they have flagged an impact.
+    let mut fixture = calibrated("calibration-event-typo", 60.0);
+    let (status, body) = fixture.request(
+        "POST",
+        "/calibration/events",
+        Some("operator-token"),
+        r#"{"event":"collison"}"#,
+    );
+
+    assert_eq!(status, 400);
+    let detail = body
+        .get("detail")
+        .and_then(Json::as_str)
+        .unwrap_or_default();
+    assert!(detail.contains("collision"), "detail: {detail}");
+}
+
+#[test]
+fn recording_an_event_needs_an_operator_and_reading_the_report_does_not() {
+    let mut fixture = calibrated("calibration-event-roles", 60.0);
+
+    let (read, _) = fixture.request("GET", "/calibration", Some("observer-token"), "");
+    assert_eq!(read, 200);
+
+    let (write, _) = fixture.request(
+        "POST",
+        "/calibration/events",
+        Some("observer-token"),
+        r#"{"event":"collision"}"#,
+    );
+    assert_eq!(write, 403, "an observer may not retire a guard");
+}
+
+#[test]
+fn a_recorded_event_leaves_the_audit_row_it_owes() {
+    // Not a configuration change, but it changes which guards may run — which is the thing §38.3's
+    // pair exists to leave a trail of.
+    let mut fixture = calibrated("calibration-event-audit", 60.0);
+    fixture.request(
+        "POST",
+        "/calibration/events",
+        Some("operator-token"),
+        r#"{"event":"collision","note":"clipped the fixture"}"#,
+    );
+
+    let entries = crate::audit::Audit::of(fixture.daemon.store.layout())
+        .read()
+        .entries;
+    let ours = entries
+        .iter()
+        .find(|entry| entry.action == "calibration_event")
+        .expect("an audit row");
+    assert_eq!(ours.subject, "collision");
+    assert!(ours.detail.contains("clipped the fixture"));
+    assert!(ours.actor.contains("operator"), "actor: {}", ours.actor);
+}

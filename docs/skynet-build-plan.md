@@ -9226,3 +9226,58 @@ migration.
 cannot adjust — `GET /calibration` reports, and nothing runs or refreshes one.
 
 Nothing is pushed.
+
+## Session — 2026-09-10 (thirty-sixth): the specified paragraph with nothing behind it
+
+Nothing new on the Hub or in the desktop shell this session, and one line of the Console's story
+that is worth recording because it is a decision rather than an omission.
+
+### §45.4's event triggers went on the robot's page, not into a pane
+
+*It hit something*, *tool changed*, *driver replaced* — five buttons on the robot's own console
+page, which the Windows application embeds, rather than a seventh pane in the shell.
+
+That is §83.2 applied rather than scheduling. The shell owns Discovery, USB and serial, sealed
+windows, an always-reachable stop, and several robots at once, because those are what a browser
+cannot do. Recording a calibration event is a button that posts. A pane here would be a second
+implementation of a control the robot already serves, and a second implementation is the drift
+§83.2 exists to forbid.
+
+The same reasoning is why session limits and settings *are* panes: neither is on the robot's page,
+and both are about a robot the operator picked out of a list this application maintains. The rule
+turns out to be usable as a rule, which is the useful thing to have learned.
+
+### What was behind it on the OS side
+
+The contract had decided all of §45.4 since it was written — `events_since`, `invalidating_events`,
+`evaluate` matching one against the other, five published events, byte-identical across three
+editions. And `events_since` appeared **nowhere** in the daemon: it came from the stored record and
+from nowhere else, so a collision that happened this morning invalidated nothing. The most carefully
+specified part of §45 was inert, and inert in the direction where a `proximity` guard goes on
+measuring separation to the wrong place while reporting healthy.
+
+The journal that fills it is unsigned among signed records, and safe for the reason §38.2's session
+override is safe: an event can only *invalidate* a calibration, never validate one, so the worst a
+forged one does is retire guards that would otherwise run. Twice now this repository has reached
+that argument from opposite ends.
+
+### Numbers
+
+* OS side: `cargo test --workspace` **1,825** (1,807), `e2e.sh` **158 checks, 0 failed** (149).
+* CLI commands (§73): **62** (60). `skynet calibration` did not exist — the report was on the robot
+  and nothing on a bench could ask for it.
+* Console and Hub unchanged this session: `desktop/tests` **205**, `tsc` clean, `vitest` **1,963**.
+
+### Still not built
+
+**Console:** USB/serial; signing, notarisation and the installer; macOS, six panes behind. The
+bench, session and settings panes' interfaces are still written and not compiled.
+
+**Hub:** the countersignature (an owner's call); robot-dependent items; the marketplace-side
+migration.
+
+**OS:** nothing runs a calibration, and nothing can from here — a procedure needs a driver, a target
+and a pose set, and §45.3 signs the result, which no robot can do. That is a boundary rather than a
+gap, and the same one §37.1 records for packages.
+
+Nothing is pushed.

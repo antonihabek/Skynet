@@ -377,6 +377,17 @@ impl Layout {
         self.state().join("calibration")
     }
 
+    /// §45.4's event journal — the impacts, tool changes and swaps a calibration is judged against.
+    ///
+    /// Beside the records it invalidates, and **unsigned** where every one of those is signed. What
+    /// makes that safe is the direction it can push: an event can only expire a calibration, never
+    /// revive one, so a forged journal costs guards that would otherwise run rather than trust that
+    /// should not be given. `crate::calibration_events` states the argument in full, including the
+    /// operation nobody may add.
+    pub fn calibration_events(&self) -> PathBuf {
+        self.calibration().join("events.jsonl")
+    }
+
     /// The append-only record of configuration changes (§38.3).
     ///
     /// Beside the things it is a record of, and not under `/data/blackbox`: the ring wraps and this
