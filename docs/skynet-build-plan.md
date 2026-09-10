@@ -8937,3 +8937,131 @@ is deliberately empty; and macOS.
 `npx vitest run` — **1,963 passed**, 93 files. `npx tsc --noEmit` — clean. No route, schema, lib or
 catalogue change, and no locale change: desktop documentation is English-only by standing convention
 and the two corrected files are a generated SQL header and a build log.
+
+---
+
+## Session — 2026-09-10 (thirty-third): the Console's fifth owned thing, and a test suite that only ran on Windows
+
+Asked whether the Console has everything an operator needs to manage an OS, and then to plan and
+build what it does not. The answer came out of §83.2 rather than out of a wishlist, and the audit
+that produced it found something better than a feature: **this machine can build and run the
+Console's test project**, which no session had tried.
+
+### The audit, against §83.2 rather than against a list of ideas
+
+The temptation with "what else should the Console do" is to list panes. §83.2 forbids most of that
+answer in advance — the application is *a shell, not a client*, it embeds the page the robot
+already serves, and re-drawing §32.2's panels natively is the one thing it must not do. Everything
+the on-robot console renders, an operator already has: the embedded page covers all thirty-five
+routes `skynetd` serves, and it can never be a version behind the daemon serving it.
+
+So the real question is narrow, and §83.2 asks it in a table: **what does this application own,
+because a browser cannot do it?** Five rows. Discovery, USB and serial, sealed windows, an
+always-reachable stop, and *several robots at once — a bench has three*.
+
+Four were built. **The fifth had never been started**, and nothing in either log had noticed,
+because the application does discover several robots — it lists them. What it does with them is
+one at a time: every action, every pane, every sentence is scoped to `Selected`. An operator with
+three machines on a bench had to select each in turn and read a webview to learn which one was
+holding.
+
+### The finding that made the rest verifiable: `dotnet test` runs here
+
+`desktop/tests` targets plain `net9.0` and **links** the sources it covers instead of referencing
+the WinUI application — a rule this project already keeps deliberately, so that a test host does
+not need the Windows App SDK to start. Nobody had ever taken it at its word on a non-Windows
+machine. Installing the .NET 9 SDK and running it: **134 of 137 passed.**
+
+The three failures were not the environment. `Diagnostics.Locate` splits `PATH` on
+`Path.PathSeparator` — correct, and `;` on Windows against `:` everywhere else — while four tests
+wrote a Windows `PATH` literally as `C:\other;C:\tools`. On any other host that is **one** entry,
+nothing matches, and three of the four fail. They were Windows-only tests inside a project that
+exists to be host-independent, which is the same shape as a check that does not run. Rebuilt from
+`Path.PathSeparator`, `Path.Combine` and `Diagnostics.ToolName` rather than typed out: **137 of
+137**, on Linux.
+
+One thing fell out of fixing them and is recorded rather than acted on: the `catch
+(ArgumentException)` in `Locate`, which the fourth test was written for, **cannot fire on this
+runtime**. .NET Core removed `Path.Combine`'s invalid-character validation, and a probe confirms a
+NUL in a path now combines without complaint. The guard is kept as insurance for a runtime that
+does throw; the test was renamed to say what it actually proves, which is the skip-and-continue.
+
+### The bench
+
+One row per discovered robot, each carrying what that robot said when asked for §27's state.
+
+**It is not a second rendering of §32.2's status panel**, and the line is worth stating where
+somebody would be about to cross it. That panel is per-robot and the robot draws it. This is the
+comparison *across* robots, which no robot's own page can draw for the plain reason that no robot
+knows the others exist. Every value is the robot's own word from `GET /state` — including the
+three booleans the daemon pre-renders for precisely this purpose, in its own comment: *"rendered
+rather than left for a console to re-derive"*.
+
+**Where a robot said nothing, the row says so.** This is the rule a table is most likely to break,
+because a table wants a value in every cell and `false` is always available — and on `safe_state`
+the difference between *this robot says it is not in a safe state* and *this robot said nothing* is
+the difference between two different afternoons. `RobotJson` gained a tri-state `MaybeFlag` beside
+`Flag` rather than replacing it, since absent-means-false is right where the caller does not care
+and wrong where it does. Two silences are also kept apart: a robot that **answered and omitted a
+field** reads *did not say*; one that **never answered** reads *no reading*.
+
+The condition count takes **both** numbers off the robot — `7 of 8 observed` — rather than
+compiling the eight in. §27 has eight conditions today, and an edition that grows a ninth would
+make a hard-coded denominator quietly wrong in the direction that looks fine.
+
+### Stop every robot, and why it is not in the header
+
+The intersection of two rows of §83.2's table, and the one bench operation where per-robot
+navigation is not merely slow: stopping three machines one at a time means selecting each, waiting
+for a webview and finding the button, while the reason you are stopping them is still happening.
+
+**It is a separate control from the header stop and must stay one.** The header's STOP means *the
+selected robot, named in the sentence it produces* — a product question this repository answered
+deliberately, on the grounds that a stop which inferred its target would eventually stop the wrong
+machine. Widening it to mean "all of them" would take that answer back. Two controls, two meanings,
+each naming what it acted on. A convenience and not an E-stop on both, and the label matters more
+on this one rather than less, because a control that reaches three machines looks more like a
+safety system than one that reaches one.
+
+The rule it exists to keep is `RobotStop`'s, and a bench makes it harder: **a robot that did not
+answer is never reported as stopped.** The natural summary of three attempts is a count, and a
+count is exactly the shape in which the third robot vanishes — so the summary names the ones that
+did not, every time. Somebody reading it while walking towards a bench has to come away knowing
+which machine to walk to.
+
+Stops go out concurrently, which is not an optimisation: five seconds each in sequence sends the
+third robot its stop ten seconds late. One robot's failure never prevents the others being sent
+one — a bench stop that got less reliable the more it was needed would be worse than none.
+
+### Proven by breaking them
+
+Both rules were checked the way this repository checks a corpus, by inverting them and watching the
+suite fail. Rendering the summary as a bare count broke **three** tests; making `MaybeFlag` fall
+back to `false` broke the one written for it by name. Both reverted, and 173 green.
+
+### Numbers
+
+* `desktop/tests` — **173 passed** (was 137), on **Linux**, warnings-as-errors. New:
+  `BenchStateTests` (13), `BenchStopTests` (10), `BenchRowTests` (13).
+* The three host-dependent tests are fixed rather than skipped; the suite now runs on any host.
+
+### What this leaves, and it is stated rather than implied
+
+**The bench's interface has never been compiled.** `BenchState`, `BenchStop` and `BenchRow` are
+logic, are in the test project, build here and are covered. The `ConsoleViewModel` wiring and the
+XAML are **written and not built**: the WinUI half needs `XamlCompiler.exe`, a Windows PE binary,
+and this is a Linux container. Running it under an emulated PE loader got as far as the compiler
+starting and no further, and the attempt was abandoned rather than pursued into a rabbit hole. So a
+binding typo in that markup would not surface until the first Windows build.
+
+That is the same standing the macOS application has, and it is held to the rule the tray stop was
+deferred under rather than quietly excused from it: **compile-checked is not verified.** One
+`dotnet build -p:Platform=x64` on a Windows machine settles it, and until that runs this feature is
+not finished. Recorded in `desktop/README.md` under *What is not here* as well, because that is the
+section a reader asking *what is missing* actually starts at — which is this repository's own
+most-repeated lesson.
+
+Still not built, Console side: USB and serial; signing, notarisation and the installer; macOS,
+which is now four panes, the stop and the bench behind.
+
+Nothing is pushed.
