@@ -74,6 +74,23 @@ skynet — talking to a running robot (§33.7)
   skill run <ns/name> [--args <json>] [--parent <inv-id>] [--overrun <factor>]
                               Invoke a skill; needs operator
   skill stop <inv-id>         Make a running skill return; needs operator
+  calibration                 §45: which parameter sets are believed, and which guards lost
+                              their input because one is not
+  calibration event <event> [--note WHY]
+                              Record an impact, a tool change or a swap (§45.4). It expires
+                              every calibration whose policy names it; re-measuring clears it
+  session                     §38.2's session override: what is narrowing this robot now
+  session set --for <90s|20m|2h> [--velocity R] [--torque N] [--base M] [--jerk F]
+              [--name NAME] [--reason WHY]
+                              Slow this robot down while somebody works on it. It can only
+                              narrow, and `--for` is required — §38.2 time-boxes this layer
+  session clear               Put it back to the ceilings the profile sets
+  settings                    §38.1's unsigned local configuration, and what set each value
+  settings set <setting> <value>
+                              log_level error|warn|info|debug · telemetry_sampling 1..60 ·
+                              console_theme system|light|dark. Nothing that reaches the
+                              Safety Kernel lives here (§38.1)
+  settings reset <setting>    Back to its default
   ota                         A/B slots, and §12's verdict on the wanted image
   identity                    Who this robot is, what it is, and what it is running (§10)
   checkin                     What this robot would tell the Hub, and whether it is heard
@@ -161,6 +178,9 @@ pub fn run(command: &str, argv: &[String]) -> i32 {
         "estop" => show(argv, "POST", "/stop", Some(String::new()), print_stop),
         "logs" => logs(argv),
         "grants" => grants(argv),
+        "session" => session(argv),
+        "settings" => settings(argv),
+        "calibration" => calibration(argv),
         "rollback" => rollback(argv),
         "install" => install(argv),
         "blackbox" => blackbox(argv),
@@ -1217,6 +1237,401 @@ fn logs(argv: &[String]) -> i32 {
         }
         Err(reason) => term::fail(&reason),
     }
+}
+
+/// `skynet session` — §38.2's time-boxed narrowing, from the machine.
+///
+/// The verb a robotics engineer standing at a bench actually reaches for: *slow this thing down
+/// while I have my hands near it, and do not let me forget I did.*
+///
+///     skynet session                                          what is in force
+///     skynet session set --for 20m --velocity 0.25            narrow, for twenty minutes
+///     skynet session clear                                    put it back
+///
+/// **`--for` is required and there is no way to omit it.** §38.2 time-boxes this layer, and a
+/// default of "until somebody notices" is exactly the hazard it names — *"a 'maintenance mode, half
+/// speed' that outlives the maintenance is a hazard that looks like a setting."*
+fn session(argv: &[String]) -> i32 {
+    let args = positional(argv);
+    match args.first().map(|s| s.as_str()) {
+        None => show(argv, "GET", "/session", None, print_session),
+        Some("clear") => show(argv, "DELETE", "/session", Some(String::new()), print_note),
+        Some("set") => {
+            let Some(duration) = flag(argv, "--for") else {
+                return term::fail(concat!(
+                    "skynet session set --for <duration> [--velocity R] [--torque N] ",
+                    "[--base M] [--jerk F] [--name NAME] [--reason WHY]\n\n",
+                    "--for is required. A session override is time-boxed (§38.2): there is no way ",
+                    "to ask for one that does not end.\n",
+                    "Durations: 90s, 20m, 2h."
+                ));
+            };
+            let Some(duration_ms) = parse_duration_ms(&duration) else {
+                return term::fail(&format!(
+                    "`{duration}` is not a duration. Use 90s, 20m or 2h."
+                ));
+            };
+
+            let mut document = Json::obj();
+            document.set(
+                "name",
+                Json::from(flag(argv, "--name").unwrap_or_else(|| "bench".to_string()).as_str()),
+            );
+            document.set("duration_ms", Json::Num(duration_ms as f64));
+            if let Some(reason) = flag(argv, "--reason") {
+                document.set("reason", Json::from(reason.as_str()));
+            }
+            let mut narrowed = false;
+            for (name, key) in [
+                ("--velocity", "joint_velocity_max_rad_s"),
+                ("--torque", "joint_torque_max_nm"),
+                ("--base", "base_velocity_max_m_s"),
+                ("--jerk", "max_delta_per_cycle"),
+            ] {
+                if let Some(raw) = flag(argv, name) {
+                    let Ok(number) = raw.parse::<f64>() else {
+                        return term::fail(&format!("`{raw}` is not a number for {name}"));
+                    };
+                    document.set(key, Json::Num(number));
+                    narrowed = true;
+                }
+            }
+            if !narrowed {
+                return term::fail(concat!(
+                    "A session override has to narrow something. Give at least one of ",
+                    "--velocity, --torque, --base or --jerk."
+                ));
+            }
+
+            show(
+                argv,
+                "POST",
+                "/session",
+                Some(document.to_canonical().unwrap_or_default()),
+                print_session,
+            )
+        }
+        Some(other) => term::fail(&format!(
+            "`{other}` is not a session command. Try `skynet session`, `skynet session set` or `skynet session clear`."
+        )),
+    }
+}
+
+/// `skynet calibration` — §45, from the machine.
+///
+///     skynet calibration                     what is believed, and which guards lost their input
+///     skynet calibration event collision     record an impact (§45.4)
+///
+/// The report existed on the robot and nothing on a bench could ask for it, which is half of §45's
+/// value missing: *"an expired extrinsic disables the proximity guard"* is a statement an operator
+/// can act on only if somebody tells them.
+///
+/// **Recording an event is the one write here, and it only ever takes trust away.** §45.4: *"a
+/// robot that has just hit something has, by definition, possibly moved its cameras, and continuing
+/// to trust yesterday's extrinsics is exactly the wrong response to an impact."* There is
+/// deliberately no verb that clears one — re-measuring the set is what clears it, which is the
+/// thing that was actually supposed to happen.
+fn calibration(argv: &[String]) -> i32 {
+    let args = positional(argv);
+    match args.first().map(|s| s.as_str()) {
+        None => show(argv, "GET", "/calibration", None, print_calibration),
+        Some("event") => {
+            let Some(event) = args.get(1) else {
+                return term::fail(concat!(
+                    "skynet calibration event <event> [--note WHY]\n\n",
+                    "§45.4's five: collision, estop_under_load, tool_change, driver_replaced, ",
+                    "mainboard_swap.\n",
+                    "Recording one expires every calibration measured before now whose policy ",
+                    "names it. Re-measuring the set is what clears it."
+                ));
+            };
+            let mut document = Json::obj();
+            document.set("event", Json::from(event.as_str()));
+            if let Some(note) = flag(argv, "--note") {
+                document.set("note", Json::from(note.as_str()));
+            }
+            show(
+                argv,
+                "POST",
+                "/calibration/events",
+                Some(document.to_canonical().unwrap_or_default()),
+                print_calibration,
+            )
+        }
+        Some(other) => term::fail(&format!(
+            "`{other}` is not a calibration command. Try `skynet calibration` or `skynet calibration event`."
+        )),
+    }
+}
+
+/// What `GET /calibration` and `POST /calibration/events` answer.
+///
+/// The guards come last and are the part worth reading. A table of parameter sets is a table of
+/// nouns; *"proximity is unavailable because camera_extrinsics expired"* is the sentence §45.2's
+/// table exists to make sayable.
+fn print_calibration(document: &Json) {
+    if let Some(detail) = document.get_present("detail").and_then(Json::as_str) {
+        println!("{} {detail}\n", term::ok("✓"));
+    }
+
+    for row in document.arr_or_empty("sets") {
+        let set = row.get("set").and_then(Json::as_str).unwrap_or("");
+        let state = row.get("state").and_then(Json::as_str).unwrap_or("");
+        let mark = if state == "valid" {
+            term::ok("✓")
+        } else if state == "absent" {
+            term::dim("·")
+        } else {
+            term::warn("!")
+        };
+        // The reason beside the state, because §45.4's conditions are the whole policy: `expired`
+        // on its own does not say whether this robot drifted, was hit, or simply got old, and the
+        // three have different fixes.
+        let reason = row
+            .get_present("reason")
+            .and_then(Json::as_str)
+            .map(|reason| format!(" ({reason})"))
+            .unwrap_or_default();
+        println!("  {mark} {set:<20} {state}{reason}");
+        if let Some(detail) = row.get_present("detail").and_then(Json::as_str) {
+            if !detail.is_empty() {
+                println!("      {}", term::dim(&term::wrap(detail, 6)));
+            }
+        }
+    }
+
+    let unavailable = document.arr_or_empty("unavailable");
+    if unavailable.is_empty() {
+        println!("\n{}", term::dim("no guard has lost its input"));
+    } else {
+        println!("\n{}", term::bold("guards without their input (§45.5)"));
+        for entry in unavailable {
+            println!(
+                "  {} {:<16} {}",
+                term::warn("!"),
+                entry.get("guard").and_then(Json::as_str).unwrap_or(""),
+                term::dim(entry.get("detail").and_then(Json::as_str).unwrap_or(""))
+            );
+        }
+    }
+
+    // What this robot could not measure, which is the difference between a robot that drifted and
+    // one that cannot tell. §45.4's rule is that a missing current reading expires a record rather
+    // than extending it, so this list explains expiries that are about the robot and not the work.
+    let unmeasured = document.arr_or_empty("unmeasured");
+    if !unmeasured.is_empty() {
+        let names: Vec<&str> = unmeasured.iter().filter_map(Json::as_str).collect();
+        println!(
+            "\n{}",
+            term::dim(&format!(
+                "this robot cannot read: {} — a missing reading expires a record rather than \
+                 extending it (§45.4)",
+                names.join(", ")
+            ))
+        );
+    }
+}
+
+/// `skynet settings` — §38.1's unsigned local configuration, from the machine.
+///
+///     skynet settings                          what this robot is set to
+///     skynet settings set log_level debug      change one
+///     skynet settings reset log_level          put one back to its default
+///
+/// Three settings and no more. §38.1 draws the line at whether a value can reach the Safety Kernel,
+/// and everything on the other side of it — every ceiling the kernel enforces — arrives signed or
+/// as a session override (§38.2). Typing one of those names here gets the sentence that says so
+/// rather than a bare refusal.
+fn settings(argv: &[String]) -> i32 {
+    let args = positional(argv);
+    match args.first().map(|s| s.as_str()) {
+        None => show(argv, "GET", "/settings", None, print_settings),
+        Some("set") => {
+            let (Some(name), Some(value)) = (args.get(1), args.get(2)) else {
+                return term::fail(concat!(
+                    "skynet settings set <setting> <value>\n\n",
+                    "  log_level           error | warn | info | debug\n",
+                    "  telemetry_sampling  reconcile passes per §74 window, 1 to 60\n",
+                    "  console_theme       system | light | dark"
+                ));
+            };
+            let mut document = Json::obj();
+            document.set("setting", Json::from(name.as_str()));
+            document.set("value", Json::from(value.as_str()));
+            show(
+                argv,
+                "POST",
+                "/settings",
+                Some(document.to_canonical().unwrap_or_default()),
+                print_settings,
+            )
+        }
+        Some("reset") => {
+            let Some(name) = args.get(1) else {
+                return term::fail("skynet settings reset <setting>");
+            };
+            let mut document = Json::obj();
+            document.set("setting", Json::from(name.as_str()));
+            document.set("reset", Json::Bool(true));
+            show(
+                argv,
+                "POST",
+                "/settings",
+                Some(document.to_canonical().unwrap_or_default()),
+                print_settings,
+            )
+        }
+        Some(other) => term::fail(&format!(
+            "`{other}` is not a settings command. Try `skynet settings`, `skynet settings set` or `skynet settings reset`."
+        )),
+    }
+}
+
+/// What `GET /settings` and `POST /settings` answer.
+///
+/// Every setting, with the ones nobody chose marked as defaults rather than hidden. A list of only
+/// what somebody changed answers the wrong question: an engineer at a bench is asking what this
+/// robot is doing, not what they did to it.
+fn print_settings(document: &Json) {
+    if let Some(detail) = document.get_present("detail").and_then(Json::as_str) {
+        println!("{} {detail}\n", term::ok("✓"));
+    }
+    for entry in document.arr_or_empty("settings") {
+        let name = entry.get("setting").and_then(Json::as_str).unwrap_or("");
+        let value = entry.get("value").and_then(Json::as_str).unwrap_or("");
+        let is_default = entry
+            .get("is_default")
+            .and_then(Json::as_bool)
+            .unwrap_or(true);
+        // The provenance §38.3 asks for, beside the value rather than in a second listing: *who
+        // set this, and when* is the question that follows *what is it* by about a second.
+        let provenance = if is_default {
+            term::dim("default")
+        } else {
+            match entry.get_present("set_by").and_then(Json::as_str) {
+                Some(who) => term::dim(&format!("set by {who}")),
+                None => term::dim("set by unrecorded"),
+            }
+        };
+        println!("  {name:<20} {value:<10} {provenance}");
+    }
+
+    let notes = document.arr_or_empty("notes");
+    if !notes.is_empty() {
+        println!();
+        for note in notes {
+            // Never swallowed. A setting somebody wrote that this robot ignored is the fact they
+            // came here to find.
+            println!("{} {}", term::warn("!"), note.as_str().unwrap_or(""));
+        }
+    }
+}
+
+/// `90s`, `20m`, `2h` — in milliseconds.
+///
+/// Suffixed rather than bare, and the reason is the unit a mistake costs. A bare `20` is twenty of
+/// something, and the two readings a person is likeliest to have in mind here — minutes and seconds
+/// — are sixty times apart on a control that slows a robot down.
+fn parse_duration_ms(text: &str) -> Option<i64> {
+    let (digits, scale) = match text.chars().last()? {
+        's' => (&text[..text.len() - 1], 1_000),
+        'm' => (&text[..text.len() - 1], 60_000),
+        'h' => (&text[..text.len() - 1], 3_600_000),
+        _ => return None,
+    };
+    let value: f64 = digits.parse().ok()?;
+    if !value.is_finite() || value <= 0.0 {
+        return None;
+    }
+    Some((value * scale as f64) as i64)
+}
+
+/// What `GET /session` and `POST /session` answer.
+fn print_session(document: &Json) {
+    let state = document
+        .get("state")
+        .and_then(Json::as_str)
+        .unwrap_or("unknown");
+    let Some(over) = document.get_present("override") else {
+        // `if` rather than `match` on the state name, and the reason is a tool rather than taste:
+        // `tools/check-golden-path.mjs` counts CLI commands by taking every string literal on a
+        // match arm across this crate, and a `match` over state names here would put `none` and
+        // `unreadable` into the count §73 publishes. The counting rule is broad by design — it
+        // exists so that adding a command never fails the build falsely — and the cost of that
+        // breadth is paid here, where a state name is not a command.
+        if state == "unreadable" {
+            println!(
+                "{} {}",
+                term::warn("!"),
+                document
+                    .get("detail")
+                    .and_then(Json::as_str)
+                    .unwrap_or("the override could not be read")
+            );
+        } else {
+            println!(
+                "{}",
+                term::dim("no session override — this robot is at the ceilings its profile sets")
+            );
+        }
+        return;
+    };
+
+    let name = over.get("name").and_then(Json::as_str).unwrap_or("");
+    // Expired is drawn in the caution colour and live in the ordinary one. The two are different
+    // facts and the difference is the whole reason this route reports three states rather than two.
+    if state == "expired" {
+        println!(
+            "{} session override {} has expired — this robot is back at its profile's ceilings",
+            term::warn("!"),
+            term::bold(name)
+        );
+    } else {
+        let remaining = over
+            .get("remaining_ms")
+            .and_then(Json::as_f64)
+            .unwrap_or(0.0) as i64;
+        println!(
+            "{} session override {} — {} left",
+            term::ok("●"),
+            term::bold(name),
+            human_duration(remaining)
+        );
+    }
+
+    for (key, label, unit) in [
+        ("joint_velocity_max_rad_s", "joint velocity", "rad/s"),
+        ("joint_torque_max_nm", "joint torque", "Nm"),
+        ("base_velocity_max_m_s", "base velocity", "m/s"),
+        ("max_delta_per_cycle", "jerk", "of the ceiling per cycle"),
+    ] {
+        if let Some(number) = over.get_present(key).and_then(Json::as_f64) {
+            println!("  {:<16} {} {}", label, number, term::dim(unit));
+        }
+    }
+
+    if let Some(reason) = over.get_present("reason").and_then(Json::as_str) {
+        println!("  {:<16} {}", "reason", term::dim(reason));
+    }
+    if let Some(who) = over.get_present("set_by").and_then(Json::as_str) {
+        println!("  {:<16} {}", "set by", term::dim(who));
+    }
+}
+
+/// A millisecond count as something a person reads off a bench.
+fn human_duration(ms: i64) -> String {
+    if ms <= 0 {
+        return "no time".to_string();
+    }
+    let seconds = ms / 1_000;
+    if seconds < 60 {
+        return format!("{seconds}s");
+    }
+    let minutes = seconds / 60;
+    if minutes < 60 {
+        return format!("{minutes}m");
+    }
+    format!("{}h{:02}m", minutes / 60, minutes % 60)
 }
 
 fn grants(argv: &[String]) -> i32 {

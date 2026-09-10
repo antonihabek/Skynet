@@ -147,13 +147,31 @@ pub fn status(layout: &Layout, wall_s: Option<f64>) -> Status {
     let now = conditions_now(wall_s);
     let trust = crate::trust::TrustStore::load(layout);
     let directory = layout.calibration();
+    // §45.4's event triggers, which until now reached nothing. `events_since` came from the stored
+    // record and from nowhere else, so a collision that happened this morning invalidated nothing:
+    // the field could only change when somebody rewrote a signed document. Read once for every
+    // set, because the journal is one file and the question each record asks of it differs only in
+    // the moment it asks *since*.
+    let journal = crate::calibration_events::read(layout);
 
     let mut held = Vec::new();
     for set in &applicable {
         let path = directory.join(format!("{set}.json"));
         match read_record(&path, set) {
-            Ok(Some((record, document))) => {
+            Ok(Some((mut record, document))) => {
                 let signature = signature_of(&trust, &directory, set, &document);
+                // Merged rather than replaced. A record may name events of its own — one written
+                // by a procedure that knew the machine had been dropped in transit — and dropping
+                // those in favour of the journal would lose the ones nobody here recorded.
+                //
+                // `since` is the record's own `at_s`: an event only counts against a record it is
+                // newer than, or re-measuring a set would be impossible — it would expire again the
+                // instant it was written.
+                for event in journal.since(record.conditions.at_s) {
+                    if !record.events_since.contains(&event) {
+                        record.events_since.push(event);
+                    }
+                }
                 held.push(Held {
                     set: set.clone(),
                     validity: evaluate(&record, &now),

@@ -337,6 +337,31 @@ export interface ResolvedLimits {
   grants: string[]
 }
 
+/**
+ * §38.2's fifth layer: a time-boxed narrowing somebody applied at the machine.
+ *
+ * The layering is `vendor defaults → fleet profile → site profile → cell profile → session
+ * override`, and this is the last of them. A profile says "in this cell, half speed" and is signed
+ * (§38.1); this says "half speed for the next twenty minutes while I have my hands near it", and
+ * routing that through a Hub and a signing key would mean nobody used it — they would move the
+ * robot at full speed instead, which is the outcome the layer exists to prevent.
+ *
+ * What makes it safe unsigned is that it can **only narrow**: `resolveLimits()` composes it by
+ * minimum with everything above it, so the worst a forged one can do is slow the robot down.
+ *
+ * It carries no deadline, and that is deliberate. §38.2 requires it to expire, and the supervisor
+ * holds the clock (§35.2 keeps time out of this layer entirely) — so an expired override is simply
+ * never passed in. This type is only ever handed overrides that are still in force.
+ */
+export interface SessionOverride {
+  name: string
+  joint_velocity_max_rad_s?: number
+  joint_torque_max_nm?: number
+  base_velocity_max_m_s?: number
+  /** Narrowed jerk ceiling. The one field here that can turn a guard on rather than off. */
+  max_delta_per_cycle?: number
+}
+
 export type SafetyNoticeCode =
   | 'advisory_only'
   | 'no_envelope'
@@ -347,6 +372,8 @@ export type SafetyNoticeCode =
   | 'transport_degraded'
   | 'no_rate_limit'
   | 'no_collision_margin'
+  | 'session_override'
+  | 'session_widened'
 
 export interface SafetyNotice {
   code: SafetyNoticeCode
@@ -368,6 +395,12 @@ export interface ResolveLimitsParams {
   /** The clamp the transport plan derived from the body and the policy's declared peaks. */
   transport: TransportClamp | null
   profile?: OperatorProfile | null
+  /**
+   * §38.2's session override, or null when none is in force **or it has expired**.
+   *
+   * The caller decides which of those two it is, because the caller has the clock.
+   */
+  session?: SessionOverride | null
   /**
    * The body's frames, flattened (§44.3), or null where it declares no tree.
    *
@@ -415,7 +448,7 @@ export interface ResolveLimitsParams {
  * applied afterwards.
  */
 export function resolveLimits(params: ResolveLimitsParams): ResolvedLimits {
-  const { tier, envelope, transport, profile } = params
+  const { tier, envelope, transport, profile, session } = params
   const enforcement = resolveEnforcement(tier)
   const notices: SafetyNotice[] = []
 
@@ -470,29 +503,111 @@ export function resolveLimits(params: ResolveLimitsParams): ResolvedLimits {
     })
   }
 
+  // §38.2's session layer, checked against **what the layer above it allows** rather than against
+  // the envelope alone — that is the section's own wording, and the layer above a session is
+  // everything already composed. A session asking for 3 rad/s under a profile allowing 1 has not
+  // widened the envelope; it has widened the thing actually in force, which is the number the
+  // operator can see and the one they will believe they changed.
+  //
+  // Reported separately from `profile_widened`: they are different sentences about different
+  // documents, and telling somebody their signed profile over-reached when it was their bench
+  // override would send them to edit a file that is not the problem.
+  const sessionWidened: string[] = []
+  if (session) {
+    const above = (
+      e?: number,
+      t?: number,
+      p?: number,
+    ) => narrowest(e, t, p)
+    const checkSession = (label: string, requested?: number, ceiling?: number | null) => {
+      if (requested !== undefined && ceiling !== null && ceiling !== undefined && requested > ceiling) {
+        sessionWidened.push(label)
+      }
+    }
+    checkSession(
+      'joint_velocity_max_rad_s',
+      session.joint_velocity_max_rad_s,
+      above(
+        envelope?.joint_velocity_max_rad_s,
+        transport?.joint_velocity_max_rad_s,
+        profile?.joint_velocity_max_rad_s,
+      ),
+    )
+    checkSession(
+      'joint_torque_max_nm',
+      session.joint_torque_max_nm,
+      above(
+        envelope?.joint_torque_max_nm,
+        transport?.joint_torque_max_nm,
+        profile?.joint_torque_max_nm,
+      ),
+    )
+    checkSession(
+      'base_velocity_max_m_s',
+      session.base_velocity_max_m_s,
+      above(
+        envelope?.base_velocity_max_m_s,
+        transport?.base_velocity_max_m_s,
+        profile?.base_velocity_max_m_s,
+      ),
+    )
+    checkSession(
+      'max_delta_per_cycle',
+      session.max_delta_per_cycle,
+      profile?.max_delta_per_cycle,
+    )
+  }
+  if (sessionWidened.length > 0) {
+    notices.push({
+      code: 'session_widened',
+      message:
+        'The session override asks to raise limits above what is already in force. Those values ' +
+        'are ignored; the narrower ceiling still applies.',
+      subjects: sessionWidened,
+    })
+  }
+
+  // The session joins the same minimum as every other layer, which is what makes "it only ever
+  // narrows" a property of the arithmetic rather than a rule somebody has to remember.
   const jointVelocity = narrowest(
     envelope?.joint_velocity_max_rad_s,
     transport?.joint_velocity_max_rad_s,
     profile?.joint_velocity_max_rad_s,
+    session?.joint_velocity_max_rad_s,
   )
   const jointTorque = narrowest(
     envelope?.joint_torque_max_nm,
     transport?.joint_torque_max_nm,
     profile?.joint_torque_max_nm,
+    session?.joint_torque_max_nm,
   )
   const baseVelocity = narrowest(
     envelope?.base_velocity_max_m_s,
     transport?.base_velocity_max_m_s,
     profile?.base_velocity_max_m_s,
+    session?.base_velocity_max_m_s,
   )
 
-  const maxDelta = profile?.max_delta_per_cycle ?? null
+  const maxDelta = narrowest(profile?.max_delta_per_cycle, session?.max_delta_per_cycle)
   if (maxDelta === null) {
     notices.push({
       code: 'no_rate_limit',
       message:
         'No jerk ceiling is configured, so a single-cycle jump from zero to the clamped maximum is ' +
         'permitted. Set max_delta_per_cycle before running a policy near people.',
+    })
+  }
+
+  // §38.2's hazard, stated rather than left to somebody noticing a small number: "a 'maintenance
+  // mode, half speed' that outlives the maintenance is a hazard that looks like a setting." A robot
+  // under an override announces it, and names it so the sentence says what to clear.
+  if (session) {
+    notices.push({
+      code: 'session_override',
+      message:
+        `A session override "${session.name}" is narrowing the limits in force. It is a temporary ` +
+        'setting rather than this robot\'s configuration — clear it when the work is done.',
+      subjects: [session.name],
     })
   }
 

@@ -348,6 +348,7 @@ def resolve_limits(params: dict[str, Any]) -> dict[str, Any]:
     envelope = params.get("envelope")
     transport = params.get("transport")
     profile = params.get("profile")
+    session = params.get("session")
     enforcement = resolve_enforcement(tier)
     notices: list[dict[str, Any]] = []
 
@@ -440,23 +441,95 @@ def resolve_limits(params: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
+    # §38.2's session layer, checked against **what the layer above it allows** rather than against
+    # the envelope alone — that is the section's own wording, and the layer above a session is
+    # everything already composed. A session asking for 3 rad/s under a profile allowing 1 has not
+    # widened the envelope; it has widened the number actually in force.
+    #
+    # Reported separately from `profile_widened`: two documents, two sentences, and telling somebody
+    # their signed profile over-reached when it was their bench override sends them to the wrong file.
+    session_widened: list[str] = []
+
+    def check_session(label: str, requested: Any, ceiling: Any) -> None:
+        if requested is _ABSENT or ceiling is None or ceiling is _ABSENT:
+            return
+        # The same null coercion `check_widen` reproduces, and for the same reason: the reference
+        # compares with JavaScript's `>`, where `null > x` is `0 > x`. Tidying it here would be a
+        # divergence dressed up as an improvement.
+        left = 0 if requested is None else requested
+        if left > ceiling:
+            session_widened.append(label)
+
+    if session is not None:
+        check_session(
+            "joint_velocity_max_rad_s",
+            _field(session, "joint_velocity_max_rad_s"),
+            _narrowest(
+                _field(envelope, "joint_velocity_max_rad_s"),
+                _field(transport, "joint_velocity_max_rad_s"),
+                _field(profile, "joint_velocity_max_rad_s"),
+            ),
+        )
+        check_session(
+            "joint_torque_max_nm",
+            _field(session, "joint_torque_max_nm"),
+            _narrowest(
+                _field(envelope, "joint_torque_max_nm"),
+                _field(transport, "joint_torque_max_nm"),
+                _field(profile, "joint_torque_max_nm"),
+            ),
+        )
+        check_session(
+            "base_velocity_max_m_s",
+            _field(session, "base_velocity_max_m_s"),
+            _narrowest(
+                _field(envelope, "base_velocity_max_m_s"),
+                _field(transport, "base_velocity_max_m_s"),
+                _field(profile, "base_velocity_max_m_s"),
+            ),
+        )
+        check_session(
+            "max_delta_per_cycle",
+            _field(session, "max_delta_per_cycle"),
+            _or_none(_field(profile, "max_delta_per_cycle")),
+        )
+    if session_widened:
+        notices.append(
+            {
+                "code": "session_widened",
+                "message": (
+                    "The session override asks to raise limits above what is already in force. "
+                    "Those values are ignored; the narrower ceiling still applies."
+                ),
+                "subjects": session_widened,
+            }
+        )
+
+    # The session joins the same minimum as every other layer, which is what makes "it only ever
+    # narrows" a property of the arithmetic rather than a rule somebody has to remember.
     joint_velocity = _narrowest(
         _field(envelope, "joint_velocity_max_rad_s"),
         _field(transport, "joint_velocity_max_rad_s"),
         _field(profile, "joint_velocity_max_rad_s"),
+        _field(session, "joint_velocity_max_rad_s"),
     )
     joint_torque = _narrowest(
         _field(envelope, "joint_torque_max_nm"),
         _field(transport, "joint_torque_max_nm"),
         _field(profile, "joint_torque_max_nm"),
+        _field(session, "joint_torque_max_nm"),
     )
     base_velocity = _narrowest(
         _field(envelope, "base_velocity_max_m_s"),
         _field(transport, "base_velocity_max_m_s"),
         _field(profile, "base_velocity_max_m_s"),
+        _field(session, "base_velocity_max_m_s"),
     )
 
-    max_delta = _or_none(_field(profile, "max_delta_per_cycle"))
+    max_delta = _narrowest(
+        _field(profile, "max_delta_per_cycle"),
+        _field(session, "max_delta_per_cycle"),
+    )
     if max_delta is None:
         notices.append(
             {
@@ -466,6 +539,23 @@ def resolve_limits(params: dict[str, Any]) -> dict[str, Any]:
                     "clamped maximum is permitted. Set max_delta_per_cycle before running a policy "
                     "near people."
                 ),
+            }
+        )
+
+    # §38.2's hazard, stated rather than left to somebody noticing a small number: "a 'maintenance
+    # mode, half speed' that outlives the maintenance is a hazard that looks like a setting." A robot
+    # under an override announces it, and names it so the sentence says what to clear.
+    if session is not None:
+        session_name = _field(session, "name")
+        notices.append(
+            {
+                "code": "session_override",
+                "message": (
+                    f'A session override "{_js_string(session_name)}" is narrowing the limits in '
+                    "force. It is a temporary setting rather than this robot's configuration — "
+                    "clear it when the work is done."
+                ),
+                "subjects": [session_name],
             }
         )
 

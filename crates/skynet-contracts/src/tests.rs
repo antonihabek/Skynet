@@ -718,6 +718,7 @@ fn a_transport_clamp_becomes_the_ceiling_the_kernel_enforces() {
     };
     let limits = resolve_limits(&ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(envelope),
         transport: Some(kernel_clamp),
         profile: None,
@@ -1015,6 +1016,7 @@ fn limits_document(velocity: f64, per_channel: &[(&str, f64)]) -> skynet_json::J
     };
     let params = ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(envelope),
         transport: Some(TransportClamp {
             joint_velocity_max_rad_s: Some(velocity),

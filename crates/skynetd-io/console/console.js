@@ -2124,6 +2124,64 @@ function renderCalibration(feed) {
   for (const line of c.unmeasured || []) {
     body.appendChild(el('p', 'note', 'not measured: ' + line))
   }
+
+  body.appendChild(calibrationEvents())
+}
+
+/**
+ * §45.4's event triggers — the half that had no way in.
+ *
+ * `events_since` came from the stored record and from nowhere else, so a robot that hit something
+ * this morning went on believing yesterday's extrinsics. §45.4 is explicit that these are the
+ * triggers that matter: *"a robot that has just hit something has, by definition, possibly moved
+ * its cameras, and continuing to trust yesterday's extrinsics is exactly the wrong response to an
+ * impact."*
+ *
+ * It lives on this page rather than in the desktop shell, and that is §83.2's rule rather than
+ * convenience: the shell owns only what a browser cannot do, and this is a button that posts.
+ *
+ * **There is deliberately no control that clears one.** Re-measuring the set clears it, which is
+ * the thing that was supposed to happen; a button that dismissed an impact would be a one-click
+ * route back to trusting a disturbed calibration.
+ */
+function calibrationEvents() {
+  const box = el('div', 'subpanel')
+  box.appendChild(el('p', 'label', 'Something happened to this robot'))
+  box.appendChild(el('p', 'note',
+    'Recording one expires every calibration measured before now whose policy names it, and the '
+    + 'guards it feeds go unavailable until the set is re-measured. Nothing here clears an event — '
+    + 're-measuring does. Needs an operator credential.'))
+
+  const row = el('div', 'acts')
+  for (const [event, label] of [
+    ['collision', 'It hit something'],
+    ['estop_under_load', 'E-stop under load'],
+    ['tool_change', 'Tool changed'],
+    ['driver_replaced', 'Driver replaced'],
+    ['mainboard_swap', 'Mainboard swapped'],
+  ]) {
+    const button = el('button', 'act', label)
+    button.addEventListener('click', () => recordCalibrationEvent(event))
+    row.appendChild(button)
+  }
+  box.appendChild(row)
+  return box
+}
+
+/**
+ * Record one (§45.4).
+ *
+ * No confirmation, on the same reasoning as the stop: the cost of an unintended one is a robot that
+ * checks *more* than it needs to until somebody re-measures a set, and a dialog in front of it
+ * would make the cautious action the slow one.
+ */
+async function recordCalibrationEvent(event) {
+  const result = await call('POST', '/calibration/events', { event })
+  say(result.ok
+    ? ((result.body && result.body.detail) || ('recorded: ' + event))
+    : 'not recorded: HTTP ' + result.status + ' — '
+      + ((result.body && (result.body.detail || result.body.error)) || ''))
+  refresh()
 }
 
 /**

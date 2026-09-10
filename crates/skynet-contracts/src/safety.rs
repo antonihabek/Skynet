@@ -19,8 +19,8 @@ pub use skynet_kernel::{
     can_start, evaluate_cycle, evaluate_cycle_with_body, fixed::FixedVec, kinematics,
     resolve_limits, Available, Body, Clamped, CommandCycle, CycleVerdict, Enforcement, Envelope,
     FaultResponse, Guard, NoticeCode, OperatorProfile, PoseOutcome, PoseTrip, Proximity,
-    ResolveLimitsParams, ResolvedLimits, SafetyNotice, Tier, TransportClamp, UnavailableGuard,
-    WarningChannel, GUARDS, MAX_CHANNELS, SAFETY_CLAIM_RULE,
+    ResolveLimitsParams, ResolvedLimits, SafetyNotice, SessionOverride, Tier, TransportClamp,
+    UnavailableGuard, WarningChannel, GUARDS, MAX_CHANNELS, SAFETY_CLAIM_RULE,
 };
 
 /// The English for a notice, given its code and what it names.
@@ -52,6 +52,20 @@ pub fn notice_message(notice: &SafetyNotice<'_>, profile_name: Option<&str>) -> 
             "The operator profile \"{}\" asks to raise limits above the declared envelope. Those values are ignored.",
             profile_name.unwrap_or("")
         ),
+        // The name is the notice's own subject rather than a parameter, unlike `ProfileWidened`
+        // above: an override is named where it is announced, and `notice_message` would otherwise
+        // need a second name threaded through every caller to render one sentence.
+        NoticeCode::SessionOverride => format!(
+            "A session override \"{}\" is narrowing the limits in force. It is a temporary setting rather than this robot's configuration — clear it when the work is done.",
+            notice.subjects.iter().next().copied().unwrap_or("")
+        ),
+        // Deliberately does not name the override. The `session_override` notice is emitted
+        // whenever one is in force, so it is always beside this one and has already said which.
+        NoticeCode::SessionWidened => concat!(
+            "The session override asks to raise limits above what is already in force. Those ",
+            "values are ignored; the narrower ceiling still applies."
+        )
+        .to_string(),
         NoticeCode::NoRateLimit => concat!(
             "No jerk ceiling is configured, so a single-cycle jump from zero to the clamped ",
             "maximum is permitted. Set max_delta_per_cycle before running a policy near people."
@@ -311,6 +325,7 @@ mod tests {
     fn a_guard_unavailable_notice_names_the_guard() {
         let limits = resolve_limits(&ResolveLimitsParams {
             tier: Tier::Host,
+            session: None,
             envelope: None,
             transport: None,
             profile: None,
@@ -344,6 +359,7 @@ mod tests {
         };
         let limits = resolve_limits(&ResolveLimitsParams {
             tier: Tier::Host,
+            session: None,
             envelope: Some(envelope),
             transport: None,
             profile: Some(profile),
@@ -368,6 +384,7 @@ mod tests {
         };
         let limits = resolve_limits(&ResolveLimitsParams {
             tier: Tier::Host,
+            session: None,
             envelope: Some(envelope),
             transport: Some(clamp),
             profile: None,

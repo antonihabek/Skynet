@@ -234,8 +234,20 @@ pub fn serve_one<C: Connection, L: Launcher, S: Slots>(
 ) {
     let _ = stream.set_deadline(READ_TIMEOUT);
     let response = match read_request(&mut stream) {
-        Ok(request) => api::handle(context, &request),
-        Err(status) => api::error(status, "the request could not be read"),
+        Ok(request) => {
+            // §38.1's `log_level` at `debug`: one line per request, which is the first thing
+            // anybody wants on a bench — *did my request arrive at all, and what did the robot
+            // decide about it*. Off by default, because a robot whose console is open is asked
+            // several times a second and this is a log, not a trace.
+            let line = format!("{} /{}", request.method, request.segments().join("/"));
+            let response = api::handle(context, &request);
+            crate::log_debug!("{line} → {}", response.status);
+            response
+        }
+        Err(status) => {
+            crate::log_debug!("a request could not be read → {status}");
+            api::error(status, "the request could not be read")
+        }
     };
     let _ = stream.write_all(&response.encode());
     let _ = stream.flush();

@@ -96,7 +96,13 @@ pub fn handle<L: Launcher, S: Slots>(
     // carry no robot state — every number on the page arrives later, from a route that enforces
     // its own role — and a console you must authenticate to *load* is a console whose stop button
     // is behind a login form (§39).
-    if let Some(response) = crate::console::asset(&request.method, &segments) {
+    if let Some(response) = crate::console::asset(
+        &request.method,
+        &segments,
+        crate::settings::read(context.daemon.store.layout())
+            .settings
+            .console_theme,
+    ) {
         return response;
     }
 
@@ -104,6 +110,15 @@ pub fn handle<L: Launcher, S: Slots>(
         .credentials
         .role_of_header(request.header("authorization"));
     let needed = requirement(&request.method, &segments);
+
+    // The other half of the bench question: not *did it arrive* but *what did this robot make of
+    // my credential*. A 403 says the token was not enough; this says what it was taken for, which
+    // is the difference between "my token is wrong" and "I am using the wrong token".
+    crate::log_debug!(
+        "  credential reads as {}; this route wants {}",
+        role.as_str(),
+        needed.0.as_str()
+    );
 
     if !needed.satisfied_by(role) {
         // 401 when nothing was presented and 403 when something was: a client that sent no
@@ -180,6 +195,7 @@ pub fn handle<L: Launcher, S: Slots>(
                 .map(|elapsed| elapsed.as_secs() as f64);
             ok(crate::calibration::status(context.daemon.store.layout(), wall_s).to_json())
         }
+        ("POST", ["calibration", "events"]) => calibration_event(context, request),
         // §55.2's cell, and the faults nothing else on this robot reports. An observer's read: it
         // is what the operator wrote down about the space, which is exactly what somebody
         // debugging a refused precondition needs to see.
@@ -211,6 +227,11 @@ pub fn handle<L: Launcher, S: Slots>(
         ("POST", ["identity", "pair"]) => pair(context, request),
         ("POST", ["identity", "unpair"]) => unpair(context, request),
         ("POST", ["shutdown"]) => shutdown(context, request),
+        ("GET", ["session"]) => session_read(context),
+        ("POST", ["session"]) => session_set(context, request),
+        ("DELETE", ["session"]) => session_clear(context, request),
+        ("GET", ["settings"]) => settings_read(context),
+        ("POST", ["settings"]) => settings_write(context, request),
         ("GET", ["skills"]) => ok(context.daemon.skills.to_json()),
         ("GET", ["skills", id]) => match context.daemon.skills.get(id) {
             Some(invocation) => ok(invocation.to_json()),
@@ -240,6 +261,7 @@ fn known_path(segments: &[&str]) -> bool {
             | ["trust"]
             | ["audit"]
             | ["calibration"]
+            | ["calibration", "events"]
             | ["outbound"]
             | ["watchdog"]
             | ["power"]
@@ -261,6 +283,8 @@ fn known_path(segments: &[&str]) -> bool {
             | ["intent"]
             | ["releases"]
             | ["telemetry"]
+            | ["session"]
+            | ["settings"]
             | ["skills"]
             | ["skills", _]
             | ["skills", _, _]
@@ -827,7 +851,8 @@ fn limits<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, request: &Requ
         &body,
         crate::limits::ROBOT_TIER,
         &context.daemon.proximity_sighting,
-    );
+    )
+    .with_session(live_session(&layout));
 
     let mut refused: Option<String> = None;
     let mut plan: Option<Box<skynet_contracts::transport::TransportPlan>> = None;
@@ -1034,7 +1059,8 @@ fn conformance<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
         &body,
         crate::limits::ROBOT_TIER,
         &context.daemon.proximity_sighting,
-    );
+    )
+    .with_session(live_session(&layout));
     // The grants an operator actually made on this machine, not a set this route invents. The mode
     // gate is measured against them, so a robot with none is skipped rather than half-measured.
     let grants: Vec<String> = crate::observe::read_grants(&layout)
@@ -1829,12 +1855,18 @@ fn checkin<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
         // §7.6, composed here rather than remembered, for the reason `actual` above is observed
         // rather than remembered: the descriptor and the profile are files somebody can replace on
         // a running robot, and a check-in reports the limits in force now.
-        Some(crate::limits::report(&crate::limits::read(
-            &layout,
-            &crate::embodiment::load(&layout),
-            crate::limits::ROBOT_TIER,
-            &context.daemon.proximity_sighting,
-        ))),
+        // §38.2's layer travels with them. A Hub device page drawing ceilings this robot is not
+        // running at would be the drift §83.2 forbids in an application, arriving by a different
+        // road — and the number an off-site engineer reads is the one they will act on.
+        Some(crate::limits::report(
+            &crate::limits::read(
+                &layout,
+                &crate::embodiment::load(&layout),
+                crate::limits::ROBOT_TIER,
+                &context.daemon.proximity_sighting,
+            )
+            .with_session(live_session(&layout)),
+        )),
     );
 
     // Read, never written. This route reports what a check-in *would* say; the reconcile loop is
@@ -1862,6 +1894,649 @@ pub fn wall_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_millis() as u64)
         .unwrap_or(0)
+}
+
+/// §38.2's session override, if one is set and still live.
+///
+/// One helper rather than three call sites reading the store, because a caller that forgot it would
+/// compose a ceiling without the layer and produce a limits page that disagrees with the robot. The
+/// suite caught exactly that on this route's first version, which is the argument for the helper
+/// rather than a hypothetical.
+pub fn live_session(layout: &crate::layout::Layout) -> Option<crate::session::Stored> {
+    match crate::session::read(layout, wall_ms() as i64) {
+        crate::session::Reading::Live(stored) => Some(stored),
+        _ => None,
+    }
+}
+
+/// §45.4's event triggers, recorded.
+///
+/// The route that makes the rest of §45.4 reachable. `events_since` had come from the stored record
+/// and from nowhere else, so a collision that happened this morning invalidated nothing at all —
+/// the field could only change when somebody rewrote a signed document.
+///
+/// **Operator, and unsigned, and that is safe for one reason**: an event can only *invalidate* a
+/// calibration, never validate one. The worst a forged entry does is retire guards that would
+/// otherwise run. `crate::calibration_events` states the argument in full, and names the operation
+/// that would break it.
+fn calibration_event<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    request: &Request,
+) -> Response {
+    let Ok(text) = std::str::from_utf8(&request.body) else {
+        return error(400, "the body is not UTF-8");
+    };
+    let Ok(document) = Json::parse(text) else {
+        return error(400, "the body is not JSON");
+    };
+    let Some(event) = document.get_present("event").and_then(Json::as_str) else {
+        return error(
+            400,
+            "expected `event` — one of collision, estop_under_load, tool_change, driver_replaced, mainboard_swap (§45.4)",
+        );
+    };
+
+    let actor = actor_of(context, request);
+    let at_s = wall_ms() as f64 / 1000.0;
+    let entry = crate::calibration_events::Entry {
+        event: event.to_string(),
+        at_s,
+        recorded_by: actor.clone(),
+        note: document
+            .get_present("note")
+            .and_then(Json::as_str)
+            .map(str::to_string),
+    };
+
+    let layout = context.daemon.store.layout().clone();
+    let entry = match crate::calibration_events::record(&layout, entry) {
+        Ok(entry) => entry,
+        Err(refusal) => {
+            let status = match refusal {
+                crate::calibration_events::Refusal::Write(_) => 500,
+                _ => 400,
+            };
+            return error(status, &refusal.detail());
+        }
+    };
+
+    calibration_event_recorded(context, &entry);
+
+    // The status straight back, so the answer is *which sets this just retired* rather than an
+    // acknowledgement the operator has to follow with a second request. That is the question they
+    // asked by recording it: §45.4's point is that an impact takes guards away, and a route that
+    // said only "recorded" would leave them to discover which.
+    let mut body = crate::calibration::status(&layout, Some(at_s)).to_json();
+    body.set("recorded", Json::from(entry.event.as_str()));
+    body.set(
+        "detail",
+        Json::Str(format!(
+            "`{}` is recorded. Every calibration measured before now whose policy names it is \
+             expired, and the guards it feeds are unavailable until the set is re-measured.",
+            entry.event
+        )),
+    );
+    ok(body)
+}
+
+/// §38.3's two records for one recorded event.
+///
+/// A calibration event is not a configuration change, but it changes which guards may run, which is
+/// the thing §38.3's pair exists to leave a trail of. The black box half matters more here than
+/// anywhere: an impact is the event an investigator is looking for beside the cycles.
+fn calibration_event_recorded<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    entry: &crate::calibration_events::Entry,
+) {
+    let line = match &entry.note {
+        Some(note) => format!("calibration event `{}` recorded: {note}", entry.event),
+        None => format!("calibration event `{}` recorded", entry.event),
+    };
+
+    let layout = context.daemon.store.layout().clone();
+    let _ = crate::audit::Audit::of(&layout).append(
+        &crate::audit::rfc3339(wall_ms()),
+        &entry.recorded_by,
+        "calibration_event",
+        &entry.event,
+        &line,
+        None,
+    );
+
+    let mono_ns = context.mono_ns;
+    if let Some(recorder) = context.blackbox.as_mut() {
+        let _ = recorder.event(
+            mono_ns,
+            skynet_blackbox::record::EventCode::ConfigChanged,
+            "operator",
+            &line,
+        );
+    }
+}
+
+/// §38.1's unsigned local configuration, read.
+///
+/// Reports **every** setting, including the ones nobody chose, with the value in force and whether
+/// it is a default. A page that listed only what somebody had set would answer "what did I change"
+/// and never "what is this robot doing", and the second is the question somebody at a bench has.
+fn settings_read<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Response {
+    let layout = context.daemon.store.layout();
+    ok(settings_json(&crate::settings::read(layout)))
+}
+
+/// One reading, rendered.
+fn settings_json(reading: &crate::settings::Reading) -> Json {
+    let mut list = Json::arr();
+    for setting in crate::settings::Setting::ALL {
+        let mut entry = Json::obj();
+        entry.set("setting", Json::from(setting.as_str()));
+        entry.set(
+            "value",
+            Json::from(reading.settings.value_of(setting).as_str()),
+        );
+        entry.set(
+            "default",
+            Json::from(crate::settings::default_of(setting).as_str()),
+        );
+        entry.set("is_default", Json::Bool(!reading.was_set(setting)));
+        // §38.3's provenance, and §38.3's word for one nobody recorded. A setting at its default
+        // has none at all — nobody set it, so there is no "who" to be missing.
+        match reading.provenance(setting) {
+            Some(provenance) => {
+                entry.set("set_by", Json::from(provenance.set_by_or_unrecorded()));
+                entry.set(
+                    "set_at_ms",
+                    match provenance.set_at_ms {
+                        Some(at) => Json::Num(at as f64),
+                        None => Json::Null,
+                    },
+                );
+            }
+            None => {
+                entry.set("set_by", Json::Null);
+                entry.set("set_at_ms", Json::Null);
+            }
+        }
+        entry.set("choices", settings_choices(setting));
+        list.push(entry);
+    }
+
+    let mut body = Json::obj();
+    body.set("settings", list);
+    // Anything on the disk this robot could not use. Never dropped: a setting somebody wrote and
+    // this robot ignored is the fact they are missing.
+    let mut notes = Json::arr();
+    for note in &reading.notes {
+        notes.push(Json::from(note.as_str()));
+    }
+    body.set("notes", notes);
+    body
+}
+
+/// What one setting will accept, so a form can offer it rather than guess.
+fn settings_choices(setting: crate::settings::Setting) -> Json {
+    let mut choices = Json::arr();
+    match setting {
+        crate::settings::Setting::LogLevel => {
+            for level in crate::settings::Level::ALL {
+                choices.push(Json::from(level.as_str()));
+            }
+        }
+        crate::settings::Setting::ConsoleTheme => {
+            for theme in crate::settings::Theme::ALL {
+                choices.push(Json::from(theme.as_str()));
+            }
+        }
+        // A range rather than a list. Sixty entries in a dropdown is a list nobody reads.
+        crate::settings::Setting::TelemetrySampling => {
+            choices.push(Json::from("1"));
+            choices.push(Json::from(
+                crate::settings::MAX_SAMPLING.to_string().as_str(),
+            ));
+        }
+    }
+    choices
+}
+
+/// §38.1's unsigned local configuration, changed.
+///
+/// One route for both setting and resetting, distinguished by `reset` in the body, rather than a
+/// `DELETE` carrying the name of what to delete. Two reasons: a `DELETE /settings` with no body
+/// would read as *reset everything*, which is not an operation anybody asked for and is one keystroke
+/// from being performed by accident; and a body-bearing `DELETE` is the shape most HTTP clients
+/// handle worst.
+fn settings_write<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    request: &Request,
+) -> Response {
+    let Ok(text) = std::str::from_utf8(&request.body) else {
+        return error(400, "the body is not UTF-8");
+    };
+    let Ok(document) = Json::parse(text) else {
+        return error(400, "the body is not JSON");
+    };
+    let Some(key) = document.get_present("setting").and_then(Json::as_str) else {
+        return error(
+            400,
+            "expected `setting` — one of log_level, telemetry_sampling, console_theme",
+        );
+    };
+    let setting = match crate::settings::Setting::of(key) {
+        Ok(setting) => setting,
+        Err(said) => return error(400, &said),
+    };
+    let reset = document
+        .get_present("reset")
+        .and_then(Json::as_bool)
+        .unwrap_or(false);
+
+    let now_ms = wall_ms() as i64;
+    let actor = actor_of(context, request);
+    let layout = context.daemon.store.layout().clone();
+
+    let outcome = if reset {
+        crate::settings::clear(&layout, setting).map(|change| (change, true))
+    } else {
+        let Some(value) = settings_value_word(&document) else {
+            return error(
+                400,
+                "expected `value` — the new value, or `reset` to put this setting back to its default",
+            );
+        };
+        crate::settings::set(&layout, setting, &value, &actor, now_ms)
+            .map(|change| (Some(change), false))
+    };
+
+    let (change, was_reset) = match outcome {
+        Ok(pair) => pair,
+        Err(refusal) => {
+            let status = match refusal {
+                crate::settings::Refusal::Write(_) => 500,
+                _ => 400,
+            };
+            return error(status, &refusal.detail());
+        }
+    };
+
+    if let Some(change) = &change {
+        settings_recorded(context, change, &actor, was_reset);
+    }
+    // Take effect now rather than on the next reconcile pass. The route runs in the daemon's own
+    // process, so an operator who turns the log level up and reads the next line should see it —
+    // and a setting that needs ten seconds to apply is one somebody sets twice.
+    //
+    // Only for the setting it is about. A theme change has no business moving a process-global,
+    // and a refresh on every write is a write that reaches further than it says it does.
+    if setting == crate::settings::Setting::LogLevel {
+        crate::log::refresh(&layout);
+    }
+
+    let reading = crate::settings::read(&layout);
+    let mut body = settings_json(&reading);
+    let detail = match &change {
+        None => "That setting was already at its default. Nothing changed.".to_string(),
+        Some(change) if !change.moved() => format!(
+            "`{}` was already {}. Nothing changed, and the asking is recorded.",
+            change.setting.as_str(),
+            change.to
+        ),
+        Some(change) => format!(
+            "`{}` is {} — it was {}{}.",
+            change.setting.as_str(),
+            change.to,
+            change.from,
+            if change.from_was_default {
+                " (the default)"
+            } else {
+                ""
+            }
+        ),
+    };
+    body.set("detail", Json::Str(detail));
+    ok(body)
+}
+
+/// The new value out of the body, as a word.
+///
+/// A number is accepted as readily as a string, because `{"value": 4}` for a sampling rate is what
+/// anybody would write and refusing it would be pedantry with a 400 attached.
+fn settings_value_word(document: &Json) -> Option<String> {
+    let value = document.get_present("value")?;
+    if let Some(word) = value.as_str() {
+        return Some(word.to_string());
+    }
+    let number = value.as_f64()?;
+    Some(if number.is_finite() && number.fract() == 0.0 {
+        format!("{}", number as i64)
+    } else {
+        format!("{number}")
+    })
+}
+
+/// §38.3's two records for one change to a setting.
+///
+/// The same pair the session override writes, and for the same reason: the audit log is what an
+/// operator reads afterwards and the black box is what an investigator reads beside the cycles. A
+/// robot whose telemetry sampling changed at 14:02 is a fact whose value is being beside 14:02.
+fn settings_recorded<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    change: &crate::settings::Change,
+    actor: &str,
+    was_reset: bool,
+) {
+    let line = if was_reset {
+        format!(
+            "setting {} reset to its default, {}",
+            change.setting.as_str(),
+            change.to
+        )
+    } else {
+        format!("setting {} set to {}", change.setting.as_str(), change.to)
+    };
+
+    let layout = context.daemon.store.layout().clone();
+    // §38.3's previous value. The value in force before, which on a robot nobody had configured is
+    // the default — said so, because "it was info" and "nobody had ever chosen" are different
+    // facts and only one of them is a change somebody made.
+    let was = if change.from_was_default {
+        format!("{} (the default)", change.from)
+    } else {
+        change.from.clone()
+    };
+    let _ = crate::audit::Audit::of(&layout).append(
+        &crate::audit::rfc3339(wall_ms()),
+        actor,
+        "setting",
+        change.setting.as_str(),
+        &line,
+        Some(&was),
+    );
+
+    let mono_ns = context.mono_ns;
+    if let Some(recorder) = context.blackbox.as_mut() {
+        let _ = recorder.event(
+            mono_ns,
+            skynet_blackbox::record::EventCode::ConfigChanged,
+            "operator",
+            &line,
+        );
+    }
+}
+
+/// §38.2's session override, read.
+///
+/// **Reports the three states the store distinguishes**, rather than collapsing them into "set" and
+/// "not set". An override that has expired is not the same fact as no override — somebody set that
+/// file expecting the robot to be slowed, and a console showing "nothing set" would leave them
+/// wondering why it sped up. `crate::limits` collapses them because *composing a ceiling* has no
+/// use for the difference; this route keeps it because *telling an operator* does.
+fn session_read<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Response {
+    let layout = context.daemon.store.layout();
+    let now_ms = wall_ms() as i64;
+
+    let mut body = Json::obj();
+    match crate::session::read(layout, now_ms) {
+        crate::session::Reading::None => {
+            body.set("state", Json::from("none"));
+        }
+        crate::session::Reading::Live(stored) => {
+            body.set("state", Json::from("live"));
+            body.set("override", session_json(&stored, now_ms));
+        }
+        crate::session::Reading::Expired(stored) => {
+            body.set("state", Json::from("expired"));
+            body.set("override", session_json(&stored, now_ms));
+        }
+        crate::session::Reading::Unreadable(why) => {
+            body.set("state", Json::from("unreadable"));
+            body.set("detail", Json::Str(why));
+        }
+    }
+    body.set(
+        "max_duration_ms",
+        Json::Num(crate::session::MAX_DURATION_MS as f64),
+    );
+    ok(body)
+}
+
+/// One override, rendered.
+fn session_json(stored: &crate::session::Stored, now_ms: i64) -> Json {
+    let mut out = Json::obj();
+    out.set("name", Json::from(stored.name.as_str()));
+    out.set("set_by", Json::from(stored.set_by.as_str()));
+    out.set(
+        "reason",
+        match &stored.reason {
+            Some(reason) => Json::from(reason.as_str()),
+            None => Json::Null,
+        },
+    );
+    out.set("set_at_ms", Json::Num(stored.set_at_ms as f64));
+    out.set("expires_at_ms", Json::Num(stored.expires_at_ms as f64));
+    // The number an operator actually reads. A deadline is an instant they have to subtract from;
+    // this is the answer to "how long have I got", which is the question being asked.
+    out.set(
+        "remaining_ms",
+        Json::Num(stored.remaining_ms(now_ms) as f64),
+    );
+    for (key, value) in [
+        ("joint_velocity_max_rad_s", stored.joint_velocity_max_rad_s),
+        ("joint_torque_max_nm", stored.joint_torque_max_nm),
+        ("base_velocity_max_m_s", stored.base_velocity_max_m_s),
+        ("max_delta_per_cycle", stored.max_delta_per_cycle),
+    ] {
+        out.set(
+            key,
+            match value {
+                Some(number) => Json::Num(number),
+                None => Json::Null,
+            },
+        );
+    }
+    out
+}
+
+/// §38.2's session override, set.
+///
+/// Replaces whatever was there. Two overrides at once would be a fifth and sixth layer nobody
+/// specified, and *"which of the two is holding this robot"* is not a question a bench should raise.
+fn session_set<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    request: &Request,
+) -> Response {
+    let Ok(text) = std::str::from_utf8(&request.body) else {
+        return error(400, "the body is not UTF-8");
+    };
+    let Ok(document) = Json::parse(text) else {
+        return error(400, "the body is not JSON");
+    };
+    let Some(name) = document.get_present("name").and_then(Json::as_str) else {
+        return error(
+            400,
+            "expected `name` — an override is named so a notice can say what to clear",
+        );
+    };
+    let Some(duration_ms) = document.get_present("duration_ms").and_then(Json::as_f64) else {
+        return error(
+            400,
+            "expected `duration_ms` — a session override is time-boxed by §38.2, so there is no way to ask for one that does not end",
+        );
+    };
+
+    let now_ms = wall_ms() as i64;
+    let actor = actor_of(context, request);
+    // §38.3's "previous value" — read before it is replaced, because after `set` there is no way to
+    // recover what was there and an audit entry that cannot say what changed is half a record.
+    let previous = match crate::session::read(context.daemon.store.layout(), now_ms) {
+        crate::session::Reading::Live(stored) | crate::session::Reading::Expired(stored) => {
+            Some(stored)
+        }
+        _ => None,
+    };
+    let number = |key: &str| document.get_present(key).and_then(Json::as_f64);
+    let stored = crate::session::Stored {
+        name: name.to_string(),
+        // §38.3 wants provenance on every configuration change. The role is what this daemon can
+        // establish — §39.2's credentials name a role and never a person, and the audit log says so
+        // in its own header — so recording the role is honest and recording a name would not be.
+        set_by: actor_of(context, request),
+        reason: document
+            .get_present("reason")
+            .and_then(Json::as_str)
+            .map(str::to_string),
+        set_at_ms: now_ms,
+        expires_at_ms: now_ms.saturating_add(duration_ms as i64),
+        joint_velocity_max_rad_s: number("joint_velocity_max_rad_s"),
+        joint_torque_max_nm: number("joint_torque_max_nm"),
+        base_velocity_max_m_s: number("base_velocity_max_m_s"),
+        max_delta_per_cycle: number("max_delta_per_cycle"),
+    };
+
+    let layout = context.daemon.store.layout();
+    let stored = match crate::session::set(layout, stored) {
+        Ok(stored) => stored,
+        Err(refusal) => {
+            let status = match refusal {
+                crate::session::Refusal::Write(_) => 500,
+                _ => 400,
+            };
+            return error(status, &refusal.detail());
+        }
+    };
+
+    session_recorded(context, &stored, "set", &actor, previous.as_ref());
+
+    let mut body = Json::obj();
+    body.set("state", Json::from("live"));
+    body.set("override", session_json(&stored, now_ms));
+    ok(body)
+}
+
+/// §38.2's session override, cleared.
+///
+/// Idempotent, and says which it was. Clearing nothing is not a 404: the operator's intent — *this
+/// robot should not be under an override* — is satisfied either way, and an error would send
+/// somebody looking for a file whose absence is what they wanted.
+fn session_clear<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    request: &Request,
+) -> Response {
+    let layout = context.daemon.store.layout();
+    let now_ms = wall_ms() as i64;
+    // Read before removing, so the record of the clearing can name what was cleared. An audit line
+    // saying only "an override was removed" is one somebody has to reconstruct from two files.
+    let was = crate::session::read(layout, now_ms);
+    let actor = actor_of(context, request);
+
+    match crate::session::clear(context.daemon.store.layout()) {
+        Err(failure) => error(
+            500,
+            &format!("the override could not be removed: {failure}"),
+        ),
+        Ok(existed) => {
+            if let crate::session::Reading::Live(stored)
+            | crate::session::Reading::Expired(stored) = &was
+            {
+                let stored = stored.clone();
+                session_recorded(context, &stored, "cleared", &actor, None);
+            }
+            let mut body = Json::obj();
+            body.set("state", Json::from("none"));
+            body.set("cleared", Json::Bool(existed));
+            body.set(
+                "detail",
+                Json::from(if existed {
+                    "The session override is gone. This robot is back to the ceilings its profile sets."
+                } else {
+                    "There was no session override. This robot was already at the ceilings its profile sets."
+                }),
+            );
+            ok(body)
+        }
+    }
+}
+
+/// §38.3's two records for one change to the override.
+///
+/// *"Every change is a black box event and an audit-log entry, carrying who, when, which layer, and
+/// the previous value."* Both, because they answer different questions to different readers: the
+/// audit log is what an operator reads afterwards, and the black box is what an investigator reads
+/// beside the cycles — and a robot that was slowed at 14:02 is a fact whose whole value is being
+/// beside the cycles from 14:02.
+fn session_recorded<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    stored: &crate::session::Stored,
+    verb: &str,
+    actor: &str,
+    previous: Option<&crate::session::Stored>,
+) {
+    let line = format!(
+        "session override \"{}\" {}, narrowing {}",
+        stored.name,
+        verb,
+        narrowed_in_prose(stored)
+    );
+
+    let layout = context.daemon.store.layout().clone();
+    // §38.3 asks for the previous value, and the audit log has a field for exactly that. Rendered
+    // as the same prose as the new one, so a reader compares two sentences rather than a sentence
+    // against a shape.
+    let was = previous.map(narrowed_in_prose);
+    let _ = crate::audit::Audit::of(&layout).append(
+        &crate::audit::rfc3339(wall_ms()),
+        actor,
+        "session_override",
+        &stored.name,
+        &line,
+        was.as_deref(),
+    );
+
+    let mono_ns = context.mono_ns;
+    if let Some(recorder) = context.blackbox.as_mut() {
+        let _ = recorder.event(
+            mono_ns,
+            skynet_blackbox::record::EventCode::ConfigChanged,
+            "operator",
+            &line,
+        );
+    }
+}
+
+/// What an override narrows, as a sentence.
+///
+/// For the two records rather than for a screen. An audit line reading `{"joint_velocity":0.5}` is
+/// a shape somebody has to parse; this is what they would have written down.
+fn narrowed_in_prose(stored: &crate::session::Stored) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for (label, value) in [
+        ("joint velocity", stored.joint_velocity_max_rad_s),
+        ("joint torque", stored.joint_torque_max_nm),
+        ("base velocity", stored.base_velocity_max_m_s),
+        ("jerk", stored.max_delta_per_cycle),
+    ] {
+        if let Some(number) = value {
+            parts.push(format!("{label} to {number}"));
+        }
+    }
+    if parts.is_empty() {
+        // Unreachable through `session::set`, which refuses an override that narrows nothing.
+        // Written anyway rather than unwrapped: this runs while recording, and a panic in the code
+        // that writes the audit entry would take out the route that made the change.
+        return "nothing".to_string();
+    }
+    parts.join(", ")
+}
+
+/// Who made this change, as far as §39.2 lets this daemon know.
+///
+/// A **role**, never a person. §39.2's credentials name a role and the audit log's own header says
+/// so — *"an investigator [learns] which role did it and never which person"* — so recording
+/// anything more specific would be a fabrication in the one file written to be believed later.
+fn actor_of<L: Launcher, S: Slots>(context: &Context<'_, L, S>, request: &Request) -> String {
+    let role = context
+        .credentials
+        .role_of_header(request.header("authorization"));
+    format!("{} (local API)", role.as_str())
 }
 
 /// §10's one-time operator action, over the local API.

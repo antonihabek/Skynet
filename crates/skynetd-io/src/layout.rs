@@ -271,6 +271,26 @@ impl Layout {
         self.profiles().join("active.json")
     }
 
+    /// §38.1's unsigned local configuration — log level, telemetry sampling, console theme.
+    ///
+    /// Beside the session override rather than among the profiles, and for a stronger version of
+    /// the same reason: a profile is signed and this is not, and these three are not even a
+    /// narrowing. What keeps the file harmless is that nothing in it can reach the kernel, which
+    /// §38.1 states as the line and `crate::settings` enforces by holding a closed set of three.
+    pub fn settings(&self) -> PathBuf {
+        self.state().join("settings.json")
+    }
+
+    /// §38.2's session override, when one has been set on this machine.
+    ///
+    /// Beside the profiles rather than among them, and that is a claim about what it is. A profile
+    /// is signed (§38.1), delivered through desired state, and is a decision about a site. This is
+    /// unsigned, set at the machine, and is a decision about the next twenty minutes — filing it in
+    /// `profiles/` would put a document nobody signed where every other document is one that was.
+    pub fn session_override(&self) -> PathBuf {
+        self.state().join("session-override.json")
+    }
+
     /// Where an operator declares the robot is at a safe state (§33.4).
     ///
     /// A file rather than a flag, because the barrier is re-evaluated every pass and a value fixed
@@ -355,6 +375,17 @@ impl Layout {
     /// calibration would take every set with it.
     pub fn calibration(&self) -> PathBuf {
         self.state().join("calibration")
+    }
+
+    /// §45.4's event journal — the impacts, tool changes and swaps a calibration is judged against.
+    ///
+    /// Beside the records it invalidates, and **unsigned** where every one of those is signed. What
+    /// makes that safe is the direction it can push: an event can only expire a calibration, never
+    /// revive one, so a forged journal costs guards that would otherwise run rather than trust that
+    /// should not be given. `crate::calibration_events` states the argument in full, including the
+    /// operation nobody may add.
+    pub fn calibration_events(&self) -> PathBuf {
+        self.calibration().join("events.jsonl")
     }
 
     /// The append-only record of configuration changes (§38.3).

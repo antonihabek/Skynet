@@ -12583,3 +12583,443 @@ green.
 141. **A check with English in it can go stale in its grammar.** Counting what a pattern matched,
      separately from what failed, is what turns that from a silent pass into a message. The count
      reached one; the sentences became singular; every pattern missed; the tool said so.
+
+---
+
+## 2026-09-08 (seventy-third) — §47.6's mapping half, and the number that did not have to cross
+
+`skynet-frames` ended the previous session as a crate with twelve passing tests and **no caller**,
+which is §79.7's shape exactly — a module nothing imports is a module nothing has tested. This
+gave it the route.
+
+The crate is the Linux mapping half of §47.6: two shared regions per pool, pixels mapped read-only
+into the reader and a loans region of one `u64` per slot mapped writable. It carries no copy of the
+selection rule — that rule is `skynet-contracts`' `FramePool`, reproduced by three editions and
+pinned by `corpus/media/pool.json` — and it is `#![forbid(unsafe_code)]`, because the one `mmap`
+belongs to `skynet-ring-shm`.
+
+### The geometry stays in the header, and that was a decision
+
+`Reader::adopt_declared` reads the pool's shape out of the region rather than off the environment.
+The four-line alternative was there: `SKYNET_RING_CHANNELS` already crosses beside the rings, and a
+`SKYNET_FRAME_POOL=<slots>x<bytes>` beside it would have worked. It would also have been a second
+copy of a number the region already states, and the failure when two copies disagree is **not an
+error** — it is a reader addressing the wrong offset for every slot past the first and finding
+plausible pixels there. So a receiver maps 64 bytes of a duplicate descriptor, checks magic and
+version, reads the geometry, and only then maps the region.
+
+### The count is the announcement
+
+`pass::MAX_FDS` went two to four and the pool crosses in the **same** `SCM_RIGHTS` message as the
+two rings — pixels third, loans fourth. Two descriptors is a runtime with no camera; four is one
+with a pool. Never three: a policy handed pixels and no loans region can read a frame and cannot
+stop the writer taking the slot out from under it, which is the one property the pool exists to
+provide. `adopt_from` refuses any other count by name, and both descriptors are consumed on every
+path including the refusals — asserted by calling `dup` on them afterwards and requiring it to fail.
+
+`skynetk --frame-pool <stream>:<slots>x<bytes>` creates the region and hands it over, and refuses
+without `--policy-socket`, because a pool nobody receives is a mapping a process talks to itself
+through. It does **not** publish into it: this edition has no capture backend, so the pool stays
+empty for the whole run and the summary says so rather than implying otherwise (§34.3). The region
+and the hand-off are the operating system's; the pixels are a vendor driver's.
+
+Two integration tests start `skynetp` as a real child and read its stdout — one where a pool crosses
+and the policy names the slot the frame is in, one where none does and the policy says nothing about
+frames. The second exists because *"four means a pool"* asserted and *"two means no pool"* assumed
+is exactly the pair where the assumption fails quietly.
+
+### Numbers
+
+`cargo test --workspace` — **1,718 passed** (1,702 before). clippy and fmt clean, 1,142 of 1,142 in
+both editions, 44 self-checks, `scale-report --check` green at 24 crates and 126,000 lines, mirrors
+match.
+
+**And `e2e.sh` reported three failing checks that this session did not diagnose**, recorded as the
+next session's first task rather than as a footnote. Its first run reported eleven, and every one of
+those was a harness error — run from `crates/skynetd-io`, where the mock driver's compile step
+cannot find `drivers/mock/mock_robot.c`, so ten checks cascaded off one missing `.so`. The script
+fails informatively for a missing compiler and does not for the wrong working directory, which is a
+gap in the check an operator actually runs.
+
+### Findings, restated
+
+1-141 as before.
+
+142. **A crate with no caller is the shape §79.7 is about.** Twelve passing tests over a module
+     nothing imports say the module is self-consistent, and nothing else. The route is what tests it.
+
+143. **A number the region already states must not also cross out of band.** When the two copies
+     disagree the reader does not fail — it reads plausible pixels at the wrong offset, which is the
+     failure mode with no error in it.
+
+---
+
+## 2026-09-08 (seventy-fourth) — the three failing checks, and the second supervisor
+
+The previous session left one instruction: *"it was three, it was not diagnosed, do not assume
+either."* It was not three, it was not a regression, and it was not in the daemon.
+
+The first run this session reported **thirteen**, one cluster: every §59 confinement read-back, plus
+§15's `safety.policy.isolation` and the two assertions about what its pass says. Each dumped every
+directive present and every one of them a refusal — `NoNewPrivileges=no`, `ProtectSystem=no`,
+`MemoryMax=infinity`, an empty `AllowedCPUs`. It reads as a sandbox that landed nothing. It is
+**`systemctl show`'s output for a unit it has never heard of**: the manager's own defaults, printed
+for whatever properties are named, with **exit status 0**.
+
+### Why there was no unit
+
+The package started and was stopped again half a second later, over and over. Nothing in `skynetd`
+was doing it — `GET /plan` never contained a `StopPackage`, no skill emitted `Effect::Stop`, nobody
+called `POST /stop`. Two units identical but for their names settled it: `probe-plain.service` stayed
+up, `skynet:openrobot:probe.service` was stopped 1.7 s after starting, every time.
+
+    3030  03:30:57  skynetd --root /tmp/skynet-e2e/kernel --user --interval 500
+
+**A `skynetd` abandoned by an aborted run three and a half hours earlier.** §33's unit names live in
+**one** user manager, so a second supervisor observes the first one's units, finds them absent from
+its own desired state, and stops them. A robot has one `skynetd`, so this is not a defect in the
+daemon; it is a defect in a script that started five background processes and cleaned up one. The
+trap killed `$DAEMON`; `$MDNS`, `$KDAEMON`, `$KLOOP` and `$KSTOP` were killed only by the lines
+that follow them, which an early exit never reaches.
+
+### Fixed in three places, and only one of them is the script
+
+1. **`confinement()` was reading an answer that was not about a unit.** A pure
+   `confinement_from_show` now asks for `LoadState` alongside the directives — in the *same* call,
+   because two calls could straddle the moment `--collect` reaps a transient unit — and returns
+   `Err` unless it is `loaded`. This matters past the script: `policy_isolation` treats an
+   unreadable confinement as a **skip** and a shortfall as a **fail**, so before this a robot whose
+   policy had stopped would fail its own `safety.policy.isolation` naming seven directives that were
+   in fact applied. `applied()` had the honest version all along (`MainPID` of 0 → *"it stopped
+   between being listed and being read"*); the rung above it did not. A test keeps the old
+   misreading demonstrable — the real not-found dump, parsed the old way, still produces a shortfall
+   of exactly seven — so nobody can quietly undo it.
+2. **The script kills what it starts.** `track` records every background pid, `kill_tracked` is the
+   trap, and a `pkill -f "skynetd --root $ROOT"` follows it for a process whose pid the shell never
+   learned.
+3. **The script refuses to run beside another supervisor**, naming the pid and the root. A run
+   against a poisoned machine that reports ten confinement failures is worse than one that does not
+   start.
+
+The read-back now reports **one** failure when there is no unit — *"the unit was started and is not
+there to read"* — rather than ten sentences that are each false.
+
+### Numbers
+
+`sh crates/skynetd-io/e2e.sh` — **98 checks, 0 failed** (13 failed / 85 passed at the start).
+`cargo test --workspace` — **1,721 passed**. clippy and fmt clean, corpus and self-check green,
+`scale-report --check` green, mirrors match. All three mechanisms verified rather than assumed: a
+clean run leaves no `skynetd`, a run started beside a stray refuses with exit 1 naming its pid, and
+an interrupted run leaves zero daemons where it used to leave one for ever.
+
+### Findings, restated
+
+1-143 as before.
+
+144. **`systemctl show` answers for a unit it has never heard of, with exit 0.** It prints the
+     manager's defaults for whatever properties are named. Reading a confinement without reading
+     `LoadState` in the same call is reading an answer that is not about a unit — and every value in
+     it is a plausible one.
+
+145. **A script that starts five processes and cleans up one leaves a supervisor on the machine.**
+     It outlives the checkout that made it, and everything it then breaks names the wrong thing.
+
+---
+
+## 2026-09-09 (seventy-fifth) — the audit before the round, whose own first draft was wrong
+
+No code. Asked whether the plan was finished, and the useful half of the answer was a correction to
+the audit itself.
+
+The first draft listed as open: *"a policy package that speaks §25 — `skynetp` appears nowhere in
+`skynetd-io`, there is no manifest in the tree, and §54.4's lifecycle has never started a real
+commanding loop end to end."* **All three clauses were false, and they were false when they were
+written.** `e2e.sh` §9 has installed a real skill package since the ninth session — `acme/wave`, the
+`skynetp`-in-a-blob pattern, staged through `skynet install`, activated through desired state,
+invoked over the socket, watched into `running` and out through `terminal`. Building it is what
+found the reconciler bug in the sixty-second session.
+
+The draft was assembled from §73's Skills row and a stale bullet in this log, both of which said
+*"nothing joins them"*. The grep that settled it took one command.
+
+### What that cost, and what was fixed
+
+Three documents were behind the tree, and closing them was the largest item of the session rather
+than the smallest:
+
+* `docs/skynet-build-plan.md` had **diverged** from the Hub's copy — four Hub sessions existed only
+  in the other repository. 180 lines, purely additive, so `--sync` was the right direction and was
+  checked to be before it was run.
+* §73's **Skills row** now carries the package and the lifecycle it is driven through, and keeps the
+  stale sentence visible with the reason: a stale *"still missing"* is the one kind of wrongness a
+  *what is missing* column cannot catch by being read. What replaces it is the two things that
+  **are** missing — no physical joint has produced the post-state §54.3 judges, and
+  `intervention_count` is attributed only while an invocation is `running`.
+* §80's **ring row** ended *"what is still one process is a sandbox"*, false since the fifty-ninth
+  session. That session recorded why it had not fixed it — the fix means editing a mirrored document
+  and the other tree was not on the machine. This was the pass that had both.
+
+Both documents were edited in **both** repositories and `docs/mirror-digests.json` re-pinned with
+`--pin` rather than `--sync`, which is the round the distinction mattered: `--sync` would have
+silently reverted the edit just made in both trees.
+
+### Numbers
+
+No code. `e2e.sh` 98 checks, `cargo test --workspace` 1,721, `scale-report --check` green at all
+eight figures, mirrors and contract mirrors match after the sync.
+
+### Findings, restated
+
+1-145 as before.
+
+146. **A summary is evidence about when somebody last wrote it down, and nothing else.** Three of
+     the four things this audit called open were closed in the tree, and the one genuinely open item
+     was the one the documents said least about.
+
+147. **A stale "still missing" is the one wrongness a "what is missing" column cannot catch.** It
+     costs a reader nothing to believe, and the next session plans around a hole that is not there.
+
+---
+
+## 2026-09-09 (seventy-sixth) — §79's two halves meet, and both were wrong about a trailing slash
+
+The previous session left one buildable item: the robot half and the Hub half are each exercised
+against a double, and neither has met the other. This is that, and it found two defects neither
+suite could have seen.
+
+`scripts/skynet-verify-recordings-robot.mjs` lives in the Hub beside the receiver's own verifier,
+because that is where the service-role client and the cleanup convention already live. `skynetk`
+turns the loop against the mock RHAL driver at 200 Hz for 400 cycles and seals a real MCAP window;
+an unpaired `skynetd once` reshapes and seals a second, which exercises §79's rule 2 — one subject
+per pass, oldest first; then `skynetd once` runs in a loop until §79 goes `Idle`. **50 checks.** Both
+windows complete, a receipt beside each naming the digest the recorder sealed, and the object in the
+bucket **byte-identical** to the file on the robot's disk, with the two digests computed by two
+implementations that share no code.
+
+With the transport proven, the fault path closed the claim §73 had carried unproven:
+`skynet_incidents.artifact_id` is filled by the digest the incident named — asserted as filled **by
+the right window**, the artifact's own `sha256` against the digest inside the incident, because a
+join on any window this device had sent would look identical and be wrong. The fault needed no
+hardware: §38.1 supplies one, a profile whose genuine signature was made over other bytes.
+
+### The first defect: curl appends a filename to a URL that ends in a slash
+
+`--upload-file` has a documented behaviour that is a footgun here and nowhere else: if the URL ends
+with a slash, curl appends the local file's name. The local file is the scratch slice, so the push
+went to `…/recordings/sha256%3A<hex>/slice`. A slash-terminated URL is the **normal** answer from
+the Hub this robot pairs with, and `advance` reuses `probed.effective_url`, which is right. What it
+produced is §79.7's signature: the probe answered, the push 404ed, the window stayed pending, and
+every surface said the robot was trying. The fix is in `curl_push` rather than in `advance`, because
+it is a property of curl and not of §79.
+
+### The second, found while looking at the first, and larger
+
+`connectivity::get_json` had **no `--location`**. Its sibling `post_json` has carried one for
+sessions. Its two callers are §11's desired state and §12's release list — so a robot paired to this
+Hub could not be told what to run and could not be told there was an update, reported honestly and
+uselessly as *the Hub answered HTTP 308*. What hid it is worth more than the fix: `get_json`'s own
+doc comment said *"there is no body, so there is no file. That is the whole of the difference
+between the two."* Two functions side by side, described as differing in one way, differing in two.
+
+Both fixes were proven load-bearing by reverting them — `upload_target` reverted, 7 checks fail with
+the exact 404 on the exact invented path; `--location` reverted, the desired-state check fails and
+nothing else does.
+
+One absence is asserted rather than left silent: §74's telemetry does **not** cross in this harness,
+because `Counting` lives in memory on the `Daemon` and each `skynetd once` is a new process. That is
+right rather than missing — §74.2's window carries a monotonic interval, which does not survive a
+process boundary, and a window whose bounds came from two processes would be a fabricated duration.
+Bytes on a disk outlive a process; an interval does not, which is why `report_upload` belongs in the
+`once` path and `report_telemetry` does not.
+
+### Numbers
+
+`cargo test --workspace` — **1,722 passed**. `e2e.sh` 98 checks, 0 failed. `skynet-verify-recordings-robot.mjs`
+— **50 checks, 0 failed**, new. clippy and fmt clean, corpus and self-check green, every check tool
+green, both mirrors re-pinned.
+
+### What it leaves
+
+The gap that closed was between two halves; the one inside it is narrower and named. The daemon ran
+**single passes**, not the supervised loop, and **§10's pairing did not run** — both waiting on a
+Linux host that can reach the Hub, and neither a missing mechanism.
+
+### Findings, restated
+
+1-147 as before.
+
+148. **Two components that have only ever met doubles have not met.** Both suites were green and had
+     been for weeks, and between them sat a robot that could not upload a window and could not read
+     its own desired state. The doubles were not wrong about the protocol; they were silent about
+     the one thing a real receiver had an opinion on.
+
+149. **Two functions described as differing in one way differed in two.** The sentence that named
+     the difference is what stopped anybody looking for a second one.
+
+---
+
+## 2026-09-09 (seventy-seventh) — the two commands §41.3 specified, and a black box nobody could read
+
+Asked to finish the OS and make the Console usable. The audit two sessions earlier said what was
+left was a vendor's, a machine's or the owner's; that was true about the *list* and it was answering
+the wrong question. The right one is **not what is unbuilt, but what somebody standing in front of a
+stopped robot would reach for**, and three things came out of it — two of them specified and
+missing.
+
+### `skynet doctor`, specified since Part IV and not a command
+
+§41.3: *"one command producing one bundle … so that the answer to 'what is wrong with this robot' is
+a file rather than an interview."* `skynet doctor` printed *"`doctor` is not a skynet command"*,
+which made that paragraph false in the way that matters — the answer **was** an interview.
+
+It is an aggregator and holds no second opinion about anything: every section is a route on §33.7,
+because a `doctor` that derived its own view of §7.2's guard partition would be a second
+implementation of it. Twelve sections — §41.3's nine plus §27's state, §33.6's health and the
+window's shape. **A route it could not read is recorded as unread, with the reason**, so a run with
+no credential produces a bundle of one section and eleven refusals each naming the role it wanted,
+which is a readable document rather than a failed run.
+
+Two things it got wrong were found by running it against a robot rather than by reading the routes:
+it counted a `guards` array with a `state` field that `GET /limits` does not have and printed
+**"0 of 0 active"** for every robot, and the queue depth was the same mistake one route over. Both
+are correct-looking output derived from a key nobody checked existed.
+
+### `GET /blackbox/events`
+
+§41.3 asks for the last N black box events and nothing could produce them: `GET /blackbox` reports a
+window's **shape**, and a shape does not answer *what happened just before it stopped*. Gaps are in
+the list, in their place — a `Gap` is not an `Event` in the type system and omitting it would present
+a continuous list over a discontinuous recording, two events either side of four hundred dropped
+records reading as consecutive. `held` is reported beside `returned` because *"the ring holds 12,000
+and you are looking at 50"* and *"the ring holds 50"* are different robots. Observer rather than
+operator, and the route sits **above** the download arm in both the router and the authorisation
+table — asserted in both, because if it ever stops doing so `events` is read as a file name and
+silently needs the wider role.
+
+### Reading a sealed recording, which nothing had ever done
+
+The strangest of the three. §13's seal has written MCAP **since the sixth session** and no code
+anywhere had ever read one back — so every question about a window was a question for the robot that
+produced it, which works until the robot is the thing that is broken. Evidence nobody can open is an
+anecdote with a checksum.
+
+`skynet-blackbox::read` is the reader and `skynet blackbox inspect <file>` the command — the one
+robot command that talks to no robot. It stops short of replay deliberately. Three properties kept:
+nothing trusts the file, every length checked against what is left; **truncated and damaged are
+different answers**, because a transfer that stopped is what §79 resumes and a record running past
+the end is a file to replace; and unknown opcodes are skipped by length and counted, so a reader from
+one edition can open a file from a later one.
+
+Two defects, both from pointing it at a real 200-cycle recording rather than a fixture: every topic
+listed **twice**, because MCAP repeats channels in the summary section, and an empty metadata value
+printing as a blank where the seal writes every key whether or not the robot had something to put in
+it.
+
+### Numbers
+
+`cargo test --workspace` — **1,728 passed** (1,722 before). `e2e.sh` **119 checks** (98 before), 0
+failed. clippy and fmt clean, corpus and self-check green, golden path green at 54 commands,
+`scale-report --check` green at 127,000 lines.
+
+### Findings, restated
+
+1-149 as before.
+
+150. **A bundle must record the sections it could not read, with the reason.** A robot answering 403
+     for want of a credential and 503 because its recorder is not running is telling you something;
+     omitting those sections, or writing them as empty objects, erases the two most interesting facts
+     in the file.
+
+151. **Evidence nobody can open is an anecdote with a checksum.** A format written for years and
+     never read back is not a capability, and the gap is invisible from the writing side.
+
+---
+
+## 2026-09-09 (seventy-eighth) — a window that could be read and not replayed, and two defects only a real recording had
+
+The audit first, and it corrected three things this log had been wrong about.
+
+* **`cargo test --workspace` did not build on Windows.** `skynet-ring-shm` states, over the block
+  that exists for it, *"a stub rather than a compile error, so `cargo test --workspace` works on a
+  machine that is not the robot."* `Mapping::words` has that stub; `bytes_slice`, added with the
+  mapping half, does not, and `skynet-frames` calls it from ten ungated places. **CI's `windows`
+  job — which exists because of a break of exactly this shape — was red.** The previous entry said
+  clippy and fmt were clean; both had been run on Linux only.
+* **`cargo fmt --all --check` was not clean either** — fourteen hunks across five files, all of them
+  the previous session's own new code.
+* **Replay was not blocked, and most of it was already written.** `crates/skynet-blackbox/src/replay.rs`
+  has evaluated recorded cycles against `ResolvedLimits` for sessions, and its own doc comment says
+  it takes records rather than a `Ring` *"so that a recording read from a sealed file … replays
+  through the same function."* Nothing joined them, and no FFI decision stood between them.
+
+### What the file could not say
+
+Reassembly is the inverse of §26's *one cycle becomes four messages*, and the inverse did not exist.
+Three of `replay()`'s inputs reached the ring and stopped there: `capability`, `nearest_person_m` and
+§26.4's `read_result`. Two of them the kernel **evaluates**, so a replay missing them does not fail —
+it recomputes a different verdict and presents the difference as the kernel disagreeing with itself,
+which is the worst available failure for a tool whose purpose is to say whether it still agrees.
+
+They are in the schema now, in all three editions, and an older recording is neither unreadable nor
+silently wrong: the missing keys become the ring's own *not known* values and `Assembled` counts the
+cycles that lacked each, so a caller says *this window predates the field*. The wire fixture caught
+the consequence before a person did — the schemas are embedded in every sealed file, so three added
+fields moved every window's digest and `reference/wire/incident.json` stopped matching its pin.
+
+**The join is by sequence, and the obvious version is wrong on the file that matters.** Reading it as
+the same index in each channel fails on a transfer cut between two of a cycle's four messages: the
+channels stay one apart for the rest of the window and every cycle after the cut is assembled out of
+two different ones, each field plausible. Matched on the sequence, that cut is one reported
+`Incomplete`.
+
+### Then it was pointed at a real recording, and both halves were wrong
+
+Two processes on Linux sealed a 300-cycle window. Replaying it reported **300 of 300 diverged**, with
+every unit test in the repository green.
+
+**One: it evaluated cycles the robot had never asked the kernel about.** §25's loop returns before
+`evaluate_cycle` when the policy has posted nothing, recording a mask of zeros and an all-`NaN`
+`desired`. The first fix was also wrong, and the real recording said so too — reading *nothing
+posted* as *`desired` is empty* collapsed the window to two evaluated cycles, because a policy
+publishing a **hold** records an all-`NaN` `desired` as well and the kernel did answer about those.
+§24's sequence separates them: zero is *no command has ever arrived*. `unposted` is 167 and the
+loop's own summary says `idle 167` — two numbers from two processes that share no code.
+
+**Two: `GET /limits` cannot replay anything.** `evaluate_cycle` reads `watchdog_ms` off the declared
+**envelope**, and `limits_to_json` does not serialise one. So the guard that decides nearly every
+cycle on a bench had no window to measure staleness against, and two recorded `stop_cat2` verdicts
+came back as `none` — **a replay saying a robot kept going where the recording says it stopped.**
+`skynetk` now writes the limits it ran under beside every window it seals, which closes a hole larger
+than the field: nothing else on the machine knows them.
+
+Where a document cannot reconstruct a guard's input the refusal lives in the **replay**, not the
+reader — whether an absence matters is a fact about the window, not about the document. `mode_gate`
+is active on an ordinary robot and does nothing at all on a cycle that exercised no capability, so
+refusing in the reader refused every real document.
+
+`skynet blackbox replay` is the CLI's second documented exit-code exception: **0** reproduced, **2**
+ran and did not, **1** could not run.
+
+### Numbers
+
+`cargo test --workspace` — **Windows 1,652 · Linux 1,739** (1,641 / 1,728 before). `e2e.sh` **129
+checks**, 0 failed (119 before). clippy and fmt clean **on both hosts**, which they were not at the
+start of the session. Corpus 1,142 of 1,142 in both editions, golden path green at 55 commands,
+every check tool green, both mirrors re-pinned.
+
+### Findings, restated
+
+1-151 as before.
+
+152. **A component that has only ever met a fixture has not been tested.** The reassembler had a
+     round-trip test that passed, against a fixture built by the same hand that built the reader. The
+     first real recording found two defects under it, one of which said a robot kept moving through a
+     stop.
+
+153. **Clean on one host is not clean.** A stub added for a non-robot target and not extended to the
+     next function that needed it turned the workspace red on the machine this repository is
+     developed on, while every tool reported green on the other.
+
+154. **A replay must refuse the cycles nobody asked the kernel about.** Evaluating them produces
+     divergences that belong to the tool, and a tool whose whole output is *the kernel disagrees with
+     itself* cannot afford to manufacture one.

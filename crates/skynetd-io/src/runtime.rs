@@ -1679,12 +1679,15 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         // — a chassis with no IMU can never run `balance`, whatever a kernel is doing — so it is
         // answerable on this side of §33.1's line, and it is a different question from
         // `guards_active` below rather than the other half of one.
-        let guards_unavailable = crate::limits::report(&crate::limits::read(
-            layout,
-            &body,
-            crate::limits::ROBOT_TIER,
-            &self.proximity_sighting,
-        ))
+        let guards_unavailable = crate::limits::report(
+            &crate::limits::read(
+                layout,
+                &body,
+                crate::limits::ROBOT_TIER,
+                &self.proximity_sighting,
+            )
+            .with_session(crate::api::live_session(layout)),
+        )
         .unavailable
         .into_iter()
         .map(|entry| entry.guard)
