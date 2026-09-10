@@ -8815,3 +8815,125 @@ panes and a tray behind Windows. Every first-version item in §83.5 is now built
 migration. And, outside Skynet, the eight `tsc` errors in `semantic-vector-store.test.ts`.
 
 Nothing is committed. Nothing is pushed.
+
+---
+
+## Session — 2026-09-10 (thirty-third): the audit, and three documents that disagreed with the tree or with themselves
+
+Asked to establish whether the plan is finished before building anything. The audit says **no**, and
+what an agent can build without a vendor, a machine or the owner is now very short — three documents
+and one crossing. This session closed the documents.
+
+Everything below was checked by running it, on a Linux container carrying both repositories.
+
+| | |
+|---|---|
+| OS `cargo test --workspace` | **1,739 passed**, exit 0 |
+| OS `e2e.sh` | **117 checks, 0 failed** — every check that does not need a systemd user manager, which this container has no PID 1 for. The script says so itself |
+| OS check tools | `scale-report --check`, mirrors, contract mirrors, golden path, RHAL flags — all green |
+| Hub `npx tsc --noEmit` | **exit 0** |
+| Hub `npx vitest run` | **1,963 passed**, 93 files |
+| Hub surface | **95** routes under `/api/skynet/v1`, **29** migrations |
+| Console | not buildable here: no .NET, and macOS needs Apple frameworks |
+
+### The correction that matters most, because it runs the other way
+
+Session thirty-two recorded `tsc --noEmit` as *"carrying eight errors — all of them in
+`lib/__tests__/semantic-vector-store.test.ts`"*. It carries **none**. Whatever closed them was the
+marketplace work in the commits after that session.
+
+Worth stating as a rule rather than as a correction: a stale *"still broken"* is the same defect as a
+stale *"still missing"*. Both are believed for free by the next reader; the only difference is which
+direction the tree looks wrong in.
+
+### `desktop/README.md` contradicted itself, in the one section a reader trusts
+
+Its *What is not here* section still said **"no tray icon and no global hotkey"** and **"no black box
+replay"**. All three shipped on 2026-09-09 and are described at length **in the same file**, under
+headings of their own, two hundred lines above: `TrayIcon.cs`, `TrayStop.cs` and the Replay pane are
+in the tree with twenty-four tests between them.
+
+A document that runs behind is one problem; a document that contradicts itself is a worse one,
+because a reader asking *what is missing* starts at the section named for that question, and a stale
+answer there is believed without checking. Rewritten, with the correction visible rather than
+quietly deleted — which is the convention that section already used for the mDNS responder.
+
+The pane count went with it, and it was wrong in **both** directions at once: this file said *five
+panes* in one place and *seven panes behind* in another, and session thirty-two's log said *six*.
+`DetailPane` has five values and macOS draws one of them, so the honest count is **four panes and
+the stop behind**, and it has still never been compiled — there is no Swift toolchain on the machine
+it was written on and none on the Linux one that audited it, because `SwiftUI`, `Network` and
+`WKWebView` are Apple frameworks.
+
+### And the macOS application's own gap list was two entries short
+
+`NotInThisBuild` in `ContentView.swift` names what that build cannot do, and it is drawn on screen —
+so it is the one list in this repository whose staleness an operator sees rather than a reader. It
+listed the console, USB, a stop and the black box, and had never gained **pairing** or §41.3's
+**bundle**, both of which Windows has had for two sessions. Added, and the stop entry now says there
+are three routes to it on Windows and none here.
+
+Uncompiled, like the rest of that target. It is a list of string literals in an array of the same
+shape as the four already there, which is the smallest change that target can receive; the honest
+statement is that nothing about macOS has ever been compiled, not that this particular edit was.
+
+### A generated file that said its own closure was outstanding, six days after the owner closed it
+
+`supabase/schema/skynet.sql`'s header explains why the tree cannot stand up a fresh database — the
+Skynet tables reference `public.profiles`, `public.organisations`, `public.org_members`,
+`public.botindex` and `auth.uid()`, none of which are in this repository — and then ended:
+
+> *"Closing it properly means a baseline migration for both halves in dependency order, and that is
+> named as outstanding in the build log rather than half-done here."*
+
+The build log says the opposite. Session twenty-one, fourth, records the baseline as **withdrawn by
+the owner** — built far enough to know its shape, then removed *"on the grounds that it is
+scaffolding rather than product: a file that exists so that a database nobody is standing up could
+be"* — and states plainly that a fresh environment not being buildable from `supabase/` is now a
+**stated property** of this repository rather than an open task in it.
+
+So the header was sending every reader who got that far to a task the owner had already declined.
+Corrected in `scripts/skynet-schema-dump.mjs`'s `HEADER` **and** in the generated file, because the
+generator emits it verbatim and a fix in one alone would make `--check` fail on a machine that has
+`pg_dump` — the two are now byte-consistent, verified by containment rather than by eye.
+
+This one was found by trying to stand a local Supabase up, which is worth recording: `supabase start`
+applies `supabase/migrations` in order and fails on the **first** Skynet migration with
+`relation "public.org_members" does not exist`. That is exactly what the header describes, arriving
+as an error message instead of as a paragraph, and it is the reason the last open crossing below is
+blocked here.
+
+### What the audit leaves, for the OS, the Hub and the Console
+
+**Buildable by an agent:** the three documents above (done), and **§10's pairing plus the supervised
+loop meeting a real Hub**. The last of those has been carried as blocked since session thirty, on a
+reason that was a fact about one machine — *"WSL cannot reach the Windows host"*. This container is a
+single Linux host with both repositories, a Docker daemon and the daemon's Unix socket, so nothing
+has to cross a firewall. What it needs instead is a database, and the paragraph above is why that is
+the owner's call rather than an afternoon's work.
+
+**A vendor's:** a capture backend for §47.6's pool, inference on what it captures, one real RHAL
+driver.
+
+**The owner's:** a third language edition; the countersignature on a conformance result (§80 — and
+§83.4 makes an operator attestation a third claim again); the marketplace-side migration; and the
+baseline above, already decided.
+
+**Hardware's:** a physical joint under the kernel, a TPM for `security.identity.attested`, an OTA
+image this Hub has applied, three of §15's eight runtime tests, the certified tier's MCU and its
+notified body, and the `vram_mb` that gates a `DeviceAllow`.
+
+**Infrastructure's, and correctly queued rather than faked:** Phase 10's real worker —
+`lib/skynet/workers/in-process.ts` runs dataset-index and search-reindex and says why in its own
+header — Phase 11's GPU training, inference endpoints and Spaces, and Phase 12's teleoperation
+session.
+
+**The Console's:** USB and serial, which have no route on the robot to talk to; signing, notarisation
+and the installer, which need certificates and a pipeline, and until one exists `CONSOLE_RELEASES`
+is deliberately empty; and macOS.
+
+### Numbers
+
+`npx vitest run` — **1,963 passed**, 93 files. `npx tsc --noEmit` — clean. No route, schema, lib or
+catalogue change, and no locale change: desktop documentation is English-only by standing convention
+and the two corrected files are a generated SQL header and a build log.

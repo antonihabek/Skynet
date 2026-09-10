@@ -8228,4 +8228,38 @@ is level with `HEAD` — so the work is on the remote already, on a branch rathe
 Nothing has been merged. Said here because a sentence claiming nothing is pushed is exactly the kind
 of sentence somebody plans around.
 
-Nothing is committed this round. Nothing is pushed.
+## What the audit then closed, in the same round
+
+The three documents, because they are the whole of what an agent can close without a vendor, a
+machine or the owner — and because leaving an audit's findings in the audit is the failure the audit
+was written against.
+
+* **`PROGRESS.md` gained rounds thirty-one through thirty-six**, as entries seventy-third to
+  seventy-eighth, with findings 142-154. It is the OS repository's canonical log by `docs/README.md`,
+  and it had been six rounds behind.
+* **`desktop/README.md`'s *What is not here*** no longer says the tray icon, the global hotkey and
+  replay are missing, and its pane count agrees with `DetailPane` — five values, one of which macOS
+  draws, so **four panes and the stop behind**. The correction is left visible rather than deleted,
+  which is the convention that section already used once.
+* **The macOS application's own `NotInThisBuild` list** gained pairing and §41.3's bundle. It is
+  drawn on screen, so it is the one stale list an operator sees rather than a reader.
+* **`supabase/schema/skynet.sql`'s header** said closing the baseline was *"named as outstanding in
+  the build log"*. The build log says the owner **withdrew** it on 2026-09-04 as scaffolding rather
+  than product. Fixed in `scripts/skynet-schema-dump.mjs`'s `HEADER` and in the generated file, which
+  the generator emits verbatim, so `--check` stays honest on a machine that has `pg_dump`.
+
+That last one was found by trying to stand a local Supabase up. `supabase start` applies
+`supabase/migrations` in order and dies on the **first** Skynet migration with `relation
+"public.org_members" does not exist` — the header's paragraph arriving as an error message. So the
+one buildable crossing above is blocked here after all, and on a decision the owner has already
+taken rather than on effort: a fresh environment cannot be built from `supabase/`, and the file that
+would change that was withdrawn.
+
+The Hub's own log carries this as session thirty-three, in both trees, and the pins were taken with
+`--pin` from the two agreeing copies.
+
+`cargo test --workspace` 1,739 · `e2e.sh` 117 · Hub `vitest` 1,963 · `tsc --noEmit` clean · mirrors,
+contract mirrors, golden path, RHAL flags and `scale-report --check` all green. No Rust changed, so
+no figure in §73 moved.
+
+Committed. **Nothing is pushed.**
