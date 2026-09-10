@@ -72,14 +72,14 @@ pub const CSP: &str = "default-src 'none'; \
 /// Returns `None` for anything else, so [`crate::api::handle`] falls through to the API routes
 /// unchanged. Only `GET` — a console asset is not something to POST to, and letting the method
 /// through would make `POST /` a 200.
-pub fn asset(method: &str, segments: &[&str]) -> Option<Response> {
+pub fn asset(method: &str, segments: &[&str], theme: crate::settings::Theme) -> Option<Response> {
     if method != "GET" {
         return None;
     }
     let response = match segments {
         // The empty path. `Request::segments` drops empty components, so `/` arrives as no
         // segments at all.
-        [] => Response::html(200, HTML),
+        [] => Response::html(200, themed(theme)),
         ["console.css"] => Response {
             status: 200,
             content_type: "text/css; charset=utf-8".to_string(),
@@ -97,6 +97,34 @@ pub fn asset(method: &str, segments: &[&str]) -> Option<Response> {
     Some(response.with("Content-Security-Policy", CSP))
 }
 
+/// The page with §38.1's `console_theme` pinned onto its root element.
+///
+/// Server-side rather than in the script, and that is the whole reason it is done here at all: a
+/// page that fetched its own theme after loading would render in the browser's colours first and
+/// swap, and the swap is most visible on the machine the setting was set for — a bench under shop
+/// lighting where the workstation is configured dark. A theme that arrives with the HTML has
+/// nothing to swap from.
+///
+/// [`Theme::System`] substitutes nothing at all, so the default path serves the file byte for byte
+/// and `prefers-color-scheme` decides, exactly as it did before this setting existed.
+fn themed(theme: crate::settings::Theme) -> String {
+    match theme {
+        crate::settings::Theme::System => HTML.to_string(),
+        pinned => HTML.replacen(
+            ROOT_ELEMENT,
+            &format!("<html lang=\"en\" data-theme=\"{}\">", pinned.as_str()),
+            1,
+        ),
+    }
+}
+
+/// The opening tag the theme is substituted into.
+///
+/// A constant rather than a literal at the call site, and asserted in the suite against the page
+/// itself: an edit to `console.html` that reformatted this tag would otherwise make the theme
+/// setting silently stop working, with the page still serving perfectly.
+const ROOT_ELEMENT: &str = "<html lang=\"en\">";
+
 /// Whether a path is one of the console's, for the authorisation table.
 ///
 /// Kept beside [`asset`] rather than written out again in `auth`, because two lists of the same
@@ -112,32 +140,77 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_three_assets_are_served_and_nothing_else_is() {
-        assert!(asset("GET", &[]).is_some());
-        assert!(asset("GET", &["console.css"]).is_some());
-        assert!(asset("GET", &["console.js"]).is_some());
+    fn the_root_element_this_module_substitutes_is_the_one_the_page_has() {
+        // The check that makes the theme setting fail loudly rather than silently. Reformatting
+        // `<html lang="en">` in `console.html` would otherwise leave `themed()` substituting
+        // nothing, the page serving perfectly, and the setting quietly doing nothing at all.
+        assert_eq!(
+            HTML.matches(ROOT_ELEMENT).count(),
+            1,
+            "console.html must contain exactly one `{ROOT_ELEMENT}` for the theme to pin onto"
+        );
+    }
 
-        assert!(asset("GET", &["status"]).is_none(), "the API still routes");
-        assert!(asset("GET", &["console.map"]).is_none());
+    #[test]
+    fn the_default_serves_the_page_byte_for_byte() {
+        // §38.1's default is `system`, and a robot nobody configured must serve exactly the file
+        // that is compiled in — `prefers-color-scheme` decides, as it did before this existed.
+        let page = asset("GET", &[], crate::settings::Theme::System).expect("the page");
+        assert_eq!(page.body, HTML.as_bytes());
+        assert!(!String::from_utf8_lossy(&page.body).contains("data-theme"));
+    }
+
+    #[test]
+    fn a_pinned_theme_arrives_on_the_root_element_with_the_html() {
+        // On the HTML rather than fetched by the script, so there is nothing to swap from. The
+        // swap would be most visible on exactly the machine the setting exists for.
+        for (theme, word) in [
+            (crate::settings::Theme::Light, "light"),
+            (crate::settings::Theme::Dark, "dark"),
+        ] {
+            let page = asset("GET", &[], theme).expect("the page");
+            let text = String::from_utf8(page.body).expect("utf-8");
+            assert!(
+                text.contains(&format!("<html lang=\"en\" data-theme=\"{word}\">")),
+                "{word} should be pinned on the root element"
+            );
+            // And the stylesheet has to have something to do with it, or the attribute is
+            // decoration. Both directions: a pin must beat the media query and the bare `:root`.
+            assert!(CSS.contains(&format!("html[data-theme=\"{word}\"]")));
+        }
+    }
+
+    #[test]
+    fn the_three_assets_are_served_and_nothing_else_is() {
+        assert!(asset("GET", &[], crate::settings::Theme::System).is_some());
+        assert!(asset("GET", &["console.css"], crate::settings::Theme::System).is_some());
+        assert!(asset("GET", &["console.js"], crate::settings::Theme::System).is_some());
+
         assert!(
-            asset("POST", &[]).is_none(),
+            asset("GET", &["status"], crate::settings::Theme::System).is_none(),
+            "the API still routes"
+        );
+        assert!(asset("GET", &["console.map"], crate::settings::Theme::System).is_none());
+        assert!(
+            asset("POST", &[], crate::settings::Theme::System).is_none(),
             "a console asset is not something to POST to"
         );
     }
 
     #[test]
     fn every_asset_carries_the_policy_and_its_own_type() {
-        let page = asset("GET", &[]).expect("the page");
+        let page = asset("GET", &[], crate::settings::Theme::System).expect("the page");
         assert!(page.content_type.starts_with("text/html"));
         assert!(page
             .extra
             .iter()
             .any(|(name, value)| name == "Content-Security-Policy" && value == CSP));
 
-        let css = asset("GET", &["console.css"]).expect("the stylesheet");
+        let css =
+            asset("GET", &["console.css"], crate::settings::Theme::System).expect("the stylesheet");
         assert!(css.content_type.starts_with("text/css"));
 
-        let js = asset("GET", &["console.js"]).expect("the script");
+        let js = asset("GET", &["console.js"], crate::settings::Theme::System).expect("the script");
         assert!(js.content_type.starts_with("text/javascript"));
     }
 

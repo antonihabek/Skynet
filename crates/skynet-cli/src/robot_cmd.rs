@@ -74,6 +74,18 @@ skynet — talking to a running robot (§33.7)
   skill run <ns/name> [--args <json>] [--parent <inv-id>] [--overrun <factor>]
                               Invoke a skill; needs operator
   skill stop <inv-id>         Make a running skill return; needs operator
+  session                     §38.2's session override: what is narrowing this robot now
+  session set --for <90s|20m|2h> [--velocity R] [--torque N] [--base M] [--jerk F]
+              [--name NAME] [--reason WHY]
+                              Slow this robot down while somebody works on it. It can only
+                              narrow, and `--for` is required — §38.2 time-boxes this layer
+  session clear               Put it back to the ceilings the profile sets
+  settings                    §38.1's unsigned local configuration, and what set each value
+  settings set <setting> <value>
+                              log_level error|warn|info|debug · telemetry_sampling 1..60 ·
+                              console_theme system|light|dark. Nothing that reaches the
+                              Safety Kernel lives here (§38.1)
+  settings reset <setting>    Back to its default
   ota                         A/B slots, and §12's verdict on the wanted image
   identity                    Who this robot is, what it is, and what it is running (§10)
   checkin                     What this robot would tell the Hub, and whether it is heard
@@ -162,6 +174,7 @@ pub fn run(command: &str, argv: &[String]) -> i32 {
         "logs" => logs(argv),
         "grants" => grants(argv),
         "session" => session(argv),
+        "settings" => settings(argv),
         "rollback" => rollback(argv),
         "install" => install(argv),
         "blackbox" => blackbox(argv),
@@ -1295,6 +1308,101 @@ fn session(argv: &[String]) -> i32 {
         Some(other) => term::fail(&format!(
             "`{other}` is not a session command. Try `skynet session`, `skynet session set` or `skynet session clear`."
         )),
+    }
+}
+
+/// `skynet settings` — §38.1's unsigned local configuration, from the machine.
+///
+///     skynet settings                          what this robot is set to
+///     skynet settings set log_level debug      change one
+///     skynet settings reset log_level          put one back to its default
+///
+/// Three settings and no more. §38.1 draws the line at whether a value can reach the Safety Kernel,
+/// and everything on the other side of it — every ceiling the kernel enforces — arrives signed or
+/// as a session override (§38.2). Typing one of those names here gets the sentence that says so
+/// rather than a bare refusal.
+fn settings(argv: &[String]) -> i32 {
+    let args = positional(argv);
+    match args.first().map(|s| s.as_str()) {
+        None => show(argv, "GET", "/settings", None, print_settings),
+        Some("set") => {
+            let (Some(name), Some(value)) = (args.get(1), args.get(2)) else {
+                return term::fail(concat!(
+                    "skynet settings set <setting> <value>\n\n",
+                    "  log_level           error | warn | info | debug\n",
+                    "  telemetry_sampling  reconcile passes per §74 window, 1 to 60\n",
+                    "  console_theme       system | light | dark"
+                ));
+            };
+            let mut document = Json::obj();
+            document.set("setting", Json::from(name.as_str()));
+            document.set("value", Json::from(value.as_str()));
+            show(
+                argv,
+                "POST",
+                "/settings",
+                Some(document.to_canonical().unwrap_or_default()),
+                print_settings,
+            )
+        }
+        Some("reset") => {
+            let Some(name) = args.get(1) else {
+                return term::fail("skynet settings reset <setting>");
+            };
+            let mut document = Json::obj();
+            document.set("setting", Json::from(name.as_str()));
+            document.set("reset", Json::Bool(true));
+            show(
+                argv,
+                "POST",
+                "/settings",
+                Some(document.to_canonical().unwrap_or_default()),
+                print_settings,
+            )
+        }
+        Some(other) => term::fail(&format!(
+            "`{other}` is not a settings command. Try `skynet settings`, `skynet settings set` or `skynet settings reset`."
+        )),
+    }
+}
+
+/// What `GET /settings` and `POST /settings` answer.
+///
+/// Every setting, with the ones nobody chose marked as defaults rather than hidden. A list of only
+/// what somebody changed answers the wrong question: an engineer at a bench is asking what this
+/// robot is doing, not what they did to it.
+fn print_settings(document: &Json) {
+    if let Some(detail) = document.get_present("detail").and_then(Json::as_str) {
+        println!("{} {detail}\n", term::ok("✓"));
+    }
+    for entry in document.arr_or_empty("settings") {
+        let name = entry.get("setting").and_then(Json::as_str).unwrap_or("");
+        let value = entry.get("value").and_then(Json::as_str).unwrap_or("");
+        let is_default = entry
+            .get("is_default")
+            .and_then(Json::as_bool)
+            .unwrap_or(true);
+        // The provenance §38.3 asks for, beside the value rather than in a second listing: *who
+        // set this, and when* is the question that follows *what is it* by about a second.
+        let provenance = if is_default {
+            term::dim("default")
+        } else {
+            match entry.get_present("set_by").and_then(Json::as_str) {
+                Some(who) => term::dim(&format!("set by {who}")),
+                None => term::dim("set by unrecorded"),
+            }
+        };
+        println!("  {name:<20} {value:<10} {provenance}");
+    }
+
+    let notes = document.arr_or_empty("notes");
+    if !notes.is_empty() {
+        println!();
+        for note in notes {
+            // Never swallowed. A setting somebody wrote that this robot ignored is the fact they
+            // came here to find.
+            println!("{} {}", term::warn("!"), note.as_str().unwrap_or(""));
+        }
     }
 }
 

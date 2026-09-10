@@ -432,6 +432,9 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         // reason: it names no key, changes nothing, and it is the panel somebody reads when a robot
         // is slower than they expected — which is precisely the question this layer creates.
         ("GET", ["session"]) => Role::Observer,
+        // §38.1's unsigned local configuration. Observer to read, because none of the three is a
+        // secret and a console that could not show its own theme would be odd.
+        ("GET", ["settings"]) => Role::Observer,
         ("GET", ["skills"]) => Role::Observer,
         ("GET", ["skills", _]) => Role::Observer,
 
@@ -462,6 +465,10 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         // it and they work on a robot at full speed instead. A safety affordance nobody can be
         // bothered to use is not a safety affordance.
         ("POST", ["session"]) => Role::Operator,
+        // Operator to change, and not Admin. §38.1 puts these here precisely because none of them
+        // reaches the kernel, so the role that may already stop a robot may certainly make its
+        // daemon say more. Admin is for the changes that are signed.
+        ("POST", ["settings"]) => Role::Operator,
         ("DELETE", ["session"]) => Role::Operator,
         ("GET", ["blackbox", _]) => Role::Operator,
 

@@ -271,6 +271,16 @@ impl Layout {
         self.profiles().join("active.json")
     }
 
+    /// §38.1's unsigned local configuration — log level, telemetry sampling, console theme.
+    ///
+    /// Beside the session override rather than among the profiles, and for a stronger version of
+    /// the same reason: a profile is signed and this is not, and these three are not even a
+    /// narrowing. What keeps the file harmless is that nothing in it can reach the kernel, which
+    /// §38.1 states as the line and `crate::settings` enforces by holding a closed set of three.
+    pub fn settings(&self) -> PathBuf {
+        self.state().join("settings.json")
+    }
+
     /// §38.2's session override, when one has been set on this machine.
     ///
     /// Beside the profiles rather than among them, and that is a claim about what it is. A profile

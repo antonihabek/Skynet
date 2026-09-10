@@ -3167,6 +3167,35 @@ limits are safe; what is missing is the alarm.
 Non-safety configuration — log level, telemetry sampling, console theme — is unsigned and local.
 The line between the two is drawn by whether the value can reach the kernel.
 
+> **Built 2026-09-10.** None of the three existed: no route, no verb, no file, and `log_level` not
+> even as a concept — the daemon had seventy-two `eprintln!` calls and no level to filter them by,
+> so a robot in production said exactly as much as a robot on a bench.
+>
+> The sentence above is a **rule about which values may live there**, and a rule stated in prose is
+> one a later hand widens without noticing. So the store holds a closed set: `Setting` is an enum
+> with three variants and there is no code path that writes a key it does not name. That is the
+> enforcement, and it is an allowlist rather than a blocklist on purpose — a list of forbidden
+> kernel names would have to keep pace with a kernel that grows, and falling behind it would be an
+> unsigned path to a ceiling. Three known keys cannot fall behind anything.
+>
+> Each of the three is **read by something**, because a settings store nothing consults is a page of
+> controls that lie (§32.2). `log_level` decides which of the daemon's own messages print, through a
+> process-global so a log call costs no filesystem access — immediate when set over the API, and on
+> the next reconcile pass when the file is edited by hand. `telemetry_sampling` makes §74's windows
+> **longer, never sparser**: a window carries its own bounds and elapsed time, so a four-pass window
+> is self-describing, whereas dropping three in four would manufacture §47.4's *"gap that looks like
+> a quiet period"* on purpose. `console_theme` is pinned onto the served HTML rather than fetched by
+> the page, so there is nothing to swap from — the swap being most visible on exactly the machine
+> the setting is for.
+>
+> §38.3's two records are written for every change, and the audit row's previous value distinguishes
+> *"it was `system`"* from *"nobody had ever chosen"*, because those are different facts about a
+> robot and the section asks for the one that was in force.
+>
+> Operator, not admin. §38.1 puts these three here precisely because none of them reaches the
+> kernel, so the role that may already stop a robot may certainly make its daemon say more; admin is
+> for the changes that are signed.
+
 ### 38.2 Layering, and it only ever narrows
 
 ```
@@ -5433,7 +5462,7 @@ miniature, and currently trivial to fix.
 | Conformance and certification | §15, §31.4, §56 | **Built on both sides** — and a robot now runs §15's eight runtime tests on itself (`GET /conformance`); §15's third suite has its numerator and denominator, counted off §13's ring (§74.6) | **Five** of the eight now execute where the tier allows it, and the other three name what they wait for. `safety.policy.isolation` is the newest, and the two rounds it took are the argument for the whole runner: §59 built the confinement, which made its old reason — *"needs a sandbox"* — false, and left a sharper one true, because what a suite can assert about a launcher is the **argv** it built. Seven `--property=` flags prove what was *requested*, and a directive systemd rejected, dropped or does not support on this kernel produces exactly the same argv. So the daemon now reads a running unit back with `systemctl show` and compares line-exactly — line-exactly because `CapabilityBoundingSet=` is asked for as the *empty* set, and a check matching the key alone would pass a unit holding `cap_sys_admin`. A directive systemd does not report counts as not landed, which is the fail-closed direction: a sandbox nobody can read is not one anybody should certify. **A third rung followed on 2026-09-07**, because `systemctl show` answers what the *manager recorded* and that is still one level above what the process is held to: the daemon now also reads `/proc/<MainPID>/status` on the unit's own process and compares the two facts a kernel exposes per process — `NoNewPrivs` and the capability bounding set — against what the unit claims. A disagreement between the layers is its own failure and the most interesting one this test can produce, because a robot whose service manager and whose kernel do not agree about a sandbox is a robot whose sandbox nobody can describe. Two rather than seven, and deliberately: the five `Protect*` directives are mount namespaces and what a namespace contains is not a line in `status`, so checking two and saying two beats checking two and implying seven. What it still does not establish is a package that *attempted* the forbidden hold and was stopped — an observation is not an attempt, and the demonstration needs both a package built to try and a manager running as root, since on a rootless user manager most of these directives forbid something the user could not do anyway; confinement landing is the mechanism, and the demonstration needs a package built to try. `package.grants.gate` is the one that moved before it, and how it moved is the point: its skip reason named the mode gate as *"the Safety Kernel's, through a path §33.1 denies this daemon"*, and `skynet-kernel-host` is that path. It is measured against a robot's own grants — one command admitted, one refused and sending no channel, one naming no capability and treated as neither. On a **guest**-tier robot it still skips, and the new reason is a live property rather than a missing one: §7.4 forwards the command whatever the guards said, so a tier that cannot refuse has not passed a test about refusing. Nothing signs a result and nothing will on a robot — §19 makes that a rule rather than a gap (§15.1). The `field` figure is measurable rather than measured: it needs a robot that runs cycles |
 | LeRobot | §16, §67 | **Built** — the bridge and its self-test | — |
 | Hub contract | §17, §57 | **Built** — all thirteen endpoints, no breaking change; four of them frozen as wire fixtures produced by the real producer (§31.6), and the thirteenth stopped being half a route when the Hub's side of §79 was written (§79.7) | Two of them carry assertions rather than evidence (§57.1) |
-| Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 58 CLI commands, the golden path checked mechanically | — |
+| Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 60 CLI commands, the golden path checked mechanically | — |
 | Security, local access control | §19, §39 | **Built** — Ed25519, the trust store, five signature states, four roles; §38.3's two records now written for a capability grant, which had left neither (§81.4) | — |
 | Distribution and business model | §20, §72 | Designed | — |
 | Languages, editions, levels | §23, §31, §42 | **Built** — **two** editions, Rust and Python, each passing all 1,148 cases of a corpus of 80 files. The row said *"one edition"* and *"the second edition, which is what the corpus is for"* for as long as that was true and for a while after | A **third** edition is what would test the claim properly. Two implementations can agree because the second was transcribed from the first — which this one was, deliberately and with its divergences documented — and the corpus only proves its worth when an edition is written by somebody who did not write the reference |
@@ -5452,7 +5481,7 @@ miniature, and currently trivial to fix.
 | Discovery — finding a robot on the link | §82 | **Built on both sides** — the DNS-SD wire format, RFC 6763's TXT convention, what a robot may advertise, a one-shot browse behind `skynet discover`, and §82.4's responder in `skynetd`: probing, defending, answering and refusing. 106 tests, and it has run between two daemons on one link | The **goodbye** has a caller since 2026-09-07: `POST /shutdown` withdraws the name, seals §13's window with `Reason::Shutdown` and exits, and the unit's `ExecStop=` is what calls it. A robot that loses power still sends nothing, which is what the TTL is for. The **browse** still cannot hold 5353 (§82.3), so it sees answers to its own question and never an unsolicited announcement — which is why there is no watch mode here and why §83.3's applications use their platform's resolver instead |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **131,000 lines of Rust** across **twenty-four crates**, held by a
+**Built** means running, tested code: **133,000 lines of Rust** across **twenty-four crates**, held by a
 corpus of 80 files and 1,148 cases to **14,000 lines** of the TypeScript reference edition and
 **16,000 lines** of the Python edition, with **5,000 lines** of drivers and **9,000 lines** in the
 Hub's mirror of the shared contracts.

@@ -133,6 +133,10 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
 
     let mut daemon = Daemon::new(store, launcher, RaucSlots);
     daemon.reload();
+    // §38.1's `log_level`, before the first message rather than after it. A daemon that printed its
+    // start-up summary at the default and only then noticed it had been told to be quiet would
+    // ignore the setting in precisely the moment it is noisiest.
+    skynetd_io::log::refresh(&layout);
     // No recorder yet at start-up: it is opened below, and the first look at §27's `kernel`
     // condition therefore reports unobservable rather than down. A daemon that reported the kernel
     // down before it had opened the recording would be announcing a fault it had not looked for.
@@ -141,8 +145,8 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
     // wrong on every pass — see `crate::observed`, which is the only thing in this process that
     // knows how many of §27's conditions were looked at.
     let seen = skynetd_io::observed::Observed::of(&daemon.sightings());
-    eprintln!(
-        "skynetd: §27 state is `{}`, because {}. §33.4's barrier is `{}` says {}, narrowed by that \
+    skynetd_io::log_info!(
+        "§27 state is `{}`, because {}. §33.4's barrier is `{}` says {}, narrowed by that \
          state — and the state rests on {}: {} — {}. Those are on §33.1's side of the line and \
          there is no channel to ask. The kernel and the RHAL are read off §13's ring rather than \
          off systemd, because a hung kernel is an active unit.",
@@ -165,8 +169,8 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         // Reported at every start, because §33.8's ladder is exactly the thing an operator needs to
         // know they are standing on. A robot silently running the last-known-good desired state is
         // a robot whose configuration changes are not taking effect and nobody knows why.
-        eprintln!(
-            "skynetd: desired state came from the {} copy: {reason}",
+        skynetd_io::log_info!(
+            "desired state came from the {} copy: {reason}",
             daemon.desired_source.as_str()
         );
     }
@@ -188,7 +192,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         &skynetd_io::embodiment::load(&layout),
         false,
     );
-    eprintln!("skynetd: black box {}", supervising.describe());
+    skynetd_io::log_info!("black box {}", supervising.describe());
     let mut recorder = match skynetd_io::blackbox::Recorder::open(
         &layout,
         skynetd_io::blackbox::supervisor_meta(&layout),
@@ -204,8 +208,8 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                 skynet_lock::Role::Creator => "created",
                 skynet_lock::Role::Attached => "attached to (§26.2)",
             };
-            eprintln!(
-                "skynetd: black box {role} {}, {} records of {} bytes",
+            skynetd_io::log_info!(
+                "black box {role} {}, {} records of {} bytes",
                 layout.blackbox().display(),
                 recorder.geometry().capacity,
                 recorder.geometry().record_size,
@@ -216,14 +220,14 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
             // recording later is entitled to, and because for as long as it was *not* reclaimed
             // this daemon could not seal a window at all.
             if let Some(previous) = recorder.reclaimed_from() {
-                eprintln!("skynetd: black box lock reclaimed from {previous}, which has exited");
+                skynetd_io::log_warn!("black box lock reclaimed from {previous}, which has exited");
             }
             Some(recorder)
         }
         Err(failure) => {
             // Reported, not fatal. §28 preallocates the ring so a full disk cannot silence the
             // recorder; a robot that cannot open one at all still needs to serve `POST /stop`.
-            eprintln!("skynetd: no black box: {failure}");
+            skynetd_io::log_warn!("no black box: {failure}");
             None
         }
     };
@@ -238,8 +242,8 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
 
     let credentials = read_credentials(&layout);
     if !credentials.is_provisioned() {
-        eprintln!(
-            "skynetd: no credentials. §39.2: there is no default password, so the console offers \
+        skynetd_io::log_warn!(
+            "no credentials. §39.2: there is no default password, so the console offers \
              status and stop and nothing else until this robot is provisioned."
         );
     }
@@ -276,11 +280,11 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
 
     let sink_description = sink.describe();
     let sink_obstacle = sink.obstacle();
-    eprintln!("skynetd: outbound goes to {sink_description}");
+    skynetd_io::log_info!("outbound goes to {sink_description}");
     if let Some(obstacle) = &sink_obstacle {
         // Said at every start, beside the sink rather than after the first failed drain. A robot
         // that will never send anything should say so before it has a queue to fail to send.
-        eprintln!("skynetd: {obstacle}");
+        skynetd_io::log_warn!("{obstacle}");
     }
 
     let origin = Instant::now();
@@ -348,7 +352,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         let local = match skynetd_io::serve::Local::bind(&socket) {
             Ok(local) => local,
             Err(error) => {
-                eprintln!("skynetd: could not bind {}: {error}", socket.display());
+                skynetd_io::log_error!("could not bind {}: {error}", socket.display());
                 return 1;
             }
         };
@@ -358,7 +362,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
             None => None,
             Some(text) => match text.parse::<SocketAddr>() {
                 Err(error) => {
-                    eprintln!("skynetd: --lan {text} is not an address: {error}");
+                    skynetd_io::log_error!("--lan {text} is not an address: {error}");
                     return 1;
                 }
                 Ok(address) => match skynetd_io::serve::Lan::bind(address) {
@@ -372,7 +376,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                         Some(lan)
                     }
                     Err(error) => {
-                        eprintln!("skynetd: {error}");
+                        skynetd_io::log_error!("{error}");
                         return 1;
                     }
                 },
@@ -403,8 +407,8 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                     // Naming the robot something is not better than not advertising: an operator
                     // browsing a bench would read a label this machine does not answer to
                     // anywhere else.
-                    eprintln!(
-                        "skynetd: not advertising on mDNS — this machine has no usable name and                          §82 will not invent one. Pass --advertise <label>."
+                    skynetd_io::log_warn!(
+                        "not advertising on mDNS — this machine has no usable name and                          §82 will not invent one. Pass --advertise <label>."
                     );
                     return None;
                 }
@@ -420,7 +424,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                     // Reported, not fatal. The console is unaffected; what is lost is being found
                     // without knowing the address already, which is the hole §82 exists to close
                     // and not a reason to refuse to supervise a robot.
-                    eprintln!("skynetd: {error}");
+                    skynetd_io::log_warn!("{error}");
                     None
                 }
             }
@@ -509,6 +513,11 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                 // reason: a staged rollout tells a whole canary ring to fetch one image at one
                 // moment, so a fleet arrives at the endpoint in lockstep by design.
                 daemon.jitter = jitter_for(now);
+                // §38.1's `log_level` again, because the file may have been edited by hand since
+                // the last pass. A change made through `POST /settings` has already taken effect —
+                // that route runs in this process and sets it there — so this is the path for a
+                // text editor, and it costs one small read per pass.
+                skynetd_io::log::refresh(&layout);
                 // §11's loop: pull, then reconcile, then report. Each is the input to the next.
                 pull_desired(&mut daemon, &layout, now);
                 observe_state(&mut daemon, recorder.as_ref(), now);
@@ -519,8 +528,8 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                     .map(|pass| pass.deferred.as_slice())
                     .unwrap_or(&[])
                 {
-                    eprintln!(
-                        "skynetd: deferred {} {}: {reason}",
+                    skynetd_io::log_info!(
+                        "deferred {} {}: {reason}",
                         skynetd_io::api::action_name(&action.kind),
                         action.subject()
                     );
@@ -600,7 +609,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
             // records who asked and this performs it, for the reason `api::shutdown` gives: the
             // responder is another thread and the recording is this loop's to seal.
             if let Some(actor) = daemon.shutdown_requested.take() {
-                eprintln!("skynetd: stopping, asked by `{actor}` (§82.4)");
+                skynetd_io::log_info!("stopping, asked by `{actor}` (§82.4)");
 
                 // The name first, because it is the only part with a deadline: a browser that
                 // caches this robot holds it for the TTL, and every millisecond spent sealing is a
@@ -619,8 +628,8 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                         std::thread::sleep(Duration::from_millis(10));
                     }
                     if !withdrawn.load(std::sync::atomic::Ordering::Acquire) {
-                        eprintln!(
-                            "skynetd: the mDNS name was not withdrawn within a second, so this \
+                        skynetd_io::log_warn!(
+                            "the mDNS name was not withdrawn within a second, so this \
                              robot stays in a browser's cache until the 120-second TTL expires \
                              (§82.4)"
                         );
@@ -635,22 +644,22 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                 if let Some(recorder) = recorder.as_mut() {
                     let now_ns = monotonic(origin).saturating_mul(1_000_000);
                     match recorder.seal(skynet_blackbox::seal::Reason::Shutdown, now_ns) {
-                        Ok((sealed, path)) => eprintln!(
-                            "skynetd: sealed {} ({} bytes) — reason shutdown (§13)",
+                        Ok((sealed, path)) => skynetd_io::log_info!(
+                            "sealed {} ({} bytes) — reason shutdown (§13)",
                             path.display(),
                             sealed.bytes.len()
                         ),
                         // Reported and not fatal. A window that could not be sealed is a window an
                         // investigator reads out of the ring instead, and refusing to exit would
                         // leave `ExecStop=` waiting on a robot that is trying to stop.
-                        Err(error) => eprintln!(
-                            "skynetd: the window could not be sealed on shutdown: {error}. What it \
+                        Err(error) => skynetd_io::log_error!(
+                            "the window could not be sealed on shutdown: {error}. What it \
                              holds is still in the ring."
                         ),
                     }
                 }
 
-                eprintln!("skynetd: stopped.");
+                skynetd_io::log_info!("stopped.");
                 // Zero, because this is a stop that was asked for. `ExecStop=` runs it and systemd
                 // reads the daemon's own exit; a non-zero code would put a robot that stopped
                 // exactly as intended into `failed` on every fleet dashboard that reads unit state.
@@ -1189,8 +1198,8 @@ fn read_credentials(layout: &Layout) -> Credentials {
         // A credentials file that does not parse is not an empty one, and it is also not a reason
         // to open the robot up. It produces no credentials, which is the same behaviour as never
         // having been provisioned, and it says so.
-        eprintln!(
-            "skynetd: the credentials file does not parse; treating this robot as unprovisioned"
+        skynetd_io::log_warn!(
+            "the credentials file does not parse; treating this robot as unprovisioned"
         );
         return Credentials::empty();
     };
@@ -1296,25 +1305,19 @@ where
     // talk to the internet.
     daemon.last_pull = Some(pulled.clone());
     if !pulled.reached {
-        eprintln!(
-            "skynetd: the desired state could not be pulled: {}",
-            pulled.detail
-        );
+        skynetd_io::log_warn!("the desired state could not be pulled: {}", pulled.detail);
         return;
     }
     let Some(verdict) = &pulled.verdict else {
         return;
     };
     for fault in &verdict.faults {
-        eprintln!("skynetd: desired state: {}", fault.message);
+        skynetd_io::log_warn!("desired state: {}", fault.message);
     }
     if pulled.written {
         // Reloaded here rather than left for the next pass, which is the point of pulling first.
         daemon.reload();
-        eprintln!(
-            "skynetd: adopted generation {} from the Hub",
-            verdict.generation
-        );
+        skynetd_io::log_info!("adopted generation {} from the Hub", verdict.generation);
     }
 
     // The release manifest for whatever OS version the desired state now names (§12, §57).
@@ -1369,6 +1372,22 @@ fn report_telemetry<L, S>(
     }
 
     daemon.counting.passes = daemon.counting.passes.saturating_add(1);
+
+    // §38.1's `telemetry_sampling`: how many reconcile passes one window covers. Below the rate,
+    // the window simply stays open — this returns without closing it and without opening a new
+    // one, so the next pass keeps counting into the same window.
+    //
+    // Longer windows, never sparser ones. Dropping three windows in four would leave the Hub
+    // looking at §47.4's *"gap that looks like a quiet period"*, manufactured deliberately; a
+    // window that covers four passes carries its own `from_ms`, `to_ms` and `elapsed_ms` and is
+    // therefore self-describing, and every counter in it is a sum over the interval it names.
+    let sampling = skynetd_io::settings::read(layout)
+        .settings
+        .telemetry_sampling;
+    if daemon.counting.passes < u64::from(sampling) {
+        return;
+    }
+
     let tally = recorder.and_then(|recorder| recorder.tally(daemon.counting.opened_sequence));
     let window = daemon.counting.close(wall, monotonic, dropped, tally);
 
@@ -1379,7 +1398,7 @@ fn report_telemetry<L, S>(
         Err(skynetd_io::telemetry::NotQueued::Unpaired) => {}
         Err(skynetd_io::telemetry::NotQueued::Unusable(_)) => {}
         Err(skynetd_io::telemetry::NotQueued::Refused(detail)) => {
-            eprintln!("skynetd: a telemetry window could not be queued: {detail}");
+            skynetd_io::log_warn!("a telemetry window could not be queued: {detail}");
         }
     }
 
@@ -1402,14 +1421,14 @@ where
         return;
     };
     if !pulled.reached {
-        eprintln!(
-            "skynetd: the release catalogue could not be pulled: {}",
+        skynetd_io::log_warn!(
+            "the release catalogue could not be pulled: {}",
             pulled.detail
         );
     } else if !pulled.fault.is_empty() {
-        eprintln!("skynetd: release `{version}`: {}", pulled.fault);
+        skynetd_io::log_warn!("release `{version}`: {}", pulled.fault);
     } else if pulled.written {
-        eprintln!("skynetd: cached the manifest for release `{version}`");
+        skynetd_io::log_info!("cached the manifest for release `{version}`");
     }
     daemon.last_release_pull = Some(pulled);
 }
@@ -1490,7 +1509,7 @@ fn report_checkin<L, S>(
         Ok(_) => {}
         Err(skynetd_io::checkin::NotQueued::Unpaired) => {}
         Err(skynetd_io::checkin::NotQueued::Refused(detail)) => {
-            eprintln!("skynetd: the check-in could not be queued: {detail}");
+            skynetd_io::log_warn!("the check-in could not be queued: {detail}");
         }
     }
 }
