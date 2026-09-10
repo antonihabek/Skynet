@@ -8815,3 +8815,469 @@ panes and a tray behind Windows. Every first-version item in §83.5 is now built
 migration. And, outside Skynet, the eight `tsc` errors in `semantic-vector-store.test.ts`.
 
 Nothing is committed. Nothing is pushed.
+
+---
+
+## Session — 2026-09-10 (thirty-third): the audit, and three documents that disagreed with the tree or with themselves
+
+Asked to establish whether the plan is finished before building anything. The audit says **no**, and
+what an agent can build without a vendor, a machine or the owner is now very short — three documents
+and one crossing. This session closed the documents.
+
+Everything below was checked by running it, on a Linux container carrying both repositories.
+
+| | |
+|---|---|
+| OS `cargo test --workspace` | **1,739 passed**, exit 0 |
+| OS `e2e.sh` | **117 checks, 0 failed** — every check that does not need a systemd user manager, which this container has no PID 1 for. The script says so itself |
+| OS check tools | `scale-report --check`, mirrors, contract mirrors, golden path, RHAL flags — all green |
+| Hub `npx tsc --noEmit` | **exit 0** |
+| Hub `npx vitest run` | **1,963 passed**, 93 files |
+| Hub surface | **95** routes under `/api/skynet/v1`, **29** migrations |
+| Console | not buildable here: no .NET, and macOS needs Apple frameworks |
+
+### The correction that matters most, because it runs the other way
+
+Session thirty-two recorded `tsc --noEmit` as *"carrying eight errors — all of them in
+`lib/__tests__/semantic-vector-store.test.ts`"*. It carries **none**. Whatever closed them was the
+marketplace work in the commits after that session.
+
+Worth stating as a rule rather than as a correction: a stale *"still broken"* is the same defect as a
+stale *"still missing"*. Both are believed for free by the next reader; the only difference is which
+direction the tree looks wrong in.
+
+### `desktop/README.md` contradicted itself, in the one section a reader trusts
+
+Its *What is not here* section still said **"no tray icon and no global hotkey"** and **"no black box
+replay"**. All three shipped on 2026-09-09 and are described at length **in the same file**, under
+headings of their own, two hundred lines above: `TrayIcon.cs`, `TrayStop.cs` and the Replay pane are
+in the tree with twenty-four tests between them.
+
+A document that runs behind is one problem; a document that contradicts itself is a worse one,
+because a reader asking *what is missing* starts at the section named for that question, and a stale
+answer there is believed without checking. Rewritten, with the correction visible rather than
+quietly deleted — which is the convention that section already used for the mDNS responder.
+
+The pane count went with it, and it was wrong in **both** directions at once: this file said *five
+panes* in one place and *seven panes behind* in another, and session thirty-two's log said *six*.
+`DetailPane` has five values and macOS draws one of them, so the honest count is **four panes and
+the stop behind**, and it has still never been compiled — there is no Swift toolchain on the machine
+it was written on and none on the Linux one that audited it, because `SwiftUI`, `Network` and
+`WKWebView` are Apple frameworks.
+
+### And the macOS application's own gap list was two entries short
+
+`NotInThisBuild` in `ContentView.swift` names what that build cannot do, and it is drawn on screen —
+so it is the one list in this repository whose staleness an operator sees rather than a reader. It
+listed the console, USB, a stop and the black box, and had never gained **pairing** or §41.3's
+**bundle**, both of which Windows has had for two sessions. Added, and the stop entry now says there
+are three routes to it on Windows and none here.
+
+Uncompiled, like the rest of that target. It is a list of string literals in an array of the same
+shape as the four already there, which is the smallest change that target can receive; the honest
+statement is that nothing about macOS has ever been compiled, not that this particular edit was.
+
+### A generated file that said its own closure was outstanding, six days after the owner closed it
+
+`supabase/schema/skynet.sql`'s header explains why the tree cannot stand up a fresh database — the
+Skynet tables reference `public.profiles`, `public.organisations`, `public.org_members`,
+`public.botindex` and `auth.uid()`, none of which are in this repository — and then ended:
+
+> *"Closing it properly means a baseline migration for both halves in dependency order, and that is
+> named as outstanding in the build log rather than half-done here."*
+
+The build log says the opposite. Session twenty-one, fourth, records the baseline as **withdrawn by
+the owner** — built far enough to know its shape, then removed *"on the grounds that it is
+scaffolding rather than product: a file that exists so that a database nobody is standing up could
+be"* — and states plainly that a fresh environment not being buildable from `supabase/` is now a
+**stated property** of this repository rather than an open task in it.
+
+So the header was sending every reader who got that far to a task the owner had already declined.
+Corrected in `scripts/skynet-schema-dump.mjs`'s `HEADER` **and** in the generated file, because the
+generator emits it verbatim and a fix in one alone would make `--check` fail on a machine that has
+`pg_dump` — the two are now byte-consistent, verified by containment rather than by eye.
+
+This one was found by trying to stand a local Supabase up, which is worth recording: `supabase start`
+applies `supabase/migrations` in order and fails on the **first** Skynet migration with
+`relation "public.org_members" does not exist`. That is exactly what the header describes, arriving
+as an error message instead of as a paragraph, and it is the reason the last open crossing below is
+blocked here.
+
+### What the audit leaves, for the OS, the Hub and the Console
+
+**Buildable by an agent:** the three documents above (done), and **§10's pairing plus the supervised
+loop meeting a real Hub**. The last of those has been carried as blocked since session thirty, on a
+reason that was a fact about one machine — *"WSL cannot reach the Windows host"*. This container is a
+single Linux host with both repositories, a Docker daemon and the daemon's Unix socket, so nothing
+has to cross a firewall. What it needs instead is a database, and the paragraph above is why that is
+the owner's call rather than an afternoon's work.
+
+**A vendor's:** a capture backend for §47.6's pool, inference on what it captures, one real RHAL
+driver.
+
+**The owner's:** a third language edition; the countersignature on a conformance result (§80 — and
+§83.4 makes an operator attestation a third claim again); the marketplace-side migration; and the
+baseline above, already decided.
+
+**Hardware's:** a physical joint under the kernel, a TPM for `security.identity.attested`, an OTA
+image this Hub has applied, three of §15's eight runtime tests, the certified tier's MCU and its
+notified body, and the `vram_mb` that gates a `DeviceAllow`.
+
+**Infrastructure's, and correctly queued rather than faked:** Phase 10's real worker —
+`lib/skynet/workers/in-process.ts` runs dataset-index and search-reindex and says why in its own
+header — Phase 11's GPU training, inference endpoints and Spaces, and Phase 12's teleoperation
+session.
+
+**The Console's:** USB and serial, which have no route on the robot to talk to; signing, notarisation
+and the installer, which need certificates and a pipeline, and until one exists `CONSOLE_RELEASES`
+is deliberately empty; and macOS.
+
+### Numbers
+
+`npx vitest run` — **1,963 passed**, 93 files. `npx tsc --noEmit` — clean. No route, schema, lib or
+catalogue change, and no locale change: desktop documentation is English-only by standing convention
+and the two corrected files are a generated SQL header and a build log.
+
+---
+
+## Session — 2026-09-10 (thirty-third): the Console's fifth owned thing, and a test suite that only ran on Windows
+
+Asked whether the Console has everything an operator needs to manage an OS, and then to plan and
+build what it does not. The answer came out of §83.2 rather than out of a wishlist, and the audit
+that produced it found something better than a feature: **this machine can build and run the
+Console's test project**, which no session had tried.
+
+### The audit, against §83.2 rather than against a list of ideas
+
+The temptation with "what else should the Console do" is to list panes. §83.2 forbids most of that
+answer in advance — the application is *a shell, not a client*, it embeds the page the robot
+already serves, and re-drawing §32.2's panels natively is the one thing it must not do. Everything
+the on-robot console renders, an operator already has: the embedded page covers all thirty-five
+routes `skynetd` serves, and it can never be a version behind the daemon serving it.
+
+So the real question is narrow, and §83.2 asks it in a table: **what does this application own,
+because a browser cannot do it?** Five rows. Discovery, USB and serial, sealed windows, an
+always-reachable stop, and *several robots at once — a bench has three*.
+
+Four were built. **The fifth had never been started**, and nothing in either log had noticed,
+because the application does discover several robots — it lists them. What it does with them is
+one at a time: every action, every pane, every sentence is scoped to `Selected`. An operator with
+three machines on a bench had to select each in turn and read a webview to learn which one was
+holding.
+
+### The finding that made the rest verifiable: `dotnet test` runs here
+
+`desktop/tests` targets plain `net9.0` and **links** the sources it covers instead of referencing
+the WinUI application — a rule this project already keeps deliberately, so that a test host does
+not need the Windows App SDK to start. Nobody had ever taken it at its word on a non-Windows
+machine. Installing the .NET 9 SDK and running it: **134 of 137 passed.**
+
+The three failures were not the environment. `Diagnostics.Locate` splits `PATH` on
+`Path.PathSeparator` — correct, and `;` on Windows against `:` everywhere else — while four tests
+wrote a Windows `PATH` literally as `C:\other;C:\tools`. On any other host that is **one** entry,
+nothing matches, and three of the four fail. They were Windows-only tests inside a project that
+exists to be host-independent, which is the same shape as a check that does not run. Rebuilt from
+`Path.PathSeparator`, `Path.Combine` and `Diagnostics.ToolName` rather than typed out: **137 of
+137**, on Linux.
+
+One thing fell out of fixing them and is recorded rather than acted on: the `catch
+(ArgumentException)` in `Locate`, which the fourth test was written for, **cannot fire on this
+runtime**. .NET Core removed `Path.Combine`'s invalid-character validation, and a probe confirms a
+NUL in a path now combines without complaint. The guard is kept as insurance for a runtime that
+does throw; the test was renamed to say what it actually proves, which is the skip-and-continue.
+
+### The bench
+
+One row per discovered robot, each carrying what that robot said when asked for §27's state.
+
+**It is not a second rendering of §32.2's status panel**, and the line is worth stating where
+somebody would be about to cross it. That panel is per-robot and the robot draws it. This is the
+comparison *across* robots, which no robot's own page can draw for the plain reason that no robot
+knows the others exist. Every value is the robot's own word from `GET /state` — including the
+three booleans the daemon pre-renders for precisely this purpose, in its own comment: *"rendered
+rather than left for a console to re-derive"*.
+
+**Where a robot said nothing, the row says so.** This is the rule a table is most likely to break,
+because a table wants a value in every cell and `false` is always available — and on `safe_state`
+the difference between *this robot says it is not in a safe state* and *this robot said nothing* is
+the difference between two different afternoons. `RobotJson` gained a tri-state `MaybeFlag` beside
+`Flag` rather than replacing it, since absent-means-false is right where the caller does not care
+and wrong where it does. Two silences are also kept apart: a robot that **answered and omitted a
+field** reads *did not say*; one that **never answered** reads *no reading*.
+
+The condition count takes **both** numbers off the robot — `7 of 8 observed` — rather than
+compiling the eight in. §27 has eight conditions today, and an edition that grows a ninth would
+make a hard-coded denominator quietly wrong in the direction that looks fine.
+
+### Stop every robot, and why it is not in the header
+
+The intersection of two rows of §83.2's table, and the one bench operation where per-robot
+navigation is not merely slow: stopping three machines one at a time means selecting each, waiting
+for a webview and finding the button, while the reason you are stopping them is still happening.
+
+**It is a separate control from the header stop and must stay one.** The header's STOP means *the
+selected robot, named in the sentence it produces* — a product question this repository answered
+deliberately, on the grounds that a stop which inferred its target would eventually stop the wrong
+machine. Widening it to mean "all of them" would take that answer back. Two controls, two meanings,
+each naming what it acted on. A convenience and not an E-stop on both, and the label matters more
+on this one rather than less, because a control that reaches three machines looks more like a
+safety system than one that reaches one.
+
+The rule it exists to keep is `RobotStop`'s, and a bench makes it harder: **a robot that did not
+answer is never reported as stopped.** The natural summary of three attempts is a count, and a
+count is exactly the shape in which the third robot vanishes — so the summary names the ones that
+did not, every time. Somebody reading it while walking towards a bench has to come away knowing
+which machine to walk to.
+
+Stops go out concurrently, which is not an optimisation: five seconds each in sequence sends the
+third robot its stop ten seconds late. One robot's failure never prevents the others being sent
+one — a bench stop that got less reliable the more it was needed would be worse than none.
+
+### Proven by breaking them
+
+Both rules were checked the way this repository checks a corpus, by inverting them and watching the
+suite fail. Rendering the summary as a bare count broke **three** tests; making `MaybeFlag` fall
+back to `false` broke the one written for it by name. Both reverted, and 173 green.
+
+### Numbers
+
+* `desktop/tests` — **173 passed** (was 137), on **Linux**, warnings-as-errors. New:
+  `BenchStateTests` (13), `BenchStopTests` (10), `BenchRowTests` (13).
+* The three host-dependent tests are fixed rather than skipped; the suite now runs on any host.
+
+### What this leaves, and it is stated rather than implied
+
+**The bench's interface has never been compiled.** `BenchState`, `BenchStop` and `BenchRow` are
+logic, are in the test project, build here and are covered. The `ConsoleViewModel` wiring and the
+XAML are **written and not built**: the WinUI half needs `XamlCompiler.exe`, a Windows PE binary,
+and this is a Linux container. Running it under an emulated PE loader got as far as the compiler
+starting and no further, and the attempt was abandoned rather than pursued into a rabbit hole. So a
+binding typo in that markup would not surface until the first Windows build.
+
+That is the same standing the macOS application has, and it is held to the rule the tray stop was
+deferred under rather than quietly excused from it: **compile-checked is not verified.** One
+`dotnet build -p:Platform=x64` on a Windows machine settles it, and until that runs this feature is
+not finished. Recorded in `desktop/README.md` under *What is not here* as well, because that is the
+section a reader asking *what is missing* actually starts at — which is this repository's own
+most-repeated lesson.
+
+Still not built, Console side: USB and serial; signing, notarisation and the installer; macOS,
+which is now four panes, the stop and the bench behind.
+
+Nothing is pushed.
+
+---
+
+## Session — 2026-09-10 (thirty-fourth): the layer a bench engineer reaches for, which did not exist
+
+Asked what a robotics engineer who has just installed Skynet OS would want on the Console to
+*optimize, adjust, customize*. The answer was not a list of panes — §83.2 rules most of that out in
+advance, since the Console embeds the page the robot already serves and everything on it is already
+reachable. The useful question is narrower: **what can an engineer not adjust anywhere at all?**
+
+Three things. The largest is §38.2's **session override**, and it turned out to be an OS gap the
+Console sits downstream of rather than a Console gap — a pane cannot offer a control for a route
+that does not exist.
+
+### The finding
+
+§38.2 lays out five layers — `vendor defaults → fleet profile → site profile → cell profile →
+session override` — and the fifth is the only one a person sets at the machine. It did not exist:
+`session_override` appeared once in the whole Rust workspace, in a doc comment. No route, no CLI
+verb, nothing to expire it. Meanwhile **§43's open list said *"Profiles layer cleanly on one robot
+(§38.2)"***, deferring only the fleet-wide version — a settled-sounding sentence about four layers
+where the specification names five.
+
+The OS work is recorded in `PROGRESS.md`/`BUILD-LOG.md` on the other side of §72.1's split. What
+landed here is the Console half and the Hub-side mirror of the contracts.
+
+### The Console's session pane
+
+Reads `GET /session`, sets with `POST`, clears with `DELETE`. Three states kept apart rather than
+two — **live**, **expired**, **none** — because a robot whose override has expired is not a robot
+that never had one, and *"nothing is set"* leaves whoever set it wondering why it sped up.
+
+**Nothing is clamped in this client, on purpose.** The robot composes the override by minimum with
+every layer above it and reports a request to raise a ceiling as discarded; pre-checking that here
+would be a second implementation of the narrowing rule — §83.2's drift — and it would be wrong on
+any robot whose profile this application has not read. The pane shows the robot's answer.
+
+**The form cannot express "no deadline".** §38.2's hazard is a robot left quietly slow, and a
+control offering *until I clear it* is what creates one. The duration box is pre-filled rather than
+empty, so the shape of a valid request is the default one.
+
+Reading needs an observer credential and setting needs an operator's, which is the role §39.1
+already gives capability grants — those *widen* what a package may do, and a control that can only
+make a robot slower is strictly less dangerous.
+
+### The Hub side
+
+`reference/typescript/safety.ts` gained the layer and `lib/skynet/os/` mirrors it, resynced through
+`check-contract-mirrors.mjs`. `docs/skynet-os-architecture.md` re-mirrored and re-pinned, carrying
+§38.2's new paragraph and three corrected figures in §73.
+
+No lib, route, schema or catalogue changes; no locale changes — desktop documentation is
+English-only by standing convention.
+
+### Numbers
+
+* `desktop/tests` — **190 passed** (173 before). New: `RobotSessionTests` (17).
+* Hub: `tsc --noEmit` clean, `vitest` **1,963 passed**.
+* OS side: `cargo test --workspace` **1,775**, `e2e.sh` **133 checks**, corpus **1,148 of 1,148** in
+  both editions with 243 lines added and none removed.
+
+### Still not built
+
+**Console:** USB/serial; signing, notarisation and the installer; macOS, now five panes, the stop
+and the bench behind. And the session and bench panes' **interfaces have never been compiled** —
+their logic is covered by 53 tests that build and run here, the `ConsoleViewModel` wiring and the
+XAML are written and not built, and `desktop/README.md` says so under *What is not here*. One
+`dotnet build -p:Platform=x64` on Windows settles both.
+
+**Hub:** the countersignature (an owner's call); robot-dependent items; the marketplace-side
+migration.
+
+Nothing is pushed.
+
+## Session — 2026-09-10 (thirty-fifth): the settings pane, and two UI questions with checkable answers
+
+### The Console's settings pane
+
+§38.1's other half, mirroring the OS work of the same day: *"non-safety configuration — log level,
+telemetry sampling, console theme — is unsigned and local. The line between the two is drawn by
+whether the value can reach the kernel."*
+
+A pane beside the session one, and the difference between them is the point of both. A session
+override changes **what the robot may do**; nothing in this pane does. So there is no duration, no
+expiry and no warning under the buttons — a log level does not need to undo itself — and the pane
+says that rather than leaving it to be inferred from the absence of a deadline.
+
+Three decisions worth recording:
+
+* **The rows come from the robot, and so do the choices.** An `ItemsControl` over whatever
+  `GET /settings` listed, not three hand-written rows. A robot with a fourth setting renders as
+  four; a build that had hardcoded a dropdown of log levels would look authoritative while silently
+  dropping the one nobody here had heard of. Same reasoning as the session pane showing the robot's
+  duration cap rather than assuming it.
+* **A key this build does not know keeps its wire name.** `RobotSetting.Label` is a fixed map and
+  not a general un-snake-caser, because a prettifier returns a label that looks like something
+  somebody wrote for a key nobody here has ever seen — §32.2's rule, in a small place.
+* **A failed request does not clear the rows.** The last known configuration stays where it is with
+  the failure's sentence beside it. Clearing would say this robot has no settings, which is never
+  true.
+
+### Two UI questions, answered with evidence rather than opinion
+
+**The Windows console.** 134 `ThemeResource` references, zero hardcoded colours, native WinUI
+controls throughout — better than it looked. Two real gaps:
+
+* **No keyboard route to the stop.** §83.2 gives it a line of its own for being *always reachable*
+  and the only route was the pointer. `Ctrl+Shift+S` now reaches it, fires from inside a text box
+  on §39.1's own argument, and is a chord rather than a bare key only so that typing a credential
+  does not stop a robot. `Ctrl+.` was rejected on a fact: the period is `VK_OEM_PERIOD`,
+  `VirtualKey` has no name for it, and a numeric `Key="190"` is not something the XAML enum
+  converter accepts.
+* **No `AutomationProperties` anywhere.** The decorative header glyph announced itself; the two
+  progress rings and the two buttons whose captions change had no stable name.
+
+**The Hub had no light theme at all**, and the failure was visible rather than theoretical.
+`Navbar` and `Footer` render *inside* `.skynet` and are themed by `globals.css`, which carries 285
+light-mode overrides; `skynet.css` carried none. A reader on light mode got a paper navbar, a paper
+footer, and a pure-black page between them.
+
+Fixed at the tokens rather than rule by rule. Four values had been written into rules instead of
+declared — a subnav hover at 5% white, a table rule at 4.5% white — and each became a token first,
+because a list of per-rule light overrides is a list that grows. The palette is built on the
+marketplace's own (`#f0ece4` here is `--app-bg` there) so the shell and the Hub agree by
+construction. What does not come from there is Skynet's identity: the signal blue stays signal
+blue, darkened to `#1a56c4` because `#4d8dff` on paper is about 2.4:1.
+
+### On whether the Hub has everything the plan asks for
+
+It is complete against `docs/skynet-architecture.md`: §6's API surface is built, and §9's phases
+A–G are **evidence gates against a deployed system** — a repository cannot close them by containing
+code, because what they ask for is a real release, a real worker and a real device.
+
+What it does not have is GitHub's *shape*: no issues, no notifications, no labels, no watch, no
+blame, no milestones, no command palette, no keyboard shortcuts. None of those is in the plan. Both
+sentences are worth saying because only one of them is *"complete"*: measured against its own
+specification the Hub is done, and measured against GitHub it is a different product with a
+narrower surface.
+
+### Numbers
+
+* `desktop/tests` — **205 passed** (190 before). New: `RobotSettingsTests` (15).
+* OS side: `cargo test --workspace` **1,807** (1,775), `e2e.sh` **149 checks, 0 failed** (133).
+* CLI commands (§73): **60** (58). `session` had never been in the CLI's own `USAGE` text — found
+  while adding `settings`, and both are there now.
+
+### Still not built
+
+**Console:** USB/serial; signing, notarisation and the installer; macOS, now six panes, the stop
+and the bench behind. And the bench, session and settings panes' **interfaces have never been
+compiled** — their logic is covered by 68 tests that build and run here, the `ConsoleViewModel`
+wiring and the XAML are written and not built, and `desktop/README.md` says so under *What is not
+here*. One `dotnet build -p:Platform=x64` on Windows settles all three.
+
+**Hub:** the countersignature (an owner's call); robot-dependent items; the marketplace-side
+migration.
+
+**OS:** calibration is the last of the three things round thirty-eight's audit found an engineer
+cannot adjust — `GET /calibration` reports, and nothing runs or refreshes one.
+
+Nothing is pushed.
+
+## Session — 2026-09-10 (thirty-sixth): the specified paragraph with nothing behind it
+
+Nothing new on the Hub or in the desktop shell this session, and one line of the Console's story
+that is worth recording because it is a decision rather than an omission.
+
+### §45.4's event triggers went on the robot's page, not into a pane
+
+*It hit something*, *tool changed*, *driver replaced* — five buttons on the robot's own console
+page, which the Windows application embeds, rather than a seventh pane in the shell.
+
+That is §83.2 applied rather than scheduling. The shell owns Discovery, USB and serial, sealed
+windows, an always-reachable stop, and several robots at once, because those are what a browser
+cannot do. Recording a calibration event is a button that posts. A pane here would be a second
+implementation of a control the robot already serves, and a second implementation is the drift
+§83.2 exists to forbid.
+
+The same reasoning is why session limits and settings *are* panes: neither is on the robot's page,
+and both are about a robot the operator picked out of a list this application maintains. The rule
+turns out to be usable as a rule, which is the useful thing to have learned.
+
+### What was behind it on the OS side
+
+The contract had decided all of §45.4 since it was written — `events_since`, `invalidating_events`,
+`evaluate` matching one against the other, five published events, byte-identical across three
+editions. And `events_since` appeared **nowhere** in the daemon: it came from the stored record and
+from nowhere else, so a collision that happened this morning invalidated nothing. The most carefully
+specified part of §45 was inert, and inert in the direction where a `proximity` guard goes on
+measuring separation to the wrong place while reporting healthy.
+
+The journal that fills it is unsigned among signed records, and safe for the reason §38.2's session
+override is safe: an event can only *invalidate* a calibration, never validate one, so the worst a
+forged one does is retire guards that would otherwise run. Twice now this repository has reached
+that argument from opposite ends.
+
+### Numbers
+
+* OS side: `cargo test --workspace` **1,825** (1,807), `e2e.sh` **158 checks, 0 failed** (149).
+* CLI commands (§73): **62** (60). `skynet calibration` did not exist — the report was on the robot
+  and nothing on a bench could ask for it.
+* Console and Hub unchanged this session: `desktop/tests` **205**, `tsc` clean, `vitest` **1,963**.
+
+### Still not built
+
+**Console:** USB/serial; signing, notarisation and the installer; macOS, six panes behind. The
+bench, session and settings panes' interfaces are still written and not compiled.
+
+**Hub:** the countersignature (an owner's call); robot-dependent items; the marketplace-side
+migration.
+
+**OS:** nothing runs a calibration, and nothing can from here — a procedure needs a driver, a target
+and a pose set, and §45.3 signs the result, which no robot can do. That is a boundary rather than a
+gap, and the same one §37.1 records for packages.
+
+Nothing is pushed.

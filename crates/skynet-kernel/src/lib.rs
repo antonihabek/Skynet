@@ -408,6 +408,55 @@ pub struct OperatorProfile<'a> {
     pub self_collision_margin_m: Option<f64>,
 }
 
+/// §38.2's fifth layer: a time-boxed narrowing somebody applied at the machine.
+///
+/// The layering is `vendor defaults → fleet profile → site profile → cell profile → session
+/// override`, and this is the last of them — the one a person standing in front of a robot reaches
+/// for. *"In this cell, half speed"* is a profile and is signed (§38.1). *"Half speed for the next
+/// twenty minutes while I work on it"* is this, and it is the difference between a decision about a
+/// site and a decision about an afternoon.
+///
+/// **It only ever narrows**, by the same `narrowest()` rule as every layer above it, and
+/// [`resolve_limits`] enforces that by taking the minimum rather than by trusting the input. §38.2
+/// requires more than discarding a widening, though: *"Attempted widenings are recorded and
+/// discarded, so an operator who believes they have raised a limit is told they have not."* So a
+/// request to raise one is a [`NoticeCode::SessionWidened`] notice naming the fields, and the
+/// number that reaches the kernel is unchanged.
+///
+/// **This type carries no clock, and that is deliberate rather than an omission.** §38.2 requires
+/// the override to expire, and the kernel takes no time (§35.2 makes `now_ms` a parameter to a
+/// cycle, never a thing the kernel reads). So expiry is the supervisor's: `skynetd` holds the
+/// deadline, and once it passes it stops handing one of these to `resolve_limits` at all. The
+/// kernel therefore cannot be asked *"is this still valid"* — it is handed only overrides that are,
+/// which is the same shape as every other input here and keeps one clock in the system rather than
+/// two that can disagree.
+///
+/// **What it deliberately cannot narrow.** Workspace volumes, the proximity thresholds and the
+/// self-collision margin stay with the signed profile. Each of those is a geometry or a distance an
+/// operator *drew* for a cell, and a bench-side "for the next twenty minutes" that redrew a
+/// workspace would be a session override changing where a robot is allowed to be — which is a
+/// decision about the room rather than about the afternoon, and is what §38.1 signs profiles for.
+/// Speed, torque and jerk are the maintenance verbs; those are here.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct SessionOverride<'a> {
+    /// What this override is called, for the notice that announces it.
+    pub name: &'a str,
+    /// Narrowed joint velocity ceiling.
+    pub joint_velocity_max_rad_s: Option<f64>,
+    /// Narrowed joint torque ceiling.
+    pub joint_torque_max_nm: Option<f64>,
+    /// Narrowed base velocity ceiling.
+    pub base_velocity_max_m_s: Option<f64>,
+    /// Narrowed jerk ceiling, as a fraction of the ceiling per control cycle.
+    ///
+    /// The one field here that can turn a guard **on**: `rate_limit` is unavailable when nothing
+    /// sets `max_delta_per_cycle` (§7.2), so a session that sets one on a robot whose profile does
+    /// not makes the guard runnable. That is a narrowing in the only sense that matters — the robot
+    /// may do strictly less afterwards — and it is worth naming because it is the case where "only
+    /// ever narrows" and "only ever removes a guard" come apart.
+    pub max_delta_per_cycle: Option<f64>,
+}
+
 /// The ceilings a transport plan derived from the body and the policy's declared peaks.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TransportClamp<'a> {
@@ -469,6 +518,11 @@ pub struct ResolveLimitsParams<'a> {
     pub transport: Option<TransportClamp<'a>>,
     /// The operator's profile, or `None`.
     pub profile: Option<OperatorProfile<'a>>,
+    /// §38.2's session override, or `None` when none is in force **or it has expired**.
+    ///
+    /// The caller decides which of those two it is, because the caller has the clock. See
+    /// [`SessionOverride`].
+    pub session: Option<SessionOverride<'a>>,
     /// What the robot can supply.
     pub available: Available,
     /// The body's frames, flattened and ordered (§44.3), or `None` where it declares no tree.
@@ -501,6 +555,16 @@ pub enum NoticeCode {
     NoRateLimit,
     /// No self-collision margin is configured, so surfaces must meet before the guard trips.
     NoCollisionMargin,
+    /// A session override (§38.2) is narrowing this robot. The subject names it.
+    ///
+    /// Emitted whenever one is in force, and that is the point of it rather than a courtesy.
+    /// §38.2's stated hazard is *"a 'maintenance mode, half speed' that outlives the maintenance"*,
+    /// which is a hazard precisely because a slowed robot looks like a working one. A robot running
+    /// at half its ceilings says so, on every surface that renders notices, until somebody clears
+    /// the override or it expires.
+    SessionOverride,
+    /// A session override asked to raise a limit. The request was recorded and discarded.
+    SessionWidened,
 }
 
 impl NoticeCode {
@@ -515,6 +579,8 @@ impl NoticeCode {
             NoticeCode::ProfileWidened => "profile_widened",
             NoticeCode::NoRateLimit => "no_rate_limit",
             NoticeCode::NoCollisionMargin => "no_collision_margin",
+            NoticeCode::SessionOverride => "session_override",
+            NoticeCode::SessionWidened => "session_widened",
         }
     }
 }
@@ -689,6 +755,7 @@ pub fn resolve_limits<'a>(params: &ResolveLimitsParams<'a>) -> ResolvedLimits<'a
         frames: _,
         transport,
         profile,
+        session,
         // `available` is read by `partition_guards`, which takes the whole params struct so the
         // guard-availability rules stay in one place rather than being split across two functions.
         available: _,
@@ -744,28 +811,109 @@ pub fn resolve_limits<'a>(params: &ResolveLimitsParams<'a>) -> ResolvedLimits<'a
         });
     }
 
+    // §38.2's session layer, checked against **what the layer above it allows** rather than against
+    // the envelope alone — that is the section's own wording, and the layer above a session is
+    // everything already composed. A session asking for 3 rad/s under a profile that allows 1 has
+    // not widened the envelope; it has widened the thing actually in force, which is the number the
+    // operator can see and the one they will believe they changed.
+    //
+    // Reported separately from `ProfileWidened` rather than folded into it. They are different
+    // sentences about different documents, and telling somebody their *profile* over-reached when
+    // it was their bench override would send them to edit a signed file for no reason.
+    let mut session_widened: FixedVec<&'a str, MAX_SUBJECTS> = FixedVec::new();
+    if let Some(over) = session {
+        let mut check = |label: &'a str, requested: Option<f64>, above: Option<f64>| {
+            if let (Some(requested), Some(above)) = (requested, above) {
+                if requested > above {
+                    session_widened.push(label);
+                }
+            }
+        };
+        check(
+            "joint_velocity_max_rad_s",
+            over.joint_velocity_max_rad_s,
+            narrowest(&[
+                envelope.and_then(|e| e.joint_velocity_max_rad_s),
+                transport.and_then(|t| t.joint_velocity_max_rad_s),
+                profile.and_then(|p| p.joint_velocity_max_rad_s),
+            ]),
+        );
+        check(
+            "joint_torque_max_nm",
+            over.joint_torque_max_nm,
+            narrowest(&[
+                envelope.and_then(|e| e.joint_torque_max_nm),
+                transport.and_then(|t| t.joint_torque_max_nm),
+                profile.and_then(|p| p.joint_torque_max_nm),
+            ]),
+        );
+        check(
+            "base_velocity_max_m_s",
+            over.base_velocity_max_m_s,
+            narrowest(&[
+                envelope.and_then(|e| e.base_velocity_max_m_s),
+                transport.and_then(|t| t.base_velocity_max_m_s),
+                profile.and_then(|p| p.base_velocity_max_m_s),
+            ]),
+        );
+        check(
+            "max_delta_per_cycle",
+            over.max_delta_per_cycle,
+            profile.and_then(|p| p.max_delta_per_cycle),
+        );
+    }
+    if !session_widened.is_empty() {
+        notices.push(SafetyNotice {
+            code: NoticeCode::SessionWidened,
+            guard: None,
+            subjects: session_widened,
+        });
+    }
+
+    // The session joins the same minimum as every other layer, which is what makes "it only ever
+    // narrows" a property of the arithmetic rather than a rule somebody has to remember. A widening
+    // recorded above is discarded here by the same expression that composes a legitimate one.
     let joint_velocity = narrowest(&[
         envelope.and_then(|e| e.joint_velocity_max_rad_s),
         transport.and_then(|t| t.joint_velocity_max_rad_s),
         profile.and_then(|p| p.joint_velocity_max_rad_s),
+        session.and_then(|s| s.joint_velocity_max_rad_s),
     ]);
     let joint_torque = narrowest(&[
         envelope.and_then(|e| e.joint_torque_max_nm),
         transport.and_then(|t| t.joint_torque_max_nm),
         profile.and_then(|p| p.joint_torque_max_nm),
+        session.and_then(|s| s.joint_torque_max_nm),
     ]);
     let base_velocity = narrowest(&[
         envelope.and_then(|e| e.base_velocity_max_m_s),
         transport.and_then(|t| t.base_velocity_max_m_s),
         profile.and_then(|p| p.base_velocity_max_m_s),
+        session.and_then(|s| s.base_velocity_max_m_s),
     ]);
 
-    let max_delta = profile.and_then(|p| p.max_delta_per_cycle);
+    let max_delta = narrowest(&[
+        profile.and_then(|p| p.max_delta_per_cycle),
+        session.and_then(|s| s.max_delta_per_cycle),
+    ]);
     if max_delta.is_none() {
         // No subjects: the sentence already names the setting, and the `rate_limit` guard's own
         // unavailability notice below carries `profile.max_delta_per_cycle` as its missing input.
         // Naming it twice would put the same fact in two places for a reader to reconcile.
         push_notice(&mut notices, NoticeCode::NoRateLimit, None, &[]);
+    }
+
+    // §38.2's hazard, stated as a notice rather than left to somebody noticing a small number: *"a
+    // 'maintenance mode, half speed' that outlives the maintenance is a hazard that looks like a
+    // setting."* A robot under an override announces it on every surface that renders notices, and
+    // carries the override's name so the sentence names what to clear.
+    if let Some(over) = session {
+        push_notice(
+            &mut notices,
+            NoticeCode::SessionOverride,
+            None,
+            &[over.name],
+        );
     }
 
     let (active, unavailable, inert) = partition_guards(params, max_delta);

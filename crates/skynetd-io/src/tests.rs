@@ -13618,3 +13618,736 @@ mod retention {
         assert_eq!(read[2].digest, "sha256:3");
     }
 }
+
+// ── §38.2's session override, over the local API ─────────────────────────────
+
+/// A fixture with an operator credential, which is the role these routes take.
+fn bench(tag: &str) -> Fixture {
+    let mut fixture = Fixture::new(tag);
+    fixture.provision();
+    fixture.credentials.add(Credential::issue(
+        "bench",
+        Role::Operator,
+        "cc",
+        "operator-token",
+    ));
+    fixture
+}
+
+#[test]
+fn a_robot_with_no_override_says_none_and_publishes_the_cap() {
+    let mut fixture = bench("session-none");
+    let (status, body) = fixture.request("GET", "/session", Some("observer-token"), "");
+
+    assert_eq!(status, 200);
+    assert_eq!(body.get("state").and_then(Json::as_str), Some("none"));
+    // The cap is published rather than left for a client to discover by being refused. §64's rule:
+    // a refusal names its fix, and a form that knows the maximum can stop somebody typing a week.
+    assert!(body.get("max_duration_ms").and_then(Json::as_f64).unwrap() > 0.0);
+}
+
+#[test]
+fn setting_one_narrows_the_limits_the_robot_reports() {
+    // The whole point, end to end: a request over the API changes the number `GET /limits` serves.
+    // Neither route knows about the other — they meet in `resolve_limits`, which is where §7.6 says
+    // a ceiling is chosen and the only place one is.
+    let mut fixture = bench("session-narrows-limits");
+
+    let (before, limits) = fixture.request("GET", "/limits", Some("observer-token"), "");
+    assert_eq!(before, 200);
+    let was = limits
+        .get("joint_velocity_max_rad_s")
+        .and_then(Json::as_f64);
+
+    let (status, _) = fixture.request(
+        "POST",
+        "/session",
+        Some("operator-token"),
+        r#"{"name":"maintenance","duration_ms":600000,"joint_velocity_max_rad_s":0.25}"#,
+    );
+    assert_eq!(status, 200);
+
+    let (_, after) = fixture.request("GET", "/limits", Some("observer-token"), "");
+    assert_eq!(
+        after.get("joint_velocity_max_rad_s").and_then(Json::as_f64),
+        Some(0.25)
+    );
+    assert_ne!(was, Some(0.25), "the fixture would prove nothing otherwise");
+}
+
+#[test]
+fn a_robot_under_an_override_says_so_on_its_limits() {
+    // §38.2's hazard is a robot that is quietly slow. The notice is how it stops being quiet, and a
+    // console renders notices without knowing this layer exists.
+    let mut fixture = bench("session-notice");
+    fixture.request(
+        "POST",
+        "/session",
+        Some("operator-token"),
+        r#"{"name":"wrist-harness","duration_ms":600000,"joint_velocity_max_rad_s":0.25}"#,
+    );
+
+    let (_, limits) = fixture.request("GET", "/limits", Some("observer-token"), "");
+    let notices = limits
+        .get("notices")
+        .and_then(Json::as_arr)
+        .expect("notices");
+    let announced = notices
+        .iter()
+        .find(|notice| notice.get("code").and_then(Json::as_str) == Some("session_override"));
+    let announced = announced.expect("an override announces itself on the limits");
+    assert!(announced
+        .get("message")
+        .and_then(Json::as_str)
+        .unwrap()
+        .contains("wrist-harness"));
+}
+
+#[test]
+fn an_override_without_a_duration_is_refused_and_told_why() {
+    // There is deliberately no way to ask for one that does not end. §38.2 time-boxes this layer,
+    // so a missing duration is a refusal rather than a default of "until somebody notices".
+    let mut fixture = bench("session-no-duration");
+    let (status, body) = fixture.request(
+        "POST",
+        "/session",
+        Some("operator-token"),
+        r#"{"name":"forever","joint_velocity_max_rad_s":0.25}"#,
+    );
+
+    assert_eq!(status, 400);
+    assert!(body
+        .get("detail")
+        .and_then(Json::as_str)
+        .unwrap()
+        .contains("time-boxed"));
+}
+
+#[test]
+fn an_override_past_the_cap_is_refused() {
+    let mut fixture = bench("session-cap");
+    let (status, body) = fixture.request(
+        "POST",
+        "/session",
+        Some("operator-token"),
+        r#"{"name":"a-week","duration_ms":604800000,"joint_velocity_max_rad_s":0.25}"#,
+    );
+
+    assert_eq!(status, 400);
+    assert!(body
+        .get("detail")
+        .and_then(Json::as_str)
+        .unwrap()
+        .contains("signed profile"));
+}
+
+#[test]
+fn an_observer_may_read_an_override_and_may_not_set_one() {
+    let mut fixture = bench("session-roles");
+
+    let (read, _) = fixture.request("GET", "/session", Some("observer-token"), "");
+    assert_eq!(read, 200);
+
+    let (write, _) = fixture.request(
+        "POST",
+        "/session",
+        Some("observer-token"),
+        r#"{"name":"nope","duration_ms":60000,"joint_velocity_max_rad_s":0.25}"#,
+    );
+    assert_eq!(write, 403, "an observer reads; it does not narrow");
+}
+
+#[test]
+fn nothing_anonymous_may_set_one() {
+    let mut fixture = bench("session-anonymous");
+    let (status, _) = fixture.request(
+        "POST",
+        "/session",
+        None,
+        r#"{"name":"nope","duration_ms":60000,"joint_velocity_max_rad_s":0.25}"#,
+    );
+    assert_eq!(status, 401);
+}
+
+#[test]
+fn clearing_restores_the_profiles_ceilings_and_is_idempotent() {
+    let mut fixture = bench("session-clear");
+    let (_, limits) = fixture.request("GET", "/limits", Some("observer-token"), "");
+    let was = limits
+        .get("joint_velocity_max_rad_s")
+        .and_then(Json::as_f64);
+
+    fixture.request(
+        "POST",
+        "/session",
+        Some("operator-token"),
+        r#"{"name":"maintenance","duration_ms":600000,"joint_velocity_max_rad_s":0.25}"#,
+    );
+
+    let (first, body) = fixture.request("DELETE", "/session", Some("operator-token"), "");
+    assert_eq!(first, 200);
+    assert_eq!(body.get("cleared").and_then(Json::as_bool), Some(true));
+
+    let (_, after) = fixture.request("GET", "/limits", Some("observer-token"), "");
+    assert_eq!(
+        after.get("joint_velocity_max_rad_s").and_then(Json::as_f64),
+        was,
+        "the robot is back where its profile puts it"
+    );
+
+    // Clearing nothing is not an error — the intent is satisfied either way.
+    let (second, body) = fixture.request("DELETE", "/session", Some("operator-token"), "");
+    assert_eq!(second, 200);
+    assert_eq!(body.get("cleared").and_then(Json::as_bool), Some(false));
+}
+
+#[test]
+fn setting_and_clearing_both_leave_an_audit_entry_with_the_previous_value() {
+    // §38.3: "Every change is a black box event and an audit-log entry, carrying who, when, which
+    // layer, and the previous value." The previous value is the half that is easy to skip, and it
+    // is the half that makes the log answer "what did somebody change" rather than "what is it now".
+    let mut fixture = bench("session-audit");
+    fixture.request(
+        "POST",
+        "/session",
+        Some("operator-token"),
+        r#"{"name":"first","duration_ms":600000,"joint_velocity_max_rad_s":0.5}"#,
+    );
+    fixture.request(
+        "POST",
+        "/session",
+        Some("operator-token"),
+        r#"{"name":"second","duration_ms":600000,"joint_velocity_max_rad_s":0.25}"#,
+    );
+
+    let log = crate::audit::Audit::of(fixture.daemon.store.layout()).read();
+    let entries: Vec<_> = log
+        .entries
+        .iter()
+        .filter(|entry| entry.action == "session_override")
+        .collect();
+    assert_eq!(entries.len(), 2);
+
+    assert_eq!(
+        entries[0].previous, None,
+        "there was nothing before the first"
+    );
+    let second = entries[1];
+    assert_eq!(second.subject, "second");
+    assert!(second.actor.contains("operator"), "actor: {}", second.actor);
+    assert!(
+        second.previous.as_deref().unwrap().contains("0.5"),
+        "the entry says what it replaced: {second:?}"
+    );
+}
+
+#[test]
+fn an_expired_override_reads_as_expired_and_stops_narrowing() {
+    // Written straight to disk with a deadline in the past, because the route cannot be asked for
+    // one — which is the property `an_override_that_expires_in_the_past_is_refused` pins, and the
+    // reason this test has to reach past the route to test the reading.
+    let mut fixture = bench("session-expired");
+    let path = fixture.daemon.store.layout().session_override();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        r#"{"name":"stale","set_by":"operator","set_at_ms":0,"expires_at_ms":1,"joint_velocity_max_rad_s":0.1}"#,
+    )
+    .unwrap();
+
+    let (_, body) = fixture.request("GET", "/session", Some("observer-token"), "");
+    assert_eq!(body.get("state").and_then(Json::as_str), Some("expired"));
+
+    let (_, limits) = fixture.request("GET", "/limits", Some("observer-token"), "");
+    assert_ne!(
+        limits
+            .get("joint_velocity_max_rad_s")
+            .and_then(Json::as_f64),
+        Some(0.1),
+        "an expired override narrows nothing"
+    );
+    let notices = limits
+        .get("notices")
+        .and_then(Json::as_arr)
+        .expect("notices");
+    assert!(
+        !notices
+            .iter()
+            .any(|notice| notice.get("code").and_then(Json::as_str) == Some("session_override")),
+        "and it does not claim the robot is held back"
+    );
+}
+
+// ── §38.1's unsigned local configuration, over the local API ─────────────────
+
+/// A fixture with an operator credential, which is the role that changes a setting.
+fn configured(tag: &str) -> Fixture {
+    let mut fixture = Fixture::new(tag);
+    fixture.provision();
+    fixture.credentials.add(Credential::issue(
+        "bench",
+        Role::Operator,
+        "cc",
+        "operator-token",
+    ));
+    fixture
+}
+
+#[test]
+fn a_robot_nobody_configured_reports_every_setting_with_its_default() {
+    // Every one, not only the ones somebody set. A page listing only changes answers "what did I
+    // change" and never "what is this robot doing", and the second is the bench's question.
+    let mut fixture = configured("settings-defaults");
+    let (status, body) = fixture.request("GET", "/settings", Some("observer-token"), "");
+
+    assert_eq!(status, 200);
+    let settings = body
+        .get("settings")
+        .and_then(Json::as_arr)
+        .expect("settings");
+    assert_eq!(settings.len(), 3);
+    for entry in settings {
+        assert_eq!(entry.get("is_default").and_then(Json::as_bool), Some(true));
+        assert_eq!(
+            entry.get("value").and_then(Json::as_str),
+            entry.get("default").and_then(Json::as_str),
+            "a robot nobody configured runs its defaults"
+        );
+        // §38.3's provenance: absent, because nobody set it. Not "unrecorded" — there is no
+        // missing record here, there is no record because there was no decision.
+        assert!(matches!(entry.get("set_by"), Some(Json::Null)));
+        assert!(!entry
+            .get("choices")
+            .and_then(Json::as_arr)
+            .expect("choices")
+            .is_empty());
+    }
+    assert!(body
+        .get("notes")
+        .and_then(Json::as_arr)
+        .expect("notes")
+        .is_empty());
+}
+
+#[test]
+fn setting_the_console_theme_changes_the_page_the_robot_serves() {
+    // The test that would have caught a store nothing consults. `POST /settings` and the console
+    // asset route know nothing about each other; they meet in the served bytes, which is the only
+    // place the setting is worth anything.
+    let mut fixture = configured("settings-theme-serves");
+
+    let before = fixture.raw("GET", "/", None);
+    assert!(
+        !String::from_utf8_lossy(&before.body).contains("data-theme"),
+        "a robot at the default pins nothing and lets the browser decide"
+    );
+
+    let (status, body) = fixture.request(
+        "POST",
+        "/settings",
+        Some("operator-token"),
+        r#"{"setting":"console_theme","value":"light"}"#,
+    );
+    assert_eq!(status, 200, "{body:?}");
+
+    let after = fixture.raw("GET", "/", None);
+    assert!(
+        String::from_utf8_lossy(&after.body).contains("data-theme=\"light\""),
+        "the page the robot serves has to carry the theme somebody set"
+    );
+}
+
+#[test]
+fn setting_the_log_level_changes_what_this_process_prints() {
+    // The other half that has to meet: a value on disk and a process-global that decides whether a
+    // line is printed. The route sets it directly rather than waiting for a reconcile pass,
+    // because a level that took ten seconds to apply is one somebody sets twice.
+    let _guard = crate::log::TEST_LOCK
+        .lock()
+        .unwrap_or_else(|held| held.into_inner());
+    let mut fixture = configured("settings-log-level");
+    let restore = crate::log::level();
+
+    assert!(crate::log::enabled(crate::log::Level::Info));
+    assert!(!crate::log::enabled(crate::log::Level::Debug));
+
+    let (status, _) = fixture.request(
+        "POST",
+        "/settings",
+        Some("operator-token"),
+        r#"{"setting":"log_level","value":"debug"}"#,
+    );
+    assert_eq!(status, 200);
+    assert!(
+        crate::log::enabled(crate::log::Level::Debug),
+        "the route has to take effect in this process, not on the next pass"
+    );
+
+    fixture.request(
+        "POST",
+        "/settings",
+        Some("operator-token"),
+        r#"{"setting":"log_level","value":"error"}"#,
+    );
+    assert!(!crate::log::enabled(crate::log::Level::Warn));
+
+    crate::log::set_level(restore);
+}
+
+#[test]
+fn a_value_the_kernel_enforces_is_refused_by_the_route_as_well_as_by_the_store() {
+    // §38.1's line, reached over HTTP. The store is where it is enforced; this asserts that the
+    // route does not have a path around it.
+    let mut fixture = configured("settings-kernel-key");
+    let (status, body) = fixture.request(
+        "POST",
+        "/settings",
+        Some("operator-token"),
+        r#"{"setting":"joint_velocity_max_rad_s","value":"99"}"#,
+    );
+
+    assert_eq!(status, 400);
+    let detail = body
+        .get("detail")
+        .and_then(Json::as_str)
+        .unwrap_or_default();
+    assert!(detail.contains("Safety Kernel"), "detail: {detail}");
+    assert!(
+        detail.contains("§38.2"),
+        "it should say where such a value lives: {detail}"
+    );
+}
+
+#[test]
+fn changing_a_setting_needs_an_operator_and_reading_one_does_not() {
+    let mut fixture = configured("settings-roles");
+
+    let (read, _) = fixture.request("GET", "/settings", Some("observer-token"), "");
+    assert_eq!(read, 200, "an observer may see what this robot is set to");
+
+    let (write, _) = fixture.request(
+        "POST",
+        "/settings",
+        Some("observer-token"),
+        r#"{"setting":"log_level","value":"debug"}"#,
+    );
+    assert_eq!(write, 403, "an observer may not change one");
+
+    let (anonymous, _) = fixture.request("GET", "/settings", None, "");
+    assert_eq!(
+        anonymous, 401,
+        "and §39.2 gives an unprovisioned caller nothing here"
+    );
+}
+
+#[test]
+fn resetting_puts_one_back_and_says_so_without_claiming_it_moved_something() {
+    let mut fixture = configured("settings-reset");
+    fixture.request(
+        "POST",
+        "/settings",
+        Some("operator-token"),
+        r#"{"setting":"console_theme","value":"dark"}"#,
+    );
+
+    let (status, body) = fixture.request(
+        "POST",
+        "/settings",
+        Some("operator-token"),
+        r#"{"setting":"console_theme","reset":true}"#,
+    );
+    assert_eq!(status, 200);
+    assert!(
+        body.get("detail")
+            .and_then(Json::as_str)
+            .unwrap_or_default()
+            .contains("was dark"),
+        "{body:?}"
+    );
+
+    let (_, again) = fixture.request(
+        "POST",
+        "/settings",
+        Some("operator-token"),
+        r#"{"setting":"console_theme","reset":true}"#,
+    );
+    assert!(
+        again
+            .get("detail")
+            .and_then(Json::as_str)
+            .unwrap_or_default()
+            .contains("already at its default"),
+        "{again:?}"
+    );
+}
+
+#[test]
+fn every_change_leaves_the_audit_entry_and_the_previous_value_it_owes() {
+    // §38.3: *"every change is a black box event and an audit-log entry, carrying who, when, which
+    // layer, and the previous value."* On a robot nobody had configured, the previous value is the
+    // default — said so, because "it was info" and "nobody had ever chosen" differ.
+    let mut fixture = configured("settings-audit");
+    fixture.request(
+        "POST",
+        "/settings",
+        Some("operator-token"),
+        r#"{"setting":"telemetry_sampling","value":6}"#,
+    );
+    fixture.request(
+        "POST",
+        "/settings",
+        Some("operator-token"),
+        r#"{"setting":"telemetry_sampling","value":12}"#,
+    );
+
+    let entries = crate::audit::Audit::of(fixture.daemon.store.layout())
+        .read()
+        .entries;
+    let ours: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.action == "setting")
+        .collect();
+    assert_eq!(ours.len(), 2, "one entry per change");
+    assert_eq!(ours[0].previous.as_deref(), Some("1 (the default)"));
+    assert_eq!(ours[1].previous.as_deref(), Some("6"));
+    assert!(ours[1].detail.contains("telemetry_sampling"));
+    // §39.2's credentials name a role and never a person, and the record says a role.
+    assert!(
+        ours[0].actor.contains("operator"),
+        "actor: {}",
+        ours[0].actor
+    );
+}
+
+#[test]
+fn a_setting_written_by_hand_that_this_build_cannot_use_is_reported_on_the_route() {
+    // Never swallowed. Somebody wrote that key expecting something to happen.
+    let mut fixture = configured("settings-notes");
+    std::fs::write(
+        fixture.daemon.store.layout().settings(),
+        r#"{"log_level":"chatty"}"#,
+    )
+    .expect("write");
+
+    let (status, body) = fixture.request("GET", "/settings", Some("observer-token"), "");
+    assert_eq!(status, 200, "a bad setting does not break the route");
+    let notes = body.get("notes").and_then(Json::as_arr).expect("notes");
+    assert_eq!(notes.len(), 1);
+    assert!(notes[0]
+        .as_str()
+        .unwrap_or_default()
+        .contains("error, warn, info, debug"));
+}
+
+// ── §45.4's event triggers, over the local API ───────────────────────────────
+
+/// A robot with one camera-extrinsics record, measured `age_s` ago, that a collision invalidates.
+///
+/// The set is chosen from §45.2's own table: extrinsics drift with *"vibration, thermal cycling,
+/// knocks"* and feed `proximity` and `workspace`, which is exactly §45.1's opening failure — a
+/// camera four centimetres out means the proximity guard measures separation to the wrong place
+/// while reporting perfectly healthy.
+fn calibrated(tag: &str, age_s: f64) -> Fixture {
+    let mut fixture = Fixture::new(tag);
+    fixture.provision();
+    fixture.credentials.add(Credential::issue(
+        "bench",
+        Role::Operator,
+        "cc",
+        "operator-token",
+    ));
+
+    let directory = fixture.daemon.store.layout().calibration();
+    std::fs::create_dir_all(&directory).expect("calibration directory");
+    let now_s = crate::api::wall_ms() as f64 / 1000.0;
+    std::fs::write(
+        directory.join("camera_extrinsics.json"),
+        format!(
+            "{{\"set\":\"camera_extrinsics\",\"method\":\"charuco-12x9, 40 poses\",\
+              \"residual\":0.4,\"residual_threshold\":1,\"operator\":\"alice\",\
+              \"conditions\":{{\"at_s\":{}}},\
+              \"policy\":{{\"invalidating_events\":[\"collision\"]}}}}",
+            now_s - age_s
+        ),
+    )
+    .expect("record");
+    fixture
+}
+
+fn validity_of(body: &Json, set: &str) -> Option<String> {
+    body.get("sets")
+        .and_then(Json::as_arr)?
+        .iter()
+        .find(|row| row.get("set").and_then(Json::as_str) == Some(set))
+        .and_then(|row| row.get("state").and_then(Json::as_str))
+        .map(str::to_string)
+}
+
+/// Why one set is in the state it is, from §45.4's closed vocabulary.
+fn expiry_reason_of(body: &Json, set: &str) -> Option<String> {
+    body.get("sets")
+        .and_then(Json::as_arr)?
+        .iter()
+        .find(|row| row.get("set").and_then(Json::as_str) == Some(set))
+        .and_then(|row| row.get_present("reason").and_then(Json::as_str))
+        .map(str::to_string)
+}
+
+#[test]
+fn recording_a_collision_expires_the_calibrations_it_could_have_disturbed() {
+    // The whole point, end to end, and the thing that was unreachable: `events_since` came from the
+    // stored record and from nowhere else, so a collision that happened this morning invalidated
+    // nothing. Neither route knows about the other — they meet in `evaluate`, which is the only
+    // place a calibration's validity is decided.
+    let mut fixture = calibrated("calibration-event-expires", 3_600.0);
+
+    let (before, body) = fixture.request("GET", "/calibration", Some("observer-token"), "");
+    assert_eq!(before, 200);
+    assert_eq!(
+        validity_of(&body, "camera_extrinsics").as_deref(),
+        Some("valid"),
+        "the fixture would prove nothing otherwise"
+    );
+
+    let (status, answered) = fixture.request(
+        "POST",
+        "/calibration/events",
+        Some("operator-token"),
+        r#"{"event":"collision","note":"clipped the fixture"}"#,
+    );
+    assert_eq!(status, 200, "{answered:?}");
+    // The status comes straight back, so the answer is *which sets this retired* rather than an
+    // acknowledgement the operator has to follow with a second request.
+    assert_eq!(
+        validity_of(&answered, "camera_extrinsics").as_deref(),
+        Some("expired")
+    );
+    // The reason as well as the state, from §45.4's closed vocabulary. `expired` on its own would
+    // pass for a record that had simply aged out, which is a different fact and a different fix.
+    assert_eq!(
+        expiry_reason_of(&answered, "camera_extrinsics").as_deref(),
+        Some("event")
+    );
+
+    let (_, after) = fixture.request("GET", "/calibration", Some("observer-token"), "");
+    assert_eq!(
+        validity_of(&after, "camera_extrinsics").as_deref(),
+        Some("expired"),
+        "and it stays expired on the next read, because the journal is on the disk"
+    );
+}
+
+#[test]
+fn a_calibration_measured_after_the_impact_is_not_invalidated_by_it() {
+    // Without this rule re-measuring would be impossible: the set would expire again the instant it
+    // was written, and there would be no way to clear an impact off a robot.
+    let mut fixture = calibrated("calibration-event-after", 3_600.0);
+    fixture.request(
+        "POST",
+        "/calibration/events",
+        Some("operator-token"),
+        r#"{"event":"collision"}"#,
+    );
+
+    // The same robot, re-measured now — which is what an engineer does after an impact.
+    let directory = fixture.daemon.store.layout().calibration();
+    let now_s = crate::api::wall_ms() as f64 / 1000.0;
+    std::fs::write(
+        directory.join("camera_extrinsics.json"),
+        format!(
+            "{{\"set\":\"camera_extrinsics\",\"method\":\"charuco-12x9, 40 poses\",\
+              \"residual\":0.4,\"residual_threshold\":1,\"operator\":\"alice\",\
+              \"conditions\":{{\"at_s\":{}}},\
+              \"policy\":{{\"invalidating_events\":[\"collision\"]}}}}",
+            now_s + 60.0
+        ),
+    )
+    .expect("re-measured");
+
+    let (_, after) = fixture.request("GET", "/calibration", Some("observer-token"), "");
+    assert_eq!(
+        validity_of(&after, "camera_extrinsics").as_deref(),
+        Some("valid"),
+        "re-measuring has to be able to clear an impact"
+    );
+}
+
+#[test]
+fn an_event_a_records_policy_does_not_name_leaves_it_alone() {
+    // §45.4 invalidates *"the calibrations the impact could plausibly have disturbed"*, and which
+    // those are is the record's own policy to say — it was written by whoever knew the method. A
+    // tool change does not move a camera.
+    let mut fixture = calibrated("calibration-event-unrelated", 3_600.0);
+
+    let (status, answered) = fixture.request(
+        "POST",
+        "/calibration/events",
+        Some("operator-token"),
+        r#"{"event":"tool_change"}"#,
+    );
+    assert_eq!(status, 200);
+    assert_eq!(
+        validity_of(&answered, "camera_extrinsics").as_deref(),
+        Some("valid")
+    );
+}
+
+#[test]
+fn an_event_this_vocabulary_does_not_have_is_refused_by_the_route() {
+    // A `collison` recorded with a typo matches no policy and invalidates nothing, leaving an
+    // operator believing they have flagged an impact.
+    let mut fixture = calibrated("calibration-event-typo", 60.0);
+    let (status, body) = fixture.request(
+        "POST",
+        "/calibration/events",
+        Some("operator-token"),
+        r#"{"event":"collison"}"#,
+    );
+
+    assert_eq!(status, 400);
+    let detail = body
+        .get("detail")
+        .and_then(Json::as_str)
+        .unwrap_or_default();
+    assert!(detail.contains("collision"), "detail: {detail}");
+}
+
+#[test]
+fn recording_an_event_needs_an_operator_and_reading_the_report_does_not() {
+    let mut fixture = calibrated("calibration-event-roles", 60.0);
+
+    let (read, _) = fixture.request("GET", "/calibration", Some("observer-token"), "");
+    assert_eq!(read, 200);
+
+    let (write, _) = fixture.request(
+        "POST",
+        "/calibration/events",
+        Some("observer-token"),
+        r#"{"event":"collision"}"#,
+    );
+    assert_eq!(write, 403, "an observer may not retire a guard");
+}
+
+#[test]
+fn a_recorded_event_leaves_the_audit_row_it_owes() {
+    // Not a configuration change, but it changes which guards may run — which is the thing §38.3's
+    // pair exists to leave a trail of.
+    let mut fixture = calibrated("calibration-event-audit", 60.0);
+    fixture.request(
+        "POST",
+        "/calibration/events",
+        Some("operator-token"),
+        r#"{"event":"collision","note":"clipped the fixture"}"#,
+    );
+
+    let entries = crate::audit::Audit::of(fixture.daemon.store.layout())
+        .read()
+        .entries;
+    let ours = entries
+        .iter()
+        .find(|entry| entry.action == "calibration_event")
+        .expect("an audit row");
+    assert_eq!(ours.subject, "collision");
+    assert!(ours.detail.contains("clipped the fixture"));
+    assert!(ours.actor.contains("operator"), "actor: {}", ours.actor);
+}

@@ -119,7 +119,7 @@ fn dispatch(argv: &[String]) -> i32 {
         "status" | "ps" | "plan" | "logs" | "grants" | "estop" | "rollback" | "install"
         | "blackbox" | "skills" | "skill" | "ota" | "identity" | "pair" | "unpair" | "checkin"
         | "intent" | "releases" | "cell" | "power" | "state" | "limits" | "conformance"
-        | "shutdown" => robot_cmd::run(command, rest),
+        | "session" | "settings" | "calibration" | "shutdown" => robot_cmd::run(command, rest),
         other => term::fail(&format!("`{other}` is not a skynet command.\n\n{USAGE}")),
     }
 }

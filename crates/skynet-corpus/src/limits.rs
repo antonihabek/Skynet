@@ -15,8 +15,8 @@ use skynet_contracts::kinematics::{flatten, workspace_from_json, FlatFrames, Wor
 use skynet_json::Json;
 use skynet_kernel::kinematics::{Frame, FrameSet, JointBinding, Volume, WorkspaceLayer};
 use skynet_kernel::{
-    Available, CommandCycle, Envelope, OperatorProfile, Proximity, ResolveLimitsParams, Tier,
-    TransportClamp,
+    Available, CommandCycle, Envelope, OperatorProfile, Proximity, ResolveLimitsParams,
+    SessionOverride, Tier, TransportClamp,
 };
 
 /// Everything [`skynet_kernel::resolve_limits`] needs, owned.
@@ -25,6 +25,7 @@ pub struct LimitsOwned {
     envelope: Option<EnvelopeOwned>,
     transport: Option<ClampOwned>,
     profile: Option<ProfileOwned>,
+    session: Option<SessionOwned>,
     available: Available,
     grants: Vec<String>,
     /// The body's frames, flattened. `None` where the case declared none, and the two pose guards
@@ -59,6 +60,15 @@ struct ProfileOwned {
     base_velocity_max_m_s: Option<f64>,
     max_delta_per_cycle: Option<f64>,
     proximity: Option<Proximity>,
+}
+
+/// §38.2's session layer, as a case declares it.
+struct SessionOwned {
+    name: String,
+    joint_velocity_max_rad_s: Option<f64>,
+    joint_torque_max_nm: Option<f64>,
+    base_velocity_max_m_s: Option<f64>,
+    max_delta_per_cycle: Option<f64>,
 }
 
 fn num(value: &Json, key: &str) -> Option<f64> {
@@ -107,6 +117,14 @@ impl LimitsOwned {
                 per_channel,
                 source: text(node, "source"),
             }
+        });
+
+        let session = value.get_present("session").map(|node| SessionOwned {
+            name: text(node, "name").unwrap_or_default(),
+            joint_velocity_max_rad_s: num(node, "joint_velocity_max_rad_s"),
+            joint_torque_max_nm: num(node, "joint_torque_max_nm"),
+            base_velocity_max_m_s: num(node, "base_velocity_max_m_s"),
+            max_delta_per_cycle: num(node, "max_delta_per_cycle"),
         });
 
         let profile = value.get_present("profile").map(|node| ProfileOwned {
@@ -161,6 +179,7 @@ impl LimitsOwned {
             .unwrap_or_default();
 
         Ok(LimitsOwned {
+            session,
             tier,
             envelope,
             transport,
@@ -261,6 +280,13 @@ impl LimitsOwned {
                 proximity: profile.proximity,
                 workspace: layers,
                 self_collision_margin_m: profile.self_collision_margin_m,
+            }),
+            session: self.session.as_ref().map(|session| SessionOverride {
+                name: session.name.as_str(),
+                joint_velocity_max_rad_s: session.joint_velocity_max_rad_s,
+                joint_torque_max_nm: session.joint_torque_max_nm,
+                base_velocity_max_m_s: session.base_velocity_max_m_s,
+                max_delta_per_cycle: session.max_delta_per_cycle,
             }),
             available: self.available,
         }

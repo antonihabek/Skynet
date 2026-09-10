@@ -8114,3 +8114,559 @@ What it adds is a rule, and it is the third round in a row to earn one:
 > ceilings are.
 
 Nothing is committed. Nothing is pushed.
+
+---
+
+# Round thirty-seven — the audit, run on a machine that is not the one the last four rounds ran on
+
+Asked to establish what is left before writing anything, because the plan *might be finished*. No
+code this round. Every item below was checked against **this** tree and **this** machine rather
+than against the prose that claims it, which is round thirty-three's rule and the one three rounds
+running have earned.
+
+The machine matters more than usual this time, and it is the round's largest finding.
+
+## What was run, and what it said
+
+| | |
+|---|---|
+| `cargo test --workspace` | **1,739 passed**, exit 0, on Linux |
+| `sh crates/skynetd-io/e2e.sh` | **117 checks, 0 failed** — every one that does not need a systemd user manager, which this container has no PID 1 for. The script says so itself rather than passing quietly |
+| `node tools/scale-report.mjs --check` | §73 matches the tree at all eight figures |
+| `node tools/check-mirrors.mjs` | all three shared documents match |
+| `node tools/check-contract-mirrors.mjs` | all eighteen contracts match |
+| `node tools/check-golden-path.mjs` | every link resolves, every make target exists, every command is one of the 55 |
+| `node tools/check-rhal-flags.mjs` | every flag accounted for across the four bindings |
+| Hub: `npx tsc --noEmit` | **exit 0** |
+| Hub: `npx vitest run` | **1,963 passed**, 93 files, exit 0 |
+| Hub: routes, migrations | **95** routes under `/api/skynet/v1`, **29** migrations (27 Skynet) |
+
+## The finding: the environment blocker is gone, and nobody has noticed yet
+
+Round thirty-four wrote down the reason §10's pairing and the supervised loop had not met a real
+Hub, and it was a fact about a particular machine rather than about the code:
+
+> *"`skynetd` serves on a Unix socket and launches through systemd, so the daemon proper runs in
+> WSL. The Hub runs on Windows. **WSL cannot reach the Windows host on this machine** … So the
+> crossing runs entirely on Windows, through `skynetd once`."*
+
+`scripts/skynet-verify-recordings-robot.mjs` says the same thing in its own header — *"§10's
+pairing runs over `skynetd`'s Unix socket, which does not exist on Windows"*.
+
+**This session is one Linux host with both repositories checked out on it, a working Docker
+daemon, `psql`, and Node.** The daemon's socket exists here; the e2e proves it by talking to a
+running `skynetd` over it 117 times. Nothing has to cross a firewall, because there is no second
+machine. So the item round thirty-four left — *the daemon ran single passes, not the supervised
+loop, and §10's pairing did not run* — is the first thing on the list that is neither a vendor's,
+a machine's nor the owner's **on this machine**, and it has been carried as blocked for three
+rounds on a blocker that was never about the code.
+
+What still has to be true for it: a real Supabase behind the Hub, which means image pulls. That is
+the first thing to try rather than the thing to assume.
+
+## Three documents behind the tree, again
+
+The failure §73's own header is written against, and the third round in a row to find it.
+
+* **`PROGRESS.md` is six rounds behind.** `docs/README.md` names it the OS repository's log —
+  *"Where progress is logged: in `PROGRESS.md`, here"* — and this file's own header says its
+  findings *"are folded into those two when a round closes"*. Rounds thirty-one through
+  thirty-six are closed and none of them is in it: the last entry is the seventy-second,
+  2026-09-07, §27's `policy`. Missing from the canonical log: §47.6's mapping half, the second
+  supervisor, the audit, §79's two halves meeting, `skynet doctor` and a black box that can be
+  read, and replay. A reader of the repository's own log would plan around six rounds of holes.
+* **`desktop/README.md`'s *"What is not here"* names three things that were built on 2026-09-09.**
+  It says *"no tray icon and no global hotkey"* — `windows/Services/TrayIcon.cs` and `TrayStop.cs`
+  are in the tree with twelve tests — and *"no black box replay"*, which the same file describes
+  at length two hundred lines earlier under a heading of its own. The stale half and the current
+  half are in one document, which is the shape that costs a reader the most.
+* **Its pane count is wrong in both directions.** The same file says *"one of five panes"* in one
+  place and *"macOS is seven panes and two features behind"* in another; `DetailPane` has five
+  values and macOS has none of them. Session thirty-two's log said *"six panes and a tray"*. Three
+  numbers, one enum, and the enum is two lines long.
+
+## And one correction to the Hub's own log, in the other direction
+
+Session thirty-two recorded `tsc --noEmit` as *"carrying eight errors — all of them in
+`lib/__tests__/semantic-vector-store.test.ts`"*. It carries **none**; the file typechecks. Whatever
+closed it was the owner's marketplace work in the commits after that session, and it is worth
+recording that a stale *"still broken"* is the same defect as a stale *"still missing"* — a reader
+believes it for free, and it makes the tree look worse than it is instead of better.
+
+## The list, restated against this tree
+
+**Buildable here, on this machine, needing nobody:** the three documents above, and §10's pairing
+plus the supervised loop against a real Hub if Supabase will come up.
+
+**A vendor's:** a capture backend to fill §47.6's pool; inference on what it captures; one real
+RHAL driver.
+
+**The owner's:** a third language edition; the countersignature on a conformance result (§80, and
+§83.4 makes an operator attestation a third claim again); which robot data survives a marketplace
+listing (`20260905200100_marketplace_listing_transactions.sql`).
+
+**Hardware's:** a physical joint under the kernel; a TPM for `security.identity.attested`; an OTA
+image this Hub has applied; three of §15's eight runtime tests; the certified tier's MCU and its
+notified body; `vram_mb` and the `DeviceAllow` behind it.
+
+**The Hub's infrastructure, and correctly queued rather than faked:** Phase 10's real worker (the
+in-process runner does dataset-index and search-reindex and says so in its own header), Phase 11's
+GPU training, inference endpoints and Spaces, and Phase 12's teleoperation session.
+
+**The Console's:** USB and serial (no route on the robot to talk to); signing, notarisation and the
+installer (certificates, and `CONSOLE_RELEASES` is deliberately empty until a pipeline fills it);
+macOS, which has never been compiled and cannot be compiled here either — SwiftUI, `Network` and
+`WKWebView` are Apple frameworks and this is a Linux container.
+
+**Designed-open on purpose:** §30, §43, §53, §58.3, unchanged.
+
+## One thing about the state of the branch, which neither log says
+
+Both logs end *"Nothing is committed. Nothing is pushed."* Both are out of date: this repository has
+**33 commits** past `origin/main` and BotMarket **27**, and in both cases `origin/claude/vibrant-ramanujan-wif8q6`
+is level with `HEAD` — so the work is on the remote already, on a branch rather than on `main`.
+Nothing has been merged. Said here because a sentence claiming nothing is pushed is exactly the kind
+of sentence somebody plans around.
+
+## What the audit then closed, in the same round
+
+The three documents, because they are the whole of what an agent can close without a vendor, a
+machine or the owner — and because leaving an audit's findings in the audit is the failure the audit
+was written against.
+
+* **`PROGRESS.md` gained rounds thirty-one through thirty-six**, as entries seventy-third to
+  seventy-eighth, with findings 142-154. It is the OS repository's canonical log by `docs/README.md`,
+  and it had been six rounds behind.
+* **`desktop/README.md`'s *What is not here*** no longer says the tray icon, the global hotkey and
+  replay are missing, and its pane count agrees with `DetailPane` — five values, one of which macOS
+  draws, so **four panes and the stop behind**. The correction is left visible rather than deleted,
+  which is the convention that section already used once.
+* **The macOS application's own `NotInThisBuild` list** gained pairing and §41.3's bundle. It is
+  drawn on screen, so it is the one stale list an operator sees rather than a reader.
+* **`supabase/schema/skynet.sql`'s header** said closing the baseline was *"named as outstanding in
+  the build log"*. The build log says the owner **withdrew** it on 2026-09-04 as scaffolding rather
+  than product. Fixed in `scripts/skynet-schema-dump.mjs`'s `HEADER` and in the generated file, which
+  the generator emits verbatim, so `--check` stays honest on a machine that has `pg_dump`.
+
+That last one was found by trying to stand a local Supabase up. `supabase start` applies
+`supabase/migrations` in order and dies on the **first** Skynet migration with `relation
+"public.org_members" does not exist` — the header's paragraph arriving as an error message. So the
+one buildable crossing above is blocked here after all, and on a decision the owner has already
+taken rather than on effort: a fresh environment cannot be built from `supabase/`, and the file that
+would change that was withdrawn.
+
+The Hub's own log carries this as session thirty-three, in both trees, and the pins were taken with
+`--pin` from the two agreeing copies.
+
+`cargo test --workspace` 1,739 · `e2e.sh` 117 · Hub `vitest` 1,963 · `tsc --noEmit` clean · mirrors,
+contract mirrors, golden path, RHAL flags and `scale-report --check` all green. No Rust changed, so
+no figure in §73 moved.
+
+Committed. **Nothing is pushed.**
+
+---
+
+# Round thirty-eight — §38.2's fifth layer, which the specification described and nothing implemented
+
+Asked what a robotics engineer who has just installed Skynet OS would want on the Console to
+*optimize, adjust, customize* — and whether the Console has it.
+
+The answer came out of §83.2 rather than out of a wishlist, because that section forbids most of
+the obvious one in advance: the Console is *a shell, not a client*, and everything the on-robot
+console renders is already there through the embedded page. So the question narrows to **what can
+an engineer not adjust anywhere at all** — not in the Console, not on the robot's own page, not
+from the CLI.
+
+Three things, and the first is the one this round is about.
+
+## The finding
+
+§38.2 lays out safety configuration as five layers:
+
+> `vendor defaults → fleet profile → site profile → cell profile → session override`
+>
+> *"Session overrides are time-boxed and expire — a 'maintenance mode, half speed' that outlives the
+> maintenance is a hazard that looks like a setting."*
+
+The fifth is the only one a person sets **at the machine**, and it is the verb a bench engineer
+actually has: *slow this thing down while my hands are near it.* It did not exist.
+
+* `session_override` appeared **once** in 131,000 lines of Rust — in a doc comment, as a concept.
+* `ResolveLimitsParams` had five inputs and none of them was a session.
+* No route wrote one. No CLI verb set one. Nothing expired one.
+* And **§43's open list said *"Profiles layer cleanly on one robot (§38.2)"*** — deferring only the
+  fleet-wide version, which reads as a settled sentence about four layers where the specification
+  names five.
+
+That is the same shape as the stale READMEs two rounds ago, one level deeper: a document believed
+for free, and the belief cost the feature.
+
+## Why the Console could not have it
+
+The Console is downstream. A pane cannot offer a control for a route that does not exist, so the
+work is the OS's — which is also the half this machine can actually verify, unlike the WinUI half.
+
+## What the kernel gained, and the one design decision in it
+
+`SessionOverride` joins the same `narrowest()` minimum as every other layer, which is what makes
+*"it only ever narrows"* a property of the arithmetic rather than a rule to remember. A widening is
+recorded and discarded by the same expression that composes a legitimate narrowing.
+
+**Checked against what the layer above allows, not against the envelope**, which is §38.2's own
+wording and the case a reader would not think to write: a session asking for 1 rad/s under a profile
+allowing 0.5 has not widened the *envelope* — 1 is well inside 2 — but it has asked to raise the
+number actually in force, which is the one the operator can see and the one they will believe they
+changed. It is a corpus case now.
+
+Reported as `session_widened` rather than folded into `profile_widened`. Two documents, two
+sentences: telling somebody their signed profile over-reached when it was their bench override sends
+them to edit a file that is not the problem.
+
+**Expiry is deliberately not in the kernel.** §35.2 keeps time out of it — `now_ms` is a parameter
+to a cycle, never something the kernel reads — so it cannot ask whether a deadline has passed.
+`skynetd` holds the deadline and simply stops handing the override to `resolve_limits`. One clock in
+the system rather than two that can disagree.
+
+## The output shape, which is why the corpus did not move
+
+The obvious build adds a `session` key to the resolved limits. `limits_to_json` writes every key
+explicitly with `null` for absent scalars, so that would have changed **every one of 1,142
+expected byte-strings** across three editions, for a field that is null in all of them.
+
+Instead the session reaches an operator two ways it already had: the **numbers move**, and a
+`session_override` **notice** announces it by name. Notices are a list, so a robot with no override
+emits nothing new — and the diff on `corpus/limits/resolution.json` is **243 insertions and zero
+deletions**. Six new cases, 1,142 unchanged, and both editions still reproduce all 1,148 byte for
+byte.
+
+That the notice is emitted at all is the point rather than a courtesy. §38.2's hazard is not a slow
+robot; it is a robot that is *quietly* slow for a week and a team that concludes the arm is faulty.
+The notice reaches every surface that renders one — `skynet limits`, the robot's own console, the
+Hub's device page — without any of them knowing this layer exists.
+
+## The daemon, and what a bench actually gets
+
+`crates/skynetd-io/src/session.rs`: a store with three readings — **live**, **expired**, and
+**unreadable** — kept apart rather than collapsed. Composing a ceiling has no use for the
+difference; telling an operator does, and a console showing an expired override as "nothing set"
+leaves somebody wondering why the robot sped up.
+
+Wall time rather than monotonic, by §45.4's reasoning: a deadline has to survive a reboot, and a
+machine switched off for a day comes back with the override expired rather than reapplied.
+
+**Eight hours maximum**, refused past it with the reason in the sentence: longer than a bench
+session is a change to how the robot behaves, and that is what §38.1 signs profiles for. A ceiling
+of zero or less is refused too — `narrowest()` would take it as the tightest input and produce a
+robot that cannot move at all, which is safe and undiagnosable from a limits page.
+
+`GET|POST|DELETE /session`, operator role for the two that write. Operator rather than admin because
+the layer can only narrow, and §39.1 already gives an operator *capability grants*, which widen what
+a package may do. Also because §38.2's argument is practical: if this is hard to reach, nobody uses
+it and they work on a robot at full speed instead.
+
+Both of §38.3's records are written, and the audit row carries **the previous value** — the half
+that is easy to skip and the half that makes a log answer *what did somebody change* rather than
+*what is it now*.
+
+`skynet session [set|clear]`, with `--for` required and no way to omit it. Durations are suffixed
+(`20m`, `2h`) rather than bare, because the two readings a person is likeliest to have in mind —
+minutes and seconds — are sixty times apart on a control that slows a robot down.
+
+## What the suite caught that no unit test could
+
+`with_session` existed and **nothing called it**. The API test that asserts `GET /limits` moves
+after a `POST /session` failed on its first run, which is the same lesson as round thirty-four's:
+two halves that have only met doubles have not met. It is a helper now — `live_session()` — used at
+every one of the five places a ceiling is composed, including §17's check-in, because a Hub device
+page drawing ceilings this robot is not running at is the same drift by a different road.
+
+## And one the e2e caught, where the test was wrong rather than the code
+
+The bench assertion *"a widening override is refused"* failed, and the code was right. That robot
+has no declared envelope and no profile ceilings, so there is nothing above the session to widen: a
+high number there is not a widening at all, it is the only ceiling the robot has, and going from
+*unbounded* to *99 rad/s* is a narrowing however alarming it looks written down. The check now
+asserts that property under its own name, and the refusal is pinned where a body with declared
+ceilings exists — the kernel's suite, and six corpus cases across three editions.
+
+## Numbers
+
+* `cargo test --workspace` — **1,775 passed** (1,739 before). Kernel 116, and the store's own 17.
+* `sh crates/skynetd-io/e2e.sh` — **133 checks, 0 failed** (117 before), against a running daemon.
+* `node tools/edition-report.mjs` — **1,148 of 1,148** in Rust and Python.
+* `corpus/limits/resolution.json` — +243 lines, **0 removed**.
+* clippy clean, fmt clean, `thumbv7em-none-eabihf` still builds with no allocator.
+* Hub: `tsc --noEmit` clean, `vitest` 1,963 passed. `desktop/tests` **190 passed** (173 before).
+* §73 corrected: 131,000 lines of Rust, 1,148 corpus cases, 58 CLI commands.
+
+## One thing found and left alone, deliberately
+
+`tools/check-golden-path.mjs` counts CLI commands by taking every string literal on a match arm
+across the crate — broad by design, so that adding a command never fails a build falsely. That
+breadth was equal to the true count by coincidence, and this round broke the coincidence: a `match`
+over state names inside a printer put two non-commands into a figure §73 publishes.
+
+The counting rule was **not** changed. Narrowing it to `main.rs`'s dispatch gives 34, and §73's
+"55" has always meant the whole surface including subcommands — so a "fix" here would have silently
+redefined a published number. The two spurious literals were removed from the printer instead, with
+the reason written where somebody would otherwise reintroduce them, and the honest count (58) went
+into §73. The fragility is real and is recorded here rather than papered over: the next unrelated
+`match` over strings in this crate will move that number again.
+
+## What round thirty-eight leaves
+
+Two of the three things an engineer cannot adjust are still open, and both are smaller than this
+one was:
+
+* **local unsigned configuration** — §38.1 names *"log level, telemetry sampling, console theme"*
+  as unsigned and local, and there is no route, no CLI verb and no file for any of them;
+* **calibration** — `GET /calibration` reports; nothing runs or refreshes one.
+
+The Console's session pane and bench pane are both **written and not compiled**, which is unchanged
+and is stated in `desktop/README.md` under *What is not here* rather than implied. One
+`dotnet build -p:Platform=x64` on Windows settles both.
+
+Nothing is pushed.
+
+# Round thirty-nine — §38.1's other half, and the two UI questions that had evidence-based answers
+
+Three things this round, and the first is the one round thirty-eight left at the top of its own
+list.
+
+## §38.1's unsigned local configuration
+
+> *"Non-safety configuration — log level, telemetry sampling, console theme — is unsigned and
+> local. The line between the two is drawn by whether the value can reach the kernel."*
+
+There was no route, no verb and no file for any of the three. `log_level` did not exist as a
+concept: the daemon had seventy-two `eprintln!` calls and no notion of a level to filter them by,
+so a robot in production said exactly as much as a robot on a bench, and neither could be told to
+say more.
+
+### The line, made mechanical rather than left in prose
+
+The interesting design question is not where to put the file. It is that §38.1 states a **rule about
+which values may live in it**, and a rule stated in prose is one a later hand widens without
+noticing — the same shape as the stale-document failure round thirty-seven spent its whole audit
+on, one level down.
+
+So the store holds a **closed set**. `Setting` is an enum with three variants and there is no code
+path that writes a key it does not name. That is the enforcement, and it is worth being precise
+about why it is the right one: a *blocklist* of kernel-reaching names would have to be kept in step
+with a kernel that grows, and the failure mode of falling behind is an unsigned path to a ceiling.
+An *allowlist of three* cannot fall behind anything.
+
+`Setting::of` does also recognise the kernel's own ceiling names, and the module says in as many
+words that this is **a courtesy and not a safety property**: somebody who types
+`joint_velocity_max_rad_s` gets the sentence naming where such a value does live — a signed profile
+(§38.1), or a session override (§38.2) — rather than a bare *unknown setting*. If that little list
+ever falls behind, the key is still refused; it is refused with the duller sentence.
+
+The property is pinned by a test that names itself: `no_value_the_kernel_enforces_can_be_written_here`.
+
+### Everything in it is read by something
+
+A settings store whose values nothing consults is a page of controls that lie, which §32.2 forbids
+in the plainest terms it uses anywhere. So each of the three was wired, and two of them needed real
+work rather than a lookup:
+
+* **`log_level`** meant building a level at all. `crate::log` holds one process-global atomic;
+  twenty-nine of the daemon's running-path messages were classified and converted. Deliberately
+  **not** converted: the `skynetd credential`, `skynetd trust` and usage output. Those are command
+  output, not logging, and a log level that silenced `skynetd trust add`'s error message would be a
+  bug wearing a feature's clothes.
+
+  Two consequences were written down rather than left to be discovered. A change through
+  `POST /settings` takes effect **immediately** — the route runs in the daemon's process and sets
+  the atomic — while a change made by editing the file takes effect **on the next reconcile pass**,
+  up to ten seconds. And the output is byte-identical to what it was: a message that prints at all
+  prints `skynetd: …` with no level tag, because the end-to-end suite greps that prefix and a log
+  line's shape is an interface even where nobody wrote it down as one.
+
+  `debug` had to be worth turning on, or one of the four values would do nothing. It now prints one
+  line per request with the status, and one saying what the credential was taken for and what the
+  route wanted — which are the two questions actually asked at a bench: *did it arrive*, and *what
+  did this robot make of my token*.
+
+* **`telemetry_sampling`** makes windows **longer, never sparser**, and that is the whole design.
+  Dropping three windows in four would manufacture §47.4's *"gap that looks like a quiet period"* on
+  purpose. A window carries its own `from_ms`, `to_ms` and `elapsed_ms`, so a four-pass window is
+  self-describing and every counter in it is a sum over the interval it names. The implementation is
+  six lines at the close site: below the rate, return without closing, and the next pass keeps
+  counting into the same window.
+
+  Zero is refused rather than read as *off*, and the refusal says why: a robot that quietly stopped
+  sending windows reads on the Hub as a robot that stopped.
+
+* **`console_theme`** is pinned onto the served HTML rather than fetched by the page's script. A
+  page that fetched its own theme would render in the browser's colours and swap — and the swap is
+  most visible on exactly the machine the setting exists for, a bench under shop lighting with a
+  workstation configured dark. `Theme::System` substitutes nothing at all, so a robot nobody
+  configured serves the file byte for byte and `prefers-color-scheme` decides as before.
+
+  The substitution target is a constant, `ROOT_ELEMENT`, asserted against the page itself. Without
+  that assertion, reformatting `<html lang="en">` in `console.html` would leave the setting silently
+  doing nothing with the page still serving perfectly.
+
+### What the suite caught
+
+The e2e's `recording_started` check failed, and the code was right. `blackbox events` answers with
+the **last** N and defaults to fifty; the assertion had been leaning on this suite producing fewer
+than fifty events before reaching that line, and three configuration changes pushed it over. Fixed
+by asking for the events rather than by moving the section, with the dependency written down.
+
+The audit assertion failed for a better reason than it was written: the row says
+`"previous":"system (the default)"`, because *"it was system"* and *"nobody had ever chosen"* are
+different facts about a robot and §38.3 asks for the one actually in force. The assertion was wrong;
+the behaviour was right, and is now asserted under its own name.
+
+## The Console, and the two questions
+
+Both were asked as questions and both had answers that could be checked rather than asserted.
+
+**The Windows console's markup is in better shape than it looked**: 134 `ThemeResource` references,
+zero hardcoded colours, native WinUI controls throughout. Two real gaps, and one of them mattered:
+
+* **zero `KeyboardAccelerator`s.** §83.2 gives the stop a line of its own for being *always
+  reachable*, and the only route to it was the pointer — which is most of that sentence missing.
+  `Ctrl+Shift+S` now reaches it. It fires from inside a text box too, on the same argument §39.1
+  makes for the route being anonymous: an unintended stop costs a restart, and a stop that waits
+  costs whatever the robot was doing. It is a chord rather than a bare key only so that typing a
+  credential does not stop a robot. `Ctrl+.` was the first choice and was rejected on a fact rather
+  than a preference: the period is `VK_OEM_PERIOD`, `VirtualKey` has no name for it, and a numeric
+  `Key="190"` is not something the XAML enum converter accepts — a chord that fails to compile is
+  no keyboard route at all.
+* **zero `AutomationProperties`.** The decorative header glyph announced itself; the two progress
+  rings and the two buttons whose captions change had no stable name. Named now, and the glyph is
+  `AccessibilityView="Raw"`.
+
+**The Hub had no light theme at all, and the failure was visible rather than theoretical.** `Navbar`
+and `Footer` are rendered *inside* `.skynet` and are themed by `globals.css`, which carries 285
+light-mode overrides. `skynet.css` carried none. So a reader on light mode got a paper navbar, a
+paper footer, and a pure-black page between them.
+
+Fixed at the tokens rather than rule by rule. Four values had been written into rules instead of
+declared — a subnav hover at 5% white, a table rule at 4.5% white — and each was turned into a token
+first, because a list of per-rule light overrides is a list that grows. The light palette is built
+on the marketplace's own (`#f0ece4` here is `--app-bg` there) so the shell and the Hub agree by
+construction, and what does not come from there is Skynet's identity: the signal blue stays signal
+blue, darkened to `#1a56c4` because `#4d8dff` on paper is about 2.4:1 and fails every contrast rule
+there is.
+
+On the feature question: the Hub is complete against `docs/skynet-architecture.md` — its §6 API
+surface is built, and §9's phases A–G are **evidence gates against a deployed system**, which no
+repository can close by containing code. What it does not have is GitHub's *shape*: no issues, no
+notifications, no labels, no watch, no blame, no milestones, no command palette, no keyboard
+shortcuts. None of those is in the plan, and the plan is the standard this is measured against —
+but it is worth saying plainly that "complete against the plan" and "as good as GitHub" are two
+different sentences, and only the first is true.
+
+## Numbers
+
+| | before | after |
+|---|---|---|
+| `cargo test --workspace` | 1,775 | 1,807 |
+| `desktop/tests` | 190 | 205 |
+| CLI commands (§73) | 58 | 60 |
+
+`session` had never been listed in the CLI's own `USAGE` text — found while adding `settings`, and
+both are there now.
+
+# Round forty — §45.4's event triggers, which the contract had decided and nothing could reach
+
+Round thirty-eight's audit listed three things an engineer could not adjust anywhere. This is the
+last of them, and it turned out to be the sharpest of the three.
+
+## The finding
+
+§45.4's own words: *"The event triggers are the ones that matter. A robot that has just hit
+something has, by definition, possibly moved its cameras, and continuing to trust yesterday's
+extrinsics is exactly the wrong response to an impact."*
+
+And the contract had decided all of it. `CalibrationRecord::events_since` exists.
+`ValidityPolicy::invalidating_events` exists. `evaluate` matches one against the other and returns
+`Validity::Expired { reason: "event" }`. `INVALIDATING_EVENTS` publishes the five. Every piece was
+written, tested and byte-identical across three editions.
+
+**`events_since` appeared nowhere in the daemon.** Not once. It came from the stored record and from
+nowhere else, so the field could change only when somebody rewrote a signed document — which means a
+collision that happened this morning invalidated nothing at all. The most carefully specified part
+of §45 was inert, and inert in the direction where a `proximity` guard goes on measuring separation
+to the wrong place while reporting perfectly healthy.
+
+Two smaller absences went with it: there was **no `skynet calibration` command**, so the report
+existed on the robot and nothing on a bench could ask for it; and the robot's own console page
+rendered the report and offered no way to tell the robot anything.
+
+## The journal, and why unsigned is safe here
+
+`/data/state/calibration/events.jsonl`. Append-only, one canonical object per line — §38.3's shape
+for the audit log and for its reason: an append must not require rewriting the file, and rewriting a
+record of impacts is the operation such a record exists to make difficult.
+
+Everything else that reaches a guard is signed and this is not. What makes that safe is a property
+of the direction it can push: **an event can only invalidate a calibration, never validate one.**
+`evaluate` reaches `Expired` on a match and there is no path by which a recorded event makes a
+record believed, so the worst a forged journal does is retire guards that would otherwise run — a
+robot more cautious than it needs to be. That is §38.2's argument for the session override, in a
+different section, and it is the second time this repository has arrived at it.
+
+The reverse is not safe, and the module names it so that nobody adds it later as a convenience: a
+journal that could **clear** an event would be an unsigned path back to trusting a disturbed
+calibration, which is §45.1's opening failure exactly. There is a test whose only job is to be the
+place that argument is written down.
+
+## Since means since, and it is what makes the file self-pruning
+
+An event counts against a record only if it is **newer** than it. Without that rule re-measuring
+would be impossible — the set would expire again the instant it was written, and an impact could
+never be cleared off a robot. With it, nothing needs a delete: re-measuring moves the record's
+`at_s` forward and old events stop counting on their own, which is the right lifecycle for a record
+of things that happened. They did happen, and the file goes on saying so.
+
+A record that does not say *when* it was taken counts every event, which is the conservative
+direction and the one §45.4 is a section about.
+
+## The vocabulary is closed, and the hazard is specific
+
+Only the five. A `collison` recorded with a typo would match no policy, invalidate nothing, and
+leave an operator believing they had flagged an impact — which is worse than a refusal by exactly
+the amount of trust it buys. Same shape as round thirty-nine's settings store, arrived at
+independently.
+
+## Where each half lives
+
+`POST /calibration/events` at **operator**, not admin: an impact is a thing that happened, and the
+person who was standing there when it did holds an operator token. Requiring somebody more senior
+would mean the robot goes on trusting a disturbed extrinsic until they are found.
+
+The route answers with the **calibration status** rather than an acknowledgement, so the reply to
+*"it hit something"* is *which guards that just took away*. §45.2's table exists to make
+"an expired extrinsic disables the proximity guard" sayable, and a route that said only `recorded`
+would leave the operator to go and discover it.
+
+The five are buttons on the **robot's own console page**, not in the desktop shell, and that is
+§83.2's rule rather than convenience: the shell owns only what a browser cannot do, and this is a
+button that posts.
+
+## Numbers
+
+| | before | after |
+|---|---|---|
+| `cargo test --workspace` | 1,807 | 1,825 |
+| `e2e.sh` | 149 | 158 checks, 0 failed |
+| CLI commands (§73) | 60 | 62 |
+
+One thing found on the way and fixed rather than noted: `POST /settings` refreshed the log level on
+**every** write, including a theme change. Harmless in production and a genuine race in a suite that
+runs on threads — a write that reaches further than it says it does. Narrowed to the setting it is
+about.
+
+## What round forty leaves
+
+Round thirty-eight's list of three is closed. What is still not built here is what §45 needs a robot
+for: **nothing runs a calibration**, and nothing can — a procedure needs a driver, a target and a
+pose set, and §45.3 signs the result, which no robot can do. That is a boundary rather than a gap,
+and it is the same one §37.1 records for packages.
+
+Nothing is pushed.

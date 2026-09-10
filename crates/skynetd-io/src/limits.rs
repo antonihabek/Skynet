@@ -152,6 +152,8 @@ pub struct Owned {
     /// Why there is no frame set, when the descriptor declared one.
     frames_fault: Option<String>,
     available: Available,
+    /// §38.2's session override, when one is set **and still live**.
+    session: Option<crate::session::Stored>,
     transport: Option<PlanClamp>,
     /// Which package the clamp above came from, when one did.
     transport_of: Option<String>,
@@ -246,6 +248,10 @@ pub fn read(
         // clamp in force. `with_package` is how a caller asks for a specific one.
         transport: None,
         transport_of: None,
+        // §38.2's session layer, for the same reason and by the same rule as the clamp above:
+        // deciding whether an override is still live needs a clock, and this function has none.
+        // `with_session` is how a caller that has one asks for it.
+        session: None,
     }
 }
 
@@ -292,6 +298,23 @@ impl Owned {
     pub fn with_package(mut self, id: &str, clamp: PlanClamp) -> Self {
         self.transport = Some(clamp);
         self.transport_of = Some(id.to_string());
+        self
+    }
+
+    /// Attach §38.2's session override.
+    ///
+    /// Takes an already-decided `Option` rather than reading the store itself, and the difference
+    /// is a clock. `crate::session::read` needs wall time to say whether a deadline has passed;
+    /// this module composes ceilings and has no business knowing what time it is. So the caller —
+    /// which is a route or a reconcile pass, both of which already hold a clock for other reasons —
+    /// decides liveness and hands over what survived.
+    ///
+    /// The consequence worth stating: an expired override arrives here as `None` and is therefore
+    /// indistinguishable from no override at all, which is exactly right for *composing a ceiling*
+    /// and exactly wrong for *reporting to an operator*. Reporting keeps the distinction, and it
+    /// keeps it somewhere else.
+    pub fn with_session(mut self, session: Option<crate::session::Stored>) -> Self {
+        self.session = session;
         self
     }
 
@@ -365,6 +388,10 @@ impl Owned {
                 per_channel: &per_channel,
                 source: clamp.source.as_deref(),
             }),
+            // §38.2's session layer. `None` here means either that none is set or that the one on
+            // disk has expired — `crate::session::read` collapses those two for this call and keeps
+            // them apart for the surfaces that report, which is the split described in `session.rs`.
+            session: self.session.as_ref().map(|stored| stored.as_kernel()),
             profile: self.profile.as_ref().map(|profile| OperatorProfile {
                 name: profile.name.as_str(),
                 joint_velocity_max_rad_s: profile.joint_velocity_max_rad_s,

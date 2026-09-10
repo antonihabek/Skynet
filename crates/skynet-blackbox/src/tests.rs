@@ -873,6 +873,7 @@ fn limits_params<'a>(
 ) -> ResolveLimitsParams<'a> {
     ResolveLimitsParams {
         tier: Tier::Host,
+        session: None,
         envelope: Some(envelope),
         transport: Some(TransportClamp {
             joint_velocity_max_rad_s: envelope.joint_velocity_max_rad_s,

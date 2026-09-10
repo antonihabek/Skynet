@@ -368,6 +368,11 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         // guard state, and it is the panel somebody reads when a robot is running with fewer of
         // them than it should be.
         ("GET", ["calibration"]) => Role::Observer,
+        // Operator to record one, and not admin. §45.4's events are things that *happened* — an
+        // impact, a tool change — and the person who was standing there when one did is the person
+        // holding an operator token. Requiring admin would mean the robot goes on trusting a
+        // disturbed extrinsic until somebody more senior is found.
+        ("POST", ["calibration", "events"]) => Role::Operator,
         // §55.2's cell. Observer for `/calibration`'s reason and one more: everything on it is what
         // an *operator* wrote into a profile about their own building — a door, a bench, a volume —
         // and the person who needs it is whoever is looking at a skill that was just refused for
@@ -428,6 +433,13 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         // stated as numbers: it names no key, changes nothing, and is the panel somebody reads
         // when a robot will not move as far as they expected.
         ("GET", ["limits"]) => Role::Observer,
+        // §38.2's session override, read. The same sentence as `GET /limits` above and for the same
+        // reason: it names no key, changes nothing, and it is the panel somebody reads when a robot
+        // is slower than they expected — which is precisely the question this layer creates.
+        ("GET", ["session"]) => Role::Observer,
+        // §38.1's unsigned local configuration. Observer to read, because none of the three is a
+        // secret and a console that could not show its own theme would be odd.
+        ("GET", ["settings"]) => Role::Observer,
         ("GET", ["skills"]) => Role::Observer,
         ("GET", ["skills", _]) => Role::Observer,
 
@@ -442,6 +454,27 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         // exemption — but the role is what decides who may ask.
         ("POST", ["skills"]) => Role::Operator,
         ("POST", ["skills", _, "stop"]) => Role::Operator,
+        // Setting and clearing §38.2's session override.
+        //
+        // Operator rather than admin, and the reason is the layer's one guarantee: it can **only
+        // narrow**. §39.1 already gives an operator "grant and revoke capabilities", which *widens*
+        // what a package may do; a control that can only make a robot slower is strictly less
+        // dangerous than one already at this level.
+        //
+        // Clearing is the same role, which is worth defending because clearing is the direction
+        // that speeds a robot up. What it speeds it up *to* is the signed profile — the documented
+        // configuration this machine is supposed to be running — so an operator clearing an
+        // override restores what an admin already approved rather than exceeding it.
+        //
+        // And a practical argument, which §38.2 makes itself: if this is hard to reach, nobody uses
+        // it and they work on a robot at full speed instead. A safety affordance nobody can be
+        // bothered to use is not a safety affordance.
+        ("POST", ["session"]) => Role::Operator,
+        // Operator to change, and not Admin. §38.1 puts these here precisely because none of them
+        // reaches the kernel, so the role that may already stop a robot may certainly make its
+        // daemon say more. Admin is for the changes that are signed.
+        ("POST", ["settings"]) => Role::Operator,
+        ("DELETE", ["session"]) => Role::Operator,
         ("GET", ["blackbox", _]) => Role::Operator,
 
         ("POST", ["packages"]) => Role::Admin,

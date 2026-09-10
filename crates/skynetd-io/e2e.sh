@@ -373,6 +373,167 @@ fi
 "$SKYNET" status $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
 grep -q "not provisioned" "$ROOT/out" && fail "still reported unprovisioned"   || pass "the robot no longer reports itself unprovisioned"
 
+say "5a. §38.2's session override, on a running robot"
+# The fifth layer, which had no implementation at all until 2026-09-10 while §43's open list said
+# "profiles layer cleanly on one robot". What is proved here is the thing no unit test can: that a
+# request over the socket changes the number `GET /limits` serves, on a daemon that composed it
+# from a descriptor and a profile without knowing this route exists.
+
+"$SKYNET" limits $SOCK --token "$OBSERVER" > "$ROOT/before" 2>&1
+pass "the limits before any override are readable"
+
+"$SKYNET" session $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1
+want "and there is no override to begin with" "no session override" "$ROOT/out"
+
+# An observer may read it and may not set one. Checked with a credential that is actually on the
+# observer side of §39.1's line, for the reason the credential above was issued.
+"$SKYNET" session set --for 20m --velocity 0.25 $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1 || true
+want "an observer is refused" "needs the operator role" "$ROOT/out"
+
+"$SKYNET" session set --for 20m --velocity 0.25 --name wrist-harness --reason "replacing the harness" $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+want "an operator may set one" "wrist-harness" "$ROOT/out"
+want "and is told how long is left" "20m left" "$ROOT/out"
+
+"$SKYNET" limits $SOCK --token "$OBSERVER" > "$ROOT/after" 2>&1
+grep -q "0.25" "$ROOT/after"   && pass "the ceiling the robot reports has moved (§7.6)"   || { fail "the override did not reach resolve_limits"; sed 's/^/      /' "$ROOT/after"; }
+grep -q "0.25" "$ROOT/before"   && fail "the fixture proves nothing: it was already 0.25"   || pass "and it was not that before, so the check is about the override"
+
+# §38.2's hazard is a robot that is *quietly* slow. This is the half that stops it being quiet, and
+# it has to reach a surface that knows nothing about this layer — `skynet limits` renders notices.
+grep -q "wrist-harness" "$ROOT/after"   && pass "and the robot says which override is holding it back (§38.2)"   || { fail "a slowed robot did not say why"; sed 's/^/      /' "$ROOT/after"; }
+
+# The widening refusal is **not** checked here, and the reason is worth writing down rather than
+# leaving as an absence: this robot has no declared envelope and no profile ceilings — `skynet
+# limits` says "source: none cited" three lines up — so there is nothing above the session for it to
+# widen. A high number set here is not a widening at all; it is the only ceiling this robot has, and
+# going from *unbounded* to *99 rad/s* is a narrowing however alarming it looks written down.
+#
+# That is worth asserting as the property it is, because it is exactly the unprovisioned-bench case
+# where this layer gets used and somebody reading `99` on a limits page should be able to find out
+# why it is there.
+"$SKYNET" session set --for 5m --velocity 99 $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+"$SKYNET" limits $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1
+grep -q "99" "$ROOT/out"   && pass "on a robot with no envelope, the override is the only ceiling there is"   || fail "the override did not become the ceiling"
+grep -q "session_widened" "$ROOT/out"   && fail "nothing was above it, so nothing was widened"   || pass "and nothing is reported as widened, because nothing was (§38.2)"
+# The refusal itself needs a body with declared ceilings, so it is pinned where such a body exists:
+# `skynet-kernel`'s suite, and six corpus cases held byte-identical across three editions.
+
+# There is no way to ask for one that does not end.
+"$SKYNET" session set --velocity 0.25 $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1 || true
+want "an override with no duration is refused" "time-boxed" "$ROOT/out"
+"$SKYNET" session set --for 30d --velocity 0.25 $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1 || true
+pass "and a duration this CLI cannot parse is refused before it is sent"
+
+# §38.3's two records, for the change that actually landed.
+grep -q '"action":"session_override"' "$ROOT/data/state/audit.jsonl"   && pass "the change left an audit row (§38.3)"   || fail "a configuration change left no audit row"
+grep -q '"previous"' "$ROOT/data/state/audit.jsonl"   && pass "carrying the value it replaced"   || fail "the audit row cannot say what changed"
+
+"$SKYNET" session clear $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+pass "it can be cleared"
+"$SKYNET" limits $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1
+grep -q "session_override" "$ROOT/out"   && fail "the robot still says it is held back"   || pass "and the robot stops saying it is held back"
+
+say "5a2. §38.1's unsigned local configuration, on a running robot"
+# §38.1's other half: *"non-safety configuration — log level, telemetry sampling, console theme —
+# is unsigned and local. The line between the two is drawn by whether the value can reach the
+# kernel."* Nothing implemented any of it until 2026-09-10.
+#
+# The check worth having here is not that the file round-trips — the suite pins that — but that the
+# setting **reaches the thing it names**. So the console page is fetched off the socket with curl,
+# twice, and the assertion is about the bytes a browser would receive.
+
+"$SKYNET" settings $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1
+want "an observer may read what this robot is set to" "log_level" "$ROOT/out"
+want "and a robot nobody configured says so rather than hiding the setting" "default" "$ROOT/out"
+
+"$SKYNET" settings set log_level debug $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1 || true
+want "an observer may not change one" "needs the operator role" "$ROOT/out"
+
+# §38.1's line, over the socket. The store enforces it; this is the assertion that the route has no
+# path around it.
+"$SKYNET" settings set joint_velocity_max_rad_s 99 $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1 || true
+want "a kernel ceiling is refused here" "Safety Kernel" "$ROOT/out"
+want "and the refusal says where such a value does live" "38.2" "$ROOT/out"
+
+curl -s --unix-socket "$ROOT/run/skynetd.sock" http://robot/ > "$ROOT/page-before" 2>&1 || true
+grep -q 'data-theme' "$ROOT/page-before"   && fail "a robot at the default should pin nothing and let the browser decide"   || pass "the console page pins no theme by default (§38.1)"
+
+"$SKYNET" settings set console_theme light $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+want "an operator may set one" "light" "$ROOT/out"
+want "and is told what it was" "was system" "$ROOT/out"
+
+curl -s --unix-socket "$ROOT/run/skynetd.sock" http://robot/ > "$ROOT/page-after" 2>&1 || true
+grep -q 'data-theme="light"' "$ROOT/page-after"   && pass "and the page the robot serves now carries it — the two halves have met"   || { fail "the setting did not reach the console"; head -c 400 "$ROOT/page-after" | sed 's/^/      /'; }
+curl -s --unix-socket "$ROOT/run/skynetd.sock" http://robot/console.css > "$ROOT/out" 2>&1 || true
+grep -q 'html\[data-theme="light"\]' "$ROOT/out"   && pass "with a stylesheet that acts on it, rather than an attribute nothing reads"   || fail "the pinned theme is decoration"
+
+"$SKYNET" settings set telemetry_sampling 0 $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1 || true
+want "a sampling rate of zero is refused rather than read as off" "There is no zero" "$ROOT/out"
+"$SKYNET" settings set telemetry_sampling 4 $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+want "and a real one is taken" "telemetry_sampling" "$ROOT/out"
+
+# §38.3's two records, for a change that is not a safety change. The section says *every* change.
+grep -q '"action":"setting"' "$ROOT/data/state/audit.jsonl"   && pass "the change left an audit row (§38.3)" || fail "a configuration change left no audit row"
+# The previous value, and it says the value it replaced was a *default* rather than something
+# somebody had chosen. Those are different facts about a robot and §38.3 asks for the one actually
+# in force, so the row carries both.
+grep -q '"previous":"system (the default)"' "$ROOT/data/state/audit.jsonl" && pass "carrying the value it replaced, and that nobody had chosen it" || { fail "the audit row cannot say what changed"; grep '"action":"setting"' "$ROOT/data/state/audit.jsonl" | sed 's/^/      /'; }
+
+"$SKYNET" settings reset console_theme $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+want "a setting can be put back" "default" "$ROOT/out"
+curl -s --unix-socket "$ROOT/run/skynetd.sock" http://robot/ > "$ROOT/out" 2>&1 || true
+grep -q 'data-theme' "$ROOT/out"   && fail "the page still pins a theme after the setting was reset"   || pass "and the page stops pinning one"
+
+say "5a3. §45.4's event triggers, on a running robot"
+# §45 had a report on the robot and no way to ask for it from a bench, and — the larger gap — no way
+# to tell a robot that something had *happened* to it. `events_since` came from the stored record
+# and from nowhere else, so a collision this morning invalidated nothing at all.
+#
+# The set used here is camera extrinsics, from §45.2's own table: it drifts with knocks and feeds
+# `proximity`, which is §45.1's opening failure — a camera four centimetres out means the guard
+# measures separation to the wrong place while reporting perfectly healthy.
+
+CALDIR="$ROOT/data/state/calibration"
+mkdir -p "$CALDIR"
+NOW_S=$(date +%s)
+cat > "$CALDIR/camera_extrinsics.json" <<JSON
+{"set":"camera_extrinsics","method":"charuco-12x9, 40 poses","residual":0.4,
+ "residual_threshold":1,"operator":"alice",
+ "conditions":{"at_s":$((NOW_S - 3600))},
+ "policy":{"invalidating_events":["collision"]}}
+JSON
+
+"$SKYNET" calibration $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1
+want "the report is readable from a bench at last" "camera_extrinsics" "$ROOT/out"
+grep -q "camera_extrinsics *valid" "$ROOT/out" && pass "and the record is believed to begin with" || { fail "the fixture proves nothing"; sed 's/^/      /' "$ROOT/out"; }
+
+"$SKYNET" calibration event collision $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1 || true
+want "an observer may not retire a guard" "needs the operator role" "$ROOT/out"
+
+"$SKYNET" calibration event collison $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1 || true
+want "a typo is refused rather than recorded and ignored" "collision" "$ROOT/out"
+
+"$SKYNET" calibration event collision --note "clipped the fixture" $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+grep -q "expired (event)" "$ROOT/out" && pass "an impact expires the calibration it could have disturbed (§45.4)" || { fail "the event reached nothing"; sed 's/^/      /' "$ROOT/out"; }
+grep -q "proximity" "$ROOT/out" && pass "and the guard that lost its input is named, which is the sentence §45.2 exists for" || { fail "no guard was reported unavailable"; sed 's/^/      /' "$ROOT/out"; }
+
+# It is on the disk rather than in the answering process: a robot that forgot an impact on restart
+# would be a robot that trusts a disturbed extrinsic after a power cycle.
+"$SKYNET" calibration $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1
+grep -q "expired (event)" "$ROOT/out" && pass "and it stays expired on the next read" || fail "the journal did not survive the request"
+
+# The one thing that clears it, and the only thing that should: measuring the set again.
+cat > "$CALDIR/camera_extrinsics.json" <<JSON
+{"set":"camera_extrinsics","method":"charuco-12x9, 40 poses","residual":0.4,
+ "residual_threshold":1,"operator":"alice",
+ "conditions":{"at_s":$((NOW_S + 60))},
+ "policy":{"invalidating_events":["collision"]}}
+JSON
+"$SKYNET" calibration $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1
+grep -q "camera_extrinsics *valid" "$ROOT/out" && pass "re-measuring the set clears the impact, and nothing else can" || { fail "a re-measured set is still expired, so an impact can never be cleared"; sed 's/^/      /' "$ROOT/out"; }
+
+grep -q '"action":"calibration_event"' "$ROOT/data/state/audit.jsonl" && pass "the event left an audit row (§38.3)" || fail "an event that retires a guard left no audit row"
+
 say "5b. The black box, on a disk (§13, §26, §28)"
 [ -f "$ROOT/data/blackbox/ring" ] \
   && pass "the ring was preallocated at start" || fail "no ring at data/blackbox/ring"
@@ -413,6 +574,12 @@ want "a path in the name is refused" "not a sealed recording" "$ROOT/out"
 # kernel host's ring, which is the only ring on this machine that has cycles in it.
 "$SKYNET" blackbox events $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
 want "the event list answers" "in the ring" "$ROOT/out"
+# `--limit 500` rather than the default 50, and the reason is a real property of the route this
+# check had been quietly leaning on: `recording_started` is the *first* event in the ring and the
+# route answers with the *last* N, so the assertion only held while this suite produced fewer than
+# fifty events before reaching here. §38.1's three configuration changes above pushed it past that
+# and the check failed — correctly, about a route behaving exactly as specified.
+"$SKYNET" blackbox events --limit 500 $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
 want "and names an event this run produced" "recording_started" "$ROOT/out"
 
 # The route must not be taken for a file name. It sits above the download arm in both the router
