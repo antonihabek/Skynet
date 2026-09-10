@@ -56,6 +56,7 @@ pub mod birth_vector;
 pub mod blackbox;
 pub mod bundle;
 pub mod calibration;
+pub mod calibration_events;
 pub mod capacity;
 pub mod cell;
 pub mod checkin;

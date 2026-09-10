@@ -368,6 +368,11 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         // guard state, and it is the panel somebody reads when a robot is running with fewer of
         // them than it should be.
         ("GET", ["calibration"]) => Role::Observer,
+        // Operator to record one, and not admin. §45.4's events are things that *happened* — an
+        // impact, a tool change — and the person who was standing there when one did is the person
+        // holding an operator token. Requiring admin would mean the robot goes on trusting a
+        // disturbed extrinsic until somebody more senior is found.
+        ("POST", ["calibration", "events"]) => Role::Operator,
         // §55.2's cell. Observer for `/calibration`'s reason and one more: everything on it is what
         // an *operator* wrote into a profile about their own building — a door, a bench, a volume —
         // and the person who needs it is whoever is looking at a skill that was just refused for

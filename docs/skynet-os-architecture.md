@@ -3766,6 +3766,45 @@ definition, possibly moved its cameras, and continuing to trust yesterday's extr
 the wrong response to an impact. So a collision invalidates the calibrations the impact could
 plausibly have disturbed, and the affected guards go unavailable until re-measured.
 
+> **Built 2026-09-10, and it was the paragraph with nothing behind it.** The contract had decided
+> all of this since it was written — a record carries `events_since`, a policy carries
+> `invalidating_events`, and one matching the other expires the record outright. What was missing is
+> the only part that made any of it reachable: **nothing on a running robot could record an event.**
+> `events_since` came from the stored record and from nowhere else, so it could change only when
+> somebody rewrote a signed document, which is to say a collision that happened this morning
+> invalidated nothing at all.
+>
+> `/data/state/calibration/events.jsonl` is the journal that fills it — append-only, one canonical
+> object per line, the shape §38.3 chose for the audit log and for the same reason: an append must
+> not require rewriting the file, and rewriting a record of impacts is the operation such a record
+> exists to make difficult.
+>
+> It is **unsigned** among signed records, and what makes that safe is the direction it can push: an
+> event can only *invalidate* a calibration, never validate one, so the worst a forged journal does
+> is retire guards that would otherwise run. That is §38.2's argument in a different section. The
+> reverse would not be safe and is named in the module so nobody adds it — a journal that could
+> *clear* an event would be an unsigned path back to trusting a disturbed calibration, which is
+> §45.1's opening failure exactly.
+>
+> **Since means since.** An event counts against a record only if it is newer than it, or
+> re-measuring would be impossible: the set would expire again the instant it was written. That is
+> also why nothing here has a delete — re-measuring moves the record's `at_s` forward and old events
+> stop counting on their own, which is the correct lifecycle for a record of things that happened.
+> A record that does not say when it was taken counts every event, which is the conservative
+> direction.
+>
+> The vocabulary is closed to the five above, and the hazard that closes it is specific rather than
+> tidy-minded: a `collison` recorded with a typo matches no policy, invalidates nothing, and leaves
+> an operator believing they have flagged an impact.
+>
+> `POST /calibration/events` at operator — not admin, because an impact is a thing that *happened*
+> and the person who was standing there holds an operator token; requiring someone more senior would
+> mean the robot goes on trusting a disturbed extrinsic until they are found. The route answers with
+> the calibration status rather than an acknowledgement, so the reply is *which guards this just
+> took away*. `skynet calibration` reads the report — which had existed on the robot with no way to
+> ask for it from a bench — and `skynet calibration event collision` records one. The robot's own
+> console page carries the five as buttons, which is where §83.2 puts anything a browser can do.
+
 ### 45.5 Expiry degrades; it never silently continues
 
 An expired calibration follows the rule already established in §7.2: **the guards that depend on it
@@ -5462,7 +5501,7 @@ miniature, and currently trivial to fix.
 | Conformance and certification | §15, §31.4, §56 | **Built on both sides** — and a robot now runs §15's eight runtime tests on itself (`GET /conformance`); §15's third suite has its numerator and denominator, counted off §13's ring (§74.6) | **Five** of the eight now execute where the tier allows it, and the other three name what they wait for. `safety.policy.isolation` is the newest, and the two rounds it took are the argument for the whole runner: §59 built the confinement, which made its old reason — *"needs a sandbox"* — false, and left a sharper one true, because what a suite can assert about a launcher is the **argv** it built. Seven `--property=` flags prove what was *requested*, and a directive systemd rejected, dropped or does not support on this kernel produces exactly the same argv. So the daemon now reads a running unit back with `systemctl show` and compares line-exactly — line-exactly because `CapabilityBoundingSet=` is asked for as the *empty* set, and a check matching the key alone would pass a unit holding `cap_sys_admin`. A directive systemd does not report counts as not landed, which is the fail-closed direction: a sandbox nobody can read is not one anybody should certify. **A third rung followed on 2026-09-07**, because `systemctl show` answers what the *manager recorded* and that is still one level above what the process is held to: the daemon now also reads `/proc/<MainPID>/status` on the unit's own process and compares the two facts a kernel exposes per process — `NoNewPrivs` and the capability bounding set — against what the unit claims. A disagreement between the layers is its own failure and the most interesting one this test can produce, because a robot whose service manager and whose kernel do not agree about a sandbox is a robot whose sandbox nobody can describe. Two rather than seven, and deliberately: the five `Protect*` directives are mount namespaces and what a namespace contains is not a line in `status`, so checking two and saying two beats checking two and implying seven. What it still does not establish is a package that *attempted* the forbidden hold and was stopped — an observation is not an attempt, and the demonstration needs both a package built to try and a manager running as root, since on a rootless user manager most of these directives forbid something the user could not do anyway; confinement landing is the mechanism, and the demonstration needs a package built to try. `package.grants.gate` is the one that moved before it, and how it moved is the point: its skip reason named the mode gate as *"the Safety Kernel's, through a path §33.1 denies this daemon"*, and `skynet-kernel-host` is that path. It is measured against a robot's own grants — one command admitted, one refused and sending no channel, one naming no capability and treated as neither. On a **guest**-tier robot it still skips, and the new reason is a live property rather than a missing one: §7.4 forwards the command whatever the guards said, so a tier that cannot refuse has not passed a test about refusing. Nothing signs a result and nothing will on a robot — §19 makes that a rule rather than a gap (§15.1). The `field` figure is measurable rather than measured: it needs a robot that runs cycles |
 | LeRobot | §16, §67 | **Built** — the bridge and its self-test | — |
 | Hub contract | §17, §57 | **Built** — all thirteen endpoints, no breaking change; four of them frozen as wire fixtures produced by the real producer (§31.6), and the thirteenth stopped being half a route when the Hub's side of §79 was written (§79.7) | Two of them carry assertions rather than evidence (§57.1) |
-| Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 60 CLI commands, the golden path checked mechanically | — |
+| Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 62 CLI commands, the golden path checked mechanically | — |
 | Security, local access control | §19, §39 | **Built** — Ed25519, the trust store, five signature states, four roles; §38.3's two records now written for a capability grant, which had left neither (§81.4) | — |
 | Distribution and business model | §20, §72 | Designed | — |
 | Languages, editions, levels | §23, §31, §42 | **Built** — **two** editions, Rust and Python, each passing all 1,148 cases of a corpus of 80 files. The row said *"one edition"* and *"the second edition, which is what the corpus is for"* for as long as that was true and for a while after | A **third** edition is what would test the claim properly. Two implementations can agree because the second was transcribed from the first — which this one was, deliberately and with its divergences documented — and the corpus only proves its worth when an edition is written by somebody who did not write the reference |
@@ -5481,7 +5520,7 @@ miniature, and currently trivial to fix.
 | Discovery — finding a robot on the link | §82 | **Built on both sides** — the DNS-SD wire format, RFC 6763's TXT convention, what a robot may advertise, a one-shot browse behind `skynet discover`, and §82.4's responder in `skynetd`: probing, defending, answering and refusing. 106 tests, and it has run between two daemons on one link | The **goodbye** has a caller since 2026-09-07: `POST /shutdown` withdraws the name, seals §13's window with `Reason::Shutdown` and exits, and the unit's `ExecStop=` is what calls it. A robot that loses power still sends nothing, which is what the TTL is for. The **browse** still cannot hold 5353 (§82.3), so it sees answers to its own question and never an unsolicited announcement — which is why there is no watch mode here and why §83.3's applications use their platform's resolver instead |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **133,000 lines of Rust** across **twenty-four crates**, held by a
+**Built** means running, tested code: **134,000 lines of Rust** across **twenty-four crates**, held by a
 corpus of 80 files and 1,148 cases to **14,000 lines** of the TypeScript reference edition and
 **16,000 lines** of the Python edition, with **5,000 lines** of drivers and **9,000 lines** in the
 Hub's mirror of the shared contracts.

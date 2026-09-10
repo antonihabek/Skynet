@@ -252,6 +252,15 @@ button.act {
   border-radius: 5px;
   cursor: pointer;
 }
+/* A row of them, which §45.4's five events need and nothing else on this page did. Wrapping
+   rather than scrolling: the panel is read on a phone beside a robot as often as on a laptop. */
+.acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.acts button.act { margin: 0; }
+
+/* The heading inside a subpanel. `h3` would inherit a browser default this stylesheet has no
+   opinion about, and a page with no build step gets exactly the type scale it writes down. */
+.label { margin: 0; font-weight: 600; }
+
 button.act:hover { border-color: var(--accent); color: var(--accent); }
 button.act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 

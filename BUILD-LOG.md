@@ -8571,3 +8571,102 @@ different sentences, and only the first is true.
 
 `session` had never been listed in the CLI's own `USAGE` text — found while adding `settings`, and
 both are there now.
+
+# Round forty — §45.4's event triggers, which the contract had decided and nothing could reach
+
+Round thirty-eight's audit listed three things an engineer could not adjust anywhere. This is the
+last of them, and it turned out to be the sharpest of the three.
+
+## The finding
+
+§45.4's own words: *"The event triggers are the ones that matter. A robot that has just hit
+something has, by definition, possibly moved its cameras, and continuing to trust yesterday's
+extrinsics is exactly the wrong response to an impact."*
+
+And the contract had decided all of it. `CalibrationRecord::events_since` exists.
+`ValidityPolicy::invalidating_events` exists. `evaluate` matches one against the other and returns
+`Validity::Expired { reason: "event" }`. `INVALIDATING_EVENTS` publishes the five. Every piece was
+written, tested and byte-identical across three editions.
+
+**`events_since` appeared nowhere in the daemon.** Not once. It came from the stored record and from
+nowhere else, so the field could change only when somebody rewrote a signed document — which means a
+collision that happened this morning invalidated nothing at all. The most carefully specified part
+of §45 was inert, and inert in the direction where a `proximity` guard goes on measuring separation
+to the wrong place while reporting perfectly healthy.
+
+Two smaller absences went with it: there was **no `skynet calibration` command**, so the report
+existed on the robot and nothing on a bench could ask for it; and the robot's own console page
+rendered the report and offered no way to tell the robot anything.
+
+## The journal, and why unsigned is safe here
+
+`/data/state/calibration/events.jsonl`. Append-only, one canonical object per line — §38.3's shape
+for the audit log and for its reason: an append must not require rewriting the file, and rewriting a
+record of impacts is the operation such a record exists to make difficult.
+
+Everything else that reaches a guard is signed and this is not. What makes that safe is a property
+of the direction it can push: **an event can only invalidate a calibration, never validate one.**
+`evaluate` reaches `Expired` on a match and there is no path by which a recorded event makes a
+record believed, so the worst a forged journal does is retire guards that would otherwise run — a
+robot more cautious than it needs to be. That is §38.2's argument for the session override, in a
+different section, and it is the second time this repository has arrived at it.
+
+The reverse is not safe, and the module names it so that nobody adds it later as a convenience: a
+journal that could **clear** an event would be an unsigned path back to trusting a disturbed
+calibration, which is §45.1's opening failure exactly. There is a test whose only job is to be the
+place that argument is written down.
+
+## Since means since, and it is what makes the file self-pruning
+
+An event counts against a record only if it is **newer** than it. Without that rule re-measuring
+would be impossible — the set would expire again the instant it was written, and an impact could
+never be cleared off a robot. With it, nothing needs a delete: re-measuring moves the record's
+`at_s` forward and old events stop counting on their own, which is the right lifecycle for a record
+of things that happened. They did happen, and the file goes on saying so.
+
+A record that does not say *when* it was taken counts every event, which is the conservative
+direction and the one §45.4 is a section about.
+
+## The vocabulary is closed, and the hazard is specific
+
+Only the five. A `collison` recorded with a typo would match no policy, invalidate nothing, and
+leave an operator believing they had flagged an impact — which is worse than a refusal by exactly
+the amount of trust it buys. Same shape as round thirty-nine's settings store, arrived at
+independently.
+
+## Where each half lives
+
+`POST /calibration/events` at **operator**, not admin: an impact is a thing that happened, and the
+person who was standing there when it did holds an operator token. Requiring somebody more senior
+would mean the robot goes on trusting a disturbed extrinsic until they are found.
+
+The route answers with the **calibration status** rather than an acknowledgement, so the reply to
+*"it hit something"* is *which guards that just took away*. §45.2's table exists to make
+"an expired extrinsic disables the proximity guard" sayable, and a route that said only `recorded`
+would leave the operator to go and discover it.
+
+The five are buttons on the **robot's own console page**, not in the desktop shell, and that is
+§83.2's rule rather than convenience: the shell owns only what a browser cannot do, and this is a
+button that posts.
+
+## Numbers
+
+| | before | after |
+|---|---|---|
+| `cargo test --workspace` | 1,807 | 1,825 |
+| `e2e.sh` | 149 | 158 checks, 0 failed |
+| CLI commands (§73) | 60 | 62 |
+
+One thing found on the way and fixed rather than noted: `POST /settings` refreshed the log level on
+**every** write, including a theme change. Harmless in production and a genuine race in a suite that
+runs on threads — a write that reaches further than it says it does. Narrowed to the setting it is
+about.
+
+## What round forty leaves
+
+Round thirty-eight's list of three is closed. What is still not built here is what §45 needs a robot
+for: **nothing runs a calibration**, and nothing can — a procedure needs a driver, a target and a
+pose set, and §45.3 signs the result, which no robot can do. That is a boundary rather than a gap,
+and it is the same one §37.1 records for packages.
+
+Nothing is pushed.

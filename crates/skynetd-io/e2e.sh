@@ -484,6 +484,56 @@ want "a setting can be put back" "default" "$ROOT/out"
 curl -s --unix-socket "$ROOT/run/skynetd.sock" http://robot/ > "$ROOT/out" 2>&1 || true
 grep -q 'data-theme' "$ROOT/out"   && fail "the page still pins a theme after the setting was reset"   || pass "and the page stops pinning one"
 
+say "5a3. §45.4's event triggers, on a running robot"
+# §45 had a report on the robot and no way to ask for it from a bench, and — the larger gap — no way
+# to tell a robot that something had *happened* to it. `events_since` came from the stored record
+# and from nowhere else, so a collision this morning invalidated nothing at all.
+#
+# The set used here is camera extrinsics, from §45.2's own table: it drifts with knocks and feeds
+# `proximity`, which is §45.1's opening failure — a camera four centimetres out means the guard
+# measures separation to the wrong place while reporting perfectly healthy.
+
+CALDIR="$ROOT/data/state/calibration"
+mkdir -p "$CALDIR"
+NOW_S=$(date +%s)
+cat > "$CALDIR/camera_extrinsics.json" <<JSON
+{"set":"camera_extrinsics","method":"charuco-12x9, 40 poses","residual":0.4,
+ "residual_threshold":1,"operator":"alice",
+ "conditions":{"at_s":$((NOW_S - 3600))},
+ "policy":{"invalidating_events":["collision"]}}
+JSON
+
+"$SKYNET" calibration $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1
+want "the report is readable from a bench at last" "camera_extrinsics" "$ROOT/out"
+grep -q "camera_extrinsics *valid" "$ROOT/out" && pass "and the record is believed to begin with" || { fail "the fixture proves nothing"; sed 's/^/      /' "$ROOT/out"; }
+
+"$SKYNET" calibration event collision $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1 || true
+want "an observer may not retire a guard" "needs the operator role" "$ROOT/out"
+
+"$SKYNET" calibration event collison $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1 || true
+want "a typo is refused rather than recorded and ignored" "collision" "$ROOT/out"
+
+"$SKYNET" calibration event collision --note "clipped the fixture" $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+grep -q "expired (event)" "$ROOT/out" && pass "an impact expires the calibration it could have disturbed (§45.4)" || { fail "the event reached nothing"; sed 's/^/      /' "$ROOT/out"; }
+grep -q "proximity" "$ROOT/out" && pass "and the guard that lost its input is named, which is the sentence §45.2 exists for" || { fail "no guard was reported unavailable"; sed 's/^/      /' "$ROOT/out"; }
+
+# It is on the disk rather than in the answering process: a robot that forgot an impact on restart
+# would be a robot that trusts a disturbed extrinsic after a power cycle.
+"$SKYNET" calibration $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1
+grep -q "expired (event)" "$ROOT/out" && pass "and it stays expired on the next read" || fail "the journal did not survive the request"
+
+# The one thing that clears it, and the only thing that should: measuring the set again.
+cat > "$CALDIR/camera_extrinsics.json" <<JSON
+{"set":"camera_extrinsics","method":"charuco-12x9, 40 poses","residual":0.4,
+ "residual_threshold":1,"operator":"alice",
+ "conditions":{"at_s":$((NOW_S + 60))},
+ "policy":{"invalidating_events":["collision"]}}
+JSON
+"$SKYNET" calibration $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1
+grep -q "camera_extrinsics *valid" "$ROOT/out" && pass "re-measuring the set clears the impact, and nothing else can" || { fail "a re-measured set is still expired, so an impact can never be cleared"; sed 's/^/      /' "$ROOT/out"; }
+
+grep -q '"action":"calibration_event"' "$ROOT/data/state/audit.jsonl" && pass "the event left an audit row (§38.3)" || fail "an event that retires a guard left no audit row"
+
 say "5b. The black box, on a disk (§13, §26, §28)"
 [ -f "$ROOT/data/blackbox/ring" ] \
   && pass "the ring was preallocated at start" || fail "no ring at data/blackbox/ring"

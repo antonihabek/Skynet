@@ -195,6 +195,7 @@ pub fn handle<L: Launcher, S: Slots>(
                 .map(|elapsed| elapsed.as_secs() as f64);
             ok(crate::calibration::status(context.daemon.store.layout(), wall_s).to_json())
         }
+        ("POST", ["calibration", "events"]) => calibration_event(context, request),
         // §55.2's cell, and the faults nothing else on this robot reports. An observer's read: it
         // is what the operator wrote down about the space, which is exactly what somebody
         // debugging a refused precondition needs to see.
@@ -260,6 +261,7 @@ fn known_path(segments: &[&str]) -> bool {
             | ["trust"]
             | ["audit"]
             | ["calibration"]
+            | ["calibration", "events"]
             | ["outbound"]
             | ["watchdog"]
             | ["power"]
@@ -1907,6 +1909,111 @@ pub fn live_session(layout: &crate::layout::Layout) -> Option<crate::session::St
     }
 }
 
+/// §45.4's event triggers, recorded.
+///
+/// The route that makes the rest of §45.4 reachable. `events_since` had come from the stored record
+/// and from nowhere else, so a collision that happened this morning invalidated nothing at all —
+/// the field could only change when somebody rewrote a signed document.
+///
+/// **Operator, and unsigned, and that is safe for one reason**: an event can only *invalidate* a
+/// calibration, never validate one. The worst a forged entry does is retire guards that would
+/// otherwise run. `crate::calibration_events` states the argument in full, and names the operation
+/// that would break it.
+fn calibration_event<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    request: &Request,
+) -> Response {
+    let Ok(text) = std::str::from_utf8(&request.body) else {
+        return error(400, "the body is not UTF-8");
+    };
+    let Ok(document) = Json::parse(text) else {
+        return error(400, "the body is not JSON");
+    };
+    let Some(event) = document.get_present("event").and_then(Json::as_str) else {
+        return error(
+            400,
+            "expected `event` — one of collision, estop_under_load, tool_change, driver_replaced, mainboard_swap (§45.4)",
+        );
+    };
+
+    let actor = actor_of(context, request);
+    let at_s = wall_ms() as f64 / 1000.0;
+    let entry = crate::calibration_events::Entry {
+        event: event.to_string(),
+        at_s,
+        recorded_by: actor.clone(),
+        note: document
+            .get_present("note")
+            .and_then(Json::as_str)
+            .map(str::to_string),
+    };
+
+    let layout = context.daemon.store.layout().clone();
+    let entry = match crate::calibration_events::record(&layout, entry) {
+        Ok(entry) => entry,
+        Err(refusal) => {
+            let status = match refusal {
+                crate::calibration_events::Refusal::Write(_) => 500,
+                _ => 400,
+            };
+            return error(status, &refusal.detail());
+        }
+    };
+
+    calibration_event_recorded(context, &entry);
+
+    // The status straight back, so the answer is *which sets this just retired* rather than an
+    // acknowledgement the operator has to follow with a second request. That is the question they
+    // asked by recording it: §45.4's point is that an impact takes guards away, and a route that
+    // said only "recorded" would leave them to discover which.
+    let mut body = crate::calibration::status(&layout, Some(at_s)).to_json();
+    body.set("recorded", Json::from(entry.event.as_str()));
+    body.set(
+        "detail",
+        Json::Str(format!(
+            "`{}` is recorded. Every calibration measured before now whose policy names it is \
+             expired, and the guards it feeds are unavailable until the set is re-measured.",
+            entry.event
+        )),
+    );
+    ok(body)
+}
+
+/// §38.3's two records for one recorded event.
+///
+/// A calibration event is not a configuration change, but it changes which guards may run, which is
+/// the thing §38.3's pair exists to leave a trail of. The black box half matters more here than
+/// anywhere: an impact is the event an investigator is looking for beside the cycles.
+fn calibration_event_recorded<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    entry: &crate::calibration_events::Entry,
+) {
+    let line = match &entry.note {
+        Some(note) => format!("calibration event `{}` recorded: {note}", entry.event),
+        None => format!("calibration event `{}` recorded", entry.event),
+    };
+
+    let layout = context.daemon.store.layout().clone();
+    let _ = crate::audit::Audit::of(&layout).append(
+        &crate::audit::rfc3339(wall_ms()),
+        &entry.recorded_by,
+        "calibration_event",
+        &entry.event,
+        &line,
+        None,
+    );
+
+    let mono_ns = context.mono_ns;
+    if let Some(recorder) = context.blackbox.as_mut() {
+        let _ = recorder.event(
+            mono_ns,
+            skynet_blackbox::record::EventCode::ConfigChanged,
+            "operator",
+            &line,
+        );
+    }
+}
+
 /// §38.1's unsigned local configuration, read.
 ///
 /// Reports **every** setting, including the ones nobody chose, with the value in force and whether
@@ -2057,7 +2164,12 @@ fn settings_write<L: Launcher, S: Slots>(
     // Take effect now rather than on the next reconcile pass. The route runs in the daemon's own
     // process, so an operator who turns the log level up and reads the next line should see it —
     // and a setting that needs ten seconds to apply is one somebody sets twice.
-    crate::log::refresh(&layout);
+    //
+    // Only for the setting it is about. A theme change has no business moving a process-global,
+    // and a refresh on every write is a write that reaches further than it says it does.
+    if setting == crate::settings::Setting::LogLevel {
+        crate::log::refresh(&layout);
+    }
 
     let reading = crate::settings::read(&layout);
     let mut body = settings_json(&reading);
