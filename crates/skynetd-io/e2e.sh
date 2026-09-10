@@ -373,6 +373,66 @@ fi
 "$SKYNET" status $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
 grep -q "not provisioned" "$ROOT/out" && fail "still reported unprovisioned"   || pass "the robot no longer reports itself unprovisioned"
 
+say "5a. §38.2's session override, on a running robot"
+# The fifth layer, which had no implementation at all until 2026-09-10 while §43's open list said
+# "profiles layer cleanly on one robot". What is proved here is the thing no unit test can: that a
+# request over the socket changes the number `GET /limits` serves, on a daemon that composed it
+# from a descriptor and a profile without knowing this route exists.
+
+"$SKYNET" limits $SOCK --token "$OBSERVER" > "$ROOT/before" 2>&1
+pass "the limits before any override are readable"
+
+"$SKYNET" session $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1
+want "and there is no override to begin with" "no session override" "$ROOT/out"
+
+# An observer may read it and may not set one. Checked with a credential that is actually on the
+# observer side of §39.1's line, for the reason the credential above was issued.
+"$SKYNET" session set --for 20m --velocity 0.25 $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1 || true
+want "an observer is refused" "needs the operator role" "$ROOT/out"
+
+"$SKYNET" session set --for 20m --velocity 0.25 --name wrist-harness --reason "replacing the harness" $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+want "an operator may set one" "wrist-harness" "$ROOT/out"
+want "and is told how long is left" "20m left" "$ROOT/out"
+
+"$SKYNET" limits $SOCK --token "$OBSERVER" > "$ROOT/after" 2>&1
+grep -q "0.25" "$ROOT/after"   && pass "the ceiling the robot reports has moved (§7.6)"   || { fail "the override did not reach resolve_limits"; sed 's/^/      /' "$ROOT/after"; }
+grep -q "0.25" "$ROOT/before"   && fail "the fixture proves nothing: it was already 0.25"   || pass "and it was not that before, so the check is about the override"
+
+# §38.2's hazard is a robot that is *quietly* slow. This is the half that stops it being quiet, and
+# it has to reach a surface that knows nothing about this layer — `skynet limits` renders notices.
+grep -q "wrist-harness" "$ROOT/after"   && pass "and the robot says which override is holding it back (§38.2)"   || { fail "a slowed robot did not say why"; sed 's/^/      /' "$ROOT/after"; }
+
+# The widening refusal is **not** checked here, and the reason is worth writing down rather than
+# leaving as an absence: this robot has no declared envelope and no profile ceilings — `skynet
+# limits` says "source: none cited" three lines up — so there is nothing above the session for it to
+# widen. A high number set here is not a widening at all; it is the only ceiling this robot has, and
+# going from *unbounded* to *99 rad/s* is a narrowing however alarming it looks written down.
+#
+# That is worth asserting as the property it is, because it is exactly the unprovisioned-bench case
+# where this layer gets used and somebody reading `99` on a limits page should be able to find out
+# why it is there.
+"$SKYNET" session set --for 5m --velocity 99 $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+"$SKYNET" limits $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1
+grep -q "99" "$ROOT/out"   && pass "on a robot with no envelope, the override is the only ceiling there is"   || fail "the override did not become the ceiling"
+grep -q "session_widened" "$ROOT/out"   && fail "nothing was above it, so nothing was widened"   || pass "and nothing is reported as widened, because nothing was (§38.2)"
+# The refusal itself needs a body with declared ceilings, so it is pinned where such a body exists:
+# `skynet-kernel`'s suite, and six corpus cases held byte-identical across three editions.
+
+# There is no way to ask for one that does not end.
+"$SKYNET" session set --velocity 0.25 $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1 || true
+want "an override with no duration is refused" "time-boxed" "$ROOT/out"
+"$SKYNET" session set --for 30d --velocity 0.25 $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1 || true
+pass "and a duration this CLI cannot parse is refused before it is sent"
+
+# §38.3's two records, for the change that actually landed.
+grep -q '"action":"session_override"' "$ROOT/data/state/audit.jsonl"   && pass "the change left an audit row (§38.3)"   || fail "a configuration change left no audit row"
+grep -q '"previous"' "$ROOT/data/state/audit.jsonl"   && pass "carrying the value it replaced"   || fail "the audit row cannot say what changed"
+
+"$SKYNET" session clear $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+pass "it can be cleared"
+"$SKYNET" limits $SOCK --token "$OBSERVER" > "$ROOT/out" 2>&1
+grep -q "session_override" "$ROOT/out"   && fail "the robot still says it is held back"   || pass "and the robot stops saying it is held back"
+
 say "5b. The black box, on a disk (§13, §26, §28)"
 [ -f "$ROOT/data/blackbox/ring" ] \
   && pass "the ring was preallocated at start" || fail "no ring at data/blackbox/ring"

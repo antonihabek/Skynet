@@ -13618,3 +13618,262 @@ mod retention {
         assert_eq!(read[2].digest, "sha256:3");
     }
 }
+
+// ── §38.2's session override, over the local API ─────────────────────────────
+
+/// A fixture with an operator credential, which is the role these routes take.
+fn bench(tag: &str) -> Fixture {
+    let mut fixture = Fixture::new(tag);
+    fixture.provision();
+    fixture.credentials.add(Credential::issue(
+        "bench",
+        Role::Operator,
+        "cc",
+        "operator-token",
+    ));
+    fixture
+}
+
+#[test]
+fn a_robot_with_no_override_says_none_and_publishes_the_cap() {
+    let mut fixture = bench("session-none");
+    let (status, body) = fixture.request("GET", "/session", Some("observer-token"), "");
+
+    assert_eq!(status, 200);
+    assert_eq!(body.get("state").and_then(Json::as_str), Some("none"));
+    // The cap is published rather than left for a client to discover by being refused. §64's rule:
+    // a refusal names its fix, and a form that knows the maximum can stop somebody typing a week.
+    assert!(body.get("max_duration_ms").and_then(Json::as_f64).unwrap() > 0.0);
+}
+
+#[test]
+fn setting_one_narrows_the_limits_the_robot_reports() {
+    // The whole point, end to end: a request over the API changes the number `GET /limits` serves.
+    // Neither route knows about the other — they meet in `resolve_limits`, which is where §7.6 says
+    // a ceiling is chosen and the only place one is.
+    let mut fixture = bench("session-narrows-limits");
+
+    let (before, limits) = fixture.request("GET", "/limits", Some("observer-token"), "");
+    assert_eq!(before, 200);
+    let was = limits
+        .get("joint_velocity_max_rad_s")
+        .and_then(Json::as_f64);
+
+    let (status, _) = fixture.request(
+        "POST",
+        "/session",
+        Some("operator-token"),
+        r#"{"name":"maintenance","duration_ms":600000,"joint_velocity_max_rad_s":0.25}"#,
+    );
+    assert_eq!(status, 200);
+
+    let (_, after) = fixture.request("GET", "/limits", Some("observer-token"), "");
+    assert_eq!(
+        after.get("joint_velocity_max_rad_s").and_then(Json::as_f64),
+        Some(0.25)
+    );
+    assert_ne!(was, Some(0.25), "the fixture would prove nothing otherwise");
+}
+
+#[test]
+fn a_robot_under_an_override_says_so_on_its_limits() {
+    // §38.2's hazard is a robot that is quietly slow. The notice is how it stops being quiet, and a
+    // console renders notices without knowing this layer exists.
+    let mut fixture = bench("session-notice");
+    fixture.request(
+        "POST",
+        "/session",
+        Some("operator-token"),
+        r#"{"name":"wrist-harness","duration_ms":600000,"joint_velocity_max_rad_s":0.25}"#,
+    );
+
+    let (_, limits) = fixture.request("GET", "/limits", Some("observer-token"), "");
+    let notices = limits
+        .get("notices")
+        .and_then(Json::as_arr)
+        .expect("notices");
+    let announced = notices
+        .iter()
+        .find(|notice| notice.get("code").and_then(Json::as_str) == Some("session_override"));
+    let announced = announced.expect("an override announces itself on the limits");
+    assert!(announced
+        .get("message")
+        .and_then(Json::as_str)
+        .unwrap()
+        .contains("wrist-harness"));
+}
+
+#[test]
+fn an_override_without_a_duration_is_refused_and_told_why() {
+    // There is deliberately no way to ask for one that does not end. §38.2 time-boxes this layer,
+    // so a missing duration is a refusal rather than a default of "until somebody notices".
+    let mut fixture = bench("session-no-duration");
+    let (status, body) = fixture.request(
+        "POST",
+        "/session",
+        Some("operator-token"),
+        r#"{"name":"forever","joint_velocity_max_rad_s":0.25}"#,
+    );
+
+    assert_eq!(status, 400);
+    assert!(body
+        .get("detail")
+        .and_then(Json::as_str)
+        .unwrap()
+        .contains("time-boxed"));
+}
+
+#[test]
+fn an_override_past_the_cap_is_refused() {
+    let mut fixture = bench("session-cap");
+    let (status, body) = fixture.request(
+        "POST",
+        "/session",
+        Some("operator-token"),
+        r#"{"name":"a-week","duration_ms":604800000,"joint_velocity_max_rad_s":0.25}"#,
+    );
+
+    assert_eq!(status, 400);
+    assert!(body
+        .get("detail")
+        .and_then(Json::as_str)
+        .unwrap()
+        .contains("signed profile"));
+}
+
+#[test]
+fn an_observer_may_read_an_override_and_may_not_set_one() {
+    let mut fixture = bench("session-roles");
+
+    let (read, _) = fixture.request("GET", "/session", Some("observer-token"), "");
+    assert_eq!(read, 200);
+
+    let (write, _) = fixture.request(
+        "POST",
+        "/session",
+        Some("observer-token"),
+        r#"{"name":"nope","duration_ms":60000,"joint_velocity_max_rad_s":0.25}"#,
+    );
+    assert_eq!(write, 403, "an observer reads; it does not narrow");
+}
+
+#[test]
+fn nothing_anonymous_may_set_one() {
+    let mut fixture = bench("session-anonymous");
+    let (status, _) = fixture.request(
+        "POST",
+        "/session",
+        None,
+        r#"{"name":"nope","duration_ms":60000,"joint_velocity_max_rad_s":0.25}"#,
+    );
+    assert_eq!(status, 401);
+}
+
+#[test]
+fn clearing_restores_the_profiles_ceilings_and_is_idempotent() {
+    let mut fixture = bench("session-clear");
+    let (_, limits) = fixture.request("GET", "/limits", Some("observer-token"), "");
+    let was = limits
+        .get("joint_velocity_max_rad_s")
+        .and_then(Json::as_f64);
+
+    fixture.request(
+        "POST",
+        "/session",
+        Some("operator-token"),
+        r#"{"name":"maintenance","duration_ms":600000,"joint_velocity_max_rad_s":0.25}"#,
+    );
+
+    let (first, body) = fixture.request("DELETE", "/session", Some("operator-token"), "");
+    assert_eq!(first, 200);
+    assert_eq!(body.get("cleared").and_then(Json::as_bool), Some(true));
+
+    let (_, after) = fixture.request("GET", "/limits", Some("observer-token"), "");
+    assert_eq!(
+        after.get("joint_velocity_max_rad_s").and_then(Json::as_f64),
+        was,
+        "the robot is back where its profile puts it"
+    );
+
+    // Clearing nothing is not an error — the intent is satisfied either way.
+    let (second, body) = fixture.request("DELETE", "/session", Some("operator-token"), "");
+    assert_eq!(second, 200);
+    assert_eq!(body.get("cleared").and_then(Json::as_bool), Some(false));
+}
+
+#[test]
+fn setting_and_clearing_both_leave_an_audit_entry_with_the_previous_value() {
+    // §38.3: "Every change is a black box event and an audit-log entry, carrying who, when, which
+    // layer, and the previous value." The previous value is the half that is easy to skip, and it
+    // is the half that makes the log answer "what did somebody change" rather than "what is it now".
+    let mut fixture = bench("session-audit");
+    fixture.request(
+        "POST",
+        "/session",
+        Some("operator-token"),
+        r#"{"name":"first","duration_ms":600000,"joint_velocity_max_rad_s":0.5}"#,
+    );
+    fixture.request(
+        "POST",
+        "/session",
+        Some("operator-token"),
+        r#"{"name":"second","duration_ms":600000,"joint_velocity_max_rad_s":0.25}"#,
+    );
+
+    let log = crate::audit::Audit::of(fixture.daemon.store.layout()).read();
+    let entries: Vec<_> = log
+        .entries
+        .iter()
+        .filter(|entry| entry.action == "session_override")
+        .collect();
+    assert_eq!(entries.len(), 2);
+
+    assert_eq!(
+        entries[0].previous, None,
+        "there was nothing before the first"
+    );
+    let second = entries[1];
+    assert_eq!(second.subject, "second");
+    assert!(second.actor.contains("operator"), "actor: {}", second.actor);
+    assert!(
+        second.previous.as_deref().unwrap().contains("0.5"),
+        "the entry says what it replaced: {second:?}"
+    );
+}
+
+#[test]
+fn an_expired_override_reads_as_expired_and_stops_narrowing() {
+    // Written straight to disk with a deadline in the past, because the route cannot be asked for
+    // one — which is the property `an_override_that_expires_in_the_past_is_refused` pins, and the
+    // reason this test has to reach past the route to test the reading.
+    let mut fixture = bench("session-expired");
+    let path = fixture.daemon.store.layout().session_override();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        r#"{"name":"stale","set_by":"operator","set_at_ms":0,"expires_at_ms":1,"joint_velocity_max_rad_s":0.1}"#,
+    )
+    .unwrap();
+
+    let (_, body) = fixture.request("GET", "/session", Some("observer-token"), "");
+    assert_eq!(body.get("state").and_then(Json::as_str), Some("expired"));
+
+    let (_, limits) = fixture.request("GET", "/limits", Some("observer-token"), "");
+    assert_ne!(
+        limits
+            .get("joint_velocity_max_rad_s")
+            .and_then(Json::as_f64),
+        Some(0.1),
+        "an expired override narrows nothing"
+    );
+    let notices = limits
+        .get("notices")
+        .and_then(Json::as_arr)
+        .expect("notices");
+    assert!(
+        !notices
+            .iter()
+            .any(|notice| notice.get("code").and_then(Json::as_str) == Some("session_override")),
+        "and it does not claim the robot is held back"
+    );
+}

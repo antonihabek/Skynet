@@ -854,6 +854,249 @@
       "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"inert_guards\":[],\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"profile_widened\",\"message\":\"The operator profile \\\"greedy\\\" asks to raise limits above the declared envelope. Those values are ignored.\",\"subjects\":[\"joint_velocity_max_rad_s\",\"joint_torque_max_nm\",\"base_velocity_max_m_s\"]},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"self_collision_margin_m\":null,\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
     },
     {
+      "id": "session-narrows",
+      "note": "A session override narrows the ceiling in force.",
+      "input": {
+        "tier": "host",
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "transport": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "min_control_hz": 10,
+          "per_channel": {
+            "elbow": 80,
+            "shoulder": 60
+          },
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "profile": {
+          "name": "cell-a",
+          "max_delta_per_cycle": 0.25
+        },
+        "available": {
+          "imu": true,
+          "people_detection": true,
+          "legged": true,
+          "proximity_reading": true
+        },
+        "session": {
+          "name": "maintenance",
+          "joint_velocity_max_rad_s": 0.5
+        }
+      },
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"inert_guards\":[],\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":0.5,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"session_override\",\"message\":\"A session override \\\"maintenance\\\" is narrowing the limits in force. It is a temporary setting rather than this robot's configuration — clear it when the work is done.\",\"subjects\":[\"maintenance\"]},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"self_collision_margin_m\":null,\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+    },
+    {
+      "id": "session-widens",
+      "note": "A session override may not widen, and is told that it tried.",
+      "input": {
+        "tier": "host",
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "transport": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "min_control_hz": 10,
+          "per_channel": {
+            "elbow": 80,
+            "shoulder": 60
+          },
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "profile": {
+          "name": "cell-a",
+          "max_delta_per_cycle": 0.25
+        },
+        "available": {
+          "imu": true,
+          "people_detection": true,
+          "legged": true,
+          "proximity_reading": true
+        },
+        "session": {
+          "name": "faster-please",
+          "joint_velocity_max_rad_s": 9
+        }
+      },
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"inert_guards\":[],\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"session_widened\",\"message\":\"The session override asks to raise limits above what is already in force. Those values are ignored; the narrower ceiling still applies.\",\"subjects\":[\"joint_velocity_max_rad_s\"]},{\"code\":\"session_override\",\"message\":\"A session override \\\"faster-please\\\" is narrowing the limits in force. It is a temporary setting rather than this robot's configuration — clear it when the work is done.\",\"subjects\":[\"faster-please\"]},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"self_collision_margin_m\":null,\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+    },
+    {
+      "id": "session-widens-past-the-profile-not-the-envelope",
+      "note": "Inside the envelope, outside the profile: still a widening, because the layer above is what is in force.",
+      "input": {
+        "tier": "host",
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "transport": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "min_control_hz": 10,
+          "per_channel": {
+            "elbow": 80,
+            "shoulder": 60
+          },
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "profile": {
+          "name": "cell-a",
+          "joint_velocity_max_rad_s": 0.5,
+          "max_delta_per_cycle": 0.25
+        },
+        "available": {
+          "imu": true,
+          "people_detection": true,
+          "legged": true,
+          "proximity_reading": true
+        },
+        "session": {
+          "name": "bench",
+          "joint_velocity_max_rad_s": 1
+        }
+      },
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"inert_guards\":[],\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":0.5,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"session_widened\",\"message\":\"The session override asks to raise limits above what is already in force. Those values are ignored; the narrower ceiling still applies.\",\"subjects\":[\"joint_velocity_max_rad_s\"]},{\"code\":\"session_override\",\"message\":\"A session override \\\"bench\\\" is narrowing the limits in force. It is a temporary setting rather than this robot's configuration — clear it when the work is done.\",\"subjects\":[\"bench\"]},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"self_collision_margin_m\":null,\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+    },
+    {
+      "id": "session-narrows-the-jerk-ceiling",
+      "note": "A session may ask for gentler ramps than the profile.",
+      "input": {
+        "tier": "host",
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "transport": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "min_control_hz": 10,
+          "per_channel": {
+            "elbow": 80,
+            "shoulder": 60
+          },
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "profile": {
+          "name": "cell-a",
+          "max_delta_per_cycle": 0.25
+        },
+        "available": {
+          "imu": true,
+          "people_detection": true,
+          "legged": true,
+          "proximity_reading": true
+        },
+        "session": {
+          "name": "gentle",
+          "max_delta_per_cycle": 0.05
+        }
+      },
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"inert_guards\":[],\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.05,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"session_override\",\"message\":\"A session override \\\"gentle\\\" is narrowing the limits in force. It is a temporary setting rather than this robot's configuration — clear it when the work is done.\",\"subjects\":[\"gentle\"]},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"self_collision_margin_m\":null,\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+    },
+    {
+      "id": "session-supplies-the-only-jerk-ceiling",
+      "note": "A session sets a jerk ceiling the profile has not, which makes the rate_limit guard runnable.",
+      "input": {
+        "tier": "host",
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "transport": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "min_control_hz": 10,
+          "per_channel": {
+            "elbow": 80,
+            "shoulder": 60
+          },
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "profile": {
+          "name": "cell-a"
+        },
+        "available": {
+          "imu": true,
+          "people_detection": true,
+          "legged": true,
+          "proximity_reading": true
+        },
+        "session": {
+          "name": "gentle",
+          "max_delta_per_cycle": 0.1
+        }
+      },
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"inert_guards\":[],\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.1,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"session_override\",\"message\":\"A session override \\\"gentle\\\" is narrowing the limits in force. It is a temporary setting rather than this robot's configuration — clear it when the work is done.\",\"subjects\":[\"gentle\"]},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"self_collision_margin_m\":null,\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+    },
+    {
+      "id": "session-on-an-unprovisioned-robot",
+      "note": "A bench robot with no profile at all is where this layer is likeliest to be used.",
+      "input": {
+        "tier": "host",
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "transport": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "min_control_hz": 10,
+          "per_channel": {
+            "elbow": 80,
+            "shoulder": 60
+          },
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "profile": null,
+        "available": {
+          "imu": true,
+          "people_detection": true,
+          "legged": true,
+          "proximity_reading": true
+        },
+        "session": {
+          "name": "maintenance",
+          "joint_velocity_max_rad_s": 0.5
+        }
+      },
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"enforcement\":\"enforcing\",\"inert_guards\":[],\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":0.5,\"max_delta_per_cycle\":null,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"no_rate_limit\",\"message\":\"No jerk ceiling is configured, so a single-cycle jump from zero to the clamped maximum is permitted. Set max_delta_per_cycle before running a policy near people.\"},{\"code\":\"session_override\",\"message\":\"A session override \\\"maintenance\\\" is narrowing the limits in force. It is a temporary setting rather than this robot's configuration — clear it when the work is done.\",\"subjects\":[\"maintenance\"]},{\"code\":\"guard_unavailable\",\"message\":\"The rate_limit guard cannot run on this robot.\",\"subjects\":[\"profile.max_delta_per_cycle\"]},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"self_collision_margin_m\":null,\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"rate_limit\",\"missing\":[\"profile.max_delta_per_cycle\"]},{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+    },
+    {
       "id": "nothing-available",
       "note": "A robot that can supply no guard inputs at all.",
       "input": {

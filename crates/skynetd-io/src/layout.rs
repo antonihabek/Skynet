@@ -271,6 +271,16 @@ impl Layout {
         self.profiles().join("active.json")
     }
 
+    /// §38.2's session override, when one has been set on this machine.
+    ///
+    /// Beside the profiles rather than among them, and that is a claim about what it is. A profile
+    /// is signed (§38.1), delivered through desired state, and is a decision about a site. This is
+    /// unsigned, set at the machine, and is a decision about the next twenty minutes — filing it in
+    /// `profiles/` would put a document nobody signed where every other document is one that was.
+    pub fn session_override(&self) -> PathBuf {
+        self.state().join("session-override.json")
+    }
+
     /// Where an operator declares the robot is at a safe state (§33.4).
     ///
     /// A file rather than a flag, because the barrier is re-evaluated every pass and a value fixed

@@ -428,6 +428,10 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         // stated as numbers: it names no key, changes nothing, and is the panel somebody reads
         // when a robot will not move as far as they expected.
         ("GET", ["limits"]) => Role::Observer,
+        // §38.2's session override, read. The same sentence as `GET /limits` above and for the same
+        // reason: it names no key, changes nothing, and it is the panel somebody reads when a robot
+        // is slower than they expected — which is precisely the question this layer creates.
+        ("GET", ["session"]) => Role::Observer,
         ("GET", ["skills"]) => Role::Observer,
         ("GET", ["skills", _]) => Role::Observer,
 
@@ -442,6 +446,23 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         // exemption — but the role is what decides who may ask.
         ("POST", ["skills"]) => Role::Operator,
         ("POST", ["skills", _, "stop"]) => Role::Operator,
+        // Setting and clearing §38.2's session override.
+        //
+        // Operator rather than admin, and the reason is the layer's one guarantee: it can **only
+        // narrow**. §39.1 already gives an operator "grant and revoke capabilities", which *widens*
+        // what a package may do; a control that can only make a robot slower is strictly less
+        // dangerous than one already at this level.
+        //
+        // Clearing is the same role, which is worth defending because clearing is the direction
+        // that speeds a robot up. What it speeds it up *to* is the signed profile — the documented
+        // configuration this machine is supposed to be running — so an operator clearing an
+        // override restores what an admin already approved rather than exceeding it.
+        //
+        // And a practical argument, which §38.2 makes itself: if this is hard to reach, nobody uses
+        // it and they work on a robot at full speed instead. A safety affordance nobody can be
+        // bothered to use is not a safety affordance.
+        ("POST", ["session"]) => Role::Operator,
+        ("DELETE", ["session"]) => Role::Operator,
         ("GET", ["blackbox", _]) => Role::Operator,
 
         ("POST", ["packages"]) => Role::Admin,

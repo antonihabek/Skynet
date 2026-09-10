@@ -16,7 +16,7 @@
     "predicate": "403dbc96b2517ba22c39cfc32fa3ab283aeb374275e38c0599017b5b40e9415f",
     "provenance": "1ef63b27f65c147f159da6b3e0e001570b5aa3157bc142441d4d686519e5c335",
     "readiness": "cea3138b5217423505eb337ea4e8ed9685742bac59d80df9022ababc8b38a524",
-    "safety": "d848b8c7f8bfe59b4f99ed3611292b4d94d02cbeb1e0672f518b1cbb0361f6b3",
+    "safety": "ffb74952033adf8fa0cacb9c4e83adf6a2a9c6b18f24f4165ea41be3a5cd9eb6",
     "semver": "080a03e82a5222e20e107012a832c15a42f4850a03c5f435b800d611c435c4e3",
     "telemetry": "4713e05e37575db913618a3d9f5b9ebc7ea3d9b27647321a19cbec776175cd6c",
     "wire/checkin": "484358cba6236fdf6a9f05e7a1bbb7cb8e727bd594d70ff7b01c6ed2d4fb5785",
@@ -24,6 +24,6 @@
     "wire/incident": "3d6a0ecf6a1c6eb763d57b4bb335883a543253b602ea545f5b53b76a97fe748b",
     "wire/telemetry": "53adda4e86e2f236d3f6a51ffaef4303870ebaad9a8fc990f86364576e608dd7",
     "wire/telemetry-counted": "080359f8489c2b24cb5196a03628411b30da97180e4a05ee8d5f8e4a8e42a5b3",
-    "reports/editions": "853bb06597664397cd3cd3702fb16b232da122c152f8203cfe70917583e0474b"
+    "reports/editions": "bc794b198a45855902424e74b47c00ebeca5e6ea4be7d2413cb7f8fff0f05ac3"
   }
 }
