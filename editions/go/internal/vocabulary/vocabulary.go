@@ -145,6 +145,18 @@ var CanonicalAxes = []string{"pitch", "yaw", "roll", "slide", "flex", "abduct", 
 // CollisionShapes is what a collision body can be. One entry, and §44 says why.
 var CollisionShapes = []string{"capsule"}
 
+// ── calibration.ts ──────────────────────────────────────────────────────────
+
+// CalibrationParameterSets is the sets §45.2 names, in the order that table gives them.
+//
+// A closed vocabulary rather than a free string, for the reason §26's event codes are closed: an
+// open one is how `camera_extrinsics` and `camera-extrinsic` end up naming the same measurement on
+// two robots in one fleet, and the guard mapping then answers differently for each.
+var CalibrationParameterSets = []string{
+	"joint_zeros", "camera_intrinsics", "camera_extrinsics", "force_torque_bias",
+	"imu_bias", "tool_offset", "gravity_vector",
+}
+
 // ── safety.ts ───────────────────────────────────────────────────────────────
 
 // OSTiers is ordered by rank. An edition that sorted these would differ on "next tier".
