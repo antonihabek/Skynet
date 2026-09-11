@@ -175,6 +175,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
       - name: Toolchain
         run: rustup toolchain install stable --profile minimal
 
@@ -224,6 +227,20 @@ jobs:
       - name: C++ edition reproduces the corpus
         run: make -C editions/cpp check
 
+      # The fourth edition (§31.3: Go, Guest ceiling, Full standing) — §42's L2, like the two above
+      # it, and the first of them whose language has a garbage collector. `make check` is gofmt and
+      # `go vet` as build failures, the case-vector tests, the canonical round trip over every
+      # expected string, the self-check (a source scan refusing the standard-library spellings that
+      # are *nearly* ECMAScript's, the runner's four-bucket accounting, and rule 3 at its edges),
+      # and the corpus at its ratchet.
+      #
+      # It is **not** yet in `tools/edition-report.mjs`, and must not be until it answers every
+      # case: that tool refuses any edition with a non-zero unimplemented count, which is §31.4
+      # enforced rather than described. Until then this step is what holds it — red on a divergence,
+      # green on a gap, which is the only arrangement under which a partial edition can be in CI.
+      - name: Go edition reproduces the corpus
+        run: make -C editions/go check
+
       # The published figure, held to the run that produces it. This is the last step in the job
       # rather than a separate one because it is the only check here that needs **both** editions
       # to have run: it runs them again and compares the result to `reference/reports/editions.json`,
@@ -242,15 +259,15 @@ jobs:
   # checking them needs the Unicode version they were generated under — which is Node's, and differs
   # between Node 24 (the corpus job's) and Node 26. A separate job rather than a second Node in the
   # corpus job, so neither toolchain decides the other's version.
-  cpp-case-tables:
+  case-tables:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '26'
-      - name: The C++ case tables are what the engine produces
-        run: node editions/cpp/tools/unicode-case.ts --check
+      - name: Every edition's case tables are what the engine produces
+        run: node tools/unicode-case.ts --check
 
   # Claims this repository makes about itself, checked mechanically. Each of these is a sentence
   # somewhere in the specification that would otherwise decay quietly.

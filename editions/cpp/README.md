@@ -43,7 +43,8 @@ mappings and final-sigma properties, **read out of the engine the reference runs
 both reach the corpus. The files record their Unicode version; regenerate them with
 
 ```bash
-node editions/cpp/tools/unicode-case.ts
+node tools/unicode-case.ts
 ```
 
-and CI checks them under the Node that produced them (`cpp-case-tables`).
+and CI checks them under the Node that produced them (`case-tables`). The generator is shared
+with the Go edition, which needs the same tables for the same reason: one derivation, two renderings.
