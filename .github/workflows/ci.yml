@@ -2,9 +2,10 @@
 #
 # Six jobs, and `corpus` is the one that matters. §31.4 requires differential checking in CI:
 # every edition runs the corpus on every commit, and a divergence blocks the release of the edition
-# that diverged and never of the others. There are four measured editions — the Rust reference, and
-# Python, C++ and Go at §42's L2 — and `corpus` runs every one of them, then re-derives the figures
-# the Hub publishes from those runs.
+# that diverged and never of the others. Four editions reproduce it whole — the Rust reference, and
+# Python, C++ and Go at §42's L2 — and a fifth, C, is partial and held by its own ratchet. `corpus`
+# runs every one of them, then re-derives the figures the Hub publishes from the four that are
+# complete; the refusal inside `edition-report.mjs` is what keeps a partial edition off that file.
 
 name: ci
 
@@ -247,6 +248,27 @@ jobs:
       - name: Go edition reproduces the corpus
         run: make -C editions/go check
 
+      # The fifth edition (§31.3: C, Certified ceiling, Full standing) — §42's L2, and **partial**.
+      # It is in this job at its ratchet rather than kept out until it is finished, for the reason the
+      # Go edition was from 624 of 1,199: the runner counts a file with no handler as *not
+      # implemented* rather than as passing, so a partial edition is green on a gap and red on a
+      # divergence, and `MIN_PASSED` in its Makefile is what stops the gap reopening. What keeps it
+      # off the published figures until it is complete is `edition-report.mjs`, which refuses any
+      # edition with a single case unanswered — so this step and that one disagree on purpose.
+      #
+      # `make check` is the canonical round trip over every expected string, the self-check (rule 3 at
+      # its edges, the twelve documents the parser must refuse, the runner's four-bucket accounting,
+      # and the 219 case vectors the engine produced), the fused multiply-add scan, and the corpus.
+      #
+      # The fusion scan matters here for a reason the C++ step's does not cover: GCC's default under
+      # `-std=c17` is `-ffp-contract=on`, which GCC 13 implements as *off* and GCC 14 implements as
+      # contraction within an expression. So the same source, with the same flags, fuses on one
+      # compiler and not the other — and `FP_FLAGS` plus this scan are what make that not matter. The
+      # probe is compiled with `fast` explicitly, because at the default it would not fuse on GCC 13
+      # and the scan would report that it could not see one.
+      - name: C edition reproduces the corpus it answers
+        run: make -C editions/c check
+
       # The published figure, held to the run that produces it. This is the last step in the job
       # rather than a separate one because it is the only check here that needs **every** edition's
       # toolchain: it runs them all again and compares the result to `reference/reports/editions.json`,
@@ -261,10 +283,11 @@ jobs:
       - name: The published edition figures are what running the editions produces
         run: node tools/edition-report.mjs --check
 
-  # The C++ edition's case tables are read out of the JavaScript engine the reference runs on, so
-  # checking them needs the Unicode version they were generated under — which is Node's, and differs
-  # between Node 24 (the corpus job's) and Node 26. A separate job rather than a second Node in the
-  # corpus job, so neither toolchain decides the other's version.
+  # Three editions' case tables — C, C++ and Go — are read out of the JavaScript engine the reference
+  # runs on, so checking them needs the Unicode version they were generated under, which is Node's and
+  # differs between Node 24 (the corpus job's) and Node 26. A separate job rather than a second Node in
+  # the corpus job, so neither toolchain decides the other's version. One generator, three renderings:
+  # `tools/unicode-case.ts` writes six files and `--check` fails on any of them having drifted.
   case-tables:
     runs-on: ubuntu-latest
     steps:
