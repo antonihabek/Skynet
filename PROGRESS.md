@@ -13304,3 +13304,141 @@ files there (`lib/skynet/os/reports/editions.json`, `mirror-digests.json`), plus
 164. **A runner that crashes describing a failure hides the failure.** The first whitespace case to
      fail took the Python runner down on a cp1250 console, and the edition looked broken in a way
      that said nothing about the case.
+
+---
+
+## 2026-09-11 (eighty-first) — the Go edition begins, and one generator where there were two
+
+Asked to continue implementing new language editions and to keep them up to date with Rust. The
+eightieth entry's open item 4 named the next one — *"the next row of §31.3 with a Full standing is
+Go (Guest ceiling)"* — and Go was not installed on this machine, which §31.4 makes a blocking fact
+rather than an inconvenience: an edition nobody has run against the corpus is not an edition. Go
+1.27.1 is now installed user-locally via scoop, and CI takes its own from `actions/setup-go`.
+
+### Where it stands
+
+| | Before | After |
+|---|---|---|
+| Rust (reference) | 1,199 / 1,199 | unchanged, verified |
+| Python | 1,199 / 1,199 | unchanged, verified |
+| C++ | 1,199 / 1,199 | unchanged, verified after the generator move |
+| **Go** | — | **401 / 1,199, 11 of 33 corpora, 0 failed** |
+| `editions.json` | 3 editions × 1,199 | unchanged — Go is deliberately absent |
+
+Every step of `make -C editions/go check` is green: gofmt, `go vet`, the case-vector tests, the
+canonical round trip over all 1,199 expected strings, the self-check, and the corpus at its ratchet.
+The eleven corpora answered are vocabulary, roles, semver, digest, predicate, opstate, observation,
+watchdog, media, intent and readiness — **every one of them passing on its first run**.
+
+Go is absent from `reference/reports/editions.json` on purpose. `tools/edition-report.mjs` refuses
+any edition with a non-zero unimplemented count, which is §31.4 enforced rather than described, and
+the tool was not softened to let a partial edition onto the page.
+
+### The canonical writer, proven before anything was built on it
+
+Finding 155 said to do this first, and it took twenty minutes rather than twenty rewrites:
+`cmd/roundtrip` parses every `expected` string in the corpus with `internal/canonical` and
+re-encodes it, and the bytes came back identical on the first run — 1,199 of them, carrying every
+number shape, key ordering and escape the system actually emits, none of them chosen by the person
+writing this edition.
+
+### Two things Go spells differently that no other edition had to care about
+
+Both are properties of the language rather than of the contracts, and both were designed out rather
+than reviewed for.
+
+**Map iteration is randomised.** The reference iterates objects in insertion order and several
+contracts' output depends on it — `evaluateCycle` appends one entry to `clamped` per channel it
+reduced, so that array's order is the document's. The C++ header records this costing a rewrite
+(finding 156). In Go it would have been worse than a rewrite: a `map[string]any` edition emits the
+same set of clamps *in a different order on every run*, which is a flake rather than a stable wrong
+answer. `internal/canonical` keeps objects as a slice of members and sorts only at the writer.
+
+**A field that is absent is not a field that is null.** Rule 5 of the canonical form, and the whole
+of `predicate.ts`'s three-valued design. Go's zero value cannot carry the distinction, so it is
+carried explicitly: a `Set` that was never called for the writer, `maybe` and `operand.resolved` for
+the evaluator. An edition collapsing the two answers `satisfied` where the reference answers
+`unevaluable` on all five inputs the reference's own header table lists — and all five are in the
+corpus.
+
+### The near-miss standard library, and the gate that refuses it
+
+The reason this edition needs an `internal/js` package is that Go has a function for nearly
+everything the reference calls, and *nearly* is the problem.
+
+| The reference calls | Go's near-equivalent | Why it is not the same |
+|---|---|---|
+| `trim()` | `strings.TrimSpace` | Keeps U+FEFF and strips U+0085. ECMAScript does the opposite. |
+| `\s` in a pattern | `\s` | Five characters in Go, twenty-five in ECMAScript |
+| `toLowerCase()` | `strings.ToLower` | The simple mapping, and no final-sigma rule |
+| `toUpperCase()` | `strings.ToUpper` | Leaves `ß` and `ﬁ` alone where the reference gives `SS` and `FI` |
+| `Math.round` | `math.Round` | Halves away from zero; `Math.round` goes toward +∞ |
+| `Number(string)` | `strconv.ParseFloat` | `"0x1f"` is 31 there and an error here; `""` is 0 there and an error here; `"1_000"` is NaN there and 1000 here |
+| `` `${n}` `` | `strconv.FormatFloat` | ECMAScript reaches for an exponent outside 1e-6..1e21; rule 3 never does |
+| `JSON.parse` | `encoding/json` | Loses insertion order, and cannot tell absent from null |
+
+`cmd/selfcheck` walks the AST and refuses every one of them outside the files that define the right
+spelling — §6.1's fourth gate, for a convention no type checker expresses. It found **four real
+violations on its first run**, and one was a defect rather than a style slip: `roleKey` interpolates
+the ordinal into a template literal, and ECMAScript's `Number::toString` writes `1e+23` where rule 3
+writes twenty-four digits. `js.NumberToString` is that function and is deliberately *not*
+`canonical.FormatNumber`; the two exist side by side because the wire and a string are different
+destinations. The exemption list names files rather than directories and prints its own length on
+every run (§6.3).
+
+`js.StringToNumber` earned its place immediately: `corpus/predicate/evaluate.json`'s context carries
+`"0x1f"`, `"1e3"` and `"Infinity"` in adjacent fields, because every operand of a numeric comparator
+goes through `Number()`.
+
+### One derivation, two renderings
+
+`editions/cpp/tools/unicode-case.ts` moved to `tools/unicode-case.ts` and gained a Go renderer.
+Copying it beside the second edition would have put the derivation — which code points map, which
+characters the sigma rule reads, which eight representatives the vectors are built from — in two
+places, to agree on the day they were written and diverge at the next Unicode version, in whichever
+edition was regenerated second (§3.3).
+
+The move is provably behaviour-preserving: the C++ tables and vectors are byte-identical apart from
+the one header line naming the generator's new path, and the C++ edition still passes 1,199 of
+1,199. CI's `cpp-case-tables` job is now `case-tables` and checks all four generated files.
+
+### One recipe that presented as a hung build
+
+The Makefile's `fmt` target ran `go run cmd/gofmt`, falling back to `gofmt -l .`. `cmd/gofmt` is a
+real command path in the standard library, so Go did not error — it started building the formatter
+from source, and the target sat there for a quarter of an hour producing nothing. `gofmt` ships
+beside the compiler and is now invoked directly.
+
+### Open
+
+1. **22 corpora remain**, and three of them are the expensive ones: `safety.ts` (limits and cycle,
+   1,144 lines, and it needs the frames and kinematics stack first), `embodiment.ts`'s transport,
+   and `skill.ts`. Finishing transport, cycle and observation also unlocks the 148 `fuzz` cases,
+   which is the largest single lever left.
+2. Go is not in `tools/edition-report.mjs` and must not be until it answers every case.
+3. CI's Linux run of the new `make -C editions/go check` step has not happened; everything above ran
+   on Windows.
+4. From before: §73's transport row is still contradicted by the Skills row, and `round_half_away`
+   exists twice in the C++ edition.
+
+### Findings, restated
+
+1-164 as before.
+
+165. **A convention gate pays for itself on the run that installs it.** The AST scan refusing Go's
+     near-miss standard-library calls found four violations in twelve files the moment it existed,
+     and one of them was a real divergence nobody had looked for. Writing the gate first is cheaper
+     than writing it after the thing it would have caught.
+
+166. **Two functions that turn a number into text are two functions.** `canonical.FormatNumber` is
+     rule 3 and never exponential; `js.NumberToString` is ECMAScript and exponential outside a
+     window. They differ on exactly the inputs nobody tests, and an edition carrying only one of
+     them is wrong in one of the two places.
+
+167. **A language's convenience can turn a wrong answer into a flake.** The other editions' risk
+     from sorted-on-insert objects was a stable divergence a corpus case pins. Go's map would have
+     produced a *different* order per process, which no corpus case can pin and no bisect can find.
+
+168. **A toolchain that is not installed is a blocking fact, not a detail.** §31.4 makes running the
+     corpus the definition of an edition, so "write the Go and someone will run it" is not a plan
+     that ends in an edition.

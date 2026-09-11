@@ -22,13 +22,21 @@ import (
 func Dispatch() corpus.Dispatch {
 	return corpus.Dispatch{
 		"digest/version":         versionDigest,
+		"intent/offer":           intentOffer,
+		"media/pool":             mediaPool,
+		"observation/frames":     observationFrames,
+		"observation/target":     observationTarget,
 		"opstate/evaluate":       opstateEvaluate,
 		"opstate/properties":     opstateProperties,
 		"opstate/warning":        opstateWarning,
 		"predicate/evaluate":     predicateEvaluate,
+		"readiness/fleet":        readinessFleet,
+		"readiness/robot":        readinessRobot,
 		"roles/vocabulary":       rolesVocabulary,
 		"semver/compare":         semverCompare,
 		"semver/satisfies":       semverSatisfies,
 		"vocabulary/closed-sets": closedSets,
+		"watchdog/command-loss":  watchdogCase,
+		"watchdog/nesting":       watchdogCase,
 	}
 }
