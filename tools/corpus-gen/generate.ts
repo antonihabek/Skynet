@@ -173,6 +173,50 @@ function add(corpus: string, file: string, entry: Case): void {
   files.set(key, list)
 }
 
+// ── What `trim()` removes, which is not what any other language's trim removes ─
+//
+// Nearly every contract trims a string before it decides something about it, and `trim()` is the
+// string operation whose meaning differs most between languages. ECMAScript removes its own
+// `WhiteSpace` and `LineTerminator` and nothing else; every other edition's native trim removes a
+// different set:
+//
+// | character              | `trim()` | Rust `char::is_whitespace` | Python `str.isspace` | Go `unicode.IsSpace` | ASCII-only |
+// |------------------------|----------|----------------------------|----------------------|----------------------|------------|
+// | U+FEFF byte-order mark | removed  | kept                       | kept                 | kept                 | kept       |
+// | U+00A0 no-break space  | removed  | removed                    | removed              | removed              | kept       |
+// | U+0085 next line       | kept     | removed                    | removed              | removed              | kept       |
+//
+// So these two probes, and they are two rather than one on purpose. The first must be removed and
+// holds both characters, so an edition that strips either one alone still fails: it stops at the
+// other. The second must be kept and is **alone**, because a pair would hide a partial stripper —
+// Rust removes U+0085, stops at whatever follows it, and a value that was non-blank to both editions
+// agrees by accident.
+//
+// Nothing in the corpus put either at a `trim()` until 2026-09-11, and by then the editions had
+// drifted exactly as the table predicts. Of the files in each edition that trim, the JavaScript set
+// was used in two of Rust's twelve — its own semver module wrote the rule down and it went no
+// further — three of Python's eleven, and four of the eight the C++ edition had written.
+const JS_TRIMS = '\uFEFF\u00A0'
+const JS_KEEPS = '\u0085'
+
+/**
+ * U+212A, which `toLowerCase()` turns into the ASCII `k`. The only character outside ASCII whose
+ * lower case is inside it, and so the one that separates a full case mapping from an ASCII one at
+ * every site that lower-cases and then compares against an ASCII word.
+ */
+const KELVIN_SIGN = String.fromCodePoint(0x212a)
+
+/**
+ * The same digits in Arabic-Indic (U+0660–U+0669).
+ *
+ * `\d` in a JavaScript pattern is ASCII `[0-9]`, and `Number()` reads nothing else. A Python `str`
+ * pattern's `\d` is every Unicode decimal digit, and `int()` and `float()` read them all — so an
+ * edition built on either reads `١.٢.٣` as a version the reference refuses.
+ */
+function arabicIndic(text: string): string {
+  return text.replace(/[0-9]/g, digit => String.fromCodePoint(0x660 + Number(digit)))
+}
+
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 //
 // One arm and one humanoid, reused across corpora so a reader comparing a transport case with an
@@ -311,6 +355,26 @@ roleCase('digit-in-axis', 'Axes are letters only.', 'left_arm.shoulder.pitch2')
 roleCase('null-role', 'A joint with no declared role parses to null.', null)
 roleCase('empty-string', 'An empty role is null, not an error.', '')
 roleCase('whitespace-only', 'Whitespace trims to nothing.', '   ')
+roleCase('wrapped-in-whitespace-only-javascript-trims',
+  'A byte-order mark and a no-break space either side, which is what a descriptor pasted out of a '
+  + 'document editor carries. `trim()` removes both, so the role parses. Before this case the four '
+  + 'implementations had three answers: Rust and Python kept the mark and refused the role, and '
+  + 'the C++ edition kept both.',
+  JS_TRIMS + 'left_arm.shoulder.pitch' + JS_TRIMS)
+roleCase('wrapped-in-a-next-line-javascript-keeps',
+  'U+0085 is whitespace to Rust, Python and Go and is not whitespace to `trim()`. Kept, so the '
+  + 'charset refuses it and the role is null — the same body described two ways by two editions '
+  + 'would otherwise have one more remappable joint in one of them.',
+  JS_KEEPS + 'left_arm.shoulder.pitch' + JS_KEEPS)
+roleCase('a-kelvin-sign-lower-cases-to-k',
+  'U+212A KELVIN SIGN lower-cases to the ASCII letter k, so this is `neck` to `toLowerCase()` and '
+  + 'the role parses. An edition that lower-cases ASCII only refuses it. `neck` is the one chain '
+  + 'with a k in it, which is the only reason this is a roles case and not a curiosity.',
+  `nec${KELVIN_SIGN}.link.pitch`)
+roleCase('an-ordinal-in-another-scripts-digits',
+  'An ordinal is ASCII digits: `\\d` in the reference’s pattern is `[0-9]`. The same number written '
+  + 'in Arabic-Indic digits is null, and an edition whose `\\d` is Unicode read it as `#1`.',
+  'base.wheel#' + arabicIndic('1'))
 for (const chain of ['left_arm', 'right_leg', 'left_hand', 'neck', 'head', 'base', 'tail', 'aux']) {
   roleCase(`chain-${chain}`, `${chain} is in the vocabulary.`, `${chain}.link.pitch`)
 }
@@ -3616,6 +3680,35 @@ predicateCase('exists-null', 'An explicit null does not exist — somebody looke
   { op: 'exists', path: 'robot.state.nothing' })
 predicateCase('exists-empty-list', 'An empty list does not exist. No guards active is not "guards".',
   { op: 'exists', path: 'robot.state.empty' })
+predicateCase('exists-a-string-of-whitespace-only-javascript-trims',
+  'A byte-order mark and a no-break space are whitespace to `trim()`, so this string is blank and '
+  + 'does not exist. The other languages disagree about the mark.',
+  { op: 'exists', path: 'robot.state.label' }, { robot: { state: { label: JS_TRIMS } } })
+predicateCase('exists-a-next-line',
+  'U+0085 is not whitespace to `trim()`, so a string holding one exists. Rust, Python and Go would '
+  + 'call it blank.',
+  { op: 'exists', path: 'robot.state.label' }, { robot: { state: { label: JS_KEEPS } } })
+predicateCase('a-number-in-whitespace-only-javascript-trims',
+  '`Number()` strips the same set `trim()` does before it reads a number, so this reading is 5.',
+  { op: 'gte', path: 'env.reading', value: 5 }, { env: { reading: JS_TRIMS + '5' + JS_TRIMS } })
+predicateCase('a-number-behind-a-next-line',
+  'And U+0085 is not in it, so this string is not a number and the clause cannot be evaluated. An '
+  + 'edition that stripped the character first would read 5 and decide.',
+  { op: 'gte', path: 'env.reading', value: 5 }, { env: { reading: JS_KEEPS + '5' } })
+predicateCase('a-number-in-another-scripts-digits',
+  '`Number()` reads ASCII digits only, so twelve written in Arabic-Indic digits is not a number '
+  + 'and the clause cannot be evaluated. Python’s `float()` reads it as 12.',
+  { op: 'gte', path: 'env.reading', value: 5 }, { env: { reading: arabicIndic('12') } })
+predicateCase('a-list-index-with-a-trailing-newline',
+  'A segment indexes a list only if it matches `^(0|[1-9]\\d*)$`, and `$` in a JavaScript pattern '
+  + 'is the end of the string. In a Python pattern it also matches before a final newline — and '
+  + '`int()` then strips it — so an edition built that way reads element 0 here, where the '
+  + 'reference reads nothing.',
+  { op: 'exists', path: 'robot.state.readings.0\n' }, { robot: { state: { readings: ['ok'] } } })
+predicateCase('a-list-index-in-another-scripts-digits',
+  'And `\\d` is ASCII, so element zero written in Arabic-Indic digits is no segment of a list.',
+  { op: 'exists', path: 'robot.state.readings.' + arabicIndic('0') },
+  { robot: { state: { readings: ['ok'] } } })
 predicateCase('exists-blank-string', 'A string of spaces does not exist.',
   { op: 'exists', path: 'robot.state.blank' })
 predicateCase('exists-missing', 'The escape hatch: `exists` is the one operator an absent path does '
@@ -3989,6 +4082,39 @@ satisfiesCase('prerelease-does-not-satisfy-a-release-range',
   'The trap semver §11 exists for: 2.0.0-rc.1 is below 2.0.0, so a range asking for 2.x does not '
   + 'admit its own release candidate.', '2.0.0-rc.1', '^2.0.0')
 
+// The range is trimmed before it is compared against `*` and `any`, and those two comparisons are
+// the only place the trim is visible: every other token is found by an unanchored scan that steps
+// over whatever surrounds it. So the probes go around the two words.
+satisfiesCase('a-wildcard-in-whitespace-only-javascript-trims',
+  '`trim()` removes a byte-order mark and a no-break space, so this is `*` and constrains nothing. '
+  + 'An edition that kept either reads a range with no token in it, which satisfies nothing — a '
+  + 'skill its Hub page says runs everywhere, refused everywhere.',
+  '9.9.9', JS_TRIMS + '*' + JS_TRIMS)
+satisfiesCase('any-behind-a-next-line',
+  'And the other direction. U+0085 is not whitespace to `trim()`, so this is not the word `any`; '
+  + 'it is a range with no token in it. Rust, Python and Go all strip the character and would read '
+  + 'a range that admits everything.',
+  '9.9.9', JS_KEEPS + 'any')
+
+// `\s` between an operator and its version is the same set as `trim()`, and the two cases above
+// this block that probe it (`nbsp-before-the-version`, `bom-between-operator-and-version`) pass an
+// edition with the wrong `\s` by coincidence: when the operator is lost the version becomes an
+// equality token, and 1.2.3 equals 1.2.3. A version one patch above the bound is what tells.
+satisfiesCase('whitespace-only-javascript-trims-between-operator-and-a-lower-bound',
+  '`\\s` matches the byte-order mark and the no-break space, so this is `>=1.2.3` and 1.2.4 is in '
+  + 'it. An edition whose `\\s` missed either loses the operator, reads the bare `1.2.3` as an '
+  + 'equality, and answers false.',
+  '1.2.4', '>=' + JS_TRIMS + '1.2.3')
+satisfiesCase('a-next-line-between-operator-and-a-lower-bound',
+  'U+0085 is not `\\s` to the reference, so the operator does not reach the version: the token is '
+  + 'the bare `1.2.3`, an equality, and 1.2.4 is outside it. An edition whose `\\s` is Unicode '
+  + 'reads `>=1.2.3` and answers true.',
+  '1.2.4', '>=' + JS_KEEPS + '1.2.3')
+satisfiesCase('a-range-in-another-scripts-digits',
+  '`\\d` is ASCII, so a range written in Arabic-Indic digits has no token in it: nothing satisfies '
+  + 'it and it is not a readable range.',
+  '1.2.3', '>=' + arabicIndic('1.2.3'))
+
 function compareCase(id: string, note: string, a: string, b: string): void {
   add('semver', 'compare', {
     id,
@@ -4021,6 +4147,19 @@ compareCase('unparseable-left',
   'nonsense', '1.0.0')
 compareCase('unparseable-both', 'And the same when neither side parses.', '', 'x')
 compareCase('trimmed', 'Both sides are trimmed before parsing.', '  1.2.3  ', '1.2.3')
+compareCase('trimmed-of-whitespace-only-javascript-trims',
+  'With the two characters `trim()` removes and other languages do not agree about. The version '
+  + 'parses, and `raw` is what is left.',
+  JS_TRIMS + '1.2.3' + JS_TRIMS, '1.2.3')
+compareCase('a-next-line-is-not-trimmed',
+  'U+0085 stays, so the left side does not parse — and an unparseable side compares equal, which '
+  + 'is why `a` is in the expected value: without it this case would pass an edition that trimmed '
+  + 'the character away.',
+  JS_KEEPS + '1.2.3', '1.2.3')
+compareCase('digits-from-another-script',
+  'The reference’s `\\d` is ASCII and `Number()` reads nothing else, so a version written in '
+  + 'Arabic-Indic digits does not parse. An edition whose `\\d` is Unicode read it as 1.2.3.',
+  arabicIndic('1.2.3'), '1.2.3')
 compareCase('leading-zeros', 'Numeric components are numbers, so leading zeros do not change one.',
   '1.02.3', '1.2.3')
 compareCase('large-major',
@@ -4516,6 +4655,26 @@ cellCase('an-empty-cell',
   'A cell with a name and nothing else is a cell nobody has measured yet, and that is not a fault.',
   { name: 'bay-4' })
 
+cellCase('a-name-of-whitespace-only-javascript-trims',
+  'A byte-order mark and a no-break space are blank to `trim()`, so this cell is unnamed.',
+  cell({ name: JS_TRIMS }))
+
+cellCase('a-name-that-is-a-next-line',
+  'U+0085 is not blank to `trim()`. Named, however odd the name — and the same answer from every '
+  + 'edition, which is the part the corpus can hold.',
+  cell({ name: JS_KEEPS }))
+
+cellCase('a-fact-key-behind-a-byte-order-mark',
+  'A key is addressable when trimming leaves it unchanged, and `trim()` removes the mark — so this '
+  + 'key is not the path segment it looks like. An edition that kept the mark would accept a fact '
+  + 'no precondition can name.',
+  cell({ facts: { [JS_TRIMS + 'door_closed']: true } }))
+
+cellCase('a-fact-key-behind-a-next-line',
+  'And `trim()` keeps U+0085, so this key is exactly itself and is addressable. An edition that '
+  + 'stripped the character would refuse a key the reference accepts.',
+  cell({ facts: { [JS_KEEPS + 'door_closed']: true } }))
+
 function cellContextCase(id: string, note: string, subject: CellDescriptor): void {
   add('cell', 'context', {
     id,
@@ -4961,6 +5120,17 @@ lifecycleCase('power-withheld-empty-is-not-a-refusal',
   + 'gets the acquiring rules exactly as they were.',
   'acquiring', progress({ power_withheld: '   ', leases: 'held' }))
 
+lifecycleCase('power-withheld-in-whitespace-only-javascript-trims',
+  'Blank to `trim()` as well, so still not a refusal. An edition that kept the byte-order mark '
+  + 'would abort the skill with a reason nobody can read.',
+  'acquiring', progress({ power_withheld: JS_TRIMS, leases: 'held' }))
+
+lifecycleCase('power-withheld-a-next-line',
+  'Not blank to `trim()`, so the skill is aborted and the reason is what arrived. That is a poor '
+  + 'sentence, and it is the reference’s sentence: the corpus pins agreement, and the field is '
+  + 'written by the power contract, which never writes this.',
+  'acquiring', progress({ power_withheld: JS_KEEPS, leases: 'held' }))
+
 lifecycleCase('lease-never-granted',
   'The other half of §25.2, and the one no case had. A token the operator never granted reports no '
   + 'holder — "nobody has the arm, this package may not ask for it" — and the refusal has to say '
@@ -5316,6 +5486,18 @@ liveCase('an-env-branch-with-no-cell',
   + 'take the battery check away from every robot nobody has surveyed.',
   { battery_percent: 55, operating_state: 'hold' })
 
+liveCase('joint-names-and-the-two-whitespace-sets',
+  'The body’s rule for a joint name is the cell’s rule for a fact key: addressable when `trim()` '
+  + 'leaves it unchanged. One name carries the byte-order mark `trim()` removes, so it is '
+  + 'unaddressable; the other carries U+0085, which `trim()` keeps, so it is addressable and lands '
+  + 'in the branch. Rust, Python and Go disagree about both.',
+  {
+    joints: [
+      { name: JS_TRIMS + 'shoulder_pan', position: 0.25 },
+      { name: JS_KEEPS + 'elbow', position: -1.5 },
+    ],
+  })
+
 // ── §12's two decisions ──────────────────────────────────────────────────────
 //
 // The third rule is the one §12 calls the single most important test in the suite:
@@ -5460,6 +5642,17 @@ bundleCase('a-bundle-that-declares-nothing',
   'Everything wrong at once, so the ordering of the findings is frozen. An operator gets one list '
   + 'rather than four reboots.',
   {}, { signature: 'absent' })
+
+bundleCase('a-version-and-digest-of-whitespace-only-javascript-trims',
+  'Both blank to `trim()`, so this bundle is unversioned and undigested — and the second is the one '
+  + 'that matters, because §12’s certification gate binds a bench pass to the digest. An edition '
+  + 'that kept the byte-order mark would treat an invisible character as bytes with a name.',
+  { ...SIGNED_BUNDLE, version: JS_TRIMS, digest: JS_TRIMS }, HEALTHY_SUBJECT)
+
+bundleCase('a-version-and-digest-that-are-a-next-line',
+  'Not blank to `trim()`, so neither refusal applies. The corpus is not saying this is a good '
+  + 'manifest; it is saying every edition reaches the same verdict about it.',
+  { ...SIGNED_BUNDLE, version: JS_KEEPS, digest: JS_KEEPS }, HEALTHY_SUBJECT)
 
 // ── §12's second rule ────────────────────────────────────────────────────────
 
@@ -5684,6 +5877,29 @@ codeCase('a-sharp-s-that-expands-to-two-letters',
   + 'eight out, and a code.',
   '\u00DF' + '234567')
 
+// The credential check trims and lower-cases before it looks for `skd_`, and each of those two
+// steps has a character where the editions' native versions disagree. All three of these are a
+// credential that has been somewhere a person could see it, so which refusal they get is the
+// difference between "treat this as exposed" and "you typed too many characters".
+
+codeCase('a-credential-behind-a-byte-order-mark',
+  'Copied out of a file that begins with one. `trim()` removes the mark, so this is a credential '
+  + 'and the refusal says so. Rust and Python kept the mark, missed the prefix, and told the '
+  + 'operator they had typed twenty-two characters.',
+  JS_TRIMS + 'skd_abcdef0123456789')
+
+codeCase('a-credential-behind-a-next-line',
+  'U+0085 is not whitespace to `trim()`, so the prefix is not at the start and this is refused by '
+  + 'length. An edition whose trim removed the character would call it a credential \u2014 the kinder '
+  + 'answer, and still a different one, which is the only thing the corpus is asking about.',
+  JS_KEEPS + 'skd_abcdef0123456789')
+
+codeCase('a-credential-spelled-with-a-kelvin-sign',
+  '`toLowerCase()` turns U+212A into the ASCII k, so this begins `skd_` and is refused as a '
+  + 'credential. The Rust edition lower-cased ASCII only, on the stated ground that a full mapping '
+  + 'would fold characters no credential prefix contains \u2014 and this is the one that it does.',
+  `s${KELVIN_SIGN}d_abcdef0123456789`)
+
 // ── §19's device credential, and §10's key binding ───────────────────────────
 
 function identityCase(id: string, note: string, identity: Identity, observed: Observed): void {
@@ -5824,6 +6040,28 @@ identityCase('a-credential-that-declares-no-scopes-at-all',
   + 'about a credential that said what it was.',
   { ...PAIRED, scopes: [] }, ATTESTED)
 
+identityCase('a-namespace-of-whitespace-only-javascript-trims',
+  'Blank to `trim()`, so half a pairing. An edition that kept the byte-order mark would report a '
+  + 'robot paired to a namespace nobody can see or type.',
+  { ...PAIRED, namespace: JS_TRIMS }, ATTESTED)
+
+identityCase('a-namespace-that-is-a-next-line',
+  'Not blank to `trim()`. Whether a namespace like this should be accepted is a question for the '
+  + 'Hub that issued it; what the corpus pins is that every edition gives the robot the same '
+  + 'answer about whether it is paired.',
+  { ...PAIRED, namespace: JS_KEEPS }, ATTESTED)
+
+identityCase('keys-compared-after-trimming',
+  'Both keys are trimmed before they are compared, with the set `trim()` uses. So these are the '
+  + 'same key and the robot is attested; an edition that kept the byte-order mark would call it a '
+  + 'replaced mainboard.',
+  { ...PAIRED, device_key: JS_TRIMS + 'aa' + JS_TRIMS }, ATTESTED)
+
+identityCase('a-key-behind-a-next-line-is-another-key',
+  'And a character `trim()` does not remove makes it a different key: `key_not_attested`, with '
+  + 'the vendor’s key named.',
+  { ...PAIRED, device_key: JS_KEEPS + 'aa' }, ATTESTED)
+
 
 // ── §10's image attestation ──────────────────────────────────────────────────
 
@@ -5932,6 +6170,29 @@ attestCase('a-known-measure-with-nothing-in-it',
   {
     os_image: known(''),
     policy: nothing(),
+    embodiment: nothing(),
+  })
+
+attestCase('every-field-in-whitespace-only-javascript-trims',
+  'The device id, a digest and a reason, each wrapped in the two characters `trim()` removes and '
+  + 'the other languages disagree about. The id is blank, so the sentence opens with "This robot"; '
+  + 'the digest and the reason are rendered without them. An edition that kept the byte-order mark '
+  + 'would put an invisible character into the sentence an incident investigation reads.',
+  {
+    device_id: JS_TRIMS,
+    os_image: known(JS_TRIMS + 'sha256:aaaa' + JS_TRIMS),
+    policy: unmeasured(JS_TRIMS + 'the runtime is not answering' + JS_TRIMS),
+    embodiment: nothing(),
+  })
+
+attestCase('every-field-behind-a-next-line',
+  'And the character `trim()` keeps, kept in all three places. The sentence carries it because '
+  + 'the reference does; whether a device id should ever hold one is a question for whatever '
+  + 'minted it.',
+  {
+    device_id: JS_KEEPS + 'dev_7',
+    os_image: known(JS_KEEPS + 'sha256:aaaa'),
+    policy: unmeasured(JS_KEEPS + 'the runtime is not answering'),
     embodiment: nothing(),
   })
 
@@ -6618,6 +6879,47 @@ documentCase('a-stalled-policy-on-a-converged-robot',
     },
   })
 
+documentCase('identifiers-in-whitespace-only-javascript-trims',
+  'Five of the document’s strings are trimmed before they cross to the Hub, and these are wrapped '
+  + 'in the two characters `trim()` removes and the other languages disagree about. They arrive '
+  + 'clean. An edition that kept the byte-order mark would send a device id the Hub’s own trim '
+  + 'then disagrees with, which is two keys for one robot.',
+  {
+    ...CONVERGED,
+    device_id: JS_TRIMS + 'dev_7' + JS_TRIMS,
+    agent: JS_TRIMS + 'skynetd/0.1.0' + JS_TRIMS,
+    contracts: JS_TRIMS + '1.0.0' + JS_TRIMS,
+    state: JS_TRIMS + 'running' + JS_TRIMS,
+    desired_digest: JS_TRIMS + 'sha256:dddd' + JS_TRIMS,
+  })
+
+documentCase('identifiers-behind-a-next-line',
+  'And U+0085, which `trim()` keeps, kept in every one of them — so the document says exactly what '
+  + 'the Hub’s own trim would have left.',
+  {
+    ...CONVERGED,
+    device_id: JS_KEEPS + 'dev_7',
+    agent: JS_KEEPS + 'skynetd/0.1.0',
+    contracts: JS_KEEPS + '1.0.0',
+    state: JS_KEEPS + 'running',
+    desired_digest: JS_KEEPS + 'sha256:dddd',
+  })
+
+documentCase('attested-digests-in-whitespace-only-javascript-trims',
+  'The attestation’s own strings, trimmed with the same set on the way out: the digests §32.1 puts a '
+  + 'fleet column on — *which robots are running image sha256:aaaa* — and the reason a slot was not '
+  + 'read. The Rust edition tested these for blankness with `trim()`’s set and then put the '
+  + 'untrimmed value on the wire, so this robot answered that query with a digest nobody could match.',
+  {
+    ...CONVERGED,
+    attestation: {
+      device_id: 'dev_7',
+      os_image: { state: 'known', digest: JS_TRIMS + 'sha256:aaaa' + JS_TRIMS },
+      policy: { state: 'unmeasured', why: JS_TRIMS + 'the runtime is not answering' + JS_TRIMS },
+      embodiment: { state: 'known', digest: 'sha256:cccc' },
+    },
+  })
+
 vocabulary('checkin_claims',
   'What a robot may claim about the generation it was given. Four rather than §17’s boolean, '
   + 'because "not applied" covers a robot that is working, one that is waiting for a person, and '
@@ -6721,6 +7023,22 @@ offerCase('a-generation-of-zero-against-a-robot-that-has-applied-one',
   'The boundary, and the case a falsy check breaks. Zero is a generation, so this is intent going '
   + 'backwards rather than a field nobody set.',
   good(0, 'sha256:bbbb', 2), HELD)
+
+offerCase('digests-compared-after-trimming',
+  'The same generation and the same document, the offered digest wrapped in the two characters '
+  + '`trim()` removes. Adopted and unchanged. An edition that kept the byte-order mark would see '
+  + 'two documents under one generation and refuse the ordinary poll.',
+  good(41, JS_TRIMS + 'sha256:aaaa' + JS_TRIMS, 2), HELD)
+
+offerCase('a-digest-behind-a-next-line-is-another-document',
+  'U+0085 is kept, so this is a different digest under the generation the robot already holds — '
+  + 'the reused generation §11 refuses. An edition that stripped the character would adopt it.',
+  good(41, JS_KEEPS + 'sha256:aaaa', 2), HELD)
+
+offerCase('a-reason-of-whitespace-only-javascript-trims',
+  'A decode failure whose reason is blank to `trim()`. The sentence ends where it would with no '
+  + 'reason at all, rather than after a colon and an invisible character.',
+  { decoded: false, decode_error: JS_TRIMS }, HELD)
 
 vocabulary('offer_faults',
   'Everything §11’s pull can find wrong with a desired state it was handed, in the order the checks '
@@ -7096,6 +7414,16 @@ fetchCase('a-partial-of-a-manifest-that-declares-no-size',
   + 'says how far it got without claiming a total.',
   { ...IMAGE, size: null, partial: 40000 })
 
+fetchCase('a-digest-of-whitespace-only-javascript-trims',
+  'Blank to `trim()`, so bytes with no name, refused before a bearer is considered. An edition that '
+  + 'kept the byte-order mark would fetch an image no gate can be bound to.',
+  { ...IMAGE, digest: JS_TRIMS })
+
+fetchCase('a-digest-that-is-a-next-line',
+  'Not blank to `trim()`, so the fetch is planned. Every edition must plan it; whether the Hub '
+  + 'should ever have served such a digest is the Hub’s question.',
+  { ...IMAGE, digest: JS_KEEPS })
+
 function arrivalCase(id: string, note: string, arrived: Arrived, expected: Expected): void {
   add('transfer', 'arrival', {
     id,
@@ -7133,6 +7461,17 @@ arrivalCase('a-manifest-with-no-size-and-the-right-digest',
   + 'is what the gate is bound to, so it is sufficient on its own.',
   { digest: 'sha256:aaaa', size: 100000 },
   { digest: 'sha256:aaaa', size: null })
+
+arrivalCase('digests-compared-after-trimming',
+  'Both digests are trimmed with the set `trim()` uses, so these match. An edition that kept the '
+  + 'byte-order mark would discard an image it had just verified.',
+  { digest: JS_TRIMS + 'sha256:aaaa', size: 100000 },
+  { digest: 'sha256:aaaa' + JS_TRIMS, size: 100000 })
+
+arrivalCase('a-next-line-makes-a-different-digest',
+  'And U+0085 survives the trim, so these do not.',
+  { digest: JS_KEEPS + 'sha256:aaaa', size: 100000 },
+  { digest: 'sha256:aaaa', size: 100000 })
 
 function uploadCase(id: string, note: string, subject: UploadSubject): void {
   add('transfer', 'upload', {
@@ -7214,6 +7553,15 @@ uploadCase('a-complete-object-under-the-wrong-digest',
   + 'it: it has no authority over the receiver’s disk and the contract does not pretend it has.',
   { ...WINDOW, held: { bytes: 4000000, digest: 'sha256:dddd' } })
 
+uploadCase('a-window-digest-of-whitespace-only-javascript-trims',
+  'Blank to `trim()`, so a window with no name and nowhere to go.',
+  { ...WINDOW, digest: JS_TRIMS })
+
+uploadCase('a-held-digest-compared-after-trimming',
+  'The receiver’s digest is trimmed with the same set, so it holds this window and the re-send is '
+  + 'avoided. An edition that kept the byte-order mark would send four megabytes again.',
+  { ...WINDOW, held: { bytes: 4000000, digest: JS_TRIMS + 'sha256:cccc' + JS_TRIMS } })
+
 function receiptCase(id: string, note: string, reported: Reported, window: UploadWindow): void {
   add('transfer', 'receipt', {
     id,
@@ -7248,6 +7596,15 @@ receiptCase('a-receiver-that-said-nothing',
   + 'the bytes are somewhere else, and a robot that wrote one off silence would be recording an '
   + 'upload on the strength of a status code.',
   { bytes: 4000000 }, SEALED)
+
+receiptCase('a-reported-digest-compared-after-trimming',
+  'Trimmed with the set `trim()` uses, so the window arrived and a receipt is written.',
+  { bytes: 4000000, digest: 'sha256:cccc' + JS_TRIMS }, SEALED)
+
+receiptCase('a-reported-digest-behind-a-next-line',
+  'And U+0085 survives the trim, so the far side holds different bytes and no receipt is written. '
+  + 'An edition that stripped the character would record an upload that did not happen.',
+  { bytes: 4000000, digest: JS_KEEPS + 'sha256:cccc' }, SEALED)
 
 vocabulary('upload_decisions',
   '§79’s eight, in the order the tests run — which is the order of cost, as `planFetch`’s seven '

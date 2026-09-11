@@ -57,6 +57,7 @@ use alloc::vec::Vec;
 use skynet_json::Json;
 
 use crate::admission::Severity;
+use crate::js::js_trim;
 
 /// Why an offered desired state is not simply adopted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,11 +166,11 @@ fn fault(code: OfferFaultCode, severity: Severity, message: String) -> OfferFaul
 /// problem per poll.
 pub fn assess_offer(offer: &Offer, held: &Held) -> OfferVerdict {
     let mut faults = Vec::new();
-    let held_digest = held.digest.trim();
-    let digest = offer.digest.trim();
+    let held_digest = js_trim(&held.digest);
+    let digest = js_trim(&offer.digest);
 
     if !offer.decoded {
-        let why = offer.decode_error.trim();
+        let why = js_trim(&offer.decode_error);
         faults.push(fault(
             OfferFaultCode::Undecodable,
             Severity::Error,

@@ -275,6 +275,133 @@
       "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
     },
     {
+      "id": "exists-a-string-of-whitespace-only-javascript-trims",
+      "note": "A byte-order mark and a no-break space are whitespace to `trim()`, so this string is blank and does not exist. The other languages disagree about the mark.",
+      "input": {
+        "predicate": {
+          "op": "exists",
+          "path": "robot.state.label"
+        },
+        "context": {
+          "robot": {
+            "state": {
+              "label": "﻿ "
+            }
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "exists-a-next-line",
+      "note": "U+0085 is not whitespace to `trim()`, so a string holding one exists. Rust, Python and Go would call it blank.",
+      "input": {
+        "predicate": {
+          "op": "exists",
+          "path": "robot.state.label"
+        },
+        "context": {
+          "robot": {
+            "state": {
+              "label": ""
+            }
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "a-number-in-whitespace-only-javascript-trims",
+      "note": "`Number()` strips the same set `trim()` does before it reads a number, so this reading is 5.",
+      "input": {
+        "predicate": {
+          "op": "gte",
+          "path": "env.reading",
+          "value": 5
+        },
+        "context": {
+          "env": {
+            "reading": "﻿ 5﻿ "
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"satisfied\",\"path\":null,\"reason\":null,\"satisfied\":true}"
+    },
+    {
+      "id": "a-number-behind-a-next-line",
+      "note": "And U+0085 is not in it, so this string is not a number and the clause cannot be evaluated. An edition that stripped the character first would read 5 and decide.",
+      "input": {
+        "predicate": {
+          "op": "gte",
+          "path": "env.reading",
+          "value": 5
+        },
+        "context": {
+          "env": {
+            "reading": "5"
+          }
+        }
+      },
+      "expected": "{\"op\":\"gte\",\"outcome\":\"unevaluable\",\"path\":\"env.reading\",\"reason\":\"not_a_number\",\"satisfied\":false}"
+    },
+    {
+      "id": "a-number-in-another-scripts-digits",
+      "note": "`Number()` reads ASCII digits only, so twelve written in Arabic-Indic digits is not a number and the clause cannot be evaluated. Python’s `float()` reads it as 12.",
+      "input": {
+        "predicate": {
+          "op": "gte",
+          "path": "env.reading",
+          "value": 5
+        },
+        "context": {
+          "env": {
+            "reading": "١٢"
+          }
+        }
+      },
+      "expected": "{\"op\":\"gte\",\"outcome\":\"unevaluable\",\"path\":\"env.reading\",\"reason\":\"not_a_number\",\"satisfied\":false}"
+    },
+    {
+      "id": "a-list-index-with-a-trailing-newline",
+      "note": "A segment indexes a list only if it matches `^(0|[1-9]\\d*)$`, and `$` in a JavaScript pattern is the end of the string. In a Python pattern it also matches before a final newline — and `int()` then strips it — so an edition built that way reads element 0 here, where the reference reads nothing.",
+      "input": {
+        "predicate": {
+          "op": "exists",
+          "path": "robot.state.readings.0\n"
+        },
+        "context": {
+          "robot": {
+            "state": {
+              "readings": [
+                "ok"
+              ]
+            }
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
+      "id": "a-list-index-in-another-scripts-digits",
+      "note": "And `\\d` is ASCII, so element zero written in Arabic-Indic digits is no segment of a list.",
+      "input": {
+        "predicate": {
+          "op": "exists",
+          "path": "robot.state.readings.٠"
+        },
+        "context": {
+          "robot": {
+            "state": {
+              "readings": [
+                "ok"
+              ]
+            }
+          }
+        }
+      },
+      "expected": "{\"op\":null,\"outcome\":\"unsatisfied\",\"path\":null,\"reason\":null,\"satisfied\":false}"
+    },
+    {
       "id": "exists-blank-string",
       "note": "A string of spaces does not exist.",
       "input": {

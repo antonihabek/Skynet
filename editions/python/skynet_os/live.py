@@ -64,7 +64,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from .js import utf16_key as _utf16_key
+from .js import js_trim as _js_trim, utf16_key as _utf16_key
 
 __all__ = ["context_to_json", "explain_omissions", "live_context"]
 
@@ -79,7 +79,7 @@ def _addressable(key: Any) -> bool:
     """
     if not isinstance(key, str):
         return False
-    return len(key) > 0 and "." not in key and key.strip() == key
+    return len(key) > 0 and "." not in key and _js_trim(key) == key
 
 
 def _finite(value: Any) -> bool:

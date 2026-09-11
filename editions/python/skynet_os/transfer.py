@@ -44,6 +44,8 @@ from __future__ import annotations
 import math
 from typing import Any, Final
 
+from .js import js_trim as _js_trim
+
 __all__ = [
     "BUNDLE_CHECKS",
     "FETCH_DECISIONS",
@@ -107,7 +109,7 @@ def _at_least_zero(value: Any) -> int:
 
 def _text(value: Any) -> str:
     """``(value ?? '').trim()``."""
-    return "" if value is None else str(value).strip()
+    return "" if value is None else _js_trim(str(value))
 
 
 def _bearer_name(bearer: dict[str, Any]) -> str:

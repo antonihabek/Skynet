@@ -75,7 +75,7 @@ bool addressable(const Json& key) {
     return false;
   }
   const std::string value(key.string_or(""));
-  return !value.empty() && value.find('.') == std::string::npos && text::strip(value) == value;
+  return !value.empty() && value.find('.') == std::string::npos && js::trim(value) == value;
 }
 
 /// `typeof value === 'number' && Number.isFinite(value)`. A gripper of `true` is not a gripper at 1.

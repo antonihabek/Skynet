@@ -375,6 +375,23 @@
         "operating_state": "hold"
       },
       "expected": "{\"context\":{\"robot\":{\"state\":{\"battery_percent\":55,\"operating\":\"hold\"}},\"skill\":{\"grants\":{\"tokens\":[]}}},\"unaddressable\":[],\"unreadable\":[]}"
+    },
+    {
+      "id": "joint-names-and-the-two-whitespace-sets",
+      "note": "The body’s rule for a joint name is the cell’s rule for a fact key: addressable when `trim()` leaves it unchanged. One name carries the byte-order mark `trim()` removes, so it is unaddressable; the other carries U+0085, which `trim()` keeps, so it is addressable and lands in the branch. Rust, Python and Go disagree about both.",
+      "input": {
+        "joints": [
+          {
+            "name": "﻿ shoulder_pan",
+            "position": 0.25
+          },
+          {
+            "name": "elbow",
+            "position": -1.5
+          }
+        ]
+      },
+      "expected": "{\"context\":{\"robot\":{\"state\":{\"joints\":{\"elbow\":-1.5}}},\"skill\":{\"grants\":{\"tokens\":[]}}},\"unaddressable\":[\"﻿ shoulder_pan\"],\"unreadable\":[]}"
     }
   ]
 }

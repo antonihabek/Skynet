@@ -42,8 +42,14 @@ from skynet_os.corpus import Unimplemented, run_corpus  # noqa: E402
 
 FAILURES: list[str] = []
 
+#: Every check that ran, counted as it runs. The total used to be a sum written out by hand beside
+#: `main`, which every new check had to remember to edit — and which went on claiming a check that
+#: had stopped running, because nothing counted anything.
+CHECKED: list[str] = []
+
 
 def check(name: str, condition: bool, detail: str = "") -> None:
+    CHECKED.append(name)
     suffix = f" — {detail}" if detail else ""
     if condition:
         print(f"  ok    {name}")
@@ -246,9 +252,10 @@ def main() -> int:
     checkin_divergences()
     cell_divergences()
     live_divergences()
+    source_divergences()
 
     print()
-    total = 15 + 8 + 4 + 2 + 2 + 3 + 4 + 3 + 3
+    total = len(CHECKED)
     if FAILURES:
         print(f"self-check FAILED — {len(FAILURES)} of {total}")
         return 1
@@ -875,6 +882,88 @@ def live_divergences() -> None:
         "a non-finite age omits `age_s` rather than publishing it",
         aged["context"]["robot"]["calibration"]["joint_zeros"] == {"state": "valid", "valid": True},
         f"row={aged['context']['robot']['calibration']['joint_zeros']}",
+    )
+
+
+def source_divergences() -> None:
+    """Spellings that computed a different answer from the reference, refused where they are written.
+
+    ``corpus/`` holds inputs that tell ``trim()`` from ``str.strip()`` and JavaScript's ``\\d`` from
+    Python's, so a module that brings either back fails a case — if one of those cases reaches it.
+    These scans do not depend on that, and they are the gate :mod:`skynet_os.js` says exists. Both
+    walk the token stream rather than the text, so a docstring that *discusses* ``\\d`` is not a
+    pattern that uses it.
+    """
+    import io
+    import os
+    import re
+    import subprocess
+    import tokenize
+
+    print()
+    print("the spellings the reference does not mean")
+
+    skipped = {tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT, tokenize.INDENT, tokenize.DEDENT}
+    package = Path(__file__).resolve().parent / "skynet_os"
+    strips: list[str] = []
+    patterns: list[str] = []
+    for path in sorted(package.glob("*.py")):
+        readline = io.StringIO(path.read_text(encoding="utf-8")).readline
+        tokens = [token for token in tokenize.generate_tokens(readline) if token.type not in skipped]
+        for at, token in enumerate(tokens):
+            # `.strip()` with no argument is Python's whitespace set. `js_trim` passes its own.
+            if (
+                token.type == tokenize.NAME
+                and token.string in ("strip", "lstrip", "rstrip")
+                and 0 < at < len(tokens) - 2
+                and tokens[at - 1].string == "."
+                and tokens[at + 1].string == "("
+                and tokens[at + 2].string == ")"
+            ):
+                strips.append(f"{path.name}:{token.start[0]}")
+            # A raw string is where a pattern lives. `\d`, `\s` and `\w` are Unicode classes to Python
+            # and ASCII or trim()'s set to JavaScript, and Python's `$` also matches before a final
+            # newline where JavaScript's matches only at the end.
+            if token.type == tokenize.STRING:
+                body = token.string.lstrip("rRbBuUfF")
+                raw = "r" in token.string[: len(token.string) - len(body)].lower()
+                if raw and re.search(r"\\[dDsSwW]|\$", body):
+                    patterns.append(f"{path.name}:{token.start[0]}")
+
+    check(
+        "no module trims with Python's whitespace set",
+        not strips,
+        "`.strip()` with no argument at " + ", ".join(strips) + " — use js_trim",
+    )
+    check(
+        "no pattern uses \\d, \\s, \\w or $",
+        not patterns,
+        "at " + ", ".join(patterns) + " — spell [0-9], JS_SPACE and \\Z",
+    )
+
+    # The runner itself, on a console that cannot encode what a failure is about. The first
+    # whitespace case to fail on the Windows console this repository is developed on crashed the
+    # runner mid-report, because the byte-order mark in its expected value is not in cp1250.
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        mark = chr(0xFEFF)
+        write_corpus(
+            root,
+            "roles",
+            "vocabulary",
+            [{"id": "wrong-on-purpose", "note": "", "input": {"role": mark + "x"}, "expected": canonical(mark)}],
+        )
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve().parent / "run_corpus.py"), "--corpus-root", str(root)],
+            capture_output=True,
+            env={**os.environ, "PYTHONIOENCODING": "cp1250"},
+            timeout=120,
+            check=False,
+        )
+    check(
+        "a failure about a character the console cannot encode is reported rather than crashing",
+        result.returncode == 1 and b"Traceback" not in result.stderr and b"\\ufeff" in result.stdout,
+        f"exit {result.returncode}, stderr {result.stderr[-300:]!r}",
     )
 
 

@@ -16,6 +16,8 @@ from __future__ import annotations
 import re
 from typing import Any, Final
 
+from .js import js_trim as _js_trim
+
 __all__ = [
     "CANONICAL_AXES",
     "CANONICAL_CHAINS",
@@ -40,7 +42,7 @@ CANONICAL_AXES: Final = (
     "pitch", "yaw", "roll", "slide", "flex", "abduct", "rotate", "grip",
 )
 
-_ROLE_PATTERN: Final = re.compile(r"^([a-z_]+)\.([a-z0-9_]+)(?:\.([a-z]+))?(?:#(\d+))?$")
+_ROLE_PATTERN: Final = re.compile(r"^([a-z_]+)\.([a-z0-9_]+)(?:\.([a-z]+))?(?:#([0-9]+))?\Z")
 
 
 class ParsedRole:
@@ -78,7 +80,7 @@ def parse_role(role: str | None) -> ParsedRole | None:
     if not role:
         return None
 
-    match = _ROLE_PATTERN.match(role.strip().lower())
+    match = _ROLE_PATTERN.match(_js_trim(role).lower())
     if match is None:
         return None
 

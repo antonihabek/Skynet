@@ -459,6 +459,144 @@
         }
       },
       "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":true,\"attestation\":{\"complete\":true,\"embodiment\":{\"digest\":\"sha256:cccc\",\"state\":\"known\",\"why\":null},\"os_image\":{\"digest\":\"sha256:aaaa\",\"state\":\"known\",\"why\":null},\"policy\":{\"digest\":\"sha256:bbbb\",\"state\":\"known\",\"why\":null},\"sentence\":\"dev_7 is running image `sha256:aaaa`, policy `sha256:bbbb`, against body `sha256:cccc`.\",\"unmeasured\":[]},\"blocking\":[],\"claim\":\"applied\",\"contracts\":\"1.0.0\",\"desired_digest\":\"sha256:dddd\",\"detail\":\"Generation 41 is applied and the plan is empty.\",\"device_id\":\"dev_7\",\"generation\":41,\"health\":{\"degraded\":true,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":{\"age_ms\":900,\"value\":0.42},\"temperature_c\":null},\"packages\":[{\"age_ms\":4000,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"stalled\"}],\"stalled\":[\"acme/grasp\"],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"temperature_c\"]},\"limits\":null,\"pending\":[],\"state\":\"running\"}"
+    },
+    {
+      "id": "identifiers-in-whitespace-only-javascript-trims",
+      "note": "Five of the document’s strings are trimmed before they cross to the Hub, and these are wrapped in the two characters `trim()` removes and the other languages disagree about. They arrive clean. An edition that kept the byte-order mark would send a device id the Hub’s own trim then disagrees with, which is two keys for one robot.",
+      "input": {
+        "device_id": "﻿ dev_7﻿ ",
+        "agent": "﻿ skynetd/0.1.0﻿ ",
+        "contracts": "﻿ 1.0.0﻿ ",
+        "state": "﻿ running﻿ ",
+        "desired_digest": "﻿ sha256:dddd﻿ ",
+        "progress": {
+          "observed_generation": 41,
+          "desired_generation": 41,
+          "pending": []
+        },
+        "health": {
+          "packages": [
+            {
+              "id": "acme/grasp",
+              "live": true,
+              "readiness": "ready",
+              "age_ms": 12
+            }
+          ],
+          "storage_headroom": {
+            "value": 0.42,
+            "age_ms": 900
+          }
+        },
+        "attestation": {
+          "device_id": "dev_7",
+          "os_image": {
+            "state": "known",
+            "digest": "sha256:aaaa"
+          },
+          "policy": {
+            "state": "known",
+            "digest": "sha256:bbbb"
+          },
+          "embodiment": {
+            "state": "known",
+            "digest": "sha256:cccc"
+          }
+        }
+      },
+      "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":true,\"attestation\":{\"complete\":true,\"embodiment\":{\"digest\":\"sha256:cccc\",\"state\":\"known\",\"why\":null},\"os_image\":{\"digest\":\"sha256:aaaa\",\"state\":\"known\",\"why\":null},\"policy\":{\"digest\":\"sha256:bbbb\",\"state\":\"known\",\"why\":null},\"sentence\":\"dev_7 is running image `sha256:aaaa`, policy `sha256:bbbb`, against body `sha256:cccc`.\",\"unmeasured\":[]},\"blocking\":[],\"claim\":\"applied\",\"contracts\":\"1.0.0\",\"desired_digest\":\"sha256:dddd\",\"detail\":\"Generation 41 is applied and the plan is empty.\",\"device_id\":\"dev_7\",\"generation\":41,\"health\":{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":{\"age_ms\":900,\"value\":0.42},\"temperature_c\":null},\"packages\":[{\"age_ms\":12,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"ready\"}],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"temperature_c\"]},\"limits\":null,\"pending\":[],\"state\":\"running\"}"
+    },
+    {
+      "id": "identifiers-behind-a-next-line",
+      "note": "And U+0085, which `trim()` keeps, kept in every one of them — so the document says exactly what the Hub’s own trim would have left.",
+      "input": {
+        "device_id": "dev_7",
+        "agent": "skynetd/0.1.0",
+        "contracts": "1.0.0",
+        "state": "running",
+        "desired_digest": "sha256:dddd",
+        "progress": {
+          "observed_generation": 41,
+          "desired_generation": 41,
+          "pending": []
+        },
+        "health": {
+          "packages": [
+            {
+              "id": "acme/grasp",
+              "live": true,
+              "readiness": "ready",
+              "age_ms": 12
+            }
+          ],
+          "storage_headroom": {
+            "value": 0.42,
+            "age_ms": 900
+          }
+        },
+        "attestation": {
+          "device_id": "dev_7",
+          "os_image": {
+            "state": "known",
+            "digest": "sha256:aaaa"
+          },
+          "policy": {
+            "state": "known",
+            "digest": "sha256:bbbb"
+          },
+          "embodiment": {
+            "state": "known",
+            "digest": "sha256:cccc"
+          }
+        }
+      },
+      "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":true,\"attestation\":{\"complete\":true,\"embodiment\":{\"digest\":\"sha256:cccc\",\"state\":\"known\",\"why\":null},\"os_image\":{\"digest\":\"sha256:aaaa\",\"state\":\"known\",\"why\":null},\"policy\":{\"digest\":\"sha256:bbbb\",\"state\":\"known\",\"why\":null},\"sentence\":\"dev_7 is running image `sha256:aaaa`, policy `sha256:bbbb`, against body `sha256:cccc`.\",\"unmeasured\":[]},\"blocking\":[],\"claim\":\"applied\",\"contracts\":\"1.0.0\",\"desired_digest\":\"sha256:dddd\",\"detail\":\"Generation 41 is applied and the plan is empty.\",\"device_id\":\"dev_7\",\"generation\":41,\"health\":{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":{\"age_ms\":900,\"value\":0.42},\"temperature_c\":null},\"packages\":[{\"age_ms\":12,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"ready\"}],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"temperature_c\"]},\"limits\":null,\"pending\":[],\"state\":\"running\"}"
+    },
+    {
+      "id": "attested-digests-in-whitespace-only-javascript-trims",
+      "note": "The attestation’s own strings, trimmed with the same set on the way out: the digests §32.1 puts a fleet column on — *which robots are running image sha256:aaaa* — and the reason a slot was not read. The Rust edition tested these for blankness with `trim()`’s set and then put the untrimmed value on the wire, so this robot answered that query with a digest nobody could match.",
+      "input": {
+        "device_id": "dev_7",
+        "agent": "skynetd/0.1.0",
+        "contracts": "1.0.0",
+        "state": "running",
+        "desired_digest": "sha256:dddd",
+        "progress": {
+          "observed_generation": 41,
+          "desired_generation": 41,
+          "pending": []
+        },
+        "health": {
+          "packages": [
+            {
+              "id": "acme/grasp",
+              "live": true,
+              "readiness": "ready",
+              "age_ms": 12
+            }
+          ],
+          "storage_headroom": {
+            "value": 0.42,
+            "age_ms": 900
+          }
+        },
+        "attestation": {
+          "device_id": "dev_7",
+          "os_image": {
+            "state": "known",
+            "digest": "﻿ sha256:aaaa﻿ "
+          },
+          "policy": {
+            "state": "unmeasured",
+            "why": "﻿ the runtime is not answering﻿ "
+          },
+          "embodiment": {
+            "state": "known",
+            "digest": "sha256:cccc"
+          }
+        }
+      },
+      "expected": "{\"agent\":\"skynetd/0.1.0\",\"applied\":true,\"attestation\":{\"complete\":false,\"embodiment\":{\"digest\":\"sha256:cccc\",\"state\":\"known\",\"why\":null},\"os_image\":{\"digest\":\"sha256:aaaa\",\"state\":\"known\",\"why\":null},\"policy\":{\"digest\":null,\"state\":\"unmeasured\",\"why\":\"the runtime is not answering\"},\"sentence\":\"dev_7 is running image `sha256:aaaa`, an unmeasured policy (the runtime is not answering), against body `sha256:cccc`.\",\"unmeasured\":[\"policy\"]},\"blocking\":[],\"claim\":\"applied\",\"contracts\":\"1.0.0\",\"desired_digest\":\"sha256:dddd\",\"detail\":\"Generation 41 is applied and the plan is empty.\",\"device_id\":\"dev_7\",\"generation\":41,\"health\":{\"degraded\":false,\"fields\":{\"battery\":null,\"generation_lag\":null,\"guard_trip_rate\":null,\"storage_headroom\":{\"age_ms\":900,\"value\":0.42},\"temperature_c\":null},\"packages\":[{\"age_ms\":12,\"id\":\"acme/grasp\",\"live\":true,\"readiness\":\"ready\"}],\"stalled\":[],\"undated\":[],\"unmeasured\":[\"battery\",\"generation_lag\",\"guard_trip_rate\",\"temperature_c\"]},\"limits\":null,\"pending\":[],\"state\":\"running\"}"
     }
   ]
 }

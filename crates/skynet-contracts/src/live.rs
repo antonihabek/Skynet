@@ -80,6 +80,7 @@ use skynet_json::Json;
 
 use crate::calibration::Validity;
 use crate::embodiment::FrameFault;
+use crate::js::js_trim;
 use crate::opstate::OperatingState;
 
 /// A joint's measured position, in the units its channel declares.
@@ -201,7 +202,7 @@ pub struct LiveContext {
 /// name the **operator** chose, and the two could reasonably diverge about whitespace without
 /// either being wrong.
 fn addressable(key: &str) -> bool {
-    !key.is_empty() && !key.contains('.') && key.trim() == key
+    !key.is_empty() && !key.contains('.') && js_trim(key) == key
 }
 
 /// Set a path only when there is something finite to say.

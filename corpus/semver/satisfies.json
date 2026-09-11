@@ -424,6 +424,51 @@
         "range": "^2.0.0"
       },
       "expected": "{\"range\":\"^2.0.0\",\"satisfies\":false,\"valid_range\":true,\"valid_version\":true,\"version\":\"2.0.0-rc.1\"}"
+    },
+    {
+      "id": "a-wildcard-in-whitespace-only-javascript-trims",
+      "note": "`trim()` removes a byte-order mark and a no-break space, so this is `*` and constrains nothing. An edition that kept either reads a range with no token in it, which satisfies nothing — a skill its Hub page says runs everywhere, refused everywhere.",
+      "input": {
+        "version": "9.9.9",
+        "range": "﻿ *﻿ "
+      },
+      "expected": "{\"range\":\"﻿ *﻿ \",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"9.9.9\"}"
+    },
+    {
+      "id": "any-behind-a-next-line",
+      "note": "And the other direction. U+0085 is not whitespace to `trim()`, so this is not the word `any`; it is a range with no token in it. Rust, Python and Go all strip the character and would read a range that admits everything.",
+      "input": {
+        "version": "9.9.9",
+        "range": "any"
+      },
+      "expected": "{\"range\":\"any\",\"satisfies\":false,\"valid_range\":false,\"valid_version\":true,\"version\":\"9.9.9\"}"
+    },
+    {
+      "id": "whitespace-only-javascript-trims-between-operator-and-a-lower-bound",
+      "note": "`\\s` matches the byte-order mark and the no-break space, so this is `>=1.2.3` and 1.2.4 is in it. An edition whose `\\s` missed either loses the operator, reads the bare `1.2.3` as an equality, and answers false.",
+      "input": {
+        "version": "1.2.4",
+        "range": ">=﻿ 1.2.3"
+      },
+      "expected": "{\"range\":\">=﻿ 1.2.3\",\"satisfies\":true,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.2.4\"}"
+    },
+    {
+      "id": "a-next-line-between-operator-and-a-lower-bound",
+      "note": "U+0085 is not `\\s` to the reference, so the operator does not reach the version: the token is the bare `1.2.3`, an equality, and 1.2.4 is outside it. An edition whose `\\s` is Unicode reads `>=1.2.3` and answers true.",
+      "input": {
+        "version": "1.2.4",
+        "range": ">=1.2.3"
+      },
+      "expected": "{\"range\":\">=1.2.3\",\"satisfies\":false,\"valid_range\":true,\"valid_version\":true,\"version\":\"1.2.4\"}"
+    },
+    {
+      "id": "a-range-in-another-scripts-digits",
+      "note": "`\\d` is ASCII, so a range written in Arabic-Indic digits has no token in it: nothing satisfies it and it is not a readable range.",
+      "input": {
+        "version": "1.2.3",
+        "range": ">=١.٢.٣"
+      },
+      "expected": "{\"range\":\">=١.٢.٣\",\"satisfies\":false,\"valid_range\":false,\"valid_version\":true,\"version\":\"1.2.3\"}"
     }
   ]
 }

@@ -1,8 +1,11 @@
 # The Python edition
 
-> **It passes the corpus: 1,109 of 1,109 cases, 31 of 31 corpora.** §31.4: *"An edition that has
-> not passed the corpus is not an edition. It cannot carry the name, appear in the matrix, or be
-> installed by `skynetd`."* This one does, and the runner prints the figure on every run.
+> **It passes the corpus — every case in every corpus.** §31.4: *"An edition that has not passed the
+> corpus is not an edition. It cannot carry the name, appear in the matrix, or be installed by
+> `skynetd`."* This one does. The figure is not written here, because this line used to say
+> *1,109 of 1,109* and went on saying it for 39 cases and two corpora after it stopped being true;
+> the runner prints the current one on every run, and `reference/reports/editions.json` holds it,
+> regenerated and checked in CI.
 >
 > **What that is, exactly.** §42 decomposes "edition" into four levels, and this is **L2 —
 > Contracts**: transport, admission, certification, readiness and everything else in `corpus/`,
@@ -83,7 +86,7 @@ package index is an edition that cannot be checked on the machine it is being re
 | `telemetry` | 25 | §74's windows, the coverage they tile, and §15's field conformance |
 | `provenance` | 21 | §56's three classes, the order that makes them ungameable, and §56.5's tolerance |
 | `live` | 20 | §54.2's precondition context, and the rule that absent is not null |
-| | **1,109** | of 1,109 |
+| | | *The counts above are a snapshot from the day the edition finished; `run_corpus.py` prints the current ones.* |
 
 **Every corpus has a handler and every case passes.** The runner still reports the four buckets on
 every run, and it will go straight back to reporting a gap the moment the corpus grows — which it
@@ -668,8 +671,8 @@ low"* rather than producing the refusal §54.2 asks for.
 
 ## Where this edition stands
 
-**Complete at L2.** 31 of 31 corpora, 1,109 of 1,109 cases, 44 self-checks, and both editions run on
-every commit with a ratchet under the Python one.
+**Complete at L2.** Every corpus and every case, the self-checks, and all three editions run on every
+commit with a ratchet under each non-reference one.
 
 What the seven rounds that finished it actually produced is worth separating from the transcription,
 because the transcription was the cheap half:

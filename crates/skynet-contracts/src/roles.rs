@@ -21,6 +21,8 @@
 
 use alloc::string::{String, ToString};
 
+use crate::js::js_trim;
+
 /// Kinematic chains a role may belong to.
 ///
 /// Deliberately small and body-plan agnostic. `aux` exists so a body plan nobody anticipated — a
@@ -111,7 +113,7 @@ pub fn parse_role(role: Option<&str>) -> Option<ParsedRole> {
     if role.is_empty() {
         return None;
     }
-    let normalised = role.trim().to_lowercase();
+    let normalised = js_trim(role).to_lowercase();
     if normalised.is_empty() {
         return None;
     }

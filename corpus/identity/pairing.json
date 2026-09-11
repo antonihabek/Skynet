@@ -169,6 +169,30 @@
         "input": "ß234567"
       },
       "expected": "{\"code\":\"SS234567\",\"fault\":null}"
+    },
+    {
+      "id": "a-credential-behind-a-byte-order-mark",
+      "note": "Copied out of a file that begins with one. `trim()` removes the mark, so this is a credential and the refusal says so. Rust and Python kept the mark, missed the prefix, and told the operator they had typed twenty-two characters.",
+      "input": {
+        "input": "﻿ skd_abcdef0123456789"
+      },
+      "expected": "{\"code\":null,\"fault\":{\"code\":\"looks_like_a_credential\",\"detail\":\"This is a device credential — it begins `skd_` — and pairing takes the short code the Hub showed you, not the credential it hands back afterwards. Nothing has been sent. Treat the credential as exposed if it has been on a screen somebody else could see.\",\"position\":null}}"
+    },
+    {
+      "id": "a-credential-behind-a-next-line",
+      "note": "U+0085 is not whitespace to `trim()`, so the prefix is not at the start and this is refused by length. An edition whose trim removed the character would call it a credential — the kinder answer, and still a different one, which is the only thing the corpus is asking about.",
+      "input": {
+        "input": "skd_abcdef0123456789"
+      },
+      "expected": "{\"code\":null,\"fault\":{\"code\":\"too_long\",\"detail\":\"A pairing code is 8 characters and this is 21. Hyphens and spaces do not count towards it.\",\"position\":null}}"
+    },
+    {
+      "id": "a-credential-spelled-with-a-kelvin-sign",
+      "note": "`toLowerCase()` turns U+212A into the ASCII k, so this begins `skd_` and is refused as a credential. The Rust edition lower-cased ASCII only, on the stated ground that a full mapping would fold characters no credential prefix contains — and this is the one that it does.",
+      "input": {
+        "input": "sKd_abcdef0123456789"
+      },
+      "expected": "{\"code\":null,\"fault\":{\"code\":\"looks_like_a_credential\",\"detail\":\"This is a device credential — it begins `skd_` — and pairing takes the short code the Hub showed you, not the credential it hands back afterwards. Nothing has been sent. Treat the credential as exposed if it has been on a screen somebody else could see.\",\"position\":null}}"
     }
   ]
 }

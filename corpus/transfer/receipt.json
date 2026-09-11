@@ -74,6 +74,36 @@
         }
       },
       "expected": "{\"code\":\"digest_mismatch\",\"detail\":\"The receiver holds the right number of bytes and they are not this window's. The digest was recorded at the seal, before any transfer existed (§77.1), so it is the half of this comparison that is evidence. No receipt is written and the next attempt begins at zero.\",\"ok\":false,\"restart\":true}"
+    },
+    {
+      "id": "a-reported-digest-compared-after-trimming",
+      "note": "Trimmed with the set `trim()` uses, so the window arrived and a receipt is written.",
+      "input": {
+        "reported": {
+          "bytes": 4000000,
+          "digest": "sha256:cccc﻿ "
+        },
+        "window": {
+          "digest": "sha256:cccc",
+          "size": 4000000
+        }
+      },
+      "expected": "{\"code\":\"complete\",\"detail\":\"The receiver holds the whole window and it hashes to what was sealed. A receipt is written beside the recording; the recording itself is kept, because §39.1's local route is for the operator standing next to the robot (§79.4).\",\"ok\":true,\"restart\":false}"
+    },
+    {
+      "id": "a-reported-digest-behind-a-next-line",
+      "note": "And U+0085 survives the trim, so the far side holds different bytes and no receipt is written. An edition that stripped the character would record an upload that did not happen.",
+      "input": {
+        "reported": {
+          "bytes": 4000000,
+          "digest": "sha256:cccc"
+        },
+        "window": {
+          "digest": "sha256:cccc",
+          "size": 4000000
+        }
+      },
+      "expected": "{\"code\":\"digest_mismatch\",\"detail\":\"The receiver holds the right number of bytes and they are not this window's. The digest was recorded at the seal, before any transfer existed (§77.1), so it is the half of this comparison that is evidence. No receipt is written and the next attempt begins at zero.\",\"ok\":false,\"restart\":true}"
     }
   ]
 }

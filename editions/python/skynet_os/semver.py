@@ -20,6 +20,8 @@ from __future__ import annotations
 import re
 from typing import Any, Final
 
+from .js import JS_SPACE as _JS_SPACE, js_trim as _js_trim
+
 __all__ = [
     "ParsedVersion",
     "compare_to_json",
@@ -32,10 +34,12 @@ __all__ = [
     "version_to_json",
 ]
 
-_SEMVER_RE: Final = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$")
-_COMPARATOR_RE: Final = re.compile(r"^(>=|<=|>|<|\^|~|=)?\s*(.+)$", re.S)
-_TOKEN_RE: Final = re.compile(r"(?:>=|<=|>|<|\^|~|=)?\s*\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?")
-_NUMERIC_RE: Final = re.compile(r"^\d+$")
+_SEMVER_RE: Final = re.compile(r"^([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9A-Za-z.-]+))?\Z")
+_COMPARATOR_RE: Final = re.compile(r"^(>=|<=|>|<|\^|~|=)?" + _JS_SPACE + r"*(.+)\Z", re.S)
+_TOKEN_RE: Final = re.compile(
+    r"(?:>=|<=|>|<|\^|~|=)?" + _JS_SPACE + r"*[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?"
+)
+_NUMERIC_RE: Final = re.compile(r"^[0-9]+\Z")
 
 
 def _number(text: str) -> float:
@@ -73,7 +77,7 @@ class ParsedVersion:
 def parse_version(text: str | None) -> ParsedVersion | None:
     if text is None:
         return None
-    trimmed = text.strip()
+    trimmed = _js_trim(text)
     match = _SEMVER_RE.match(trimmed)
     if match is None:
         return None
@@ -156,7 +160,7 @@ class _Comparator:
 
 
 def _parse_comparator(token: str) -> _Comparator | None:
-    match = _COMPARATOR_RE.match(token.strip())
+    match = _COMPARATOR_RE.match(_js_trim(token))
     if match is None:
         return None
     version = parse_version(match.group(2))
@@ -206,7 +210,7 @@ def _parse_range(range_text: str) -> list[list[_Comparator] | None] | None:
     ``None`` for the whole result means the range is a wildcard — every version satisfies it and
     there is nothing to compare against.
     """
-    trimmed = range_text.strip()
+    trimmed = _js_trim(range_text)
     if not trimmed or trimmed == "*" or trimmed.lower() == "any":
         return None
 
@@ -214,7 +218,7 @@ def _parse_range(range_text: str) -> list[list[_Comparator] | None] | None:
     for group in trimmed.split("||"):
         # Tokenised on the operator rather than on whitespace, so ">= 1.2.0" and ">=1.2.0" both
         # parse. A range written either way means the same thing to the person who wrote it.
-        tokens = _TOKEN_RE.findall(group.strip())
+        tokens = _TOKEN_RE.findall(_js_trim(group))
         if not tokens:
             groups.append(None)
             continue

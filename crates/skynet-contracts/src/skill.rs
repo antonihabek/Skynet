@@ -46,6 +46,7 @@ use skynet_json::Json;
 
 // §54.4's `running` row: "a skill is not an exemption from the kernel". The lifecycle reads §27's
 // machine rather than keeping a second opinion about whether the robot is commanding.
+use crate::js::js_trim;
 use crate::opstate::OperatingState;
 use crate::predicate::{self, Outcome, UnevaluableReason};
 use crate::round_half_away;
@@ -1426,7 +1427,7 @@ pub fn progress_from_json(input: &Json) -> Progress {
         power_withheld: input
             .get("power_withheld")
             .and_then(Json::as_str)
-            .map(str::trim)
+            .map(js_trim)
             .filter(|sentence| !sentence.is_empty())
             .map(str::to_string),
         elapsed_ms: input.get("elapsed_ms").and_then(Json::as_f64),

@@ -20,6 +20,7 @@ this edition has reached, and lowering it is a decision somebody makes in a diff
 from __future__ import annotations
 
 import argparse
+import io
 import sys
 from pathlib import Path
 
@@ -53,6 +54,15 @@ def main() -> int:
         help="Fail if fewer than this many cases passed. The ratchet — see the module docstring.",
     )
     args = parser.parse_args()
+
+    # A failure is described with the bytes it is about, and some of those are exactly the characters
+    # a legacy console code page cannot encode. The whitespace cases are built around a byte-order
+    # mark, and on the Windows console this repository is developed on (cp1250) the first one to
+    # fail crashed this runner in the middle of its report — so the edition looked broken in a way
+    # that said nothing about the case. Escaping what the console cannot show keeps the report, and
+    # an escaped invisible character is more use to somebody reading a diff than the character.
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(errors="backslashreplace")
 
     root = (
         Path(args.corpus_root)

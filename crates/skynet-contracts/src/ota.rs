@@ -54,6 +54,7 @@ use alloc::vec::Vec;
 use skynet_json::Json;
 
 use crate::admission::{Severity, SignatureState};
+use crate::js::js_trim;
 
 /// The components an OS bundle may declare that it changes.
 ///
@@ -268,7 +269,7 @@ fn fault(
 pub fn admit_bundle(bundle: &BundleManifest, subject: &UpdateSubject) -> BundleVerdict {
     let mut faults = Vec::new();
 
-    if bundle.version.trim().is_empty() {
+    if js_trim(&bundle.version).is_empty() {
         faults.push(fault(
             BundleFaultCode::Unversioned,
             Severity::Error,
@@ -282,7 +283,7 @@ pub fn admit_bundle(bundle: &BundleManifest, subject: &UpdateSubject) -> BundleV
     // Before the certification gate, because that gate binds a bench pass to this digest and a
     // bundle with no digest cannot be bound to anything. Reported separately so the two refusals do
     // not read as one problem.
-    if bundle.digest.trim().is_empty() {
+    if js_trim(&bundle.digest).is_empty() {
         faults.push(fault(
             BundleFaultCode::Undigested,
             Severity::Error,

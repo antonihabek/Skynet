@@ -76,6 +76,36 @@
         }
       },
       "expected": "{\"code\":\"match\",\"detail\":\"These bytes are the release the manifest describes.\",\"discard\":false,\"ok\":true}"
+    },
+    {
+      "id": "digests-compared-after-trimming",
+      "note": "Both digests are trimmed with the set `trim()` uses, so these match. An edition that kept the byte-order mark would discard an image it had just verified.",
+      "input": {
+        "arrived": {
+          "digest": "﻿ sha256:aaaa",
+          "size": 100000
+        },
+        "expected": {
+          "digest": "sha256:aaaa﻿ ",
+          "size": 100000
+        }
+      },
+      "expected": "{\"code\":\"match\",\"detail\":\"These bytes are the release the manifest describes.\",\"discard\":false,\"ok\":true}"
+    },
+    {
+      "id": "a-next-line-makes-a-different-digest",
+      "note": "And U+0085 survives the trim, so these do not.",
+      "input": {
+        "arrived": {
+          "digest": "sha256:aaaa",
+          "size": 100000
+        },
+        "expected": {
+          "digest": "sha256:aaaa",
+          "size": 100000
+        }
+      },
+      "expected": "{\"code\":\"digest_mismatch\",\"detail\":\"These bytes do not hash to what the signed release manifest says this bundle is. §12 binds every gate it applies to that digest, so bytes that are not it are not this release — do not install them, and find out where they came from. Discarded, because bytes that will never verify are bytes a resume would append to for ever.\",\"discard\":true,\"ok\":false}"
     }
   ]
 }

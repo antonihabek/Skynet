@@ -465,6 +465,54 @@
         }
       },
       "expected": "{\"admitted\":false,\"faults\":[{\"code\":\"unversioned\",\"message\":\"This bundle names no version, so nothing can say what the robot would be running afterwards. Rebuild it with a version.\",\"severity\":\"error\",\"subjects\":[]},{\"code\":\"undigested\",\"message\":\"This bundle names no digest. §12's certification gate binds a bench pass to the exact bytes it was taken against, and bytes with no name cannot be bound to.\",\"severity\":\"error\",\"subjects\":[]},{\"code\":\"signature_absent\",\"message\":\"Nobody signed this bundle. §12 signs images with the same Ed25519 machinery as releases, and an unsigned root filesystem is a root filesystem anybody on the path could have written.\",\"severity\":\"error\",\"subjects\":[]},{\"code\":\"compatibility_undeclared\",\"message\":\"This bundle declares no compatible machines, so nothing here can tell whether it is built for this one.\",\"severity\":\"warning\",\"subjects\":[]}],\"gated_components\":[]}"
+    },
+    {
+      "id": "a-version-and-digest-of-whitespace-only-javascript-trims",
+      "note": "Both blank to `trim()`, so this bundle is unversioned and undigested — and the second is the one that matters, because §12’s certification gate binds a bench pass to the digest. An edition that kept the byte-order mark would treat an invisible character as bytes with a name.",
+      "input": {
+        "bundle": {
+          "version": "﻿ ",
+          "channel": "stable",
+          "digest": "﻿ ",
+          "compatible": [
+            "bench-arm-v1"
+          ],
+          "changes": [
+            "userspace"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "verified"
+        }
+      },
+      "expected": "{\"admitted\":false,\"faults\":[{\"code\":\"unversioned\",\"message\":\"This bundle names no version, so nothing can say what the robot would be running afterwards. Rebuild it with a version.\",\"severity\":\"error\",\"subjects\":[]},{\"code\":\"undigested\",\"message\":\"This bundle names no digest. §12's certification gate binds a bench pass to the exact bytes it was taken against, and bytes with no name cannot be bound to.\",\"severity\":\"error\",\"subjects\":[]}],\"gated_components\":[]}"
+    },
+    {
+      "id": "a-version-and-digest-that-are-a-next-line",
+      "note": "Not blank to `trim()`, so neither refusal applies. The corpus is not saying this is a good manifest; it is saying every edition reaches the same verdict about it.",
+      "input": {
+        "bundle": {
+          "version": "",
+          "channel": "stable",
+          "digest": "",
+          "compatible": [
+            "bench-arm-v1"
+          ],
+          "changes": [
+            "userspace"
+          ]
+        },
+        "subject": {
+          "running_version": "1.3.0",
+          "board": "bench-arm-v1",
+          "channel": "stable",
+          "signature": "verified"
+        }
+      },
+      "expected": "{\"admitted\":true,\"faults\":[],\"gated_components\":[]}"
     }
   ]
 }

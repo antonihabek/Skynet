@@ -14,6 +14,7 @@
 
 #include "skynet_os/contracts.hpp"
 #include "skynet_os/corpus.hpp"
+#include "skynet_os/js.hpp"
 #include "skynet_os/roles.hpp"
 #include "skynet_os/text.hpp"
 
@@ -66,7 +67,7 @@ std::optional<ParsedRole> parse(const std::string& role) {
     return std::nullopt;
   }
 
-  const std::string text = text::ascii_lower(text::strip(role));
+  const std::string text = js::to_lower(js::trim(role));
   if (text.empty()) {
     return std::nullopt;
   }

@@ -36,6 +36,8 @@ use alloc::string::{String, ToString};
 
 use skynet_json::Json;
 
+use crate::js::js_trim;
+
 pub use crate::bundle::Bearer;
 
 /// What to do about one sealed window (§79).
@@ -132,7 +134,7 @@ pub struct UploadPlan {
 /// receipt is free; refusing costs nothing; waiting for a link costs nothing; asking costs one
 /// small request; and only then are megabytes considered.
 pub fn plan_upload(subject: &UploadSubject) -> UploadPlan {
-    let digest = subject.digest.trim();
+    let digest = js_trim(&subject.digest);
     let size = subject.size;
 
     if subject.receipt {
@@ -211,7 +213,7 @@ pub fn plan_upload(subject: &UploadSubject) -> UploadPlan {
     };
 
     let bytes = held.bytes;
-    let held_digest = held.digest.as_deref().unwrap_or("").trim();
+    let held_digest = js_trim(held.digest.as_deref().unwrap_or(""));
 
     if bytes >= size {
         if bytes == size && !held_digest.is_empty() && held_digest == digest {
@@ -339,8 +341,8 @@ pub struct UploadCheck {
 /// Short keeps the offset, for `check_bundle`'s reason in the other direction: a transfer that
 /// stopped early is what a link dropping looks like, and it is exactly what a resume is for.
 pub fn check_upload(reported: &Reported, window: &Window) -> UploadCheck {
-    let want = window.digest.trim();
-    let got = reported.digest.as_deref().unwrap_or("").trim();
+    let want = js_trim(&window.digest);
+    let got = js_trim(reported.digest.as_deref().unwrap_or(""));
     let size = window.size;
     let bytes = reported.bytes;
 

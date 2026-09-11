@@ -227,6 +227,45 @@
         }
       },
       "expected": "{\"decision\":\"restart\",\"detail\":\"The receiver claims 4000000 bytes for a window of 4000000, and does not say what they hash to. A complete object nobody will name is not evidence this window arrived, and writing a receipt for it would record an upload that may never have happened. It is sent again from the beginning.\",\"from\":0}"
+    },
+    {
+      "id": "a-window-digest-of-whitespace-only-javascript-trims",
+      "note": "Blank to `trim()`, so a window with no name and nowhere to go.",
+      "input": {
+        "subject": {
+          "digest": "﻿ ",
+          "size": 4000000,
+          "held": null,
+          "receipt": false,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"refuse\",\"detail\":\"This window carries no digest, so there is no address to send it to and nothing to check the far side's answer against. §79.1 makes the digest the route, and bytes with no name have nowhere to go.\",\"from\":0}"
+    },
+    {
+      "id": "a-held-digest-compared-after-trimming",
+      "note": "The receiver’s digest is trimmed with the same set, so it holds this window and the re-send is avoided. An edition that kept the byte-order mark would send four megabytes again.",
+      "input": {
+        "subject": {
+          "digest": "sha256:cccc",
+          "size": 4000000,
+          "held": {
+            "bytes": 4000000,
+            "digest": "﻿ sha256:cccc﻿ "
+          },
+          "receipt": false,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"done\",\"detail\":\"The receiver holds all 4000000 bytes and says they hash to this window's digest. Nothing is sent and a receipt is written — which is the state a robot reaches after an upload whose acknowledgement was lost.\",\"from\":0}"
     }
   ]
 }

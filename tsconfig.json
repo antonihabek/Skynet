@@ -23,5 +23,8 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["reference/typescript/**/*.ts", "tools/**/*.ts"]
+  // `editions/` because an edition may carry a generator of its own — the C++ edition's case
+  // tables are read out of the engine by `editions/cpp/tools/unicode-case.ts` — and a generator
+  // outside this list is the untyped script this file was written to stop.
+  "include": ["reference/typescript/**/*.ts", "tools/**/*.ts", "editions/**/*.ts"]
 }

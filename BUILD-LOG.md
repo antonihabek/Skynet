@@ -8670,3 +8670,70 @@ pose set, and §45.3 signs the result, which no robot can do. That is a boundary
 and it is the same one §37.1 records for packages.
 
 Nothing is pushed.
+
+---
+
+## 2026-09-11 — the audit answered, and a second edition started and stopped mid-corpus
+
+Asked whether Hub, Console and OS are built to their plans, then to verify the Python edition of the
+OS and build another. The full account is `PROGRESS.md`, seventy-ninth entry. In brief:
+
+| | Verified today |
+|---|---|
+| Skynet OS | Built to §73's table except where §45 needs a robot. Test counts are platform-specific — **Linux 1,825 · Windows 1,738**, ~87 `cfg`-gated tests apart |
+| Skynet Hub | At its plan's §33 log; four items open, all four blocked on an owner rather than on code |
+| Skynet Console | Fifth owned layer. **Not buildable here** — targets `net9.0`, machine has .NET 8 runtimes and no SDK |
+| Python edition | **1,148 of 1,148, 33 of 33 corpora**, 44 self-checks. Complete at L2 |
+| C++ edition (new) | **899 of 1,148, 0 failed, 27 of 33 corpora.** Round trip 1,161 checked, 0 failed |
+
+**Stopped mid-corpus and the tree is red.** `editions/cpp/src/contracts/identity.cpp` is written and
+does not compile — file-local names in an anonymous namespace inside `skynet::identity`, used from
+`skynet::contracts`. Fix known, not applied. `power.cpp`, `calibration.cpp`, `identity.cpp` and
+`identity.hpp` are uncommitted; everything else is on `main` at `6adad88`.
+
+Remaining for the C++ edition: identity (47), checkin (25), admission (40), blackbox (22), ota (29),
+skill (86) — 249 cases.
+
+Three documents are wrong and were left as found: `editions/python/README.md` claims 1,109 of 1,109
+and 31 of 31; §73's transport row is contradicted by the Skills row in the same table;
+`tools/edition-report.mjs` invokes `python3`, which is not the interpreter's name on this host.
+
+Nothing is pushed.
+
+---
+
+## 2026-09-11 — the C++ edition complete, and three editions brought back to one whitespace
+
+Continued the editions from the plan, with every edition held to Rust. The full account is
+`PROGRESS.md`, eightieth entry. In brief:
+
+| | Verified today (Windows) |
+|---|---|
+| Corpus | **1,199** cases (+51, all divergence probes); regenerates byte-identical from the oracle |
+| Rust (reference) | **1,199 / 1,199**; `cargo test --workspace` **1,740**, 0 failed; fmt and clippy `-D warnings` clean |
+| Python | **1,199 / 1,199**; self-check **47** |
+| C++ | **1,199 / 1,199, 33 of 33 corpora**; JSON round trip 1,212 / 0 failed; self-check **20**; `make check` green |
+| Edition report | 3 editions x 1,199, synced into the Hub; Hub suites 29 / 29 |
+
+**The drift.** JavaScript's `trim()` set (removes U+FEFF and U+00A0, keeps U+0085) was documented in
+Rust's `semver.rs` and applied in 2 of Rust's 12 trimming files, 3 of Python's 11 and 4 of C++'s 8.
+Probes at every trim site found Rust, Python and C++ each diverging; all three now use the set, each
+behind a gate: `crates/skynet-contracts/clippy.toml` (disallowed methods), a token scan in
+`editions/python/self_check.py`, and the C++ ASCII helpers deleted outright. The same sweep found
+KELVIN SIGN lower-casing into ASCII (Rust and C++ had ASCII-only lowering), Python's `\d`, `\s` and
+`$` meaning Unicode digits, Unicode whitespace and end-before-newline, and a Rust bug that emitted an
+untrimmed attestation digest.
+
+**C++.** Compiles again; ota, checkin, admission, skill and blackbox written from the reference; case
+tables generated from the oracle's engine with 219 engine-produced vectors; Makefile rebuilt (derived
+sources, per-object parallel build, ratchet 1,199); `tests/self_check.cpp` and a README exist.
+
+**Tooling and CI.** `edition-report.mjs` runs on Windows and lists C++. CI: Python ratchet 1109 to
+1199, `make -C editions/cpp check` in the corpus job, and a `cpp-case-tables` job on Node 26.
+
+**Hub (Robot Overflow).** `lib/skynet/os/reports/editions.json` and `lib/skynet/os/mirror-digests.json`
+synced by `check-contract-mirrors --sync`; two comments in `lib/skynet/editions.ts` corrected.
+
+Open: nothing is committed in either repository; the new CI steps have not run on Linux; a fourth L2
+edition (Go is the next Full row) was not started; two reference behaviours (an unknown signature
+state, an unknown measure state) are reproduced as found and recorded as specification questions.

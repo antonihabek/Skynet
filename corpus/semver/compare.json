@@ -111,6 +111,33 @@
       "expected": "{\"a\":{\"major\":1,\"minor\":2,\"patch\":3,\"prerelease\":null,\"raw\":\"1.2.3\"},\"b\":{\"major\":1,\"minor\":2,\"patch\":3,\"prerelease\":null,\"raw\":\"1.2.3\"},\"compare\":0}"
     },
     {
+      "id": "trimmed-of-whitespace-only-javascript-trims",
+      "note": "With the two characters `trim()` removes and other languages do not agree about. The version parses, and `raw` is what is left.",
+      "input": {
+        "a": "﻿ 1.2.3﻿ ",
+        "b": "1.2.3"
+      },
+      "expected": "{\"a\":{\"major\":1,\"minor\":2,\"patch\":3,\"prerelease\":null,\"raw\":\"1.2.3\"},\"b\":{\"major\":1,\"minor\":2,\"patch\":3,\"prerelease\":null,\"raw\":\"1.2.3\"},\"compare\":0}"
+    },
+    {
+      "id": "a-next-line-is-not-trimmed",
+      "note": "U+0085 stays, so the left side does not parse — and an unparseable side compares equal, which is why `a` is in the expected value: without it this case would pass an edition that trimmed the character away.",
+      "input": {
+        "a": "1.2.3",
+        "b": "1.2.3"
+      },
+      "expected": "{\"a\":null,\"b\":{\"major\":1,\"minor\":2,\"patch\":3,\"prerelease\":null,\"raw\":\"1.2.3\"},\"compare\":0}"
+    },
+    {
+      "id": "digits-from-another-script",
+      "note": "The reference’s `\\d` is ASCII and `Number()` reads nothing else, so a version written in Arabic-Indic digits does not parse. An edition whose `\\d` is Unicode read it as 1.2.3.",
+      "input": {
+        "a": "١.٢.٣",
+        "b": "1.2.3"
+      },
+      "expected": "{\"a\":null,\"b\":{\"major\":1,\"minor\":2,\"patch\":3,\"prerelease\":null,\"raw\":\"1.2.3\"},\"compare\":0}"
+    },
+    {
       "id": "leading-zeros",
       "note": "Numeric components are numbers, so leading zeros do not change one.",
       "input": {
