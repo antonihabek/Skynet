@@ -23,8 +23,9 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  // `editions/` because an edition may carry a generator of its own — the C++ edition's case
-  // tables are read out of the engine by `editions/cpp/tools/unicode-case.ts` — and a generator
-  // outside this list is the untyped script this file was written to stop.
+  // `editions/` because an edition may carry a generator of its own, and a generator outside this
+  // list is the untyped script this file was written to stop. The case tables both the C++ and Go
+  // editions map with are read out of the engine by `tools/unicode-case.ts`, which this already
+  // covers; the entry stays because the next edition-local generator should be typed too.
   "include": ["reference/typescript/**/*.ts", "tools/**/*.ts", "editions/**/*.ts"]
 }
