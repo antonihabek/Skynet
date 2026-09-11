@@ -21,6 +21,7 @@ import (
 // edition" is not satisfied by a table with fewer entries in it.
 func Dispatch() corpus.Dispatch {
 	return corpus.Dispatch{
+		"certification/award":    certificationAward,
 		"digest/version":         versionDigest,
 		"intent/offer":           intentOffer,
 		"media/pool":             mediaPool,
@@ -30,11 +31,15 @@ func Dispatch() corpus.Dispatch {
 		"opstate/properties":     opstateProperties,
 		"opstate/warning":        opstateWarning,
 		"predicate/evaluate":     predicateEvaluate,
+		"provenance/classify":    provenanceClassify,
+		"provenance/scores":      provenanceScores,
 		"readiness/fleet":        readinessFleet,
 		"readiness/robot":        readinessRobot,
 		"roles/vocabulary":       rolesVocabulary,
 		"semver/compare":         semverCompare,
 		"semver/satisfies":       semverSatisfies,
+		"telemetry/coverage":     telemetryCoverage,
+		"telemetry/window":       telemetryWindow,
 		"vocabulary/closed-sets": closedSets,
 		"watchdog/command-loss":  watchdogCase,
 		"watchdog/nesting":       watchdogCase,
