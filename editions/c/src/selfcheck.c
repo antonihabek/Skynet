@@ -19,10 +19,12 @@
  */
 #include <math.h>
 #include <stdio.h>
+#include <uchar.h>
 #include <string.h>
 
 #include "skynet_os/arena.h"
 #include "skynet_os/corpus.h"
+#include "skynet_os/js.h"
 #include "skynet_os/parse.h"
 #include "skynet_os/value.h"
 #include "skynet_os/write.h"
@@ -359,6 +361,126 @@ static void accounting(sk_arena *arena)
     expect_int("and is not counted as unimplemented", refused.unanswered, 0);
 }
 
+/* ── 5. The case tables, against whole strings the engine converted ────────── */
+
+typedef struct {
+    bool upper;
+    const char32_t *in;
+    const char32_t *out;
+} sk_case_vector;
+
+#include "../tests/case_vectors.inc"
+
+/* A char32_t string as UTF-8, which is what `sk_js_upper` and `sk_js_lower` take. */
+static const char *utf8_of(sk_arena *arena, const char32_t *points, size_t *out_len)
+{
+    sk_buf out;
+    sk_buf_init(&out, arena);
+    for (size_t at = 0; points[at] != 0; at += 1) {
+        char encoded[4];
+        size_t width = sk_utf8_encode((uint32_t)points[at], encoded);
+        sk_buf_append(&out, encoded, width);
+    }
+    *out_len = out.len;
+    return out.bytes == NULL ? "" : out.bytes;
+}
+
+static void case_tables(sk_arena *arena)
+{
+    (void)printf("the case tables\n");
+
+    /* The tables live in `src/unicode_case.inc`, which only `src/js.c` includes, and the vectors here
+     * carry their own version stamp. Two files generated under different Unicode versions would
+     * disagree about characters neither of them is wrong about, and the disagreement would read as
+     * hundreds of defects — so the two stamps are compared across the file boundary. */
+    expect_text("the tables and the vectors are one Unicode version", sk_js_unicode_version(),
+                SK_VECTORS_UNICODE_VERSION);
+
+    /*
+     * The mapping tables are binary-searched, so their order is load-bearing: a table that lost it
+     * would still answer most lookups, which is the failure that passes a corpus run and breaks on
+     * one character nobody tested.
+     */
+    expect_true("the upper table is ascending", sk_js_tables_sorted());
+
+    /*
+     * 219 whole strings the engine converted. The tables are single code points and cannot be wrong
+     * about a string on their own; the code that walks a string with them, and applies the sigma
+     * rule, can — and these are what would say so (finding 163).
+     */
+    size_t vector_count = sizeof case_vectors / sizeof case_vectors[0];
+    int wrong = 0;
+    for (size_t at = 0; at < vector_count; at += 1) {
+        const sk_case_vector *vector = &case_vectors[at];
+        size_t in_len = 0;
+        size_t wanted_len = 0;
+        const char *in = utf8_of(arena, vector->in, &in_len);
+        const char *wanted = utf8_of(arena, vector->out, &wanted_len);
+        size_t got_len = 0;
+        const char *got = vector->upper ? sk_js_upper(arena, in, in_len, &got_len)
+                                        : sk_js_lower(arena, in, in_len, &got_len);
+        if (got_len != wanted_len || memcmp(got, wanted, got_len) != 0) {
+            wrong += 1;
+            if (wrong <= 5) {
+                (void)printf("  vector %zu (%s): expected \"%s\", got \"%s\"\n", at,
+                             vector->upper ? "upper" : "lower", wanted, got);
+            }
+        }
+    }
+    checks += 1;
+    if (wrong != 0) {
+        failures += 1;
+        (void)printf("  %d of %zu case vectors disagree with the engine\n", wrong, vector_count);
+    }
+
+    /* The three mappings the header says a C library cannot do, named so a reader can see them. */
+    size_t len = 0;
+    expect_text("a sharp s upper-cases to two letters",
+                sk_js_upper(arena, "\xc3\x9f", 2, &len), "SS");
+    expect_text("the Kelvin sign lower-cases to an ASCII k",
+                sk_js_lower(arena, "\xe2\x84\xaa", 3, &len), "k");
+    /* A capital sigma at the end of a word is a *different* letter from one in the middle, which is
+     * the whole reason the ranges are in the table beside the mappings. */
+    expect_text("a final sigma", sk_js_lower(arena, "\xce\x9f\xce\xa3", 4, &len),
+                "\xce\xbf\xcf\x82");
+    expect_text("and a medial one", sk_js_lower(arena, "\xce\x9f\xce\xa3\xce\x9f", 6, &len),
+                "\xce\xbf\xcf\x83\xce\xbf");
+
+    /* `trim` removes ECMAScript's whitespace, which is not `isspace`'s: the semver corpus holds a
+     * range written with a U+FEFF before the version, and the reference trims it. */
+    expect_text("trim removes a zero-width no-break space",
+                sk_js_trim(arena, "\xef\xbb\xbf 1.2.3 \xef\xbb\xbf", 13, &len), "1.2.3");
+    expect_text("trim leaves an interior space",
+                sk_js_trim(arena, "  a b  ", 7, &len), "a b");
+    expect_text("trim of nothing but space", sk_js_trim(arena, "   ", 3, &len), "");
+
+    /* Number::toString is not the canonical writer, and the two differ in both directions. */
+    expect_text("a ten-millionth is exponential here", sk_js_number_to_string(arena, 1e-7), "1e-7");
+    expect_text("and so is ten to the twenty-first",
+                sk_js_number_to_string(arena, 1e21), "1e+21");
+    expect_text("a millionth is not", sk_js_number_to_string(arena, 1e-6), "0.000001");
+    expect_text("ten to the twentieth is not",
+                sk_js_number_to_string(arena, 1e20), "100000000000000000000");
+    expect_text("an integer", sk_js_number_to_string(arena, 100), "100");
+    expect_text("a negative", sk_js_number_to_string(arena, -1.5), "-1.5");
+    expect_text("negative zero is zero here too", sk_js_number_to_string(arena, -0.0), "0");
+    /* Where the canonical writer refuses, this renders the word — and the difference matters because
+     * these end up inside frozen message strings. */
+    expect_text("NaN is a word", sk_js_number_to_string(arena, (double)NAN), "NaN");
+    expect_text("and so is infinity", sk_js_number_to_string(arena, (double)INFINITY), "Infinity");
+
+    /* ToString over a value, which is what a template literal does. */
+    expect_text("an absent field", sk_js_to_string(arena, NULL, false), "undefined");
+    expect_text("a null field", sk_js_to_string(arena, sk_null(), true), "null");
+    sk_value *array = sk_array(arena);
+    sk_push(arena, array, sk_number(arena, 1));
+    sk_push(arena, array, sk_null());
+    sk_push(arena, array, sk_string(arena, "a"));
+    expect_text("an array joins with commas and writes null as nothing",
+                sk_js_to_string(arena, array, true), "1,,a");
+    expect_text("an object", sk_js_to_string(arena, sk_object(arena), true), "[object Object]");
+}
+
 int main(int argc, char **argv)
 {
     for (int at = 1; at < argc; at += 1) {
@@ -378,6 +500,7 @@ int main(int argc, char **argv)
     writer(arena);
     parser(arena);
     accounting(arena);
+    case_tables(arena);
     sk_arena_free(arena);
 
     (void)printf("self check  %d checks, %d failed\n", checks, failures);
