@@ -13322,13 +13322,24 @@ rather than an inconvenience: an edition nobody has run against the corpus is no
 | Rust (reference) | 1,199 / 1,199 | unchanged, verified |
 | Python | 1,199 / 1,199 | unchanged, verified |
 | C++ | 1,199 / 1,199 | unchanged, verified after the generator move |
-| **Go** | — | **401 / 1,199, 11 of 33 corpora, 0 failed** |
+| **Go** | — | **624 / 1,199, 19 of 33 corpora complete, 1 partial, 0 failed** |
 | `editions.json` | 3 editions × 1,199 | unchanged — Go is deliberately absent |
 
 Every step of `make -C editions/go check` is green: gofmt, `go vet`, the case-vector tests, the
 canonical round trip over all 1,199 expected strings, the self-check, and the corpus at its ratchet.
-The eleven corpora answered are vocabulary, roles, semver, digest, predicate, opstate, observation,
-watchdog, media, intent and readiness — **every one of them passing on its first run**.
+The nineteen complete are birth, calibration, certification, digest, intent, media, observation,
+opstate, ota, power, predicate, provenance, readiness, roles, semver, telemetry, transfer,
+vocabulary and watchdog. `checkin` is **partial**: its claim and health files pass and
+`checkin/document` is declined, because it needs the guard report, which needs `resolveLimits`,
+which needs the frames and kinematics stack. Declined rather than half-answered — §31.4 wants a
+corpus an edition answers *part* of to be visibly neither complete nor missing, and the runner
+prints it that way.
+
+All but two of the files passed on their first run. The two that did not were the same mistake
+twice, and it is worth naming: `telemetry/window` and `ota/boot` put their subject at the *top
+level* of the case input where their sibling files wrap it in a named field, and reading the wrong
+one produced a plausible answer rather than an error — `not_pending` for every boot, which is what a
+boot with no evidence legitimately gets.
 
 Go is absent from `reference/reports/editions.json` on purpose. `tools/edition-report.mjs` refuses
 any edition with a non-zero unimplemented count, which is §31.4 enforced rather than described, and
@@ -13411,10 +13422,12 @@ beside the compiler and is now invoked directly.
 
 ### Open
 
-1. **22 corpora remain**, and three of them are the expensive ones: `safety.ts` (limits and cycle,
+1. **14 corpora remain**, and three of them are the expensive ones: `safety.ts` (limits and cycle,
    1,144 lines, and it needs the frames and kinematics stack first), `embodiment.ts`'s transport,
-   and `skill.ts`. Finishing transport, cycle and observation also unlocks the 148 `fuzz` cases,
-   which is the largest single lever left.
+   and `skill.ts`. Those three unlock most of what is left: the frames/kinematics stack also
+   unblocks `checkin/document` and `cell`, and transport and cycle unlock the 148 `fuzz` cases,
+   which is the largest single lever remaining. `admission`, `identity`, `blackbox` and `live` are
+   independent of all of it.
 2. Go is not in `tools/edition-report.mjs` and must not be until it answers every case.
 3. CI's Linux run of the new `make -C editions/go check` step has not happened; everything above ran
    on Windows.
@@ -13442,3 +13455,10 @@ beside the compiler and is now invoked directly.
 168. **A toolchain that is not installed is a blocking fact, not a detail.** §31.4 makes running the
      corpus the definition of an edition, so "write the Go and someone will run it" is not a plan
      that ends in an edition.
+
+169. **A handler that reads the wrong field answers rather than failing.** Two corpus files put
+     their subject at the top level where their siblings wrap it in a named field, and reading the
+     absent field produced a well-formed verdict over an empty document — `not_pending` for every
+     boot. Nothing threw, and the answer was one the contract legitimately gives. The corpus caught
+     both on the first run, which is the argument for comparing bytes rather than for trusting a
+     handler that returned something.
