@@ -13,3 +13,6 @@ __pycache__/
 /drivers/mock/selftest.exe
 # MuJoCo writes this beside the working directory on a warning.
 MUJOCO_LOG.TXT
+
+# The C++ edition's build output.
+editions/cpp/build/
