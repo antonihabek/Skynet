@@ -3,9 +3,10 @@
 # Six jobs, and `corpus` is the one that matters. §31.4 requires differential checking in CI:
 # every edition runs the corpus on every commit, and a divergence blocks the release of the edition
 # that diverged and never of the others. Four editions reproduce it whole — the Rust reference, and
-# Python, C++ and Go at §42's L2 — and a fifth, C, is partial and held by its own ratchet. `corpus`
-# runs every one of them, then re-derives the figures the Hub publishes from the four that are
-# complete; the refusal inside `edition-report.mjs` is what keeps a partial edition off that file.
+# Python, C++ and Go at §42's L2 — and three more, C, Zig and Java, are partial and each held by its
+# own ratchet. `corpus` runs every one of them, then re-derives the figures the Hub publishes from
+# the four that are complete; the refusal inside `edition-report.mjs` is what keeps a partial
+# edition off that file.
 
 name: ci
 
@@ -179,6 +180,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
       - name: Toolchain
         run: rustup toolchain install stable --profile minimal
 
@@ -269,6 +277,32 @@ jobs:
       - name: C edition reproduces the corpus it answers
         run: make -C editions/c check
 
+      # The sixth edition (§31.3: Zig, Host ceiling, Community standing) — §42's L2, and **partial**, at its own
+      # ratchet for the reason the C step above gives.
+      #
+      # `zig build check` is `zig fmt` as a build failure, the canonical round trip, the self-check, the fused
+      # multiply-add scan, and the corpus. Zig's default float mode is `.strict` and forbids contraction, so
+      # unlike the C and C++ steps there is no flag being checked here — the scan is checking that the *default*
+      # still holds, because `@setFloatMode(.optimized)` is one line in one file away from making this edition's
+      # arithmetic differ from the reference's on every machine with an FMA. It cross-compiles for aarch64 and
+      # x86-64 v3, which takes a minute on a cold cache.
+      - name: Zig edition reproduces the corpus it answers
+        run: zig build --build-file editions/zig/build.zig check
+
+      # The seventh edition (§31.3: Java / Kotlin, Guest ceiling, Community standing) — §42's L2, partial, same
+      # arrangement.
+      #
+      # `make check` is the canonical round trip, the self-check, and the corpus. There is no fusion step and
+      # that is the platform rather than an omission: the JVM specification defines `dmul` and `dadd` as separate
+      # IEEE-754 operations with no licence to contract them, and `strictfp` became the only behaviour in Java
+      # 17. Nothing to set, and no default to distrust.
+      #
+      # What this edition needs instead is an explicit stream encoding, which its Makefile passes: JDK 18 made
+      # `file.encoding` UTF-8 and left the console streams on the platform's native encoding, and this runner
+      # prints the report `edition-report.mjs` parses.
+      - name: Java edition reproduces the corpus it answers
+        run: make -C editions/java check
+
       # The published figure, held to the run that produces it. This is the last step in the job
       # rather than a separate one because it is the only check here that needs **every** edition's
       # toolchain: it runs them all again and compares the result to `reference/reports/editions.json`,
@@ -283,11 +317,12 @@ jobs:
       - name: The published edition figures are what running the editions produces
         run: node tools/edition-report.mjs --check
 
-  # Three editions' case tables — C, C++ and Go — are read out of the JavaScript engine the reference
+  # Five editions' case tables — C, C++, Go, Java and Zig — are read out of the JavaScript engine the reference
   # runs on, so checking them needs the Unicode version they were generated under, which is Node's and
   # differs between Node 24 (the corpus job's) and Node 26. A separate job rather than a second Node in
   # the corpus job, so neither toolchain decides the other's version. One generator, three renderings:
-  # `tools/unicode-case.ts` writes six files and `--check` fails on any of them having drifted.
+  # `tools/unicode-case.ts` writes twelve files — Java needs four, because javac limits a method to 64 KiB and
+  # each table gets its own class — and `--check` fails on any of them having drifted.
   case-tables:
     runs-on: ubuntu-latest
     steps:

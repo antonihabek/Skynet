@@ -31,7 +31,8 @@
  *
  * # Why one generator rather than one per edition
  *
- * Four targets today — C, C++, Go and Zig — and each only says how to *render* the one derivation.\n *\n * This file lived at `editions/cpp/tools/unicode-case.ts` while there was one edition that needed
+ * Five targets today — C, C++, Go, Java and Zig — and each only says how to *render* the one
+ * derivation.\n *\n * This file lived at `editions/cpp/tools/unicode-case.ts` while there was one edition that needed
  * it. Copying it beside the second would have put the derivation — which code points map, which
  * characters the sigma rule reads, which eight representatives the vectors are built from — in two
  * places, and §3.3's rule is that every fact exists in exactly one place and everything else
@@ -482,6 +483,153 @@ ${cases.map(vector => `    .{ .upper = ${vector[0]}, .in = ${zigString(vector[1]
 };
 `
 
+// ── The Java target ─────────────────────────────────────────────────────────
+//
+// Java's `String.toUpperCase()` *does* apply the full mappings and the final-sigma rule, which makes this the
+// one target whose language could plausibly skip the tables. It does not, for the reason this file's header
+// gives: the tables are read out of the engine the reference runs on, and the JDK's Unicode version is its
+// own. An edition that used `toUpperCase()` would agree with the reference on every character in whichever
+// Unicode version the two happened to share and disagree on the ones added between them — a divergence that
+// appears when somebody upgrades a JDK, in a build nobody changed.
+//
+// # Why the tables are filled by numbered methods rather than by array initialisers
+//
+// **javac has a 64 KiB limit on the bytecode of a single method, and a static array initialiser *is* a
+// method** — the class initialiser. Four tables of this size in one `<clinit>` is `error: code too large`,
+// which is not a warning that can be turned off and not a thing a reader would predict from the source.
+//
+// The options were a packed string literal (a constant-pool entry, so no limit — but the file stops being
+// diffable, and this generator's whole design is that a regenerated table produces a reviewable diff) or
+// chunked methods. Chunks keep the file readable and the limit unreachable, and the chunk size is small
+// enough that it stays unreachable as Unicode grows.
+
+const JAVA_CHUNK = 150
+
+/** `name` filled by `fill0`, `fill1`, … each of at most JAVA_CHUNK rows, called from a static block. */
+function javaChunked(
+  declaration: string,
+  name: string,
+  rendered: readonly string[],
+  perLine: number,
+): string {
+  const chunks: string[] = []
+  const calls: string[] = []
+  for (let start = 0; start < rendered.length; start += JAVA_CHUNK) {
+    const slice = rendered.slice(start, start + JAVA_CHUNK)
+    const index = chunks.length
+    const body: string[] = []
+    for (let at = 0; at < slice.length; at += perLine) {
+      const values = slice.slice(at, at + perLine)
+      body.push(`        ${values.map((held, offset) => `${name}[${start + at + offset}] = ${held};`).join(' ')}`)
+    }
+    chunks.push(`    private static void ${name}Fill${index}() {\n${body.join('\n')}\n    }`)
+    calls.push(`        ${name}Fill${index}();`)
+  }
+  return (
+    `    static final ${declaration} ${name} = new ${declaration.replace('[]', `[${rendered.length}]`)};\n\n`
+    + `${chunks.join('\n\n')}\n\n`
+    + `    static {\n${calls.join('\n')}\n    }`
+  )
+}
+
+function javaMappingTable(name: string, table: Mapping[]): string {
+  return (
+    javaChunked('int[]', `${name}From`, table.map(([codePoint]) => `0x${hex(codePoint)}`), 6)
+    + '\n\n'
+    + javaChunked(
+      'int[][]',
+      `${name}To`,
+      table.map(([, points]) => `new int[] {${points.map(point => `0x${hex(point)}`).join(', ')}}`),
+      3,
+    )
+  )
+}
+
+function javaRangeTable(name: string, table: Range[]): string {
+  return javaChunked(
+    'int[][]',
+    name,
+    table.map(([first, last]) => `new int[] {0x${hex(first)}, 0x${hex(last)}}`),
+    2,
+  )
+}
+
+/** A Java string literal holding exactly these code points, ASCII-only in the source. */
+function javaString(points: readonly number[]): string {
+  return '"' + points.map(point => {
+    // Java's unicode escape is a *UTF-16* one, processed before the lexer runs, so a code point above the BMP
+    // has to be written as its surrogate pair — which is also exactly how it sits in the `String` at runtime.
+    if (point <= 0xffff) return `\\u${point.toString(16).toUpperCase().padStart(4, '0')}`
+    const offset = point - 0x10000
+    const high = 0xd800 + (offset >> 10)
+    const low = 0xdc00 + (offset & 0x3ff)
+    return `\\u${high.toString(16).toUpperCase()}\\u${low.toString(16).toUpperCase()}`
+  }).join('') + '"'
+}
+
+/** One class per table, so no class initialiser carries more than one of them. */
+function javaTableClass(name: string, note: string, body: string): { path: string; content: string } {
+  return {
+    path: join(ROOT, 'editions', 'java', 'src', 'skynet', 'os', `${name}.java`),
+    content: `// Generated by ${GENERATOR}. Do not edit; run the generator.
+//
+// Unicode ${unicode}: ${note}
+//
+// Filled by numbered methods rather than by an array initialiser, because a static array initialiser is the
+// class initialiser and javac limits a method to 64 KiB of bytecode. See the Java target in ${GENERATOR}.
+
+package skynet.os;
+
+final class ${name} {
+    private ${name}() {}
+
+    static final String UNICODE_VERSION = "${unicode}";
+
+${body}
+}
+`,
+  }
+}
+
+const javaUpper = javaTableClass(
+  'UnicodeUpper',
+  `the ${upper.length} code points whose \`String.prototype.toUpperCase\` mapping is not themselves.`,
+  javaMappingTable('upper', upper),
+)
+const javaLower = javaTableClass(
+  'UnicodeLower',
+  `the ${lower.length} code points whose \`String.prototype.toLowerCase\` mapping is not themselves.`,
+  javaMappingTable('lower', lower),
+)
+const javaRanges = javaTableClass(
+  'UnicodeRanges',
+  `the two properties \`toLowerCase\`'s one context rule reads — ${cased.length} Cased ranges and `
+    + `${ignorable.length} Case_Ignorable ranges.`,
+  `${javaRangeTable('casedRanges', cased)}\n\n${javaRangeTable('caseIgnorableRanges', ignorable)}`,
+)
+
+const javaVectors = `// Generated by ${GENERATOR}. Do not edit; run the generator.
+//
+// Unicode ${unicode}: whole strings converted by the engine the reference runs on, for SelfCheck to convert
+// with the tables and compare. ${cases.length} vectors. The first element of each row is "1" for
+// \`toUpperCase\` and "0" for \`toLowerCase\`.
+//
+// The tables are single code points and cannot be wrong about a string on their own. The code that walks a
+// string with them, and applies the sigma rule, can — and these are what would say so (finding 163).
+
+package skynet.os;
+
+final class CaseVectors {
+    private CaseVectors() {}
+
+    static final String VECTORS_UNICODE_VERSION = "${unicode}";
+
+    static final String[][] VECTORS = {
+${cases.map(vector => `        {"${vector[0] ? 1 : 0}", ${javaString(vector[1])}, ${javaString(expectation(vector))}},`).join('\n')}
+    };
+}
+`
+
 // ── Writing them out ────────────────────────────────────────────────────────
 
 type Artefact = { path: string; content: string }
@@ -495,6 +643,10 @@ const artefacts: Artefact[] = [
   { path: join(ROOT, 'editions', 'c', 'tests', 'case_vectors.inc'), content: cVectors },
   { path: join(ROOT, 'editions', 'zig', 'src', 'unicode_case.zig'), content: zigTables },
   { path: join(ROOT, 'editions', 'zig', 'src', 'case_vectors.zig'), content: zigVectors },
+  javaUpper,
+  javaLower,
+  javaRanges,
+  { path: join(ROOT, 'editions', 'java', 'src', 'skynet', 'os', 'CaseVectors.java'), content: javaVectors },
 ]
 
 function label(path: string): string {
