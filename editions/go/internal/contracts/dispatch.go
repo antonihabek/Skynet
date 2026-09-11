@@ -21,6 +21,11 @@ import (
 // edition" is not satisfied by a table with fewer entries in it.
 func Dispatch() corpus.Dispatch {
 	return corpus.Dispatch{
+		"birth/certificate":      birthCertificate,
+		"calibration/events":     calibrationCase,
+		"calibration/expiry":     calibrationCase,
+		"calibration/provenance": calibrationCase,
+		"calibration/sets":       calibrationSets,
 		"certification/award":    certificationAward,
 		"digest/version":         versionDigest,
 		"intent/offer":           intentOffer,
