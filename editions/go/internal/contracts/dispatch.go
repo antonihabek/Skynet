@@ -22,6 +22,10 @@ import (
 func Dispatch() corpus.Dispatch {
 	return corpus.Dispatch{
 		"digest/version":         versionDigest,
+		"opstate/evaluate":       opstateEvaluate,
+		"opstate/properties":     opstateProperties,
+		"opstate/warning":        opstateWarning,
+		"predicate/evaluate":     predicateEvaluate,
 		"roles/vocabulary":       rolesVocabulary,
 		"semver/compare":         semverCompare,
 		"semver/satisfies":       semverSatisfies,
