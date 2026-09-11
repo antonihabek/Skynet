@@ -4,9 +4,95 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
+#include <string_view>
 
 namespace skynet::js {
 namespace {
+
+/// One code point's full case mapping. Unused slots are 0, which no mapping produces.
+struct Mapping {
+  char32_t from;
+  char32_t to[3];
+};
+
+/// An inclusive run of code points holding a property.
+struct Range {
+  char32_t first;
+  char32_t last;
+};
+
+// `kUpper`, `kLower`, `kCased`, `kCaseIgnorable` and `kUnicodeVersion`, generated from the engine
+// the reference runs on by `tools/unicode-case.ts`. Sorted by code point by construction.
+#include "unicode_case.inc"
+
+constexpr char32_t kCapitalSigma = 0x03A3;
+constexpr char32_t kFinalSigma = 0x03C2;
+
+template <std::size_t N>
+const Mapping* find_mapping(const Mapping (&table)[N], char32_t code_point) {
+  const Mapping* end = table + N;
+  const Mapping* found = std::lower_bound(
+      table, end, code_point, [](const Mapping& one, char32_t wanted) { return one.from < wanted; });
+  return found != end && found->from == code_point ? found : nullptr;
+}
+
+template <std::size_t N>
+bool has_property(const Range (&table)[N], char32_t code_point) {
+  const Range* end = table + N;
+  const Range* after = std::upper_bound(
+      table, end, code_point, [](char32_t wanted, const Range& one) { return wanted < one.first; });
+  return after != table && (after - 1)->last >= code_point;
+}
+
+void append_mapped(std::u32string& out, const Mapping* mapping, char32_t code_point) {
+  if (mapping == nullptr) {
+    out.push_back(code_point);
+    return;
+  }
+  for (const char32_t to : mapping->to) {
+    if (to == 0) {
+      break;
+    }
+    out.push_back(to);
+  }
+}
+
+/// Unicode's Final_Sigma: a cased letter before, skipping case-ignorable characters, and none after.
+///
+/// A character that is both cased and case-ignorable — a modifier letter — is **stepped over** in
+/// both directions rather than counted as the letter, which is what the engine does. Reading the
+/// definition's regular expression literally gives the other answer; `tests/case_vectors.inc` holds
+/// strings from all four classes so the two cannot be confused without the self-check saying so.
+bool is_final_sigma(const std::u32string& value, std::size_t at) {
+  bool preceded = false;
+  for (std::size_t before = at; before > 0;) {
+    --before;
+    if (has_property(kCaseIgnorable, value[before])) {
+      continue;
+    }
+    preceded = has_property(kCased, value[before]);
+    break;
+  }
+  if (!preceded) {
+    return false;
+  }
+  for (std::size_t after = at + 1; after < value.size(); ++after) {
+    if (has_property(kCaseIgnorable, value[after])) {
+      continue;
+    }
+    return !has_property(kCased, value[after]);
+  }
+  return true;
+}
+
+std::string encode(const std::u32string& value) {
+  std::string out;
+  for (const char32_t code_point : value) {
+    append_utf8(out, code_point);
+  }
+  return out;
+}
 
 /// The shortest decimal digits that round-trip, and the exponent `E` with
 /// `value = 0.d1d2… × 10^n`, in ECMAScript's `n`/`k`/`s` terms.
@@ -50,7 +136,7 @@ Digits shortest_digits(double value) {
 }
 
 /// ECMAScript's WhiteSpace plus LineTerminator, as UTF-8 byte sequences. Notably it includes
-/// U+FEFF and excludes the C1 controls, which is the half that differs from most hosts' trim.
+/// U+FEFF and excludes U+0085, which is where it differs from most hosts' trim.
 const std::vector<std::string>& js_whitespace() {
   static const std::vector<std::string> set = {
       "\t",          "\n",          "\v",          "\f",          "\r",
@@ -62,8 +148,12 @@ const std::vector<std::string>& js_whitespace() {
   return set;
 }
 
-/// Length in bytes of the whitespace run starting at `at`, or 0.
-std::size_t whitespace_at(std::string_view value, std::size_t at) {
+}  // namespace
+
+std::size_t space_at(std::string_view value, std::size_t at) {
+  if (at >= value.size()) {
+    return 0;
+  }
   for (const std::string& one : js_whitespace()) {
     if (value.compare(at, one.size(), one) == 0) {
       return one.size();
@@ -72,7 +162,86 @@ std::size_t whitespace_at(std::string_view value, std::size_t at) {
   return 0;
 }
 
-}  // namespace
+std::u32string code_points(std::string_view value) {
+  std::u32string out;
+  std::size_t at = 0;
+  while (at < value.size()) {
+    const auto lead = static_cast<unsigned char>(value[at]);
+    char32_t code_point = lead;
+    std::size_t width = 1;
+    if (lead >= 0xF0) {
+      width = 4;
+      code_point = lead & 0x07u;
+    } else if (lead >= 0xE0) {
+      width = 3;
+      code_point = lead & 0x0Fu;
+    } else if (lead >= 0xC0) {
+      width = 2;
+      code_point = lead & 0x1Fu;
+    }
+    if (at + width > value.size()) {
+      out.push_back(0xFFFD);
+      break;
+    }
+    for (std::size_t step = 1; step < width; ++step) {
+      code_point = (code_point << 6) | (static_cast<unsigned char>(value[at + step]) & 0x3Fu);
+    }
+    at += width;
+    out.push_back(code_point);
+  }
+  return out;
+}
+
+void append_utf8(std::string& out, char32_t code_point) {
+  if (code_point < 0x80) {
+    out.push_back(static_cast<char>(code_point));
+  } else if (code_point < 0x800) {
+    out.push_back(static_cast<char>(0xC0 | (code_point >> 6)));
+    out.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
+  } else if (code_point < 0x10000) {
+    out.push_back(static_cast<char>(0xE0 | (code_point >> 12)));
+    out.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3F)));
+    out.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
+  } else {
+    out.push_back(static_cast<char>(0xF0 | (code_point >> 18)));
+    out.push_back(static_cast<char>(0x80 | ((code_point >> 12) & 0x3F)));
+    out.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3F)));
+    out.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
+  }
+}
+
+std::u32string to_upper(char32_t code_point) {
+  std::u32string out;
+  append_mapped(out, find_mapping(kUpper, code_point), code_point);
+  return out;
+}
+
+std::u32string to_upper(const std::u32string& value) {
+  // Upper-casing has no context rule, so a string is the concatenation of its code points' mappings.
+  std::u32string out;
+  for (const char32_t code_point : value) {
+    append_mapped(out, find_mapping(kUpper, code_point), code_point);
+  }
+  return out;
+}
+
+std::string to_upper(std::string_view value) { return encode(to_upper(code_points(value))); }
+
+std::u32string to_lower(const std::u32string& value) {
+  std::u32string out;
+  for (std::size_t at = 0; at < value.size(); ++at) {
+    if (value[at] == kCapitalSigma && is_final_sigma(value, at)) {
+      out.push_back(kFinalSigma);
+      continue;
+    }
+    append_mapped(out, find_mapping(kLower, value[at]), value[at]);
+  }
+  return out;
+}
+
+std::string to_lower(std::string_view value) { return encode(to_lower(code_points(value))); }
+
+std::string_view unicode_version() { return kUnicodeVersion; }
 
 std::string number_to_string(double value) {
   if (std::isnan(value)) {
@@ -108,6 +277,37 @@ std::string number_to_string(double value) {
   return minus + mantissa + "e" + (power > 0 ? "+" : "-") + std::to_string(std::abs(power));
 }
 
+double math_round(double value) {
+  if (!std::isfinite(value)) {
+    return value;
+  }
+  // `value - whole` is exact: below 2^52 the floor shares the value's exponent range and the
+  // subtraction only clears bits, and at or above it every double is already an integer.
+  const double whole = std::floor(value);
+  return value - whole >= 0.5 ? whole + 1 : whole;
+}
+
+bool truthy(const Json& value) {
+  switch (value.kind()) {
+    case Json::Kind::Null: return false;
+    case Json::Kind::Bool: return value.is_true();
+    case Json::Kind::Number: {
+      const double held = value.number_or(0);
+      return !(held == 0 || std::isnan(held));
+    }
+    case Json::Kind::String: return !value.string_or("").empty();
+    default: return true;
+  }
+}
+
+double bare_number(const Json& object, std::string_view field, double fallback) {
+  if (!object.has(field)) {
+    return fallback;
+  }
+  const Json& value = object[field];
+  return value.is_number() ? value.number_or(fallback) : std::numeric_limits<double>::quiet_NaN();
+}
+
 std::string interpolate(const Json* value) {
   if (value == nullptr) {
     return "undefined";
@@ -140,7 +340,7 @@ std::string interpolate(const Json* value) {
 std::string trim(std::string_view value) {
   std::size_t first = 0;
   for (;;) {
-    const std::size_t width = whitespace_at(value, first);
+    const std::size_t width = space_at(value, first);
     if (width == 0) {
       break;
     }
@@ -166,32 +366,7 @@ std::string trim(std::string_view value) {
 
 std::vector<std::uint16_t> utf16_units(std::string_view value) {
   std::vector<std::uint16_t> units;
-  std::size_t at = 0;
-  while (at < value.size()) {
-    const auto lead = static_cast<unsigned char>(value[at]);
-    std::uint32_t code_point = lead;
-    std::size_t width = 1;
-    if (lead >= 0xF0) {
-      width = 4;
-      code_point = lead & 0x07u;
-    } else if (lead >= 0xE0) {
-      width = 3;
-      code_point = lead & 0x0Fu;
-    } else if (lead >= 0xC0) {
-      width = 2;
-      code_point = lead & 0x1Fu;
-    }
-    if (at + width > value.size()) {
-      // A truncated sequence is one replacement character, which is what a decoder produces and
-      // what a length therefore counts.
-      units.push_back(0xFFFD);
-      break;
-    }
-    for (std::size_t step = 1; step < width; ++step) {
-      code_point = (code_point << 6) | (static_cast<unsigned char>(value[at + step]) & 0x3Fu);
-    }
-    at += width;
-
+  for (const char32_t code_point : code_points(value)) {
     if (code_point >= 0x10000) {
       const std::uint32_t rest = code_point - 0x10000;
       units.push_back(static_cast<std::uint16_t>(0xD800 + (rest >> 10)));

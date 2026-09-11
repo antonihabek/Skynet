@@ -1,11 +1,17 @@
-// The small string operations the contracts share.
+// The small string operations the contracts share, and the character tests that are ASCII by
+// grammar — a role's charset, a digit in a version.
 //
-// ASCII by name, everywhere, and that is a decision rather than an oversight. `std::tolower` is
-// locale-dependent: under a Turkish locale it maps `I` to a dotless `ı`, so a role or a vocabulary
-// word would classify differently on one operator's workstation than on another's. Every
-// identifier this system compares — roles, closed-set words, semantic versions, package names —
-// is ASCII by grammar, so the ASCII operation is both the correct one and the one that cannot vary
-// by environment.
+// There is no trim and no case conversion here, and that is the point of this paragraph. There
+// used to be both, ASCII-only, on the argument that every identifier the system compares is ASCII
+// by grammar, so the ASCII operation was the correct one. It was not: the reference trims with
+// `trim()` and lower-cases with `toLowerCase()` **before** it checks the grammar, and both reach
+// outside ASCII — a byte-order mark is trimmed away, U+212A KELVIN SIGN lower-cases into the `k` of
+// `neck`. The corpus caught both on 2026-09-11. They are `js::trim`, `js::to_lower` and
+// `js::to_upper` now, and the ASCII versions were deleted rather than left beside them, so that
+// reaching for one is a compile error rather than a divergence.
+//
+// `std::tolower` and friends are refused for the older reason: they consult the locale, and a
+// Turkish one maps `I` to a dotless `ı`.
 
 #ifndef SKYNET_OS_TEXT_HPP
 #define SKYNET_OS_TEXT_HPP
@@ -22,14 +28,6 @@ namespace skynet::text {
 [[nodiscard]] constexpr bool is_ascii_alpha(char ch) {
   return is_ascii_lower(ch) || is_ascii_upper(ch);
 }
-
-/// Lowercase the ASCII letters and leave every other byte alone — including every byte of a UTF-8
-/// sequence, all of which are >= 0x80 and none of which this touches.
-[[nodiscard]] std::string ascii_lower(std::string_view value);
-
-/// Trim the ASCII whitespace Python's `str.strip()` trims: space, tab, newline, carriage return,
-/// form feed and vertical tab.
-[[nodiscard]] std::string strip(std::string_view value);
 
 /// Split on a separator, keeping empty fields. Empty fields are kept because they are how a
 /// grammar detects `torso..yaw` — a splitter that dropped them would make a malformed role parse.

@@ -13023,3 +13023,284 @@ every check tool green, both mirrors re-pinned.
 154. **A replay must refuse the cycles nobody asked the kernel about.** Evaluating them produces
      divergences that belong to the tool, and a tool whose whole output is *the kernel disagrees with
      itself* cannot afford to manufacture one.
+
+---
+
+## 2026-09-11 (seventy-ninth) — the Python edition verified, and a C++ edition stopped at 899
+
+Two things were asked: whether Hub, Console and OS are built to their plans, and then — given that
+answer — a second edition of the OS in another language, with the Python edition verified first.
+This entry records both, and **the second is unfinished and the working tree is red**; the state is
+written down exactly as it stands rather than tidied.
+
+### The audit, in one paragraph each
+
+**Skynet OS** is built to §73's *what version one covers* table except where the remaining work needs
+a robot: nothing runs a calibration (§45), and nothing can, because a procedure needs a driver, a
+target and a pose set and §45.3 signs the result. **Skynet Hub** is at its plan's §33 log — 96 routes,
+22 tracked migrations — with four items open and all four blocked on an owner's decision rather than
+on code (account erasure, who may decide an abuse report, retention of sealed windows, collections).
+**Skynet Console** is at its fifth owned layer and **cannot be built or tested on this machine**: its
+target is `net9.0` and only .NET 8 runtimes are installed, no SDK. That is a fact about the machine,
+not about the Console, and it is stated here so no later entry reads its silence as a pass.
+
+Two numbers in this log were platform-specific and read as absolute: the test counts. ~87 tests are
+`cfg(unix)` or `cfg(target_os = "linux")` gated, so **1,825 is Linux and 1,738 is Windows** for the
+same commit. Both are correct; neither is *the* number.
+
+One live documentation defect, unfixed: §73's transport row says *"no policy runtime exists to carry
+a command as far as a guard"*, which the **Skills** row in the same table contradicts. The sentence
+was true when written and the table outgrew it.
+
+### The Python edition passes, and its README does not say so
+
+`run_corpus.py` — **1,148 of 1,148 cases, 0 failed, 0 not implemented, 33 of 33 corpora**.
+`self_check.py` — **44 checks, ok**. The edition is complete at L2 and has been for some time.
+
+Its README opens with *"It passes the corpus: 1,109 of 1,109 cases, 31 of 31 corpora"* and repeats
+the pair three more times. **A README that states a passing number is a claim that ages**, and this
+one aged by 39 cases and two corpora with nothing in the repository checking it. `run_corpus.py`
+prints the true number on every run; the document beside it printed an old one. Left as found, and
+listed below.
+
+### The C++ edition, at §42's L2
+
+§31.3 puts C++ at a **Certified** ceiling with a **Full** standing and gives the reason — *"largest
+population in robotics; ROS 2 is C++"* — so it is the edition worth having next. It is written from
+`reference/typescript/*.ts` only: never from `corpus/`, which would agree by construction, and never
+from the Python edition, which would prove only that one hand did both.
+
+**The foundation was proved against the oracle before one contract was built on it.** §31.4 is
+byte-identical canonical JSON or nothing, so the first executable thing in the edition is
+`tests/json_roundtrip.cpp`: parse all 1,148 `expected` strings out of the corpus and re-serialise
+them, requiring identical bytes. **1,161 checked, 0 failed.** It also settled a design that would
+otherwise have been found much later and much deeper: the obvious object container keeps its keys
+sorted, and it is wrong here. **The reference iterates objects in insertion order and several
+contracts' output depends on it** — `evaluate_cycle` appends one `clamped` entry per channel it
+reduced, in the order it walked them. Storage order and write order are two different things; the
+container keeps insertion order and the *writer* applies §31.4's sort.
+
+Under it: `sha256.cpp` against the FIPS 180-4 vectors; `kinematics.cpp` carrying the kernel's own
+`sin`/`cos`/`sqrt` (§31.2 single-source, fdlibm coefficients, Cody–Waite reduction) rather than the
+host libm; `js.cpp` for the divergences a host language does not share with the reference —
+`Number::toString` going exponential outside 1e-7…1e21, `toFixed` breaking ties away from zero on the
+exact binary value, UTF-16 code-unit ordering, `null > n` coercing to `0 > n`; `vocabulary.cpp` with
+all **74** closed sets transcribed one file at a time, each with the reference file it came from.
+
+Three things the gates caught that review had not:
+
+* **A value computed and never stored.** `parse_role` derived the ordinal into a local
+  `std::optional<double> index` and never assigned it to `parsed.index`. Both spellings type-check;
+  three `roles` cases did not.
+* **`-Werror` deleted a helper.** A `finite()` in `cell.cpp` had been superseded and left behind;
+  `-Wunused-function` refused the build. §6.1's second-strongest gate doing exactly its job, and
+  R-10 applied by the compiler rather than by memory.
+* **Exit 127 from a binary that built cleanly** — the MinGW runtime DLLs. `-static` in `LDFLAGS`.
+
+### Where it stopped, and what is red
+
+| | |
+|---|---|
+| Corpus | **899 of 1,148 passed, 0 failed**, 249 not implemented — all 249 in corpora with no handler, **0 in a file a handler declined** |
+| Corpora | **27 of 33** complete |
+| Round trip | 1,161 checked, 0 failed |
+| Size | ~11.0k lines of `.cpp`, ~1.2k of headers |
+
+Complete: birth, calibration, cell, certification, cycle, digest, embodiment, frames, fuzz, intent,
+kinematics, limits, live, media, observation, opstate, power, predicate, provenance, readiness, roles,
+semver, telemetry, transfer, transport, vocabulary, watchdog.
+
+Remaining: **identity (47), checkin (25), admission (40), blackbox (22), ota (29), skill (86)** — 249.
+
+**The tree does not compile.** `src/contracts/identity.cpp` (462 lines, §10/§19/§50 — pairing-code
+normalisation, credential state, and §10's attestation sentence) is written and registered in the
+dispatch table, and its shared constants and helpers sit in an anonymous namespace inside
+`skynet::identity` while the contract that needs them is in `skynet::contracts`. File-local is not
+scope-local; three errors, and more behind them. The fix is to hoist those names to a scope both
+namespaces see. It was not applied — the session was stopped here deliberately, and the half-built
+state is left visible rather than reverted.
+
+`power.cpp`, `calibration.cpp`, `identity.cpp` and `identity.hpp` are **uncommitted**; everything
+else is on `main` at `6adad88`. Nothing is pushed.
+
+### Open, and small
+
+1. `editions/python/README.md` still claims 1,109 of 1,109 and 31 of 31. It is 1,148 and 33.
+2. `editions/cpp/Makefile`'s ratchet `MIN_PASSED ?= 840` is below the 899 actually reached.
+3. `editions/cpp/tests/self_check.cpp` is referenced by the `test` target and does not exist.
+4. `editions/cpp/README.md` does not exist.
+5. `tools/edition-report.mjs` invokes `python3`, which is not the interpreter's name on Windows, so
+   the report tool cannot run the Python edition on the machine this repository is developed on —
+   the same shape as finding 153.
+6. The C++ edition is **not** in `tools/edition-report.mjs`'s `EDITIONS` list and must not be until
+   it is at 1,148. The tool already refuses any edition with a non-zero unimplemented count, which is
+   §31.4 enforced rather than described: *an edition that has not passed the corpus is not an
+   edition.*
+7. §73's transport row, above.
+
+### Findings, restated
+
+1-154 as before.
+
+155. **Prove the serialiser against the oracle before building anything on it.** A canonical writer
+     is the one component every case in the corpus passes through, and 1,148 round-trips cost an hour
+     and dictated the object container's design. Found after twenty contracts, it is twenty rewrites.
+
+156. **Storage order and write order are different things.** The reference iterates objects in
+     insertion order; §31.4 writes them sorted. A container that does both by sorting on insert is
+     correct on every case where the two agree and wrong wherever a contract's output is built by
+     walking a map.
+
+157. **A differential corpus catches what a type checker cannot.** A value computed into a local and
+     never assigned to the field it was computed for type-checks, reviews clean, and fails three
+     cases. Typing rules out a category; the oracle rules out the value.
+
+158. **A README stating a passing number is a claim with no gate behind it.** The Python edition's
+     drifted by 39 cases and two corpora while the runner beside it printed the truth on every run.
+     A number that is not checked is a number that is eventually false.
+
+---
+
+## 2026-09-11 (eightieth) — the C++ edition at 1,199, and three editions brought back to one whitespace
+
+Asked to continue the editions from the plan, log the progress, and keep each edition up to date with
+Rust as the main one. The C++ edition the seventy-ninth entry left red at 899 is complete; and making
+"up to date with Rust" mean something turned up a drift in **all three** editions — Rust included —
+that the corpus had no input able to see.
+
+### Where it stands
+
+| | Before | After |
+|---|---|---|
+| Corpus | 1,148 cases | **1,199** (+51, every one a divergence probe) |
+| Rust (reference) | 1,148 / 1,148 | **1,199 / 1,199**; workspace **1,740** on Windows, fmt and clippy `-D warnings` clean |
+| Python | 1,148 / 1,148 | **1,199 / 1,199**; self-check **47** |
+| C++ | 899 / 1,148, tree not compiling | **1,199 / 1,199, 33 of 33 corpora**; round trip 1,212 / 0 failed; self-check **20** |
+| `editions.json` | 2 editions, runnable on Linux only | **3 editions × 1,199**, runs on Windows, synced into the Hub |
+
+### One whitespace set, and nobody was using it
+
+Every contract trims before it decides, and `trim()` removes a set no other language's trim does:
+U+FEFF goes (Rust, Python and Go keep it), U+0085 stays (all three strip it), U+00A0 goes (an ASCII
+strip keeps it). Rust's own `semver.rs` had written the rule down — *"trimming uses JavaScript's
+whitespace set … a divergence nobody would find for years"* — and it was applied in **2 of Rust's 12**
+files that trim, **3 of Python's 11**, and **4 of the 8** the C++ edition had written. The corpus held
+no BOM, NEL or NBSP at a trim site, so all 1,148 cases passed everywhere.
+
+42 cases now put two probes at every trim site in every family (roles, semver, predicate, identity ×3,
+check-in, cell, live, intent, OTA, skill, transfer ×4). The probes are designed against each other:
+U+FEFF U+00A0 must be removed and holds both characters, so an edition stripping only one still
+fails; U+0085 must be kept and is **alone**, because a pair would hide a partial stripper — Rust
+removes U+0085, stops at whatever follows, and agrees by accident. First run: **Rust 10+ failures,
+Python 26, C++ 10** — the table's prediction, edition by edition.
+
+Resolved toward the rule Rust had documented, in every edition, each with a gate rather than a
+sentence:
+
+* **Rust** — `js.rs` holds `js_trim`/`is_js_space` (moved out of `semver.rs`); 34 sites across 10
+  files converted; `crates/skynet-contracts/clippy.toml` refuses `str::trim`, `trim_start`,
+  `trim_end`, `split_whitespace`, `char::is_whitespace` and the ASCII case methods. The gate was
+  written first and seen to flag all 36 sites before any was fixed.
+* **Python** — `js_trim` at 15 sites in 8 modules; `self_check.py` walks the token stream and refuses
+  any `.strip()` with no argument. The whitespace set itself is now written by code point: it used to
+  be 25 characters, most of them invisible, and the edit tool could not even match it.
+* **C++** — `js::trim` everywhere; the ASCII `text::strip` and `text::ascii_lower` are **deleted**,
+  so reaching for one is a compile error.
+
+### Case, and `\d`, `\s` and `$`
+
+Three more of the same kind, each confirmed by running before a case was written:
+
+* **Case mapping lands inside ASCII grammars.** `toLowerCase()` turns U+212A KELVIN SIGN into `k`, so
+  `nec`+U+212A+`.link.pitch` is the role `neck` and `s`+U+212A+`d_…` is a credential. Rust ASCII-lowercased
+  the credential prefix "because a full mapping would fold characters no credential prefix contains",
+  which this character disproves; C++ ASCII-lowercased everything. Both now use the full mapping.
+* **C++ had no case mapping at all**, and `ß`→`SS`, `ﬁ`→`FI` were two corpus failures. The tables
+  are **generated from the engine the reference runs on** (`editions/cpp/tools/unicode-case.ts`,
+  Unicode 17.0, 1,580 upper / 1,488 lower), with 219 whole-string vectors from the same engine. The
+  vectors earned their place on the first deliberate break: final sigma's definition read literally
+  counts a character that is both Cased and Case_Ignorable (U+02B0) as the preceding letter; the
+  engine steps over it. The self-check names the string.
+* **Python's regex classes are not JavaScript's.** `\d` matched Arabic-Indic digits (`١.٢.٣` parsed as
+  a version; `#١` as ordinal 1), `\s` was Unicode whitespace, and `$` matched before a final newline
+  (`list.0\n` indexed element 0). Eight patterns now spell `[0-9]`, `JS_SPACE` and `\Z`; the same
+  token scan refuses the old spellings. 8 cases pin it.
+
+### The reference edition had one of its own
+
+`text_or_null` in Rust's `identity.rs` tested the trimmed digest for blankness and put the
+**untrimmed** one on the wire — so a check-in's attestation carried a digest no fleet query could
+match, while the sentence beside it had trimmed it. Python and C++ trimmed. One case
+(`checkin/document :: attested-digests-in-whitespace-only-javascript-trims`), then the fix.
+
+### The C++ edition, finished
+
+Fixed the identity file's scoping (an unnamed namespace one level too deep) and wrote the five
+remaining contracts from the reference: **ota** (31), **checkin** (28), **admission** (40), **skill**
+(88), **blackbox** (22 — the six MCAP schemas, the ring's records and header, and two sealed files,
+all byte-exact on the first build). Along the way `truthy` was extracted from two copies into
+`js::truthy`, the bare-number rule (`null` in a case is NaN, corpus/README.md) became one
+`js::bare_number`, and `js::math_round` is JavaScript's `Math.round` — ties toward +∞, exact at
+0.49999999999999994.
+
+The Makefile could never have linked: its hand-written source list missed four translation units and
+the `test` target named a `self_check.cpp` that did not exist. Sources are now derived from the tree,
+objects build in parallel with compiler-recorded dependencies (≈12 s rather than ≈56 s), MinGW's
+bogus default `CXX` is overridden, and the ratchet is 1,199. `tests/self_check.cpp` exists: runner
+accounting, the case vectors, the helpers at their edges, and a scan refusing `<cctype>`.
+
+### The report, CI, and the Hub
+
+`tools/edition-report.mjs` invoked `python3`, which on Windows is the Store stub — it had never run on
+the machine this repository is developed on. It now picks executables by host and keeps the printed
+runner strings fixed, so the file is byte-identical from either. It lists the C++ edition, and the
+Python runner's Windows crash on printing a BOM through cp1250 is fixed and has a regression check.
+
+CI: the Python ratchet was 1109 against a real 1,148 — raised to 1199; `make -C editions/cpp check`
+added to the corpus job; a `cpp-case-tables` job checks the tables under Node 26, because Node 24's
+Unicode differs. `tsconfig.json` now includes `editions/**/*.ts`; the Hub's installed TypeScript
+(7.0.2) type-checks all 33 files clean.
+
+`reference/reports/editions.json` was synced into the Hub with `check-contract-mirrors --sync`: two
+files there (`lib/skynet/os/reports/editions.json`, `mirror-digests.json`), plus two comments in
+`lib/skynet/editions.ts` that a third edition made false. The Hub's editions and mirror suites pass,
+29 of 29. The page was not opened in a browser; the change is data and the suites cover the join.
+
+### Open
+
+1. **Nothing is committed**, in either repository.
+2. CI's Linux run of the new steps has not happened; everything above ran on Windows.
+3. Two reference behaviours were reproduced rather than tightened, because tightening is a
+   specification change: `admitPackage`'s signature `switch` adds no finding for a state its type
+   does not contain, and `shapeMeasure` passes an unknown measure state through where all three
+   editions read it as `unmeasured`.
+4. A fourth L2 edition was not started. §42 puts the realistic L2 count at 3–4, and with the oracle
+   there are four; the next row of §31.3 with a Full standing is Go (Guest ceiling).
+5. `round_half_away` exists twice in the C++ edition (`observation.cpp`, `kinematics.cpp`).
+6. From before: §73's transport row is still contradicted by the Skills row.
+
+### Findings, restated
+
+1-158 as before.
+
+159. **A rule written down in one module is not a rule.** The whitespace set was documented in
+     `semver.rs` and reached 2 of Rust's 12 trimming files; the other editions did no better. What
+     makes it hold is the gate — a disallowed method, a token scan, a deleted helper.
+
+160. **A probe can hide the divergence it was written to find.** A pair of must-keep characters lets
+     an edition that strips only the outer one agree by accident. The kept probe has to be alone.
+
+161. **A full case mapping lands inside an ASCII grammar.** "Every identifier is ASCII, so ASCII
+     lowercasing is exact" was false twice: the reference maps before it checks, and `ß`, `ﬁ` and
+     U+212A all map into ASCII.
+
+162. **Testing a value and emitting it are two operations.** Rust trimmed a digest to decide it was
+     not blank and sent the one it had not trimmed.
+
+163. **A generated table needs vectors from the same generator.** The table maps code points and
+     cannot be wrong about a string; the walker can, and only whole strings from the engine caught
+     the one character class the specification's own wording gets backwards.
+
+164. **A runner that crashes describing a failure hides the failure.** The first whitespace case to
+     fail took the Python runner down on a cp1250 console, and the edition looked broken in a way
+     that said nothing about the case.

@@ -45,6 +45,14 @@ const std::map<std::string, Handler>& handlers() {
       {"cell", &contracts::cell},
       {"telemetry", &contracts::telemetry},
       {"transfer", &contracts::transfer},
+      {"power", &contracts::power},
+      {"calibration", &contracts::calibration},
+      {"identity", &contracts::identity},
+      {"ota", &contracts::ota},
+      {"checkin", &contracts::checkin},
+      {"admission", &contracts::admission},
+      {"skill", &contracts::skill},
+      {"blackbox", &contracts::blackbox},
   };
   return table;
 }

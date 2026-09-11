@@ -19,7 +19,9 @@
 //!   reference does, and a comparator that returned an error here would make the two editions order
 //!   a malformed list differently;
 //! * trimming and `\s` use **JavaScript's** whitespace set, not `char::is_whitespace`, which
-//!   differs on `U+FEFF` and would otherwise be a divergence nobody would find for years;
+//!   differs on `U+FEFF` and would otherwise be a divergence nobody would find for years. This
+//!   module is where that rule was first written down; it now lives in [`crate::js`], because every
+//!   contract trims and one module applying it is how ten others came not to;
 //! * the range tokenizer is a scan, not an anchored parse, so `v1.2.3` yields the token `1.2.3` and
 //!   `1.2.3.4` yields `1.2.3`. That is what the reference's global regex does.
 //!
@@ -36,6 +38,8 @@ use alloc::vec::Vec;
 
 use skynet_json::Json;
 
+use crate::js::{is_js_space, js_trim};
+
 /// A version, parsed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedVersion {
@@ -49,39 +53,6 @@ pub struct ParsedVersion {
     pub prerelease: Option<String>,
     /// The input, trimmed.
     pub raw: String,
-}
-
-/// JavaScript's `WhiteSpace` and `LineTerminator`, which is what `trim()` and `\s` remove.
-///
-/// Written out rather than delegated to [`char::is_whitespace`] because the two sets differ:
-/// `U+FEFF` is whitespace to JavaScript and not to Rust, and `U+0085` is the reverse. A range
-/// string with a byte-order mark in it is rare; two editions disagreeing about whether it parses is
-/// the kind of thing that is found once, in the field, by somebody who cannot explain it.
-fn is_js_space(c: char) -> bool {
-    matches!(
-        c,
-        '\u{0009}'
-            | '\u{000A}'
-            | '\u{000B}'
-            | '\u{000C}'
-            | '\u{000D}'
-            | '\u{0020}'
-            | '\u{00A0}'
-            | '\u{1680}'
-            | '\u{2000}'
-            ..='\u{200A}'
-                | '\u{2028}'
-                | '\u{2029}'
-                | '\u{202F}'
-                | '\u{205F}'
-                | '\u{3000}'
-                | '\u{FEFF}'
-    )
-}
-
-/// `String.prototype.trim`.
-pub fn js_trim(input: &str) -> &str {
-    input.trim_matches(is_js_space)
 }
 
 /// Parse `major.minor.patch[-prerelease]`, or `None`.

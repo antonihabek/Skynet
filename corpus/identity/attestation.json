@@ -172,6 +172,44 @@
         }
       },
       "expected": "{\"complete\":true,\"sentence\":\"This robot is running an unnamed OS image, no policy, against no body.\",\"unmeasured\":[]}"
+    },
+    {
+      "id": "every-field-in-whitespace-only-javascript-trims",
+      "note": "The device id, a digest and a reason, each wrapped in the two characters `trim()` removes and the other languages disagree about. The id is blank, so the sentence opens with \"This robot\"; the digest and the reason are rendered without them. An edition that kept the byte-order mark would put an invisible character into the sentence an incident investigation reads.",
+      "input": {
+        "device_id": "﻿ ",
+        "os_image": {
+          "state": "known",
+          "digest": "﻿ sha256:aaaa﻿ "
+        },
+        "policy": {
+          "state": "unmeasured",
+          "why": "﻿ the runtime is not answering﻿ "
+        },
+        "embodiment": {
+          "state": "nothing"
+        }
+      },
+      "expected": "{\"complete\":false,\"sentence\":\"This robot is running image `sha256:aaaa`, an unmeasured policy (the runtime is not answering), against no body.\",\"unmeasured\":[\"policy\"]}"
+    },
+    {
+      "id": "every-field-behind-a-next-line",
+      "note": "And the character `trim()` keeps, kept in all three places. The sentence carries it because the reference does; whether a device id should ever hold one is a question for whatever minted it.",
+      "input": {
+        "device_id": "dev_7",
+        "os_image": {
+          "state": "known",
+          "digest": "sha256:aaaa"
+        },
+        "policy": {
+          "state": "unmeasured",
+          "why": "the runtime is not answering"
+        },
+        "embodiment": {
+          "state": "nothing"
+        }
+      },
+      "expected": "{\"complete\":false,\"sentence\":\"dev_7 is running image `sha256:aaaa`, an unmeasured policy (the runtime is not answering), against no body.\",\"unmeasured\":[\"policy\"]}"
     }
   ]
 }

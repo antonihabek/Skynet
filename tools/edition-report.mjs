@@ -46,6 +46,21 @@ const OUT = join(HERE, 'reference', 'reports', 'editions.json')
 const check = process.argv.includes('--check')
 
 /**
+ * The executables, by host — and never the text the report prints.
+ *
+ * This tool used to invoke `python3` everywhere, which on Windows is a stub that opens the Store, so
+ * the report could not run on the machine this repository is developed on while every Linux run was
+ * green — the shape of the 2026-09-10 finding that clean on one host is not clean. What each edition
+ * is *run with* now depends on the host; what the report *says* it is run with does not, because a
+ * file whose bytes depended on who generated it is a file `--check` fails on one of the two.
+ */
+const WINDOWS = process.platform === 'win32'
+const PYTHON = process.env.PYTHON ?? (WINDOWS ? 'python' : 'python3')
+// Strawberry's and MSYS2's make on Windows are both installed under this name.
+const MAKE = process.env.MAKE ?? (WINDOWS ? 'mingw32-make' : 'make')
+const EXE = WINDOWS ? '.exe' : ''
+
+/**
  * The editions that **exist**, with the command that measures each.
  *
  * An edition is on this list when there is code to run, not when there is a plan to write one.
@@ -67,15 +82,35 @@ const EDITIONS = [
     standing: 'full',
     path: 'editions/python/',
     runner: 'python3 editions/python/run_corpus.py --json',
-    command: ['python3', ['editions/python/run_corpus.py', '--json']],
+    command: [PYTHON, ['editions/python/run_corpus.py', '--json']],
+  },
+  {
+    // §31.3 gives C++ a Certified ceiling and a Full standing — *"the largest population in
+    // robotics; ROS 2 is C++"*. On this list from 2026-09-11, the first run at which it reproduced
+    // every case, and not before: the check below refuses any edition with a case unimplemented.
+    id: 'cpp',
+    language: 'C++',
+    standing: 'full',
+    path: 'editions/cpp/',
+    runner: 'make -C editions/cpp && editions/cpp/build/skynet-corpus-cpp --json',
+    build: [MAKE, ['-C', 'editions/cpp', `build/skynet-corpus-cpp${EXE}`]],
+    command: [`editions/cpp/build/skynet-corpus-cpp${EXE}`, ['--json', '--corpus-root', 'corpus']],
   },
 ]
+
+function run(program, args) {
+  return execFileSync(program, args, { cwd: HERE, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+}
 
 function measure(edition) {
   const [program, args] = edition.command
   let stdout
   try {
-    stdout = execFileSync(program, args, { cwd: HERE, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    // An edition compiled ahead of its run is built here rather than assumed built: a report
+    // measured against a binary somebody forgot to rebuild would publish the previous source's
+    // numbers under this commit.
+    if (edition.build) run(...edition.build)
+    stdout = run(program, args)
   } catch (error) {
     // A runner that exits non-zero has not reproduced the corpus, and a report generated from it
     // would be a page reporting a passing edition that does not pass.
@@ -108,8 +143,8 @@ function measure(edition) {
     runner: edition.runner,
     cases_passed: result.passed,
     cases_total: result.total,
-    // Only the Rust runner counts files; the Python one reports corpora. Both are printed where
-    // they exist and neither is invented for the other.
+    // Only the Rust runner counts files; the Python and C++ ones report corpora. Each is printed
+    // where it exists and neither is invented for the other.
     corpus_files: typeof result.files === 'number' ? result.files : null,
     corpora_complete: Array.isArray(result.complete) ? result.complete : null,
   }
@@ -168,7 +203,7 @@ function matrix() {
  *
  * `tools/corpus-gen/generate.ts` produces the corpus by *"running curated inputs through the
  * TypeScript oracle and freezing the canonical bytes of each"*. Measuring that oracle against its
- * own output would report 1,109 of 1,109 and mean nothing at all.
+ * own output would report every case passing and mean nothing at all.
  *
  * It is here rather than left out because leaving it out is a lie of a different kind: the page
  * would say *no code written* about the edition this Hub is built in and the corpus is generated

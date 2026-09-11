@@ -58,7 +58,8 @@ use alloc::vec::Vec;
 
 use skynet_json::Json;
 
-use crate::semver::{is_valid_range, is_valid_version, js_trim, satisfies};
+use crate::js::js_trim;
+use crate::semver::{is_valid_range, is_valid_version, satisfies};
 
 /// What an evaluation concluded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

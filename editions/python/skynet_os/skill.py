@@ -46,6 +46,7 @@ from __future__ import annotations
 import math
 from typing import Any, Final
 
+from .js import js_trim as _js_trim
 from .predicate import evaluate_predicate_outcome
 
 __all__ = [
@@ -596,7 +597,7 @@ def advance(phase: str, progress: dict[str, Any] | None = None) -> dict[str, Any
         # wait — an invocation parked hoping for a charger would burn §54.4's timeout and abort with
         # the wrong reason. And an empty sentence is not a refusal: §64 makes a refusal name its fix.
         withheld_raw = progress.get("power_withheld")
-        withheld = ("" if withheld_raw is None else str(withheld_raw)).strip()
+        withheld = _js_trim("" if withheld_raw is None else str(withheld_raw))
         if withheld:
             return done("terminal", "power_withheld", "aborted", withheld)
         leases = progress.get("leases")

@@ -30,6 +30,7 @@
 //    fields precisely to hold an edition to it.
 
 #include "skynet_os/contracts.hpp"
+#include "skynet_os/js.hpp"
 #include "skynet_os/predicate.hpp"
 #include "skynet_os/semver.hpp"
 #include "skynet_os/text.hpp"
@@ -70,7 +71,9 @@ std::optional<std::pair<int, std::string>> radix_literal(const std::string& body
   if (body.size() < 3 || body[0] != '0') {
     return std::nullopt;
   }
-  const char marker = static_cast<char>(std::tolower(static_cast<unsigned char>(body[1])));
+  // ASCII by grammar — `0x`, `0X` and the rest are StringNumericLiteral's own spellings — and not
+  // `std::tolower`, which consults the locale.
+  const char marker = text::is_ascii_upper(body[1]) ? static_cast<char>(body[1] - 'A' + 'a') : body[1];
   int base = 0;
   bool (*admits)(char) = nullptr;
   if (marker == 'x') {
@@ -244,7 +247,7 @@ std::optional<double> js_number(const Json* value) {
     return std::nullopt;
   }
 
-  const std::string body = text::strip(value->string_or(""));
+  const std::string body = js::trim(value->string_or(""));
   if (body.empty()) {
     // The reference guards this before coercing: `Number('')` is 0, which would make a blank field
     // compare as zero rather than refuse.
@@ -448,7 +451,7 @@ Outcome evaluate_outcome(const Json& node, const Json& context) {
       return decided(!value->items().empty());
     }
     if (value->is_string()) {
-      return decided(!text::strip(value->string_or("")).empty());
+      return decided(!js::trim(value->string_or("")).empty());
     }
     return decided(true);
   }

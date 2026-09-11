@@ -1241,6 +1241,270 @@
         }
       },
       "expected": "{\"faults\":[]}"
+    },
+    {
+      "id": "a-name-of-whitespace-only-javascript-trims",
+      "note": "A byte-order mark and a no-break space are blank to `trim()`, so this cell is unnamed.",
+      "input": {
+        "cell": {
+          "name": "﻿ ",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"unnamed\",\"detail\":\"A cell has no identity but its name, and this one has none.\",\"subjects\":[]}]}"
+    },
+    {
+      "id": "a-name-that-is-a-next-line",
+      "note": "U+0085 is not blank to `trim()`. Named, however odd the name — and the same answer from every edition, which is the part the corpus can hold.",
+      "input": {
+        "cell": {
+          "name": "",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[]}"
+    },
+    {
+      "id": "a-fact-key-behind-a-byte-order-mark",
+      "note": "A key is addressable when trimming leaves it unchanged, and `trim()` removes the mark — so this key is not the path segment it looks like. An edition that kept the mark would accept a fact no precondition can name.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "﻿ door_closed": true
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[{\"code\":\"fact_key_unusable\",\"detail\":\"A precondition addresses this as env.﻿ door_closed, and a dot path cannot name it. Nest the object instead of putting a dot in the key.\",\"subjects\":[\"﻿ door_closed\"]}]}"
+    },
+    {
+      "id": "a-fact-key-behind-a-next-line",
+      "note": "And `trim()` keeps U+0085, so this key is exactly itself and is addressable. An edition that stripped the character would refuse a key the reference accepts.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        }
+      },
+      "expected": "{\"faults\":[]}"
     }
   ]
 }

@@ -31,6 +31,8 @@ use alloc::string::{String, ToString};
 
 use skynet_json::Json;
 
+use crate::js::js_trim;
+
 /// What to do about one OS image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FetchDecision {
@@ -128,7 +130,7 @@ pub struct FetchPlan {
 /// metering first would report a robot as waiting for an unmetered bearer to fetch an image it
 /// already has.
 pub fn plan_fetch(subject: &FetchSubject) -> FetchPlan {
-    let digest = subject.digest.trim();
+    let digest = js_trim(&subject.digest);
 
     if subject.have {
         return FetchPlan {
@@ -313,8 +315,8 @@ pub struct BundleCheck {
 /// append to for ever, and an unverified bundle left on the disk is an artifact some future code
 /// path will find.
 pub fn check_bundle(arrived: &Arrived, expected: &Expected) -> BundleCheck {
-    let want = expected.digest.trim();
-    let got = arrived.digest.trim();
+    let want = js_trim(&expected.digest);
+    let got = js_trim(&arrived.digest);
 
     if let Some(size) = expected.size {
         if arrived.size < size {

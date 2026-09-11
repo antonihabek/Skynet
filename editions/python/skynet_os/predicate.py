@@ -43,6 +43,7 @@ import math
 import re
 from typing import Any, Final
 
+from .js import js_trim as _js_trim
 from .semver import is_valid_range, is_valid_version, satisfies
 
 __all__ = [
@@ -80,11 +81,11 @@ PREDICATE_OPS: Final = [
 ]
 
 #: A canonical decimal index, which is what a JSON array member is named.
-_INDEX_RE: Final = re.compile(r"^(0|[1-9]\d*)$")
+_INDEX_RE: Final = re.compile(r"^(0|[1-9][0-9]*)\Z")
 
 #: ``Number(string)``'s grammar, minus the legacy octal escape hatch the reference cannot produce.
-_DECIMAL_RE: Final = re.compile(r"^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$")
-_RADIX_RE: Final = re.compile(r"^0([xX][0-9a-fA-F]+|[oO][0-7]+|[bB][01]+)$")
+_DECIMAL_RE: Final = re.compile(r"^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\Z")
+_RADIX_RE: Final = re.compile(r"^0([xX][0-9a-fA-F]+|[oO][0-7]+|[bB][01]+)\Z")
 
 #: The sentinel for "this path named nothing". JSON has no `undefined`, so a real `null` in the
 #: context has to remain distinguishable from an absent member — see `read_path`.
@@ -217,7 +218,7 @@ def _js_number(value: Any) -> float | None:
     if not isinstance(value, str):
         return None
 
-    text = value.strip()
+    text = _js_trim(value)
     if text == "":
         # The reference guards this before coercing: `Number('')` is 0, which would make a blank
         # field compare as zero rather than refuse.
@@ -381,7 +382,7 @@ def evaluate_predicate_outcome(predicate: Any, context: Any) -> PredicateOutcome
         if isinstance(value, list):
             return _decided(len(value) > 0)
         if isinstance(value, str):
-            return _decided(value.strip() != "")
+            return _decided(_js_trim(value) != "")
         return _decided(True)
 
     if op in ("eq", "neq"):

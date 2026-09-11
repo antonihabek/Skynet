@@ -206,7 +206,7 @@ jobs:
       # that reads as honest progress. Raise it when the edition grows; lowering it is a decision
       # somebody makes in a diff rather than something that happens quietly.
       - name: Python edition reproduces the corpus
-        run: python3 editions/python/run_corpus.py --min-passed 1109
+        run: python3 editions/python/run_corpus.py --min-passed 1199
 
       # The traps the corpus structurally cannot reach, and the checks on the runner itself.
       # Two kinds in one script, and both are here for the same reason: a case carrying a `1` where
@@ -215,6 +215,14 @@ jobs:
       # absence is a gap in the corpus, and neither is a reason to leave the branch unchecked.
       - name: The Python edition's own checks
         run: python3 editions/python/self_check.py
+
+      # The third edition (§31.3: C++, Certified ceiling, Full standing). `make check` is the round
+      # trip of canonical JSON over every expected string, the self-check (runner accounting, the
+      # case tables against their engine vectors, and a scan refusing locale-dependent <cctype>
+      # calls), and the corpus at its ratchet — `MIN_PASSED` in the Makefile, for the reason the
+      # Python step above gives for its own.
+      - name: C++ edition reproduces the corpus
+        run: make -C editions/cpp check
 
       # The published figure, held to the run that produces it. This is the last step in the job
       # rather than a separate one because it is the only check here that needs **both** editions
@@ -229,6 +237,20 @@ jobs:
       # on a page for as long as nobody happened to run this tool by hand.
       - name: The published edition figures are what running the editions produces
         run: node tools/edition-report.mjs --check
+
+  # The C++ edition's case tables are read out of the JavaScript engine the reference runs on, so
+  # checking them needs the Unicode version they were generated under — which is Node's, and differs
+  # between Node 24 (the corpus job's) and Node 26. A separate job rather than a second Node in the
+  # corpus job, so neither toolchain decides the other's version.
+  cpp-case-tables:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      - name: The C++ case tables are what the engine produces
+        run: node editions/cpp/tools/unicode-case.ts --check
 
   # Claims this repository makes about itself, checked mechanically. Each of these is a sentence
   # somewhere in the specification that would otherwise decay quietly.

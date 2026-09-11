@@ -52,6 +52,7 @@ pub mod embodiment;
 pub mod entitlement;
 pub mod identity;
 pub mod intent;
+pub mod js;
 pub mod json;
 pub mod kinematics;
 pub mod live;

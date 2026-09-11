@@ -169,18 +169,7 @@ bool frame_is_named(const Json& volume) {
 }
 
 /// Whether `value` is truthy in the JavaScript sense — the test the fixture volume needs.
-bool truthy(const Json& value) {
-  switch (value.kind()) {
-    case Json::Kind::Null: return false;
-    case Json::Kind::Bool: return value.is_true();
-    case Json::Kind::Number: {
-      const double held = value.number_or(0);
-      return !(held == 0 || std::isnan(held));
-    }
-    case Json::Kind::String: return !value.string_or("").empty();
-    default: return true;
-  }
-}
+using js::truthy;
 
 /// Every fault in a cell descriptor.
 ///

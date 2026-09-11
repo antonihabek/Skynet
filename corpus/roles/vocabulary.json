@@ -179,6 +179,38 @@
       "expected": "null"
     },
     {
+      "id": "wrapped-in-whitespace-only-javascript-trims",
+      "note": "A byte-order mark and a no-break space either side, which is what a descriptor pasted out of a document editor carries. `trim()` removes both, so the role parses. Before this case the four implementations had three answers: Rust and Python kept the mark and refused the role, and the C++ edition kept both.",
+      "input": {
+        "role": "﻿ left_arm.shoulder.pitch﻿ "
+      },
+      "expected": "{\"axis\":\"pitch\",\"chain\":\"left_arm\",\"index\":null,\"key\":\"left_arm.shoulder.pitch\",\"link\":\"shoulder\"}"
+    },
+    {
+      "id": "wrapped-in-a-next-line-javascript-keeps",
+      "note": "U+0085 is whitespace to Rust, Python and Go and is not whitespace to `trim()`. Kept, so the charset refuses it and the role is null — the same body described two ways by two editions would otherwise have one more remappable joint in one of them.",
+      "input": {
+        "role": "left_arm.shoulder.pitch"
+      },
+      "expected": "null"
+    },
+    {
+      "id": "a-kelvin-sign-lower-cases-to-k",
+      "note": "U+212A KELVIN SIGN lower-cases to the ASCII letter k, so this is `neck` to `toLowerCase()` and the role parses. An edition that lower-cases ASCII only refuses it. `neck` is the one chain with a k in it, which is the only reason this is a roles case and not a curiosity.",
+      "input": {
+        "role": "necK.link.pitch"
+      },
+      "expected": "{\"axis\":\"pitch\",\"chain\":\"neck\",\"index\":null,\"key\":\"neck.link.pitch\",\"link\":\"link\"}"
+    },
+    {
+      "id": "an-ordinal-in-another-scripts-digits",
+      "note": "An ordinal is ASCII digits: `\\d` in the reference’s pattern is `[0-9]`. The same number written in Arabic-Indic digits is null, and an edition whose `\\d` is Unicode read it as `#1`.",
+      "input": {
+        "role": "base.wheel#١"
+      },
+      "expected": "null"
+    },
+    {
       "id": "chain-left_arm",
       "note": "left_arm is in the vocabulary.",
       "input": {

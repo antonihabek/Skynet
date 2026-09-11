@@ -89,6 +89,30 @@ namespace skynet::contracts {
 /// §12, §34.3 and §79's transfers: fetching an image, sending a window, and checking both.
 [[nodiscard]] Json transfer(const std::string& label, const Json& input);
 
+/// §36's power and thermal assessment: the state, and whether its number can be believed.
+[[nodiscard]] Json power(const std::string& label, const Json& input);
+
+/// §45's calibration validity, and the guards an expired set takes away.
+[[nodiscard]] Json calibration(const std::string& label, const Json& input);
+
+/// §10, §19 and §50's identity: a pairing code, a credential's state, and what is running.
+[[nodiscard]] Json identity(const std::string& label, const Json& input);
+
+/// §12's OTA: may this image be installed, and is the slot it booted into good.
+[[nodiscard]] Json ota(const std::string& label, const Json& input);
+
+/// §11 and §17's check-in: what a robot may claim, its health, and the document it sends.
+[[nodiscard]] Json checkin(const std::string& label, const Json& input);
+
+/// §8.2's package admission: every finding, in order, and what will be granted.
+[[nodiscard]] Json admission(const std::string& label, const Json& input);
+
+/// §54's skills: preconditions, success, timeout, composition and the lifecycle.
+[[nodiscard]] Json skill(const std::string& label, const Json& input);
+
+/// §13 and §26's black box: the ring's records and header, the MCAP schemas, and a sealed file.
+[[nodiscard]] Json blackbox(const std::string& label, const Json& input);
+
 }  // namespace skynet::contracts
 
 #endif  // SKYNET_OS_CONTRACTS_HPP

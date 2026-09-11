@@ -271,6 +271,50 @@
       "expected": "{\"changed\":true,\"detail\":\"every required capability is leased\",\"from\":\"acquiring\",\"outcome\":null,\"reason\":\"leases_acquired\",\"release_leases\":false,\"to\":\"running\"}"
     },
     {
+      "id": "power-withheld-in-whitespace-only-javascript-trims",
+      "note": "Blank to `trim()` as well, so still not a refusal. An edition that kept the byte-order mark would abort the skill with a reason nobody can read.",
+      "input": {
+        "phase": "acquiring",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running",
+          "power_withheld": "﻿ "
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"every required capability is leased\",\"from\":\"acquiring\",\"outcome\":null,\"reason\":\"leases_acquired\",\"release_leases\":false,\"to\":\"running\"}"
+    },
+    {
+      "id": "power-withheld-a-next-line",
+      "note": "Not blank to `trim()`, so the skill is aborted and the reason is what arrived. That is a poor sentence, and it is the reference’s sentence: the corpus pins agreement, and the field is written by the power contract, which never writes this.",
+      "input": {
+        "phase": "acquiring",
+        "progress": {
+          "invoked": true,
+          "root": true,
+          "entry_permitted": true,
+          "leases": "held",
+          "elapsed_ms": 100,
+          "deadline": {
+            "deadline_ms": 20000,
+            "enforceable": true,
+            "factor": 2
+          },
+          "robot": "running",
+          "power_withheld": ""
+        }
+      },
+      "expected": "{\"changed\":true,\"detail\":\"\",\"from\":\"acquiring\",\"outcome\":\"aborted\",\"reason\":\"power_withheld\",\"release_leases\":true,\"to\":\"terminal\"}"
+    },
+    {
       "id": "lease-never-granted",
       "note": "The other half of §25.2, and the one no case had. A token the operator never granted reports no holder — \"nobody has the arm, this package may not ask for it\" — and the refusal has to say that rather than \"held by another package\", which sends an operator hunting for a package that does not exist when the fix is one grant. Found by writing a runtime, not by reading the document.",
       "input": {

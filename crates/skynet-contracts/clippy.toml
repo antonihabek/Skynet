@@ -1,0 +1,19 @@
+# The contracts are transcribed from `reference/typescript/*`, and these are the methods whose Rust
+# meaning is not the reference's. Each was used somewhere in this crate, and each computed a
+# different answer from the reference on an input the corpus now holds; `src/js.rs` has the
+# replacements and the reasons.
+#
+# Crate-local on purpose. The daemon parses HTTP headers and systemd output, where Rust's whitespace
+# set is the right one and there is no reference to agree with. Here there always is.
+
+disallowed-methods = [
+  { path = "str::trim", reason = "Unicode White_Space is not trim()'s set: U+FEFF and U+0085 differ. Use crate::js::js_trim." },
+  { path = "str::trim_start", reason = "Unicode White_Space is not trim()'s set. Trim with crate::js::is_js_space." },
+  { path = "str::trim_end", reason = "Unicode White_Space is not trim()'s set. Trim with crate::js::is_js_space." },
+  { path = "str::split_whitespace", reason = "Unicode White_Space is not the reference's \\s. Split on crate::js::is_js_space." },
+  { path = "char::is_whitespace", reason = "Unicode White_Space is not trim()'s set. Use crate::js::is_js_space." },
+  { path = "char::to_ascii_lowercase", reason = "toLowerCase() maps U+212A KELVIN SIGN to 'k'. Use str::to_lowercase, which is the reference's mapping." },
+  { path = "char::to_ascii_uppercase", reason = "toUpperCase() is a full mapping. Use char::to_uppercase." },
+  { path = "str::to_ascii_lowercase", reason = "toLowerCase() maps U+212A KELVIN SIGN to 'k'. Use str::to_lowercase, which is the reference's mapping." },
+  { path = "str::to_ascii_uppercase", reason = "toUpperCase() is a full mapping. Use str::to_uppercase." },
+]

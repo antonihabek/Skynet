@@ -190,6 +190,58 @@
         }
       },
       "expected": "{\"adopt\":true,\"changed\":true,\"faults\":[{\"code\":\"generation_went_backwards\",\"message\":\"This robot has applied generation 41 and the Hub is asking for 0. Intent has gone backwards, which is what a Hub restored from a backup looks like. It is adopted — a robot that refused to follow one would be a fleet nobody could recover — and it is reported, because it is worth somebody knowing once.\",\"severity\":\"warning\"}],\"generation\":0}"
+    },
+    {
+      "id": "digests-compared-after-trimming",
+      "note": "The same generation and the same document, the offered digest wrapped in the two characters `trim()` removes. Adopted and unchanged. An edition that kept the byte-order mark would see two documents under one generation and refuse the ordinary poll.",
+      "input": {
+        "offer": {
+          "decoded": true,
+          "generation": 41,
+          "digest": "﻿ sha256:aaaa﻿ ",
+          "packages": 2
+        },
+        "held": {
+          "generation": 41,
+          "digest": "sha256:aaaa",
+          "running": 2
+        }
+      },
+      "expected": "{\"adopt\":true,\"changed\":false,\"faults\":[],\"generation\":41}"
+    },
+    {
+      "id": "a-digest-behind-a-next-line-is-another-document",
+      "note": "U+0085 is kept, so this is a different digest under the generation the robot already holds — the reused generation §11 refuses. An edition that stripped the character would adopt it.",
+      "input": {
+        "offer": {
+          "decoded": true,
+          "generation": 41,
+          "digest": "sha256:aaaa",
+          "packages": 2
+        },
+        "held": {
+          "generation": 41,
+          "digest": "sha256:aaaa",
+          "running": 2
+        }
+      },
+      "expected": "{\"adopt\":false,\"changed\":false,\"faults\":[{\"code\":\"generation_reused\",\"message\":\"The Hub is serving a different document under generation 41, which this robot has already applied. §11 rests idempotence on that counter, so adopting this would have the robot running new software while reporting the old generation as applied — and a fleet console would show it converged. Bump the generation on the Hub and this robot will take it on the next poll.\",\"severity\":\"error\"}],\"generation\":41}"
+    },
+    {
+      "id": "a-reason-of-whitespace-only-javascript-trims",
+      "note": "A decode failure whose reason is blank to `trim()`. The sentence ends where it would with no reason at all, rather than after a colon and an invisible character.",
+      "input": {
+        "offer": {
+          "decoded": false,
+          "decode_error": "﻿ "
+        },
+        "held": {
+          "generation": 41,
+          "digest": "sha256:aaaa",
+          "running": 2
+        }
+      },
+      "expected": "{\"adopt\":false,\"changed\":false,\"faults\":[{\"code\":\"undecodable\",\"message\":\"This response is not a desired state. It has not been written to disk, and this robot carries on reconciling against what it already has — which is what it does whenever it cannot reach the Hub at all (§34.1), so nothing about the robot is worse for it.\",\"severity\":\"error\"}],\"generation\":41}"
     }
   ]
 }

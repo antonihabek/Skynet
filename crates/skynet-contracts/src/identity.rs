@@ -49,6 +49,7 @@ use alloc::vec::Vec;
 use skynet_json::Json;
 
 use crate::admission::Severity;
+use crate::js::js_trim;
 
 /// The alphabet a pairing code is drawn from — Crockford's base32.
 ///
@@ -160,15 +161,15 @@ fn fold(character: char) -> char {
 /// none. Length is checked before the alphabet for the same reason: somebody who typed seven
 /// characters needs to be told they typed seven.
 pub fn normalize_pairing_code(input: &str) -> CodeResult {
-    // ASCII-lowercased rather than `to_lowercase`, which allocates and would fold characters no
-    // credential prefix contains. The prefix is four ASCII bytes and the comparison is about them.
-    let trimmed = input.trim();
-    let head: String = trimmed
-        .chars()
-        .take(DEVICE_TOKEN_PREFIX.len())
-        .map(|c| c.to_ascii_lowercase())
-        .collect();
-    if head == DEVICE_TOKEN_PREFIX {
+    // Trimmed and lower-cased as the reference does it, with `trim()`'s set and a full case mapping.
+    // This used to lower-case ASCII only, on the stated ground that a full mapping would fold
+    // characters no credential prefix contains — and U+212A KELVIN SIGN lower-cases to the `k` in
+    // `skd_`, so the reference called that string a credential while this edition counted its
+    // characters. The corpus holds it now: `identity/pairing :: a-credential-spelled-with-a-kelvin-sign`.
+    if js_trim(input)
+        .to_lowercase()
+        .starts_with(DEVICE_TOKEN_PREFIX)
+    {
         return CodeResult {
             code: None,
             fault: Some(CodeFault {
@@ -472,7 +473,7 @@ fn finding(
 /// lifecycle, and it is reported as a warning naming the command rather than as something broken.
 pub fn check_identity(identity: &Identity, observed: &Observed) -> IdentityVerdict {
     let mut findings = Vec::new();
-    let namespace = identity.namespace.trim();
+    let namespace = js_trim(&identity.namespace);
 
     if !identity.credential {
         findings.push(finding(
@@ -557,8 +558,8 @@ pub fn check_identity(identity: &Identity, observed: &Observed) -> IdentityVerdi
     }
 
     // ── §10's second addition: what the key is bound to ────────────────────────
-    let key = identity.device_key.trim();
-    let birth_key = observed.birth_key.trim();
+    let key = js_trim(&identity.device_key);
+    let birth_key = js_trim(&observed.birth_key);
 
     match identity.binding {
         None => findings.push(finding(
@@ -743,7 +744,7 @@ pub struct AttestationReport {
 fn render(measure: &Measure, label: &str, noun: &str) -> String {
     match measure.state {
         MeasureState::Known => {
-            let digest = measure.digest.trim();
+            let digest = js_trim(&measure.digest);
             // A `Known` measure with nothing in it is a caller bug, and it is rendered as the
             // absence it is rather than as an empty pair of backticks somebody reads as a digest of
             // zero length.
@@ -755,7 +756,7 @@ fn render(measure: &Measure, label: &str, noun: &str) -> String {
         }
         MeasureState::Nothing => format!("no {noun}"),
         MeasureState::Unmeasured => {
-            let why = measure.why.trim();
+            let why = js_trim(&measure.why);
             if why.is_empty() {
                 format!("an unmeasured {noun}")
             } else {
@@ -798,7 +799,7 @@ pub fn attest(attestation: &Attestation) -> AttestationReport {
         unmeasured.push("policy".to_string());
     }
 
-    let device = attestation.device_id.trim();
+    let device = js_trim(&attestation.device_id);
     let subject = if device.is_empty() {
         "This robot"
     } else {
@@ -930,11 +931,20 @@ fn measure_to_json(measure: &Measure) -> Json {
     out
 }
 
+/// The reference's `trimmedOrNull`: the trimmed text, or null when nothing is left.
+///
+/// **The trimmed text**, and that is the half that was wrong. This used to test the trimmed value
+/// for blankness and then put the untrimmed one on the wire, so a digest that arrived with a
+/// byte-order mark around it left this robot as a digest no fleet query could match — while the
+/// sentence beside it, rendered by `attest`, had trimmed it. Found by the corpus, once the corpus
+/// had a check-in whose attestation carried one:
+/// `checkin/document :: attested-digests-in-whitespace-only-javascript-trims`.
 fn text_or_null(value: &str) -> Json {
-    if value.trim().is_empty() {
+    let text = js_trim(value);
+    if text.is_empty() {
         Json::Null
     } else {
-        Json::Str(value.to_string())
+        Json::Str(text.to_string())
     }
 }
 
@@ -1038,7 +1048,7 @@ mod tests {
             let fault = normalize_pairing_code(input)
                 .fault
                 .expect("none of these is a code");
-            let trimmed = input.trim();
+            let trimmed = js_trim(input);
             if !trimmed.is_empty() {
                 assert!(
                     !fault.detail.contains(trimmed),

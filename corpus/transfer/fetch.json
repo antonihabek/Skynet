@@ -176,6 +176,42 @@
         }
       },
       "expected": "{\"decision\":\"resume\",\"detail\":\"Resuming at 40000 bytes. The partial is keyed to this bundle's digest, so it cannot be a different image's tail.\",\"from\":40000}"
+    },
+    {
+      "id": "a-digest-of-whitespace-only-javascript-trims",
+      "note": "Blank to `trim()`, so bytes with no name, refused before a bearer is considered. An edition that kept the byte-order mark would fetch an image no gate can be bound to.",
+      "input": {
+        "subject": {
+          "digest": "﻿ ",
+          "size": 100000,
+          "have": false,
+          "partial": 0,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"refuse\",\"detail\":\"This release names no bundle digest, so there is nothing to check the bytes against. §12 binds a bench pass to the exact bytes it was taken against, and bytes with no name cannot be bound to — so they are not fetched either.\",\"from\":0}"
+    },
+    {
+      "id": "a-digest-that-is-a-next-line",
+      "note": "Not blank to `trim()`, so the fetch is planned. Every edition must plan it; whether the Hub should ever have served such a digest is the Hub’s question.",
+      "input": {
+        "subject": {
+          "digest": "",
+          "size": 100000,
+          "have": false,
+          "partial": 0,
+          "bearer": {
+            "name": "eth0",
+            "metered": false,
+            "metering_declared": true
+          }
+        }
+      },
+      "expected": "{\"decision\":\"fetch\",\"detail\":\"Fetching 100000 bytes over `eth0`.\",\"from\":0}"
     }
   ]
 }

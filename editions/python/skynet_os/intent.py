@@ -41,6 +41,8 @@ from __future__ import annotations
 import math
 from typing import Any, Final
 
+from .js import js_trim as _js_trim
+
 __all__ = ["OFFER_FAULTS", "assess_offer", "offer_to_json"]
 
 OFFER_FAULTS: Final = (
@@ -84,12 +86,12 @@ def assess_offer(offer: dict[str, Any], held: dict[str, Any]) -> dict[str, Any]:
     """
     faults: list[dict[str, Any]] = []
     held_generation = _or(held.get("generation"), 0)
-    held_digest = str(_or(held.get("digest"), "")).strip()
+    held_digest = _js_trim(str(_or(held.get("digest"), "")))
     offered = _or(offer.get("generation"), 0)
-    digest = str(_or(offer.get("digest"), "")).strip()
+    digest = _js_trim(str(_or(offer.get("digest"), "")))
 
     if offer.get("decoded") is not True:
-        why = str(_or(offer.get("decode_error"), "")).strip()
+        why = _js_trim(str(_or(offer.get("decode_error"), "")))
         because = "" if why == "" else f": {why}"
         faults.append(
             _fault(

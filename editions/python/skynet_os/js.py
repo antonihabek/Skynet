@@ -9,10 +9,20 @@ They lived in :mod:`skynet_os.identity` first, moved here when :mod:`skynet_os.c
 same two, and are a module rather than a third copy because a divergence helper that exists twice is
 a divergence helper that will eventually disagree with itself.
 
-**``String.prototype.trim``** removes a *smaller* set than Python's ``str.strip()``: ECMAScript's
-``WhiteSpace`` plus ``LineTerminator``, which includes ``U+FEFF`` and excludes the C1 controls.
-``"\x1c".strip()`` is empty to Python and ``"\x1c"`` to the reference, and the difference decides
-whether a name is blank.
+**``String.prototype.trim``** removes a different set from Python's ``str.strip()``: ECMAScript's
+``WhiteSpace`` plus ``LineTerminator``, which includes ``U+FEFF`` and excludes ``U+0085`` and the
+separators ``U+001C``–``U+001F``. ``"\x1c".strip()`` is empty to Python and ``"\x1c"`` to the
+reference, and the difference decides whether a name is blank. The same set is JavaScript's
+``\\s``, which a Python ``str`` pattern's ``\\s`` is not — :data:`JS_SPACE` is the class to use.
+
+**``\\d``** in a JavaScript pattern is ``[0-9]``. In a Python ``str`` pattern it is every Unicode
+decimal digit, and ``int()`` and ``float()`` read them all, so a version written in Arabic-Indic
+digits is a version to Python and nothing to the reference. Patterns in this package spell
+``[0-9]``.
+
+Until 2026-09-11 this module held the trim rule and eight other modules did not use it: they called
+``.strip()``, and their patterns used ``\\s`` and ``\\d``. The corpus had no input that could tell. It
+has now, and ``self_check.py`` scans the package for both spellings.
 
 **``.length``, and indexing** are in UTF-16 code units. Eight characters above ``U+FFFF`` are sixteen
 of them, and a refusal that reports a length is reporting that number.
@@ -34,6 +44,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Final
 
 __all__ = [
+    "JS_SPACE",
     "js_number",
     "js_trim",
     "to_fixed",
@@ -43,15 +54,23 @@ __all__ = [
     "utf16_units",
 ]
 
-#: ECMAScript's ``WhiteSpace`` plus ``LineTerminator``. Python's ``strip()`` removes more.
-_JS_WHITESPACE: Final = (
-    "\t\n\v\f\r             "
-    "     　﻿"
+#: ECMAScript's ``WhiteSpace`` plus ``LineTerminator``, by code point. Written as numbers because the
+#: string it used to be was twenty-five characters, most of them invisible, and a set nobody can
+#: read is a set nobody can check.
+_JS_WHITESPACE_CODE_POINTS: Final = (
+    0x0009, 0x000A, 0x000B, 0x000C, 0x000D, 0x0020, 0x00A0, 0x1680,
+    *range(0x2000, 0x200B),
+    0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF,
 )
+_JS_WHITESPACE: Final = "".join(map(chr, _JS_WHITESPACE_CODE_POINTS))
+
+#: One character of JavaScript's \s, as a pattern: write this where a JavaScript pattern says \s.
+#: None of the set is special inside a character class.
+JS_SPACE: Final = "[" + _JS_WHITESPACE + "]"
 
 
 def js_trim(value: str) -> str:
-    """``String.prototype.trim`` — the specification's set, not Python's larger one."""
+    """``String.prototype.trim`` — the specification's set, not Python's."""
     return value.strip(_JS_WHITESPACE)
 
 

@@ -50,6 +50,7 @@ use alloc::vec::Vec;
 use skynet_json::Json;
 
 use crate::identity::{attest, attestation_to_json, Attestation};
+use crate::js::js_trim;
 
 /// What a robot may claim about the generation it was given.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -682,12 +683,12 @@ pub fn check_in(input: &CheckInInput) -> CheckIn {
         claim: claim_for(&input.progress),
         health: summarize(&input.health),
         attestation: input.attestation.clone(),
-        device_id: input.device_id.trim().to_string(),
-        agent: input.agent.trim().to_string(),
-        contracts: input.contracts.trim().to_string(),
-        state: input.state.trim().to_string(),
+        device_id: js_trim(&input.device_id).to_string(),
+        agent: js_trim(&input.agent).to_string(),
+        contracts: js_trim(&input.contracts).to_string(),
+        state: js_trim(&input.state).to_string(),
         pending,
-        desired_digest: input.desired_digest.trim().to_string(),
+        desired_digest: js_trim(&input.desired_digest).to_string(),
         // Carried through rather than derived. What the guards are and what they lack is the
         // kernel's answer for this body, and a builder that recomputed any of it would be a second
         // implementation of §7.3 living in the reporting path.

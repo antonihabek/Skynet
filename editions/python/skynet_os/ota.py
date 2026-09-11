@@ -38,6 +38,8 @@ from __future__ import annotations
 import math
 from typing import Any, Final
 
+from .js import js_trim as _js_trim
+
 __all__ = [
     "BOOT_DECISIONS",
     "BUNDLE_FAULTS",
@@ -192,7 +194,7 @@ def admit_bundle(bundle: dict[str, Any], subject: dict[str, Any]) -> dict[str, A
     changes = bundle.get("changes")
     changes = [] if changes is None else changes
 
-    if version.strip() == "":
+    if _js_trim(version) == "":
         faults.append(
             _fault(
                 "unversioned",
@@ -205,7 +207,7 @@ def admit_bundle(bundle: dict[str, Any], subject: dict[str, Any]) -> dict[str, A
     # Before the certification gate, because that gate binds a bench pass to this digest and a
     # bundle with no digest cannot be bound to anything. Reported separately so the two refusals do
     # not read as one problem.
-    if digest.strip() == "":
+    if _js_trim(digest) == "":
         faults.append(
             _fault(
                 "undigested",

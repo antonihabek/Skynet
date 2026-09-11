@@ -35,6 +35,8 @@ use alloc::vec::Vec;
 use skynet_json::Json;
 use skynet_kernel::kinematics::{Shape, Volume, WorkspaceLayer};
 
+use crate::js::js_trim;
+
 /// A volume, owned.
 ///
 /// `shape` is an [`Option`] because "declared and unreadable" is a fault to report rather than a
@@ -153,7 +155,7 @@ pub struct CellFault {
 
 /// A key a dot path can address: non-empty, no dot, and no surrounding whitespace.
 fn usable_key(key: &str) -> bool {
-    !key.is_empty() && !key.contains('.') && key.trim() == key
+    !key.is_empty() && !key.contains('.') && js_trim(key) == key
 }
 
 fn shape_is_usable(volume: &CellVolume) -> bool {
@@ -173,7 +175,7 @@ fn shape_is_usable(volume: &CellVolume) -> bool {
 }
 
 fn frame_is_named(volume: &CellVolume) -> bool {
-    !volume.frame.trim().is_empty()
+    !js_trim(&volume.frame).is_empty()
 }
 
 /// Every fault in a cell descriptor.
@@ -186,7 +188,7 @@ fn frame_is_named(volume: &CellVolume) -> bool {
 pub fn validate_cell(cell: &CellDescriptor) -> Vec<CellFault> {
     let mut faults = Vec::new();
 
-    if cell.name.trim().is_empty() {
+    if js_trim(&cell.name).is_empty() {
         faults.push(CellFault {
             code: CellFaultCode::Unnamed,
             subjects: Vec::new(),
@@ -242,7 +244,7 @@ pub fn validate_cell(cell: &CellDescriptor) -> Vec<CellFault> {
 
     let mut seen_fixtures: Vec<&str> = Vec::new();
     for (index, fixture) in cell.fixtures.iter().enumerate() {
-        if fixture.name.trim().is_empty() {
+        if js_trim(&fixture.name).is_empty() {
             faults.push(CellFault {
                 code: CellFaultCode::FixtureUnnamed,
                 subjects: alloc::vec![format!("fixtures[{index}]")],
@@ -279,7 +281,7 @@ pub fn validate_cell(cell: &CellDescriptor) -> Vec<CellFault> {
 
     let mut seen_channels: Vec<&str> = Vec::new();
     for (index, entry) in cell.parking_pose.iter().enumerate() {
-        if entry.channel.trim().is_empty() {
+        if js_trim(&entry.channel).is_empty() {
             faults.push(CellFault {
                 code: CellFaultCode::ParkingChannelUnnamed,
                 subjects: alloc::vec![format!("parking_pose[{index}]")],
@@ -324,7 +326,7 @@ pub fn cell_environment(cell: &CellDescriptor) -> Json {
         Json::Arr(
             cell.fixtures
                 .iter()
-                .filter(|fixture| !fixture.name.trim().is_empty())
+                .filter(|fixture| !js_trim(&fixture.name).is_empty())
                 .map(|fixture| Json::Str(fixture.name.clone()))
                 .collect(),
         ),

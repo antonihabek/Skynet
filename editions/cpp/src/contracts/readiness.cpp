@@ -57,20 +57,7 @@ std::size_t tier_rank(const std::string& tier) {
 /// that use it pair it with a `> 0` rather than relying on it alone.
 bool is_number(const Json& value) { return value.is_number(); }
 
-/// JavaScript truthiness: `0`, `''`, `null`, `undefined`, `NaN` and `false` are not. Notably an
-/// empty array and an empty object **are**.
-bool truthy(const Json& value) {
-  switch (value.kind()) {
-    case Json::Kind::Null: return false;
-    case Json::Kind::Bool: return value.is_true();
-    case Json::Kind::Number: {
-      const double held = value.number_or(0);
-      return !(held == 0 || std::isnan(held));
-    }
-    case Json::Kind::String: return !value.string_or("").empty();
-    default: return true;
-  }
-}
+using js::truthy;
 
 struct Check {
   std::string name;

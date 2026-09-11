@@ -16,6 +16,7 @@
 
 #include "skynet_os/contracts.hpp"
 #include "skynet_os/corpus.hpp"
+#include "skynet_os/js.hpp"
 #include "skynet_os/semver.hpp"
 #include "skynet_os/text.hpp"
 
@@ -102,7 +103,7 @@ struct Comparator {
 
 /// `^(>=|<=|>|<|\^|~|=)?\s*(.+)$` — the operator, then whatever is left, parsed as a version.
 std::optional<Comparator> parse_comparator(const std::string& token) {
-  const std::string trimmed = text::strip(token);
+  const std::string trimmed = js::trim(token);
   std::size_t at = 0;
   std::string op;
   if (text::starts_with(trimmed, ">=") || text::starts_with(trimmed, "<=")) {
@@ -182,10 +183,11 @@ std::vector<std::string> find_tokens(std::string_view group) {
                 group[cursor] == '~' || group[cursor] == '=')) {
       cursor += 1;
     }
-    while (cursor < group.size() && (group[cursor] == ' ' || group[cursor] == '\t' ||
-                                     group[cursor] == '\n' || group[cursor] == '\r' ||
-                                     group[cursor] == '\f' || group[cursor] == '\v')) {
-      ++cursor;
+    // `\s*`, which is `trim()`'s set: a byte-order mark or a no-break space between an operator
+    // and its version is stepped over, and U+0085 is not.
+    for (std::size_t width = js::space_at(group, cursor); width > 0;
+         width = js::space_at(group, cursor)) {
+      cursor += width;
     }
 
     const auto digits = [&](std::size_t& position) {
@@ -229,8 +231,8 @@ std::vector<std::string> find_tokens(std::string_view group) {
 /// nothing to compare against.
 std::optional<std::vector<std::optional<std::vector<Comparator>>>> parse_range(
     const std::string& range_text) {
-  const std::string trimmed = text::strip(range_text);
-  if (trimmed.empty() || trimmed == "*" || text::ascii_lower(trimmed) == "any") {
+  const std::string trimmed = js::trim(range_text);
+  if (trimmed.empty() || trimmed == "*" || js::to_lower(trimmed) == "any") {
     return std::nullopt;
   }
 
@@ -241,7 +243,7 @@ std::optional<std::vector<std::optional<std::vector<Comparator>>>> parse_range(
     const std::string group =
         trimmed.substr(start, separator == std::string::npos ? std::string::npos : separator - start);
 
-    const std::vector<std::string> tokens = find_tokens(text::strip(group));
+    const std::vector<std::string> tokens = find_tokens(js::trim(group));
     if (tokens.empty()) {
       groups.emplace_back(std::nullopt);
     } else {
@@ -274,7 +276,7 @@ std::optional<std::vector<std::optional<std::vector<Comparator>>>> parse_range(
 
 std::optional<Version> parse(const std::string& text) {
   // `^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$`
-  const std::string trimmed = text::strip(text);
+  const std::string trimmed = js::trim(text);
   std::size_t at = 0;
   const auto digits = [&]() -> std::optional<std::string> {
     const std::size_t start = at;
