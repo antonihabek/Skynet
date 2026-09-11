@@ -56,6 +56,39 @@ namespace skynet::contracts {
 /// §47.6's frame pool: a handle names one generation of one slot, and nothing else.
 [[nodiscard]] Json media(const std::string& label, const Json& input);
 
+/// §27's operating state machine, its three predicates, and §49.1's warning matrix.
+[[nodiscard]] Json opstate(const std::string& label, const Json& input);
+
+/// §46's watchdog chain: four layers, the host-tier refusal, and the nesting report.
+[[nodiscard]] Json watchdog(const std::string& label, const Json& input);
+
+/// §11's pull: may this response become the desired state?
+[[nodiscard]] Json intent(const std::string& label, const Json& input);
+
+/// §31.5's readiness: what a robot has declared, and the tier it could attempt.
+[[nodiscard]] Json readiness(const std::string& label, const Json& input);
+
+/// §54.2's live precondition context, where absent is never null.
+[[nodiscard]] Json live(const std::string& label, const Json& input);
+
+/// §56's provenance: what an on-robot result is worth, and whether two roll-ups of it agree.
+[[nodiscard]] Json provenance(const std::string& label, const Json& input);
+
+/// §15's certification award: the tier the evidence supports, never the tier claimed.
+[[nodiscard]] Json certification(const std::string& label, const Json& input);
+
+/// §50's birth certificate: what it establishes about this machine, and what it cannot.
+[[nodiscard]] Json birth(const std::string& label, const Json& input);
+
+/// §55.2's cell descriptor: what an operator sees on save, and what a precondition reads after.
+[[nodiscard]] Json cell(const std::string& label, const Json& input);
+
+/// §74's telemetry: one window, and what a set of them covers.
+[[nodiscard]] Json telemetry(const std::string& label, const Json& input);
+
+/// §12, §34.3 and §79's transfers: fetching an image, sending a window, and checking both.
+[[nodiscard]] Json transfer(const std::string& label, const Json& input);
+
 }  // namespace skynet::contracts
 
 #endif  // SKYNET_OS_CONTRACTS_HPP
