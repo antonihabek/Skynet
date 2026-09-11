@@ -73,7 +73,8 @@ func ExplainBirth(finding BirthFinding) string {
 	return ""
 }
 
-// subjectAt is the reference's destructuring default `const [first = ”, second = ”] = subjects`.
+// subjectAt is the reference's destructuring default `const [first = "", second = ""] = subjects`:
+// a subject the list does not have reads as the empty string.
 func subjectAt(subjects []string, at int) string {
 	if at < 0 || at >= len(subjects) {
 		return ""

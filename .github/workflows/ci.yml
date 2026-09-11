@@ -1,10 +1,10 @@
 # Skynet OS — continuous integration.
 #
-# Four jobs, and the third is the one that matters. §31.4 requires differential checking in CI:
+# Six jobs, and `corpus` is the one that matters. §31.4 requires differential checking in CI:
 # every edition runs the corpus on every commit, and a divergence blocks the release of the edition
-# that diverged and never of the others. There are two editions now, and `corpus` runs both — the
-# reference and the Python edition §31.3's matrix puts at the guest ceiling. The second is
-# incomplete and its runner reports that as a number, which is what makes it safe to gate on.
+# that diverged and never of the others. There are four measured editions — the Rust reference, and
+# Python, C++ and Go at §42's L2 — and `corpus` runs every one of them, then re-derives the figures
+# the Hub publishes from those runs.
 
 name: ci
 
@@ -193,12 +193,11 @@ jobs:
             exit 1
           }
 
-      # Every edition sits the same exam. Two rows now, and the second is not a smaller version
-      # of the first: the Python edition is **incomplete**, and the whole design of its runner is
-      # about saying so in a number rather than in a comment. It passes when every case it answers
-      # is byte-identical and reports the rest as not implemented — so this step goes red on a
-      # divergence and stays green on a gap, which is the only arrangement under which a partial
-      # edition can be in CI at all.
+      # Every edition sits the same exam. Each runner passes when every case it answers is
+      # byte-identical and reports the rest as not implemented — red on a divergence, green on a gap,
+      # which is how an edition was allowed into CI while it was partial. What keeps a gap from
+      # opening up again is the ratchet each step below carries, and the report at the end of the job,
+      # which refuses any edition with a single case unanswered.
       - name: Rust edition reproduces the corpus
         run: cargo test -p skynet-corpus -- --nocapture
 
@@ -222,8 +221,14 @@ jobs:
       # The third edition (§31.3: C++, Certified ceiling, Full standing). `make check` is the round
       # trip of canonical JSON over every expected string, the self-check (runner accounting, the
       # case tables against their engine vectors, and a scan refusing locale-dependent <cctype>
-      # calls), and the corpus at its ratchet — `MIN_PASSED` in the Makefile, for the reason the
-      # Python step above gives for its own.
+      # calls), the fused multiply-add scan, and the corpus at its ratchet — `MIN_PASSED` in the
+      # Makefile, for the reason the Python step above gives for its own.
+      #
+      # The fusion scan is here because this runner is x86-64 at its baseline level, which has no FMA
+      # instruction, so the corpus passing on it says nothing about a build for aarch64 — where GCC
+      # contracts `x*y + z` by default and the kernel's sine and cosine come out with different bits.
+      # The scan compiles every unit with FMA made available and fails on any fused instruction; the
+      # Makefile's `FP_FLAGS` is what keeps there being none.
       - name: C++ edition reproduces the corpus
         run: make -C editions/cpp check
 
@@ -231,19 +236,20 @@ jobs:
       # it, and the first of them whose language has a garbage collector. `make check` is gofmt and
       # `go vet` as build failures, the case-vector tests, the canonical round trip over every
       # expected string, the self-check (a source scan refusing the standard-library spellings that
-      # are *nearly* ECMAScript's, the runner's four-bucket accounting, and rule 3 at its edges),
-      # and the corpus at its ratchet.
+      # are *nearly* ECMAScript's, the runner's four-bucket accounting, rule 3 at its edges, and the
+      # compiler's own assembly on the six architectures where Go fuses a multiply into an add), and
+      # the corpus at its ratchet.
       #
-      # It is **not** yet in `tools/edition-report.mjs`, and must not be until it answers every
-      # case: that tool refuses any edition with a non-zero unimplemented count, which is §31.4
-      # enforced rather than described. Until then this step is what holds it — red on a divergence,
-      # green on a gap, which is the only arrangement under which a partial edition can be in CI.
+      # The fusion half cross-compiles, because the Go specification permits fusion "possibly across
+      # statements" and this runner's amd64 at its default level cannot show it: on arm64, ppc64le and
+      # loong64 the observation contract's rounding helper was being fused after inlining, and every
+      # corpus run here passed.
       - name: Go edition reproduces the corpus
         run: make -C editions/go check
 
       # The published figure, held to the run that produces it. This is the last step in the job
-      # rather than a separate one because it is the only check here that needs **both** editions
-      # to have run: it runs them again and compares the result to `reference/reports/editions.json`,
+      # rather than a separate one because it is the only check here that needs **every** edition's
+      # toolchain: it runs them all again and compares the result to `reference/reports/editions.json`,
       # which the Hub mirrors and `/skynet/os/editions` renders to the public.
       #
       # It is here because on 2026-09-07 that file said 1,137 cases while both editions passed

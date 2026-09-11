@@ -114,7 +114,15 @@ type ObservationFrame struct {
 // maths applies with full force to a rounding inside a latency correction: two editions rounding a
 // half-nanosecond differently is a one-nanosecond disagreement today and a *different chosen
 // sample* the day two candidates are equidistant. So every edition writes the same four lines out.
+//
+// Both callers pass a product, and the first line rounds it. Without it the compiler inlines this
+// function, sees `ms * 1000` feeding `value - truncated`, and on arm64, ppc64le and loong64 fuses
+// the two into one instruction — so the fraction is taken from the *unrounded* product, which is a
+// different number exactly at the half-way points this function exists to decide. The reference's
+// multiplication rounds before the call; this conversion is how Go is made to do the same, and
+// cmd/selfcheck's fusion scan is what found it missing.
 func roundHalfAway(value float64) float64 {
+	value = float64(value)
 	if !canonical.Finite(value) {
 		return 0
 	}

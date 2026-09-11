@@ -3,14 +3,19 @@
 #   make -C editions/go check     everything CI runs, all of it blocking
 #   make -C editions/go corpus    just the corpus, at the ratchet
 #
-# `check` is five things and every one of them fails the build:
+# `check` is six things and every one of them fails the build:
 #
 #   | fmt          | gofmt is not advisory here; a formatting diff is a build failure       |
 #   | vet          | Go's own correctness checks, which are warnings nowhere else            |
 #   | test         | the 219 case vectors and the tables' order                             |
 #   | roundtrip    | the canonical writer against every `expected` string in the corpus     |
-#   | selfcheck    | the source scan, the runner's accounting, rule 3 at its edges          |
+#   | selfcheck    | the source scan, the runner's accounting, rule 3 at its edges, and the |
+#   |              | compiler's assembly on the six architectures that fuse a multiply-add  |
 #   | corpus       | every case, at MIN_PASSED                                             |
+#
+# The fusion scan cross-compiles the edition for arm64, amd64 (v3), riscv64, ppc64le, s390x and
+# loong64. On a cold build cache that compiles the standard library for each first, a minute or two;
+# after that it replays from the cache in seconds.
 #
 # MIN_PASSED is the ratchet (§6.2), and it exists because the corpus runner's floor is **zero**: an
 # edition whose handler was deleted answers nothing, fails nothing, and exits 0, because the cases
@@ -21,7 +26,7 @@
 # Raise it whenever the edition reaches higher. Never lower it to make a build pass.
 
 GO ?= go
-MIN_PASSED ?= 624
+MIN_PASSED ?= 1199
 
 # The corpus lives above this directory. Passed explicitly so the runner does not have to guess from
 # a working directory that `make -C` has already changed.
