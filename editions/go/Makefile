@@ -21,7 +21,7 @@
 # Raise it whenever the edition reaches higher. Never lower it to make a build pass.
 
 GO ?= go
-MIN_PASSED ?= 204
+MIN_PASSED ?= 334
 
 # The corpus lives above this directory. Passed explicitly so the runner does not have to guess from
 # a working directory that `make -C` has already changed.
@@ -31,9 +31,12 @@ CORPUS ?= ../../corpus
 
 check: fmt vet test roundtrip selfcheck corpus
 
+# gofmt ships beside the compiler, so it is invoked directly. `go run cmd/gofmt` also works and
+# builds the formatter from the standard library's source first, which takes minutes — it was in
+# this recipe for one session and presented as a hung build.
 fmt:
 	@echo "== gofmt"
-	@test -z "$$($(GO) run cmd/gofmt 2>/dev/null || gofmt -l .)" || { \
+	@test -z "$$(gofmt -l .)" || { \
 		echo "these files are not gofmt-clean:"; gofmt -l .; exit 1; }
 
 vet:
