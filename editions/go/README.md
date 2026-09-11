@@ -1,15 +1,11 @@
 # The Go edition
 
-> **In progress.** It is not an edition yet. §31.4: *"An edition that has not passed the corpus is
-> not an edition — it cannot carry the name, appear in the matrix, or be installed by `skynetd`."*
-> This one answers some of the corpus and says so in a number the runner prints on every run. The
-> figure is deliberately not written here, and neither is the one it will eventually reach: a README
-> that states a passing number is a claim with nothing behind it (finding 158 — the Python
-> edition's drifted by 39 cases and two corpora while the runner beside it printed the truth).
->
-> `reference/reports/editions.json` lists the editions that have passed. This one is absent from it
-> on purpose, and `tools/edition-report.mjs` refuses any edition with a non-zero unimplemented
-> count rather than recording that it half passes.
+> §31.4: *"An edition that has not passed the corpus is not an edition."* Whether this one has is
+> answered by running it, and the answer is printed on every run and recorded in
+> `reference/reports/editions.json` by `tools/edition-report.mjs`, which refuses any edition with a
+> single case unanswered. The figure is deliberately not written here: a README that states a
+> passing number is a claim with nothing behind it (finding 158 — the Python edition's drifted by 39
+> cases and two corpora while the runner beside it printed the truth).
 
 §31.3 gives Go a **Guest** ceiling and a **Full** standing — *"GC pauses. Excellent for
 `skynetd`-equivalent fleet services off the robot, and for tooling."* This is §42's **L2 —
@@ -31,7 +27,7 @@ make -C editions/go check
 | `vet` | Go's own correctness checks, which are warnings nowhere else |
 | `test` | 219 whole strings the reference's engine case-converted, and the case tables' ordering |
 | `roundtrip` | Every `expected` string in the corpus parses and re-serialises to identical bytes — the canonical writer, proven before anything is built on it |
-| `selfcheck` | A source scan refusing the standard-library spellings that are *nearly* right; the runner's four-bucket accounting over synthetic corpora; rule 3 of the canonical form at its edges |
+| `selfcheck` | A source scan refusing the standard-library spellings that are *nearly* right; the runner's four-bucket accounting over synthetic corpora; rule 3 of the canonical form at its edges; the compiler's own assembly on the six architectures that fuse a multiply-add (below) |
 | `corpus` | Every case this edition answers, at the ratchet `MIN_PASSED` in the `Makefile` |
 
 No dependencies, for the reason `Cargo.toml` gives for the Rust workspace having none: §31.4
@@ -79,6 +75,47 @@ slice of members and sorts only when writing.
 declared a safety envelope" from "the envelope is null", and a map cannot hold that without a
 sentinel that can leak into output. Here the absence is a `Set` that was never called, so rule 5 is
 unrepresentable rather than enforced.
+
+## The multiply-add the compiler is allowed to fuse
+
+The third Go-specific rule, and the only one no corpus run on this repository's machines can see.
+The Go specification permits an implementation to *"combine multiple floating-point operations into
+a single fused operation, possibly across statements"*, and on arm64, riscv64, ppc64, s390x, loong64
+and amd64 at `GOAMD64=v3` the compiler does: `x*y + z` becomes one instruction that does not round
+`x*y`. §31.2 makes the kernel's sine, cosine and square root a fixed sequence of correctly rounded
+operations so that every edition computes the same bits, and a fused operation is a different
+sequence.
+
+Measured rather than assumed, on 2026-09-11:
+
+| | `x*y + z` | `p := x*y; p + z` |
+|---|---|---|
+| amd64, default level | not fused | not fused |
+| arm64; amd64 at `GOAMD64=v3` | fused | fused |
+| riscv64, ppc64le, s390x, loong64 | fused | not measured |
+
+The second column is why this is a compiler-output check and not a source rule. The live defect it
+found on its first run was neither spelling: `micros` handed `ms * 1000` to `roundHalfAway`, the
+compiler inlined it, and on arm64, ppc64le and loong64 computed the fraction from the *unrounded*
+product — exactly the half-way points that function exists to decide — while every corpus run on
+amd64 passed.
+
+The specification's remedy is an explicit conversion, which *"rounds to the precision of the target
+type, preventing fusion"*: `float64(x*y)` where a product meets a sum, or `v = float64(v)` where a
+helper receives one. `cmd/selfcheck` compiles the edition for all six targets with `-gcflags=-S` and
+fails on any fused instruction in it, and `internal/fusionprobe` fuses on purpose so the scan can
+prove, per target, that it is able to see one.
+
+The C++ edition has the same exposure through GCC's default `-ffp-contract=fast` and the same gate in
+its Makefile. Rust, Python and the TypeScript oracle cannot contract.
+
+## Two functions the reference names alike
+
+`observation.ts` and `kinematics.ts` each have a `roundHalfAway`, and they are different functions:
+one truncates and then tests the fraction, the other adds a half and then truncates, and at
+0.49999999999999994 they return 0 and 1. This edition keeps them as `roundHalfAway` and
+`quadrantRound`, each in the file its reference lives in. Merging them would be a bug that passes
+every case the corpus holds today.
 
 ## The generated file
 

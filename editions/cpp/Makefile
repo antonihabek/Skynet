@@ -20,6 +20,16 @@ CXX := g++
 endif
 CXXFLAGS ?= -std=c++20 -O2 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror
 INCLUDES := -Iinclude
+
+# Floating-point contraction is off, and that is a property of the format rather than a preference.
+# GCC's default for C++ is -ffp-contract=fast: wherever the target has a fused multiply-add — every
+# aarch64, a Jetson included, and x86-64 from v3 — `x*y + z` becomes one instruction that does not
+# round `x*y`. §31.2 makes the kernel's sin, cos and sqrt a fixed sequence of correctly rounded
+# operations so that every edition computes the same bits, and a fused operation is a different
+# sequence: on 2026-09-11 kinematics.cpp compiled with FMA available held ninety of them, and passed
+# the corpus only because baseline x86-64 has no FMA instruction to contract into. The flag lives in
+# a variable of its own that every compile uses, so an override of CXXFLAGS cannot drop it.
+FP_FLAGS := -ffp-contract=off
 BUILD := build
 OBJ := $(BUILD)/obj
 
@@ -50,7 +60,7 @@ CORPUS ?= ../../corpus
 # decision somebody makes in a diff.
 MIN_PASSED ?= 1199
 
-.PHONY: all corpus test check clean
+.PHONY: all corpus test fusion check clean
 
 all: $(RUNNER) $(ROUNDTRIP) $(SELFCHECK)
 
@@ -60,20 +70,20 @@ all: $(RUNNER) $(ROUNDTRIP) $(SELFCHECK)
 # rule; a generated table included from a `.cpp` is now a dependency because the compiler read it.
 $(OBJ)/%.o: src/%.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(FP_FLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
 
 $(OBJ)/tests/%.o: tests/%.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(FP_FLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
 
 $(RUNNER): $(OBJECTS) $(OBJ)/run_corpus.o
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) $(FP_FLAGS) -o $@ $^ $(LDFLAGS)
 
 $(ROUNDTRIP): $(OBJECTS) $(OBJ)/tests/json_roundtrip.o
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) $(FP_FLAGS) -o $@ $^ $(LDFLAGS)
 
 $(SELFCHECK): $(OBJECTS) $(OBJ)/tests/self_check.o
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) $(FP_FLAGS) -o $@ $^ $(LDFLAGS)
 
 corpus: $(RUNNER)
 	$(RUNNER) --corpus-root $(CORPUS) --min-passed $(MIN_PASSED)
@@ -82,9 +92,44 @@ test: $(ROUNDTRIP) $(SELFCHECK)
 	$(ROUNDTRIP) $(CORPUS)
 	$(SELFCHECK) .
 
-check: test corpus
+# ── The fused multiply-add scan ───────────────────────────────────────────────
+#
+# FP_FLAGS says contraction is off; this is what checks the compiler agreed. Every translation unit
+# is compiled to assembly with a fused multiply-add *available* — the flag that makes one exist on
+# this host's architecture — and the step fails on any fused instruction in the listings. The probe
+# is compiled the same way without FP_FLAGS and must fuse, so a host where the scan cannot see an
+# FMA (an architecture this does not know, a compiler that ignored the flag) fails rather than
+# passing by not looking.
+#
+# aarch64 has FMA in its base instruction set and needs no flag; x86-64 needs -mfma. Any other host
+# gets neither, and its probe will say so.
+FMA_TARGET := $(if $(findstring x86_64,$(shell $(CXX) -dumpmachine)),-mfma,)
+FUSION := $(BUILD)/fusion
+FUSION_LISTINGS := $(patsubst src/%.cpp,$(FUSION)/%.s,$(SOURCES) src/run_corpus.cpp)
+# vfmadd231sd and the rest of the VEX family on x86-64; fmadd, fmsub, fnmadd, fnmsub on aarch64.
+FUSED_MNEMONIC := '(^|[[:space:]])v?fn?m(add|sub)[0-9a-z]*[[:space:]]'
+
+$(FUSION)/%.s: src/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(FP_FLAGS) $(FMA_TARGET) $(INCLUDES) -MMD -MP -S $< -o $@
+
+$(FUSION)/probe.s: tests/fusion_probe.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(FMA_TARGET) -S $< -o $@
+
+fusion: $(FUSION_LISTINGS) $(FUSION)/probe.s
+	@echo "== fused multiply-add scan ($(or $(FMA_TARGET),no flag): $(words $(FUSION_LISTINGS)) listings)"
+	@if ! grep -qiE $(FUSED_MNEMONIC) $(FUSION)/probe.s; then \
+		echo "the probe did not fuse, so this scan cannot see a fused instruction on this host"; exit 1; fi
+	@if grep -ciE $(FUSED_MNEMONIC) $(FUSION_LISTINGS) | grep -v ':0$$'; then \
+		echo "fused multiply-adds above: a product fused into an add is a different sequence of"; \
+		echo "roundings from the reference's, and section 31.2 pins the bits (see FP_FLAGS)"; exit 1; fi
+	@echo "none, and the probe fused"
+
+check: test fusion corpus
 
 clean:
 	rm -rf $(BUILD)
 
 -include $(OBJECTS:.o=.d) $(OBJ)/run_corpus.d $(OBJ)/tests/json_roundtrip.d $(OBJ)/tests/self_check.d
+-include $(FUSION_LISTINGS:.s=.d)

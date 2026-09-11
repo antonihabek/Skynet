@@ -13462,3 +13462,140 @@ beside the compiler and is now invoked directly.
      boot. Nothing threw, and the answer was one the contract legitimately gives. The corpus caught
      both on the first run, which is the argument for comparing bytes rather than for trusting a
      handler that returned something.
+
+---
+
+## 2026-09-11 (eighty-second) — the Go edition at 1,199, and the multiply-add two editions were fusing
+
+Asked to continue the language editions if the plan still has one to write, keeping each up to date
+with Rust. It had exactly one in flight: §42 puts the realistic L2 count at three to four, and the
+fourth, Go, stood at 624. It is finished — and finishing it turned up a defect in **two** editions
+that no corpus run on this repository's machines could ever show, because it lives in instructions
+an amd64 host at its default level does not have.
+
+### Where it stands
+
+| | Before | After |
+|---|---|---|
+| Rust (reference) | 1,199 / 1,199 | unchanged, re-run |
+| Python | 1,199 / 1,199 | unchanged, re-run; self-check 47 |
+| C++ | 1,199 / 1,199 | 1,199 / 1,199 **with contraction off**; self-check 20; new `fusion` step |
+| **Go** | 624 / 1,199, 19 of 33 corpora | **1,199 / 1,199, 33 of 33**; round trip 1,199; `make check` six steps green |
+| `editions.json` | 3 editions × 1,199 | **4 editions × 1,199**, synced into the Hub |
+
+Every figure above was produced by running the edition this session, not read from a file. Go's
+remaining corpora — kinematics, frames, limits, cycle, transport, the check-in document, identity,
+admission, cell, live, skill and blackbox, with the fuzzed cycle, transport and observation files —
+are ~6,300 lines under `editions/go/internal/`, one file per reference module, and every file
+reproduced its corpus on the first run: the poses to the last bit, the 104 transport plans, both
+sealed MCAP files by SHA-256.
+
+With it, §42's L2 row is at its upper bound. The next §31.3 row with a Full standing is **C**, and its
+case is the safety-MCU build — an L4 decision §42 says "should be driven by a named customer's safety
+case rather than by preference". That is the owner's to make, so no fifth edition was started.
+
+### The multiply-add the compilers were allowed to fuse
+
+§31.2 makes the kernel's sine, cosine and square root a fixed sequence of correctly rounded
+operations, so that every edition — and both channels of a certified-tier pair — computes the same
+bits. A fused multiply-add is a different sequence: it computes `x*y + z` without rounding `x*y`.
+Rust never contracts; neither can Python or the TypeScript oracle. Go and C++ both may.
+
+**Go.** The specification permits fusion *"possibly across statements"*. Measured before anything was
+written: `x*y + z` fuses on arm64, amd64 at `GOAMD64=v3`, riscv64, ppc64le, s390x and loong64, and on
+arm64 and amd64 v3 so does `p := x*y; p + z` (the other four were not measured for that). So the gate
+reads the compiler, not the source: `cmd/selfcheck` cross-compiles the edition for all six with
+`-gcflags=-S` and fails on any fused instruction, and `internal/fusionprobe` fuses on purpose so each
+target proves the scan can see one. **It found a live defect on its first run**: `micros` passes
+`ms * 1000` to `roundHalfAway`, the compiler inlines it, and on arm64, ppc64le and loong64 the
+fraction was computed from the unrounded product — the half-way points that function exists to
+decide. Fixed by the specification's own remedy, an explicit `float64(v)` in the helper. The new
+geometry was written with `float64(a*b)` wherever a product meets a sum, and the scan confirms none
+of it fuses.
+
+**C++.** GCC's default for C++ is `-ffp-contract=fast`. With FMA available — every aarch64, a Jetson
+included — `kinematics.cpp` compiled to **ninety** fused instructions; with `-ffp-contract=off`, none.
+It passed the corpus everywhere it had run because baseline x86-64 has no FMA to contract into. The
+flag is now `FP_FLAGS` on every compile, in its own variable so overriding `CXXFLAGS` cannot drop it,
+and a `fusion` step in `check` compiles every unit with `-mfma` and refuses a fused instruction, with
+`tests/fusion_probe.cpp` required to fuse. Removing the flag makes the step fail naming
+`kinematics.s`; that was run, not assumed.
+
+What this does **not** establish is a corpus run on arm64 hardware: none is available here. The scans
+prove there is no fused instruction in the compiled output for those architectures, which is the
+mechanism by which the results would differ; they are not a run.
+
+### Two things earlier entries had wrong
+
+* **`checkin/document` never waited on `resolveLimits`.** The eighty-first entry declined it for want
+  of the guard report and the frames stack. `checkIn` carries the report through unchanged —
+  `limits: input.limits ?? null` — and what the file waited on was `identity.ts`'s `attest`.
+* **The C++ edition's "`round_half_away` exists twice" is not duplication.** `observation.ts` and
+  `kinematics.ts` each define one and they are different functions: at 0.49999999999999994 one returns
+  0 and the other 1. The Go edition keeps them as `roundHalfAway` and `quadrantRound`, with the reason
+  in both. Merging them would pass every case the corpus holds today.
+
+### A formatter that rewrote meaning
+
+gofmt's doc-comment reformatting turns a pair of apostrophes into a closing quotation mark, so a
+comment quoting the reference's empty-string default came out quoting something else. Three times
+this session and twice in files an earlier session wrote. All five are fixed, and the source scan now
+refuses a typographic quote in any comment, which is the only trace the rewrite leaves. (The same
+pair of apostrophes also breaks this shell's heredocs, which is why this entry was not appended with
+one.)
+
+### The report, CI and the Hub
+
+`tools/edition-report.mjs` lists Go (`go -C editions/go run ./cmd/corpus --json`), and the report
+regenerates to four editions and passes `--check`. CI's comments had described two editions and an
+incomplete Python one, and said Go "must not be" in the report — all corrected, with the fusion
+reasons on the C++ and Go steps; the YAML was parsed to confirm it still loads. The header's "four
+jobs, the third" is six jobs, `corpus` the fourth.
+
+Synced into the Hub with `check-contract-mirrors --sync` (`lib/skynet/os/reports/editions.json`,
+`mirror-digests.json`), and one comment in `lib/skynet/editions.ts` extended to Go. One Hub test went
+red for the best reason: it used Go as its example of an **absent** edition. It now asserts the
+property — every absent row is null, never a zero — over whichever rows are absent, instead of over a
+named language. Hub suites 29 of 29. `/skynet/os/editions` was opened in the browser against the dev
+server: the Go row renders as measured, "5 of 9 editions … exist as running code", no console errors.
+
+### Open
+
+1. **Nothing is committed**, in either repository. The Hub's working tree also still carries the
+   eightieth session's uncommitted sync, now superseded by this one.
+2. CI's Linux run of the new steps has not happened. The Go fusion scan cross-compiles the standard
+   library for six architectures on a cold cache, which will add a minute or two to the `corpus` job.
+3. No edition has been run on arm64 hardware (above).
+4. From before: §73's transport row is still contradicted by the Skills row.
+5. `make` is not on this machine's Git Bash path; `gmake` from Strawberry Perl is, and is what ran the
+   Makefiles here.
+
+### Findings, restated
+
+1-169 as before.
+
+170. **A clean corpus run proves the bits on the machine that ran it.** Two editions were fusing
+     multiply-adds that §31.2 forbids, and every run passed, because the host had no FMA instruction
+     to fuse into. A property of the compiled output has to be checked in the compiled output, for the
+     architectures the edition is meant to run on.
+
+171. **A scan that finds nothing needs a positive control.** "No fused instruction" and "a pattern that
+     no longer matches this compiler's mnemonics" print the same line. Both fusion gates compile a probe
+     that must fuse, per target, so an empty result is evidence rather than silence.
+
+172. **Fusion happens after inlining, where no source rule can follow it.** The Go defect was neither
+     `x*y + z` nor a product on the line above an add; it was a product passed into a helper that the
+     compiler inlined and then subtracted from.
+
+173. **A blocker in a log is a claim like any other.** `checkin/document` was declined for a
+     dependency it never had, and reading the function would have shown it in one line.
+
+174. **One name in the reference can be two functions.** An open item recorded a duplicate to merge;
+     the two differ on the largest double below a half.
+
+175. **A test pinned to a fact about progress fails when the progress happens.** The Hub asserted Go
+     was absent; the property it meant was that absence renders as null.
+
+176. **A formatter can change what a comment says.** gofmt rewrote a pair of apostrophes into a
+     quotation mark five times across two sessions, each a comment that then misquoted the line it
+     explained. The gate is a scan for the trace it leaves.

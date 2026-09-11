@@ -209,7 +209,7 @@ func ifElse(condition bool, whenTrue, whenFalse string) string {
 	return whenFalse
 }
 
-// plural is the reference's `${n === 1 ? ” : 's'}`.
+// plural is the reference's `${n === 1 ? "" : "s"}`: nothing for exactly one, and an s otherwise.
 func plural(count float64) string {
 	if count == 1 {
 		return ""

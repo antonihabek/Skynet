@@ -96,6 +96,22 @@ const EDITIONS = [
     build: [MAKE, ['-C', 'editions/cpp', `build/skynet-corpus-cpp${EXE}`]],
     command: [`editions/cpp/build/skynet-corpus-cpp${EXE}`, ['--json', '--corpus-root', 'corpus']],
   },
+  {
+    // §31.3: Go, Guest ceiling, Full standing — *"excellent for `skynetd`-equivalent fleet services
+    // off the robot, and for tooling"*. On this list from 2026-09-11, the run at which it first
+    // reproduced every case; from 624 until then it was held by its own CI step and kept off this
+    // file by the refusal below, which is the arrangement that refusal exists for.
+    //
+    // `go -C` rather than a working directory, because the module root is `editions/go` and the
+    // tool runs everything from the repository root. `go run` compiles from the source it is
+    // measuring, so there is no binary here that could be stale.
+    id: 'go',
+    language: 'Go',
+    standing: 'full',
+    path: 'editions/go/',
+    runner: 'go -C editions/go run ./cmd/corpus --json --corpus-root ../../corpus',
+    command: ['go', ['-C', 'editions/go', 'run', './cmd/corpus', '--json', '--corpus-root', '../../corpus']],
+  },
 ]
 
 function run(program, args) {
@@ -143,8 +159,8 @@ function measure(edition) {
     runner: edition.runner,
     cases_passed: result.passed,
     cases_total: result.total,
-    // Only the Rust runner counts files; the Python and C++ ones report corpora. Each is printed
-    // where it exists and neither is invented for the other.
+    // Only the Rust runner counts files; the Python, C++ and Go ones report corpora. Each is
+    // printed where it exists and neither is invented for the other.
     corpus_files: typeof result.files === 'number' ? result.files : null,
     corpora_complete: Array.isArray(result.complete) ? result.complete : null,
   }

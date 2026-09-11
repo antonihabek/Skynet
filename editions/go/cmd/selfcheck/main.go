@@ -18,16 +18,24 @@
 //  3. **The canonical writer at its edges.** The round trip in cmd/roundtrip proves the writer
 //     against every number the corpus holds, which is a strong statement about the numbers that
 //     occur and none at all about the ones that do not.
+//
+//  4. **The compiler's own output**, on the architectures this machine is not. See fusionScan: the
+//     one divergence in this edition that no run of the corpus on an amd64 host can ever show.
 package main
 
 import (
+	"context"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/antonihabek/Skynet/editions/go/internal/canonical"
 	"github.com/antonihabek/Skynet/editions/go/internal/corpus"
@@ -39,6 +47,7 @@ func main() {
 	failures += sourceScan()
 	failures += runnerAccounting()
 	failures += numberEdges()
+	failures += fusionScan()
 
 	if failures > 0 {
 		fmt.Fprintf(os.Stderr, "\nself-check: %d failed\n", failures)
@@ -136,13 +145,35 @@ func sourceScan() int {
 	return failures
 }
 
+// typographicQuotes are what gofmt leaves behind when it rewrites a doc comment.
+//
+// Since Go 1.19 gofmt reformats doc comments, and one of its rewrites turns a pair of apostrophes
+// into a closing double quotation mark — so a comment quoting the reference's empty-string default
+// comes out quoting something that is neither the reference nor English. (This comment cannot show
+// the pair without gofmt rewriting it too, which is the whole problem.) It happened five times in
+// this edition before anything looked, each one a comment that then misquoted the line it
+// explained. The rewrite leaves no other trace, and this edition's prose uses straight quotes
+// everywhere, so a curly one is the signal.
+var typographicQuotes = []string{"“", "”"}
+
 func scanFile(path string) int {
 	fileSet := token.NewFileSet()
-	parsed, err := parser.ParseFile(fileSet, path, nil, 0)
+	parsed, err := parser.ParseFile(fileSet, path, nil, parser.ParseComments)
 	if err != nil {
 		return fail("%s: %v", path, err)
 	}
 	failures := 0
+	for _, group := range parsed.Comments {
+		for _, comment := range group.List {
+			for _, quote := range typographicQuotes {
+				if strings.Contains(comment.Text, quote) {
+					position := fileSet.Position(comment.Pos())
+					failures += fail("%s:%d: a typographic quote in a comment — gofmt rewrites `''` in a doc "+
+						"comment into one; write the empty string as \"\" or say it in words", path, position.Line)
+				}
+			}
+		}
+	}
 	ast.Inspect(parsed, func(node ast.Node) bool {
 		switch typed := node.(type) {
 		case *ast.SelectorExpr:
@@ -323,6 +354,167 @@ func numberEdges() int {
 
 	fmt.Println("numbers      rule 3 at its edges, and the whitespace class against IsSpace")
 	return failures
+}
+
+// ── 4. the compiler's own output ────────────────────────────────────────────
+
+// fusingTargets are the architectures on which the Go compiler fuses a multiply into an add.
+//
+// The Go specification permits it in so many words — "an implementation may combine multiple
+// floating-point operations into a single fused operation, possibly across statements, and produce
+// a result that differs from the value obtained by executing and rounding the instructions
+// individually" — and the reference forbids it just as plainly: `kinematics.ts` says *nothing here
+// uses a fused multiply-add*, because §31.2's argument for writing sine and cosine out rests on the
+// same sequence of correctly rounded operations producing the same bits everywhere. A fused
+// operation is a different sequence.
+//
+// The list is measured, not remembered: each of the six fuses `x*y + z` into one instruction, and
+// mips64, 386 and wasm fuse nothing. amd64 is here at v3 only; at its default level there is no FMA
+// instruction to fuse into, which is why every corpus run on a developer's x86 machine passes and
+// why this check has to compile for machines other than the one it runs on. A Jetson is arm64.
+var fusingTargets = []struct {
+	goarch string
+	level  string
+}{
+	{"arm64", ""},
+	{"amd64", "v3"},
+	{"riscv64", ""},
+	{"ppc64le", ""},
+	{"s390x", ""},
+	{"loong64", ""},
+}
+
+// assemblyLine is one instruction in the compiler's -S listing: the source position, then the
+// mnemonic. The position is what makes a finding actionable — a fused instruction is reported
+// against the line of Go that produced it, which is the line that needs a float64 conversion.
+var assemblyLine = regexp.MustCompile(`\(([^()]+\.go):([0-9]+)\)\t([A-Z][A-Z0-9.]*)`)
+
+// fusedMnemonic is every spelling of a fused multiply-add the six targets emit: FMADDD, FMSUBD,
+// FNMADDD and FNMSUBD on arm64, riscv64 and loong64; FMADD and its three siblings on ppc64 and
+// s390x; VFMADD231SD and the rest of the VEX family on amd64.
+var fusedMnemonic = regexp.MustCompile(`^V?FN?M(ADD|SUB)[0-9A-Z]*$`)
+
+// probeFile is the positive control's path, relative to the edition.
+const probeFile = "internal/fusionprobe/probe.go"
+
+// compileTimeout bounds one architecture's build. A cold cache compiles the standard library for
+// that architecture first, which takes a minute or two; a warm one replays the listing in under a
+// second.
+const compileTimeout = 10 * time.Minute
+
+// fusionScan refuses any fused multiply-add in the compiled edition, on every architecture that has
+// one.
+//
+// It reads the compiler's output rather than the source, and that is the whole of the design. The
+// fusion is a property of the SSA backend, not of the syntax: `p := x * y` on one line and `p + z` on
+// the next fuse exactly as `x*y + z` does, and so does a product passed into a helper that the
+// compiler inlines and then subtracts from. Both were measured before this was written, and the
+// second is the defect this check found on its first run — `micros` handing `ms * 1000` to
+// roundHalfAway, which computed the fraction from the unrounded product on arm64. No source scan
+// sees across an inlining boundary. The listing does.
+//
+// The remedy the specification gives is an explicit conversion — "an explicit floating-point type
+// conversion rounds to the precision of the target type, preventing fusion" — so a finding here is
+// fixed by writing float64(x*y) where the product is formed, or float64(v) where a helper receives
+// one.
+func fusionScan() int {
+	failures := 0
+	for _, target := range fusingTargets {
+		name := target.goarch
+		if target.level != "" {
+			name += " " + target.level
+		}
+
+		listing, err := compileAssembly(target.goarch, target.level)
+		if err != nil {
+			failures += fail("fusion scan (%s): %v", name, err)
+			continue
+		}
+
+		instructions := 0
+		probeFused := false
+		fused := map[string]string{}
+		for _, line := range strings.Split(listing, "\n") {
+			match := assemblyLine.FindStringSubmatch(line)
+			if match == nil {
+				continue
+			}
+			instructions++
+			if !fusedMnemonic.MatchString(match[3]) {
+				continue
+			}
+			path := editionRelative(match[1])
+			if path == probeFile {
+				probeFused = true
+				continue
+			}
+			fused[path+":"+match[2]] = match[3]
+		}
+
+		// Three ways to pass by not looking, and each is refused by name.
+		if instructions == 0 {
+			failures += fail("fusion scan (%s): the build printed no assembly, so nothing was checked", name)
+			continue
+		}
+		if !probeFused {
+			failures += fail("fusion scan (%s): the probe in %s did not fuse, so the scan cannot see a "+
+				"fused instruction on this target — a mnemonic the pattern does not know, or a compiler "+
+				"that stopped fusing; either way the result below would mean nothing", name, probeFile)
+			continue
+		}
+		sites := make([]string, 0, len(fused))
+		for site := range fused {
+			sites = append(sites, site)
+		}
+		sort.Strings(sites)
+		for _, site := range sites {
+			failures += fail("%s: %s on %s — a product fused into an add; round it with float64(…) "+
+				"where it is formed, or where the helper that inlines it receives it", site, fused[site], name)
+		}
+	}
+	fmt.Printf("fusion       %d architectures, each with its positive control\n", len(fusingTargets))
+	return failures
+}
+
+// compileAssembly builds the edition's internal packages for one architecture and returns the
+// compiler's listing. Linux as the operating system for every target, because the question is the
+// instruction set and not the platform; CGO off, because nothing here uses it and a cross build with
+// it on would need a C compiler for each target.
+func compileAssembly(goarch, level string) (string, error) {
+	deadline, cancel := context.WithTimeout(context.Background(), compileTimeout)
+	defer cancel()
+
+	command := exec.CommandContext(deadline, "go", "build", "-gcflags=-S", "./internal/...")
+	command.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+goarch, "CGO_ENABLED=0")
+	if level != "" {
+		command.Env = append(command.Env, "GOAMD64="+level)
+	}
+	output, err := command.CombinedOutput()
+	if deadline.Err() != nil {
+		return "", fmt.Errorf("the build did not finish inside %v", compileTimeout)
+	}
+	if err != nil {
+		return "", fmt.Errorf("the build failed: %v\n%s", err, lastLines(string(output), 20))
+	}
+	return string(output), nil
+}
+
+// editionRelative turns the compiler's absolute source path into the path this edition's other
+// checks print, so a finding reads the same whichever machine produced it.
+func editionRelative(path string) string {
+	slashed := filepath.ToSlash(path)
+	if at := strings.Index(slashed, "/editions/go/"); at >= 0 {
+		return slashed[at+len("/editions/go/"):]
+	}
+	return slashed
+}
+
+func lastLines(text string, count int) string {
+	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	if len(lines) > count {
+		lines = lines[len(lines)-count:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func positiveInfinity() float64 { return 1 / zero() }
