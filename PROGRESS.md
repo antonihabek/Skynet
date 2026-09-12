@@ -13599,3 +13599,129 @@ server: the Go row renders as measured, "5 of 9 editions … exist as running co
 176. **A formatter can change what a comment says.** gofmt rewrote a pair of apostrophes into a
      quotation mark five times across two sessions, each a comment that then misquoted the line it
      explained. The gate is a scan for the trace it leaves.
+
+## 2026-09-12 (eighty-third) — the four §31.3 rows that had no code, and §31.3 now fully implemented
+
+Four rows of §31.3's edition matrix had no implementation at the start of this session: **C**, **Zig**,
+**Java / Kotlin** and **C# / .NET**. All four now exist at §42's **L2 — Contracts**, each held by its
+own `--min-passed` ratchet and its own CI step. The ninth row is TypeScript, which is the oracle and
+cannot be measured against its own output, so **every row of §31.3 that can have an implementation now
+has one.**
+
+Every figure below was printed by a runner, not estimated.
+
+| Edition | §31.3 | Round trip | Self check | Corpus |
+|---|---|---|---|---|
+| C | Certified, Full | 1199 of 1199 | 96 checks, 0 failed | **240** of 1,199, 0 failed |
+| Zig | Host, Community | 1199 of 1199 | 97 checks, 0 failed | **201** of 1,199, 0 failed |
+| Java | Guest, Community | 1199 of 1199 | 101 checks, 0 failed | **201** of 1,199, 0 failed |
+| C# | Guest, Community | 1199 of 1199 | 113 checks, 0 failed | **201** of 1,199, 0 failed |
+
+The round trip — every `expected` string in the corpus parsed and re-serialised to identical bytes —
+passed **1,199 of 1,199 on the first run in all four editions**, and so did every contract module. That
+is worth stating plainly rather than celebrating: it is what a differential test against a frozen oracle
+is supposed to do once the rules are written from the reference instead of from another edition.
+
+None of the four is in `reference/reports/editions.json`, which still says four editions and 1,199
+cases. The refusal inside `tools/edition-report.mjs` keeps any edition with a case unimplemented off the
+published figure — the arrangement Go was in from 624 cases until the eighty-second session — and the
+tool's `--check` was run after each edition to confirm it.
+
+### What each platform decided differently
+
+**C** — an arena allocator, one region per corpus case, and no `free` in any contract: the L2 decision
+closest to the L4 MISRA-C target. `sk_arena_alloc` never returns NULL; it aborts naming the request it
+could not serve, because the alternative is a NULL check at several thousand construction sites, which
+in practice means a missing one somewhere. 240 cases across six corpora — the only one of the four to
+get past the first four contracts.
+
+**Zig** — `ReleaseSafe` by default, `zig fmt` as a build failure, and the fusion scan checking that the
+*default* still holds: Zig's float mode is `.strict` and forbids contraction, so unlike C and C++ there
+is no flag being set, and `@setFloatMode(.optimized)` is one line in one file away from making the
+arithmetic differ on every machine with an FMA.
+
+**Java** — the closest edition to the reference, which is what makes it dangerous: a `String` here is
+UTF-16 exactly as a JavaScript string is, so nothing forces a decision about representation and the
+places where Java *looks* like the reference and is not are the whole of the work.
+
+**C#** — `ToString("R")` is the shortest round-trip decimal, so this is the one edition of the four that
+runs no precision loop; it still reshapes every number, because `"R"` turns exponential at a narrower
+band than Java does and signs negative zero.
+
+### Five gates that found something
+
+1. **GCC 13 implements `-ffp-contract=on` as *off*.** The C fusion probe — the positive control finding
+   171 requires — reported that it could not fuse. The probe is now compiled with `-ffp-contract=fast`
+   explicitly. The same source with the same flags fuses on GCC 14 and not on 13, which is the whole
+   reason `FP_FLAGS` and the scan both exist.
+2. **`char.ConvertToUtf32` throws on a string the oracle answers.** A JavaScript string may hold an
+   unpaired surrogate and `codePointAt` returns it; .NET raises `ArgumentException`, and
+   `ConvertFromUtf32` refuses to write one back. Every walk over a string in the C# `Js` module now goes
+   through its own `CodePointAt`/`AppendCodePoint`. Without it, a lone surrogate anywhere in a role or a
+   version string is an exception where the reference answers null.
+3. **`javac` processes a unicode escape before the lexer runs, including inside a comment.** A comment
+   containing the four characters that spell one does not compile. Same shape as the C edition's
+   discovery that a C comment cannot contain the two characters that open one — and MSBuild added a
+   third: an XML comment cannot contain two consecutive hyphens, so `SkynetOs.csproj` cannot quote a
+   `dotnet run --` line at all.
+4. **A static array initialiser is a method, and javac limits one to 64 KiB of bytecode.** The generated
+   case tables are `error: code too large` as array literals. `tools/unicode-case.ts` emits numbered fill
+   methods, one class per table, for Java only. Roslyn has no such limit on a flat `static readonly
+   int[]` of constants — it becomes a metadata blob — but it *does* compile `int[][]` as per-row
+   bytecode, so the C# target renders flat arrays and offsets.
+5. **`dotnet run` forwards an option it does not recognise to the program.** `--nologo` arrived as the
+   C# runner's first argument and it answered with its usage line. Right of the runner; the Makefile now
+   runs the built assembly directly.
+
+### Two of my own errors, caught by the gates rather than by reading
+
+* **A self-check literal I wrote was wrong.** My 5e-324 expectation for the C edition was not the
+  oracle's. It was regenerated *from* the oracle — `node` over `reference/typescript/canonical.ts` — and
+  all sixteen probe values then agreed.
+* **My Zig float probe printed `0.3` for `0.1 + 0.2`, and the probe was wrong, not Zig.** Comptime float
+  arithmetic is f128. Routing it through a runtime `f64` gave `0.30000000000000004`, and the shape of
+  that mistake is now what the self-check asserts.
+
+### Documentation corrected, having been proved wrong
+
+* `tools/edition-report.mjs` said §31.3's other rows were absent because there was no code to run. Four
+  of the five now have code and are absent because they are *partial*. All three reasons are named.
+* `README.md` said the corpus holds 1,137 cases and that the Rust runner reproduces all 1,137. It is
+  1,199 on both lines, re-counted from `corpus/`.
+* `README.md`'s repository layout did not mention `editions/` at all. Seven of them now.
+* CI's header said three editions were partial and its case-tables job said five editions and twelve
+  generated files. Four, six and fourteen.
+
+### Open
+
+1. **Nothing has been pushed yet at the time of writing this entry**; the branch is
+   `claude/exciting-hypatia-k11axe`.
+2. CI's Linux run of the four new steps has not happened.
+3. No edition has been run on arm64 hardware.
+4. The four new editions answer four corpora between them (six for C). The other twenty-six are
+   unimplemented and counted as such on every run.
+5. From before: §73's transport row is still contradicted by the Skills row.
+
+### Findings, restated
+
+1-176 as before.
+
+177. **A per-language comment rule is a real constraint, not a curiosity.** Three of the four editions
+     hit one: a C comment cannot contain the two characters that open one, a Java comment cannot contain
+     a unicode escape, and an XML comment cannot contain two consecutive hyphens. Each was found by a
+     compiler refusing a comment that explained something true, and each was fixed by rewording rather
+     than by deleting the explanation.
+
+178. **A compiler flag's documented default is not its implemented default.** `-ffp-contract=on` is what
+     `-std=c17` selects and GCC 13 implements it as off. A gate that assumed the documented behaviour
+     would have reported a clean scan on a compiler that was never contracting anything.
+
+179. **A host library that throws where the reference answers is a defect in the edition, not the
+     input.** Two .NET calls refuse a lone surrogate that a JavaScript string may legally hold. Caught by
+     reading the API's contract before the corpus reached it — the corpus case that would have gone red
+     is real, and would have read as a bug in the contract rather than in the string walk.
+
+180. **The shortest-round-trip renderer is per-platform, and so is whether an edition needs a search.**
+     Java's `Double.toString` gives two digits where one round-trips; .NET's `"R"` gives one. The same
+     rule 3 therefore costs a precision loop in one edition and a reshaping in another, and an edition
+     that copied the other's approach would be either wrong or slow for no reason.
