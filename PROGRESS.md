@@ -13934,3 +13934,45 @@ groups print out of order is a self-check whose output nobody trusts to be in th
      field.** The temptation in every one of the four languages was to compose `"stopping_" + cause`. That
      would answer a cause nobody declared with a token no vocabulary holds, which is exactly the divergence
      the vocabulary corpus was added to catch — and no corpus case would have said so.
+
+## 2026-09-12 (eighty-sixth) — the two things called a console, and the repository that said neither
+
+A short entry, and it is a documentation one. Asked how to open "the console" on a Windows PC, I
+answered about the **on-robot console** — the page `skynetd` serves — and the question was about
+**Skynet Console**, the operator's desktop application (§83). §6659 of the architecture already has the
+rule that would have prevented it: *"Never bare 'the console' where both are in play."*
+
+What this repository said about that was nothing. `README.md` described the on-robot console and its
+fixture at length and **never mentioned that a desktop application exists**, let alone that it lives in
+the Hub repository under `desktop/` rather than here. A reader of this repo has no way to learn that the
+thing they are looking for is somewhere else. Fixed: a paragraph beside the fixture naming both, saying
+which is which, and stating §83.2's rule that the application is a shell rather than a client — it
+embeds this page and owns only what a browser cannot do.
+
+One bare use of "the console" in `README.md`'s §79 upload paragraph, where both are genuinely in play,
+is now "the on-robot console". The remaining bare uses in `docs/skynet-os-architecture.md` are inside
+§32 and §34, whose own subject is the on-robot one, and were left alone rather than rewritten in a
+document this session had no other business in.
+
+The fixture sentence was also incomplete in the same place: it said "anybody can serve the directory"
+without saying what with. `console/fixture-serve.mjs` documents why a plain static server renders a
+false page — it has no idea the file beside `blackbox` is a status code, so a 503 replays as a 200 — and
+the sentence now says so. The test's own doc comment was corrected for this on the same day (entry
+eighty-three); the README had the same gap and nothing connected the two.
+
+### What was verified rather than assumed
+
+Read out of the Hub repository, not from memory: the application is at `desktop/windows/`, WinUI 3 on
+`net9.0-windows10.0.19041.0`, `x64;arm64`, `WindowsAppSDKSelfContained=true`, built with
+`dotnet build -p:Platform=x64` from `desktop/windows`, and its own README records that the Windows half
+builds and runs while the macOS half has never been compiled. No edit was made in that repository.
+
+### Findings, restated
+
+1-186 as before.
+
+187. **A naming rule in the specification does not reach a reader who never gets to it.** §6659 forbids
+     bare "the console" where two things carry the name, and the rule was kept in the prose that
+     discusses both — while the README, which is where somebody starts, described one of them and did
+     not say the other existed. A disambiguation rule needs the *existence* of both things stated
+     somewhere a newcomer reads first, or it only protects people who already know.
