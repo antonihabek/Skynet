@@ -2,7 +2,7 @@
 //
 //   java -cp build skynet.os.SelfCheck [--corpus-root corpus]
 //
-// Five groups, and each exists because a corpus run would be green without it:
+// Six groups, and each exists because a corpus run would be green without it:
 //
 // 1. **Rule 3 at its edges**, and one of those edges is the reason this edition does not use
 //    `Double.toString` at all. See `numbers()`.
@@ -13,12 +13,16 @@
 //    and no corpus file would say so.
 // 4. **The runner's own accounting**, over synthetic corpora with known answers.
 // 5. **The case tables**, against 219 whole strings the reference's engine converted.
+// 6. **The closed vocabularies' table**, over the two things the corpus checks nothing about: how many
+//    sets this edition believes it holds, and whether a name nobody declared is distinguishable from a
+//    set with no members.
 
 package skynet.os;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import skynet.os.contracts.Vocabulary;
 
 public final class SelfCheck {
     private SelfCheck() {}
@@ -372,6 +376,46 @@ public final class SelfCheck {
         expectText("an object", Js.toStringOf(Value.object(), true), "[object Object]");
     }
 
+    // ── 6. The closed vocabularies ───────────────────────────────────────────
+
+    /**
+     * The corpus checks every set's <i>members</i>. What it cannot check is the table that holds them,
+     * and one property of that table is dangerous: a duplicate name. A map's {@code put} replaces in
+     * place, so a second entry under a name already present would silently lose the first and the corpus
+     * would pass, because one of the two is the answer it measures.
+     *
+     * <p>That one is not asserted here, because {@code Vocabulary.put} <b>throws</b> on it during class
+     * initialisation — §6.1's ladder: a violation that cannot be represented beats a test that finds it.
+     * What is left are the properties a running table can still get wrong.
+     */
+    private static void vocabularies() {
+        System.err.println("the closed vocabularies");
+
+        List<String> names = Vocabulary.names();
+        // §31.4's sentence about closed vocabularies is about *all* of them, and the corpus names the
+        // seventy-four it holds. A set added to the reference and not to this table is a corpus failure;
+        // a set removed from this table is a corpus failure too. This is the third case: the table and
+        // the corpus agreeing on seventy-four while this edition believes it holds some other number.
+        expectInt("seventy-four sets", names.size(), 74);
+
+        // Every set answers a non-empty array, which is what makes JSON null usable as "no such set": if
+        // any set were empty, the two answers would be indistinguishable to a caller.
+        int empty = 0;
+        for (String name : names) {
+            Value answer = Vocabulary.closedSetsCase(Value.object().set("set", Value.of(name)));
+            if (answer.kind() != Value.Kind.ARRAY || Value.length(answer) == 0) {
+                empty += 1;
+                System.err.printf("  `%s` answers no members%n", name);
+            }
+        }
+        expectTrue("every set has at least one member", empty == 0);
+
+        // And a name nobody declared is null rather than empty, which is the other half of that.
+        expectTrue("an undeclared set answers null", Vocabulary.closedSetsCase(
+                Value.object().set("set", Value.of("a_vocabulary_nobody_declared"))).kind()
+                == Value.Kind.NULL);
+    }
+
     public static void main(String[] argv) {
         for (int at = 0; at < argv.length; at++) {
             if ("--corpus-root".equals(argv[at]) && at + 1 < argv.length) {
@@ -389,6 +433,7 @@ public final class SelfCheck {
         parser();
         accounting();
         caseTables();
+        vocabularies();
 
         System.err.printf("self check  %d checks, %d failed%n", checks, failures);
         System.exit(failures == 0 ? 0 : 1);

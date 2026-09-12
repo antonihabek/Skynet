@@ -130,3 +130,11 @@ diverge at the next Unicode version. Two things about the C rendering are C's al
 `src/contracts/dispatch.c` is the inventory: a corpus file in that table is answered, and one absent
 from it is counted as *not implemented* and printed separately from the failures. The runner's summary
 is the honest sentence, and none of its four numbers is useful without the others.
+
+Two files under `src/contracts/` have no module beside them in the reference. `dispatch.c` is the routing
+table, which TypeScript does not need because the corpus generator calls the functions directly.
+`vocabulary.c` is the seventy-four closed string sets: they are declared across the reference's modules as
+exported constants rather than computed by one of them, so this edition holds them as its own table — and
+the corpus is what says whether the table is right. A token added to one edition and not another is exactly
+the divergence `corpus/vocabulary/closed-sets.json` was added to catch, and it could not catch one that a
+generator had put in every edition at once.

@@ -3,7 +3,7 @@
  *
  *   skynet-selfcheck-c [--corpus-root corpus]
  *
- * Four groups, and each exists because a corpus run would be green without it:
+ * Six groups, and each exists because a corpus run would be green without it:
  *
  * 1. **Rule 3 at its edges.** The corpus holds the numbers the reference happened to produce. It does
  *    not hold 2^53, or the value whose shortest rendering is exponential in every library and
@@ -16,6 +16,12 @@
  * 4. **The runner's own accounting**, over synthetic corpora with known answers. The four buckets are
  *    what every other number in this edition is reported through, and a runner that counted a
  *    declined file as a pass would report a finished edition.
+ * 5. **The case tables**, against the whole strings the reference's engine converted. The tables are
+ *    single code points and cannot be wrong about a string on their own; the code that walks a string
+ *    with them, and applies the sigma rule, can.
+ * 6. **The closed vocabularies' table**, over the two things the corpus checks nothing about: how many
+ *    sets this edition believes it holds, and whether a name nobody declared is distinguishable from a
+ *    set with no members.
  */
 #include <math.h>
 #include <stdio.h>
@@ -27,6 +33,7 @@
 #include "skynet_os/js.h"
 #include "skynet_os/parse.h"
 #include "skynet_os/value.h"
+#include "skynet_os/vocabulary.h"
 #include "skynet_os/write.h"
 
 static int failures = 0;
@@ -481,6 +488,61 @@ static void case_tables(sk_arena *arena)
     expect_text("an object", sk_js_to_string(arena, sk_object(arena), true), "[object Object]");
 }
 
+/* ── 6. The closed vocabularies ───────────────────────────────────────────────
+ *
+ * The corpus checks every set's *members*, and cannot check two things about the table that holds
+ * them. A duplicate name is the dangerous one: the lookup returns the first match, so a second entry
+ * under a name already present is dead code that a reader would take for the answer — and the corpus
+ * would pass, because the first entry is the one it measures.
+ */
+static void vocabulary(sk_arena *arena)
+{
+    (void)fprintf(stderr, "the closed vocabularies\n");
+
+    size_t count = 0;
+    const char *const *names = sk_vocabulary_set_names(&count);
+
+    /* §31.4's sentence about closed vocabularies is about *all* of them, and the corpus names the
+     * seventy-four it holds. A set added to the reference and not to this table is a corpus failure;
+     * a set removed from this table is a corpus failure too. This is the third case: the table and
+     * the corpus agreeing on seventy-four while this edition believes it holds some other number. */
+    expect_int("seventy-four sets", (long)count, 74);
+
+    int duplicates = 0;
+    for (size_t at = 0; at < count; at += 1) {
+        for (size_t other = at + 1; other < count; other += 1) {
+            if (strcmp(names[at], names[other]) == 0) {
+                duplicates += 1;
+                (void)fprintf(stderr, "  `%s` is declared twice, and the second is unreachable\n",
+                              names[at]);
+            }
+        }
+    }
+    expect_true("no set is declared twice", duplicates == 0);
+
+    /* Every set answers a non-empty array, which is what makes JSON null usable as "no such set":
+     * if any set were empty, the two answers would be indistinguishable to a caller. */
+    int empty = 0;
+    for (size_t at = 0; at < count; at += 1) {
+        sk_value *ask = sk_object(arena);
+        sk_set(arena, ask, "set", sk_string(arena, names[at]));
+        const char *error = NULL;
+        const sk_value *answer = sk_vocabulary_closed_sets_case(arena, ask, &error);
+        if (sk_kind_of(answer) != SK_ARRAY || sk_len(answer) == 0) {
+            empty += 1;
+            (void)fprintf(stderr, "  `%s` answers no members\n", names[at]);
+        }
+    }
+    expect_true("every set has at least one member", empty == 0);
+
+    /* And a name nobody declared is null rather than empty, which is the other half of that. */
+    sk_value *unknown = sk_object(arena);
+    sk_set(arena, unknown, "set", sk_string(arena, "a_vocabulary_nobody_declared"));
+    const char *error = NULL;
+    expect_true("an undeclared set answers null",
+                sk_is_null(sk_vocabulary_closed_sets_case(arena, unknown, &error)));
+}
+
 int main(int argc, char **argv)
 {
     for (int at = 1; at < argc; at += 1) {
@@ -501,6 +563,7 @@ int main(int argc, char **argv)
     parser(arena);
     accounting(arena);
     case_tables(arena);
+    vocabulary(arena);
     sk_arena_free(arena);
 
     (void)printf("self check  %d checks, %d failed\n", checks, failures);

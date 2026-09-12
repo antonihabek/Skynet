@@ -2,7 +2,7 @@
 //
 //   dotnet run --project editions/csharp -c Release -- selfcheck
 //
-// Six groups, and each exists because a corpus run would be green without it:
+// Seven groups, and each exists because a corpus run would be green without it:
 //
 // 1. **Rule 3 at its edges**, including the two ways `double.ToString("R")` is not rule 3 even though its
 //    digits are the right ones. See `Numbers()`.
@@ -16,6 +16,9 @@
 //    framework's own casing — which is the *simple* mapping and disagrees with the engine.
 // 6. **No fused multiply-add**, which on this platform is a source scan with a positive control rather than a
 //    compiler flag: see `Fusion()`.
+// 7. **The closed vocabularies' table**, over the two things the corpus checks nothing about: how many sets
+//    this edition believes it holds, and whether a name nobody declared is distinguishable from a set with
+//    no members.
 
 using System;
 using System.Collections.Generic;
@@ -548,6 +551,48 @@ internal static class SelfCheck
         }
     }
 
+    // ── 7. The closed vocabularies ───────────────────────────────────────────
+
+    /// <summary>
+    /// The corpus checks every set's <i>members</i>. What it cannot check is the table that holds them,
+    /// and one property of that table is dangerous: a duplicate name, which would replace the earlier set
+    /// in place and lose it while the corpus still passed on whichever of the two remained.
+    /// <para>
+    /// That one is not asserted here, because a collection initialiser with a duplicate key throws
+    /// <c>ArgumentException</c> at type initialisation — §6.1's ladder, where a violation that cannot be
+    /// represented beats a test that finds it. What is left are the properties a running table can still
+    /// get wrong.
+    /// </para>
+    /// </summary>
+    private static void Vocabularies()
+    {
+        Console.Error.WriteLine("the closed vocabularies");
+
+        // §31.4's sentence about closed vocabularies is about *all* of them, and the corpus names the
+        // seventy-four it holds. A set added to the reference and not to this table is a corpus failure;
+        // a set removed from this table is a corpus failure too. This is the third case: the table and
+        // the corpus agreeing on seventy-four while this edition believes it holds some other number.
+        ExpectInt("seventy-four sets", Vocabulary.Count, 74);
+
+        // Every set answers a non-empty array, which is what makes JSON null usable as "no such set": if
+        // any set were empty, the two answers would be indistinguishable to a caller.
+        int empty = 0;
+        foreach (string name in Vocabulary.Names)
+        {
+            Value answer = Vocabulary.ClosedSetsCase(Value.Object().Set("set", Value.Of(name)));
+            if (answer.ValueKind != Kind.Array || Value.Length(answer) == 0)
+            {
+                empty += 1;
+                Console.Error.WriteLine("  `" + name + "` answers no members");
+            }
+        }
+        ExpectTrue("every set has at least one member", empty == 0);
+
+        // And a name nobody declared is null rather than empty, which is the other half of that.
+        ExpectTrue("an undeclared set answers null", Vocabulary.ClosedSetsCase(
+            Value.Object().Set("set", Value.Of("a_vocabulary_nobody_declared"))).ValueKind == Kind.Null);
+    }
+
     internal static int Run()
     {
         Numbers();
@@ -556,6 +601,7 @@ internal static class SelfCheck
         Accounting();
         CaseTables();
         Fusion();
+        Vocabularies();
 
         Console.Error.WriteLine("self check  " + checks.ToString(CultureInfo.InvariantCulture) + " checks, "
             + failures.ToString(CultureInfo.InvariantCulture) + " failed");
