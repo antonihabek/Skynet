@@ -13612,8 +13612,8 @@ Every figure below was printed by a runner, not estimated.
 
 | Edition | §31.3 | Round trip | Self check | Corpus |
 |---|---|---|---|---|
-| C | Certified, Full | 1199 of 1199 | 96 checks, 0 failed | **240** of 1,199, 0 failed |
-| Zig | Host, Community | 1199 of 1199 | 97 checks, 0 failed | **201** of 1,199, 0 failed |
+| C | Certified, Full | 1199 of 1199 | 87 checks, 0 failed | **240** of 1,199, 0 failed |
+| Zig | Host, Community | 1199 of 1199 | 92 checks, 0 failed | **201** of 1,199, 0 failed |
 | Java | Guest, Community | 1199 of 1199 | 101 checks, 0 failed | **201** of 1,199, 0 failed |
 | C# | Guest, Community | 1199 of 1199 | 113 checks, 0 failed | **201** of 1,199, 0 failed |
 
@@ -13647,6 +13647,23 @@ places where Java *looks* like the reference and is not are the whole of the wor
 **C#** — `ToString("R")` is the shortest round-trip decimal, so this is the one edition of the four that
 runs no precision loop; it still reshapes every number, because `"R"` turns exponential at a narrower
 band than Java does and signs negative zero.
+
+Both self-check counts in that table were wrong in this entry's first draft — 96 for C and 97 for Zig
+— and were corrected by re-running the four editions from the repository root, which is how CI invokes
+them. That re-run is also what found the defect below.
+
+### The CI step for Zig was broken, and a masked exit code is why it looked fine
+
+`zig build --build-file editions/zig/build.zig check` is what CI runs, from the repository root. It
+**failed** there and passed from `editions/zig`, because a Zig `Run` step with no `setCwd` inherits the
+cwd of the `zig build` process — so `-Dcorpus`'s default `../../corpus` resolved against whatever
+directory the caller was in. The three run steps now set their working directory to the build root, as
+the fusion step already did.
+
+It looked fine because the command that ran it was `zig build ... | grep ...; make -C editions/java ...
+| grep ...`, whose reported exit code is the last `grep`'s. Zig's status was never examined, and the
+missing `round trip` and `result` lines in that output were the only evidence — which reads as a quiet
+step rather than a failed one. The step now passes from the root, with both fusion probes fusing.
 
 ### Five gates that found something
 
@@ -13725,3 +13742,12 @@ band than Java does and signs negative zero.
      Java's `Double.toString` gives two digits where one round-trips; .NET's `"R"` gives one. The same
      rule 3 therefore costs a precision loop in one edition and a reshaping in another, and an edition
      that copied the other's approach would be either wrong or slow for no reason.
+
+181. **A gate has to be run the way CI runs it, from where CI runs it.** The Zig step passed from the
+     edition's own directory and failed from the repository root, because a build-system run step
+     inherited the caller's working directory and a relative default therefore meant two different
+     things. Running it once from the wrong place is the whole test.
+
+182. **A pipeline's exit code is the last command's.** `zig build ... | grep ...` reports the grep's
+     status, so a failing gate read as a passing one with less output. Anything whose result matters is
+     checked by its own status, not by whether the line one expected appeared.

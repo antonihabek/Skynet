@@ -22,7 +22,7 @@ pub fn build(b: *std.Build) void {
     ) orelse .ReleaseSafe;
 
     // Where the corpus is. Overridable so a vendor can point the runner at a pinned copy.
-    const corpus_root = b.option([]const u8, "corpus", "The corpus directory") orelse "../../corpus";
+    const corpus_root = b.option([]const u8, "corpus", "The corpus directory, relative to editions/zig") orelse "../../corpus";
 
     // The ratchet. This is the number of cases this edition has reached; see `--min-passed` in
     // `src/main.zig` for why a floor is checked separately from the failures. Lowering it is a decision
@@ -49,14 +49,24 @@ pub fn build(b: *std.Build) void {
         built[index] = exe;
     }
 
+    // **Every run step's working directory is this build root, set rather than inherited.** A `Run` step
+    // with no `setCwd` inherits the cwd of the `zig build` process, so `corpus_root`'s default resolved
+    // against whatever directory the caller happened to be in: `zig build check` worked from
+    // `editions/zig` and failed from the repository root, which is where the CI step invokes it with
+    // `--build-file`. The default is documented as *the repository's `corpus/`*, so it has to mean that
+    // from anywhere. A caller passing `-Dcorpus=` a relative path is naming it relative to this
+    // directory too, which is the same rule as the default and is why the option's help says so.
     const corpus_run = b.addRunArtifact(built[0]);
+    corpus_run.setCwd(b.path("."));
     corpus_run.addArgs(&.{ "--corpus-root", corpus_root, "--min-passed", min_passed });
     const corpus_step = b.step("corpus", "Run the conformance corpus at its ratchet");
     corpus_step.dependOn(&corpus_run.step);
 
     const roundtrip_run = b.addRunArtifact(built[1]);
+    roundtrip_run.setCwd(b.path("."));
     roundtrip_run.addArgs(&.{ "--corpus-root", corpus_root });
     const selfcheck_run = b.addRunArtifact(built[2]);
+    selfcheck_run.setCwd(b.path("."));
     selfcheck_run.addArgs(&.{ "--corpus-root", corpus_root });
     const test_step = b.step("test", "The canonical round trip and the self-check");
     test_step.dependOn(&roundtrip_run.step);
