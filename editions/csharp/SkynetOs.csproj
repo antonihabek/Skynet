@@ -1,0 +1,67 @@
+<!--
+  The C# / .NET edition (§31.3, §42 level L2 — Contracts).
+
+    make -C editions/csharp check
+
+  The three subcommands are `roundtrip`, `selfcheck` and `corpus`; the Makefile beside this file spells out
+  how each is invoked, because an XML comment cannot contain two consecutive hyphens and so cannot quote a
+  dotnet command line at all. (That is the third per-language comment rule this repository's editions have
+  run into: a C comment cannot contain the characters that open one, a Java comment cannot contain a unicode
+  escape, and an XML comment cannot contain a long option.)
+
+  One project with three subcommands rather than three projects, because .NET allows one entry point per
+  assembly and three assemblies sharing a source tree is three project files to keep in step for no reader's
+  benefit.
+
+  No PackageReference. §31.4 requires byte-identical output, so the number conversion and the duplicate-key
+  rule have to be ours rather than whatever a dependency does this year — which is the same reason the Rust
+  workspace has none. It also means `dotnet build` works with no network, which is what lets an edition be
+  checked on the machine it is being reviewed on.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Skynet.Os</RootNamespace>
+    <AssemblyName>skynet-corpus-csharp</AssemblyName>
+    <ImplicitUsings>disable</ImplicitUsings>
+
+    <!--
+      The gate. §6.1 of the coding standard ranks the compiler second only to making a violation
+      unrepresentable, and in an edition whose whole job is byte-identical output a nullable-reference warning
+      is a wrong document rather than a style question.
+    -->
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!--
+      `latest-recommended` rather than `latest-all`. The difference is not strictness about correctness — every
+      analyser that reports a defect is on either way — it is that `all` enables the API-design and performance
+      advisories, and several of those are wrong about this code on purpose: the value model exposes a mutable
+      list because a contract builds documents by appending, and the corpus runner catches broad exceptions
+      because finding 164 says a runner that crashes describing a failure hides the failure. Choosing the
+      analyser set is a decision; suppressing a rule that found something would not be.
+    -->
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+
+    <!--
+      Culture is not allowed to decide any of this. `InvariantGlobalization` removes ICU entirely, so
+      `ToUpper()` and `double.ToString()` cannot pick up a machine's locale — and this edition would not use
+      them anyway, because the case tables come from the engine the reference runs on and the number rule is
+      §31.4's. The property is here to make a locale-dependent call impossible rather than merely unused.
+    -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!--
+      **No floating-point relaxation, stated rather than inherited.** The CLR specification defines `mul` and
+      `add` on float64 as separate IEEE-754 operations, so there is no contraction to switch off the way there
+      is in C, C++ and Zig. What there *is* on this platform is `System.Math.FusedMultiplyAdd`, which fuses
+      when a caller asks for it — so the rule here is that nothing calls it, and `selfcheck` scans the source
+      to say so. §31.2 pins the kernel's sine, cosine and square root as a fixed sequence of correctly rounded
+      operations, and a fused operation is a different sequence.
+    -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+  </PropertyGroup>
+
+</Project>
