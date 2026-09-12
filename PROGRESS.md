@@ -13599,3 +13599,380 @@ server: the Go row renders as measured, "5 of 9 editions … exist as running co
 176. **A formatter can change what a comment says.** gofmt rewrote a pair of apostrophes into a
      quotation mark five times across two sessions, each a comment that then misquoted the line it
      explained. The gate is a scan for the trace it leaves.
+
+## 2026-09-12 (eighty-third) — the four §31.3 rows that had no code, and §31.3 now fully implemented
+
+Four rows of §31.3's edition matrix had no implementation at the start of this session: **C**, **Zig**,
+**Java / Kotlin** and **C# / .NET**. All four now exist at §42's **L2 — Contracts**, each held by its
+own `--min-passed` ratchet and its own CI step. The ninth row is TypeScript, which is the oracle and
+cannot be measured against its own output, so **every row of §31.3 that can have an implementation now
+has one.**
+
+Every figure below was printed by a runner, not estimated.
+
+| Edition | §31.3 | Round trip | Self check | Corpus |
+|---|---|---|---|---|
+| C | Certified, Full | 1199 of 1199 | 87 checks, 0 failed | **240** of 1,199, 0 failed |
+| Zig | Host, Community | 1199 of 1199 | 92 checks, 0 failed | **201** of 1,199, 0 failed |
+| Java | Guest, Community | 1199 of 1199 | 101 checks, 0 failed | **201** of 1,199, 0 failed |
+| C# | Guest, Community | 1199 of 1199 | 113 checks, 0 failed | **201** of 1,199, 0 failed |
+
+The round trip — every `expected` string in the corpus parsed and re-serialised to identical bytes —
+passed **1,199 of 1,199 on the first run in all four editions**, and so did every contract module. That
+is worth stating plainly rather than celebrating: it is what a differential test against a frozen oracle
+is supposed to do once the rules are written from the reference instead of from another edition.
+
+None of the four is in `reference/reports/editions.json`, which still says four editions and 1,199
+cases. The refusal inside `tools/edition-report.mjs` keeps any edition with a case unimplemented off the
+published figure — the arrangement Go was in from 624 cases until the eighty-second session — and the
+tool's `--check` was run after each edition to confirm it.
+
+### What each platform decided differently
+
+**C** — an arena allocator, one region per corpus case, and no `free` in any contract: the L2 decision
+closest to the L4 MISRA-C target. `sk_arena_alloc` never returns NULL; it aborts naming the request it
+could not serve, because the alternative is a NULL check at several thousand construction sites, which
+in practice means a missing one somewhere. 240 cases across six corpora — the only one of the four to
+get past the first four contracts.
+
+**Zig** — `ReleaseSafe` by default, `zig fmt` as a build failure, and the fusion scan checking that the
+*default* still holds: Zig's float mode is `.strict` and forbids contraction, so unlike C and C++ there
+is no flag being set, and `@setFloatMode(.optimized)` is one line in one file away from making the
+arithmetic differ on every machine with an FMA.
+
+**Java** — the closest edition to the reference, which is what makes it dangerous: a `String` here is
+UTF-16 exactly as a JavaScript string is, so nothing forces a decision about representation and the
+places where Java *looks* like the reference and is not are the whole of the work.
+
+**C#** — `ToString("R")` is the shortest round-trip decimal, so this is the one edition of the four that
+runs no precision loop; it still reshapes every number, because `"R"` turns exponential at a narrower
+band than Java does and signs negative zero.
+
+Both self-check counts in that table were wrong in this entry's first draft — 96 for C and 97 for Zig
+— and were corrected by re-running the four editions from the repository root, which is how CI invokes
+them. That re-run is also what found the defect below.
+
+### The CI step for Zig was broken, and a masked exit code is why it looked fine
+
+`zig build --build-file editions/zig/build.zig check` is what CI runs, from the repository root. It
+**failed** there and passed from `editions/zig`, because a Zig `Run` step with no `setCwd` inherits the
+cwd of the `zig build` process — so `-Dcorpus`'s default `../../corpus` resolved against whatever
+directory the caller was in. The three run steps now set their working directory to the build root, as
+the fusion step already did.
+
+It looked fine because the command that ran it was `zig build ... | grep ...; make -C editions/java ...
+| grep ...`, whose reported exit code is the last `grep`'s. Zig's status was never examined, and the
+missing `round trip` and `result` lines in that output were the only evidence — which reads as a quiet
+step rather than a failed one. The step now passes from the root, with both fusion probes fusing.
+
+### Five gates that found something
+
+1. **GCC 13 implements `-ffp-contract=on` as *off*.** The C fusion probe — the positive control finding
+   171 requires — reported that it could not fuse. The probe is now compiled with `-ffp-contract=fast`
+   explicitly. The same source with the same flags fuses on GCC 14 and not on 13, which is the whole
+   reason `FP_FLAGS` and the scan both exist.
+2. **`char.ConvertToUtf32` throws on a string the oracle answers.** A JavaScript string may hold an
+   unpaired surrogate and `codePointAt` returns it; .NET raises `ArgumentException`, and
+   `ConvertFromUtf32` refuses to write one back. Every walk over a string in the C# `Js` module now goes
+   through its own `CodePointAt`/`AppendCodePoint`. Without it, a lone surrogate anywhere in a role or a
+   version string is an exception where the reference answers null.
+3. **`javac` processes a unicode escape before the lexer runs, including inside a comment.** A comment
+   containing the four characters that spell one does not compile. Same shape as the C edition's
+   discovery that a C comment cannot contain the two characters that open one — and MSBuild added a
+   third: an XML comment cannot contain two consecutive hyphens, so `SkynetOs.csproj` cannot quote a
+   `dotnet run --` line at all.
+4. **A static array initialiser is a method, and javac limits one to 64 KiB of bytecode.** The generated
+   case tables are `error: code too large` as array literals. `tools/unicode-case.ts` emits numbered fill
+   methods, one class per table, for Java only. Roslyn has no such limit on a flat `static readonly
+   int[]` of constants — it becomes a metadata blob — but it *does* compile `int[][]` as per-row
+   bytecode, so the C# target renders flat arrays and offsets.
+5. **`dotnet run` forwards an option it does not recognise to the program.** `--nologo` arrived as the
+   C# runner's first argument and it answered with its usage line. Right of the runner; the Makefile now
+   runs the built assembly directly.
+
+### Two of my own errors, caught by the gates rather than by reading
+
+* **A self-check literal I wrote was wrong.** My 5e-324 expectation for the C edition was not the
+  oracle's. It was regenerated *from* the oracle — `node` over `reference/typescript/canonical.ts` — and
+  all sixteen probe values then agreed.
+* **My Zig float probe printed `0.3` for `0.1 + 0.2`, and the probe was wrong, not Zig.** Comptime float
+  arithmetic is f128. Routing it through a runtime `f64` gave `0.30000000000000004`, and the shape of
+  that mistake is now what the self-check asserts.
+
+### Documentation corrected, having been proved wrong
+
+* `tools/edition-report.mjs` said §31.3's other rows were absent because there was no code to run. Four
+  of the five now have code and are absent because they are *partial*. All three reasons are named.
+* `README.md` said the corpus holds 1,137 cases and that the Rust runner reproduces all 1,137. It is
+  1,199 on both lines, re-counted from `corpus/`.
+* `README.md`'s repository layout did not mention `editions/` at all. Seven of them now.
+* CI's header said three editions were partial and its case-tables job said five editions and twelve
+  generated files. Four, six and fourteen.
+
+### Open
+
+1. **Nothing has been pushed yet at the time of writing this entry**; the branch is
+   `claude/exciting-hypatia-k11axe`.
+2. CI's Linux run of the four new steps has not happened.
+3. No edition has been run on arm64 hardware.
+4. The four new editions answer four corpora between them (six for C). The other twenty-six are
+   unimplemented and counted as such on every run.
+5. From before: §73's transport row is still contradicted by the Skills row.
+
+### Findings, restated
+
+1-176 as before.
+
+177. **A per-language comment rule is a real constraint, not a curiosity.** Three of the four editions
+     hit one: a C comment cannot contain the two characters that open one, a Java comment cannot contain
+     a unicode escape, and an XML comment cannot contain two consecutive hyphens. Each was found by a
+     compiler refusing a comment that explained something true, and each was fixed by rewording rather
+     than by deleting the explanation.
+
+178. **A compiler flag's documented default is not its implemented default.** `-ffp-contract=on` is what
+     `-std=c17` selects and GCC 13 implements it as off. A gate that assumed the documented behaviour
+     would have reported a clean scan on a compiler that was never contracting anything.
+
+179. **A host library that throws where the reference answers is a defect in the edition, not the
+     input.** Two .NET calls refuse a lone surrogate that a JavaScript string may legally hold. Caught by
+     reading the API's contract before the corpus reached it — the corpus case that would have gone red
+     is real, and would have read as a bug in the contract rather than in the string walk.
+
+180. **The shortest-round-trip renderer is per-platform, and so is whether an edition needs a search.**
+     Java's `Double.toString` gives two digits where one round-trips; .NET's `"R"` gives one. The same
+     rule 3 therefore costs a precision loop in one edition and a reshaping in another, and an edition
+     that copied the other's approach would be either wrong or slow for no reason.
+
+181. **A gate has to be run the way CI runs it, from where CI runs it.** The Zig step passed from the
+     edition's own directory and failed from the repository root, because a build-system run step
+     inherited the caller's working directory and a relative default therefore meant two different
+     things. Running it once from the wrong place is the whole test.
+
+182. **A pipeline's exit code is the last command's.** `zig build ... | grep ...` reports the grep's
+     status, so a failing gate read as a passing one with less output. Anything whose result matters is
+     checked by its own status, not by whether the line one expected appeared.
+
+## 2026-09-12 (eighty-fourth) — the closed vocabularies in four editions, and +296 cases
+
+No §31.3 row is left without an implementation, so this session is **breadth**: `vocabulary/closed-sets`,
+the corpus's single largest file after the fuzz corpora, added to all four of the partial editions.
+
+| Edition | Before | After | Self check |
+|---|---|---|---|
+| C | 240 | **314** of 1,199, 0 failed | 91 checks, 0 failed |
+| Zig | 201 | **275** of 1,199, 0 failed | 96 checks, 0 failed |
+| Java | 201 | **275** of 1,199, 0 failed | 104 checks, 0 failed |
+| C# | 201 | **275** of 1,199, 0 failed | 116 checks, 0 failed |
+
+All four passed all 74 sets on the first run, and every ratchet was raised to the new figure. The round
+trip is still 1199 of 1199 in each.
+
+### Why this corpus, and why it is not generated
+
+Seventy-four closed string sets, 442 members, and the generator's own comment says what it is for:
+`capability_reserved` was added to the Rust `PackageRejectionCode` and not to the reference's, and nothing
+could see it — the mirror pins guard the reference, and every corpus covers the cases it holds, none of
+which had ever mentioned a token invented ten minutes earlier.
+
+That argument decides how the tables were written. **Each edition holds its own table**, rather than one
+generator emitting them into all four the way `tools/unicode-case.ts` emits the case tables. The case
+tables come from the JavaScript engine, which no edition can re-derive by hand; a vocabulary is a list of
+strings in the reference's own source, and a token added in one place and not another is precisely what
+this corpus was added to catch. A generator could not catch a mistake it had made in every edition at once.
+
+The member lists were read out of `reference/typescript` mechanically — one exported constant per set,
+resolved through the `vocabulary()` calls in `tools/corpus-gen/generate.ts` that name which constant each
+set is — and that reading was checked against the corpus **before** any edition code was written: 74 of 74
+sets agreed. What each edition then carries is its own statement of the vocabulary, and each is
+independently subject to the corpus from here on.
+
+Order is part of the agreement for several sets, and the tables preserve declaration order rather than
+sorting: `os_tiers` and `scts_areas` are ranked, `operating_states` and `state_reasons` run in the order
+§27's `evaluate` descends through its rules, and `skill_phases` runs in diagram order so that "never moves
+backwards through this list" is a property somebody can assert.
+
+### What each language decided
+
+* **C** — `SET(...)` is a compound literal in a static initialiser, which has static storage duration
+  (C17 6.5.2.5p5), so the table costs nothing at run time and there is no second name per set to keep in
+  step with the first.
+* **Zig** — `zig fmt` collapses a wrapped list onto one line unless it carries a trailing comma, and with
+  one it puts a single member per line. The formatter's preference is the right answer here for a reason
+  beyond formatting: one member per line makes an added token exactly one line of diff.
+* **Java** — `put` **throws** on a duplicate set name during class initialisation. §6.1's ladder: a
+  violation that cannot be represented beats a test that finds it. A duplicate would replace the earlier
+  set in place, and the corpus would still pass on whichever of the two survived.
+* **C#** — a collection initialiser with a duplicate key throws at type initialisation, which is the same
+  gate without the explicit method.
+
+An undeclared set answers **JSON null, not an empty array**, in all four. Every one of the seventy-four
+sets has at least one member, so an empty array could only mean *a set with nothing in it*; §54.2's rule
+about naming what could not be resolved applies to a set name as much as to a path. The self-check asserts
+both halves — that no set is empty, and that an undeclared name is null — which is the pair that makes the
+distinction usable.
+
+### Documentation corrected, having been proved wrong
+
+* **The C and Zig self-check headers each said "four groups" and listed four, while both had five** — the
+  case-tables group was never listed. Now six each, with every group named. The Java header said five
+  (now six) and the C#'s six (now seven).
+* The Java and C# READMEs quoted self-check counts of 101 and 113; they are 104 and 116.
+* All four READMEs said `Dispatch` was the only file with no module beside it in the reference. The
+  vocabulary contract is a second, and each README now says so and why.
+
+### Open
+
+1. The four editions answer five corpora between them (seven for C). Twenty-five remain, with `fuzz`
+   (148 cases), `skill` (88) and `identity` (56) the largest.
+2. CI's Linux run of the four steps still has not happened.
+3. No edition has been run on arm64 hardware.
+4. From before: §73's transport row is still contradicted by the Skills row.
+
+### Findings, restated
+
+1-182 as before.
+
+183. **Whether to generate a table into every edition depends on whether a human could have derived it.**
+     The case tables come from a JavaScript engine and are generated into six editions, because no edition
+     can re-derive them. The closed vocabularies are lists of strings in the reference's source and are
+     *not* generated, because the corpus that holds them exists to catch a token added in one edition and
+     not another — and a generator cannot catch a mistake it made in all of them. Same shape of artefact,
+     opposite answer, and the reason is the gate rather than the data.
+
+184. **A doc comment that counts its own list is a claim, and two of them were already wrong.** The C and
+     Zig self-check headers said "four groups" over five. Nothing checks a number in prose, which is why
+     the number in prose should be the thing a reader can also count in the file below it.
+
+## 2026-09-12 (eighty-fifth) — §27's machine in four editions, and a list each of them holds twice
+
+Second breadth pass, and the target was chosen for what it proves rather than for its case count: §27's
+**operating-state machine**. Forty cases across three files, and the two small ones are the reason it is
+worth having — `opstate/properties` freezes `safe_state`, `commands` and `sticky` for every state, and
+`opstate/warning` freezes §49.1's tone for **every ordered pair** of states, forty-nine of them. An edition
+cannot get one transition right by accident and the rest wrong.
+
+| Edition | Before | After | Self check |
+|---|---|---|---|
+| C | 314 | **354** of 1,199, 0 failed | 92 checks, 0 failed |
+| Zig | 275 | **315** of 1,199, 0 failed | 97 checks, 0 failed |
+| Java | 275 | **315** of 1,199, 0 failed | 105 checks, 0 failed |
+| C# | 275 | **315** of 1,199, 0 failed | 117 checks, 0 failed |
+
+All four passed all forty on the first run; every ratchet raised; the round trip is still 1199 of 1199.
+
+### The rule order is the specification
+
+`derive` descends nine rules and the order decides four of the corpus's cases on its own. Each is written
+as the §27 row it implements rather than as a condition:
+
+1. **RHAL lost** first, because it is the condition under which nothing else can be known — no observed
+   joint state, no estop reading, no guard that can evaluate.
+2. **A failed self-test** is `SAFE`, not `DEGRADED`: a robot that failed its own self-test should not be
+   talked into running by a reconcile loop.
+3. **A stop** above POST, because an operator stop is honoured whatever the robot is doing, including
+   booting.
+4-8. POST incomplete, homing pending, kernel down, guard hold, then no policy split from policy not ready.
+9. **`DEGRADED` below the policy rules**, which is the entry that had been getting this wrong elsewhere:
+   §27's row says the robot *runs*, so `degraded` is the impaired running state and not a third resting
+   one. A robot with an unavailable guard and *no policy* is holding, and calling that `degraded` would
+   report a robot as running when it is not.
+
+Two details reproduced rather than tidied:
+
+* **`stop_settled` is read only while a stop is commanded.** A robot that is not stopping has not completed
+  a stop, and a caller leaving the flag true between stops would otherwise pin the machine in `SAFE`. For
+  `estop` the flag is not observable on any edition that exists — §24 gives the hardware chain one bit,
+  which says the chain is open and nothing about whether the body has come to rest — so absent derives
+  `stopping`, which can hold a robot and can never release one.
+* **An unknown stop cause omits `reason` rather than inventing one.** The reference is a `switch` over a
+  closed union with no default, which in TypeScript answers `undefined`, and rule 5 omits an undefined
+  field. Composing `stopping_<whatever>` would be an edition claiming a vocabulary member that
+  `corpus/vocabulary/closed-sets.json` does not hold. The corpus never asks — all thirty-eight of its
+  `evaluate` cases name a declared cause — so this is a rule each edition had to take from the reference
+  rather than from a failing case.
+
+§49.1's tone is phrased over `commandsAutonomously` in all four, not over the literal `"running"`. The
+under-inclusive spelling misses `hold -> degraded`, which is a policy beginning to command a body: a robot
+whose guard set is imperfect — §45.5's ordinary case — would have begun autonomous motion silently.
+
+### A list every edition now holds twice, and nothing in the corpus compares them
+
+After this pass each edition holds §27's seven state names in **two** files: the machine's own rule-order
+list, and the `operating_states` entry of its closed-vocabulary table. The corpus measures each against the
+oracle *separately*, so two lists that agreed with the oracle at different moments would both still pass
+while disagreeing with each other — and the order is load-bearing in one file and frozen output in the
+other.
+
+Every edition's self-check now asserts the two are the same list in the same order. That is the only kind
+of check that can find it: no corpus file mentions both.
+
+### One thing the C edition's own convention caught
+
+The new self-check group printed its heading **before** `rule 3 — numbers`, having been called last. The C
+edition reports on **stdout** and the group I added used `stderr`, so the two streams interleaved when
+piped. Matched to the file's convention rather than left as a cosmetic oddity, because a self-check whose
+groups print out of order is a self-check whose output nobody trusts to be in the order it ran.
+
+### Open
+
+1. The four editions answer eight corpora between them (ten for C). Twenty-two remain, with `fuzz`
+   (148 cases), `skill` (88) and `identity` (56) the largest.
+2. CI's Linux run of the four steps still has not happened.
+3. No edition has been run on arm64 hardware.
+4. From before: §73's transport row is still contradicted by the Skills row.
+
+### Findings, restated
+
+1-184 as before.
+
+185. **A corpus that measures two tables separately cannot notice that they disagree with each other.**
+     Each edition holds §27's states twice — in the machine and in the frozen vocabulary — and each copy is
+     measured against the oracle alone. Two copies that were both right at different times are both green
+     and mutually inconsistent. Within-edition duplication needs a within-edition check.
+
+186. **A closed `switch` with no default is a deliberate `undefined`, and porting it means omitting the
+     field.** The temptation in every one of the four languages was to compose `"stopping_" + cause`. That
+     would answer a cause nobody declared with a token no vocabulary holds, which is exactly the divergence
+     the vocabulary corpus was added to catch — and no corpus case would have said so.
+
+## 2026-09-12 (eighty-sixth) — the two things called a console, and the repository that said neither
+
+A short entry, and it is a documentation one. Asked how to open "the console" on a Windows PC, I
+answered about the **on-robot console** — the page `skynetd` serves — and the question was about
+**Skynet Console**, the operator's desktop application (§83). §6659 of the architecture already has the
+rule that would have prevented it: *"Never bare 'the console' where both are in play."*
+
+What this repository said about that was nothing. `README.md` described the on-robot console and its
+fixture at length and **never mentioned that a desktop application exists**, let alone that it lives in
+the Hub repository under `desktop/` rather than here. A reader of this repo has no way to learn that the
+thing they are looking for is somewhere else. Fixed: a paragraph beside the fixture naming both, saying
+which is which, and stating §83.2's rule that the application is a shell rather than a client — it
+embeds this page and owns only what a browser cannot do.
+
+One bare use of "the console" in `README.md`'s §79 upload paragraph, where both are genuinely in play,
+is now "the on-robot console". The remaining bare uses in `docs/skynet-os-architecture.md` are inside
+§32 and §34, whose own subject is the on-robot one, and were left alone rather than rewritten in a
+document this session had no other business in.
+
+The fixture sentence was also incomplete in the same place: it said "anybody can serve the directory"
+without saying what with. `console/fixture-serve.mjs` documents why a plain static server renders a
+false page — it has no idea the file beside `blackbox` is a status code, so a 503 replays as a 200 — and
+the sentence now says so. The test's own doc comment was corrected for this on the same day (entry
+eighty-three); the README had the same gap and nothing connected the two.
+
+### What was verified rather than assumed
+
+Read out of the Hub repository, not from memory: the application is at `desktop/windows/`, WinUI 3 on
+`net9.0-windows10.0.19041.0`, `x64;arm64`, `WindowsAppSDKSelfContained=true`, built with
+`dotnet build -p:Platform=x64` from `desktop/windows`, and its own README records that the Windows half
+builds and runs while the macOS half has never been compiled. No edit was made in that repository.
+
+### Findings, restated
+
+1-186 as before.
+
+187. **A naming rule in the specification does not reach a reader who never gets to it.** §6659 forbids
+     bare "the console" where two things carry the name, and the rule was kept in the prose that
+     discusses both — while the README, which is where somebody starts, described one of them and did
+     not say the other existed. A disambiguation rule needs the *existence* of both things stated
+     somewhere a newcomer reads first, or it only protects people who already know.

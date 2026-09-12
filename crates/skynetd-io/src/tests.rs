@@ -1507,7 +1507,14 @@ fn every_console_feed_has_a_fixture_route() {
 /// Write the console and one answer per route it fetches, so a browser can render it.
 ///
 /// `cargo test -p skynetd-io -- --ignored console_fixture --nocapture`, then serve the directory it
-/// names — any static server will do, and §32.2's whole point is that the page needs nothing else.
+/// names **with the `fixture-serve.mjs` it writes beside the page**, which the run prints the command
+/// for. Not a plain static server: the fixture records one `<route>.status` per route and a static
+/// server has no idea that file is a status code, so a 503 replays as a 200 and the page renders an
+/// error object as data — `undefined records of undefined B` where the robot said service unavailable,
+/// which is the §32.2 violation the console is built not to commit. That is not hypothetical; it is
+/// what a static server drew the first time somebody looked, and `console/fixture-serve.mjs` carries
+/// the account. §32.2's point survives it: the server is thirty lines of Node standard library and the
+/// page itself still needs nothing.
 ///
 /// **Why this exists.** The console has been written, served, routed and tested for several sessions
 /// and has never been *looked at*. Its script is syntax-checked in CI and every route it calls has a

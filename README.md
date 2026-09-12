@@ -106,8 +106,8 @@ it, which says no when the answer is no.
 | §47.6's frame pool — in `skynet-contracts`, not here | The **loan**, which is what crosses a sandbox boundary: a handle names one generation of one slot, a slot a reader holds is never reused under it, and when every slot is held the frame is dropped and counted rather than stalling capture. Ten scripted corpus cases, which every edition reproduces. Writing the corpus first found the reference taking the lowest-index free slot where §47.6 says oldest — a pool of any capacity using one slot, refusing a reader its frame on nearly every cycle (§47.6a) |
 | `crates/skynet-dl` — the driver loader | `dlopen`/`LoadLibraryW`, the vtable check, and a safe wrapper around the four calls a control loop makes. The workspace's only loader `unsafe`, in one crate with two callers |
 | `crates/skynet-kernel-host` — the control loop, and the `skynetk` binary (§25) | The consumer end of the command ring, running: a real driver opened, a cycle turned at a declared rate, the kernel's verdict written, a `Cycle` recorded every pass. A hold is a mask of zeros; a controlled stop ramps at the declared jerk ceiling; a ramp with no rate escalates and says so; an advisory verdict is not enforced. Records every cycle into §13's ring behind an exclusive writer lock (§26.2), seals the window on exit, and writes the **limits it ran under beside it** — without which nothing off a bench could be replayed, because `skynetd` resolves its own from a descriptor and a plan rather than from this loop's flags; `skynetk blackbox <dir>` reads one back and reports §74's five counters off it. 22 tests, plus three against the mock robot at 200 Hz with no overruns |
-| `corpus/` — the conformance corpus | 1,137 cases, 80 files, of which 74 are the closed vocabularies every edition must spell identically |
-| `crates/skynet-corpus` — the corpus runner | Reproduces all 1,137 byte for byte |
+| `corpus/` — the conformance corpus | 1,199 cases, 80 files, of which 74 are the closed vocabularies every edition must spell identically |
+| `crates/skynet-corpus` — the corpus runner | Reproduces all 1,199 byte for byte |
 | `reference/typescript/` — the oracle | Vendored from the Hub; generates the corpus |
 | `bindings/python` — the Python RHAL | Driver protocol plus a ctypes ABI view, offset-asserted |
 | `drivers/mock` — the mock robot | 24 sim-conformance checks, no hardware |
@@ -268,7 +268,17 @@ The panel added for §11 exists for a state that is invisible everywhere else: a
 against a **last-known-good** copy looks identical, on every other surface, to one reconciling
 against a current desired state.
 `cargo test -p skynetd-io -- --ignored console_fixture` writes the page and one file per route it
-fetches, from the real router, so anybody can serve the directory and look at it without a robot.
+fetches, from the real router, together with the `fixture-serve.mjs` that replays each route's status
+code — so anybody can serve the directory and look at it without a robot. Not a plain static server: a
+503 replayed as a 200 renders an error object as data, which is the one thing §32.2 forbids.
+
+**Two things are called a console, and this repository holds one of them.** *The on-robot console* is
+the page above, served by `skynetd` over the LAN from the machine it describes (§32.2). *Skynet
+Console* is the operator's **desktop application** (§83) — WinUI 3 on Windows, SwiftUI on macOS — and
+it lives in the Hub repository under `desktop/`, not here. It is a shell rather than a client: §83.2
+has it embed this page in a `WebView2` and own only what a browser cannot do — discovery, USB,
+multi-gigabyte sealed windows, an always-reachable stop, several robots at once. Never bare "the
+console" where both are in play.
 
 §49's warning tone is built, and the shape of what was missing is worth a paragraph because it
 is invisible from either half. `hri.warning` has been a **reserved** capability token since §8 was
@@ -345,7 +355,7 @@ having — the stored object hashing to the digest the robot declared at the sea
 
 What has **not** happened is the two halves meeting. Each is exercised against a double: this robot
 uploads to a test receiver and the Hub receives from a test client, and no window has yet crossed
-from one into the other. Until one does, `skynet blackbox` and the console say which sealed windows
+from one into the other. Until one does, `skynet blackbox` and the on-robot console say which sealed windows
 the Hub has acknowledged and which are on this robot and nowhere else, so the state is visible rather
 than inferred.
 
@@ -598,6 +608,15 @@ crates/          The Rust reference edition.
   skynet-capture     The capture-side split (§47.4): a latest-wins slot and a bounded queue.
   skynet-corpus      Holds this edition to the corpus.
 corpus/          The conformance corpus. Plain data, no code.
+editions/        The other editions of §31.3's matrix. Each reproduces the corpus or says
+                 how far it has got; §31.4 is what makes the list survivable.
+  python             Guest ceiling, Full standing. Reproduces the corpus whole.
+  cpp                Certified ceiling, Full standing. Reproduces the corpus whole.
+  go                 Guest ceiling, Full standing. Reproduces the corpus whole.
+  c                  Certified ceiling, Full standing. §42's L2, and partial.
+  zig                Host ceiling, Community standing. §42's L2, and partial.
+  java               Guest ceiling, Community standing. §42's L2, and partial.
+  csharp             Guest ceiling, Community standing. §42's L2, and partial.
 reference/       The TypeScript oracle the corpus is generated from.
 tools/           The generator.
 drivers/
