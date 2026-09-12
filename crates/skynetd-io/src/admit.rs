@@ -157,17 +157,32 @@ impl Report {
     }
 }
 
+/// A skill-card field, in the two spellings a manifest may carry it in.
+///
+/// The Hub's card schema puts `task`, `preconditions`, `success_criteria`,
+/// `expected_duration_seconds` and `composition` at the **top level** of the manifest it publishes.
+/// A manifest assembled from a repository that nests the card puts the same fields under `skill`.
+/// Both shapes reach a robot, so both are read.
+///
+/// They are read *here*, once, because the alternative is what this module and
+/// [`crate::skill`] had between them: the same `or_else` chain written out at five call sites. The
+/// failure that shape produces is not a crash — it is the sixth field somebody adds being read in
+/// one spelling and silently absent in the other, which on a precondition is a clause that never
+/// refuses anything.
+pub fn card_field<'a>(manifest: &'a Json, name: &str) -> Option<&'a Json> {
+    manifest.get_present(name).or_else(|| {
+        manifest
+            .get("skill")
+            .and_then(|card| card.get_present(name))
+    })
+}
+
 /// The call graph a skill's manifest declares (§54.5).
 ///
 /// `composition.calls`, flat or under `skill`, like every other field a manifest may carry either
 /// way. Absent on every package that is not a composing skill, which is nearly all of them.
 pub fn declared_calls(manifest: &Json) -> Vec<SkillCall> {
-    let composition = manifest.get_present("composition").or_else(|| {
-        manifest
-            .get("skill")
-            .and_then(|s| s.get_present("composition"))
-    });
-    read_calls(composition.and_then(|c| c.get_present("calls")))
+    read_calls(card_field(manifest, "composition").and_then(|c| c.get_present("calls")))
 }
 
 /// §54.5's install-time refusal: *"a cycle is refused at install by walking the declared graph, not

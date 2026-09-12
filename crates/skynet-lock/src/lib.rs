@@ -70,6 +70,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod ring_file;
 pub mod writership;
 
 pub use writership::{AttachError, Attaching, Creating, Joining, Role, Writership};

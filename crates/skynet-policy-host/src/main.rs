@@ -44,104 +44,13 @@ use std::sync::atomic::AtomicU32;
 use std::time::{Duration, Instant};
 
 use skynet_policy_host::backend::{Approach, Commanding, Hold, Trajectory};
+use skynet_policy_host::rendezvous;
 use skynet_policy_host::run::{PolicyHost, SystemClock, Tick};
 use skynet_ring::{mode, words_for, Ring, MAX_CHANNELS};
-use skynet_ring_shm::Mapping;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     std::process::exit(run(&args));
-}
-
-/// Connect to a runtime's socket and take the ring it offers (§25).
-///
-/// Three failures, and each sends a person somewhere different:
-///
-/// * **the socket is not there** — the runtime is not running, or is running without
-///   `--policy-socket`;
-/// * **no descriptor arrived** — something is listening on that path and it is not a runtime;
-/// * **what arrived is not a ring** — a descriptor crossed and its header is not one this build can
-///   read, which is a version disagreement rather than a network problem.
-///
-/// The slot count is the runtime's. It is passed in here as what to expect, and
-/// [`Mapping::adopt`] validates the header before it returns — so a policy cannot choose the
-/// geometry, and one that is told the wrong number is refused rather than mapping a ring at the
-/// wrong stride.
-#[cfg(unix)]
-fn adopt_from(path: &std::path::Path, slots: usize) -> Result<Adopted, String> {
-    use skynet_ring_shm::Access;
-    use std::os::fd::AsRawFd;
-
-    let socket = std::os::unix::net::UnixStream::connect(path)
-        .map_err(|error| format!("no runtime is listening on {}: {error}", path.display()))?;
-    let mut fds = [-1; 4];
-    let taken = skynet_ring_shm::pass::recv_fds(socket.as_raw_fd(), &mut fds)
-        .map_err(|error| format!("{} offered no ring: {error}", path.display()))?;
-    // Two or four, and nothing else. Two is a runtime with no frame pool, four is one with §47.6's
-    // — the count is the whole of how the arrangement is announced, which is why any other number
-    // is an error rather than a pool this side quietly does without. A runtime that sent three sent
-    // pixels with no loans region, and a reader with no loans cannot stop a slot moving under it.
-    if taken != 2 && taken != 4 {
-        return Err(format!(
-            "{} sent {taken} descriptor(s). A policy needs two — the command ring it writes and \
-             the observation ring it reads — or four, when the frame pool comes with them",
-            path.display()
-        ));
-    }
-    let commands = Mapping::adopt(fds[0], slots, Access::Write).map_err(|error| {
-        format!(
-            "the command descriptor from {} is not a ring: {error}",
-            path.display()
-        )
-    })?;
-    // Read-only, and raw: the observation ring has its own magic and its own header, and mapping it
-    // as a command ring would be the confusion §25 gives it a different format to prevent.
-    let body = Mapping::adopt_raw(fds[1], slots, Access::Read).map_err(|error| {
-        format!(
-            "the observation descriptor from {} could not be mapped: {error}",
-            path.display()
-        )
-    })?;
-    // The pool, when one came with them. Its shape is read out of its own header rather than from
-    // an environment variable beside `SKYNET_RING_CHANNELS`, because a second copy of the slot
-    // count is a number that can disagree with the region it describes — and the failure when it
-    // does is not an error, it is this process addressing the wrong offset for every slot past the
-    // first and finding plausible pixels there.
-    let frames = match taken {
-        4 => Some(
-            skynet_frames::Reader::adopt_declared(fds[2], fds[3]).map_err(|error| {
-                format!(
-                    "the frame descriptors from {} are not a pool: {error}",
-                    path.display()
-                )
-            })?,
-        ),
-        _ => None,
-    };
-    Ok(Adopted {
-        commands,
-        body,
-        frames,
-    })
-}
-
-/// What arrived over §25's socket.
-///
-/// A struct rather than a tuple because there are now three of them and the third is optional, and
-/// `(Mapping, Mapping, Option<Reader>)` at a call site is three positions a reader has to count
-/// rather than three names they can read.
-struct Adopted {
-    commands: Mapping,
-    body: Mapping,
-    /// §47.6's pool, when the runtime offered one. `None` is a robot with no camera, which is most
-    /// of them, and is not a degraded version of having one.
-    frames: Option<skynet_frames::Reader>,
-}
-
-/// Not Unix: there is no socket to receive a descriptor over.
-#[cfg(not(unix))]
-fn adopt_from(_path: &std::path::Path, _slots: usize) -> Result<Adopted, String> {
-    Err("a ring is handed over a Unix socket, and this is not a Unix (§23.5)".to_string())
 }
 
 fn fail(message: &str) -> i32 {
@@ -448,7 +357,7 @@ fn run(args: &[String]) -> i32 {
     // binary was until the hand-off existed, and it says so on the line below.
     let (shared, body, frames) = match options.ring_socket.as_deref() {
         None => (None, None, None),
-        Some(path) => match adopt_from(path, slots) {
+        Some(path) => match rendezvous::adopt_from(path, slots) {
             Ok(adopted) => (Some(adopted.commands), Some(adopted.body), adopted.frames),
             // Refused rather than fallen back to a private ring. A policy asked to join a robot's
             // ring and quietly publishing into its own address space is a producer that looks like

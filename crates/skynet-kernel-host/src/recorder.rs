@@ -48,6 +48,7 @@ use std::path::{Path, PathBuf};
 use skynet_blackbox::record::{Cycle, CycleView, Entry, Shape};
 use skynet_blackbox::ring::{Geometry, Meta, Ring};
 use skynet_blackbox::seal::{seal, Reason, Sealed};
+use skynet_lock::ring_file;
 use skynet_lock::{Joining, Role, Writership};
 
 /// How many bytes the ring is preallocated with.
@@ -145,7 +146,12 @@ impl Recorder {
             // a ring shaped for a different body has no room for one.
             Joining::Attacher(attaching) => {
                 let holder = attaching.holder().to_string();
-                let store = fs::read(&path).map_err(RecorderError::Io)?;
+                // Waited for, not read once. The writership named a live creator, so a ring that
+                // is not on disk yet is one being written — see `skynet_lock::ring_file`, which
+                // carries the run this was found on.
+                let store =
+                    ring_file::read_when_published(&path, ring_file::PUBLISH_WAIT)
+                        .map_err(RecorderError::Io)?;
                 let ring = Ring::open(&store).map_err(|error| {
                     RecorderError::Geometry(format!(
                         "{holder} holds this directory and its ring cannot be opened here: {error:?}"
@@ -198,9 +204,11 @@ impl Recorder {
         // size and fails at the first write after the disk fills, which is the failure §28 is
         // written against: a black box that stops recording because something else filled the disk
         // is a black box that fails exactly when something is going wrong.
-        let mut file = File::create(&path).map_err(RecorderError::Io)?;
-        file.write_all(&store).map_err(RecorderError::Io)?;
-        file.sync_all().map_err(RecorderError::Io)?;
+        //
+        // Published by rename. Writing those 64 MB at the final path leaves a file of every
+        // intermediate length at a name the other writer is about to open, and §33.1 guarantees it
+        // opens during exactly that window.
+        ring_file::publish(&path, &store).map_err(RecorderError::Io)?;
 
         let scratch = vec![0u8; ring.geometry().record_size];
         let writership = creating.seed(ring.next_sequence());

@@ -37,9 +37,18 @@ Restart=always
 RestartSec=2s
 
 # §40.2: the core running the kernel and the RHAL is isolated at boot, and no package's cpuset may
-# include it. This is the other side of that rule — the loop is pinned to it. The number is the
-# machine's, so it lives in the environment file beside the driver rather than here.
-CPUAffinity=${SKYNET_RT_CPU}
+# include it. This is the other side of that rule — the loop is pinned to it.
+#
+# The number is the machine's and it is deliberately **not** written here. systemd expands
+# `${VARIABLE}` in the `Exec*` lines and nowhere else, so `CPUAffinity=${SKYNET_RT_CPU}` — which is
+# what this file said until it was first run on a host — does not read the environment file: it is
+# parsed as a CPU range, fails, and is *ignored with a log line nobody reads*. The loop then runs
+# on whatever core the scheduler likes and §40.2 holds nowhere, while every surface still says it
+# does. `install.sh` resolves `--rt-cpu` into
+#
+#     /etc/systemd/system/skynetk.service.d/10-install.conf
+#
+# and `install.sh --check` asks systemd what it actually parsed, so this can never be silent again.
 
 # §23.5's real-time argument, made a scheduling policy rather than a hope. `99` is deliberately not
 # used: a task at the top priority that spins cannot be preempted by anything, including the
@@ -51,11 +60,18 @@ CPUSchedulingPriority=80
 # deadline that no amount of headroom explains afterwards.
 LimitMEMLOCK=infinity
 
-# It writes the black box and reads the driver. It does not need the network, and §33.1's whole
-# argument is that this process is small enough to reason about.
+# It writes the black box and binds the policy socket, and reads the driver. It does not need the
+# network, and §33.1's whole argument is that this process is small enough to reason about.
+#
+# `ProtectSystem=strict` makes the entire hierarchy read-only, so every path this process writes has
+# to be named — and `ReadWritePaths=` takes no variable expansion either (§ the note on CPUAffinity
+# above). What this file said until its first run was `/run/skynet ${SKYNET_ROOT}/data/blackbox`:
+# the first names a directory nothing in this repository has ever created, which is a hard
+# `226/NAMESPACE` at every start, and the second was dropped as "not absolute". Neither named
+# `<root>/run`, where `--policy-socket` on the ExecStart line binds — so the sandbox was wrong about
+# all three paths. `install.sh` writes the resolved pair into the drop-in named above.
 PrivateNetwork=yes
 ProtectSystem=strict
-ReadWritePaths=/run/skynet ${SKYNET_ROOT}/data/blackbox
 ProtectHome=yes
 NoNewPrivileges=yes
 

@@ -1,7 +1,7 @@
 # Skynet OS — Technical Architecture
 
 > Skynet has two halves. **Skynet Hub** is where robot software is discovered, versioned,
-> reviewed, signed and sold — it is documented in `docs/skynet-architecture.md` and is largely
+> reviewed, signed and sold — it is documented in the Hub's own repository and is largely
 > built. **Skynet OS** is what runs that software on the machine. This document designs the
 > second half end to end.
 >
@@ -1055,7 +1055,7 @@ Two properties are worth designing for explicitly:
 
 ## 19. Security posture
 
-Inherits the Hub's posture (§7 of `docs/skynet-architecture.md`) and adds what being on the robot
+Inherits the Hub's posture (§7 of its architecture, in the Hub's repository) and adds what being on the robot
 requires:
 
 * **Untrusted policies are the design assumption, not an edge case.** Sandboxed, no actuator

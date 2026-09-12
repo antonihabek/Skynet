@@ -22,9 +22,20 @@ EnvironmentFile=/etc/skynet/skynetd.env
 # --lan is the on-robot console (§32.2), and §34.2 refuses a routable address here rather than
 # warning about one. --advertise is the label a browse shows (§82); without it the machine's own
 # name is used, and without --lan nothing is advertised at all.
+#
+# `$SKYNET_CONSOLE` carries the **whole argument** and is unbraced, and both halves of that matter.
+# systemd substitutes `${VARIABLE}` as a single word even when the variable is empty, so the
+# `--lan ${SKYNET_CONSOLE_ADDRESS}` this line used to read passed `--lan ""` on every robot
+# installed without a console — which is the default — and the supervisor refuses an empty address
+# and exits 1, restarts, and does it again. `$VARIABLE` unbraced splits on whitespace and expands
+# to *no* words when it is empty, which is the only way a unit file can say "this flag is absent".
+#
+# `--config ${SKYNET_DRIVER_CONFIG}` in skynetk.service is deliberately not the same case: that one
+# is an opaque string handed to the driver's open(), where empty is a value and means no
+# configuration. An address has no empty member.
 ExecStart=/usr/bin/skynetd \
     --root ${SKYNET_ROOT} \
-    --lan ${SKYNET_CONSOLE_ADDRESS} \
+    $SKYNET_CONSOLE \
     --advertise ${SKYNET_LABEL} \
     --interval ${SKYNET_INTERVAL_MS}
 
@@ -54,12 +65,23 @@ RestartSec=5s
 # §40.2: never the isolated core. A supervisor scheduled onto the core running the kernel could
 # delay the kernel, and §23.5's real-time argument would be void — which is the same rule packages
 # are held to, applied to the process that holds them to it.
-CPUAffinity=${SKYNET_GENERAL_CPUS}
+#
+# The cpuset is not written here and neither are the writable paths below, for the reason
+# `skynetk.service` states at length: systemd expands `${VARIABLE}` only in the `Exec*` lines, so a
+# `CPUAffinity=${SKYNET_GENERAL_CPUS}` is ignored with a log line and a `ReadWritePaths=`
+# `${SKYNET_ROOT}` is dropped as "not absolute". Both were in this file until it was first run on a
+# host, and the first of them fails *silently* — a supervisor free to be scheduled onto the
+# isolated core, on a robot whose documentation says it cannot be.
+#
+# `install.sh` resolves `--general-cpus` and `--root` into
+#
+#     /etc/systemd/system/skynetd.service.d/10-install.conf
+#
+# and `install.sh --check` asserts that systemd came back with the values.
 
 # It launches transient units through `systemd-run`, so it needs the manager. Everything else it
 # touches is under its own root.
 ProtectSystem=strict
-ReadWritePaths=/run/skynet ${SKYNET_ROOT}
 ProtectHome=yes
 NoNewPrivileges=yes
 

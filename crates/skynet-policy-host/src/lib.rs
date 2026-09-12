@@ -74,14 +74,18 @@
 //! [`backend`] is the policy interface and the backends that ship with it, all pure: a tick number
 //! and a clock in, an [`Intent`] out, no I/O and no ring. [`run`] is the loop and the only part
 //! that publishes.
+//! [`rendezvous`] is §25's hand-over: the socket a supervisor offers its rings over, and the one
+//! part of this crate a third party's package has to call before it can command anything.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod backend;
+pub mod rendezvous;
 pub mod run;
 
 pub use backend::{Approach, Backend, Body, Commanding, Hold, Intent, Trajectory};
+pub use rendezvous::{Adopted, Ready};
 pub use run::{Clock, PolicyHost, Refusal, StepClock, Summary, SystemClock, Tick};
 
 #[cfg(test)]

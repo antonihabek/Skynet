@@ -360,6 +360,23 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
 
         let lan = match flag(argv, "--lan") {
             None => None,
+            // An empty value is still a refusal — there is no address that means "no console", and
+            // §32.2's console is opt-in by absence. What the empty case gets is a different
+            // sentence, because it has a different cause and the address parser's own complaint
+            // ("`--lan  is not an address`", with the value it is quoting missing from the line)
+            // sends the reader to look for a malformed address that was never there. The only
+            // party that passes an empty one is a unit file: systemd substitutes `${VARIABLE}` as
+            // a single word even when it is unset, so there is no way to spell an absent flag that
+            // way, and this is what that mistake looks like from here.
+            Some(text) if text.is_empty() => {
+                skynetd_io::log_error!(
+                    "--lan was given an empty value. Omitting it is how a robot says it has no \
+                     console on the LAN (§32.2); an empty address is not that. In a systemd unit, \
+                     `--lan ${{VAR}}` passes one empty argument when VAR is unset — put the whole \
+                     flag in the variable and use $VAR unbraced, which expands to no words at all."
+                );
+                return 1;
+            }
             Some(text) => match text.parse::<SocketAddr>() {
                 Err(error) => {
                     skynetd_io::log_error!("--lan {text} is not an address: {error}");

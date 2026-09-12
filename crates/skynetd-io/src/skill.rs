@@ -608,26 +608,16 @@ impl Runtime {
         }
 
         let published = read_clauses(
-            manifest.get_present("preconditions").or_else(|| {
-                manifest
-                    .get("skill")
-                    .and_then(|s| s.get_present("preconditions"))
-            }),
+            crate::admit::card_field(manifest, "preconditions"),
             ClauseOrigin::Skill,
         );
         let criteria = read_clauses(
-            manifest.get_present("success_criteria").or_else(|| {
-                manifest
-                    .get("skill")
-                    .and_then(|s| s.get_present("success_criteria"))
-            }),
+            crate::admit::card_field(manifest, "success_criteria"),
             ClauseOrigin::Skill,
         );
         // Both spellings, like every other field this reads: a manifest may carry the skill card
         // flat or under `skill`. Trimmed, and empty is absent — a task nobody wrote is not a task.
-        let task = manifest
-            .get_present("task")
-            .or_else(|| manifest.get("skill").and_then(|s| s.get_present("task")))
+        let task = crate::admit::card_field(manifest, "task")
             .and_then(Json::as_str)
             .map(str::trim)
             .filter(|text| !text.is_empty())
@@ -640,14 +630,8 @@ impl Runtime {
             tokens
         };
 
-        let expected = manifest
-            .get_present("expected_duration_seconds")
-            .or_else(|| {
-                manifest
-                    .get("skill")
-                    .and_then(|s| s.get_present("expected_duration_seconds"))
-            })
-            .and_then(Json::as_f64);
+        let expected =
+            crate::admit::card_field(manifest, "expected_duration_seconds").and_then(Json::as_f64);
         let factor = request.overrun_factor.unwrap_or(DEFAULT_OVERRUN_FACTOR);
         let own = skill_deadline(expected, factor);
         // §54.5's third limit. The root's remaining budget bounds the child, including bounding an

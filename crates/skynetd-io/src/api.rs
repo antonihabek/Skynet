@@ -380,10 +380,25 @@ fn status<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
         .filter(|unit| unit.state == skynetd::actual::UnitState::Running)
         .count();
 
+    // Which machine answered. `GET /embodiment` carries the whole body — joints, frame graph,
+    // digest — and this route carried no part of it, so `skynet status` could say the edition, the
+    // contracts version, the generation and the tier without ever saying *which robot this is*:
+    // the first question somebody holding a list of them has. Found the first time the status line
+    // was read on a robot rather than in a test.
+    //
+    // The slug only, and absent when there is no descriptor. §28 keeps "no body was ever written"
+    // apart from "a body was written and cannot be used", `GET /embodiment` is the route that
+    // reports the difference, and a summary line that filled the gap with a placeholder would read
+    // as a robot answering the question.
+    let slug = crate::embodiment::load(context.daemon.store.layout())
+        .known()
+        .map(|known| known.descriptor.robot_slug.clone());
+
     let mut body = Json::obj();
     body.set("edition", Json::from("rust"))
         .set("version", Json::from(VERSION))
         .set("contracts", Json::from(skynet_contracts::CONTRACTS_VERSION))
+        .set_opt("robot_slug", slug.map(Json::from))
         .set("generation", Json::Num(actual.generation as f64))
         .set(
             "desired_generation",

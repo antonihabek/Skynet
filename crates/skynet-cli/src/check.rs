@@ -79,7 +79,8 @@ pub struct CheckResult {
 }
 
 impl CheckResult {
-    fn new(
+    /// A result with every field named.
+    pub fn new(
         id: &'static str,
         what: impl Into<String>,
         outcome: Outcome,
@@ -93,15 +94,18 @@ impl CheckResult {
         }
     }
 
-    fn pass(id: &'static str, what: impl Into<String>) -> Self {
+    /// Measured, and it holds. A pass carries no detail: there is nothing to explain.
+    pub fn pass(id: &'static str, what: impl Into<String>) -> Self {
         Self::new(id, what, Outcome::Pass, String::new())
     }
 
-    fn fail(id: &'static str, what: impl Into<String>, detail: impl Into<String>) -> Self {
+    /// Measured, and it does not. The detail is what the reader has to act on.
+    pub fn fail(id: &'static str, what: impl Into<String>, detail: impl Into<String>) -> Self {
         Self::new(id, what, Outcome::Fail, detail)
     }
 
-    fn assert(
+    /// A pass or a fail from a boolean, with the detail used only on the failing side.
+    pub fn assert(
         id: &'static str,
         what: impl Into<String>,
         held: bool,

@@ -7,6 +7,7 @@
 //! skynet descriptor from-urdf robot.urdf > embodiment.json   §63.4
 //! skynet driver new my-arm --lang c                          §63.1
 //! skynet driver check ./my-arm/libmy_arm.so                  §63.3
+//! skynet skill check ./skills/openrobot/park               §54
 //! skynet transport ./policy.json --robot embodiment.json     §18
 //! skynet role left_arm.shoulder.pitch                        §5.1
 //! ```
@@ -41,6 +42,7 @@ mod driver_cmd;
 mod frames_cmd;
 mod robot_cmd;
 mod scaffold;
+mod skill_check;
 mod term;
 mod transport_cmd;
 
@@ -55,6 +57,7 @@ skynet — Skynet OS workstation tools
   descriptor from-urdf <file>     Draft an embodiment descriptor from a URDF (§63.4)
   driver new <name>               Scaffold a driver that builds and fails honestly (§63.1)
   driver check <library>          Run the sim half of SCTS against a driver (§63.3)
+  skill check <dir>               Hold a skill package against §54 before publishing it
   transport <policy> --robot <d>  What this body would do with this policy (§18)
   frames <descriptor>             The frame graph, its poses, and what the pose
                                   guards can do with it (§44)
@@ -68,7 +71,7 @@ skynet — Skynet OS workstation tools
 
   status · state · ps · plan · logs · grants · estop · rollback · cell · power
   conformance · limits · identity · pair · unpair · checkin · intent · releases · ota · shutdown
-  skills · skill run <ns/name> · skill stop <inv-id>
+  skills · skill run <ns/name> · skill stop <inv-id>      (`skill check` above needs no robot)
   install <dir> --id <ns/name> --kind <k> --version <v> --digest <hex>
   blackbox [index] · blackbox events · blackbox seal · blackbox get <name>
   blackbox inspect <file>         What a sealed recording says. Needs no robot.
@@ -116,6 +119,12 @@ fn dispatch(argv: &[String]) -> i32 {
         "transport" => run_or_help(rest, transport_cmd::USAGE, transport_cmd::run),
         "frames" => run_or_help(rest, frames_cmd::USAGE, frames_cmd::run),
         "role" => role(rest),
+        // Before the robot family, which prints its own usage for `--help` and would take
+        // this command's with it. `skill check` reads a directory on this workstation; the
+        // rest of the `skill` family needs a robot on the other end of a socket.
+        "skill" if rest.first().map(String::as_str) == Some("check") => {
+            skill_check::run(&rest[1..])
+        }
         "status" | "ps" | "plan" | "logs" | "grants" | "estop" | "rollback" | "install"
         | "blackbox" | "skills" | "skill" | "ota" | "identity" | "pair" | "unpair" | "checkin"
         | "intent" | "releases" | "cell" | "power" | "state" | "limits" | "conformance"
