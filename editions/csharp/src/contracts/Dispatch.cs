@@ -27,5 +27,6 @@ internal static class Dispatch
         ["roles/vocabulary"] = Embodiment.RolesVocabularyCase,
         ["semver/compare"] = Semver.CompareCase,
         ["semver/satisfies"] = Semver.SatisfiesCase,
+        ["vocabulary/closed-sets"] = Vocabulary.ClosedSetsCase,
     };
 }

@@ -21,7 +21,7 @@ make -C editions/java check
 | Step | What it holds |
 |---|---|
 | `round trip` | Every `expected` string in the corpus parses and re-serialises to identical bytes |
-| `self check` | 101 checks: rule 3 at its edges, rules 2, 4 and 5 as facts, the documents the parser must refuse, the runner's four-bucket accounting, and 219 whole strings the reference's engine case-converted |
+| `self check` | 104 checks: rule 3 at its edges, rules 2, 4 and 5 as facts, the documents the parser must refuse, the runner's four-bucket accounting, 219 whole strings the reference's engine case-converted, and the closed-vocabulary table |
 | `corpus` | Every case this edition answers, at the ratchet `MIN_PASSED` in the `Makefile` |
 
 `-Xlint:all -Werror`, and it earned that on its first run by refusing a missing `serialVersionUID` — a warning
@@ -113,3 +113,9 @@ From the modules under `reference/typescript` only — never from `corpus/`, whi
 never from the Python, C++, Go, C or Zig editions, which would prove only that one hand did both. One class under
 `src/skynet/os/contracts/` per module there, named for it. `Dispatch` is the only one with no counterpart: the
 reference has no such table, because in TypeScript the corpus generator calls the functions directly.
+
+There is a second class with no counterpart: `contracts/Vocabulary`, the seventy-four closed string sets.
+They are declared across the reference's modules as exported constants rather than computed by one of them,
+so this edition holds them as its own table. Its `put` throws on a duplicate name during class
+initialisation rather than leaving it to a test, because a duplicate would replace the earlier set in place
+and the corpus would still pass on whichever of the two survived.

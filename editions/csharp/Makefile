@@ -32,7 +32,7 @@ CORPUS ?= ../../corpus
 
 # The ratchet. This is the number of cases this edition has reached; see `--min-passed` in `src/Program.cs` for
 # why a floor is checked separately from the failures. Lowering it is a decision somebody makes in a diff.
-MIN_PASSED ?= 201
+MIN_PASSED ?= 275
 
 # `DOTNET_CLI_TELEMETRY_OPTOUT` and `DOTNET_NOLOGO` are set for every target, not as a preference but because
 # the first run of the CLI otherwise prints a welcome banner to stdout — and this edition prints its report to

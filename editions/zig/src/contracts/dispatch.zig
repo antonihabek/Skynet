@@ -14,6 +14,7 @@ const corpus = @import("../corpus.zig");
 const embodiment = @import("embodiment.zig");
 const predicate = @import("predicate.zig");
 const semver = @import("semver.zig");
+const vocabulary = @import("vocabulary.zig");
 
 /// Every corpus file this edition answers, keyed by `corpus/file`.
 ///
@@ -25,4 +26,5 @@ pub const entries = [_]corpus.DispatchEntry{
     .{ .key = "roles/vocabulary", .handler = embodiment.rolesVocabularyCase },
     .{ .key = "semver/compare", .handler = semver.compareCase },
     .{ .key = "semver/satisfies", .handler = semver.satisfiesCase },
+    .{ .key = "vocabulary/closed-sets", .handler = vocabulary.closedSetsCase },
 };

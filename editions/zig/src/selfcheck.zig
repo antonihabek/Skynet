@@ -2,7 +2,7 @@
 //!
 //!     skynet-selfcheck-zig [--corpus-root corpus]
 //!
-//! Four groups, and each exists because a corpus run would be green without it:
+//! Six groups, and each exists because a corpus run would be green without it:
 //!
 //! 1. **Rule 3 at its edges.** The corpus holds the numbers the reference happened to produce. It does
 //!    not hold 2^53, the smallest subnormal, or negative zero — and negative zero is the one place this
@@ -15,6 +15,12 @@
 //! 4. **The runner's own accounting**, over synthetic corpora with known answers. The four buckets are
 //!    what every other number in this edition is reported through, and a runner that counted a declined
 //!    file as a pass would report a finished edition.
+//! 5. **The case tables**, against the whole strings the reference's engine converted. The tables are
+//!    single code points and cannot be wrong about a string on their own; the code that walks a string
+//!    with them, and applies the sigma rule, can.
+//! 6. **The closed vocabularies' table**, over the two things the corpus checks nothing about: how many
+//!    sets this edition believes it holds, and whether a name nobody declared is distinguishable from a
+//!    set with no members.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -23,6 +29,7 @@ const parse = @import("parse.zig");
 const value = @import("value.zig");
 const js = @import("js.zig");
 const vectors = @import("case_vectors.zig");
+const vocabulary = @import("contracts/vocabulary.zig");
 
 var checks: u32 = 0;
 var failures: u32 = 0;
@@ -425,6 +432,55 @@ fn caseTables(a: Allocator) !void {
     expectText("an object", try js.toString(a, try value.object(a), true), "[object Object]");
 }
 
+// ── 6. The closed vocabularies ───────────────────────────────────────────────
+//
+// The corpus checks every set's *members*, and cannot check two things about the table that holds them.
+// A duplicate name is the dangerous one: the lookup returns the first match, so a second entry under a
+// name already present is dead code that a reader would take for the answer — and the corpus would pass,
+// because the first entry is the one it measures.
+fn vocabularies(a: Allocator) !void {
+    std.debug.print("the closed vocabularies\n", .{});
+
+    var buf: [vocabulary.count][]const u8 = undefined;
+    const names = vocabulary.names(&buf);
+
+    // §31.4's sentence about closed vocabularies is about *all* of them, and the corpus names the
+    // seventy-four it holds. A set added to the reference and not to this table is a corpus failure; a
+    // set removed from this table is a corpus failure too. This is the third case: the table and the
+    // corpus agreeing on seventy-four while this edition believes it holds some other number.
+    expectInt("seventy-four sets", @intCast(names.len), 74);
+
+    var duplicates: u32 = 0;
+    for (names, 0..) |name, at| {
+        for (names[at + 1 ..]) |other| {
+            if (std.mem.eql(u8, name, other)) {
+                duplicates += 1;
+                std.debug.print("  `{s}` is declared twice, and the second is unreachable\n", .{name});
+            }
+        }
+    }
+    expectTrue("no set is declared twice", duplicates == 0);
+
+    // Every set answers a non-empty array, which is what makes JSON null usable as "no such set": if any
+    // set were empty, the two answers would be indistinguishable to a caller.
+    var empty: u32 = 0;
+    for (names) |name| {
+        const ask = try value.object(a);
+        try value.set(a, ask, "set", try value.string(a, name));
+        const answer = try vocabulary.closedSetsCase(a, ask);
+        if (answer.kind != .array or value.len(answer) == 0) {
+            empty += 1;
+            std.debug.print("  `{s}` answers no members\n", .{name});
+        }
+    }
+    expectTrue("every set has at least one member", empty == 0);
+
+    // And a name nobody declared is null rather than empty, which is the other half of that.
+    const unknown = try value.object(a);
+    try value.set(a, unknown, "set", try value.string(a, "a_vocabulary_nobody_declared"));
+    expectTrue("an undeclared set answers null", (try vocabulary.closedSetsCase(a, unknown)).isNull());
+}
+
 pub fn main(init: std.process.Init) !u8 {
     const a = init.arena.allocator();
 
@@ -447,6 +503,7 @@ pub fn main(init: std.process.Init) !u8 {
     parser(a);
     try accounting(a);
     try caseTables(a);
+    try vocabularies(a);
 
     std.debug.print("self check  {d} checks, {d} failed\n", .{ checks, failures });
     return if (failures == 0) 0 else 1;

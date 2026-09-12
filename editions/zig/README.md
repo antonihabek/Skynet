@@ -108,3 +108,9 @@ array literal into columns whose width depends on the widest element in each run
 predict without reimplementing the formatter. `node tools/unicode-case.ts --check` is their gate instead. A
 generated file that is permanently one `zig fmt` away from failing a gate is worse than one the formatter
 does not touch.
+
+There is a second file with no counterpart: `src/contracts/vocabulary.zig`, the seventy-four closed string
+sets. They are declared across the reference's modules as exported constants rather than computed by one of
+them, so this edition holds them as its own table — one member per line, which is `zig fmt`'s own choice
+once the list carries a trailing comma and the right choice anyway, because the divergence the corpus
+exists to catch is one token added in one place and one line of diff is how it shows.

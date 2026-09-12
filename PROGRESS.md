@@ -13751,3 +13751,94 @@ step rather than a failed one. The step now passes from the root, with both fusi
 182. **A pipeline's exit code is the last command's.** `zig build ... | grep ...` reports the grep's
      status, so a failing gate read as a passing one with less output. Anything whose result matters is
      checked by its own status, not by whether the line one expected appeared.
+
+## 2026-09-12 (eighty-fourth) — the closed vocabularies in four editions, and +296 cases
+
+No §31.3 row is left without an implementation, so this session is **breadth**: `vocabulary/closed-sets`,
+the corpus's single largest file after the fuzz corpora, added to all four of the partial editions.
+
+| Edition | Before | After | Self check |
+|---|---|---|---|
+| C | 240 | **314** of 1,199, 0 failed | 91 checks, 0 failed |
+| Zig | 201 | **275** of 1,199, 0 failed | 96 checks, 0 failed |
+| Java | 201 | **275** of 1,199, 0 failed | 104 checks, 0 failed |
+| C# | 201 | **275** of 1,199, 0 failed | 116 checks, 0 failed |
+
+All four passed all 74 sets on the first run, and every ratchet was raised to the new figure. The round
+trip is still 1199 of 1199 in each.
+
+### Why this corpus, and why it is not generated
+
+Seventy-four closed string sets, 442 members, and the generator's own comment says what it is for:
+`capability_reserved` was added to the Rust `PackageRejectionCode` and not to the reference's, and nothing
+could see it — the mirror pins guard the reference, and every corpus covers the cases it holds, none of
+which had ever mentioned a token invented ten minutes earlier.
+
+That argument decides how the tables were written. **Each edition holds its own table**, rather than one
+generator emitting them into all four the way `tools/unicode-case.ts` emits the case tables. The case
+tables come from the JavaScript engine, which no edition can re-derive by hand; a vocabulary is a list of
+strings in the reference's own source, and a token added in one place and not another is precisely what
+this corpus was added to catch. A generator could not catch a mistake it had made in every edition at once.
+
+The member lists were read out of `reference/typescript` mechanically — one exported constant per set,
+resolved through the `vocabulary()` calls in `tools/corpus-gen/generate.ts` that name which constant each
+set is — and that reading was checked against the corpus **before** any edition code was written: 74 of 74
+sets agreed. What each edition then carries is its own statement of the vocabulary, and each is
+independently subject to the corpus from here on.
+
+Order is part of the agreement for several sets, and the tables preserve declaration order rather than
+sorting: `os_tiers` and `scts_areas` are ranked, `operating_states` and `state_reasons` run in the order
+§27's `evaluate` descends through its rules, and `skill_phases` runs in diagram order so that "never moves
+backwards through this list" is a property somebody can assert.
+
+### What each language decided
+
+* **C** — `SET(...)` is a compound literal in a static initialiser, which has static storage duration
+  (C17 6.5.2.5p5), so the table costs nothing at run time and there is no second name per set to keep in
+  step with the first.
+* **Zig** — `zig fmt` collapses a wrapped list onto one line unless it carries a trailing comma, and with
+  one it puts a single member per line. The formatter's preference is the right answer here for a reason
+  beyond formatting: one member per line makes an added token exactly one line of diff.
+* **Java** — `put` **throws** on a duplicate set name during class initialisation. §6.1's ladder: a
+  violation that cannot be represented beats a test that finds it. A duplicate would replace the earlier
+  set in place, and the corpus would still pass on whichever of the two survived.
+* **C#** — a collection initialiser with a duplicate key throws at type initialisation, which is the same
+  gate without the explicit method.
+
+An undeclared set answers **JSON null, not an empty array**, in all four. Every one of the seventy-four
+sets has at least one member, so an empty array could only mean *a set with nothing in it*; §54.2's rule
+about naming what could not be resolved applies to a set name as much as to a path. The self-check asserts
+both halves — that no set is empty, and that an undeclared name is null — which is the pair that makes the
+distinction usable.
+
+### Documentation corrected, having been proved wrong
+
+* **The C and Zig self-check headers each said "four groups" and listed four, while both had five** — the
+  case-tables group was never listed. Now six each, with every group named. The Java header said five
+  (now six) and the C#'s six (now seven).
+* The Java and C# READMEs quoted self-check counts of 101 and 113; they are 104 and 116.
+* All four READMEs said `Dispatch` was the only file with no module beside it in the reference. The
+  vocabulary contract is a second, and each README now says so and why.
+
+### Open
+
+1. The four editions answer five corpora between them (seven for C). Twenty-five remain, with `fuzz`
+   (148 cases), `skill` (88) and `identity` (56) the largest.
+2. CI's Linux run of the four steps still has not happened.
+3. No edition has been run on arm64 hardware.
+4. From before: §73's transport row is still contradicted by the Skills row.
+
+### Findings, restated
+
+1-182 as before.
+
+183. **Whether to generate a table into every edition depends on whether a human could have derived it.**
+     The case tables come from a JavaScript engine and are generated into six editions, because no edition
+     can re-derive them. The closed vocabularies are lists of strings in the reference's source and are
+     *not* generated, because the corpus that holds them exists to catch a token added in one edition and
+     not another — and a generator cannot catch a mistake it made in all of them. Same shape of artefact,
+     opposite answer, and the reason is the gate rather than the data.
+
+184. **A doc comment that counts its own list is a claim, and two of them were already wrong.** The C and
+     Zig self-check headers said "four groups" over five. Nothing checks a number in prose, which is why
+     the number in prose should be the thing a reader can also count in the file below it.

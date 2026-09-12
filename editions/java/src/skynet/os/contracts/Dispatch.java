@@ -31,6 +31,7 @@ public final class Dispatch {
         out.put("roles/vocabulary", Embodiment::rolesVocabularyCase);
         out.put("semver/compare", Semver::compareCase);
         out.put("semver/satisfies", Semver::satisfiesCase);
+        out.put("vocabulary/closed-sets", Vocabulary::closedSetsCase);
         return out;
     }
 }

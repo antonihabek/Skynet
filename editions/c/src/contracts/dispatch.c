@@ -5,6 +5,7 @@
 #include "skynet_os/predicate.h"
 #include "skynet_os/readiness.h"
 #include "skynet_os/semver.h"
+#include "skynet_os/vocabulary.h"
 #include "skynet_os/watchdog.h"
 
 /*
@@ -20,6 +21,7 @@ static const sk_dispatch_entry ENTRIES[] = {
     {"roles/vocabulary", sk_roles_vocabulary_case},
     {"semver/compare", sk_semver_compare_case},
     {"semver/satisfies", sk_semver_satisfies_case},
+    {"vocabulary/closed-sets", sk_vocabulary_closed_sets_case},
     {"watchdog/command-loss", sk_watchdog_case},
     {"watchdog/nesting", sk_watchdog_case},
     {NULL, NULL},
