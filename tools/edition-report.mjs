@@ -63,9 +63,18 @@ const EXE = WINDOWS ? '.exe' : ''
 /**
  * The editions that **exist**, with the command that measures each.
  *
- * An edition is on this list when there is code to run, not when there is a plan to write one.
- * §31.3's other six rows are in the specification and are absent here, which is the difference
- * between a matrix and an inventory.
+ * An edition is on this list when it reproduces the corpus **whole**, not when there is code to run
+ * and not when there is a plan to write one. §31.3's other five rows are absent here for three
+ * different reasons, and the difference matters:
+ *
+ * * **C, Zig, Java / Kotlin and C# / .NET** have code, and it is partial. Each is held by its own
+ *   `--min-passed` ratchet in CI, and the refusal in `check` below is what keeps it off the published
+ *   file until it answers every case — the arrangement Go was in from 624 cases until 2026-09-11.
+ *   Adding a partial edition here is therefore not a matter of adding a row; it fails.
+ * * **TypeScript** is the oracle. It cannot be measured against its own output, so there is nothing
+ *   for a runner here to compare.
+ *
+ * Which is the difference between a matrix and an inventory.
  */
 const EDITIONS = [
   {
