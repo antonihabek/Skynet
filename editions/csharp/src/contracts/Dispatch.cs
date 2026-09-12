@@ -23,6 +23,9 @@ internal static class Dispatch
     /// </summary>
     internal static Dictionary<string, Corpus.Handler> Entries() => new(System.StringComparer.Ordinal)
     {
+        ["opstate/evaluate"] = OpState.EvaluateCase,
+        ["opstate/properties"] = OpState.PropertiesCase,
+        ["opstate/warning"] = OpState.WarningCase,
         ["predicate/evaluate"] = Predicate.EvaluateCase,
         ["roles/vocabulary"] = Embodiment.RolesVocabularyCase,
         ["semver/compare"] = Semver.CompareCase,

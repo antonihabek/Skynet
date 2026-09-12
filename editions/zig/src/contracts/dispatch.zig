@@ -12,6 +12,7 @@
 
 const corpus = @import("../corpus.zig");
 const embodiment = @import("embodiment.zig");
+const opstate = @import("opstate.zig");
 const predicate = @import("predicate.zig");
 const semver = @import("semver.zig");
 const vocabulary = @import("vocabulary.zig");
@@ -22,6 +23,9 @@ const vocabulary = @import("vocabulary.zig");
 /// prints the two separately — §31.4's "an edition that has not passed the corpus is not an edition" is
 /// not satisfied by a table with fewer entries in it.
 pub const entries = [_]corpus.DispatchEntry{
+    .{ .key = "opstate/evaluate", .handler = opstate.evaluateCase },
+    .{ .key = "opstate/properties", .handler = opstate.propertiesCase },
+    .{ .key = "opstate/warning", .handler = opstate.warningCase },
     .{ .key = "predicate/evaluate", .handler = predicate.evaluateCase },
     .{ .key = "roles/vocabulary", .handler = embodiment.rolesVocabularyCase },
     .{ .key = "semver/compare", .handler = semver.compareCase },

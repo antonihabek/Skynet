@@ -29,6 +29,7 @@ const parse = @import("parse.zig");
 const value = @import("value.zig");
 const js = @import("js.zig");
 const vectors = @import("case_vectors.zig");
+const opstate = @import("contracts/opstate.zig");
 const vocabulary = @import("contracts/vocabulary.zig");
 
 var checks: u32 = 0;
@@ -474,6 +475,25 @@ fn vocabularies(a: Allocator) !void {
         }
     }
     expectTrue("every set has at least one member", empty == 0);
+
+    // **The same seven state names live in two files of this edition**, and nothing in the corpus compares
+    // them: `opstate/properties` measures one against the oracle and `vocabulary/closed-sets` measures the
+    // other, so two lists that agreed with the oracle at different moments would both still pass while
+    // disagreeing with each other. This is the check for that — §27's rule order is load-bearing in one file
+    // and frozen output in the other.
+    const askStates = try value.object(a);
+    try value.set(a, askStates, "set", try value.string(a, "operating_states"));
+    const frozen = try vocabulary.closedSetsCase(a, askStates);
+    var agree = value.len(frozen) == opstate.states.len;
+    for (opstate.states, 0..) |state, at| {
+        if (!agree) break;
+        const held = value.at(frozen, at) orelse break;
+        if (!std.mem.eql(u8, held.text, state)) {
+            agree = false;
+            std.debug.print("  state {d}: the machine says `{s}`, the vocabulary says `{s}`\n", .{ at, state, held.text });
+        }
+    }
+    expectTrue("the machine's states and the frozen vocabulary are the same list, in the same order", agree);
 
     // And a name nobody declared is null rather than empty, which is the other half of that.
     const unknown = try value.object(a);

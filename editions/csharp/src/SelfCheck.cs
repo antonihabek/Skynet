@@ -588,6 +588,28 @@ internal static class SelfCheck
         }
         ExpectTrue("every set has at least one member", empty == 0);
 
+        // **The same seven state names live in two classes of this edition**, and nothing in the corpus
+        // compares them: `opstate/properties` measures one against the oracle and `vocabulary/closed-sets`
+        // measures the other, so two lists that agreed with the oracle at different moments would both still
+        // pass while disagreeing with each other. This is the check for that — §27's rule order is
+        // load-bearing in one class and frozen output in the other.
+        Value frozen = Vocabulary.ClosedSetsCase(
+            Value.Object().Set("set", Value.Of("operating_states")));
+        bool agree = Value.Length(frozen) == OpState.OperatingStates.Length;
+        for (int at = 0; agree && at < OpState.OperatingStates.Length; at++)
+        {
+            string held = Value.AsString(Value.At(frozen, at), string.Empty);
+            if (!string.Equals(held, OpState.OperatingStates[at], StringComparison.Ordinal))
+            {
+                agree = false;
+                Console.Error.WriteLine("  state " + at.ToString(CultureInfo.InvariantCulture)
+                    + ": the machine says `" + OpState.OperatingStates[at] + "`, the vocabulary says `"
+                    + held + "`");
+            }
+        }
+        ExpectTrue("the machine's states and the frozen vocabulary are the same list, in the same order",
+            agree);
+
         // And a name nobody declared is null rather than empty, which is the other half of that.
         ExpectTrue("an undeclared set answers null", Vocabulary.ClosedSetsCase(
             Value.Object().Set("set", Value.Of("a_vocabulary_nobody_declared"))).ValueKind == Kind.Null);

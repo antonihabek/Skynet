@@ -63,7 +63,7 @@ CORPUS ?= ../../corpus
 # The ratchet. This is the number of cases this edition has reached; see `--min-passed` in
 # `src/main.c` for why a floor is checked separately from the failures. Lowering it is a decision
 # somebody makes in a diff.
-MIN_PASSED ?= 314
+MIN_PASSED ?= 354
 
 .PHONY: all corpus test fusion check clean
 

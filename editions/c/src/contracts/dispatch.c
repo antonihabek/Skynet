@@ -2,6 +2,7 @@
 
 #include "skynet_os/embodiment.h"
 #include "skynet_os/intent.h"
+#include "skynet_os/opstate.h"
 #include "skynet_os/predicate.h"
 #include "skynet_os/readiness.h"
 #include "skynet_os/semver.h"
@@ -15,6 +16,9 @@
  */
 static const sk_dispatch_entry ENTRIES[] = {
     {"intent/offer", sk_intent_offer_case},
+    {"opstate/evaluate", sk_opstate_evaluate_case},
+    {"opstate/properties", sk_opstate_properties_case},
+    {"opstate/warning", sk_opstate_warning_case},
     {"predicate/evaluate", sk_predicate_evaluate_case},
     {"readiness/fleet", sk_readiness_fleet_case},
     {"readiness/robot", sk_readiness_robot_case},

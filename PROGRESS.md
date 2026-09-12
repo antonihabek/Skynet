@@ -13842,3 +13842,95 @@ distinction usable.
 184. **A doc comment that counts its own list is a claim, and two of them were already wrong.** The C and
      Zig self-check headers said "four groups" over five. Nothing checks a number in prose, which is why
      the number in prose should be the thing a reader can also count in the file below it.
+
+## 2026-09-12 (eighty-fifth) — §27's machine in four editions, and a list each of them holds twice
+
+Second breadth pass, and the target was chosen for what it proves rather than for its case count: §27's
+**operating-state machine**. Forty cases across three files, and the two small ones are the reason it is
+worth having — `opstate/properties` freezes `safe_state`, `commands` and `sticky` for every state, and
+`opstate/warning` freezes §49.1's tone for **every ordered pair** of states, forty-nine of them. An edition
+cannot get one transition right by accident and the rest wrong.
+
+| Edition | Before | After | Self check |
+|---|---|---|---|
+| C | 314 | **354** of 1,199, 0 failed | 92 checks, 0 failed |
+| Zig | 275 | **315** of 1,199, 0 failed | 97 checks, 0 failed |
+| Java | 275 | **315** of 1,199, 0 failed | 105 checks, 0 failed |
+| C# | 275 | **315** of 1,199, 0 failed | 117 checks, 0 failed |
+
+All four passed all forty on the first run; every ratchet raised; the round trip is still 1199 of 1199.
+
+### The rule order is the specification
+
+`derive` descends nine rules and the order decides four of the corpus's cases on its own. Each is written
+as the §27 row it implements rather than as a condition:
+
+1. **RHAL lost** first, because it is the condition under which nothing else can be known — no observed
+   joint state, no estop reading, no guard that can evaluate.
+2. **A failed self-test** is `SAFE`, not `DEGRADED`: a robot that failed its own self-test should not be
+   talked into running by a reconcile loop.
+3. **A stop** above POST, because an operator stop is honoured whatever the robot is doing, including
+   booting.
+4-8. POST incomplete, homing pending, kernel down, guard hold, then no policy split from policy not ready.
+9. **`DEGRADED` below the policy rules**, which is the entry that had been getting this wrong elsewhere:
+   §27's row says the robot *runs*, so `degraded` is the impaired running state and not a third resting
+   one. A robot with an unavailable guard and *no policy* is holding, and calling that `degraded` would
+   report a robot as running when it is not.
+
+Two details reproduced rather than tidied:
+
+* **`stop_settled` is read only while a stop is commanded.** A robot that is not stopping has not completed
+  a stop, and a caller leaving the flag true between stops would otherwise pin the machine in `SAFE`. For
+  `estop` the flag is not observable on any edition that exists — §24 gives the hardware chain one bit,
+  which says the chain is open and nothing about whether the body has come to rest — so absent derives
+  `stopping`, which can hold a robot and can never release one.
+* **An unknown stop cause omits `reason` rather than inventing one.** The reference is a `switch` over a
+  closed union with no default, which in TypeScript answers `undefined`, and rule 5 omits an undefined
+  field. Composing `stopping_<whatever>` would be an edition claiming a vocabulary member that
+  `corpus/vocabulary/closed-sets.json` does not hold. The corpus never asks — all thirty-eight of its
+  `evaluate` cases name a declared cause — so this is a rule each edition had to take from the reference
+  rather than from a failing case.
+
+§49.1's tone is phrased over `commandsAutonomously` in all four, not over the literal `"running"`. The
+under-inclusive spelling misses `hold -> degraded`, which is a policy beginning to command a body: a robot
+whose guard set is imperfect — §45.5's ordinary case — would have begun autonomous motion silently.
+
+### A list every edition now holds twice, and nothing in the corpus compares them
+
+After this pass each edition holds §27's seven state names in **two** files: the machine's own rule-order
+list, and the `operating_states` entry of its closed-vocabulary table. The corpus measures each against the
+oracle *separately*, so two lists that agreed with the oracle at different moments would both still pass
+while disagreeing with each other — and the order is load-bearing in one file and frozen output in the
+other.
+
+Every edition's self-check now asserts the two are the same list in the same order. That is the only kind
+of check that can find it: no corpus file mentions both.
+
+### One thing the C edition's own convention caught
+
+The new self-check group printed its heading **before** `rule 3 — numbers`, having been called last. The C
+edition reports on **stdout** and the group I added used `stderr`, so the two streams interleaved when
+piped. Matched to the file's convention rather than left as a cosmetic oddity, because a self-check whose
+groups print out of order is a self-check whose output nobody trusts to be in the order it ran.
+
+### Open
+
+1. The four editions answer eight corpora between them (ten for C). Twenty-two remain, with `fuzz`
+   (148 cases), `skill` (88) and `identity` (56) the largest.
+2. CI's Linux run of the four steps still has not happened.
+3. No edition has been run on arm64 hardware.
+4. From before: §73's transport row is still contradicted by the Skills row.
+
+### Findings, restated
+
+1-184 as before.
+
+185. **A corpus that measures two tables separately cannot notice that they disagree with each other.**
+     Each edition holds §27's states twice — in the machine and in the frozen vocabulary — and each copy is
+     measured against the oracle alone. Two copies that were both right at different times are both green
+     and mutually inconsistent. Within-edition duplication needs a within-edition check.
+
+186. **A closed `switch` with no default is a deliberate `undefined`, and porting it means omitting the
+     field.** The temptation in every one of the four languages was to compose `"stopping_" + cause`. That
+     would answer a cause nobody declared with a token no vocabulary holds, which is exactly the divergence
+     the vocabulary corpus was added to catch — and no corpus case would have said so.

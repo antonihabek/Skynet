@@ -21,7 +21,7 @@ make -C editions/csharp check
 | Step | What it holds |
 |---|---|
 | `round trip` | Every `expected` string in the corpus parses and re-serialises to identical bytes |
-| `self check` | 116 checks: rule 3 at its edges, rules 2, 4 and 5 as facts, the documents the parser must refuse, the runner's four-bucket accounting, 219 whole strings the reference's engine case-converted, the fused-multiply-add ban, and the closed-vocabulary table |
+| `self check` | 117 checks: rule 3 at its edges, rules 2, 4 and 5 as facts, the documents the parser must refuse, the runner's four-bucket accounting, 219 whole strings the reference's engine case-converted, the fused-multiply-add ban, and the closed-vocabulary table |
 | `corpus` | Every case this edition answers, at the ratchet `MIN_PASSED` in the `Makefile` |
 
 `TreatWarningsAsErrors` lives in `SkynetOs.csproj` rather than in the `Makefile`, so an editor and a CI step see
