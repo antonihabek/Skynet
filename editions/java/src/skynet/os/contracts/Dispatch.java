@@ -27,6 +27,9 @@ public final class Dispatch {
      */
     public static Map<String, Corpus.Handler> entries() {
         Map<String, Corpus.Handler> out = new LinkedHashMap<>();
+        out.put("opstate/evaluate", OpState::evaluateCase);
+        out.put("opstate/properties", OpState::propertiesCase);
+        out.put("opstate/warning", OpState::warningCase);
         out.put("predicate/evaluate", Predicate::evaluateCase);
         out.put("roles/vocabulary", Embodiment::rolesVocabularyCase);
         out.put("semver/compare", Semver::compareCase);

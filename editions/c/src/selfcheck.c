@@ -32,6 +32,7 @@
 #include "skynet_os/corpus.h"
 #include "skynet_os/js.h"
 #include "skynet_os/parse.h"
+#include "skynet_os/opstate.h"
 #include "skynet_os/value.h"
 #include "skynet_os/vocabulary.h"
 #include "skynet_os/write.h"
@@ -497,7 +498,7 @@ static void case_tables(sk_arena *arena)
  */
 static void vocabulary(sk_arena *arena)
 {
-    (void)fprintf(stderr, "the closed vocabularies\n");
+    (void)printf("the closed vocabularies\n");
 
     size_t count = 0;
     const char *const *names = sk_vocabulary_set_names(&count);
@@ -513,8 +514,7 @@ static void vocabulary(sk_arena *arena)
         for (size_t other = at + 1; other < count; other += 1) {
             if (strcmp(names[at], names[other]) == 0) {
                 duplicates += 1;
-                (void)fprintf(stderr, "  `%s` is declared twice, and the second is unreachable\n",
-                              names[at]);
+                (void)printf("  `%s` is declared twice, and the second is unreachable\n", names[at]);
             }
         }
     }
@@ -530,10 +530,33 @@ static void vocabulary(sk_arena *arena)
         const sk_value *answer = sk_vocabulary_closed_sets_case(arena, ask, &error);
         if (sk_kind_of(answer) != SK_ARRAY || sk_len(answer) == 0) {
             empty += 1;
-            (void)fprintf(stderr, "  `%s` answers no members\n", names[at]);
+            (void)printf("  `%s` answers no members\n", names[at]);
         }
     }
     expect_true("every set has at least one member", empty == 0);
+
+    /* **The same seven state names live in two files of this edition**, and nothing in the corpus compares
+     * them: `opstate/properties` measures one against the oracle and `vocabulary/closed-sets` measures the
+     * other, so two lists that agreed with the oracle at different moments would both still pass while
+     * disagreeing with each other. This is the check for that, and it is the only kind of check that can
+     * find it — §27's rule order is load-bearing in one file and frozen output in the other. */
+    sk_value *ask_states = sk_object(arena);
+    sk_set(arena, ask_states, "set", sk_string(arena, "operating_states"));
+    const char *unused = NULL;
+    const sk_value *frozen = sk_vocabulary_closed_sets_case(arena, ask_states, &unused);
+    size_t state_count = 0;
+    const char *const *states = sk_opstate_states(&state_count);
+    bool agree = sk_len(frozen) == state_count;
+    for (size_t at = 0; agree && at < state_count; at += 1) {
+        if (!sk_string_is(sk_at(frozen, at), states[at])) {
+            agree = false;
+            size_t ignored = 0;
+            (void)printf("  state %zu: the machine says `%s`, the vocabulary says `%s`\n",
+                         at, states[at], sk_as_string(sk_at(frozen, at), &ignored, ""));
+        }
+    }
+    expect_true("the machine's states and the frozen vocabulary are the same list, in the same order",
+                agree);
 
     /* And a name nobody declared is null rather than empty, which is the other half of that. */
     sk_value *unknown = sk_object(arena);

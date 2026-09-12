@@ -22,6 +22,7 @@ package skynet.os;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import skynet.os.contracts.OpState;
 import skynet.os.contracts.Vocabulary;
 
 public final class SelfCheck {
@@ -409,6 +410,25 @@ public final class SelfCheck {
             }
         }
         expectTrue("every set has at least one member", empty == 0);
+
+        // **The same seven state names live in two classes of this edition**, and nothing in the corpus
+        // compares them: `opstate/properties` measures one against the oracle and `vocabulary/closed-sets`
+        // measures the other, so two lists that agreed with the oracle at different moments would both still
+        // pass while disagreeing with each other. This is the check for that — §27's rule order is
+        // load-bearing in one class and frozen output in the other.
+        Value frozen = Vocabulary.closedSetsCase(
+                Value.object().set("set", Value.of("operating_states")));
+        boolean agree = Value.length(frozen) == OpState.OPERATING_STATES.length;
+        for (int at = 0; agree && at < OpState.OPERATING_STATES.length; at++) {
+            String held = Value.asString(Value.at(frozen, at), "");
+            if (!held.equals(OpState.OPERATING_STATES[at])) {
+                agree = false;
+                System.err.printf("  state %d: the machine says `%s`, the vocabulary says `%s`%n",
+                        at, OpState.OPERATING_STATES[at], held);
+            }
+        }
+        expectTrue("the machine's states and the frozen vocabulary are the same list, in the same order",
+                agree);
 
         // And a name nobody declared is null rather than empty, which is the other half of that.
         expectTrue("an undeclared set answers null", Vocabulary.closedSetsCase(
