@@ -74,6 +74,8 @@ skynet — talking to a running robot (§33.7)
   skill run <ns/name> [--args <json>] [--parent <inv-id>] [--overrun <factor>]
                               Invoke a skill; needs operator
   skill stop <inv-id>         Make a running skill return; needs operator
+  skill check <dir>           Hold a skill package against §54. Talks to no robot; run it
+                              before publishing, and `skynet skill check --help` for it
   calibration                 §45: which parameter sets are believed, and which guards lost
                               their input because one is not
   calibration event <event> [--note WHY]
@@ -228,7 +230,8 @@ fn skill(argv: &[String]) -> i32 {
             _ => term::fail("skynet skill stop <inv-id> — name the invocation, not the package"),
         },
         _ => term::fail(&format!(
-            "skynet skill run <ns/name>, or skynet skill stop <inv-id>.\n\n{USAGE}"
+            "skynet skill check <dir>, skynet skill run <ns/name>, or skynet skill stop \
+             <inv-id>.\n\n{USAGE}"
         )),
     }
 }
@@ -1013,6 +1016,18 @@ fn print_status(document: &Json) {
         text("edition"),
         text("contracts")
     );
+    // The body, on its own line and above the software's: the line above says what is running and
+    // this one says what it is running *on*, which is the question somebody with a list of robots
+    // is asking. Printed even when it is missing — `text()`'s em dash would read as a robot that
+    // answered, and a robot with no descriptor (§28) is a provisioning step nobody ran rather than
+    // a detail worth omitting.
+    match document.get_present("robot_slug").and_then(Json::as_str) {
+        Some(slug) => println!("body {}", term::bold(slug)),
+        None => println!(
+            "{}",
+            term::dim("body: no usable descriptor (§28) — `GET /embodiment` has which of the two")
+        ),
+    }
     println!(
         "generation {} of {}   {}",
         number("generation"),

@@ -280,9 +280,19 @@ static int mock_emergency_stop(skr_ctx *ctx) {
  * `roles` **are** declared here, because on a mock we know what the joints mean. A generator
  * reading a real URDF only *suggests* them and waits for a human, for the same reason at lower
  * stakes.
+ *
+ * `simulator` is **true**, and it is the field this descriptor went longest without. SS52 puts the
+ * obligation to declare squarely on the simulator -- *"a simulator presented as a robot"* is the
+ * direction that costs something, because SS35.3 caps a simulated body at guest tier and rules that
+ * no simulated run is bench evidence. Absent, the flag reads as false, and this body was claiming
+ * to be a real arm. It happened to be capped at guest anyway, for an unrelated reason: a driver
+ * cannot sign its own descriptor, so `embodiment.descriptor.signed` is unmeasured and absence is
+ * not a pass. That is a coincidence and not a mechanism -- sign this descriptor and the cap would
+ * have lifted, on a robot with no joints in it.
  */
 static const char MOCK_DESCRIPTOR[] =
     "{\"schema_version\":1,\"robot_slug\":\"mock-arm\",\"digest\":null,\"verified\":false,"
+    "\"simulator\":true,"
     "\"base\":\"fixed\",\"dof\":3,"
     "\"joints\":["
     "{\"name\":\"J1\",\"role\":\"right_arm.shoulder.pitch\",\"type\":\"revolute\","

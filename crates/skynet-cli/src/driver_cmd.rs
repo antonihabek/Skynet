@@ -25,6 +25,12 @@ skynet driver check <library> [--config <json>]
          --config <json>   passed verbatim to the driver's open(). Defaults to
                            an empty string.
 
+         --descriptor <f>  write the body this driver describes to <f>, in the
+                           canonical form §28 pins at state/embodiment.json. This
+                           is how a bench robot is provisioned from its own
+                           driver: §33.1 forbids `skynetd` loading one to ask, and
+                           this command has already loaded it to check it.
+
          The sim tests that are properties of the runtime rather than of a driver
          are listed as not covered, by name, on every run.
 
@@ -37,7 +43,7 @@ const NEW_SPEC: Spec = Spec {
 };
 
 const CHECK_SPEC: Spec = Spec {
-    values: &["config"],
+    values: &["config", "descriptor"],
     switches: &[],
 };
 
@@ -179,5 +185,123 @@ fn run_check(rest: &[String]) -> i32 {
     };
 
     let report = check::run(&library, args.value("config").unwrap_or(""));
+
+    // Before the report is printed, so a write that fails is a refusal rather than a line after a
+    // clean run that somebody scrolls past.
+    if let Some(target) = args.value("descriptor") {
+        if let Err(message) = write_descriptor(&report, Path::new(target)) {
+            return term::fail(&message);
+        }
+    }
+
     check::print(&report)
+}
+
+/// Write the descriptor the driver returned, in the canonical form §28 pins.
+///
+/// # Why this is a flag on `check` and not a command of its own
+///
+/// Getting the descriptor means loading the driver and calling `describe()`, which is exactly what
+/// `check` has already done by the time it has an answer. A second command would load the same
+/// shared object a second time to ask the same question — and would be a route that returns a body
+/// **without** having checked that the vtable agrees with it, which is the one thing that makes a
+/// descriptor worth writing down.
+///
+/// # Canonical, because the digest is over the canonical form
+///
+/// §28 pins `state/embodiment.json` and pairs it with a detached signature over its digest. A file
+/// written with any other key order hashes differently, so a descriptor pretty-printed here would
+/// be one no signature could ever match.
+fn write_descriptor(report: &check::Report, target: &Path) -> Result<(), String> {
+    let Some(descriptor) = report.descriptor.as_ref() else {
+        return Err(format!(
+            "this driver returned no descriptor that decodes, so there is nothing to write to {}.              The report below says why; `embodiment.descriptor.valid` is the line that matters.",
+            target.display()
+        ));
+    };
+
+    let text = descriptor
+        .to_canonical()
+        .map_err(|error| format!("the descriptor could not be serialised: {error:?}"))?;
+
+    if let Some(parent) = target.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+        }
+    }
+    std::fs::write(target, format!("{text}\n"))
+        .map_err(|error| format!("cannot write {}: {error}", target.display()))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use skynet_json::Json;
+
+    fn temp(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("skynet-driver-cmd-{}-{label}", std::process::id()))
+    }
+
+    /// The property the flag exists for: §28 pairs the descriptor with a detached signature over
+    /// its digest, and a digest is over the **canonical** form. A file written any other way is one
+    /// no signature could ever match.
+    #[test]
+    fn the_descriptor_is_written_canonically_with_a_trailing_newline() {
+        let mut descriptor = Json::obj();
+        descriptor.set("robot_slug", Json::from("mock-arm"));
+        descriptor.set("base", Json::from("fixed"));
+        descriptor.set("dof", Json::Num(3.0));
+        // Out of order on purpose: canonical form sorts keys, so a writer that preserved insertion
+        // order would pass a test whose fixture happened to be sorted already.
+        descriptor.set("appended", Json::Bool(true));
+
+        let report = check::Report {
+            descriptor: Some(descriptor),
+            ..Default::default()
+        };
+        let target = temp("canonical");
+        let _ = std::fs::remove_file(&target);
+        write_descriptor(&report, &target).expect("write");
+
+        let written = std::fs::read_to_string(&target).expect("read");
+        assert_eq!(
+            written,
+            "{\"appended\":true,\"base\":\"fixed\",\"dof\":3,\"robot_slug\":\"mock-arm\"}\n"
+        );
+        let _ = std::fs::remove_file(&target);
+    }
+
+    /// A driver whose descriptor did not decode has nothing to write, and saying so beats leaving a
+    /// zero-byte file at the path §28 pins — which is the state a robot reads as *malformed* rather
+    /// than as *absent*, and sends somebody to debug a generator that never ran.
+    #[test]
+    fn a_driver_with_no_descriptor_is_refused_rather_than_writing_an_empty_file() {
+        let target = temp("absent");
+        let _ = std::fs::remove_file(&target);
+
+        let error = write_descriptor(&check::Report::default(), &target).unwrap_err();
+        assert!(error.contains("embodiment.descriptor.valid"), "{error}");
+        assert!(!target.exists(), "nothing should have been written");
+    }
+
+    /// The directory is created, because the path somebody passes is usually somewhere that does
+    /// not exist yet — `/data/state/embodiment.json` on a robot being provisioned, for instance.
+    #[test]
+    fn a_parent_directory_that_does_not_exist_is_created() {
+        let mut descriptor = Json::obj();
+        descriptor.set("robot_slug", Json::from("mock-arm"));
+        let report = check::Report {
+            descriptor: Some(descriptor),
+            ..Default::default()
+        };
+
+        let dir = temp("nested");
+        let _ = std::fs::remove_dir_all(&dir);
+        let target = dir.join("state").join("embodiment.json");
+        write_descriptor(&report, &target).expect("write");
+        assert!(target.is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

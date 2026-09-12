@@ -43,8 +43,6 @@ const HERE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 /** `[ path in this repository, path in BotMarket ]`. */
 const MIRRORS = [
   ['docs/skynet-os-architecture.md', 'docs/skynet-os-architecture.md'],
-  ['docs/skynet-architecture.md', 'docs/skynet-architecture.md'],
-  ['docs/skynet-build-plan.md', 'skynet-build-plan.md'],
 ]
 
 // The *code* the two repositories share is checked by `check-contract-mirrors.mjs` rather than

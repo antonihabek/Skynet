@@ -132,7 +132,16 @@ impl Recorder {
             // the ring's own is what it writes into.
             Joining::Attacher(attaching) => {
                 let holder = attaching.holder().to_string();
-                let store = fs::read(&path).map_err(|e| io_error("opening", &path, e))?;
+                // Waited for, not read once — and this is the side the defect was found on. §33.1
+                // starts the control loop first, so on a robot with a new `/data` this daemon
+                // arrives while the loop is still writing a 64 MB ring, and a single read returned
+                // `Short` and left the supervisor with no black box for the life of the process.
+                // `skynet_lock::ring_file` carries the run and the reasoning.
+                let store = skynet_lock::ring_file::read_when_published(
+                    &path,
+                    skynet_lock::ring_file::PUBLISH_WAIT,
+                )
+                .map_err(|e| io_error("opening", &path, e))?;
                 let ring = Ring::open(&store).map_err(|error| {
                     std::io::Error::other(format!(
                         "{holder} holds this black box directory and the ring it created cannot be                          opened here: {error:?}"
@@ -176,11 +185,11 @@ impl Recorder {
         let geometry = Geometry::for_budget(shape, DIGESTS, CAPABILITIES, budget)
             .map_err(|error| std::io::Error::other(format!("sizing the black box: {error:?}")))?;
         let (ring, store) = Ring::create(geometry, meta);
-        let mut file = File::create(&path).map_err(|e| io_error("creating", &path, e))?;
-        file.write_all(&store)
+        // Published by rename rather than written at its name: the other writer opens this path as
+        // soon as its writership says somebody else created it, and a partial ring is what it used
+        // to find. See `skynet_lock::ring_file`.
+        skynet_lock::ring_file::publish(&path, &store)
             .map_err(|e| io_error("preallocating", &path, e))?;
-        file.sync_all()
-            .map_err(|e| io_error("flushing", &path, e))?;
         let scratch = vec![0u8; ring.geometry().record_size];
         let writership = creating.seed(ring.next_sequence());
         Ok(Recorder {

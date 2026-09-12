@@ -5118,6 +5118,48 @@ fn write_embodiment(fixture: &Fixture, document: &str) {
     std::fs::write(path, document).unwrap();
 }
 
+/// `GET /status` names the robot, and says nothing when it cannot.
+///
+/// This is the assertion the first bring-up on a real host failed. `virtual-robot.sh` reads its ten
+/// facts back *from the robot* rather than from what the installer wrote, and the one that says
+/// which body was installed had nothing to read: the status document carried the edition, the
+/// contracts version, the generation, the tier and the safe state, and no part of the machine's own
+/// identity. Every other route agreed with it, because the field was nowhere.
+///
+/// Both directions are tested, and the absent one matters as much: a placeholder here would read as
+/// a robot that answered the question, and §28 makes "no descriptor" a provisioning step somebody
+/// has to run.
+#[test]
+fn status_names_the_body_when_there_is_one_and_omits_it_when_there_is_not() {
+    let mut fixture = Fixture::new("status-body");
+    fixture.provision();
+
+    let (status, body) = fixture.request("GET", "/status", None, "");
+    assert_eq!(status, 200);
+    assert_eq!(
+        body.get_present("robot_slug"),
+        None,
+        "a robot with no descriptor must not name a body"
+    );
+
+    write_embodiment(
+        &fixture,
+        r#"{"robot_slug":"mock-arm","base":"fixed","dof":1,
+            "joints":[{"name":"shoulder","type":"revolute","control_modes":["position"]}]}"#,
+    );
+    let (_, body) = fixture.request("GET", "/status", None, "");
+    assert_eq!(
+        body.get("robot_slug").and_then(Json::as_str),
+        Some("mock-arm")
+    );
+
+    // Malformed is the third state, and it is not a name. An operator whose generator emitted
+    // something wrong must not read a slug off a descriptor this robot refused.
+    write_embodiment(&fixture, "{ not json");
+    let (_, body) = fixture.request("GET", "/status", None, "");
+    assert_eq!(body.get_present("robot_slug"), None);
+}
+
 /// The three states, over the wire, through the real router.
 ///
 /// The distinction between the first two is the one worth an integration test: an operator seeing
