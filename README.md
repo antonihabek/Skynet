@@ -268,7 +268,17 @@ The panel added for §11 exists for a state that is invisible everywhere else: a
 against a **last-known-good** copy looks identical, on every other surface, to one reconciling
 against a current desired state.
 `cargo test -p skynetd-io -- --ignored console_fixture` writes the page and one file per route it
-fetches, from the real router, so anybody can serve the directory and look at it without a robot.
+fetches, from the real router, together with the `fixture-serve.mjs` that replays each route's status
+code — so anybody can serve the directory and look at it without a robot. Not a plain static server: a
+503 replayed as a 200 renders an error object as data, which is the one thing §32.2 forbids.
+
+**Two things are called a console, and this repository holds one of them.** *The on-robot console* is
+the page above, served by `skynetd` over the LAN from the machine it describes (§32.2). *Skynet
+Console* is the operator's **desktop application** (§83) — WinUI 3 on Windows, SwiftUI on macOS — and
+it lives in the Hub repository under `desktop/`, not here. It is a shell rather than a client: §83.2
+has it embed this page in a `WebView2` and own only what a browser cannot do — discovery, USB,
+multi-gigabyte sealed windows, an always-reachable stop, several robots at once. Never bare "the
+console" where both are in play.
 
 §49's warning tone is built, and the shape of what was missing is worth a paragraph because it
 is invisible from either half. `hri.warning` has been a **reserved** capability token since §8 was
@@ -345,7 +355,7 @@ having — the stored object hashing to the digest the robot declared at the sea
 
 What has **not** happened is the two halves meeting. Each is exercised against a double: this robot
 uploads to a test receiver and the Hub receives from a test client, and no window has yet crossed
-from one into the other. Until one does, `skynet blackbox` and the console say which sealed windows
+from one into the other. Until one does, `skynet blackbox` and the on-robot console say which sealed windows
 the Hub has acknowledged and which are on this robot and nowhere else, so the state is visible rather
 than inferred.
 
