@@ -368,13 +368,18 @@ fn driver_check_refuses_a_file_that_is_not_a_driver() {
 /// §63.5's first two milestones, measured rather than asserted: a scaffold that builds and loads,
 /// and a conformance run whose failures are the to-do list its own README promised.
 ///
-/// `#[ignore]` because it needs a C compiler. The `abi` CI job runs it explicitly.
+/// Built with the `Makefile` the scaffold wrote, in a directory outside this repository — which is
+/// what a vendor does. This test used to compile the source itself with `-I<repository>/bindings/c`,
+/// handing the compiler an include path no vendor has, and it passed for as long as the generated
+/// `make` failed with `skynet_rhal.h: No such file or directory`. A test that supplies what the user
+/// is missing is a test of something else.
+///
+/// `#[ignore]` because it needs a C compiler and `make`. The `abi` CI job runs it explicitly.
 #[test]
-#[ignore = "needs a C compiler; run explicitly with --ignored (the abi CI job does)"]
+#[ignore = "needs a C compiler and make; run explicitly with --ignored (the abi CI job does)"]
 fn a_fresh_c_scaffold_builds_loads_and_reaches_guest_tier() {
     let dir = scratch("scaffold-build");
     let target = dir.join("probe-arm");
-    let bindings = repository_root().join("bindings/c");
 
     let created = skynet(&[
         "driver",
@@ -395,43 +400,16 @@ fn a_fresh_c_scaffold_builds_loads_and_reaches_guest_tier() {
         "libprobe_arm.so"
     });
 
-    // `CC` first, then the usual names. A vendor's machine has one of these; naming all three in
-    // the failure is more use than insisting on the one this developer happens to have.
-    let candidates: Vec<String> = std::env::var("CC")
-        .into_iter()
-        .chain(["cc", "gcc", "clang"].iter().map(|name| name.to_string()))
-        .collect();
-    let mut build = None;
-    for compiler in &candidates {
-        let attempt = Command::new(compiler)
-            .args([
-                "-std=c11",
-                "-O2",
-                "-Wall",
-                "-Wextra",
-                "-Wpedantic",
-                "-fPIC",
-                "-shared",
-            ])
-            .arg(format!("-I{}", bindings.display()))
-            .arg("-o")
-            .arg(&library)
-            .arg(target.join("probe_arm.c"))
-            .output();
-        if let Ok(output) = attempt {
-            build = Some(output);
-            break;
-        }
-    }
-    let build = build.unwrap_or_else(|| {
-        panic!(
-            "no C compiler found. Tried: {}. Set CC.",
-            candidates.join(", ")
-        )
-    });
+    // The generated Makefile and nothing else: no include path, no flags from here. `CC`, if set,
+    // reaches the compiler through make the way it would on a vendor's machine.
+    let build = Command::new("make")
+        .current_dir(&target)
+        .output()
+        .unwrap_or_else(|error| panic!("could not run make: {error}. This test needs make."));
     assert!(
         build.status.success(),
-        "the scaffold must compile clean under -Wall -Wextra -Wpedantic:\n{}",
+        "the scaffold must build with its own Makefile, clean under -Wall -Wextra -Wpedantic:\n{}{}",
+        String::from_utf8_lossy(&build.stdout),
         String::from_utf8_lossy(&build.stderr)
     );
 
@@ -458,15 +436,6 @@ fn a_fresh_c_scaffold_builds_loads_and_reaches_guest_tier() {
     // The runtime-level sim tests are named as not covered rather than quietly counted as passes.
     assert!(report.contains("safety.kernel.parity"), "{report}");
     assert!(report.contains("not covered here"), "{report}");
-}
-
-fn repository_root() -> PathBuf {
-    // CARGO_MANIFEST_DIR is `<root>/crates/skynet-cli`.
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("the crate lives two levels below the workspace root")
-        .to_path_buf()
 }
 
 // ── `skynet frames` (§44) ────────────────────────────────────────────────────

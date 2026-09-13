@@ -113,7 +113,8 @@ mod tests {
     use super::*;
 
     fn temp(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("skynet-ring-file-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("skynet-ring-file-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -139,14 +140,21 @@ mod tests {
         let mut sightings = 0;
         while !writer.is_finished() {
             if let Ok(seen) = fs::read(&path) {
-                assert_eq!(seen.len(), bytes.len(), "a partial ring was visible at its name");
+                assert_eq!(
+                    seen.len(),
+                    bytes.len(),
+                    "a partial ring was visible at its name"
+                );
                 sightings += 1;
             }
         }
         writer.join().unwrap();
         assert_eq!(fs::read(&path).unwrap().len(), bytes.len());
         let _ = sightings;
-        assert!(!dir.join("ring.incoming").exists(), "the staging file is renamed away");
+        assert!(
+            !dir.join("ring.incoming").exists(),
+            "the staging file is renamed away"
+        );
     }
 
     /// An attacher that arrives before the creator has published waits for it rather than

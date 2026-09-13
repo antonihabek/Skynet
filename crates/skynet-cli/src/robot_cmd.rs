@@ -2997,6 +2997,32 @@ fn route_id(id: &str) -> Option<String> {
     Some(format!("{}:{}", parsed.namespace(), parsed.name()))
 }
 
+/// Why the local socket could not be opened, as the thing to do next.
+///
+/// This was one sentence for every cause — *"Is skynetd running? Is this the robot?"* — and the
+/// commonest cause on a freshly installed robot is neither: the socket belongs to root and the
+/// command was run as somebody else. A developer told the daemon might be down goes and looks at a
+/// daemon that is fine. The three causes that account for nearly every case get their own answer.
+#[cfg(unix)]
+fn unreachable_socket(path: &std::path::Path, error: &std::io::Error) -> String {
+    let path = path.display();
+    match error.kind() {
+        std::io::ErrorKind::PermissionDenied => format!(
+            "could not open {path}: permission denied.\n  The robot is probably fine — the socket \
+             belongs to root, and this command ran as a user who may not open it. Run it with sudo."
+        ),
+        std::io::ErrorKind::NotFound => format!(
+            "there is no socket at {path}.\n  Is skynetd running (`systemctl status skynetd`)? Is \
+             this the robot? A supervisor started with another --root puts it under that root."
+        ),
+        std::io::ErrorKind::ConnectionRefused => format!(
+            "{path} is there and nothing is listening on it.\n  That is a socket left behind by a \
+             supervisor that has stopped; `systemctl status skynetd` says why it stopped."
+        ),
+        _ => format!("could not reach {path}: {error}\n  Is skynetd running? Is this the robot?"),
+    }
+}
+
 /// Send one request and read one response.
 /// One request, with the answer's body handed back as bytes.
 ///
@@ -3028,12 +3054,8 @@ fn request_raw(
         }
         #[cfg(unix)]
         Target::Socket(path) => {
-            let mut stream = std::os::unix::net::UnixStream::connect(&path).map_err(|error| {
-                format!(
-                    "could not reach {}: {error}\n  Is skynetd running? Is this the robot?",
-                    path.display()
-                )
-            })?;
+            let mut stream = std::os::unix::net::UnixStream::connect(&path)
+                .map_err(|error| unreachable_socket(&path, &error))?;
             exchange(&mut stream, wire.as_bytes())?
         }
         #[cfg(not(unix))]
@@ -3533,5 +3555,25 @@ mod tests {
         ] {
             assert!(USAGE.contains(command), "usage should name `{command}`");
         }
+    }
+
+    /// The permission case is the one a new user meets first, and it used to be reported as a daemon
+    /// that might not be running. Each cause names its own next step, and none of them sends
+    /// somebody to look for a problem that is not there.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreachable_socket_says_which_of_the_common_causes_it_is() {
+        use std::io::{Error, ErrorKind};
+        let path = std::path::Path::new("/run/skynetd.sock");
+
+        let denied = unreachable_socket(path, &Error::from(ErrorKind::PermissionDenied));
+        assert!(denied.contains("sudo"), "{denied}");
+        assert!(!denied.contains("Is skynetd running"), "{denied}");
+
+        let missing = unreachable_socket(path, &Error::from(ErrorKind::NotFound));
+        assert!(missing.contains("systemctl status skynetd"), "{missing}");
+
+        let stale = unreachable_socket(path, &Error::from(ErrorKind::ConnectionRefused));
+        assert!(stale.contains("nothing is listening"), "{stale}");
     }
 }
