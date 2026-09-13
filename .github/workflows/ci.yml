@@ -25,7 +25,7 @@ jobs:
   rust:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Toolchain
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
       - name: Format
@@ -88,7 +88,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Toolchain
         run: rustup toolchain install stable --profile minimal --component clippy
       # `--all-targets` so tests, benches and examples are built rather than only the libraries —
@@ -103,7 +103,7 @@ jobs:
   abi:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Mock robot, sim conformance
         working-directory: drivers/mock
         run: make check
@@ -173,7 +173,7 @@ jobs:
   corpus:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -344,7 +344,7 @@ jobs:
   case-tables:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: '26'
@@ -356,7 +356,7 @@ jobs:
   invariants:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
