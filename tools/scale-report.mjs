@@ -325,8 +325,8 @@ const CONDITION_SENTENCES = [
       String.raw`([\w-]+) of the eight ${IS_OR_ARE} still the kernel's`, 'gi'),
   },
   {
-    file: join(ROOT, 'README.md'),
-    label: 'README',
+    file: join(ROOT, 'docs/status.md'),
+    label: 'docs/status.md',
     pattern: new RegExp(
       String.raw`([\w-]+) of §27's eight conditions ${IS_OR_ARE} unobserved`, 'gi'),
   },

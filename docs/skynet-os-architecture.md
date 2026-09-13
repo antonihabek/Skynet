@@ -1,7 +1,7 @@
 # Skynet OS — Technical Architecture
 
 > Skynet has two halves. **Skynet Hub** is where robot software is discovered, versioned,
-> reviewed, signed and sold — it is documented in the Hub's own repository and is largely
+> reviewed, signed and sold — it is documented in the Hub's architecture (`docs/skynet-architecture.md` in the Hub's repository) and is largely
 > built. **Skynet OS** is what runs that software on the machine. This document designs the
 > second half end to end.
 >
@@ -1055,7 +1055,7 @@ Two properties are worth designing for explicitly:
 
 ## 19. Security posture
 
-Inherits the Hub's posture (§7 of its architecture, in the Hub's repository) and adds what being on the robot
+Inherits the Hub's posture (§7 of `docs/skynet-architecture.md`, in the Hub's repository) and adds what being on the robot
 requires:
 
 * **Untrusted policies are the design assumption, not an edge case.** Sandboxed, no actuator
@@ -5520,8 +5520,8 @@ miniature, and currently trivial to fix.
 | Discovery — finding a robot on the link | §82 | **Built on both sides** — the DNS-SD wire format, RFC 6763's TXT convention, what a robot may advertise, a one-shot browse behind `skynet discover`, and §82.4's responder in `skynetd`: probing, defending, answering and refusing. 106 tests, and it has run between two daemons on one link | The **goodbye** has a caller since 2026-09-07: `POST /shutdown` withdraws the name, seals §13's window with `Reason::Shutdown` and exits, and the unit's `ExecStop=` is what calls it. A robot that loses power still sends nothing, which is what the TTL is for. The **browse** still cannot hold 5353 (§82.3), so it sees answers to its own question and never an unsolicited announcement — which is why there is no watch mode here and why §83.3's applications use their platform's resolver instead |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **134,000 lines of Rust** across **twenty-four crates**, held by a
-corpus of 80 files and 1,148 cases to **14,000 lines** of the TypeScript reference edition and
+**Built** means running, tested code: **136,000 lines of Rust** across **twenty-four crates**, held by a
+corpus of 80 files and 1,199 cases to **14,000 lines** of the TypeScript reference edition and
 **16,000 lines** of the Python edition, with **5,000 lines** of drivers and **9,000 lines** in the
 Hub's mirror of the shared contracts.
 

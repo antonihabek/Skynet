@@ -525,7 +525,7 @@ pub fn report(layout: &Layout, free: Free, floor_bytes: u64) -> Json {
 ///
 /// It sits here rather than in §38's configuration because a floor an operator can lower to zero
 /// is a floor that authorises deleting everything, and that is a decision for the owner rather than
-/// for a profile. It is listed with the retention work in `BUILD-LOG.md`.
+/// for a profile.
 pub const DEFAULT_FLOOR_BYTES: u64 = 1_024 * 1_024 * 1_024;
 
 /// What this robot can say about its own free disk.

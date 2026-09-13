@@ -38,7 +38,19 @@ import { fileURLToPath } from 'node:url'
 const HERE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 /** The documents that make promises to a developer. Reference documents are not checked here. */
-const DOCUMENTS = ['README.md', 'docs/README.md', 'corpus/README.md', 'reference/typescript/README.md']
+const DOCUMENTS = [
+  'README.md',
+  'docs/README.md',
+  'docs/status.md',
+  'corpus/README.md',
+  'reference/typescript/README.md',
+  // The documents a newcomer reaches from the README, and the ones a contributor follows. Each gives
+  // commands and links, and each can go stale the same way.
+  'CONTRIBUTING.md',
+  'SECURITY.md',
+  'editions/README.md',
+  'packaging/README.md',
+]
 
 const problems = []
 

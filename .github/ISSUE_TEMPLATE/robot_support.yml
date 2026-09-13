@@ -1,0 +1,45 @@
+name: Robot or driver support
+description: A robot you want to run Skynet OS on, or a driver you are writing.
+labels: [driver]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Skynet OS runs on any robot somebody has written a conformant RHAL driver for. This issue is the place to find out whether that somebody exists yet — or to become them.
+
+  - type: input
+    id: robot
+    attributes:
+      label: Robot
+      placeholder: Vendor and model, e.g. "Franka Research 3"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: control
+    attributes:
+      label: How it can be commanded
+      description: Robots whose controller only accepts uploaded programs (many industrial arms) are Guest tier permanently — see Part VII of the specification.
+      options:
+        - Joint level (position, velocity or torque) from my own process
+        - Only through the vendor's controller or program upload
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: role
+    attributes:
+      label: What you want to do
+      options:
+        - I want to write this driver
+        - I am writing it and have a question
+        - I want to use it if someone writes it
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: The SDK or protocol it speaks, links to its documentation, and — if you have started — the output of `skynet driver check`.

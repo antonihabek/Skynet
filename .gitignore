@@ -32,3 +32,7 @@ editions/c/build/
 /docs/skynet-architecture.md
 /docs/skynet-build-plan.md
 /robot-overflow-patches/
+
+# Machine-specific agent guidance. It names paths on one maintainer's machine.
+/CLAUDE.local.md
+/AGENTS.local.md

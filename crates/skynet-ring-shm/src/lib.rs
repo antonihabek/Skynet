@@ -51,7 +51,7 @@
 //! `memfd_create` is Linux. On any other target every function here returns
 //! [`ShmError::Unsupported`] rather than failing to compile, so the workspace still builds and tests
 //! on a developer's machine — which is most of them, and all of the ones this was written on. The
-//! Linux path is exercised in CI and in a container; see `PROGRESS.md`.
+//! Linux path is exercised by CI, which runs on Linux.
 
 #![forbid(missing_docs)]
 
