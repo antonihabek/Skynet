@@ -45,8 +45,23 @@ ROOT="${SKYNET_ROOT:-/}"
 DATA="${ROOT%/}/data"
 RUN="${ROOT%/}/run"
 SOCKET="$RUN/skynetd.sock"
-BUILD="$REPO/target/release"
 MOCK_DIR="$REPO/drivers/mock"
+
+# Two shapes this script runs from, told apart by what is on disk rather than by a flag somebody
+# forgets. A **checkout** has sources and builds them. A **release bundle** (packaging/bundle.sh)
+# has the four binaries at bin/, the mock body at lib/, and no Cargo.toml — so there is nothing to
+# build and no toolchain to require, which is the whole point of downloading one.
+if [ -x "$REPO/bin/skynetd" ] && [ ! -f "$REPO/Cargo.toml" ]; then
+  FROM_BUNDLE=yes
+  BUILD="$REPO/bin"
+  MOCK_LIB="$REPO/lib/libskynet_mock.so"
+  BODY_OUT="$REPO/mock-body.json"
+else
+  FROM_BUNDLE=no
+  BUILD="$REPO/target/release"
+  MOCK_LIB="$MOCK_DIR/libskynet_mock.so"
+  BODY_OUT="$REPO/target/mock-body.json"
+fi
 UNITS=(skynetk.service skynetd.service)
 
 if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -96,7 +111,37 @@ need_linux() {
 
 # ── build ────────────────────────────────────────────────────────────────────
 do_build() {
+  if [ "$FROM_BUNDLE" = "yes" ]; then
+    step "Using the release bundle"
+    for binary in skynetd skynetk skynet skynetp; do
+      [ -x "$BUILD/$binary" ] || die "this bundle has no $BUILD/$binary. Download it again, or check it
+      against SHA256SUMS — a bundle missing a binary was damaged on the way."
+    done
+    [ -f "$MOCK_LIB" ] || die "this bundle has no mock body at $MOCK_LIB."
+    ok "skynetd, skynetk, skynet, skynetp, and the mock body — nothing to build"
+    return 0
+  fi
+
   step "Building"
+
+  # Under sudo, build as the person who typed it, in their login environment. Two things go wrong
+  # otherwise, and both are the first thing a Rust developer following the README would meet: sudo
+  # resets PATH, so a rustup-installed cargo in ~/.cargo/bin is "not installed"; and where cargo is
+  # found, a build as root leaves root-owned files in target/, so that developer's next ordinary
+  # `cargo build` fails with a permission error nobody connects to this script. Installing needs
+  # root. Building never did.
+  if [ "$(id -u)" = "0" ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    note "building as $SUDO_USER, so target/ stays theirs"
+    sudo -u "$SUDO_USER" -H bash -lc \
+      'cd "$1" && cargo build --release --workspace && make -C drivers/mock lib' _ "$REPO" >&2 || \
+      die "the build failed as $SUDO_USER. If it says cargo is not found, install Rust for that user
+      (https://rustup.rs) — or build first as yourself, then re-run this:
+
+          cargo build --release --workspace && make -C drivers/mock lib"
+    ok "skynetd, skynetk, skynet, skynetp, and the mock body: $MOCK_LIB"
+    return 0
+  fi
+
   command -v cargo >/dev/null 2>&1 || die "cargo is not installed. The four binaries are Rust."
   ( cd "$REPO" && cargo build --release --workspace ) >&2
   ok "skynetd, skynetk, skynet, skynetp"
@@ -115,20 +160,38 @@ do_up() {
   need_root
   do_build
 
-  local driver="$MOCK_DIR/libskynet_mock.so"
+  local driver="$MOCK_LIB"
   [ -f "$driver" ] || die "the mock body did not build at $driver"
 
   step "Describing the body"
   # From the driver itself, which is the only party that knows. This also runs the sim half of SCTS
   # against it, so a body that cannot answer the ABI is refused here rather than at the first cycle.
-  local body="$REPO/target/mock-body.json"
+  local body="$BODY_OUT"
   "$BUILD/skynet" driver check "$driver" --descriptor "$body" >&2 || \
     die "the mock body did not pass the driver-facing suite, so it is not a body to install."
   ok "$body"
 
+  # The cpusets come from this machine, not from install.sh's defaults. Those name core 3 for the
+  # loop and 0-2 for everything else, which is right for a four-core robot board and a unit that
+  # cannot start on a two-core laptop VM — `CPUAffinity=3` on a machine with no core 3 is a failed
+  # start, and it would be the first thing a new developer saw. The last core goes to the loop and
+  # the rest to everything else; a single-core machine shares its one core, which is no isolation at
+  # all, and a guest-tier bench robot does not claim any.
+  local cores rt_cpu general_cpus
+  cores="$(nproc 2>/dev/null || echo 1)"
+  if [ "$cores" -ge 2 ]; then
+    rt_cpu=$((cores - 1))
+    general_cpus="0-$((cores - 2))"
+  else
+    rt_cpu=0
+    general_cpus=0
+  fi
+
   step "Installing"
   "$HERE/install.sh" \
     --from "$BUILD" \
+    --rt-cpu "$rt_cpu" \
+    --general-cpus "$general_cpus" \
     --driver "$driver" \
     --descriptor "$body" \
     --tier guest \

@@ -1,0 +1,116 @@
+# Skynet OS — the release bundle, installed the way a user installs it.
+#
+# Every push builds the bundle with `packaging/bundle.sh`, installs it with `packaging/get.sh` from
+# the directory it was just written to, and brings up a virtual robot from what was installed —
+# real systemd units, the real Safety Kernel, the ten assertions `virtual-robot.sh` reads back from
+# the robot. That is the installer's automated test: before this workflow, the only gate on
+# `install.sh` was somebody running it by hand, and the first time anybody did, five things in it were wrong.
+#
+# A `v*` tag does all of that on both architectures and then publishes. Nothing is published that
+# was not first installed and run on the architecture it is for.
+
+name: package
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22.04 rather than latest: the binaries link the C library of the machine they are built on,
+        # and robots run older distributions than CI does. A bundle built here runs on glibc 2.35
+        # and newer. The arm runners are available to public repositories only, so while this one is
+        # private the matrix is x86-64 alone — and a tag cannot publish, which `publish` says loudly.
+        runner: ${{ fromJSON(github.event.repository.private && '["ubuntu-22.04"]' || '["ubuntu-22.04", "ubuntu-22.04-arm"]') }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: The tag is the workspace version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::the tag is $GITHUB_REF_NAME and Cargo.toml says $version. Bump the workspace version and tag that, so \`skynet version\` and the release agree."
+            exit 1
+          fi
+
+      - name: Bundle
+        run: ./packaging/bundle.sh --out dist
+
+      # From the bundle, not the checkout: `get.sh` verifies the checksum and unpacks outside the
+      # repository, so nothing here can quietly fall back to a source tree the user will not have.
+      - name: Install it the way a user would
+        run: |
+          SKYNET_BASE_URL="file://$PWD/dist" SKYNET_DIR="$RUNNER_TEMP/skynet" sh packaging/get.sh
+          echo "BUNDLE=$(ls -d "$RUNNER_TEMP"/skynet/skynet-os-*)" >> "$GITHUB_ENV"
+
+      - name: A virtual robot comes up from it
+        run: sudo "$BUNDLE/packaging/virtual-robot.sh" up
+
+      - name: And the installation verifies
+        run: sudo "$BUNDLE/packaging/install.sh" --check
+
+      - name: What the robot said, if it did not come up
+        if: failure()
+        run: sudo journalctl -u skynetk -u skynetd -n 120 --no-pager
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ runner.arch }}
+          path: dist/skynet-os-linux-*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: bundle
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: bundle-*
+          merge-multiple: true
+
+      - name: Both architectures are here
+        run: |
+          for arch in x86_64 aarch64; do
+            if [ ! -f "dist/skynet-os-linux-$arch.tar.gz" ]; then
+              echo "::error::there is no $arch bundle. aarch64 is built on GitHub's arm runners, which public repositories get; a release without the architecture robots actually run is not published."
+              exit 1
+            fi
+          done
+          cd dist && sha256sum skynet-os-linux-*.tar.gz > SHA256SUMS && cat SHA256SUMS
+
+      # Signed provenance for each archive: which workflow, which commit, which runner built it.
+      # Anyone can check it with `gh attestation verify <archive> --repo antonihabek/Skynet`.
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/skynet-os-linux-*.tar.gz
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/skynet-os-linux-*.tar.gz dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Skynet OS $GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag
