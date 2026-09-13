@@ -19,7 +19,7 @@
 §73's last column has carried one entry against §31 since the table was written: *"The second
 edition, which is what the corpus is for."* That entry is now satisfied at L2, and §73 is a
 **mirrored** document — edited in both repositories or in neither — so the amendment is recorded in
-`BUILD-LOG.md` rather than made here.
+the maintainers' build log rather than made here.
 
 ## What a Python edition is, and the ceiling it declares
 
@@ -494,7 +494,7 @@ the eighth array and is silently truncated to eight instead.
 A ninth guard is not something a producer emits, so the clamp is defensive rather than reachable,
 and a corpus case carrying one would freeze *truncation* as the specified answer for a malformed
 cycle — when the answer the other seven arrays give is a refusal. That is a question about the
-format rather than a gap in an edition, so it is written down here and in `BUILD-LOG.md` rather than
+format rather than a gap in an edition, so it is written down here rather than
 settled by whichever behaviour was easier to transcribe.
 
 ## What the eleventh round found: nine of nineteen, and the function nothing was measuring
@@ -687,7 +687,7 @@ because the transcription was the cheap half:
 | Format conventions found undocumented | **1** (`null` in a numeric field), now in `corpus/README.md` |
 | Duplicated implementations of one rule, consolidated | **2** (`toFixed`, and the JS helpers into `js.py`) |
 
-The single sentence the whole set comes down to is in `BUILD-LOG.md` §30 and is worth repeating
+The single sentence the whole set comes down to is worth repeating
 here: **a case that demonstrates a rule and a case that pins it are different cases, and a corpus
 needs both.** Thirty-one of the thirty-eight are the second kind and seven are coverage of a
 function nothing measured, and a corpus written to be read had almost none of either.

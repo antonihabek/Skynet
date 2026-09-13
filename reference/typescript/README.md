@@ -76,8 +76,8 @@ where two malformed shapes used to throw.
 Keeping the rest vendored byte-for-byte is deliberate: an oracle that has been tidied is an oracle
 that no longer describes the thing it is the reference for. When the Hub's copy changes, this copy
 is updated and the corpus is regenerated, and the diff in `corpus/` is the review. When a change
-starts here — as the SCTS expansion of §52 did — it is carried the other way by hand and recorded
-in `PROGRESS.md`, which is the same rule `docs/README.md` applies to the shared documents.
+starts here — as the SCTS expansion of §52 did — it is carried the other way by hand, which is the same
+rule `docs/README.md` applies to the shared specification.
 
 ## Running it
 
