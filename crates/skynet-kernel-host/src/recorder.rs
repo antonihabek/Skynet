@@ -149,9 +149,8 @@ impl Recorder {
                 // Waited for, not read once. The writership named a live creator, so a ring that
                 // is not on disk yet is one being written — see `skynet_lock::ring_file`, which
                 // carries the run this was found on.
-                let store =
-                    ring_file::read_when_published(&path, ring_file::PUBLISH_WAIT)
-                        .map_err(RecorderError::Io)?;
+                let store = ring_file::read_when_published(&path, ring_file::PUBLISH_WAIT)
+                    .map_err(RecorderError::Io)?;
                 let ring = Ring::open(&store).map_err(|error| {
                     RecorderError::Geometry(format!(
                         "{holder} holds this directory and its ring cannot be opened here: {error:?}"

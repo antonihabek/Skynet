@@ -26,6 +26,29 @@ pub struct File {
 /// Languages `--lang` accepts.
 pub const LANGUAGES: [&str; 2] = ["c", "rust"];
 
+/// The RHAL C header, as it was when this CLI was compiled. See the `"c"` arm of [`build`].
+const RHAL_HEADER: &str = include_str!("../../../bindings/c/skynet_rhal.h");
+
+/// The `skynet-rhal` dependency line for a Rust scaffold.
+///
+/// Inside a checkout, a path to the crate beside it, so a driver being written against an unreleased
+/// ABI change sees it. Outside one, the crate at **this CLI's own release tag** in the repository the
+/// workspace names — so the struct layouts a driver compiles against are the ones this CLI's `driver
+/// check` loads it with. This used to be `path = "../crates/skynet-rhal"` unconditionally, which
+/// resolved only for a project created directly in the repository root.
+fn rhal_dependency(header_include: &str) -> String {
+    match header_include.strip_suffix("bindings/c") {
+        Some(to_root) if !header_include.is_empty() => {
+            format!(r#"{{ path = "{to_root}crates/skynet-rhal" }}"#)
+        }
+        _ => format!(
+            r#"{{ git = "{}", tag = "v{}" }}"#,
+            env!("CARGO_PKG_REPOSITORY"),
+            env!("CARGO_PKG_VERSION")
+        ),
+    }
+}
+
 /// Build the file set for a new driver.
 ///
 /// `name` is the project directory name; `symbol` is it turned into a C identifier, because
@@ -41,24 +64,42 @@ pub fn build(name: &str, language: &str, header_include: &str) -> Result<Vec<Fil
     let slug = slug(name);
 
     match language {
-        "c" => Ok(vec![
-            File {
-                path: PathBuf::from(format!("{symbol}.c")),
-                body: c_source(name, &symbol, &slug, header_include),
-            },
-            File {
-                path: PathBuf::from("Makefile"),
-                body: c_makefile(&symbol, header_include),
-            },
-            File {
-                path: PathBuf::from("README.md"),
-                body: readme(name, &symbol, "c"),
-            },
-        ]),
+        "c" => {
+            let mut files = vec![
+                File {
+                    path: PathBuf::from(format!("{symbol}.c")),
+                    body: c_source(name, &symbol, &slug, header_include),
+                },
+                File {
+                    path: PathBuf::from("Makefile"),
+                    body: c_makefile(&symbol, header_include),
+                },
+                File {
+                    path: PathBuf::from("README.md"),
+                    body: readme(name, &symbol, "c"),
+                },
+            ];
+            // Outside a checkout there is no `bindings/c` to point at, and this used to emit a bare
+            // `#include "skynet_rhal.h"` for "a vendor with the SDK installed" — an SDK nothing
+            // installs. So a driver scaffolded anywhere but inside this repository failed its very
+            // first `make` with `skynet_rhal.h: No such file or directory`, which is the first
+            // thing every vendor would have seen. The header is written beside the source instead.
+            //
+            // It is still single-source (§31.2): these are the bytes of `bindings/c/skynet_rhal.h`
+            // as they were when this CLI was built, and the ABI version inside them is what
+            // `skynet driver check` holds the driver to at load.
+            if header_include.is_empty() {
+                files.push(File {
+                    path: PathBuf::from("skynet_rhal.h"),
+                    body: RHAL_HEADER.to_string(),
+                });
+            }
+            Ok(files)
+        }
         "rust" => Ok(vec![
             File {
                 path: PathBuf::from("Cargo.toml"),
-                body: rust_manifest(name, &symbol),
+                body: rust_manifest(name, &symbol, &rhal_dependency(header_include)),
             },
             File {
                 path: PathBuf::from("src/lib.rs"),
@@ -381,7 +422,7 @@ clean:
     )
 }
 
-fn rust_manifest(name: &str, symbol: &str) -> String {
+fn rust_manifest(name: &str, symbol: &str, rhal: &str) -> String {
     format!(
         r#"[package]
 name = "{name}"
@@ -399,7 +440,7 @@ crate-type = ["cdylib"]
 # skynet-rhal gives you the `#[repr(C)]` structs and the ABI version constant. It is a view of the
 # same C header, not a second definition — if the two ever disagree, a build fails rather than a
 # robot moving unexpectedly (§31.2).
-skynet-rhal = {{ path = "../crates/skynet-rhal" }}
+skynet-rhal = {rhal}
 
 [profile.release]
 # A driver that panics inside the RT path should not unwind through C.
@@ -720,6 +761,56 @@ mod tests {
         assert_eq!(identifier("Acme Arm 2!"), "acme_arm_2");
         assert_eq!(slug("Acme Arm 2!"), "acme-arm-2");
         assert_eq!(identifier("---"), "");
+    }
+
+    /// A scaffold has to build wherever it is created, and a vendor does not create it inside this
+    /// repository. Both templates used to assume they were: the C one included a header nothing
+    /// installs, and the Rust one depended on `../crates/skynet-rhal`.
+    #[test]
+    fn a_scaffold_outside_the_repository_carries_what_it_needs_to_build() {
+        let c = build("acme-arm", "c", "").unwrap();
+        let header = c
+            .iter()
+            .find(|file| file.path == Path::new("skynet_rhal.h"))
+            .expect("outside a checkout the header is written beside the source");
+        assert_eq!(
+            header.body,
+            std::fs::read_to_string(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../bindings/c/skynet_rhal.h"
+            ))
+            .unwrap(),
+            "the written header is the repository's, byte for byte"
+        );
+        assert!(c[0].body.contains(r#"#include "skynet_rhal.h""#));
+
+        let rust = build("acme-arm", "rust", "").unwrap();
+        let manifest = &rust[0].body;
+        assert!(
+            manifest.contains(&format!(
+                r#"skynet-rhal = {{ git = "{}", tag = "v{}" }}"#,
+                env!("CARGO_PKG_REPOSITORY"),
+                env!("CARGO_PKG_VERSION")
+            )),
+            "{manifest}"
+        );
+    }
+
+    /// And inside one, both templates point at the crate and header beside them rather than at a
+    /// copy, so a driver written against an unreleased ABI change sees it.
+    #[test]
+    fn a_scaffold_inside_the_repository_points_at_the_checkout() {
+        let c = build("acme-arm", "c", "../../bindings/c").unwrap();
+        assert!(c.iter().all(|file| file.path != Path::new("skynet_rhal.h")));
+
+        let rust = build("acme-arm", "rust", "../bindings/c").unwrap();
+        assert!(
+            rust[0]
+                .body
+                .contains(r#"skynet-rhal = { path = "../crates/skynet-rhal" }"#),
+            "{}",
+            rust[0].body
+        );
     }
 
     #[test]
