@@ -38,6 +38,8 @@ REPO="$(cd -- "$HERE/.." && pwd)"
 
 # ── defaults ─────────────────────────────────────────────────────────────────
 FROM="$REPO/target/release"
+# A release bundle carries the binaries at bin/ and no sources; see packaging/bundle.sh.
+if [ -x "$REPO/bin/skynetd" ] && [ ! -f "$REPO/Cargo.toml" ]; then FROM="$REPO/bin"; fi
 PREFIX="/usr"
 ROOT="/"
 DRIVER=""
