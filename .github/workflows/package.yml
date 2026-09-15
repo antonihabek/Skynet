@@ -100,7 +100,7 @@ jobs:
 
       # Signed provenance for each archive: which workflow, which commit, which runner built it.
       # Anyone can check it with `gh attestation verify <archive> --repo antonihabek/Skynet`.
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/skynet-os-linux-*.tar.gz
 
