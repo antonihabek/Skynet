@@ -5440,7 +5440,7 @@ Recorded here because it was decided in discussion and belongs in the design.
 
 ### 72.1 Skynet OS lives in its own repository
 
-Not in the BotMarket repository. Four reasons, one decisive:
+Not in the Hub's repository, Robot Overflow. Four reasons, one decisive:
 
 1. **Licensing history.** §20 proposes Apache-2.0 for Core. A subdirectory of a private commercial
    repository cannot be cleanly open-sourced later — it needs a history-scrubbing split, or it
@@ -5459,7 +5459,7 @@ migration. That sequencing works only if the repository is separate from the out
 | Repository | Holds |
 |---|---|
 | **`skynet-os`** (new, private → public) | Spec, RHAL bindings, the conformance corpus, every edition, contracts (Rust plus the WASM build and the TypeScript reference oracle), drivers, CLI, Yocto layers, the on-robot console |
-| **`Botmarket`** (existing, private) | Hub API routes, Skynet OS UI pages, migrations, registry readiness — consuming the contracts as a published package — and **Skynet Console**, the operator's desktop application (§83.3a) |
+| **Robot Overflow**, the Hub (existing, private) | Hub API routes, Skynet OS UI pages, migrations, registry readiness — consuming the contracts as a published package — and **Skynet Console**, the operator's desktop application (§83.3a) |
 
 One repository rather than one per edition: §31.4's differential fuzzing needs every edition
 testable against one corpus in one CI run, and splitting them makes that a cross-repository problem
@@ -6779,14 +6779,14 @@ surface, not part of the runtime a vendor compiles against. Putting it in the re
 going to be published would mean either publishing it or performing exactly the history surgery
 §72.1 exists to avoid.
 
-So it lives in **BotMarket**, at `desktop/`. And it had to move *before* it grew, which is §72.3's
+So it lives in **Robot Overflow**, the Hub's repository, at `desktop/`. And it had to move *before* it grew, which is §72.3's
 own argument in miniature — moving a window and a scan is minutes, moving that plus a bundler, a
 signing pipeline and a release matrix is a week.
 
 | | |
 |---|---|
 | `skynet-os` (private → **public**) | `skynet-mdns`, and §82's responder half when it is written |
-| **BotMarket** (private) | Skynet Console: `desktop/windows` (WinUI 3), `desktop/macos` (SwiftUI), `desktop/shared` |
+| **Robot Overflow** (private) | Skynet Console: `desktop/windows` (WinUI 3), `desktop/macos` (SwiftUI), `desktop/shared` |
 
 **`skynet-mdns` stays where it is**, and that is the half of the decision worth defending. §82's
 responder belongs to `skynetd`, and a vendor reading the OS needs to see what a robot advertises.
@@ -6812,8 +6812,17 @@ day, a signing key (§83.4), so the thing that runs there deserves the same trea
   `min_os_version` problem in a new place, and it should be answered with the same care rather than
   discovered when an old application silently misreads a new robot.
 
-None of that is built. The download surface on the Hub, the release pipeline and the certificates
-are all outstanding, and until they exist the application is a local `cargo build`.
+**Amended 2026-09-15: the surface and the Windows pipeline exist; the certificates do not.**
+`/skynet/console` lists a build per platform with its digest and its `skynetd` statement, and
+serves the installer from the Hub's own storage. `desktop/release/release-windows.mts` in the
+Hub's repository tests, builds, signs, reads the signature back, opens the application — which
+must come up per-monitor DPI aware — packages it as a Windows Installer package, signs and verifies
+that too, hashes, uploads and records a release, and there is no flag that skips signing: a
+signature that does not verify ends the run, and the registry refuses an entry that does not name
+its signer. No certificate exists yet, so nothing is published and the page says so. macOS has no
+pipeline. Until a signed build is published, Windows gets the same package unsigned from
+`desktop/release/build-windows.mts`, built on the machine that installs it — for every user, into
+Program Files, with Start menu and desktop shortcuts and an entry in Settings to uninstall it.
 
 ### 83.4 What it opens, and what it must not assume it opens
 

@@ -11177,7 +11177,7 @@ fn frozen(name: &str, document: &Json) {
 
          This document crosses §17 and the Hub keeps its own copy of it. If the change is intended,          re-freeze and resync — and expect the Hub's suite to have something to say, which is the          point:
              SKYNET_WRITE_WIRE=1 cargo test -p skynetd-io
-             node tools/check-contract-mirrors.mjs --sync ../BotMarket
+             node tools/check-contract-mirrors.mjs --sync
 ",
         path.display()
     );

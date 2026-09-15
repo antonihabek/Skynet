@@ -388,7 +388,7 @@ jobs:
       # §72.1 splits the code and does not split the specification, and §31.4 makes the reference
       # TypeScript the oracle every edition is measured against.
       #
-      # These two used to be no-ops here. BotMarket is not checked out beside this one, so both
+      # These two used to be no-ops here. The Hub is not checked out beside this one, so both
       # printed "not found" and exited zero — a job named after a check that could not fail, and the
       # one divergence the contract tool has caught was caught by a human running it locally.
       #
