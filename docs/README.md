@@ -43,5 +43,5 @@ Part I is the design. **Part VII is the honest account of what does not work**, 
 reading before the rest — the word "universal" invites a strong reading that the document spends a
 good deal of its length refusing.
 
-You do not need Parts II–VII to build a driver. [`../README.md`](../README.md) is the golden path
-(§65): what a developer reads, in order, to reach a moving robot.
+You do not need Parts II–VII to build a driver. [`developer-guide.md`](developer-guide.md) is the
+golden path (§65): what a developer reads, in order, to reach a moving robot.

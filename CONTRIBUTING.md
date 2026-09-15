@@ -95,7 +95,8 @@ skynet driver check ./libmy_arm.so
 ```
 
 `driver check` runs the simulated half of the conformance suite and tells you the tier your
-evidence supports. The golden path in [`README.md`](README.md) walks the rest.
+evidence supports. The golden path in [`docs/developer-guide.md`](docs/developer-guide.md) walks
+the rest.
 
 ## Reporting a problem
 

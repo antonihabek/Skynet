@@ -40,6 +40,8 @@ const HERE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 /** The documents that make promises to a developer. Reference documents are not checked here. */
 const DOCUMENTS = [
   'README.md',
+  // §65's path itself. The README is the one page of concepts; this is the rest of the path.
+  'docs/developer-guide.md',
   'docs/README.md',
   'docs/status.md',
   'corpus/README.md',
@@ -175,8 +177,21 @@ function checkCommands(document, source, known) {
  */
 const KNOWN_SUBCOMMANDED = new Set(['driver', 'descriptor', 'skill'])
 
+/**
+ * The shell blocks of a document: fences with no info string or a shell one.
+ *
+ * Every fence is matched and the non-shell ones are filtered out afterwards, rather than matching
+ * only shell fences. The first draft did the latter, and a ```rust opener it could not match was
+ * read as the *closing* fence of the block before it — so from there to the end of the document the
+ * prose between blocks was checked and the blocks themselves were not. The README it guarded had
+ * 18 `skynet` lines and the check read 5, and passed.
+ */
+const SHELL_FENCES = new Set(['', 'bash', 'sh', 'console'])
+
 function fenced(source) {
-  return [...source.matchAll(/```(?:bash|sh|console)?\n([\s\S]*?)```/g)].map(match => match[1])
+  return [...source.matchAll(/```([^\n`]*)\n([\s\S]*?)```/g)]
+    .filter(match => SHELL_FENCES.has(match[1].trim()))
+    .map(match => match[2])
 }
 
 // ── Run ──────────────────────────────────────────────────────────────────────
