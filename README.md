@@ -1,96 +1,106 @@
 # Skynet OS
 
-A universal operating system for robots — where "universal" means something specific and defensible,
-and the specification spends a good deal of its length saying what it does not mean.
+**An open-source operating system for robots, built around one safety rule: robot software never
+moves a motor by itself. A safety layer checks every command first.**
 
 [![ci](https://github.com/antonihabek/Skynet/actions/workflows/ci.yml/badge.svg)](https://github.com/antonihabek/Skynet/actions/workflows/ci.yml)
 [![package](https://github.com/antonihabek/Skynet/actions/workflows/package.yml/badge.svg)](https://github.com/antonihabek/Skynet/actions/workflows/package.yml)
 [![licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
 
-Skynet has two halves. **Skynet Hub** is where robot software is discovered, versioned, reviewed,
-signed and sold. **Skynet OS** is what runs that software on the machine. This repository is the
-second half.
-
-> The Hub can already tell you *whether* a policy fits a robot. Nothing yet makes it *fit*.
-
-Licence: Apache-2.0. The trademark and the certification programme are what SCTS gates — not the
-interface. Implement it freely.
+> **This is an early project (version 0.1).** You can run a simulated robot on your own computer
+> today. It is **not** ready to control a real robot yet — see [What works today](#what-works-today).
 
 ---
 
-## Try it without a robot
+## What is it?
 
-A real installation — the systemd units, the Safety Kernel evaluating its guards, the supervisor
-reconciling desired state — on any Linux machine where systemd is PID 1, with a simulated body
-underneath instead of hardware. Nothing here moves a joint, and the robot says so: a simulated body
-is capped at Guest tier (§35.3).
+Robots from different companies run completely different software. A program written for one robot
+arm usually cannot run on another one, and there is no common way to install robot software, update
+it, or check that it is safe to run.
 
-**From a release** — Linux, x86-64 or aarch64, nothing to build:
+Skynet OS tries to fix that. It sits between robot software and the robot's hardware, and gives
+every robot the same:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/antonihabek/Skynet/main/packaging/get.sh | sh
-sudo ~/.local/share/skynet-os/current/packaging/virtual-robot.sh up
-```
+- **way to install and update software**, in packages — a bit like apps on a phone;
+- **safety checks**, done by the **Safety Kernel**, which looks at every command before it can reach
+  a motor;
+- **black box**, which records what the robot was told to do and what it did, like a plane's flight
+  recorder;
+- **command-line tool**, `skynet`, for talking to a robot and for building drivers.
 
-`get.sh` verifies the download's checksum, unpacks it into your home directory and stops. It never
-runs `sudo` itself; the second line is yours to run.
+To support a new robot, someone writes a **driver**: a small library that tells Skynet OS how to
+read that robot's sensors and send commands to its motors. It works like a printer driver, which
+lets any program print on that printer. Once a robot has a driver, everything else in Skynet OS
+works on it.
 
-**From source** — Rust stable and a C compiler, and nothing else, because the workspace has no
-third-party dependencies:
+"Universal" does **not** mean one program that runs on every robot. What stays the same across
+robots is the set of rules — the same packages, the same tools and the same tests — while each
+robot gets its own driver.
 
-```bash
-git clone https://github.com/antonihabek/Skynet.git && cd Skynet
-sudo ./packaging/virtual-robot.sh up
-```
-
-It builds as you and installs as root. Either way, it ends by asking the running robot ten questions
-and printing the answers:
-
-```
-  ✓ the local socket answers (§33.7)
-  ✓ the control loop is up
-  ✓ the body is the mock arm
-  ✓ the black box has a window
-  ✓ guest — §35.3's cap, because the body declares simulator: true
-  ...
-  This machine is now a robot
-```
-
-Then talk to it. The socket belongs to root, so the CLI runs under `sudo`; `status` and `estop`
-need no credential (§39.1), and everything else takes the admin token the installer printed once, as
-`--token` or `$SKYNET_TOKEN`:
-
-```bash
-sudo skynet status                           # which body, what it runs, whether stop is reachable
-sudo skynet state --token <admin-token>      # §27's operating state, and the evidence for each condition
-```
-
-`sudo ./packaging/virtual-robot.sh down` removes it again and leaves `/data` — the black box it
-recorded — where it was. On Windows, run all of this inside WSL2 with systemd enabled; on macOS,
-inside a Linux VM.
+Skynet OS is one half of a bigger project. The other half, **Skynet Hub**, is where robot software is
+shared, reviewed and signed. The Hub lives in a separate repository, and you do not need it to try
+Skynet OS.
 
 ---
 
-## The claim, stated exactly
+## How it keeps a robot safe
 
-There is no binary that boots on a Unitree G1, an ABB arm, a Roomba and a warehouse AMR. What is
-universal is the **contract**: the same packages, the same transport planner, the same Hub, the same
-conformance suite, the same CLI — reached at three depths of integration, each stating plainly what
-it can and cannot promise.
+The whole design rests on one rule:
+
+> **Only the Safety Kernel is allowed to send commands to a robot's motors.**
+
+Robot software (called a **policy**, and often an AI model) never controls a motor directly. It
+writes down the command it *wants*, and the Safety Kernel decides what actually reaches the motors.
+Many times a second, it runs every command through eight safety checks, called **guards**. For
+example, they check that:
+
+- the robot's software is still sending fresh commands (if it goes quiet, the robot is brought to a
+  controlled stop);
+- no joint moves too far, too fast or too hard for its limits;
+- the arm stays inside the space it is allowed to be in, and does not hit itself;
+- the robot is not moving too fast for how close the nearest person is.
+
+Why so strict? Many AI models shared online are stored in a file format that can run hidden code
+the moment it is opened. If downloaded software could move motors directly, one bad file could turn
+a real machine into a dangerous one. With the Safety Kernel in the middle, even software nobody
+trusts can only *ask*.
+
+```
+   Robot software  (downloaded, not trusted)
+          │   "move the elbow to 45°"
+          ▼
+  ┌──────────────────────────────────┐
+  │          SAFETY KERNEL           │   checks every command, many times a second
+  │     8 safety checks · no AI      │   the only part allowed to move a motor
+  └──────────────────────────────────┘
+          │   allowed, limited, or stopped
+          ▼
+   Driver  ──►  Robot hardware
+```
+
+---
+
+## Three levels: Guest, Host and Certified
+
+Not every robot lets outside software control its motors. So Skynet OS connects to a robot at one of
+three levels, called **tiers**, and always tells you honestly which one it is at.
 
 | | **Guest** | **Host** | **Certified** |
 |---|---|---|---|
-| Runs on | A container beside the vendor stack | PREEMPT_RT Linux on the robot | Host, plus an independent safety MCU |
-| Owns the control loop | No | Yes | Yes |
-| Safety Kernel | **Advisory** — detects and records, enforces nothing | **Enforcing** | **Enforcing, redundant** |
-| Stop path independent of the app processor | No | No | Yes |
-| Can be evidence in a safety case | No | No | Yes |
-| Effort to adopt | An afternoon | A vendor porting project | That, plus hardware |
+| Where it runs | In a container, next to the robot maker's own software | On the robot's computer, on real-time Linux | Like Host, plus a separate safety chip |
+| Controls the motors | No | Yes | Yes |
+| Safety Kernel | **Only watches** — spots and records problems, but cannot block them | **Enforces** — blocks unsafe commands | **Enforces, with a backup** on independent hardware |
+| Can stop the robot even if the main computer fails | No | No | Yes |
+| Can be used as evidence in an official safety review | No | No | Yes |
+| Effort to set up | An afternoon | A porting project for the robot maker | That, plus extra hardware |
 
-Guest is how the ecosystem starts, and it is honest about being a passenger: it computes every
-verdict, logs every violation, raises every alarm — and the command still reaches the robot
-unchanged, because there is nothing underneath that Skynet controls. That is genuinely useful, it is
-not a safety function, and every surface says so in those words.
+At the **Guest** level, Skynet OS is a passenger. It checks every command, records every problem and
+raises every alarm, but the command still reaches the robot unchanged, because Skynet OS is not the
+one in control. That is useful, but it is **not** a safety system, and Skynet OS says so everywhere.
+The simulated robot you can try below always runs at Guest level.
+
+**No software can make a robot "certified safe" on its own.** Skynet OS keeps this sentence in its
+code, and repeats it word for word wherever the Certified level is mentioned:
 
 ```
 SAFETY_CLAIM_RULE:
@@ -99,370 +109,208 @@ SAFETY_CLAIM_RULE:
   body against a specific robot in a specific application.
 ```
 
-That constant lives in the code and is rendered on every surface that mentions the certified tier.
-Shortening it would be the most damaging thing this product could do.
+In plain words: an independent, officially approved organisation has to check each real robot doing
+its real job. Skynet OS can only give that organisation evidence to look at.
 
 ---
 
-## The one invariant
+## Try it without a robot
 
-> **The Safety Kernel is the only component with write access to an actuator.**
+You can turn a Linux computer into a **virtual robot**: the real Skynet OS programs and the real
+Safety Kernel, with a simulated robot arm instead of hardware. Nothing physical moves.
 
-A policy does not command a joint. It writes a *desired* command into a ring the kernel reads, and
-the kernel decides what reaches the motors. This is not a stylistic preference: most published
-checkpoints are pickles, and unpickling executes code by construction. Without sole writership,
-every published model is a remote code execution vulnerability bolted to a two-metre humanoid. It is
-what lets Skynet run untrusted policies *at all* — which is the entire point of having a catalogue.
+**You need Linux with systemd** — that is most normal Linux installs, such as Ubuntu. (systemd is
+the program that starts and looks after background services.) On Windows, use
+[WSL2 with systemd turned on](https://learn.microsoft.com/windows/wsl/systemd). On a Mac, use a
+Linux virtual machine.
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  .sky packages          policy · skill · service             │  sandboxed
-│  no actuator access · declared budget · granted capabilities │  untrusted
-├──────────────────────────────────────────────────────────────┤
-│  Policy Runtime      inference · observation assembly        │
-│  Embodiment Transport   resolved at install, applied here    │  system
-│  skynetd             lifecycle · reconcile · OTA · blackbox  │  services
-├══════════════════════════════════════════════════════════════┤
-│  ███  SAFETY KERNEL  ███                                     │  real-time
-│  the only writer to an actuator · 8 guards · no allocation   │  no AI
-├══════════════════════════════════════════════════════════════┤
-│  RHAL — stable C ABI, semver, drivers as shared objects      │  vendor
-├──────────────────────────────────────────────────────────────┤
-│  Vendor driver: ROS 2 · EtherCAT · CANopen · SDK · simulator │  boundary
-├──────────────────────────────────────────────────────────────┤
-│  PREEMPT_RT Linux            (certified tier: + safety MCU)  │
-└──────────────────────────────────────────────────────────────┘
+### Option 1: download a release (quickest)
+
+For 64-bit Linux on Intel/AMD (x86-64) or ARM (aarch64). Nothing to build.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/antonihabek/Skynet/main/packaging/get.sh | sh
+sudo ~/.local/share/skynet-os/current/packaging/virtual-robot.sh up
 ```
 
-The double rule is the trust boundary. Everything above it may be untrusted, downloaded five minutes
-ago, and written by a stranger. Nothing above it can move a joint except by asking the thing below
-it, which says no when the answer is no.
+The first line downloads Skynet OS, checks that the download is not damaged by comparing its
+checksum, and unpacks it into your home folder. It never uses `sudo`, and you can
+[read the script](packaging/get.sh) before running it. The second line installs and starts the
+virtual robot, and needs `sudo` because it sets up system services.
+
+### Option 2: build it from the source code
+
+You need [Rust](https://rustup.rs) (1.82 or newer), a C compiler and `make`. Nothing else gets
+downloaded, because the Rust code does not use any outside libraries.
+
+```bash
+git clone https://github.com/antonihabek/Skynet.git && cd Skynet
+sudo ./packaging/virtual-robot.sh up
+```
+
+It builds as your normal user and installs as root.
+
+### What you will see
+
+When it finishes, the script asks the running robot questions about itself and checks every answer:
+
+```
+  What the robot says about itself
+  ✓ the local socket answers (§33.7)
+  ✓ status reports a running supervisor
+  ✓ the control loop is up
+  ...
+  ✓ the black box has a window
+
+  The tier this evidence supports
+  ✓ guest — §35.3's cap, because the body declares simulator: true
+
+  This machine is now a robot
+```
+
+If a line says `FAIL` instead, the script tells you what to read next.
+
+### Talk to your robot
+
+```bash
+sudo skynet status                           # which body it has, what it runs, whether stop works
+sudo skynet state --token <admin-token>      # what state the robot is in, and why
+```
+
+`status` and the emergency stop, `skynet estop`, never need a password, on purpose: anyone near a
+robot must always be able to check it and stop it. Almost everything else needs the **admin token**, a password the installer
+prints **once** — so copy it somewhere safe. Pass it with `--token`, or set it in the `SKYNET_TOKEN`
+environment variable.
+
+### Remove it
+
+```bash
+sudo ./packaging/virtual-robot.sh down
+```
+
+This stops and removes the virtual robot. It keeps the `/data` folder, where the robot's black box
+recordings are. If you used Option 1, the script is in `~/.local/share/skynet-os/current/packaging/`.
 
 ---
 
-## The golden path
+## What works today
 
-What a developer reads, in order, and nothing else is required to get to a moving robot (§65).
+Skynet OS is at version 0.1. Here is the honest short version; [docs/status.md](docs/status.md) has
+the full one, part by part.
 
-### 1. Concepts
+**Built and tested**
 
-The tiers, the kernel invariant, what a driver is. That is the section above, and
-[`docs/skynet-os-architecture.md`](docs/skynet-os-architecture.md) §1–§7 in full.
+- The Safety Kernel and all eight of its guards.
+- The control loop (`skynetk`), the supervisor (`skynetd`) and the `skynet` command-line tool.
+- The black box, including playing a recording back through the Safety Kernel again.
+- Installing packages, checking their digital signatures, and rolling back.
+- A mock robot, a driver for the [MuJoCo](https://mujoco.org) physics simulator, and a bridge to
+  robots supported by [LeRobot](https://github.com/huggingface/lerobot) (so far tested only against
+  a simulated stand-in).
+- Tools that turn a URDF robot description into a Skynet OS body description, and that create the
+  starting code for a new driver in C or Rust.
+- The core rules written again in Python, C++, Go, C, Zig, Java and C#, all checked against the same
+  shared tests. Some are complete and some are still in progress — see
+  [editions/README.md](editions/README.md).
 
-### 2. Build it
+**Not built yet**
 
-No network, no dependencies. The Rust workspace has none at all — not minimalism for its own sake,
-but because the kernel is `no_std` without `alloc` and a vendor building a driver in 2036 should not
-need a package registry to have survived.
+- The part that runs AI models on the robot. For now there is only a test program (`skynetp`) that
+  sends simple, scripted commands.
+- Drivers for real industrial hardware, such as `ros2_control`, EtherCAT, CANopen and robot makers'
+  own software kits.
+- The separate safety chip the Certified level needs.
+- A test of software updates on real robot hardware. The update code is written and tested, but has
+  never run on a real device.
 
-```bash
-cargo test --workspace
-cargo install --path crates/skynet-cli --locked    # puts `skynet` on your PATH
-```
-
-### 3. Run the mock robot
-
-A body that answers the RHAL with no hardware behind it, and — the part that matters more — one you
-can provoke the dangerous failures on: a stalled command stream, a joint reporting NaN, an estop
-mid-motion, a bus timeout inside a cycle.
-
-```bash
-cd drivers/mock && make check
-```
-
-### 4. Write a driver
-
-Start from a scaffold rather than from a blank file (§63.1):
-
-```bash
-skynet driver new my-arm --lang c      # or --lang rust
-cd my-arm && make
-skynet driver check ./libmy_arm.so
-```
-
-The scaffold builds, loads, and **fails conformance in exactly the places where only you know the
-answer** — the roles are null, so `embodiment.roles.coverage` fails at 0%, and a driver cannot sign
-its own descriptor, so `embodiment.descriptor.signed` is not measured. Those two plus the `TODO`s in
-the generated source are the to-do list.
-
-`skynet driver check` runs the driver-facing half of the sim suite against the built shared object
-and reports, in the terms of §15, **the tier the evidence supports** rather than a pass or a fail.
-The sim tests that are properties of the runtime rather than of a driver are listed as not covered,
-by name, on every run — a vendor arriving at certification believing they had evidence they do not
-have is a failure of that list. Turning up to a bench session with this already green is what makes
-bench time cheap.
-
-`drivers/mock/mock_robot.c` is the reference. A vendor implements one shared object exporting the C
-ABI in [`bindings/c/skynet_rhal.h`](bindings/c/skynet_rhal.h), and that is the entire integration.
-
-**If your robot is one LeRobot already supports, the driver exists**:
-[`drivers/lerobot`](drivers/lerobot/) wraps `Robot.connect / get_observation / send_action`, and
-[`drivers/python-host`](drivers/python-host/) is what loads it. Guest tier — Python's GIL and garbage
-collector cannot hold a real-time path, and the host refuses to load a Python driver that claims
-otherwise.
-
-**And if you have no robot at all**, [`drivers/mujoco`](drivers/mujoco/) turns an MJCF scene into
-one: a descriptor built from the scene, a clock that is the simulator's (§35.3), a camera where the
-machine can render, and `simulator: true` on the descriptor so nothing it produces can be presented
-as bench evidence. That is what makes the sim half of SCTS runnable against physics rather than
-against a mock, which is why §70 calls simulator drivers load-bearing rather than a lesser path.
-Four properties make it a contract rather than an interface:
-
-* **`abi_version` is checked at load and mismatches refuse.** The OS ships weekly, the driver ships
-  when the vendor has something to say, and neither blocks the other. This is Project Treble in one
-  field.
-* **`read_state` and `write_command` are wait-free and allocate nothing.** They run inside the
-  real-time path.
-* **`emergency_stop` must work from a signal handler and from a dying process.** A driver that
-  implements it as "publish a message and await an ack" fails the test that matters most.
-* **`describe` returns the embodiment descriptor.** The body description comes out of the driver, so
-  it cannot drift from the hardware it describes without the driver being wrong.
-
-### 5. Describe the body
-
-Most of the descriptor is already written and sitting in a file the robot has (§63.4):
-
-```bash
-skynet descriptor from-urdf robot.urdf > embodiment.json
-```
-
-The descriptor goes to stdout and the reasoning goes to stderr, so the redirect above captures a
-file and not a lecture. Joints, types, limits, the frame graph and the degrees of freedom come
-straight out of the URDF. Two things never do, and the report says so every time.
-
-The role vocabulary is what makes cross-body work possible, and it is deliberately modest:
-
-```
-role  := chain "." link [ "." axis ] [ "#" index ]
-
-left_arm.shoulder.pitch    right_hand.finger.flex#2    base.wheel#0
-```
-
-Wire names stay vendor-specific; the semantics become shared. An unrecognised role parses to
-nothing and can then only be matched by exact name — it never silently maps to something plausible.
-`skynet role left_arm.shoulder.pitch` checks one at the keyboard.
-
-**Roles are suggested, never assigned.** A URDF carries no semantics, so `shoulder_pitch_joint` is
-*probably* `left_arm.shoulder.pitch` — and probably is not a basis for cross-body remapping, because
-a wrong role does not fail loudly, it binds a policy's elbow channel to a wrist. The importer prints
-every suggestion and how it reached it; `--accept-suggested-roles` is the human-confirms step and is
-a separate action precisely so that it is one.
-
-**The `envelope` stays null until a person supplies a sourced figure.** A URDF effort limit is a
-design value from a CAD model, not a datasheet safety rating, and copying one into the other would
-auto-populate a safety limit nobody verified. The robot then renders "no safety envelope declared",
-which is correct and slightly annoying, and that is the right trade.
-
-### 6. Check the body's own geometry
-
-The descriptor carries a frame graph (§44.3), and the Safety Kernel walks it in cycle to decide two
-of the eight guards. What that walk can actually do is worth knowing before a robot is holding
-itself still for a reason nobody can see:
-
-```bash
-skynet frames embodiment.json --joints shoulder=1.5708,elbow=0
-```
-
-The tree, where that configuration puts every frame, and — the part that matters — what the
-`workspace` and `self_collision` guards will be able to do with it: how many frames can be
-constrained, how many carry geometry the kernel can place, and how many pairs that costs per cycle.
-A body with one collision capsule has nothing to collide with, and learning that here beats learning
-it from a guard silently doing nothing.
-
-Forward kinematics runs on the same code the robot runs, down to the sine: §31.2 makes the kernel's
-`sin`, `cos` and `sqrt` single-source across editions, because no platform library is required to
-round the way another one does and a redundant safety processor that disagrees with the primary
-about a clamp is the failure redundancy exists to detect.
-
-### 7. Understand what will be enforced
-
-```bash
-skynet transport ./policy.json --robot embodiment.json
-```
-
-```rust
-let plan = skynet_contracts::resolve_transport(&policy, &body, Default::default());
-```
-
-Per channel, one of six answers — `direct`, `remap`, `retarget`, `synthesize`, `drop`, `blocked` —
-and the plan's verdict is the worst binding in it. The planner is pure: no I/O, no clock, no
-database. It runs on the Hub so a repository page can answer "does this run on my G1?" before
-anybody downloads forty gigabytes, on the robot at install time with no network at all, and on a
-workstation so a developer can ask what a body they do not own would do with their policy. All three
-compute the same function over the same declared facts, so none is authoritative and they cannot
-disagree.
+The specification itself estimates **several engineer-years** of work before a real robot moves
+under Skynet OS.
 
 ---
 
-## When something is wrong
+## What it does *not* promise
 
-Every refusal names the cause and the next thing to do, usually with the section of the
-specification behind it. Read the message before searching for it — it was written to be the
-answer.
+"Universal operating system" sounds bigger than this is, so here are the limits, stated up front:
 
-When a message is not enough, these are the questions in the order worth asking them. On a robot
-they run under `sudo` (the socket is root's), and everything past `status` takes `--token`:
+- **No driver, no robot.** Skynet OS only works on robots someone has written a working driver for.
+- **Some robots will always be Guest.** Many industrial arms — for example Fanuc, KUKA, ABB and older
+  Universal Robots controllers — only accept whole programs, not motor-by-motor commands. Their own
+  controller is in charge of safety, so Skynet OS can only ride along.
+- **Running is not the same as succeeding.** Skynet OS can adapt software made for one robot to a
+  robot with a different body. That makes the commands valid and keeps them inside safe limits, but
+  it does not mean the task still works. Nobody knows how to guarantee that yet.
+- **At the Host level, it replaces your robot's control software.** `ros2_control` and the Safety
+  Kernel both want to be the one that controls the motors, and they cannot both be. If you use
+  `ros2_control` today, you should know this from the start.
 
-```bash
-skynet status                      # is the supervisor up, which body, is stop reachable
-skynet state                       # which of §27's conditions holds the robot where it is
-skynet limits                      # which guards can run, and the input each missing one needs
-skynet conformance                 # §15's runtime tests, run by the robot on itself
-skynet blackbox                    # the recording's window, and what is missing from it
-skynet doctor --out bundle.json    # all of the above and more, in one file
-```
-
-`skynet doctor` is the one to attach to a bug report. It reads every route §41.3 names, and a route
-it could not read is recorded as unread *with the reason* — a robot refusing a request for want of
-a credential is telling you something, and the bundle does not swallow it.
-
-Underneath the CLI, the two processes log to the journal:
-
-```bash
-journalctl -u skynetk -u skynetd -f
-```
-
-`skynetk` is the control loop (the driver and the Safety Kernel) and `skynetd` is the supervisor.
-They are separate on purpose (§33.1): the supervisor can crash, restart or be stopped, and the loop
-keeps holding the robot. If only one of them is in trouble, that is usually the first clue.
-
-For a driver you are writing, `skynet driver check ./libyour_driver.so` is the equivalent — it loads
-the shared object, runs the simulated half of the conformance suite, and reports the tier your
-evidence supports rather than a bare pass or fail.
+The full list is Part VII of [the specification](docs/skynet-os-architecture.md).
 
 ---
 
-## Running the daemon
+## What is in this repository
 
-`skynetd` is the supervisor (§33) and `skynet` is the CLI in front of it. Nothing here needs a robot;
-`--root` puts `/data` and `/run` wherever you like.
-
-```bash
-# Stage a package. The digest is verified against the content, not taken on trust; add
-# --signed-by and --signature and the release signature is checked too (§19, §37.1).
-skynet install ./my-policy --root /tmp/robot \
-  --id openrobot/grasp --kind policy --version 1.0.0 --digest <hex>
-
-# Say what the robot should be running, then reconcile once and read the plan.
-skynetd once --root /tmp/robot
-
-# Or run it, with the local API in front (§33.7). Add --lan and it answers a browse, so a
-# laptop on the same network can find it without being told the address (§82).
-skynetd --root /tmp/robot --lan 169.254.3.4:8099 --advertise arm-01 &
-skynet discover                                        # which robots are on this link
-skynet status --socket /tmp/robot/run/skynetd.sock     # needs no credential (§39.1)
-skynet estop  --socket /tmp/robot/run/skynetd.sock     # nor does this
-skynetd credential add --root /tmp/robot --label laptop --role operator
-skynet ps --socket /tmp/robot/run/skynetd.sock --token <token>
-
-# Invoke a skill (§54.1). Accepted, not started: the next reconcile pass evaluates §54.2's
-# preconditions against a live context and may refuse it, naming the clause.
-skynet skill run openrobot/pick --args '{"target":"cup"}'   --socket /tmp/robot/run/skynetd.sock --token <token>
-skynet skills --socket /tmp/robot/run/skynetd.sock --token <token>
-```
-
-Two things it will not do, and says so rather than pretending:
-
-* **nothing starts until somebody declares a safe state.** §33.4 gates it, and this edition has no
-  channel to the kernel to ask — so an operator writes `yes` into `/data/state/safe-state` and every
-  report of the safe state says `declared` beside it.
-* **there is no default password.** An unprovisioned robot answers status and stop and nothing else
-  (§39.2), and that is the specified behaviour rather than a state to be fixed by a fallback.
-* **and it trusts nobody until told to.** `/data/state/trust.json` holds the keys whose signatures
-  this robot believes, and there is no default there either — so a package reports `untrusted` until
-  somebody writes one, and a **driver** does not activate at all (§19). That is the same
-  useless-rather-than-open choice §39.2 makes for credentials.
-
-`sh crates/skynetd-io/e2e.sh` runs the whole chain — install, verify, activate, launch, socket,
-rollback — and reports the systemd launch step as not run where there is no systemd, rather than
-passing a shorter exam.
+| Folder | What is inside |
+|---|---|
+| [`crates/`](crates/) | The main Rust code — the operating system itself |
+| [`drivers/`](drivers/) | Robot drivers: `mock` (no hardware), `mujoco` (physics simulator), `lerobot` and `python-host` |
+| [`bindings/`](bindings/) | The interface every driver implements (the RHAL), in C, C++ and Python |
+| [`packaging/`](packaging/) | The installer, the virtual robot script, the system service files and the release bundle |
+| [`docs/`](docs/) | The specification, the status report and the developer guide |
+| [`corpus/`](corpus/) | Shared test cases that every version of the code must reproduce exactly |
+| [`editions/`](editions/) | The core rules in Python, C++, Go, C, Zig, Java and C# |
+| [`reference/`](reference/) | The TypeScript reference code the test cases are generated from |
+| [`tools/`](tools/) | Scripts that generate and check things, run automatically on every change |
 
 ---
 
-## The corpus is the specification
+## Words you will see
 
-An edition is any implementation that reproduces the conformance corpus and passes SCTS. Not "agrees
-with", not "is equivalent to" — **reproduces, byte for byte**, because equivalence is where drift
-hides. A warning in a different order today is a different clamp tomorrow.
-
-```bash
-node tools/corpus-gen/generate.ts   # regenerate from the reference oracle
-cargo test -p skynet-corpus          # hold this edition to it
-```
-
-Cases across roles, transport, cycle verdicts, limit resolution, frame graphs, forward kinematics,
-the black box, admission, certification, readiness and more — the fuzzed ones generated from seeded
-PRNGs written out in full, so regenerating produces byte-identical files and a diff means a
-behaviour change rather than a reshuffle.
-
-The newest of them freeze **poses**, not only verdicts. A guard trip is a boolean, and two editions
-could agree on every trip in the corpus while disagreeing about where the arm is by a millimetre —
-right up to the day one of them clamps and the other does not.
-
-A divergence is *either* a specification ambiguity *or* an implementation defect. It blocks the
-release of the edition that diverged and never of the others.
+| Word | What it means |
+|---|---|
+| **Driver** | A small library that connects Skynet OS to one kind of robot |
+| **RHAL** | Robot Hardware Abstraction Layer — the fixed C interface every driver implements |
+| **Safety Kernel** | The part that checks every command, and the only part allowed to move a motor |
+| **Guard** | One of the Safety Kernel's eight safety checks |
+| **Policy** | Software that decides how a robot should move, often a trained AI model |
+| **Skill** | A named task a robot can be asked to do, such as "pick up the cup" |
+| **Package** | Robot software bundled so it can be installed on a robot |
+| **Descriptor** | A file describing a robot's body: its joints, their limits and its shape |
+| **Tier** | Guest, Host or Certified — how deeply Skynet OS is connected to a robot |
+| **Black box** | The recorder that saves what happened in every control cycle |
+| **Corpus** | The shared set of test cases every edition must pass |
+| **Edition** | The core rules written in one programming language |
+| **`skynetd` / `skynetk`** | The two background services: the supervisor, and the control loop |
 
 ---
 
-## Repository layout
+## Learn more
 
-```
-docs/          The specification. Every § in this repository points into it.
-bindings/      The RHAL ABI a driver implements: C (the source of truth), C++ and Python views.
-crates/        The Rust reference edition — the operating system itself.
-editions/      The same contracts in Python, C++, Go, C, Zig, Java and C#.
-corpus/        The conformance corpus every edition reproduces byte for byte. Data, no code.
-reference/     The TypeScript oracle the corpus is generated from.
-drivers/       mock (no hardware), mujoco (physics), lerobot (a bridge), python-host.
-packaging/     install.sh, virtual-robot.sh, the systemd units, and the release bundle.
-tools/         The corpus generator and the checks CI runs over the documents.
-```
-
-The four processes a robot runs, and the crates they come from:
-
-| Binary | Crate | What it is |
-|---|---|---|
-| `skynetk` | `skynet-kernel-host` | The control loop: owns the driver, runs the Safety Kernel every cycle, records the black box |
-| `skynetd` | `skynetd-io` | The supervisor: reconciles desired state, launches packages, serves the local API and the on-robot console |
-| `skynetp` | `skynet-policy-host` | The policy host: the producer end of the command ring a policy writes into |
-| `skynet` | `skynet-cli` | The CLI: talks to a robot, and scaffolds and checks drivers on a workstation |
-
-The Safety Kernel itself is `skynet-kernel` — `no_std`, no allocator, no clock, its own `sin`, `cos`
-and `sqrt`. [`editions/README.md`](editions/README.md) explains why Rust lives in `crates/` rather
-than beside the other languages, and [`Cargo.toml`](Cargo.toml) lists every crate.
-
-Why this is a separate repository from the Hub, and not a subdirectory (§72.1): a subdirectory of a
-private commercial repository cannot be cleanly open-sourced later without a history-scrubbing split
-or publishing commit history that leaks marketplace internals. Git history is permanent, so the
-licence boundary has to exist before the code does.
+- **[Developer guide](docs/developer-guide.md)** — build it, write a driver, describe a robot's body,
+  see what the Safety Kernel will enforce, run the services by hand, and fix problems.
+- **[Specification](docs/skynet-os-architecture.md)** — the complete design. It is long: start with
+  Part I, and read Part VII (what does not work) early.
+- **[Status](docs/status.md)** — what is built, part by part.
+- **[Editions](editions/README.md)** — the same rules in other programming languages.
 
 ---
 
-## What this does not do, stated because the word "universal" invites the strong reading
+## Get help or get involved
 
-* **Nothing runs without an RHAL driver for that specific robot.** The claim is precisely: any robot
-  for which somebody has written a conformant driver.
-* **A large class of robots cannot be commanded at joint level.** Behind a Fanuc, KUKA, ABB or older
-  UR controller you upload a *program*; the controller owns the servo loop and enforces its own
-  safety. Those machines are Guest tier permanently — not because of a missing feature, but because
-  the architecture that makes them safe is somebody else's and is already there.
-* **Transport makes a policy execute, not succeed.** A `retargeted` verdict means the commands are
-  geometrically valid and inside the envelope. Whether the policy still does the task is an open
-  research question.
-* **At Host tier, Skynet OS replaces the thing it is said to be compatible with.** `ros2_control` and
-  the Safety Kernel both want to be the component that writes to actuators, and they cannot both be.
-  Anyone evaluating adoption should hear that in the first conversation rather than the third month.
+- **Found a bug?** [Open an issue](https://github.com/antonihabek/Skynet/issues/new/choose) with
+  the bug template. If a robot is involved, attach the file made by `skynet doctor --out bundle.json`.
+- **Have a question or an idea?** [Start a discussion](https://github.com/antonihabek/Skynet/discussions).
+- **Want Skynet OS on your robot?** Open a *Robot or driver support* issue. Drivers are the most
+  useful thing anyone can contribute.
+- **Want to write code?** Read [CONTRIBUTING.md](CONTRIBUTING.md) first.
+- **Found a security or safety problem?** Please **do not** post it publicly — report it privately,
+  as [SECURITY.md](SECURITY.md) explains.
 
-The full version of this list is Part VII of the specification, and it is worth reading before the
-rest.
+Everyone taking part is expected to follow the [code of conduct](CODE_OF_CONDUCT.md).
 
 ---
 
-## Status, contributing, security
+## Licence
 
-* **What is built and what is not:** [`docs/status.md`](docs/status.md), crate by crate, including
-  the parts that exist only as specification.
-* **Contributing:** [`CONTRIBUTING.md`](CONTRIBUTING.md). Drivers are the most useful contribution
-  there is.
-* **A security or safety issue:** report it privately — [`SECURITY.md`](SECURITY.md).
-* **Licence:** [Apache-2.0](LICENSE).
+Skynet OS is free and open source under the [Apache 2.0 licence](LICENSE). You can use it, change it
+and share it, including in commercial products, as long as you keep the licence and copyright
+notices. The Skynet name and the certification programme are not covered by the licence.
