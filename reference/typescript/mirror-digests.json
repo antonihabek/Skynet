@@ -1,5 +1,5 @@
 {
-  "note": "sha256 of each reference contract, with its imports rewritten for the Hub, and of each wire fixture as-is under a `wire/` prefix. Written by tools/check-contract-mirrors.mjs --sync in the Skynet OS repository; checked there against reference/typescript/, and in BotMarket by lib/__tests__/skynet-os-mirrors.test.ts. Never edit by hand — a digest somebody updated to match a local edit is a check that has been switched off.",
+  "note": "sha256 of each reference contract, with its imports rewritten for the Hub, and of each wire fixture as-is under a `wire/` prefix. Written by tools/check-contract-mirrors.mjs --sync in the Skynet OS repository; checked there against reference/typescript/, and in the Hub by lib/__tests__/skynet-os-mirrors.test.ts. Never edit by hand — a digest somebody updated to match a local edit is a check that has been switched off.",
   "digests": {
     "birth": "ee1930c41b640088d77321e95dcbf9aeab4c33fd658d42e595774a44370acaea",
     "calibration": "a8b86f1e1a1a22688d728c549d82e1ae99afac2333c064125e6813e33c93ab21",

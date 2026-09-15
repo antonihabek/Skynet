@@ -29,7 +29,7 @@
  * # With one repository, which is what CI has
  *
  * The comparison above needs both trees, and for a long time this script's answer to having one was
- * to print "BotMarket not found" and exit zero — so the CI job named after this check has never
+ * to print that the Hub was not found and exit zero — so the CI job named after this check has never
  * been able to fail, and the one divergence it has actually caught was caught by a human running it
  * locally.
  *
@@ -319,7 +319,7 @@ function allDigests() {
  * The pinned digests, kept in **both** repositories.
  *
  * The comparison further down only runs where both are checked out, and CI has one. So the job that
- * exists to catch a divergence has never been able to: it printed "BotMarket not found" and exited
+ * exists to catch a divergence has never been able to: it printed that the Hub was not found and exited
  * zero, and the one defect this tool has actually caught was caught by a human running it locally.
  *
  * This file closes that. It holds the same digests as the Hub's copy and is written by the same
@@ -379,7 +379,7 @@ function writePins(hubPath) {
     note: 'sha256 of each reference contract, with its imports rewritten for the Hub, and of each '
       + 'wire fixture as-is under a `wire/` prefix. Written by '
       + 'tools/check-contract-mirrors.mjs --sync in the Skynet OS repository; checked there against '
-      + 'reference/typescript/, and in BotMarket by lib/__tests__/skynet-os-mirrors.test.ts. Never '
+      + 'reference/typescript/, and in the Hub by lib/__tests__/skynet-os-mirrors.test.ts. Never '
       + 'edit by hand — a digest somebody updated to match a local edit is a check that has been '
       + 'switched off.',
     digests,

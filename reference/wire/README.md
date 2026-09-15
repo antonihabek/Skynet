@@ -38,7 +38,7 @@ When a producer legitimately changes:
 
 ```
 SKYNET_WRITE_WIRE=1 cargo test -p skynetd-io
-node tools/check-contract-mirrors.mjs --sync ../BotMarket
+node tools/check-contract-mirrors.mjs --sync
 ```
 
 Then run the Hub's suite. If it fails, the change is one the Hub owes and the two land together —

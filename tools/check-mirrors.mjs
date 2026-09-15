@@ -2,7 +2,7 @@
 /**
  * Verify the shared documents have not diverged.
  *
- * Three files live in both this repository and BotMarket. §72.1 splits the code for good reasons —
+ * Three files live in both this repository and the Hub's. §72.1 splits the code for good reasons —
  * licensing history, vendor readability, toolchain overlap, release cadence — and the specification
  * is not one of the things that should be split by that boundary. Two copies drifting apart would
  * mean two teams building against two designs while both believed they were reading the same one.
@@ -20,7 +20,7 @@
  * # With one repository, which is what CI has
  *
  * The comparison needs both trees, and this script's answer to having one used to be to print
- * "BotMarket not found" and exit zero — so the CI job named after this check could not fail, and
+ * that the Hub was not found and exit zero — so the CI job named after this check could not fail, and
  * a specification edited here and not there would ship.
  *
  * So each document's digest is pinned in `docs/mirror-digests.json`, written by `--sync` from the
@@ -40,7 +40,7 @@ import { findHubOr } from './hub-path.mjs'
 
 const HERE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
-/** `[ path in this repository, path in BotMarket ]`. */
+/** `[ path in this repository, path in the Hub ]`. */
 const MIRRORS = [
   ['docs/skynet-os-architecture.md', 'docs/skynet-os-architecture.md'],
 ]
@@ -54,7 +54,7 @@ const sync = args.includes('--sync')
 /**
  * Record agreement without moving a byte.
  *
- * `--sync` conflates two operations that are not the same one: *take BotMarket's copies*, and
+ * `--sync` conflates two operations that are not the same one: *take the Hub's copies*, and
  * *record that these bytes are agreed*. The workflow this file documents below — "an edit made
  * here first should be copied there by hand, deliberately" — needs the second without the first,
  * and until `--pin` existed the only way to reach it was to run `--sync`, which overwrites **every
@@ -194,7 +194,7 @@ function writePins(agreed) {
   writeFileSync(
     PINS,
     `${JSON.stringify({
-      note: 'sha256 of each document shared with BotMarket, pinned so a divergence is caught with '
+      note: 'sha256 of each document shared with the Hub (Robot Overflow), pinned so a divergence is caught with '
         + 'one checkout — which is what CI has. Written by tools/check-mirrors.mjs --sync (take '
         + 'their copies, then pin) or --pin (move nothing, pin what already agrees). A document '
         + 'the two trees differ on keeps its last agreed digest rather than being re-pinned or '
@@ -225,7 +225,7 @@ for (const [ours, theirs] of MIRRORS) {
   const b = join(hub, theirs)
 
   if (!existsSync(b)) {
-    console.log(`MISSING  ${theirs} in BotMarket`)
+    console.log(`MISSING  ${theirs} in the Hub`)
     diverged += 1
     continue
   }
@@ -242,24 +242,24 @@ for (const [ours, theirs] of MIRRORS) {
   }
 
   if (sync && !pinOnly) {
-    // BotMarket is the origin of all three, so it wins a sync. An edit made here first should be
+    // The Hub is the origin of all three, so it wins a sync. An edit made here first should be
     // copied there by hand, deliberately, rather than by a flag that could silently overwrite it
     // — and then pinned with `--pin`, which is the half of this that moves nothing.
     copyFileSync(b, a)
-    console.log(`synced   ${ours}  <- BotMarket`)
+    console.log(`synced   ${ours}  <- the Hub`)
     synced += 1
     agreed.add(ours)
     continue
   }
 
   console.log(`DIVERGED ${ours}`)
-  console.log(`         here:      ${a}`)
-  console.log(`         BotMarket: ${b}`)
+  console.log(`         here:    ${a}`)
+  console.log(`         the Hub: ${b}`)
   diverged += 1
 }
 
 if (synced > 0) {
-  console.log(`\n${synced} file(s) synced from BotMarket.`)
+  console.log(`\n${synced} file(s) synced from the Hub.`)
 }
 
 // Re-pinned per document rather than per run. Pinning a divergence would record a disagreement as
@@ -275,7 +275,7 @@ if (diverged > 0 && !pinOnly) {
   console.error(
     `\n${diverged} shared document(s) have diverged.\n` +
       'A shared document is edited in both repositories or in neither. Either copy the newer\n' +
-      'version across by hand, or run with --sync to take BotMarket\'s copies.',
+      'version across by hand, or run with --sync to take the Hub\'s copies.',
   )
   process.exit(1)
 }

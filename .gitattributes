@@ -28,7 +28,7 @@
 
 # The same failure, one directory over, and it has now happened for real.
 #
-# `reference/typescript/*.ts` is mirrored into BotMarket's `lib/skynet/os/` by
+# `reference/typescript/*.ts` is mirrored into the Hub's `lib/skynet/os/` by
 # `tools/check-contract-mirrors.mjs`, and its digests are checked from the Hub's own suite. Both
 # sides were written on a working tree that happened to hold LF; the first `git checkout` after a
 # merge re-materialised the Hub's copies as CRLF, and from that moment the comparison reported all
@@ -47,7 +47,7 @@ tools/**/*.ts             eol=lf
 # And the shared specifications, for the same reason and now with the same teeth.
 #
 # `tools/check-mirrors.mjs` pins a sha256 of each of these into `docs/mirror-digests.json` so that a
-# document edited here and not in BotMarket fails with **one** checkout, which is what CI has. That
+# document edited here and not in the Hub fails with **one** checkout, which is what CI has. That
 # digest is over the file's bytes, so a checkout that rewrote the line endings would present as an
 # edit nobody made. The rule at the top of this file already covers them; they are named here
 # because their bytes now gate a check, and a reader looking for what must not be touched should

@@ -85,6 +85,13 @@ if [ -z "$BIN" ]; then
   cargo build -p skynetd-io -p skynet-cli -p skynet-kernel-host -p skynet-policy-host >/dev/null
   BIN="$(cargo metadata --format-version 1 --no-deps 2>/dev/null | sed 's/.*"target_directory":"\([^"]*\)".*/\1/')/debug"
 fi
+# Absolute, because §26's download and §41.3's doctor below run the CLI from inside `$ROOT`. A
+# relative SKYNET_BIN — the form the usage line above and CI both pass — named nothing once the
+# directory changed, and `set -e` ended the whole run with exit 127 halfway through, as `not found`.
+case "$BIN" in
+  /*) ;;
+  *) BIN="$(cd "$BIN" 2>/dev/null && pwd)" || { echo "SKYNET_BIN=$SKYNET_BIN is not a directory"; exit 1; } ;;
+esac
 SKYNETD="$BIN/skynetd"
 SKYNET="$BIN/skynet"
 SKYNETK="$BIN/skynetk"
