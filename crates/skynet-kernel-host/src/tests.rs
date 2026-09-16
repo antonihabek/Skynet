@@ -1154,3 +1154,364 @@ fn a_commanded_window_counts_its_own_trips() {
     drop(recorder);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ── Capture, in the cycle ───────────────────────────────────────────────────
+
+mod capture {
+    use super::*;
+    use crate::capture::{Camera, Declared, RhalSensor};
+    use crate::run::Attached;
+    use skynet_capture::source::Source;
+
+    /// Ten frames' worth of bytes, which is all a test pattern needs to be told apart.
+    const FRAME_BYTES: usize = 10;
+
+    fn body_with_camera() -> Fake {
+        let mut body = Fake::new(2);
+        body.camera = Some(("wrist".to_string(), FRAME_BYTES));
+        body
+    }
+
+    fn declared(hz: f64) -> Declared {
+        Declared {
+            name: "wrist".to_string(),
+            hz,
+            buffers: 2,
+            slot_bytes: 64,
+        }
+    }
+
+    /// Turn a fresh loop at 100 Hz for `cycles` cycles with `camera` attached.
+    ///
+    /// The clock restarts at zero on every call, which the tests that call this twice rely on: the
+    /// camera's own schedule is what decides whether a frame is due, and a schedule that has moved
+    /// past the restarted clock reads nothing until it catches up.
+    fn turn(camera: &mut Camera, body: &mut Fake, cycles: u64) -> Vec<crate::run::Turn> {
+        let words = ring_words();
+        let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+        let mut consumer = ring.consumer();
+        let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
+        let mut host = Host::new(&CHANNELS);
+        (0..cycles)
+            .map(|cycle| {
+                host.step_observing(
+                    cycle * 10_000_000,
+                    body,
+                    &mut consumer,
+                    &limits,
+                    None::<&Envelope<'_>>,
+                    Attached {
+                        observations: None,
+                        camera: Some(&mut *camera),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    /// The stream is read at the rate somebody declared, not at the loop's.
+    ///
+    /// §47.5's declaration is the only thing that sets it. A camera read on every cycle of a
+    /// hundred-hertz loop is a hundred renders a second that nobody asked for, on the control
+    /// thread.
+    #[test]
+    fn a_camera_is_read_at_its_declared_rate_and_not_the_loops() {
+        let mut body = body_with_camera();
+        let sensor = RhalSensor::new(0, &declared(25.0)).expect("a stream");
+        let mut camera = Camera::new(sensor, None);
+
+        let turns = turn(&mut camera, &mut body, 20);
+
+        // Twenty cycles of ten milliseconds, and a frame due every forty: at 0, 40, 80, 120, 160.
+        assert_eq!(camera.sensor().counts().reads, 5);
+        assert_eq!(camera.sensor().counts().frames, 5);
+        let captured: Vec<usize> = turns
+            .iter()
+            .map(|turn| turn.capture.as_ref().expect("a camera turn").captured)
+            .collect();
+        assert_eq!(
+            captured,
+            vec![1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]
+        );
+    }
+
+    /// The command goes out before the camera is read.
+    ///
+    /// The write is the part of a cycle with a deadline. A frame read first would spend the
+    /// period's budget before the one thing in it that cannot be late.
+    #[test]
+    fn a_cycle_writes_its_command_before_it_reads_the_camera() {
+        let mut body = body_with_camera();
+        let sensor = RhalSensor::new(0, &declared(100.0)).expect("a stream");
+        let mut camera = Camera::new(sensor, None);
+
+        turn(&mut camera, &mut body, 3);
+
+        assert_eq!(
+            body.frames_after,
+            vec![1, 2, 3],
+            "each frame was read after that cycle's command had been written"
+        );
+    }
+
+    /// Every buffer the camera takes goes back in the same turn.
+    ///
+    /// §47.3's one hard rule. With no pool attached the frame has nowhere to go, and it is
+    /// released anyway — a sensor that kept it would run dry after two frames and then look like a
+    /// camera that stopped.
+    #[test]
+    fn every_buffer_the_camera_takes_comes_back() {
+        let mut body = body_with_camera();
+        let sensor = RhalSensor::new(0, &declared(100.0)).expect("a stream");
+        let mut camera = Camera::new(sensor, None);
+
+        turn(&mut camera, &mut body, 12);
+
+        assert_eq!(camera.sensor().counts().frames, 12);
+        assert_eq!(
+            camera.sensor().outstanding(),
+            0,
+            "nothing is still lent out"
+        );
+        assert_eq!(
+            camera.sensor().counts().starved,
+            0,
+            "so nothing ever starved"
+        );
+        assert_eq!(
+            camera.counts().unpublished,
+            12,
+            "and every frame is counted as one nobody was offered, rather than as published"
+        );
+    }
+
+    /// A frame the driver has already given is not a new frame.
+    ///
+    /// Reading a stream faster than it produces is a configuration somebody can choose, and a
+    /// policy told the same image is fresh twice has been told something false about time. Here
+    /// the body's own state read fails from the third cycle, so the fake's clock stops and its
+    /// camera answers with the frame it already stamped.
+    #[test]
+    fn a_frame_the_driver_repeats_is_counted_and_not_handed_on() {
+        let mut body = body_with_camera();
+        let sensor = RhalSensor::new(0, &declared(100.0)).expect("a stream");
+        let mut camera = Camera::new(sensor, None);
+
+        let words = ring_words();
+        let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+        let mut consumer = ring.consumer();
+        let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
+        let mut host = Host::new(&CHANNELS);
+        let mut captured = Vec::new();
+        for cycle in 0..3u64 {
+            if cycle == 2 {
+                body.read_fails = true;
+            }
+            let turn = host.step_observing(
+                cycle * 10_000_000,
+                &mut body,
+                &mut consumer,
+                &limits,
+                None::<&Envelope<'_>>,
+                Attached {
+                    observations: None,
+                    camera: Some(&mut camera),
+                },
+            );
+            captured.push(turn.capture.map(|capture| capture.captured));
+        }
+
+        assert_eq!(camera.sensor().counts().reads, 3);
+        assert_eq!(camera.sensor().counts().repeats, 1);
+        assert_eq!(camera.sensor().counts().frames, 2);
+        assert_eq!(
+            captured,
+            vec![Some(1), Some(1), Some(0)],
+            "nothing was captured on the repeated read"
+        );
+    }
+
+    /// A failed read is counted, kept with its code, and does not stop the cycle.
+    #[test]
+    fn a_failed_read_is_counted_and_the_cycle_still_turns() {
+        let mut body = body_with_camera();
+        body.camera_fails = true;
+        let sensor = RhalSensor::new(0, &declared(100.0)).expect("a stream");
+        let mut camera = Camera::new(sensor, None);
+
+        let turns = turn(&mut camera, &mut body, 3);
+
+        assert_eq!(turns.len(), 3, "every cycle still produced a record");
+        assert_eq!(body.written.len(), 3, "and still wrote its command");
+        assert_eq!(camera.sensor().counts().failures, 3);
+        assert_eq!(
+            camera.sensor().first_failure().map(|failure| failure.code),
+            Some(-5)
+        );
+        assert_eq!(
+            camera.sensor().outstanding(),
+            0,
+            "a failed read holds no buffer"
+        );
+    }
+
+    /// Nothing is recorded, and the gap says exactly that.
+    ///
+    /// §47.4's recording side is declared empty on this build — there is no encoder — so every
+    /// frame is an annotated gap from the first one on. What must not happen is the absence
+    /// reading as a quiet stream.
+    #[test]
+    fn every_frame_is_an_annotated_gap_because_there_is_no_encoder() {
+        let mut body = body_with_camera();
+        let sensor = RhalSensor::new(0, &declared(100.0)).expect("a stream");
+        let mut camera = Camera::new(sensor, None);
+
+        turn(&mut camera, &mut body, 4);
+
+        let gap = camera
+            .close()
+            .expect("the gap closes at the end of the run");
+        assert_eq!((gap.from_seq, gap.to_seq, gap.frames), (0, 3, 4));
+        assert_eq!(camera.close(), None, "and it is handed back once");
+    }
+
+    /// A declaration that would read nothing is refused, naming what to change.
+    #[test]
+    fn a_declaration_that_reads_nothing_is_refused_by_name() {
+        for (hz, buffers, bytes, says) in [
+            (0.0, 2, 64, "capture rate"),
+            (f64::NAN, 2, 64, "capture rate"),
+            (30.0, 0, 64, "at least one buffer"),
+            (30.0, 2, 0, "at least one buffer"),
+        ] {
+            let refused = RhalSensor::new(
+                0,
+                &Declared {
+                    name: "wrist".to_string(),
+                    hz,
+                    buffers,
+                    slot_bytes: bytes,
+                },
+            )
+            .expect_err("a stream that holds or reads nothing is not built");
+            assert!(refused.contains(says), "{refused}");
+        }
+    }
+
+    /// A frame reaches the pool a policy maps, bytes and all.
+    ///
+    /// The one thing the rest of this section only implies: the pixels a policy reads are the ones
+    /// the driver rendered, carrying the sequence the camera assigned and the stamp the driver
+    /// gave. Linux only, because the pool is a `memfd`.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_frame_reaches_the_pool_a_policy_maps() {
+        let geometry = skynet_frames::Geometry {
+            slots: 2,
+            slot_bytes: 64,
+        };
+        let pool = skynet_frames::Writer::create("wrist", geometry).expect("a pool");
+        let [frames, loans] = pool.descriptors();
+        let dup = |fd| skynet_ring_shm::pass::dup(fd).expect("dup");
+        let reader =
+            skynet_frames::Reader::adopt(dup(frames), dup(loans), geometry).expect("a reader");
+
+        let mut body = body_with_camera();
+        let sensor = RhalSensor::new(0, &declared(100.0)).expect("a stream");
+        let mut camera = Camera::new(sensor, Some(pool));
+
+        assert_eq!(
+            reader.latest(),
+            None,
+            "nothing yet, and not a frame of zeros"
+        );
+        let turns = turn(&mut camera, &mut body, 3);
+        assert_eq!(
+            turns
+                .iter()
+                .map(|turn| turn.capture.as_ref().and_then(|capture| capture.published))
+                .collect::<Vec<_>>(),
+            vec![Some(0), Some(1), Some(2)]
+        );
+
+        let latest = reader.latest().expect("a frame");
+        let identity = reader.acquire(&latest).expect("a loan");
+        assert_eq!(identity.sequence, 2);
+        assert_eq!(identity.stream, "wrist");
+        let mut pixels = Vec::new();
+        reader.read(&latest, &mut pixels).expect("the bytes");
+        assert_eq!(
+            pixels,
+            Fake::pattern(3, FRAME_BYTES),
+            "the third frame the body rendered"
+        );
+        reader.release(&latest);
+        assert_eq!(camera.counts().published, 3);
+    }
+
+    /// A policy holding every slot costs itself vision, and the camera keeps going.
+    ///
+    /// §47.6's `pool_exhausted`: dropped, counted, and capture is never stalled.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_pool_with_every_slot_on_loan_drops_and_counts_and_capture_continues() {
+        let geometry = skynet_frames::Geometry {
+            slots: 1,
+            slot_bytes: 64,
+        };
+        let pool = skynet_frames::Writer::create("wrist", geometry).expect("a pool");
+        let [frames, loans] = pool.descriptors();
+        let dup = |fd| skynet_ring_shm::pass::dup(fd).expect("dup");
+        let reader =
+            skynet_frames::Reader::adopt(dup(frames), dup(loans), geometry).expect("a reader");
+
+        let mut body = body_with_camera();
+        let sensor = RhalSensor::new(0, &declared(100.0)).expect("a stream");
+        let mut camera = Camera::new(sensor, Some(pool));
+
+        let words = ring_words();
+        let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+        let mut consumer = ring.consumer();
+        let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
+        let mut host = Host::new(&CHANNELS);
+        let mut step = |cycle: u64, camera: &mut Camera, body: &mut Fake| {
+            host.step_observing(
+                cycle * 10_000_000,
+                body,
+                &mut consumer,
+                &limits,
+                None::<&Envelope<'_>>,
+                Attached {
+                    observations: None,
+                    camera: Some(camera),
+                },
+            )
+            .capture
+            .expect("a camera turn")
+        };
+
+        step(0, &mut camera, &mut body);
+        let held = reader.latest().expect("the first frame");
+        reader.acquire(&held).expect("and the policy holds it");
+
+        for cycle in 1..=3 {
+            let turned = step(cycle, &mut camera, &mut body);
+            assert!(turned.refused.is_some(), "cycle {cycle}: {turned:?}");
+        }
+        assert_eq!(camera.counts().pool_dropped, 3);
+        assert_eq!(camera.sensor().counts().frames, 4, "capture never stalled");
+        assert_eq!(
+            camera.sensor().outstanding(),
+            0,
+            "and never kept what it could not give"
+        );
+
+        reader.release(&held);
+        let turned = step(4, &mut camera, &mut body);
+        assert_eq!(
+            turned.published,
+            Some(4),
+            "a released slot takes the next frame"
+        );
+    }
+}

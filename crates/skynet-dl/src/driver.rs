@@ -57,6 +57,17 @@ pub enum DriverError {
         /// What was wrong with it.
         detail: String,
     },
+    /// A sensor frame larger than the buffer declared for its stream.
+    ///
+    /// Refused rather than truncated, for the reason `skynet-frames` refuses one: a policy handed
+    /// nine tenths of an image has no way to know. The capacity is §47.5's declaration, so the fix is
+    /// the declaration rather than this process growing a buffer a driver asked it to.
+    Oversized {
+        /// Bytes the frame occupies.
+        needed: usize,
+        /// Bytes the stream was declared to hold.
+        capacity: usize,
+    },
 }
 
 impl std::fmt::Display for DriverError {
@@ -82,6 +93,11 @@ impl std::fmt::Display for DriverError {
             DriverError::Malformed { entry, detail } => {
                 write!(f, "the driver's {entry}() succeeded and {detail}")
             }
+            DriverError::Oversized { needed, capacity } => write!(
+                f,
+                "the driver handed back a {needed}-byte frame for a stream declared to hold \
+                 {capacity}. It is refused rather than truncated (§47.5); declare a larger slot."
+            ),
         }
     }
 }
@@ -142,6 +158,23 @@ pub struct Sample {
     pub base_pose: [f32; 7],
     /// `vx vy vz wx wy wz`.
     pub base_twist: [f32; 6],
+}
+
+/// Everything about one sensor frame except its bytes, which were copied into the caller's buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SensorFrame {
+    /// `CLOCK_MONOTONIC_RAW` at acquisition (§47.2). Never zero: a frame with no stamp is refused.
+    pub stamp_ns: u64,
+    /// Pixels across.
+    pub width: u32,
+    /// Pixels down.
+    pub height: u32,
+    /// Bytes per row.
+    pub stride: u32,
+    /// One of `skynet_rhal::format`.
+    pub format: u32,
+    /// How many bytes were copied.
+    pub len: usize,
 }
 
 /// An open driver context.
@@ -369,6 +402,95 @@ impl Driver {
                     .to_string(),
             });
         }
+    }
+
+    /// Whether the driver can read sensors at all, without calling it.
+    pub fn has_sensors(&self) -> bool {
+        self.vtable.read_sensor.is_some()
+    }
+
+    /// Read the named sensor's newest frame, copying its bytes into `into`.
+    ///
+    /// **Copied, not borrowed**, because the ABI says the driver's buffer is valid only until the
+    /// next read of the same sensor. A borrow would be a lifetime this side could not express, and
+    /// §47.3's zero-copy path is `dmabuf` — a V4L2 or GPU concern this entry point does not carry.
+    /// `into` is the stream's declared slot (§47.5), so the copy never allocates.
+    ///
+    /// Three things the driver says are checked against what it hands back before any byte is
+    /// trusted, each for the reason `skynet driver check` gives: a frame with no bytes, a header
+    /// whose `stride × height` does not fit the bytes behind it, and a frame with no acquisition
+    /// stamp. The last is §47.2's rule — a zero stamp is not an estimate, it is an absence, and
+    /// substituting arrival time for it here is exactly what that section forbids.
+    pub fn read_sensor(
+        &mut self,
+        name: &std::ffi::CStr,
+        into: &mut [u8],
+    ) -> Result<SensorFrame, DriverError> {
+        let read_sensor = self
+            .vtable
+            .read_sensor
+            .ok_or(DriverError::Absent("read_sensor"))?;
+
+        let mut frame = skynet_rhal::Frame {
+            stamp_ns: 0,
+            width: 0,
+            height: 0,
+            stride: 0,
+            format: 0,
+            data: std::ptr::null(),
+            size: 0,
+        };
+
+        // SAFETY: from a vtable that passed `accepts`, called on a live context; `name` is
+        // NUL-terminated and outlives the call; `frame` is a valid out-parameter the driver fills.
+        let code = unsafe { read_sensor(self.ctx, name.as_ptr(), &mut frame) };
+        if code != 0 {
+            return Err(DriverError::Call {
+                entry: "read_sensor",
+                code,
+            });
+        }
+
+        let malformed = |detail: String| DriverError::Malformed {
+            entry: "read_sensor",
+            detail,
+        };
+        if frame.data.is_null() || frame.size == 0 {
+            return Err(malformed("returned an empty frame".to_string()));
+        }
+        let described = (frame.stride as usize).saturating_mul(frame.height as usize);
+        if described > frame.size {
+            return Err(malformed(format!(
+                "described {}x{} at stride {} — {described} bytes — and handed back {}",
+                frame.width, frame.height, frame.stride, frame.size
+            )));
+        }
+        if frame.stamp_ns == 0 {
+            return Err(malformed(
+                "returned a frame with no acquisition stamp (§47.2)".to_string(),
+            ));
+        }
+        if frame.size > into.len() {
+            return Err(DriverError::Oversized {
+                needed: frame.size,
+                capacity: into.len(),
+            });
+        }
+
+        // SAFETY: `data` is non-null and the driver asserts `size` readable bytes behind it, valid
+        // until the next read of this sensor — which cannot happen before this copy finishes,
+        // because `self` is borrowed mutably for the whole call. `into` was checked to hold them.
+        let bytes = unsafe { std::slice::from_raw_parts(frame.data as *const u8, frame.size) };
+        into[..frame.size].copy_from_slice(bytes);
+
+        Ok(SensorFrame {
+            stamp_ns: frame.stamp_ns,
+            width: frame.width,
+            height: frame.height,
+            stride: frame.stride,
+            format: frame.format,
+            len: frame.size,
+        })
     }
 
     /// Whether the driver exposes an emergency stop, without calling it.

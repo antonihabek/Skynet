@@ -32,7 +32,7 @@ else
   endif
 endif
 
-.PHONY: all check check-lerobot check-mujoco clean
+.PHONY: all check check-lerobot check-mujoco check-capture clean
 
 all: $(LIB)
 
@@ -60,6 +60,23 @@ check-mujoco: $(LIB)
 	SKYNET_MUJOCO_SCENE=$(abspath $(REPO)/drivers/mujoco/scenes/so_arm_shaped.xml) \
 	PYTHONPATH=$(REPO)/bindings/python:$(REPO)/drivers/mujoco \
 	$(CARGO) run --manifest-path $(REPO)/Cargo.toml -q -p skynet-cli -- driver check ./$(LIB)
+
+# §47.2's fourth backend through the real ABI: a camera the driver renders, read with `read_sensor`
+# by the control loop and published into §47.6's pool. The LeRobot fake has a 32x24 RGB wrist
+# camera — 2,304 bytes a frame — so the pool is declared with slots of exactly that.
+#
+# Nothing connects to the socket, and nothing needs to: the pool is filled whether or not a policy
+# has mapped it, which is §47.4's rule that capture is never stalled by a consumer. What this checks
+# is the half before the hand-off — frames read through the C shim, over the pipe, into the region —
+# and it fails unless at least one frame was published. `skynetk` exits non-zero on its own if any
+# sensor read failed.
+CAPTURE_OUT := $(or $(TMPDIR),/tmp)/skynetk-capture
+check-capture: $(LIB)
+	rm -f $(CAPTURE_OUT).sock
+	SKYNET_PYTHON=$(PYTHON) 	SKYNET_PYTHON_DRIVER=skynet_lerobot 	SKYNET_LEROBOT_FAKE=1 	PYTHONPATH=$(REPO)/bindings/python:$(REPO)/drivers/lerobot 	$(CARGO) run --manifest-path $(REPO)/Cargo.toml -q -p skynet-kernel-host --bin skynetk -- 		run --driver ./$(LIB) --hz 50 --cycles 50 --policy-socket $(CAPTURE_OUT).sock 		--frame-pool wrist:2x2304@10 > $(CAPTURE_OUT).txt
+	cat $(CAPTURE_OUT).txt
+	grep -Eq '^published +[1-9][0-9]* to the pool' $(CAPTURE_OUT).txt
+	rm -f $(CAPTURE_OUT).sock
 
 clean:
 	rm -f $(LIB) skynet_python_host.dll libskynet_python_host.dylib libskynet_python_host.so

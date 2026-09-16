@@ -89,6 +89,7 @@ name = "skynet-kernel-host"
 version = "0.1.0"
 dependencies = [
  "skynet-blackbox",
+ "skynet-capture",
  "skynet-contracts",
  "skynet-dl",
  "skynet-frames",

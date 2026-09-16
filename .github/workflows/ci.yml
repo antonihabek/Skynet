@@ -155,6 +155,15 @@ jobs:
         working-directory: drivers/python-host
         run: make check PYTHON=python3
 
+      # §47.2's fourth backend, through the ABI rather than through a fake: `skynetk` reads the
+      # LeRobot fake's wrist camera with `read_sensor` — C shim, pipe, interpreter — inside its
+      # control loop, and publishes each frame into §47.6's pool. `src/tests.rs` covers the same
+      # turn against arrays; this is the half that needs a real `read_sensor` behind a real vtable,
+      # and a Linux `memfd` for the pool. It fails unless a frame was published and no read failed.
+      - name: A camera the driver renders reaches the frame pool
+        working-directory: drivers/python-host
+        run: make check-capture PYTHON=python3
+
       # The MuJoCo simulator driver (§70), against real physics. `libosmesa6` is the software GL
       # implementation that makes the camera path exercisable on a machine with no display; without
       # it the driver correctly declares no sensors, which is a real branch and a weaker test.

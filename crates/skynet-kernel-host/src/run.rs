@@ -35,6 +35,7 @@ use skynet_blackbox::Cycle;
 use skynet_kernel::{Envelope, ResolvedLimits, MAX_CHANNELS};
 use skynet_ring::{Consumer, Reading};
 
+use crate::capture::{Camera, CaptureTurn};
 use crate::cycle::{decide, record, Decision, Observed, Posted, Stopping};
 use crate::driver::Actuator;
 
@@ -99,6 +100,27 @@ pub struct Turn {
     pub read_error: Option<crate::driver::ReadFailure>,
     /// Whether an emergency stop was demanded and the body has none.
     pub stop_unavailable: bool,
+    /// What the camera did, when one is attached.
+    pub capture: Option<CaptureTurn>,
+}
+
+/// What a cycle publishes to, beyond the command it writes to the body.
+///
+/// Both are optional and both are the loop's to feed rather than to own: the mappings belong to
+/// whoever created them, and a cycle borrows them for as long as it takes to write into them.
+#[derive(Default)]
+pub struct Attached<'a, 'p> {
+    /// §25's observation ring: the body this cycle read, for a policy in another process.
+    pub observations: Option<&'a mut skynet_obs::Producer<'p>>,
+    /// §47's capture: a declared stream, read through the RHAL and published into the pool.
+    pub camera: Option<&'a mut Camera>,
+}
+
+impl<'a, 'p> Attached<'a, 'p> {
+    /// Nothing attached: the body is driven and nothing else hears about it.
+    pub fn nothing() -> Attached<'a, 'p> {
+        Attached::default()
+    }
 }
 
 /// Counters worth carrying out of a run.
@@ -186,10 +208,10 @@ impl<'a> Host<'a> {
         limits: &ResolvedLimits<'a>,
         envelope: Option<&Envelope<'a>>,
     ) -> Turn {
-        self.step_observing(now_ns, body, ring, limits, envelope, None)
+        self.step_observing(now_ns, body, ring, limits, envelope, Attached::nothing())
     }
 
-    /// Turn the loop once, publishing the body this cycle read.
+    /// Turn the loop once, publishing the body this cycle read and whatever the camera captured.
     ///
     /// # Why this process is the one that publishes it
     ///
@@ -206,6 +228,12 @@ impl<'a> Host<'a> {
     /// sequence — and a policy watching the sequence stop advancing learns exactly what the black
     /// box learns. Skipping the publish would leave the policy reading a stale slot with no way to
     /// tell it apart from a body that is not moving.
+    ///
+    /// # The camera turns after the write
+    ///
+    /// The command is the part of a cycle with a deadline, so it goes to the body first; a frame
+    /// read afterwards costs the time left in the period, and a read that costs more than that is an
+    /// overrun the caller counts. See [`crate::capture`] for why the read is on this thread at all.
     pub fn step_observing<A: Actuator>(
         &mut self,
         now_ns: u64,
@@ -213,8 +241,12 @@ impl<'a> Host<'a> {
         ring: &mut Consumer<'_>,
         limits: &ResolvedLimits<'a>,
         envelope: Option<&Envelope<'a>>,
-        observations: Option<&mut skynet_obs::Producer<'_>>,
+        attached: Attached<'_, '_>,
     ) -> Turn {
+        let Attached {
+            observations,
+            camera,
+        } = attached;
         self.tick += 1;
         self.summary.cycles += 1;
         let now_ms = now_ns as f64 / 1_000_000.0;
@@ -373,6 +405,12 @@ impl<'a> Host<'a> {
             }
         }
 
+        // ── Capture, if a stream is declared ─────────────────────────────────
+        //
+        // The body's clock rather than a second reading of this one: `now_ns` is the instant this
+        // cycle began, and a stream's rate is judged against cycles.
+        let capture = camera.map(|camera| camera.turn(now_ns, body));
+
         // ── Remember, for the next cycle ─────────────────────────────────────
         self.previous.clear();
         for (index, channel) in self.channels.iter().take(width).enumerate() {
@@ -419,6 +457,7 @@ impl<'a> Host<'a> {
             reading,
             read_error,
             stop_unavailable,
+            capture,
         }
     }
 

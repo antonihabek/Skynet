@@ -38,10 +38,11 @@ use skynet_kernel::{
     can_start, resolve_limits, Available, Envelope, OperatorProfile, ResolveLimitsParams, Tier,
     TransportClamp, WarningChannel,
 };
+use skynet_kernel_host::capture::{Camera, Declared, RhalSensor};
 use skynet_kernel_host::driver::{Actuator, Rhal};
 use skynet_kernel_host::handoff;
 use skynet_kernel_host::recorder::{Recorder, DEFAULT_BUDGET};
-use skynet_kernel_host::run::Host;
+use skynet_kernel_host::run::{Attached, Host};
 use skynet_ring::{words_for, Ring};
 
 const USAGE: &str = "\
@@ -72,19 +73,20 @@ skynetk run --driver <library> [options]
                         descriptor to whatever connects here (§25). Without it the
                         ring is private to this process and every cycle reads an
                         empty one, which is a robot with no policy.
-  --frame-pool <spec>   create §47.6's frame pool as `<stream>:<slots>x<bytes>` and
-                        hand it over with the rings. The numbers are declared, not
-                        measured (§47.5). This build has no capture backend, so the
-                        pool it offers stays empty and the summary says so — what
-                        the flag provides is the region and the hand-off, and the
-                        pixels are a vendor driver's to write.
+  --frame-pool <spec>   create §47.6's frame pool as `<stream>:<slots>x<bytes>@<hz>`,
+                        hand it over with the rings, and fill it from the driver's
+                        sensor named <stream>, read at <hz> (§47.2's RHAL backend).
+                        Every number is declared, not measured (§47.5), and the
+                        sensor must be one the driver's descriptor declares.
+                        Frames are not recorded: this build has no encoder, and
+                        the summary names the gap rather than leaving it implied.
                         Needs --policy-socket: a pool nobody receives is a mapping.
   --quiet               only print the summary.
 
 skynetk blackbox <dir>
 
   Read a ring back: its shape, what it holds, and §74's five counters. Needs no
-  daemon and no socket — it opens the file  wrote.
+  daemon and no socket — it opens the file `run --blackbox` wrote.
 
   Without --policy-socket the ring is private to this process, so every cycle reads
   an empty one and the kernel holds — which is the honest state of a robot that is
@@ -110,20 +112,41 @@ struct Options {
     watchdog_ms: Option<f64>,
     blackbox: Option<PathBuf>,
     policy_socket: Option<PathBuf>,
-    frame_pool: Option<(String, skynet_frames::Geometry)>,
+    frame_pool: Option<FramePool>,
     quiet: bool,
 }
 
-/// `"head_rgb:4x2073600"` — a stream name, a colon, slots, an `x`, bytes per slot.
+/// What `--frame-pool` declared: the stream, the pool's shape, and the rate to read it at.
+struct FramePool {
+    stream: String,
+    geometry: skynet_frames::Geometry,
+    hz: f64,
+}
+
+/// `"head_rgb:4x2073600@30"` — a stream name, a colon, slots, an `x`, bytes per slot, an `@`, a rate.
 ///
-/// Parsed strictly, and every failure names the fix (§64). The three numbers are a **declaration**
-/// (§47.5): they are not derived from anything this process can see, because the frames come from a
-/// capture device and this build has no capture backend. What the flag buys is the region and the
-/// hand-off — the pixels are the vendor driver's to write.
-fn parse_frame_pool(text: &str) -> Result<(String, skynet_frames::Geometry), String> {
+/// Parsed strictly, and every failure names the fix (§64). The numbers are a **declaration**
+/// (§47.5): none is derived from anything this process can see. The rate in particular is required
+/// rather than defaulted — a camera that renders on demand has no frame rate that is a property of
+/// the body, and a default here would be this binary choosing one for it.
+fn parse_frame_pool(text: &str) -> Result<FramePool, String> {
     let (stream, shape) = text.split_once(':').ok_or_else(|| {
-        format!("--frame-pool wants `<stream>:<slots>x<bytes>`, and this is `{text}`")
+        format!("--frame-pool wants `<stream>:<slots>x<bytes>@<hz>`, and this is `{text}`")
     })?;
+    let (shape, hz) = shape.split_once('@').ok_or_else(|| {
+        format!(
+            "--frame-pool wants a capture rate after the shape — `{shape}@<hz>` — because the              pool is now filled from the driver and a stream is read at a rate somebody declared"
+        )
+    })?;
+    let hz: f64 = hz
+        .trim()
+        .parse()
+        .map_err(|_| format!("`{}` is not a capture rate", hz.trim()))?;
+    if !(hz.is_finite() && hz > 0.0) {
+        return Err(format!(
+            "a capture rate of {hz} Hz reads no frames; declare a positive rate"
+        ));
+    }
     if stream.is_empty() || stream.len() > skynet_frames::MAX_NAME {
         return Err(format!(
             "`{stream}` is not a stream name: it must be between 1 and {} bytes, because the name \
@@ -149,10 +172,68 @@ fn parse_frame_pool(text: &str) -> Result<(String, skynet_frames::Geometry), Str
                 .to_string(),
         );
     }
-    Ok((
-        stream.to_string(),
-        skynet_frames::Geometry { slots, slot_bytes },
-    ))
+    Ok(FramePool {
+        stream: stream.to_string(),
+        geometry: skynet_frames::Geometry { slots, slot_bytes },
+        hz,
+    })
+}
+
+/// Check that the body has the stream a pool was declared for, before anything is offered.
+///
+/// A pool offered for a sensor the driver cannot read tells a policy it has a camera. So the
+/// descriptor is asked — the driver's own statement of what the body is — and the refusal names
+/// what it does declare. Where the descriptor gives an RGB sensor's size, a slot too small for one
+/// frame is refused here rather than on every frame for the length of the run.
+fn sensor_declared(body: &mut Rhal, pool: &FramePool) -> Result<(), String> {
+    let stream = &pool.stream;
+    if !body.has_sensors() {
+        return Err(format!(
+            "--frame-pool names `{stream}`, and this driver has no read_sensor entry point, so no              sensor can be read through the RHAL (§47.2). A camera read directly from V4L2 or              GenICam is a backend this build does not have."
+        ));
+    }
+    let text = body.describe().map_err(|error| {
+        format!(
+            "the driver's descriptor could not be read, so `{stream}` cannot be checked: {error}"
+        )
+    })?;
+    let descriptor = skynet_json::Json::parse(&text)
+        .map_err(|_| "the driver's descriptor is not JSON".to_string())
+        .and_then(|json| {
+            skynet_contracts::json::descriptor_from_json(&json)
+                .map_err(|error| format!("the driver's descriptor does not decode: {error}"))
+        })?;
+    let Some(sensor) = descriptor
+        .sensors
+        .iter()
+        .find(|sensor| &sensor.name == stream)
+    else {
+        let names: Vec<&str> = descriptor
+            .sensors
+            .iter()
+            .map(|sensor| sensor.name.as_str())
+            .collect();
+        return Err(format!(
+            "--frame-pool names `{stream}` and the driver's descriptor declares {}. A pool for a              stream the body does not have would tell a policy it has a camera.",
+            if names.is_empty() {
+                "no sensors".to_string()
+            } else {
+                format!("only {}", names.join(", "))
+            }
+        ));
+    };
+    if let (Some(width), Some(height), "rgb") =
+        (sensor.width, sensor.height, sensor.modality.as_str())
+    {
+        let needed = (width * height * 3.0) as usize;
+        if needed > pool.geometry.slot_bytes {
+            return Err(format!(
+                "`{stream}` is declared {width}x{height} RGB — {needed} bytes a frame — and the                  pool's slots hold {}. Declare slots of at least {needed} bytes.",
+                pool.geometry.slot_bytes
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// How many slots the command ring holds.
@@ -335,6 +416,14 @@ fn run(args: &[String]) -> i32 {
         );
     }
 
+    // Before anything is printed or offered: a pool declared for a stream the body does not have
+    // is refused here, while nothing has been created that would have to be taken back.
+    if let Some(pool) = options.frame_pool.as_ref() {
+        if let Err(message) = sensor_declared(&mut body, pool) {
+            return fail(&message);
+        }
+    }
+
     // Channel names come from the transport plan on a real robot. Without one, they are positional
     // and named as such — `joint0` is honestly a position, where a made-up anatomical name would
     // read as knowledge this process does not have.
@@ -475,12 +564,11 @@ fn run(args: &[String]) -> i32 {
     let mut shared = None;
     let mut body_ring = None;
     let mut port = None;
-    // §47.6's pool, created here and handed over below. Empty for the whole run: publishing into it
-    // needs a capture backend, and this build has none, which the summary says rather than implies
-    // (§34.3 — measure what you can, declare what you cannot). A reader that maps it sees a pool
-    // with no frame yet, which is exactly what a camera that has not delivered one looks like, and
-    // is the reason §47.6 has a sentinel for it rather than slot 0.
-    let mut frames = None;
+    // §47.6's pool, created here, handed over below and filled by the camera the loop turns. A reader
+    // that maps it before the first frame sees a pool with no frame yet, which is exactly what a
+    // camera that has not delivered one looks like, and is the reason §47.6 has a sentinel for it
+    // rather than slot 0.
+    let mut camera = None;
     match options.policy_socket.as_deref() {
         None => {}
         Some(path) => match handoff::Port::open(path, RING_SLOTS, RING_SLOTS) {
@@ -494,24 +582,47 @@ fn run(args: &[String]) -> i32 {
                 body_ring = Some(observations);
                 port = Some(opened);
 
-                if let Some((stream, geometry)) = options.frame_pool.as_ref() {
-                    match skynet_frames::Writer::create(stream, *geometry) {
-                        Ok(pool) => {
-                            if !options.quiet {
-                                println!(
-                                    "frames     pool \"{stream}\" offered with the rings, {} × {} B \
-                                     — empty, because this build has no capture backend (§47.6)",
-                                    geometry.slots, geometry.slot_bytes
-                                );
-                                println!();
+                if let Some(declared) = options.frame_pool.as_ref() {
+                    // Refused rather than run without it, for the reason the ring above is.
+                    let pool =
+                        match skynet_frames::Writer::create(&declared.stream, declared.geometry) {
+                            Ok(pool) => pool,
+                            Err(error) => {
+                                return fail(&format!("--frame-pool could not be created: {error}"))
                             }
-                            frames = Some(pool);
-                        }
-                        // Refused rather than run without it, for the reason the ring above is.
-                        Err(error) => {
-                            return fail(&format!("--frame-pool could not be created: {error}"))
-                        }
+                        };
+                    // Two buffers on this side: the frame in flight to the pool, and one more so
+                    // that a turn which reads never finds the sensor dry by its own doing. The pool
+                    // is where frames are held for the policy, and its slots are the declaration
+                    // §47.5 asks about.
+                    let sensor = match RhalSensor::new(
+                        0,
+                        &Declared {
+                            name: declared.stream.clone(),
+                            hz: declared.hz,
+                            buffers: 2,
+                            slot_bytes: declared.geometry.slot_bytes,
+                        },
+                    ) {
+                        Ok(sensor) => sensor,
+                        Err(message) => return fail(&message),
+                    };
+                    if !options.quiet {
+                        println!(
+                            "frames     pool \"{}\" offered with the rings, {} × {} B, filled from \
+                             the driver's sensor at {} Hz (§47.2)",
+                            declared.stream,
+                            declared.geometry.slots,
+                            declared.geometry.slot_bytes,
+                            declared.hz
+                        );
+                        println!(
+                            "           not recorded: this build has no encoder, so every frame \
+                             is a gap in the black box, and the summary names it (§47.4)"
+                        );
+                        println!();
                     }
+                    camera = Some(Camera::new(sensor, Some(pool)));
                 }
             }
             // Refused rather than fallen back to a private ring. A loop that quietly ran with a
@@ -632,6 +743,7 @@ fn run(args: &[String]) -> i32 {
     let mut first_error: Option<String> = None;
     let mut stop_unavailable_seen = false;
     let mut recorder_failed = false;
+    let mut camera_failed = false;
 
     let mut cycle = 0u64;
     loop {
@@ -647,8 +759,9 @@ fn run(args: &[String]) -> i32 {
         if let (Some(mapping), Some(body), Some(port)) =
             (shared.as_ref(), body_ring.as_ref(), port.as_mut())
         {
-            if port.offer(mapping, body, frames.as_ref()) > 0 && !options.quiet {
-                let took = match frames.as_ref() {
+            let frames = camera.as_ref().and_then(Camera::pool);
+            if port.offer(mapping, body, frames) > 0 && !options.quiet {
+                let took = match frames {
                     Some(_) => "took the rings and the frame pool",
                     None => "took the rings",
                 };
@@ -664,7 +777,10 @@ fn run(args: &[String]) -> i32 {
             &mut consumer,
             &limits,
             Some(&envelope),
-            observations.as_mut(),
+            Attached {
+                observations: observations.as_mut(),
+                camera: camera.as_mut(),
+            },
         );
 
         if let Some(failure) = turn.read_error {
@@ -675,6 +791,9 @@ fn run(args: &[String]) -> i32 {
             }
         }
         stop_unavailable_seen |= turn.stop_unavailable;
+        if let Some(capture) = turn.capture.as_ref() {
+            camera_failed |= capture.refused.is_some();
+        }
 
         // Every cycle, including the idle ones. §15's field conformance is a ratio over cycles, and
         // a recorder that skipped the uneventful ones would be writing the numerator without the
@@ -713,6 +832,10 @@ fn run(args: &[String]) -> i32 {
         period.as_secs_f64() * 1000.0
     );
 
+    if let Some(camera) = camera.as_mut() {
+        camera_failed |= report_camera(camera);
+    }
+
     // Sealed on the way out, because a window nobody sealed is a ring the next run overwrites.
     // §13's reason for sealing at shutdown is its reason for sealing at an incident: the records
     // are only evidence once they are a file.
@@ -747,11 +870,55 @@ fn run(args: &[String]) -> i32 {
         );
     }
 
-    // A run that could not read the body is not a successful run, however many cycles it turned.
-    if summary.read_failures > 0 || recorder_failed {
+    // A run that could not read the body is not a successful run, however many cycles it turned —
+    // and nor is one whose declared stream could not be read or published. A camera a policy was
+    // offered and did not get is a fault, not a statistic.
+    if summary.read_failures > 0 || recorder_failed || camera_failed {
         return 1;
     }
     0
+}
+
+/// The summary's capture lines, and whether the stream failed.
+///
+/// Every count is printed, including the zeros, because a stream that read nothing and a stream
+/// nobody declared would otherwise print the same thing: nothing.
+fn report_camera(camera: &mut Camera) -> bool {
+    let sensor = camera.sensor().counts();
+    let counts = camera.counts();
+    println!();
+    println!(
+        "frames read     {} of {} reads ({} repeated a frame already seen)",
+        sensor.frames, sensor.reads, sensor.repeats
+    );
+    println!(
+        "frames starved  {} (due with every buffer held, §47.5)",
+        sensor.starved
+    );
+    println!("read failures   {} (sensor)", sensor.failures);
+    println!(
+        "published       {} to the pool, {} dropped by it (every slot on loan), {} refused",
+        counts.published, counts.pool_dropped, counts.pool_failed
+    );
+    match camera.close() {
+        Some(gap) => println!(
+            "not recorded    {} frame(s), sequence {} to {} — this build has no encoder (§47.4)",
+            gap.frames, gap.from_seq, gap.to_seq
+        ),
+        None => println!("not recorded    nothing was captured, so nothing was left out"),
+    }
+    if let Some(failure) = camera.sensor().first_failure() {
+        println!(
+            "first sensor failure: {} ({})",
+            failure.detail, failure.code
+        );
+    }
+    if let Some(refusal) = camera.first_refusal() {
+        println!("first pool refusal: {refusal}");
+    }
+    // A stream that was due and read nothing is a stream that failed, even with no error: a
+    // declaration nobody could satisfy is the finding.
+    sensor.failures > 0 || (sensor.reads > 0 && sensor.frames == 0)
 }
 
 /// `skynetk blackbox <dir>` — what the ring under `dir` holds.
