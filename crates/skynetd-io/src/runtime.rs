@@ -1769,7 +1769,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
                 // §13's ring, counted over the interval since the last pass by the caller —
                 // which holds the recorder, because the ring has exactly one writer and this
                 // struct is not it. `None` is a robot with no recording to count, and it keeps
-                // `intervention_count` out of the episode rather than in it as a zero.
+                // `interventions` out of the episode rather than in it as a zero.
                 interventions_since,
                 // §35.1's correlation clock, for the one field that needs it: the episode's
                 // `recorded_at`. Zero means the platform could not answer, which is not a time.

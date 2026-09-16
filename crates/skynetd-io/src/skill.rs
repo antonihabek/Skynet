@@ -56,9 +56,10 @@
 //! value and a second value saying whether the first is real. An `Option` says both, and it cannot
 //! be read without the question being asked.
 //!
-//! `None` is *nothing counted*, and it keeps `intervention_count` **out** of the episode rather
-//! than in it as a zero — §54.4 asks for the number and a zero on a robot where nothing counts is
-//! evidence a marketplace would quote.
+//! `None` is *nothing counted*, and it keeps `interventions` **out** of the episode rather than in
+//! it as a zero — §54.4 asks for the number and a zero on a robot where nothing counts is evidence a
+//! marketplace would quote. It keeps it out for the rest of the invocation, too: a count with a hole
+//! in it is a floor, and a later counted pass does not turn it back into a total.
 //!
 //! ## One invocation at a time, and the reason the limit is here
 //!
@@ -234,7 +235,51 @@ pub struct Invocation {
     refused_clause: String,
     entry_permitted: Option<bool>,
     hold_lost: bool,
-    interventions: Option<u32>,
+    interventions: InterventionCount,
+}
+
+/// §54.4's intervention count over one invocation, and whether it is still a total.
+///
+/// Three states rather than an `Option`, because the `Option` this replaced could not remember
+/// losing a pass. A pass nothing counted set it to `None`, and the next counted pass revived it from
+/// zero — so an invocation with a hole in the middle reported the sum of the passes after the hole
+/// as though it were the whole, which is the number §74.3 exists to stop: quietly smaller than the
+/// truth and indistinguishable from it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InterventionCount {
+    /// No pass has been evaluated yet, so there is nothing to report either way.
+    NoPassYet,
+    /// Every pass so far was counted, and this is their sum.
+    Counted(u32),
+    /// At least one pass was not — nothing counted it, or two invocations shared it — so this
+    /// invocation has a floor rather than a total. **Terminal:** a later counted pass does not
+    /// make the hole behind it smaller.
+    Unmeasured,
+}
+
+impl InterventionCount {
+    /// Fold one pass in. `None` is a pass nobody can attribute to this invocation.
+    fn with_pass(self, attributable: Option<u64>) -> InterventionCount {
+        match (self, attributable) {
+            (InterventionCount::Unmeasured, _) | (_, None) => InterventionCount::Unmeasured,
+            (InterventionCount::NoPassYet, Some(count)) => {
+                InterventionCount::Counted(u32::try_from(count).unwrap_or(u32::MAX))
+            }
+            // Saturating, because the release profile keeps overflow checks on and a daemon that
+            // panicked on a large count would lose every episode in flight to report one.
+            (InterventionCount::Counted(sum), Some(count)) => InterventionCount::Counted(
+                sum.saturating_add(u32::try_from(count).unwrap_or(u32::MAX)),
+            ),
+        }
+    }
+
+    /// The total, when there is one.
+    fn total(self) -> Option<u32> {
+        match self {
+            InterventionCount::Counted(sum) => Some(sum),
+            InterventionCount::NoPassYet | InterventionCount::Unmeasured => None,
+        }
+    }
 }
 
 impl Invocation {
@@ -356,7 +401,7 @@ impl Invocation {
         if let Some(duration) = self.duration_ms() {
             out.set("duration_seconds", Json::Num(duration as f64 / 1_000.0));
         }
-        if let Some(count) = self.interventions {
+        if let Some(count) = self.interventions.total() {
             out.set("interventions", Json::Num(f64::from(count)));
         }
         if let Some(wall_ms) = self.ended_wall_ms {
@@ -389,7 +434,7 @@ impl Invocation {
         // The absence, said out loud. A consumer reading `interventions` as null cannot tell a Hub
         // default from a robot that cannot count, and the difference decides whether the row is
         // training data.
-        if self.interventions.is_none() {
+        if self.interventions.total().is_none() {
             metadata.set("interventions_measured", Json::Bool(false));
         }
         out.set("metadata", metadata);
@@ -410,7 +455,7 @@ pub struct Cycle<'a> {
     /// Kernel interventions recorded since the last pass, or `None` when nothing counted.
     ///
     /// Read off §13's ring by the caller — see the module header. `None` is not zero: it keeps
-    /// `intervention_count` out of the episode rather than putting it in as evidence of a clean run.
+    /// `interventions` out of the episode rather than putting it in as evidence of a clean run.
     pub interventions_since: Option<u64>,
     /// Wall-clock milliseconds, when this robot has a clock (§35.1).
     ///
@@ -672,7 +717,7 @@ impl Runtime {
             refused_clause: String::new(),
             entry_permitted: None,
             hold_lost: false,
-            interventions: None,
+            interventions: InterventionCount::NoPassYet,
         });
         self.forget_old();
         Ok(id)
@@ -852,18 +897,14 @@ impl Runtime {
         // cycles the kernel intervened in over the interval, and two passes that each saw trips are
         // two lots of trips. The rising edge this replaced was a consequence of the input being a
         // boolean, and it collapsed a whole pass of them into one.
+        //
+        // Nothing counted, or the interval's trips cannot be told apart between two live
+        // invocations: both leave the episode without the field, which is the honest report and the
+        // one §74.3 asks for — and leave it without the field for good (see `InterventionCount`).
         {
-            let attributable = solo_running;
+            let attributable = cycle.interventions_since.filter(|_| solo_running);
             let invocation = &mut self.invocations[index];
-            match (cycle.interventions_since, attributable) {
-                (Some(count), true) => {
-                    *invocation.interventions.get_or_insert(0) += count as u32;
-                }
-                // Nothing counted, or the interval's trips cannot be told apart between two live
-                // invocations. Both leave the episode without the field, which is the honest report
-                // and the one §74.3 asks for.
-                _ => invocation.interventions = None,
-            }
+            invocation.interventions = invocation.interventions.with_pass(attributable);
         }
 
         let progress = self.progress_of(index, cycle);
