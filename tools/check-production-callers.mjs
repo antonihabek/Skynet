@@ -93,11 +93,29 @@ const UBIQUITOUS = new Set([
   'path',
 ])
 
-/** Remove comments and string literals so brace matching and name search see only code. */
+/**
+ * Remove comments and string literals so brace matching and name search see only code.
+ *
+ * What is removed is replaced by **the newlines it spanned**, never by nothing. Every line number
+ * this file prints is counted off the stripped text, so a block comment or a multi-line string
+ * swallowed whole moves every declaration after it: `upload_target` was reported at
+ * `skynetd-io/src/upload.rs:545` and is declared at 742, because two hundred lines of module
+ * documentation sit between the two. A line number that opens the wrong line is worse than no line
+ * number at all, because a reader believes it and goes looking for a defect at the place it names.
+ *
+ * A separating space goes in as well, so `a/**\/b` and `foo"bar"baz` do not fuse into one token
+ * that the declaration pattern could read as a name.
+ */
 function strip(src) {
   let out = ''
   let i = 0
   const n = src.length
+  /** The newlines between two offsets, so removing a span costs its text and not its lines. */
+  const spanned = (from, to) => {
+    let newlines = ''
+    for (let k = from; k < to; k++) if (src[k] === '\n') newlines += '\n'
+    return newlines
+  }
   while (i < n) {
     const c = src[i]
     const d = src[i + 1]
@@ -108,6 +126,7 @@ function strip(src) {
     }
     // Block comment, nested as Rust allows.
     if (c === '/' && d === '*') {
+      const start = i
       let depth = 1
       i += 2
       while (i < n && depth > 0) {
@@ -119,6 +138,7 @@ function strip(src) {
           i += 2
         } else i++
       }
+      out += ' ' + spanned(start, i)
       continue
     }
     // Raw string: r"..." / r#"..."# / r##"..."## — replaced by a space, never scanned.
@@ -130,19 +150,21 @@ function strip(src) {
         j++
       }
       if (src[j] === '"') {
+        const start = i
         const terminator = '"' + '#'.repeat(hashes)
         const end = src.indexOf(terminator, j + 1)
         i = end === -1 ? n : end + terminator.length
-        out += ' '
+        out += ' ' + spanned(start, i)
         continue
       }
     }
     // Byte or char literal, and ordinary strings. Escapes are honoured.
     if (c === '"') {
+      const start = i
       i++
       while (i < n && src[i] !== '"') i += src[i] === '\\' ? 2 : 1
       i++
-      out += ' '
+      out += ' ' + spanned(start, i)
       continue
     }
     out += c
