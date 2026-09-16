@@ -47,6 +47,16 @@ pub enum DriverError {
         /// What it returned.
         code: i32,
     },
+    /// A call succeeded and what it handed back cannot be used as given.
+    ///
+    /// Distinct from [`DriverError::Call`], because the driver said *yes*: the fault is in what it
+    /// wrote, and a person reading a code of zero beside "failed" would be reading a contradiction.
+    Malformed {
+        /// Which entry point.
+        entry: &'static str,
+        /// What was wrong with it.
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for DriverError {
@@ -68,6 +78,9 @@ impl std::fmt::Display for DriverError {
             ),
             DriverError::Call { entry, code } => {
                 write!(f, "the driver's {entry}() returned {code}")
+            }
+            DriverError::Malformed { entry, detail } => {
+                write!(f, "the driver's {entry}() succeeded and {detail}")
             }
         }
     }
@@ -307,33 +320,55 @@ impl Driver {
     }
 
     /// The driver's embodiment descriptor, as JSON, when it publishes one.
+    ///
+    /// # The return value is a length, and from 2026-09-04 this read it as a status
+    ///
+    /// §4's contract, in the header's words: *"Returns bytes written, or SKR_EINVAL if `len` is too
+    /// small — the OS then retries with a larger buffer."* This function used to treat any non-zero
+    /// return as a failure, which is every descriptor a conforming driver has ever written — the
+    /// mock returns its length, as the header says to. Nothing noticed because nothing called it:
+    /// `skynet driver check` drives the vtable itself and reads the return correctly, and the one
+    /// production path that needed a descriptor from a loaded driver did not exist until a control
+    /// loop needed to know what its camera was.
+    ///
+    /// The retry is bounded — 4 KiB, growing fourfold to 1 MiB, the same walk the CLI takes — because
+    /// a caller that grew the buffer until it fit would be letting a driver decide how much this
+    /// process allocates.
     pub fn describe(&mut self) -> Result<String, DriverError> {
         let describe = self
             .vtable
             .describe
             .ok_or(DriverError::Absent("describe"))?;
 
-        // 64 KiB, which is generous for a descriptor and bounded, because the ABI's contract is
-        // "fills up to `len`" and a caller that grew the buffer until it fit would be letting a
-        // driver decide how much this process allocates.
-        let mut buffer = vec![0u8; 64 * 1024];
+        let mut size = 4096usize;
+        loop {
+            let mut buffer = vec![0u8; size];
 
-        // SAFETY: from a vtable that passed `accepts`, live context, and a writable buffer of
-        // exactly the length passed alongside it.
-        let code = unsafe { describe(self.ctx, buffer.as_mut_ptr() as *mut c_char, buffer.len()) };
-        if code != 0 {
-            return Err(DriverError::Call {
+            // SAFETY: from a vtable that passed `accepts`, live context, and a writable buffer of
+            // exactly the length passed alongside it.
+            let written =
+                unsafe { describe(self.ctx, buffer.as_mut_ptr() as *mut c_char, buffer.len()) };
+
+            if written == skynet_rhal::status::EINVAL && size < DESCRIBE_CEILING {
+                size *= 4;
+                continue;
+            }
+            if written <= 0 {
+                return Err(DriverError::Call {
+                    entry: "describe",
+                    code: written,
+                });
+            }
+            // Clamped, for `read_state`'s reason: a driver claiming to have written more than it
+            // was given room for is a driver bug, and trusting its number would be trusting it to
+            // bound a read of this process's memory.
+            buffer.truncate((written as usize).min(size));
+            return String::from_utf8(buffer).map_err(|_| DriverError::Malformed {
                 entry: "describe",
-                code,
+                detail: "wrote bytes that are not UTF-8. The descriptor is JSON, and JSON is UTF-8"
+                    .to_string(),
             });
         }
-
-        let end = buffer
-            .iter()
-            .position(|byte| *byte == 0)
-            .unwrap_or(buffer.len());
-        buffer.truncate(end);
-        Ok(String::from_utf8_lossy(&buffer).into_owned())
     }
 
     /// Whether the driver exposes an emergency stop, without calling it.
@@ -354,6 +389,9 @@ impl Drop for Driver {
         }
     }
 }
+
+/// The largest descriptor [`Driver::describe`] will make room for: 1 MiB, after four retries.
+const DESCRIBE_CEILING: usize = 1 << 20;
 
 /// The widest command frame the ring carries, which is the most joints a probe can make room for.
 fn skynet_ring_max_channels() -> usize {

@@ -234,3 +234,21 @@ fn a_channel_list_that_disagrees_with_the_body_is_refused() {
         "{said}"
     );
 }
+
+/// A conforming driver's descriptor is read, and the return value is taken as the length it is.
+///
+/// Regression, and the reason it is here rather than in `skynet-dl`: `Driver::describe` read §4's
+/// return value — *bytes written* — as a status, so every conforming driver's descriptor was a
+/// failure. Nothing noticed because nothing called it until a camera needed to be checked against
+/// the body, and the mock is the conforming driver this suite already builds.
+#[test]
+#[ignore = "needs a C compiler; run explicitly with --ignored (the abi CI job does)"]
+fn a_conforming_drivers_descriptor_is_read() {
+    let library = build_mock("describe");
+    let mut body = skynet_kernel_host::driver::Rhal::open(&library, "").expect("the mock opens");
+    let text = body
+        .describe()
+        .expect("a driver that returns its length has returned a descriptor");
+    assert!(text.starts_with('{'), "{text}");
+    assert!(text.contains("\"robot_slug\":\"mock-arm\""), "{text}");
+}
