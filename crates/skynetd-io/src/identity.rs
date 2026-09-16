@@ -47,9 +47,8 @@
 use std::path::{Path, PathBuf};
 
 use skynet_contracts::identity::{
-    check_identity, code_result_to_json, identity_verdict_to_json, normalize_pairing_code,
-    Attestation, Identity, IdentityFinding, IdentityVerdict, Measure, Observed,
-    DEVICE_TOKEN_PREFIX,
+    check_identity, identity_verdict_to_json, normalize_pairing_code, Attestation, Identity,
+    IdentityFinding, IdentityVerdict, Measure, Observed, DEVICE_TOKEN_PREFIX,
 };
 use skynet_json::Json;
 
@@ -947,11 +946,6 @@ pub fn attestation(
 /// second, and the one that mattered got the smaller half. There is one shape now and both read it.
 pub fn attestation_to_json(attestation: &Attestation) -> Json {
     skynet_contracts::identity::attestation_to_json(attestation)
-}
-
-/// One pairing code, checked and never echoed — for the CLI's `--check` and for tests.
-pub fn check_code(typed: &str) -> Json {
-    code_result_to_json(&normalize_pairing_code(typed))
 }
 
 /// Everything §34.2's sender needs, or `None` when this robot cannot report to anybody.

@@ -49,7 +49,8 @@ import {
 } from '../../reference/typescript/package.ts'
 import { versionDigest, type DigestFile } from '../../reference/typescript/digest.ts'
 import {
-  awardCertification, SCTS_AREAS, SCTS_SUITES, testsRequiredFor, type CertificationInput,
+  awardCertification, SCTS_AREAS, SCTS_SUITES, SCTS_TESTS, testsRequiredFor,
+  type CertificationInput,
 } from '../../reference/typescript/conformance.ts'
 import {
   evaluateReadiness, summarizeReadiness, type ReadinessSubject,
@@ -1585,6 +1586,44 @@ certificationCase('duplicate-results-keep-the-last',
     ...results(GUEST_TESTS),
     ...results([GUEST_TESTS[0]], 'fail'),
   ] })
+
+// ── what evidence taken without a robot is worth ─────────────────────────────
+//
+// The shape a dry run actually produces, which this corpus did not hold until 2026-09-16:
+// `no-evidence` is an empty result set and `guest-complete` passes the bench test too, so an
+// edition could award `guest` for sim-only evidence and reproduce every case in this file.
+//
+// It is worth a case rather than an inference because the answer is one row of §15's table and
+// nothing else. Of the ten tests required from guest, nine are `sim` and one — `offline.control
+// .independent` — is `bench`, so a run with no body is `missing` on a guest-required test and
+// §12's gate awards **none**. Not guest. A tier lower than the plan that commissioned these cases
+// assumed, and low enough that an edition getting it wrong would be telling a vendor their
+// simulator had earned something.
+//
+// The three run together on purpose. The first is the ceiling, the second is the single row that
+// sets it, and the third is the tier the reason names when a higher one was claimed — an edition
+// that walked down from `host` and reported a host-level reason would pass the first two.
+
+const SIM_TESTS = SCTS_TESTS.filter(test => test.suite === 'sim').map(test => test.id)
+
+certificationCase('sim-only-awards-none',
+  'Every test a workstation can run, passing, and no bench evidence at all — what `skynet driver '
+  + 'check` produces against a fake. Nine of the ten guest-required tests are satisfied and the '
+  + 'tenth, offline.control.independent, is bench, so the award is none rather than guest. '
+  + 'Absence is not a pass even when everything present passed.',
+  { claimed: 'guest', results: results(SIM_TESTS) })
+
+certificationCase('sim-only-plus-the-one-bench-test',
+  'The same evidence with offline.control.independent measured, which awards guest. Paired with '
+  + 'sim-only-awards-none it pins the reason for that refusal to exactly one row of §15: not the '
+  + 'suite, not the count, that test.',
+  { claimed: 'guest', results: results([...SIM_TESTS, 'offline.control.independent']) })
+
+certificationCase('sim-only-claiming-host-still-reads-guest',
+  'Sim-only evidence behind a host claim. The verdict is identical to the guest claim, reason '
+  + 'included: the walk stops at the first tier that fails, so the sentence an operator reads '
+  + 'names guest and not the tier the vendor asked for.',
+  { claimed: 'host', results: results(SIM_TESTS) })
 
 // ── frames, §44.3 ────────────────────────────────────────────────────────────
 //

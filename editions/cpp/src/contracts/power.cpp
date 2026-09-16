@@ -384,6 +384,9 @@ Json power(const std::string& /*label*/, const Json& input) {
   out.set("grants_new_leases", Json::boolean(state_grants && !withheld));
   out.set("requires_safe_state", Json::boolean(state == "reserve" || state == "critical"));
   out.set("stops_immediately", Json::boolean(state == "critical"));
+  // §36.1's third row, missing from this document in every edition until 2026-09-16.
+  out.set("notifies_operator",
+          Json::boolean(state == "low" || state == "reserve" || state == "critical"));
   out.set("budget_missed", budget_missed);
   return out;
 }

@@ -1461,6 +1461,296 @@
         ]
       },
       "expected": "{\"awarded\":\"none\",\"expires_in_days\":null,\"failures\":[\"rhal.abi.version\"],\"missing\":[],\"reasons\":[\"guest: 1 failing, 0 unmeasured.\"]}"
+    },
+    {
+      "id": "sim-only-awards-none",
+      "note": "Every test a workstation can run, passing, and no bench evidence at all — what `skynet driver check` produces against a fake. Nine of the ten guest-required tests are satisfied and the tenth, offline.control.independent, is bench, so the award is none rather than guest. Absence is not a pass even when everything present passed.",
+      "input": {
+        "claimed": "guest",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.signed",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.limits.sourced",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.roles.coverage",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.capabilities.declared",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.frames.complete",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "ota.safety_gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "telemetry.replay.deterministic",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.identity.attested",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ]
+      },
+      "expected": "{\"awarded\":\"none\",\"expires_in_days\":null,\"failures\":[],\"missing\":[\"offline.control.independent\"],\"reasons\":[\"guest: 0 failing, 1 unmeasured.\"]}"
+    },
+    {
+      "id": "sim-only-plus-the-one-bench-test",
+      "note": "The same evidence with offline.control.independent measured, which awards guest. Paired with sim-only-awards-none it pins the reason for that refusal to exactly one row of §15: not the suite, not the count, that test.",
+      "input": {
+        "claimed": "guest",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.signed",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.limits.sourced",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.roles.coverage",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.capabilities.declared",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.frames.complete",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "ota.safety_gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "telemetry.replay.deterministic",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.identity.attested",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ]
+      },
+      "expected": "{\"awarded\":\"guest\",\"expires_in_days\":null,\"failures\":[],\"missing\":[],\"reasons\":[]}"
+    },
+    {
+      "id": "sim-only-claiming-host-still-reads-guest",
+      "note": "Sim-only evidence behind a host claim. The verdict is identical to the guest claim, reason included: the walk stops at the first tier that fails, so the sentence an operator reads names guest and not the tier the vendor asked for.",
+      "input": {
+        "claimed": "host",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.signed",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.limits.sourced",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.roles.coverage",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.capabilities.declared",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.frames.complete",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "ota.safety_gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "telemetry.replay.deterministic",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.identity.attested",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ]
+      },
+      "expected": "{\"awarded\":\"none\",\"expires_in_days\":null,\"failures\":[],\"missing\":[\"offline.control.independent\"],\"reasons\":[\"guest: 0 failing, 1 unmeasured.\"]}"
     }
   ]
 }

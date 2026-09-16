@@ -2172,11 +2172,26 @@ fn print_power(document: &Json) {
         println!("  thermal {thermal} — giving up {}", shed.join(", "));
     }
 
-    // Three booleans an operator acts on, printed only when they say something. A line reading
+    // Four booleans an operator acts on, printed only when they say something. A line reading
     // "new leases: yes" on every healthy robot is a line nobody reads on the one robot where it
     // says no.
+    //
+    // §36.1's `notifies_operator` is not printed on its own, because it would be: it is true on
+    // exactly the three states that already withhold leases, and the state is on the line above.
+    // What it does carry that nothing else here does is **which of the two reasons** withheld
+    // them. `grants_new_leases` is the state *and* the faults; this is the state alone, so the two
+    // disagreeing means a fault took the leases while the charge level was fine. Those send an
+    // operator to different places, which is the same distinction the daemon's own refusal
+    // sentence draws, and this line drew none of it until 2026-09-16.
     if !flag("grants_new_leases") {
-        println!("  {}", term::bold("no new task leases (§36.1)"));
+        println!(
+            "  {}",
+            term::bold(if flag("notifies_operator") {
+                "no new task leases — the charge level itself (§36.1)"
+            } else {
+                "no new task leases — a fault, not the charge level (§36.1)"
+            })
+        );
     }
     if flag("requires_safe_state") {
         println!(
@@ -3288,6 +3303,51 @@ fn replay_file(path: &str, argv: &[String]) -> i32 {
         result.warmed,
         result.evaluated()
     );
+
+    // §26.4: whether the window recorded every field the replay evaluates.
+    //
+    // Said out loud in both directions, because a replay is evidence and evidence that will not
+    // report its own completeness is the shape §15 names as the most damaging thing this platform
+    // could ship. Until now a window missing `capability` or `nearest_person_m` on some of its
+    // cycles replayed and printed exactly like a whole one: the per-guard `Unknowable` below fires
+    // only when a field is absent from *every* cycle, which is the recording-is-too-old case and
+    // the benign one.
+    //
+    // The partial case is the one worth the alarm. One writer does not stop writing a field
+    // halfway through a window, so a count between zero and all of them is a file that has been
+    // edited or a writer with a bug — and either way the verdicts below were reproduced from a
+    // robot that is not quite the one that produced them.
+    let cycle_count = put_back
+        .records
+        .iter()
+        .filter(|record| matches!(&record.body, skynet_blackbox::Body::Cycle(_)))
+        .count();
+    if put_back.absent.verdict_inputs_all_recorded() {
+        println!("  every field this replay evaluates was recorded on every cycle");
+    } else {
+        for (field, missing) in [
+            ("capability", put_back.absent.capability),
+            ("nearest_person_m", put_back.absent.nearest_person_m),
+        ] {
+            if missing == 0 {
+                continue;
+            }
+            let line = if missing == cycle_count {
+                format!(
+                    "no cycle carries `{field}`, so this window was sealed before the field \
+                     existed — the guards reading it are reported below as unknowable rather \
+                     than as never engaged"
+                )
+            } else {
+                format!(
+                    "{missing} of the {cycle_count} cycles carry no `{field}`, and one writer \
+                     does not stop midway — this file has been edited or the writer had a bug, \
+                     and the verdicts below came from a robot not quite the one that recorded them"
+                )
+            };
+            println!("  {}", term::warn(&line));
+        }
+    }
 
     // §25: the loop returns before the kernel when the policy posted nothing, so those cycles
     // carry no verdict to reproduce. Said before the result rather than after it, because a

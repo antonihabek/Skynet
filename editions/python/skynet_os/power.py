@@ -577,5 +577,9 @@ def power_to_json(case_input: dict[str, Any]) -> Any:
         "grants_new_leases": grants_new_leases(assessment),
         "requires_safe_state": state_requires_safe_state(assessment["state"]),
         "stops_immediately": state_stops_immediately(assessment["state"]),
+        # §36.1's third row. ``state_notifies_operator`` was written and exported with the other
+        # two and left out of this document, in every edition at once, which is why nothing caught
+        # it: the corpus can only hold editions to each other.
+        "notifies_operator": state_notifies_operator(assessment["state"]),
         "budget_missed": budget_missed(declared, observed),
     }

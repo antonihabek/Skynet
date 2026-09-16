@@ -1,5 +1,5 @@
 {
-  "cases": 1199,
+  "cases": 1202,
   "editions": [
     {
       "id": "rust",
@@ -7,8 +7,8 @@
       "standing": "reference",
       "path": "crates/",
       "runner": "cargo run -q -p skynet-corpus --bin corpus-report",
-      "cases_passed": 1199,
-      "cases_total": 1199,
+      "cases_passed": 1202,
+      "cases_total": 1202,
       "corpus_files": 80,
       "corpora_complete": null
     },
@@ -18,8 +18,8 @@
       "standing": "full",
       "path": "editions/python/",
       "runner": "python3 editions/python/run_corpus.py --json",
-      "cases_passed": 1199,
-      "cases_total": 1199,
+      "cases_passed": 1202,
+      "cases_total": 1202,
       "corpus_files": null,
       "corpora_complete": [
         "admission",
@@ -63,8 +63,8 @@
       "standing": "full",
       "path": "editions/cpp/",
       "runner": "make -C editions/cpp && editions/cpp/build/skynet-corpus-cpp --json",
-      "cases_passed": 1199,
-      "cases_total": 1199,
+      "cases_passed": 1202,
+      "cases_total": 1202,
       "corpus_files": null,
       "corpora_complete": [
         "admission",
@@ -108,8 +108,8 @@
       "standing": "full",
       "path": "editions/go/",
       "runner": "go -C editions/go run ./cmd/corpus --json --corpus-root ../../corpus",
-      "cases_passed": 1199,
-      "cases_total": 1199,
+      "cases_passed": 1202,
+      "cases_total": 1202,
       "corpus_files": null,
       "corpora_complete": [
         "admission",
