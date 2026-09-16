@@ -84,6 +84,16 @@ func StateRequiresSafeState(state string) bool { return state == "reserve" || st
 // StateStopsImmediately reports whether the stop is immediate rather than after the running task.
 func StateStopsImmediately(state string) bool { return state == "critical" }
 
+// StateNotifiesOperator reports whether an operator is told (§36.1's low row, and below it).
+//
+// §36.1 derives three facts from a power state, and this one reached no document in any edition
+// until 2026-09-16 — the reference included, which is why the corpus never caught it. A robot that
+// has stopped taking work and a robot that has stopped taking work and owes somebody a phone call
+// are different situations, and only the first was reportable.
+func StateNotifiesOperator(state string) bool {
+	return state == "low" || state == "reserve" || state == "critical"
+}
+
 // PowerReserve is §36.2's budget, and what it could not account for.
 type PowerReserve struct {
 	// WH is the reserve, or absent when the body declares nothing to compute one from.
@@ -455,5 +465,6 @@ func powerCase(input canonical.Value) (canonical.Value, error) {
 		Set("grants_new_leases", canonical.Bool(GrantsNewLeases(assessment))).
 		Set("requires_safe_state", canonical.Bool(StateRequiresSafeState(assessment.State))).
 		Set("stops_immediately", canonical.Bool(StateStopsImmediately(assessment.State))).
+		Set("notifies_operator", canonical.Bool(StateNotifiesOperator(assessment.State))).
 		Set("budget_missed", optionalString(missed, missed != "")), nil
 }
