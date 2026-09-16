@@ -1,26 +1,21 @@
 {
   "note": "pub fns with no caller outside a test, each with the reason it is unreached. Checked by tools/check-production-callers.mjs. The ratchet only tightens: a name here that gains a production caller fails the check until it is removed, and a new unreached fn fails until it is either wired up or added with a reason. Three of the groups below are answered — the signer, the capture producer and the vendor ABI — and the rest are a baseline somebody has to drain. Never add a name without an argument for it: a list of names with no reasons is the thing this list exists to prevent.",
-
   "allowed": {
     "from_u64": "§19 forbids a robot holding a signing key, so `skynet-ed25519` is verification-only and its description says so. The signer exists behind `#[cfg(feature = \"test-signing\")]` because a test proving the *verified* path needs a signature over bytes it chose, and the alternative is testing the verifier against four fixed messages forever. A dev-dependency cycle back to this package turns the feature on for its own tests without putting it in anything that ships.",
     "from_seed": "As `from_u64` — behind `test-signing`, which nothing that ships may name.",
     "verifying_key": "As `from_u64` — behind `test-signing`, which nothing that ships may name.",
     "public_hex": "As `from_u64` — behind `test-signing`, which nothing that ships may name.",
     "sign_hex": "As `from_u64` — behind `test-signing`, which nothing that ships may name.",
-
     "estimated": "§47.4's producer side. No capture backend exists on this edition — `skynet-capture` moves handles a V4L2 or GenICam backend would produce and neither is written — so the API a backend calls is unreached by construction rather than by oversight. Phase 1 of DRY-COVERAGE-PLAN.md is what reaches it.",
     "is_full": "As `estimated` — §47.4's producer side, waiting on a capture backend.",
     "close_gap": "As `estimated` — §47.4's producer side, waiting on a capture backend.",
     "open_gap": "As `estimated` — §47.4's producer side, waiting on a capture backend.",
     "deliver": "As `estimated` — §47.4's producer side, waiting on a capture backend.",
     "revoke_loans": "§47.6's frame pool. The loan and the mapping are built and three editions reproduce them; the pixels are not, so the pool a robot offers today is empty and nothing has a loan to revoke. Same unblocker as `estimated`.",
-
     "from_flags": "The vendor ABI's Rust view (§4, §31.2). This crate is public surface for a driver author outside this workspace, so an in-workspace caller is not expected — and `skynetd-io` deliberately has no edge to it (§33.1), which is why §24's flag values are restated there and held by tools/check-rhal-flags.mjs instead.",
     "to_flags": "As `from_flags` — the vendor-facing ABI view.",
-
     "driver_may_activate": "§19's driver-activation rule, written twice, with only one copy live. `crates/skynetd-io/src/runtime.rs:519` enforces it inline and is the reached one; this is the spelling nothing calls. Not a safety hole — the rule is enforced — but it is §78's shape exactly, where the remedy for one fact with several spellings is a mechanism rather than care. Folding them is the owner's decision, not this check's. F5 in DRY-COVERAGE-PLAN.md.",
     "verdict_inputs_all_recorded": "§26.4. `skynet-blackbox` can read a sealed window back and replay its cycles through the kernel, and never reports whether the window recorded every field a replay evaluates — so a replay of an incomplete window is presented exactly like a replay of a complete one. F5 in DRY-COVERAGE-PLAN.md.",
-
     "transfers": "Baseline 2026-09-16 — unreached when this check was introduced, not triaged. See DRY-COVERAGE-PLAN.md Phase 0.2.",
     "format_pairing_code": "Baseline 2026-09-16 — unreached, not triaged. Contract surface mirrored to the Hub, so a consumer outside this workspace may be the only caller; that needs confirming rather than assuming.",
     "notifies_operator": "Baseline 2026-09-16 — unreached, not triaged.",
@@ -42,7 +37,6 @@
     "write_response": "Baseline 2026-09-16 — unreached, not triaged.",
     "grants_by_package": "Baseline 2026-09-16 — unreached, not triaged.",
     "bundle_message": "Baseline 2026-09-16 — unreached, not triaged.",
-    "upload_target": "Baseline 2026-09-16 — unreached, not triaged.",
     "grants_for": "Baseline 2026-09-16 — unreached, not triaged."
   }
 }
