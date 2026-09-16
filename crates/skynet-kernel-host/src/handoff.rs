@@ -69,6 +69,15 @@ pub struct Port {
     path: PathBuf,
     handed: usize,
     refused: usize,
+    /// A pidfd per policy that took the descriptors, from the kernel rather than from the policy.
+    ///
+    /// §47.6's loans are the reason this is kept. See [`Port::reap_departed`].
+    readers: Vec<std::os::fd::RawFd>,
+    /// Hand-overs the kernel would not name a peer for.
+    ///
+    /// Sticky, and it disables revocation for the life of the port. A reader nothing can watch is a
+    /// reader that may still be alive, and the rule below is all-or-nothing.
+    unidentified: usize,
 }
 
 /// Why a port could not be opened.
@@ -153,6 +162,8 @@ impl Port {
                 path: path.to_path_buf(),
                 handed: 0,
                 refused: 0,
+                readers: Vec::new(),
+                unidentified: 0,
             },
         ))
     }
@@ -188,13 +199,33 @@ impl Port {
         let mut handed = 0;
         loop {
             match self.listener.accept() {
-                Ok((stream, _)) => match pass::send_fds(stream.as_raw_fd(), &carried[..count]) {
-                    Ok(()) => {
-                        self.handed += 1;
-                        handed += 1;
+                Ok((stream, _)) => {
+                    // Named **before** the descriptors are sent, which is the only ordering that
+                    // works: `SO_PEERPIDFD` fails with `ESRCH` once the peer is gone, and a policy
+                    // that exits the instant it has the fds is exactly the case the pidfd is for.
+                    // The descriptor outlives the process it names; the pid never could.
+                    let named = pass::peer_pidfd(stream.as_raw_fd());
+                    match pass::send_fds(stream.as_raw_fd(), &carried[..count]) {
+                        Ok(()) => {
+                            self.handed += 1;
+                            handed += 1;
+                            match named {
+                                Ok(pidfd) => self.readers.push(pidfd),
+                                // No signal for this reader, so no revocation for this port. Fail
+                                // closed: a pool that loses a slot says so in `stats()`, and one
+                                // that revokes on a guess hands a live reader's buffer to the
+                                // writer.
+                                Err(_) => self.unidentified += 1,
+                            }
+                        }
+                        Err(_) => {
+                            self.refused += 1;
+                            if let Ok(pidfd) = named {
+                                pass::close(pidfd);
+                            }
+                        }
                     }
-                    Err(_) => self.refused += 1,
-                },
+                }
                 // Nothing waiting. The ordinary result on almost every cycle.
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
                 Err(_) => {
@@ -204,6 +235,59 @@ impl Port {
             }
         }
         handed
+    }
+
+    /// Whether every policy that took the pool has exited — answered once per departure.
+    ///
+    /// # What this is for
+    ///
+    /// §47.6 lends a slot to a reader and the writer will not reuse it until the loan is released.
+    /// A policy that dies holding one pins that slot for the life of the robot, and
+    /// `skynet_frames::Writer::revoke_loans` is the remedy — for as long as it had no caller,
+    /// because nothing that holds the pool had a sound signal that the reader was gone.
+    ///
+    /// This is that signal, and it comes from the kernel: a pidfd per accepted connection, taken at
+    /// accept time with `SO_PEERPIDFD`. `skynet_ring_shm::pass::peer_pidfd` explains why every
+    /// cheaper answer — the socket's end-of-file, a timeout, a pid — is unsound.
+    ///
+    /// # All of them, or none
+    ///
+    /// The loans region is one claim per slot and carries **no owner**, so there is no such thing as
+    /// revoking one reader's loans. Two policies may hold slots at once — this port hands the
+    /// descriptors to everything that connects, and the arbitration that stops a second commanding
+    /// package is `skynetd_io::shape::supervising`'s rather than this file's — so revoking while one
+    /// of them is alive would take a slot out from under it.
+    ///
+    /// So this returns `true` only when there was at least one reader and **every** one of them has
+    /// exited, and then forgets them, so a policy that starts afterwards is a fresh generation. The
+    /// consequence worth stating: a policy that crashes while another is running keeps its slots
+    /// pinned until the second one exits too. That is the direction to be wrong in.
+    ///
+    /// A hand-over the kernel would not name disables this permanently. Same rule, same reason.
+    pub fn reap_departed(&mut self) -> bool {
+        if self.readers.is_empty() || self.unidentified > 0 {
+            return false;
+        }
+        if !self
+            .readers
+            .iter()
+            .all(|pidfd| pass::process_exited(*pidfd))
+        {
+            return false;
+        }
+        for pidfd in self.readers.drain(..) {
+            pass::close(pidfd);
+        }
+        true
+    }
+
+    /// How many policies took the descriptors without the kernel naming the process behind them.
+    ///
+    /// Non-zero means loan revocation is off for this run, and an operator should be able to read
+    /// that rather than infer it from a pool that never recovers a slot. `ENOPROTOOPT` — a kernel
+    /// older than 6.5 — is the only cause anybody is likely to meet.
+    pub fn unidentified(&self) -> usize {
+        self.unidentified
     }
 
     /// How many policies have taken the descriptor.
@@ -229,6 +313,10 @@ impl Drop for Port {
         // it. Removed here, and removed again before the next bind, because a process that is
         // killed never reaches this.
         let _ = std::fs::remove_file(&self.path);
+        // And the pidfds, which are descriptors this process owns for as long as it watches them.
+        for pidfd in self.readers.drain(..) {
+            pass::close(pidfd);
+        }
     }
 }
 
@@ -262,6 +350,16 @@ impl Port {
         _observations: &Mapping,
         _frames: Option<&skynet_frames::Writer>,
     ) -> usize {
+        0
+    }
+
+    /// Nothing took the pool, so nothing has left it.
+    pub fn reap_departed(&mut self) -> bool {
+        false
+    }
+
+    /// None, always.
+    pub fn unidentified(&self) -> usize {
         0
     }
 
