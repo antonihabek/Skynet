@@ -38,6 +38,13 @@ pub struct Commanding {
     /// reading is good enough, so the reading is passed through and the turn counts it as
     /// unbudgeted. A closed-loop policy that declares no budget is a policy nobody can hold to one.
     pub observation_budget_ms: Option<f64>,
+    /// How old a camera frame may be before this policy may not use it, in milliseconds.
+    ///
+    /// §25.1's staleness budget is *per stream*, and a camera is a stream with its own latency:
+    /// thirty milliseconds is old for a joint reading and ordinary for an image. So it is its own
+    /// number rather than the body's, and exceeding it is a hold the backend never sees, for the
+    /// same reason. `None` passes every frame, and the backend is told each one's age.
+    pub frame_budget_ms: Option<f64>,
     /// The control mode resolved for this package by §6's transport plan.
     ///
     /// Fixed for the lease. A backend returning a different one is refused rather than followed:
@@ -57,6 +64,7 @@ impl Commanding {
         Commanding {
             channels: 0,
             observation_budget_ms: None,
+            frame_budget_ms: None,
             mode: mode::POSITION,
         }
     }
@@ -163,6 +171,42 @@ pub enum Body<'a> {
     Detached,
 }
 
+/// What the runtime could show a backend of the robot's camera this cycle (§47.6).
+///
+/// Four cases for [`Body`]'s reason: each sends a person somewhere different, and an `Option` would
+/// make *no camera on this robot* and *the camera has not delivered yet* the same value.
+#[derive(Debug, Clone, Copy)]
+pub enum Sight<'a> {
+    /// The newest frame, copied out of the pool under a loan that was released before the backend
+    /// was asked.
+    ///
+    /// Copied because §47.6 lets the writer reuse a slot the moment it is released, and a backend
+    /// that took several milliseconds over a borrow into the mapping would be holding the slot for
+    /// all of them — which is what loans are for, and what this runtime chooses not to spend on a
+    /// policy that has not asked for it.
+    Frame {
+        /// The pixels, as the capture side published them.
+        pixels: &'a [u8],
+        /// The capture side's sequence for this frame. A backend that sees it jump has missed
+        /// frames, which is ordinary: the pool is latest-wins by design (§47.4).
+        sequence: u64,
+        /// Acquisition, on the same clock as the body's stamp (§47.2).
+        stamp_ns: u64,
+        /// How old the frame is at this tick, in milliseconds, measured from acquisition.
+        age_ms: f64,
+    },
+    /// A pool is attached and nothing has been published into it yet — §47.6's sentinel, which is
+    /// what keeps this from being a frame of zeros.
+    NoFrameYet,
+    /// The newest frame was replaced between being named and being taken.
+    ///
+    /// Not a fault: the writer outran this reader, and §47.6 refuses the stale handle by name
+    /// rather than showing somebody else's frame. The next tick names the new one.
+    Missed,
+    /// No pool is attached. A robot with no camera, which is most of them.
+    Blind,
+}
+
 /// A policy, as the ring sees one.
 ///
 /// Deliberately narrow. A backend receives the tick it is answering and the monotonic instant that
@@ -170,13 +214,14 @@ pub enum Body<'a> {
 /// so the only thing it can do is decide — which is what makes every backend in this file testable
 /// without a robot, and what would make a neural network backend testable without a GPU.
 ///
-/// # What is still missing from this signature
+/// # What a backend can see
 ///
-/// **Anything the robot can see.** [`Body`] carries proprioception, which is what `skynet-obs`
-/// carries, which is what fits in a page. Camera frames need a buffer pool with handles and a
-/// lifetime rule, and until that exists a backend here can close the loop on where the joints are
-/// and not on what is in front of them. There is no `frames` field returning an empty slice: a
-/// parameter nothing can fill is a worse lie than a missing one.
+/// [`Body`] carries proprioception, which is what `skynet-obs` carries, which is what fits in a
+/// page. [`Sight`] carries the camera: §47.6's pool, filled since 2026-09-16 by the control loop
+/// reading the driver's sensor. Until that producer existed this trait had no frame parameter, on
+/// the argument that a parameter nothing can fill is a worse lie than a missing one — and the
+/// argument still holds for a robot with no camera, which is why [`Sight::Blind`] is a case and not
+/// an empty slice.
 pub trait Backend {
     /// A short name for logs and the black box. Never a claim about what the policy does.
     fn name(&self) -> &'static str;
@@ -187,8 +232,10 @@ pub trait Backend {
     /// backend can tell "the twentieth cycle" from "the twentieth command".
     ///
     /// `body` is what the runtime could learn about the robot. A backend that ignores it is
-    /// open-loop, which is a legitimate thing to be and is what both backends in this file are.
-    fn decide(&mut self, tick: u64, now_ns: u64, body: Body<'_>) -> Intent;
+    /// open-loop, which is a legitimate thing to be and is what two backends in this file are.
+    ///
+    /// `sight` is the newest camera frame, when there is a camera and it has delivered one.
+    fn decide(&mut self, tick: u64, now_ns: u64, body: Body<'_>, sight: Sight<'_>) -> Intent;
 }
 
 /// The policy that commands nothing, for ever.
@@ -205,7 +252,7 @@ impl Backend for Hold {
         "hold"
     }
 
-    fn decide(&mut self, _tick: u64, _now_ns: u64, _body: Body<'_>) -> Intent {
+    fn decide(&mut self, _tick: u64, _now_ns: u64, _body: Body<'_>, _sight: Sight<'_>) -> Intent {
         Intent::Hold
     }
 }
@@ -269,7 +316,7 @@ impl Backend for Trajectory {
         "trajectory"
     }
 
-    fn decide(&mut self, tick: u64, _now_ns: u64, _body: Body<'_>) -> Intent {
+    fn decide(&mut self, tick: u64, _now_ns: u64, _body: Body<'_>, _sight: Sight<'_>) -> Intent {
         match self.rows.get(self.next) {
             Some((at, values, mask)) if *at <= tick => {
                 let intent = Intent::Command {
@@ -342,7 +389,7 @@ impl Backend for Approach {
         "approach"
     }
 
-    fn decide(&mut self, _tick: u64, _now_ns: u64, body: Body<'_>) -> Intent {
+    fn decide(&mut self, _tick: u64, _now_ns: u64, body: Body<'_>, _sight: Sight<'_>) -> Intent {
         let Body::Fresh { observation, .. } = body else {
             // No body, for any of the three reasons. A closed-loop policy with nothing to close on
             // is a policy that should not be commanding, and a hold says so while staying alive.

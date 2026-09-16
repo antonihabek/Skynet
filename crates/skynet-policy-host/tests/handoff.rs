@@ -349,6 +349,12 @@ fn a_frame_pool_crosses_with_the_rings_and_the_policy_reads_its_shape_from_it() 
         said.contains("newest frame in slot 0"),
         "the policy mapped the pool and did not see the frame in it. It said:\n{said}",
     );
+    // And the backend was shown it on every turn, which is the step past naming the slot: the
+    // child took a loan, copied the pixels, and gave the loan back before deciding.
+    assert!(
+        said.contains("20 of 20 turn(s) were shown a frame (0 missed, 0 too old)"),
+        "the policy named the frame and did not hand it to its backend. It said:\n{said}",
+    );
 
     // And the loans region really is the child's to write: it exited, so nothing holds a slot, and
     // the writer can take the one the frame is in.

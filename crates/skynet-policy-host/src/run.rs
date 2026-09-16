@@ -28,7 +28,7 @@
 
 use skynet_ring::{Command, Producer, RingError};
 
-use crate::backend::{Backend, Body, Commanding, Intent};
+use crate::backend::{Backend, Body, Commanding, Intent, Sight};
 
 /// A monotonic clock, so a test can drive the loop without waiting.
 ///
@@ -136,6 +136,22 @@ enum Feed {
     Fresh { age_ms: f64, budgeted: bool },
 }
 
+/// What the frame pool said this turn, before it becomes a [`Sight`].
+///
+/// For [`Feed`]'s reason: the stale case is decided before the backend is asked, and a `Sight`
+/// borrows the pixel buffer, which cannot happen until every decision needing `&mut self` is made.
+#[derive(Debug, Clone, Copy)]
+enum Seen {
+    Blind,
+    NoFrameYet,
+    Missed,
+    Frame {
+        sequence: u64,
+        stamp_ns: u64,
+        age_ms: f64,
+    },
+}
+
 /// What a run of the loop did in total.
 ///
 /// Every field is a count of something that happened, and there is deliberately no ratio here: a
@@ -168,6 +184,12 @@ pub struct Summary {
     /// §25.1's undeclared-budget case. Not an error and not zero-cost: it is the count of cycles on
     /// which nothing in this system could say whether the body the policy acted on was current.
     pub unbudgeted: u64,
+    /// Turns a backend was shown a camera frame.
+    pub frames: u64,
+    /// Turns the newest frame moved before it could be taken (§47.6's stale handle).
+    pub frames_missed: u64,
+    /// Turns held because the frame was older than the lease's frame budget (§25.1).
+    pub stale_frames: u64,
 }
 
 /// The producer side of §25's command ring.
@@ -189,6 +211,8 @@ pub struct PolicyHost<B: Backend, C: Clock> {
     /// also what makes [`skynet_obs::Consumer::read`]'s contract useful: a `Stale` or an `Empty`
     /// leaves it untouched, so what it holds is the last reading that was genuinely delivered.
     observation: skynet_obs::Observation,
+    /// The newest frame's pixels, copied out of the pool and reused every turn for the same reason.
+    pixels: Vec<u8>,
 }
 
 impl<B: Backend, C: Clock> PolicyHost<B, C> {
@@ -212,6 +236,7 @@ impl<B: Backend, C: Clock> PolicyHost<B, C> {
             sequence: 0,
             summary: Summary::default(),
             observation: skynet_obs::Observation::default(),
+            pixels: Vec::new(),
         }
     }
 
@@ -245,6 +270,33 @@ impl<B: Backend, C: Clock> PolicyHost<B, C> {
         &mut self,
         producer: &mut Producer<'_>,
         observations: Option<&mut skynet_obs::Consumer<'_>>,
+    ) -> Tick {
+        self.turn_seeing(producer, observations, None)
+    }
+
+    /// Run one turn with a camera: as [`Self::turn`], and the newest frame in `frames` is shown to
+    /// the backend as a [`Sight`].
+    ///
+    /// # The loan is released before the backend is asked
+    ///
+    /// The frame is taken the way §47.6 says a reader takes one — name the newest, publish a loan,
+    /// validate it, copy — and the loan is given back as soon as the copy is done. The backend then
+    /// works on this process's copy for as long as it likes, and the writer is free to reuse the
+    /// slot the moment the copy ends rather than the moment inference does. A policy that wants to
+    /// hold a frame across cycles can keep its own copy; what it cannot do is pin the pool.
+    ///
+    /// # What copying costs
+    ///
+    /// One slot of bytes per turn, into a buffer that is kept and reused. `skynet-frames` also
+    /// builds a `String` for the stream name on every `latest` and `acquire` — §47.6's contract names
+    /// a stream by string — so a turn with a camera allocates where a turn without one does not.
+    /// It is stated here rather than assumed away; the overrun count is what says whether it
+    /// matters.
+    pub fn turn_seeing(
+        &mut self,
+        producer: &mut Producer<'_>,
+        observations: Option<&mut skynet_obs::Consumer<'_>>,
+        frames: Option<&skynet_frames::Reader>,
     ) -> Tick {
         if !self.lease.valid() {
             self.tick += 1;
@@ -303,6 +355,26 @@ impl<B: Backend, C: Clock> PolicyHost<B, C> {
             self.summary.unbudgeted += 1;
         }
 
+        // ── the camera ───────────────────────────────────────────────────────
+        //
+        // After the body, for the same reason the body is read after the stamp: the age a backend
+        // is told is the age at the instant its command will carry.
+        let seen = match frames {
+            None => Seen::Blind,
+            Some(pool) => self.look(pool, produced_ns),
+        };
+        match seen {
+            Seen::Frame { age_ms, .. } => match self.lease.frame_budget_ms {
+                Some(budget) if age_ms > budget => {
+                    self.summary.stale_frames += 1;
+                    return self.publish(producer, produced_ns, Intent::Hold);
+                }
+                _ => self.summary.frames += 1,
+            },
+            Seen::Missed => self.summary.frames_missed += 1,
+            Seen::NoFrameYet | Seen::Blind => {}
+        }
+
         let body = match feed {
             Feed::Detached => Body::Detached,
             Feed::Empty => Body::Empty,
@@ -315,7 +387,23 @@ impl<B: Backend, C: Clock> PolicyHost<B, C> {
             },
         };
 
-        let intent = self.backend.decide(tick, produced_ns, body);
+        let sight = match seen {
+            Seen::Frame {
+                sequence,
+                stamp_ns,
+                age_ms,
+            } => Sight::Frame {
+                pixels: &self.pixels,
+                sequence,
+                stamp_ns,
+                age_ms,
+            },
+            Seen::NoFrameYet => Sight::NoFrameYet,
+            Seen::Missed => Sight::Missed,
+            Seen::Blind => Sight::Blind,
+        };
+
+        let intent = self.backend.decide(tick, produced_ns, body, sight);
 
         let finished_ns = self.clock.now_ns();
         if finished_ns.saturating_sub(produced_ns) > self.period_ns {
@@ -323,6 +411,32 @@ impl<B: Backend, C: Clock> PolicyHost<B, C> {
         }
 
         self.publish(producer, produced_ns, intent)
+    }
+
+    /// Take the newest frame out of the pool, into [`Self::pixels`], and give the loan back.
+    ///
+    /// A refusal at either step is [`Seen::Missed`]: the handle named a slot the writer has since
+    /// reused, and §47.6 refuses it by name rather than showing another frame.
+    fn look(&mut self, pool: &skynet_frames::Reader, produced_ns: u64) -> Seen {
+        let Some(handle) = pool.latest() else {
+            return Seen::NoFrameYet;
+        };
+        let Ok(identity) = pool.acquire(&handle) else {
+            return Seen::Missed;
+        };
+        let copied = pool.read(&handle, &mut self.pixels);
+        pool.release(&handle);
+        if copied.is_none() {
+            self.pixels.clear();
+            return Seen::Missed;
+        }
+        Seen::Frame {
+            sequence: identity.sequence,
+            stamp_ns: identity.stamp_ns,
+            // Saturating, for the body's reason: a frame stamped in the future is a clock that has
+            // stepped, and the honest age is zero rather than an unsigned wrap.
+            age_ms: produced_ns.saturating_sub(identity.stamp_ns) as f64 / 1_000_000.0,
+        }
     }
 
     /// Turn one intent into a slot on the ring, or into nothing.
