@@ -39,7 +39,9 @@
 //! and outside everything that has to stay small; loading a neural network is a [`Backend`] nobody
 //! in this repository has written, and the trait exists so that absence is a named vacancy rather
 //! than a silent one. What ships here are backends that are honest about being simple: one that
-//! commands nothing and one that plays a table of setpoints open-loop.
+//! commands nothing, one that plays a table of setpoints open-loop, and one that walks joints toward
+//! a target, closed on the body. Each is shown the newest camera frame when a pool came with the
+//! rings (§47.6), and none of the three looks at it.
 //!
 //! **It never touches the RHAL.** §25: *"The policy cannot reach the kernel except through the
 //! ring, and cannot reach the RHAL at all."* This process opens one shared mapping and writes
@@ -84,7 +86,7 @@ pub mod backend;
 pub mod rendezvous;
 pub mod run;
 
-pub use backend::{Approach, Backend, Body, Commanding, Hold, Intent, Trajectory};
+pub use backend::{Approach, Backend, Body, Commanding, Hold, Intent, Sight, Trajectory};
 pub use rendezvous::{Adopted, Ready};
 pub use run::{Clock, PolicyHost, Refusal, StepClock, Summary, SystemClock, Tick};
 

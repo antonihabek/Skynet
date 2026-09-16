@@ -17,7 +17,7 @@ use skynet_kernel_host::run::{Attached, Host};
 use skynet_ring::{mode, words_for, Ring, MAX_CHANNELS};
 use std::sync::atomic::AtomicU32;
 
-use crate::backend::{Approach, Backend, Body, Commanding, Hold, Intent, Trajectory};
+use crate::backend::{Approach, Backend, Body, Commanding, Hold, Intent, Sight, Trajectory};
 use crate::run::{PolicyHost, Refusal, StepClock, Tick};
 
 const SLOTS: usize = 8;
@@ -30,6 +30,7 @@ fn lease(channels: usize) -> Commanding {
     Commanding {
         channels,
         observation_budget_ms: None,
+        frame_budget_ms: None,
         mode: mode::POSITION,
     }
 }
@@ -50,7 +51,7 @@ impl Backend for Scripted {
         "scripted"
     }
 
-    fn decide(&mut self, tick: u64, _now_ns: u64, _body: Body<'_>) -> Intent {
+    fn decide(&mut self, tick: u64, _now_ns: u64, _body: Body<'_>, _sight: Sight<'_>) -> Intent {
         self.0.get(tick as usize).copied().unwrap_or(Intent::Silent)
     }
 }
@@ -204,6 +205,7 @@ fn an_impossible_lease_refuses_every_turn() {
         Commanding {
             channels: MAX_CHANNELS + 1,
             observation_budget_ms: None,
+            frame_budget_ms: None,
             mode: mode::POSITION,
         },
         10_000_000,
@@ -545,7 +547,7 @@ impl Backend for Watcher {
         "watcher"
     }
 
-    fn decide(&mut self, _tick: u64, _now_ns: u64, body: Body<'_>) -> Intent {
+    fn decide(&mut self, _tick: u64, _now_ns: u64, body: Body<'_>, _sight: Sight<'_>) -> Intent {
         self.seen.push(match body {
             Body::Fresh {
                 observation,
@@ -618,6 +620,7 @@ fn a_reading_past_its_budget_holds_without_asking_the_backend() {
         Commanding {
             channels: 1,
             observation_budget_ms: Some(0.5),
+            frame_budget_ms: None,
             mode: mode::POSITION,
         },
         10_000_000,
@@ -980,5 +983,244 @@ fn a_clamped_command_comes_back_as_the_body_the_robot_actually_reached() {
     assert!(
         (seen.position[0] - 0.25).abs() < 1e-6,
         "the body is what the robot reached, not what the policy asked for",
+    );
+}
+
+// ── the camera ───────────────────────────────────────────────────────────────
+
+/// What a backend was shown, one entry per decision.
+#[derive(Debug, Clone, PartialEq)]
+enum Shown {
+    Frame { sequence: u64, pixels: Vec<u8> },
+    NoFrameYet,
+    Missed,
+    Blind,
+}
+
+/// A backend that holds, and keeps what it was shown.
+#[derive(Default)]
+struct Watching(Vec<Shown>);
+
+impl Backend for Watching {
+    fn name(&self) -> &'static str {
+        "watching"
+    }
+
+    fn decide(&mut self, _tick: u64, _now_ns: u64, _body: Body<'_>, sight: Sight<'_>) -> Intent {
+        self.0.push(match sight {
+            Sight::Frame {
+                pixels, sequence, ..
+            } => Shown::Frame {
+                sequence,
+                pixels: pixels.to_vec(),
+            },
+            Sight::NoFrameYet => Shown::NoFrameYet,
+            Sight::Missed => Shown::Missed,
+            Sight::Blind => Shown::Blind,
+        });
+        Intent::Hold
+    }
+}
+
+/// A policy with no pool is told it is blind — not handed an empty frame.
+#[test]
+fn a_policy_with_no_pool_is_told_it_is_blind() {
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring");
+    let mut producer = ring.producer();
+    let mut host = PolicyHost::new(Watching::default(), still(), lease(1), 10_000_000);
+
+    host.turn_seeing(&mut producer, None, None);
+    assert_eq!(host.backend().0, vec![Shown::Blind]);
+    assert_eq!(host.summary().frames, 0);
+}
+
+/// A pool and its reader, in one process, over duplicated descriptors — `SCM_RIGHTS`, one step in.
+#[cfg(target_os = "linux")]
+fn pool(slots: usize, slot_bytes: usize) -> (skynet_frames::Writer, skynet_frames::Reader) {
+    let geometry = skynet_frames::Geometry { slots, slot_bytes };
+    let writer = skynet_frames::Writer::create("wrist", geometry).expect("a pool");
+    let [frames, loans] = writer.descriptors();
+    let dup = |fd| skynet_ring_shm::pass::dup(fd).expect("dup");
+    let reader = skynet_frames::Reader::adopt(dup(frames), dup(loans), geometry).expect("a reader");
+    (writer, reader)
+}
+
+/// A pool nothing has published into is *no frame yet*, and the backend is still asked.
+///
+/// A camera that has not delivered is ordinary at start, and a policy may decide something
+/// without it — so the backend is asked, and told.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_empty_pool_is_no_frame_yet_and_the_backend_is_still_asked() {
+    let (_writer, reader) = pool(2, 16);
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring");
+    let mut producer = ring.producer();
+    let mut host = PolicyHost::new(Watching::default(), still(), lease(1), 10_000_000);
+
+    assert_eq!(
+        host.turn_seeing(&mut producer, None, Some(&reader)),
+        Tick::Held(1)
+    );
+    assert_eq!(host.backend().0, vec![Shown::NoFrameYet]);
+}
+
+/// The newest frame reaches the backend, and the loan is given back before the backend runs.
+///
+/// A one-slot pool is the test: if the reader were still holding the slot, the writer's next
+/// publish would be refused as `pool_exhausted`. It is accepted, so the loan was released.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_newest_frame_reaches_the_backend_and_the_slot_is_free_again() {
+    let (mut writer, reader) = pool(1, 16);
+    writer
+        .publish(7, 900_000, b"first frame")
+        .expect("published");
+
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring");
+    let mut producer = ring.producer();
+    let mut host = PolicyHost::new(Watching::default(), still(), lease(1), 10_000_000);
+
+    host.turn_seeing(&mut producer, None, Some(&reader));
+    assert_eq!(
+        host.backend().0,
+        vec![Shown::Frame {
+            sequence: 7,
+            pixels: b"first frame".to_vec()
+        }]
+    );
+    assert_eq!(host.summary().frames, 1);
+
+    writer
+        .publish(8, 950_000, b"second frame")
+        .expect("the only slot was given back, so the writer may take it");
+    host.turn_seeing(&mut producer, None, Some(&reader));
+    assert_eq!(
+        host.backend().0.last(),
+        Some(&Shown::Frame {
+            sequence: 8,
+            pixels: b"second frame".to_vec()
+        })
+    );
+}
+
+/// A frame past the lease's budget is a hold the backend never sees (§25.1).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_frame_past_its_budget_holds_without_asking_the_backend() {
+    let (mut writer, reader) = pool(1, 16);
+    // Stamped 0.9 ms before the clock's reading of 1 ms, against a budget of 0.5 ms.
+    writer.publish(1, 100_000, b"old").expect("published");
+
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring");
+    let mut producer = ring.producer();
+    let mut budgeted = lease(1);
+    budgeted.frame_budget_ms = Some(0.5);
+    let mut host = PolicyHost::new(Watching::default(), still(), budgeted, 10_000_000);
+
+    assert_eq!(
+        host.turn_seeing(&mut producer, None, Some(&reader)),
+        Tick::Held(1)
+    );
+    assert!(host.backend().0.is_empty(), "the backend was never asked");
+    assert_eq!(host.summary().stale_frames, 1);
+    assert_eq!(host.summary().frames, 0);
+}
+
+/// Pixels a body rendered reach a policy, through the kernel host's camera and §47.6's pool.
+///
+/// §47's whole path in one process, the way `the_whole_control_path_in_one_process` is §25's: the
+/// kernel host reads the fake's camera inside its cycle and publishes the frame, and the policy
+/// host maps the same pool and shows the frame to a backend. The bytes are checked against the
+/// pattern the fake rendered, so a frame that crossed is the frame that was taken.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_frame_the_body_rendered_reaches_the_policy() {
+    use skynet_kernel_host::capture::{Camera, Declared, RhalSensor};
+
+    let (writer, reader) = pool(2, 16);
+    let mut camera = Camera::new(
+        RhalSensor::new(
+            0,
+            &Declared {
+                name: "wrist".to_string(),
+                hz: 100.0,
+                buffers: 2,
+                slot_bytes: 16,
+            },
+        )
+        .expect("a stream"),
+        Some(writer),
+    );
+    let mut robot = Fake::new(1);
+    robot.camera = Some(("wrist".to_string(), 12));
+
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring");
+    let mut producer = ring.producer();
+    let mut consumer = Ring::open(&words).expect("the same ring").consumer();
+    let channels: [&str; 1] = ["shoulder"];
+    let per_channel: [(&str, f64); 1] = [("shoulder", 1.0)];
+    let mut active: FixedVec<Guard, 8> = FixedVec::new();
+    active.push(Guard::Envelope);
+    let limits = ResolvedLimits {
+        tier: Tier::Host,
+        enforcement: Enforcement::Enforcing,
+        joint_velocity_max_rad_s: Some(2.0),
+        joint_torque_max_nm: None,
+        base_velocity_max_m_s: None,
+        min_control_hz: Some(100.0),
+        max_delta_per_cycle: None,
+        proximity: None,
+        per_channel: &per_channel,
+        active_guards: active,
+        unavailable_guards: FixedVec::new(),
+        inert_guards: FixedVec::new(),
+        source: Some("the camera test"),
+        notices: FixedVec::new(),
+        grants: &[],
+        frames: None,
+        workspace: &[],
+        self_collision_margin_m: None,
+    };
+    let mut kernel = Host::new(&channels);
+    let mut policy = PolicyHost::new(Watching::default(), still(), lease(1), 10_000_000);
+
+    for cycle in 0..2u64 {
+        kernel.step_observing(
+            cycle * 10_000_000,
+            &mut robot,
+            &mut consumer,
+            &limits,
+            None::<&Envelope<'_>>,
+            Attached {
+                observations: None,
+                camera: Some(&mut camera),
+            },
+        );
+        policy.turn_seeing(&mut producer, None, Some(&reader));
+    }
+
+    assert_eq!(
+        policy.backend().0,
+        vec![
+            Shown::Frame {
+                sequence: 0,
+                pixels: Fake::pattern(1, 12)
+            },
+            Shown::Frame {
+                sequence: 1,
+                pixels: Fake::pattern(2, 12)
+            },
+        ]
+    );
+    assert_eq!(camera.counts().published, 2);
+    assert_eq!(
+        camera.counts().pool_dropped,
+        0,
+        "the policy never pinned a slot"
     );
 }

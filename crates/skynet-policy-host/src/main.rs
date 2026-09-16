@@ -29,6 +29,10 @@
 //! approach` possible outside a test. A closed-loop policy that received the commands and not the
 //! body would be commanding blind, which is why they cross together rather than in two messages.
 //!
+//! **A frame pool, when one comes with the rings, is shown to the backend every turn** (§47.6): the
+//! newest frame is taken on a loan, copied, and the loan given back before the backend decides. The
+//! summary says how many turns were shown one, and says nothing about frames when no pool came.
+//!
 //! **Without a socket it publishes into a ring nobody reads**, in its own address space, and says
 //! so on the last line rather than leaving a reader to assume a robot moved. `approach` refuses to
 //! run at all there: a backend that closes a loop on a body it cannot see holds for ever, and a
@@ -45,7 +49,7 @@ use std::time::{Duration, Instant};
 
 use skynet_policy_host::backend::{Approach, Commanding, Hold, Trajectory};
 use skynet_policy_host::rendezvous;
-use skynet_policy_host::run::{PolicyHost, SystemClock, Tick};
+use skynet_policy_host::run::{PolicyHost, Summary, SystemClock, Tick};
 use skynet_ring::{mode, words_for, Ring, MAX_CHANNELS};
 
 fn main() {
@@ -322,6 +326,7 @@ fn run(args: &[String]) -> i32 {
         channels: options.channels,
         // No ring is attached, so nothing would be checked against a budget.
         observation_budget_ms: None,
+        frame_budget_ms: None,
         mode: options.mode,
     };
     if !lease.valid() {
@@ -429,11 +434,15 @@ fn run(args: &[String]) -> i32 {
         }
     }
 
-    // The observation reaches the backend through here, which is why the closure takes it rather
-    // than capturing it: `approach` is a function of the body and the other two are not, and a
-    // consumer captured by one of them would be a borrow held for the life of the run.
+    // The observation and the frame pool reach the backend through here, which is why the closure
+    // takes them rather than capturing them: `approach` is a function of the body and the other two
+    // are not, and a consumer captured by one of them would be a borrow held for the life of the run.
     type Turn<'a> = Box<
-        dyn FnMut(&mut skynet_ring::Producer<'_>, Option<&mut skynet_obs::Consumer<'_>>) -> Tick
+        dyn FnMut(
+                &mut skynet_ring::Producer<'_>,
+                Option<&mut skynet_obs::Consumer<'_>>,
+                Option<&skynet_frames::Reader>,
+            ) -> (Tick, Summary)
             + 'a,
     >;
     let mut host: Turn<'_> = match options.backend.as_str() {
@@ -449,7 +458,9 @@ fn run(args: &[String]) -> i32 {
                 lease,
                 period_ns,
             );
-            Box::new(move |producer, body| inner.turn(producer, body))
+            Box::new(move |producer, body, frames| {
+                (inner.turn_seeing(producer, body, frames), inner.summary())
+            })
         }
         // The closed-loop one, and the only backend whose command on cycle n is a function of what
         // the body did on cycle n - 1. It was written when `skynet-obs` was and had no way to be
@@ -462,11 +473,15 @@ fn run(args: &[String]) -> i32 {
                 lease,
                 period_ns,
             );
-            Box::new(move |producer, body| inner.turn(producer, body))
+            Box::new(move |producer, body, frames| {
+                (inner.turn_seeing(producer, body, frames), inner.summary())
+            })
         }
         _ => {
             let mut inner = PolicyHost::new(Hold, SystemClock::default(), lease, period_ns);
-            Box::new(move |producer, body| inner.turn(producer, body))
+            Box::new(move |producer, body, frames| {
+                (inner.turn_seeing(producer, body, frames), inner.summary())
+            })
         }
     };
 
@@ -474,6 +489,7 @@ fn run(args: &[String]) -> i32 {
     let mut held = 0u64;
     let mut refused = 0u64;
     let mut turns = 0u64;
+    let mut summary = Summary::default();
 
     loop {
         if let Some(limit) = options.cycles {
@@ -482,7 +498,9 @@ fn run(args: &[String]) -> i32 {
             }
         }
         let started = Instant::now();
-        match host(&mut producer, observations.as_mut()) {
+        let (tick, so_far) = host(&mut producer, observations.as_mut(), frames.as_ref());
+        summary = so_far;
+        match tick {
             Tick::Published(_) => published += 1,
             Tick::Held(_) => held += 1,
             Tick::Silent => {}
@@ -509,6 +527,14 @@ fn run(args: &[String]) -> i32 {
         println!(
             "skynetp: {turns} turn(s) — {published} commanded, {held} held, {refused} refused"
         );
+        // Only when a pool came with the rings: a policy that printed a frame line on every robot
+        // would be claiming a camera that is not there.
+        if frames.is_some() {
+            println!(
+                "skynetp: {} of {turns} turn(s) were shown a frame ({} missed, {} too old)",
+                summary.frames, summary.frames_missed, summary.stale_frames
+            );
+        }
         // What became of the commands, and the two answers are not the same sentence. A private
         // ring has no consumer by construction. A received one has the runtime that handed it over
         // — and this process cannot say what that runtime did with a command, because §7's guards
