@@ -2172,11 +2172,26 @@ fn print_power(document: &Json) {
         println!("  thermal {thermal} — giving up {}", shed.join(", "));
     }
 
-    // Three booleans an operator acts on, printed only when they say something. A line reading
+    // Four booleans an operator acts on, printed only when they say something. A line reading
     // "new leases: yes" on every healthy robot is a line nobody reads on the one robot where it
     // says no.
+    //
+    // §36.1's `notifies_operator` is not printed on its own, because it would be: it is true on
+    // exactly the three states that already withhold leases, and the state is on the line above.
+    // What it does carry that nothing else here does is **which of the two reasons** withheld
+    // them. `grants_new_leases` is the state *and* the faults; this is the state alone, so the two
+    // disagreeing means a fault took the leases while the charge level was fine. Those send an
+    // operator to different places, which is the same distinction the daemon's own refusal
+    // sentence draws, and this line drew none of it until 2026-09-16.
     if !flag("grants_new_leases") {
-        println!("  {}", term::bold("no new task leases (§36.1)"));
+        println!(
+            "  {}",
+            term::bold(if flag("notifies_operator") {
+                "no new task leases — the charge level itself (§36.1)"
+            } else {
+                "no new task leases — a fault, not the charge level (§36.1)"
+            })
+        );
     }
     if flag("requires_safe_state") {
         println!(

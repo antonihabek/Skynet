@@ -1396,6 +1396,13 @@ pub fn power_to_json(
         "stops_immediately",
         Json::Bool(assessment.stops_immediately()),
     );
+    // §36.1's third row, which this document carried for neither of the other two's reasons: it was
+    // simply missed. `notifies_operator` was computed and tested in `power.rs` and read by nothing,
+    // so a robot that owed an operator a phone call had no way to say so. Added 2026-09-16.
+    out.set(
+        "notifies_operator",
+        Json::Bool(assessment.state.notifies_operator()),
+    );
     out.set(
         "budget_missed",
         nullable_str(&crate::power::budget_missed(

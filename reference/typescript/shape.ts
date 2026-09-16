@@ -55,7 +55,8 @@ import {
 } from './watchdog.ts'
 import {
   assess as assessPower, budgetMissed, degraded as powerDegraded,
-  grantsNewLeases, reserveComplete, stateRequiresSafeState, stateStopsImmediately,
+  grantsNewLeases, reserveComplete, stateNotifiesOperator, stateRequiresSafeState,
+  stateStopsImmediately,
   type PowerObservation, type PowerProfile,
 } from './power.ts'
 import { toRecord, type Frame as ObservationFrame } from './observation.ts'
@@ -411,6 +412,12 @@ export function shapePower(
     grants_new_leases: grantsNewLeases(assessment),
     requires_safe_state: stateRequiresSafeState(assessment.state),
     stops_immediately: stateStopsImmediately(assessment.state),
+    // §36.1 derives three facts from a power state and this document carried two of them until
+    // 2026-09-16. `stateNotifiesOperator` existed, was tested, and reached no surface in any
+    // edition — so the row that says somebody is told was computed and told to nobody. A robot
+    // that has stopped taking work and a robot that has stopped taking work *and owes an operator
+    // a phone call* are different situations, and only the first was reportable.
+    notifies_operator: stateNotifiesOperator(assessment.state),
     budget_missed: nullable(budgetMissed(declaredBudgetMs, observedInferenceMs)),
   }
 }
