@@ -516,7 +516,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             .as_ref()
             .and_then(|raw| crate::trust::SignedBy::from_hex(&raw.key, &raw.value).ok());
         let verdict = trust.check(&crate::trust::package_message(digest), signed.as_ref());
-        if verdict.state == skynet_contracts::admission::SignatureState::Verified {
+        if verdict.state.admits() {
             return None;
         }
 

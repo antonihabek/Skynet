@@ -432,6 +432,20 @@ pub enum SignatureState {
 }
 
 impl SignatureState {
+    /// §19's admission rule: whether a package carrying this signature state may be activated.
+    ///
+    /// One state admits and the other four do not, and the asymmetry is the rule rather than an
+    /// accident of the enum's shape: [`SignatureState::Untrusted`] and
+    /// [`SignatureState::Unverifiable`] are both *"nothing went wrong"* answers, and both of them
+    /// still refuse, because §37.1 asks for a key the operator trusts and neither one is that.
+    ///
+    /// Written here because the fact had two spellings — this one, and an equality test inside the
+    /// daemon's activation arm — and §78's remedy for one fact with several spellings is a
+    /// mechanism rather than care. A third spelling is now a change to this function.
+    pub fn admits(self) -> bool {
+        matches!(self, SignatureState::Verified)
+    }
+
     /// The wire spelling.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -1034,6 +1048,25 @@ mod tests {
                 "{kind} on a simulator"
             );
             assert!(admit(kind, false).findings.is_empty(), "{kind} on a robot");
+        }
+    }
+
+    /// §19, over every state rather than the two anybody reaches for.
+    ///
+    /// The distinction that earned `Untrusted` a state of its own: a stranger's signature is
+    /// *valid*, nothing went wrong, and it still must not admit native code. `Unverifiable` is the
+    /// same shape one step further out — the edition could not check at all — and an edition that
+    /// read "could not check" as "no reason to refuse" is the failure this asserts against.
+    #[test]
+    fn only_a_trusted_signature_admits_a_driver() {
+        assert!(SignatureState::Verified.admits());
+        for state in [
+            SignatureState::Failed,
+            SignatureState::Untrusted,
+            SignatureState::Absent,
+            SignatureState::Unverifiable,
+        ] {
+            assert!(!state.admits(), "{state:?} must not admit a driver");
         }
     }
 }

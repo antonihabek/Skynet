@@ -3289,6 +3289,51 @@ fn replay_file(path: &str, argv: &[String]) -> i32 {
         result.evaluated()
     );
 
+    // §26.4: whether the window recorded every field the replay evaluates.
+    //
+    // Said out loud in both directions, because a replay is evidence and evidence that will not
+    // report its own completeness is the shape §15 names as the most damaging thing this platform
+    // could ship. Until now a window missing `capability` or `nearest_person_m` on some of its
+    // cycles replayed and printed exactly like a whole one: the per-guard `Unknowable` below fires
+    // only when a field is absent from *every* cycle, which is the recording-is-too-old case and
+    // the benign one.
+    //
+    // The partial case is the one worth the alarm. One writer does not stop writing a field
+    // halfway through a window, so a count between zero and all of them is a file that has been
+    // edited or a writer with a bug — and either way the verdicts below were reproduced from a
+    // robot that is not quite the one that produced them.
+    let cycle_count = put_back
+        .records
+        .iter()
+        .filter(|record| matches!(&record.body, skynet_blackbox::Body::Cycle(_)))
+        .count();
+    if put_back.absent.verdict_inputs_all_recorded() {
+        println!("  every field this replay evaluates was recorded on every cycle");
+    } else {
+        for (field, missing) in [
+            ("capability", put_back.absent.capability),
+            ("nearest_person_m", put_back.absent.nearest_person_m),
+        ] {
+            if missing == 0 {
+                continue;
+            }
+            let line = if missing == cycle_count {
+                format!(
+                    "no cycle carries `{field}`, so this window was sealed before the field \
+                     existed — the guards reading it are reported below as unknowable rather \
+                     than as never engaged"
+                )
+            } else {
+                format!(
+                    "{missing} of the {cycle_count} cycles carry no `{field}`, and one writer \
+                     does not stop midway — this file has been edited or the writer had a bug, \
+                     and the verdicts below came from a robot not quite the one that recorded them"
+                )
+            };
+            println!("  {}", term::warn(&line));
+        }
+    }
+
     // §25: the loop returns before the kernel when the policy posted nothing, so those cycles
     // carry no verdict to reproduce. Said before the result rather than after it, because a
     // window that is mostly idle makes the line below mean much less than it looks like.

@@ -264,6 +264,19 @@ fn nullable(value: Option<f64>) -> Json {
 ///
 /// Every field is derived from [`Tier`] rather than stored, so a UI cannot show a tier as enforcing
 /// when the kernel would resolve it to advisory.
+///
+/// # No surface calls this yet, and it is kept anyway
+///
+/// It was nearly deleted on 2026-09-16 for having no caller, which it does not. What stopped that
+/// is the last line of the body: **this is the only place in the workspace that renders
+/// [`SAFETY_CLAIM_RULE`] into an output.** `skynet-kernel` declares the sentence and CI checks the
+/// text is intact; nothing else emits it. `CONTRIBUTING.md` requires every surface that mentions
+/// the certified tier to render it in full, and deleting the one renderer would have left that rule
+/// with nothing implementing it and no check able to notice.
+///
+/// So the honest reading is not *unused*, it is *built ahead of its surface* — and the rule is
+/// carried on every tier rather than only the certified one precisely so a surface cannot render a
+/// tier without also holding the sentence that qualifies it.
 pub fn tier_profile_to_json(tier: Tier) -> Json {
     let mut out = Json::obj();
     out.set("tier", Json::from(tier.as_str()));
