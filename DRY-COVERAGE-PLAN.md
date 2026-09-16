@@ -466,6 +466,48 @@ says about the cost of the refusal: the rule exists for `safety.estop.latency`, 
 its own words that a driver returning success is not evidence — and the first thing it caught was a
 number this workspace already had.
 
+### F24 — capture runs inside §7's control cycle, and the first body slow enough to show it made the loop miss on every frame.
+
+The fifth session recorded a departure from Phase 1's gate: *"the driver is the LeRobot fake rather
+than MuJoCo — the same ABI, one `pip install` away from being the other, and the pipeline under test
+is identical."* The second clause is true about the pipeline and was wrong about what the run
+measures. `pip install mujoco` and `apt-get install libosmesa6` take a minute here, `BODY=mujoco`
+puts a physics simulator on the other side of the same ABI, and the gate **fails**:
+
+```
+cycles          250
+overruns         73 — cycles that missed the 20.00 ms period
+frames read      73 of 73 reads
+```
+
+**Exactly one overrun per frame read, and none on any other cycle.** That is not jitter. §47.2's
+RHAL backend is read by `Camera::turn` from inside `skynetk`'s control cycle, so a sensor whose read
+costs more than the control period delays §7's guards *by construction*. Measured in the driver
+process: 18.2 ms to render 128×96 through `MUJOCO_GL=osmesa`, against a 20 ms period and a physics
+step of 0.007 ms. The render is the whole of it.
+
+Three things make this worth a finding rather than a bug report.
+
+* **It is §23.3's own rule, on the side of the loop where it is worse.** *"A design where a 40 ms
+  inference spike delays a torque command is a design that falls over"* — and §23.3's answer is that
+  inference lives in another process, which is why `skynetp` reports **0** overruns in the same run.
+  Capture has no such separation: it is a call on the control thread.
+* **No fake could have shown it.** The LeRobot bridge draws a 32×24 pattern; the cost is invisible
+  and the loop is green. The finding needed a body whose sensor read is genuinely expensive, which is
+  the argument for the second body existing at all — and the reason `check-loop` now takes one.
+* **The fix is an ABI question, not a patch.** Moving the read to its own thread means calling
+  `read_sensor` while the control thread is in `read_state`, and `bindings/c/skynet_rhal.h` says
+  nothing about concurrency: its three rules constrain `read_state`, `write_command` and
+  `emergency_stop`, and re-entrancy is not among them. A runtime that started calling a driver from
+  two threads would be relying on a promise no vendor has made. That is a specification change and
+  therefore an issue, in the same class as Phase 3's.
+
+What is **not** claimed: that 18.2 ms is a property of MuJoCo. `osmesa` is a software rasteriser and
+a machine with a GPU would render this in well under a millisecond, so `check-loop-mujoco` passes
+there and fails here. That is the honest state of a real-time assertion — §15 makes
+`rhal.sensor.latency` a *bench* test for exactly this reason — and the script says which of the two
+it is rather than reporting a generic miss.
+
 ---
 
 ## Phase 0 — the dry-mode contract
@@ -525,6 +567,13 @@ Two departures from the gate as written, both stated rather than absorbed. The d
 fake rather than MuJoCo — the same ABI, one `pip install` away from being the other, and the pipeline
 under test is identical. And the policy is not an ONNX one, because there is no ONNX runner: F15.
 
+> **The first departure is closed as of the eighth session, and closing it failed the gate.**
+> `BODY=mujoco` runs the whole of `loop.sh` against a physics simulator rendering its own wrist
+> camera — `make -C drivers/python-host check-loop-mujoco` — and on this machine it does not close:
+> capture is inside §7's control cycle and an 18 ms render misses the period on every frame. F24.
+> The gate's measurement below therefore still stands as taken, with the LeRobot fake, and what the
+> simulator adds is a finding rather than a stronger pass.
+>
 > **The second departure is closed as of the seventh session.** `skynet-ort` exists, `skynetp` runs a
 > `kind: "onnx"` artefact, and the two refusals that gate it were exercised through the binary against
 > a real library. What has *not* been re-run is `check-loop` itself with an ONNX policy in place of the
