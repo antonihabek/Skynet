@@ -747,4 +747,75 @@ mod tests {
         });
         assert_eq!(verdict.awarded, "none");
     }
+
+    /// Every test a build with no physical robot can produce a result for: §15's `sim` suite, the
+    /// half that runs "in CI, on every commit, free". `bench` needs a human, a machine and a day.
+    fn sim_only() -> Vec<&'static str> {
+        SCTS_TESTS
+            .iter()
+            .filter(|t| t.suite == "sim")
+            .map(|t| t.id)
+            .collect()
+    }
+
+    /// A build with no robot is awarded **nothing**, and the reason is one row of §15's table.
+    ///
+    /// Worth a test rather than an inference, because the inference goes wrong in the reassuring
+    /// direction: eighteen of the nineteen `bench` tests are required from `host` or `certified`, so
+    /// the dry ceiling reads as `guest`. `offline.control.independent` is the nineteenth — §11's
+    /// invariant, in the `bench` suite, required from `guest` — so sim-only evidence supports no
+    /// tier at all. `DRY-COVERAGE-PLAN.md` F1 has the argument.
+    #[test]
+    fn evidence_from_a_build_with_no_robot_awards_no_tier() {
+        let verdict = award_certification(&CertificationInput {
+            claimed: "certified".to_string(),
+            results: passing(&sim_only()),
+            field_conformance: None,
+            bench_age_days: None,
+            simulator: false,
+        });
+
+        assert_eq!(
+            verdict.awarded, "none",
+            "sim-only evidence is missing a guest-required test, so there is no tier to award"
+        );
+        assert!(
+            verdict
+                .missing
+                .contains(&"offline.control.independent".to_string()),
+            "the one guest-required bench test must be named as missing, not silently absent: {:?}",
+            verdict.missing
+        );
+        assert!(
+            verdict.failures.is_empty(),
+            "nothing failed — the evidence is incomplete, which is a different sentence: {:?}",
+            verdict.failures
+        );
+    }
+
+    /// The suite split that decides the dry ceiling, pinned in both forms it can break in.
+    ///
+    /// Guards a reclassification rather than a bug: move a bench test to `sim` and a build with no
+    /// robot starts clearing tiers it has no evidence for, with every other check here still green —
+    /// each of them is about the award arithmetic, not about which suite a test is in. `field` is
+    /// deliberately zero, because field conformance is a ratio over a reporting window rather than a
+    /// set of reported tests, and "that it stayed true" is not a measurement anybody takes once.
+    #[test]
+    fn the_suite_split_that_decides_the_dry_ceiling_is_pinned() {
+        let count = |suite: &str| SCTS_TESTS.iter().filter(|t| t.suite == suite).count();
+        assert_eq!((count("sim"), count("bench"), count("field")), (17, 19, 0));
+        assert_eq!(count("sim") + count("bench"), SCTS_TESTS.len());
+
+        let bench_at_guest: Vec<&str> = SCTS_TESTS
+            .iter()
+            .filter(|t| t.suite == "bench" && t.required_from == "guest")
+            .map(|t| t.id)
+            .collect();
+        assert_eq!(
+            bench_at_guest,
+            ["offline.control.independent"],
+            "this set decides what a build with no robot can be awarded. Changing it is a §15 \
+             change — an issue carried to both repositories, not an edit here"
+        );
+    }
 }

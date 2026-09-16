@@ -436,6 +436,26 @@ jobs:
       - name: The golden path still describes this repository
         run: node tools/check-golden-path.mjs
 
+      # A function that exists, is correct, is tested, and is called by nothing a robot runs.
+      #
+      # This repository has shipped that defect four times — `Transition::warning` dropped at the
+      # daemon's observe step so nothing ever made a sound; `can_start` with four test callers and
+      # no production one; `EventCode::GrantChanged` with a single producer, so the ring recorded
+      # every grant a Hub made and none an operator made standing at the robot; and
+      # `available.proximity_reading` hard `false` in two files, each noting that the day a producer
+      # existed this was the line that would change. Every one passed clippy at `-D warnings`,
+      # passed its own tests, and was found by a person asking who calls this.
+      #
+      # `dead_code` cannot see any of them: a `pub fn` is never dead, and a `#[cfg(test)]` module is
+      # a caller as far as the compiler is concerned. So it is a parser, and its limits are in the
+      # tool's own header rather than implied here.
+      #
+      # It matters more now than it did. DRY-COVERAGE-PLAN.md commits to driver and runtime work
+      # with no physical robot, and hardware is what usually catches a path nobody wired up — by not
+      # moving. Taking it out of the loop takes that with it.
+      - name: Every pub fn is reached by something that is not a test
+        run: node tools/check-production-callers.mjs
+
       # §7.4. The sentence the product is not allowed to shorten. It lives in the kernel as a
       # constant, and a surface that mentions the certified tier without it is a surface making a
       # claim nobody sanctioned.
