@@ -219,49 +219,39 @@ impl Uploader for RefusingUploader {
     }
 }
 
-/// A credential this robot will not put in a curl config.
+/// A credential this robot will not put in a curl config, as an answer.
 ///
-/// The rule from [`crate::connectivity`]: refused rather than escaped, because the escape set
-/// curl's parser accepts is small and version-dependent.
+/// The rule and its sentence are [`crate::connectivity::presentable`]'s. Asked here before a push
+/// copies its slice out, so a refused credential costs no disk.
 fn unusable(credential: Option<&str>) -> Option<Answer> {
-    let credential = credential?;
-    if !credential
-        .chars()
-        .any(|c| c == '"' || c == '\\' || c.is_control())
-    {
-        return None;
-    }
-    Some(Answer {
-        error: Some(
-            "this robot holds a credential containing a character it will not put in a curl \
-             config — a quote, a backslash or a control character. Nothing has been sent."
-                .to_string(),
-        ),
-        ..Answer::default()
-    })
+    crate::connectivity::presentable(credential)
+        .err()
+        .map(|refusal| Answer {
+            error: Some(refusal),
+            ..Answer::default()
+        })
 }
 
 fn curl_probe(ask: &Probe) -> Answer {
-    if let Some(refusal) = unusable(ask.credential.as_deref()) {
-        return refusal;
-    }
-    let mut command = std::process::Command::new("curl");
-    command.args(["--silent", "--show-error", "--request", "GET"]);
-    // A redirect is an address, not a refusal. See [`Answer::effective_url`] and the same flag on
-    // [`crate::bundle`]'s fetch: credentials are dropped on a cross-host redirect because
-    // `--location-trusted` is deliberately not used.
-    command.args(["--location", "--max-time"]);
-    command.arg(ask.budget_s.to_string());
+    let mut arguments = crate::connectivity::curl_arguments([
+        "--silent",
+        "--show-error",
+        "--request",
+        "GET",
+        // A redirect is an address, not a refusal. See [`Answer::effective_url`] and the same flag
+        // on [`crate::bundle`]'s fetch: credentials are dropped on a cross-host redirect because
+        // `--location-trusted` is deliberately not used.
+        "--location",
+        "--max-time",
+    ]);
+    arguments.push(ask.budget_s.to_string().into());
     // A 404 is an answer, not a failure: it is the receiver saying it holds nothing under this
     // digest, which is the ordinary state for a window nobody has sent yet. `--fail` would turn
     // that into an error and a backoff, so the first upload of every window would wait out a curve
     // before it started.
-    command.args(["--write-out", "\n%{http_code} %{url_effective}"]);
-    if ask.credential.is_some() {
-        command.args(["--config", "-"]);
-    }
-    command.arg(&ask.url);
-    interpret(command, ask.credential.as_deref(), &ask.url, "probing")
+    arguments.push("--write-out".into());
+    arguments.push("\n%{http_code} %{url_effective}".into());
+    interpret(&arguments, ask.credential.as_deref(), &ask.url, "probing")
 }
 
 /// Copy `[from, from + len)` of the window into the scratch file, and say how many bytes landed.
@@ -345,20 +335,24 @@ fn curl_push(ask: &Push) -> Answer {
         }
     };
 
-    let mut command = std::process::Command::new("curl");
-    command.args(["--silent", "--show-error", "--fail"]);
-    // Present here as well as on the probe, and it should almost never fire: [`advance`] pushes to
-    // the address the probe ended at. It is the fallback for the case the probe cannot cover — a
-    // Hub that redirects a `PUT` and not a `GET` — and following one costs a re-send of the body,
-    // which is why the probe is the mechanism and this is the safety net.
-    command.args(["--location", "--max-time"]);
-    command.arg(ask.budget_s.to_string());
-    command.args([
-        "--speed-limit",
-        &crate::bundle::STALL_BYTES_PER_SECOND.to_string(),
+    let mut arguments = crate::connectivity::curl_arguments([
+        "--silent",
+        "--show-error",
+        "--fail",
+        // Present here as well as on the probe, and it should almost never fire: [`advance`] pushes
+        // to the address the probe ended at. It is the fallback for the case the probe cannot cover
+        // — a Hub that redirects a `PUT` and not a `GET` — and following one costs a re-send of the
+        // body, which is why the probe is the mechanism and this is the safety net.
+        "--location",
+        "--max-time",
     ]);
-    command.args(["--speed-time", &crate::bundle::STALL_SECONDS.to_string()]);
-    command.args(["--write-out", "\n%{http_code} %{url_effective}"]);
+    arguments.push(ask.budget_s.to_string().into());
+    arguments.push("--speed-limit".into());
+    arguments.push(crate::bundle::STALL_BYTES_PER_SECOND.to_string().into());
+    arguments.push("--speed-time".into());
+    arguments.push(crate::bundle::STALL_SECONDS.to_string().into());
+    arguments.push("--write-out".into());
+    arguments.push("\n%{http_code} %{url_effective}".into());
     // The header `--continue-at` used to generate, written out rather than delegated.
     //
     // `--continue-at` sets the offset *and* sends the rest of the file, and the second half is what
@@ -370,72 +364,40 @@ fn curl_push(ask: &Push) -> Answer {
     // The total is still the window's, because that is what `Content-Range` means. A receiver that
     // ignores the header is caught by the digest rather than trusted, which is the rule that lets
     // this be a header rather than a negotiation.
-    command.args([
-        "--header",
-        &format!(
+    arguments.push("--header".into());
+    arguments.push(
+        format!(
             "Content-Range: bytes {}-{}/{}",
             ask.from,
             ask.from + written - 1,
             ask.total
-        ),
-    ]);
-    command.arg("--upload-file");
-    command.arg(&ask.scratch);
-    if ask.credential.is_some() {
-        command.args(["--config", "-"]);
-    }
+        )
+        .into(),
+    );
+    arguments.push("--upload-file".into());
+    arguments.push(ask.scratch.clone().into_os_string());
     // Never `ask.url` directly: see [`upload_target`] for the one character that decides whether
     // these bytes reach the route or a path invented from the scratch file's name.
     let target = upload_target(&ask.url);
-    command.arg(target);
-    let answer = interpret(command, ask.credential.as_deref(), target, "sending");
+    let answer = interpret(&arguments, ask.credential.as_deref(), target, "sending");
     // The slice has done its job whether or not the request worked, and a copy of a recording left
     // on the disk §28 reserves for recordings is the one thing this file must not become.
     let _ = std::fs::remove_file(&ask.scratch);
     answer
 }
 
-/// Run one curl, and read what came back.
+/// Run one curl through [`crate::connectivity::curl`], and read what came back.
 fn interpret(
-    mut command: std::process::Command,
+    arguments: &[std::ffi::OsString],
     credential: Option<&str>,
     url: &str,
     doing: &str,
 ) -> Answer {
-    use std::io::Write;
-
-    let child = command
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn();
-    let mut child = match child {
-        Ok(child) => child,
-        Err(error) => {
-            return Answer {
-                error: Some(format!(
-                "`curl` could not be started ({error}). §34.2's outbound path is HTTPS and this \
-                     edition has no TLS stack of its own, so the window needs curl."
-            )),
-                ..Answer::default()
-            }
-        }
-    };
-
-    if let Some(stdin) = child.stdin.as_mut() {
-        if let Some(credential) = credential {
-            // The one line that carries the secret, on the one channel that is not world-readable.
-            let _ = stdin
-                .write_all(format!("header = \"Authorization: Bearer {credential}\"\n").as_bytes());
-        }
-    }
-    drop(child.stdin.take());
-
-    let output = match child.wait_with_output() {
+    let output = match crate::connectivity::curl(arguments, credential, url) {
         Ok(output) => output,
         Err(error) => {
             return Answer {
-                error: Some(format!("curl did not finish: {error}")),
+                error: Some(error),
                 ..Answer::default()
             }
         }

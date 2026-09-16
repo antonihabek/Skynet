@@ -163,29 +163,18 @@ impl Fetcher for RefusingFetcher {
 
 /// One request, run.
 fn curl_slice(ask: &Ask) -> Slice {
-    use std::io::Write;
-
     let before = size_of(&ask.into);
 
-    // The credential rule from `connectivity`: nothing about it is ever an argument, because
-    // `/proc/<pid>/cmdline` is world-readable.
-    if let Some(credential) = &ask.credential {
-        if credential
-            .chars()
-            .any(|c| c == '"' || c == '\\' || c.is_control())
-        {
-            return Slice {
-                before,
-                after: before,
-                error: Some(
-                    "this robot holds a credential containing a character it will not put in a \
-                     curl config — a quote, a backslash or a control character. Nothing has been \
-                     requested."
-                        .to_string(),
-                ),
-                ..Slice::default()
-            };
-        }
+    // Refused before the directory is made, so a credential this robot will not present leaves no
+    // trace. The rule and its sentence are `connectivity`'s, and so is the process: nothing about
+    // the credential is ever an argument, because `/proc/<pid>/cmdline` is world-readable.
+    if let Err(refusal) = crate::connectivity::presentable(ask.credential.as_deref()) {
+        return Slice {
+            before,
+            after: before,
+            error: Some(refusal),
+            ..Slice::default()
+        };
     }
 
     if let Some(parent) = ask.into.parent() {
@@ -202,8 +191,7 @@ fn curl_slice(ask: &Ask) -> Slice {
         }
     }
 
-    let mut command = std::process::Command::new("curl");
-    command.args([
+    let mut arguments = crate::connectivity::curl_arguments([
         "--silent",
         "--show-error",
         // Without this, an HTTP error page is a body, and a body is written into the partial —
@@ -215,63 +203,32 @@ fn curl_slice(ask: &Ask) -> Slice {
         "--location",
         "--max-time",
     ]);
-    command.arg(ask.budget_s.to_string());
-    command.args(["--speed-limit", &STALL_BYTES_PER_SECOND.to_string()]);
-    command.args(["--speed-time", &STALL_SECONDS.to_string()]);
+    arguments.push(ask.budget_s.to_string().into());
+    arguments.push("--speed-limit".into());
+    arguments.push(STALL_BYTES_PER_SECOND.to_string().into());
+    arguments.push("--speed-time".into());
+    arguments.push(STALL_SECONDS.to_string().into());
     // The body goes to the file, so stdout carries only these. `content_length_download` is what
     // remains of *this* response, so the whole artifact is that plus the offset — which is right for
     // a `206` and for a `200` alike.
-    command.args([
-        "--write-out",
-        "%{http_code} %{size_download} %{content_length_download}",
-    ]);
+    arguments.push("--write-out".into());
+    arguments.push("%{http_code} %{size_download} %{content_length_download}".into());
     if ask.from > 0 {
         // `--continue-at` sets the range *and* appends, which is the pair of behaviours a resume
         // needs. A server that ignores the range is caught below rather than trusted.
-        command.args(["--continue-at", &ask.from.to_string()]);
+        arguments.push("--continue-at".into());
+        arguments.push(ask.from.to_string().into());
     }
-    command.arg("--output");
-    command.arg(&ask.into);
-    if ask.credential.is_some() {
-        command.args(["--config", "-"]);
-    }
-    command.arg(&ask.url);
+    arguments.push("--output".into());
+    arguments.push(ask.into.clone().into_os_string());
 
-    let child = command
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn();
-    let mut child = match child {
-        Ok(child) => child,
-        Err(error) => {
-            return Slice {
-                before,
-                after: size_of(&ask.into),
-                error: Some(format!(
-                "`curl` could not be started ({error}). §34.2's outbound path is HTTPS and this \
-                     edition has no TLS stack of its own, so the image needs curl."
-            )),
-                ..Slice::default()
-            }
-        }
-    };
-
-    if let Some(stdin) = child.stdin.as_mut() {
-        if let Some(credential) = &ask.credential {
-            let _ = stdin
-                .write_all(format!("header = \"Authorization: Bearer {credential}\"\n").as_bytes());
-        }
-    }
-    drop(child.stdin.take());
-
-    let output = match child.wait_with_output() {
+    let output = match crate::connectivity::curl(&arguments, ask.credential.as_deref(), &ask.url) {
         Ok(output) => output,
         Err(error) => {
             return Slice {
                 before,
                 after: size_of(&ask.into),
-                error: Some(format!("curl did not finish: {error}")),
+                error: Some(error),
                 ..Slice::default()
             }
         }
