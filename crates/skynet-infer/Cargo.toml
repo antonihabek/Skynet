@@ -1,0 +1,14 @@
+[package]
+name = "skynet-infer"
+version = "0.1.0"
+edition = "2021"
+description = "§23.3's in-process inference backend: a model runner seam, and a runner that needs nothing"
+license = "Apache-2.0"
+
+# `skynet-json` and nothing else. This crate is deliberately below `skynet-policy-host` rather than
+# beside it: a session implementation that links a real inference library has to be selectable by the
+# `skynetp` binary, which lives *in* the policy host — so a `Session` trait declared there could
+# never be implemented by a crate that binary depends on. Cargo calls that a cycle; the layering
+# below is what avoids it.
+[dependencies]
+skynet-json = { path = "../skynet-json" }

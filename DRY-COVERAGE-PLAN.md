@@ -209,6 +209,165 @@ offers for a false positive is to add a name to a list, which is how a real call
 writing. Five other files spell `'"'`; none happened to hide another sole caller, so the count moved
 by exactly one.
 
+### F14 — `main` was red on the string-literal check again, and F12's mechanism is why.
+
+Four literals in `skynet-kernel-host/src/main.rs`, all `--frame-pool` refusals, all introduced by the
+commit that wired the camera in — *after* c04f57a fixed thirty-eight of the same thing. The check
+works, the check was never run, and CI had not run either because nothing had been pushed.
+
+So the remedy is not another fix. It is **`tools/run-ci-job.mjs`**, which reads the steps out of
+`.github/workflows/ci.yml` and runs them, every one whatever the last one did. Written that way
+because the obvious alternative — a script listing the checks — is a second record of a fact, and this
+codebase's standing argument against those is that they disagree exactly once, after the failure that
+matters. There is nothing to keep in sync: a step added to the workflow is a step it runs.
+
+On the tree as it stood: **52 of 53 `invariants` steps passed and one failed**, which is the ratio the
+pre-PR gate in `CONTRIBUTING.md` could not have produced, because none of the fifty-three is in it.
+That file now says so and says how to run the rest.
+
+What it cannot reproduce is the runner, which is F7's first row: a clippy release, a `systemd` or a
+locale this machine does not have. The tool's own summary says that rather than claiming CI is green.
+
+### F15 — *Decisions* 5's terms fit neither route to ONNX Runtime.
+
+The owner allowed one third-party dependency, narrowly: *"the dependency lives in one crate, behind a
+feature that is off by default, the safety kernel stays `no_std` … and `ci.yml`'s check is narrowed to
+permit **exactly that package and nothing else** rather than switched off."* Both routes to §23.3's
+named runner break the emphasised clause, in opposite directions:
+
+* **A Cargo dependency on a maintained binding crate** brings a transitive tree. The narrowing would
+  admit tens of packages, and `Cargo.lock` — which today holds exactly the workspace members, and is
+  checked for it — would stop being a list anybody reads.
+* **`dlopen` through `skynet-dl`** takes no Cargo dependency at all, and was started in a previous
+  session (an uncommitted `Library::address`, reverted here). What stops it is that ONNX Runtime's C
+  API is reached through one struct of several hundred function pointers whose order is the library's
+  version. A hand-transcribed copy that is wrong by one field calls the wrong function through a raw
+  pointer, in a robot's policy runtime, and that is not a defect that surfaces as an error. It could
+  not have been verified on this machine either way.
+
+Neither was taken. What was built instead is the **decision layer behind a `Session` seam** — assemble
+the input, refuse what cannot be run, turn an output into a command, seven named holds — with a
+dependency-free feed-forward runner so that every one of those refusals is exercised. The seam is why
+the choice above can be made later and change nothing else, and it is stated in three places that a
+policy file declaring `kind: "onnx"` is **refused by name** rather than run by something else.
+
+The carve-out the owner granted was therefore not spent. It is still there when the routes are costed
+by somebody with the authority to accept one.
+
+> **Costed, 2026-09-16, and the second bullet's premise is wrong.** Kept rather than rewritten, for
+> the reason F3a is kept: a blocker that dissolved on inspection is worth being able to recognise the
+> next time one is written down.
+>
+> *"one struct of several hundred function pointers whose order is the library's version"* — the order
+> is the **requested API version's**, not the installed library's. `OrtGetApiBase()` is the single
+> exported symbol, and the `GetApi(version)` on it
+> [returns the `OrtApi` for the version asked for, or `nullptr` when that version is
+> unsupported](https://onnxruntime.ai/docs/api/c/struct_ort_api_base.html). Microsoft's own release
+> note for ONNX Runtime 1.0 states that the C APIs are ABI compatible and follow semantic versioning,
+> and that a program linked against one version keeps working with later releases without re-linking
+> ([announcement](https://opensource.microsoft.com/blog/2019/10/30/announcing-onnx-runtime-1-0)).
+> Content rephrased for compliance with licensing restrictions.
+>
+> So the failure mode F15 refused is not the one that exists. A version this workspace did not
+> transcribe against yields a **null pointer and a refusal**, which is a detectable, nameable hold —
+> not a misaligned struct dispatching through a raw pointer. What remains is transcription error
+> *within* a known layout, which is bounded (only the entries up to the ones actually called), and
+> `GetVersionString` sits on `OrtApiBase` rather than on `OrtApi`, so it can be called to sanity-check
+> the library **before** anything trusts a transcribed offset.
+>
+> That flips the comparison. Resolved as *Decisions* 12: **`dlopen`**, which needs no Cargo
+> dependency, no `CONTRIBUTING.md` edit and no change to `ci.yml`'s check — so the carve-out stays
+> unspent for a reason better than caution.
+
+### F20 — the transcription self-check crashed instead of refusing, and only the control said so.
+
+`Ort::open` runs a status round-trip on every load — make an `OrtStatus` with a known code and a known
+message, read both back — and the reason is not that ONNX Runtime might be broken. It is that
+`CreateStatus`, `GetErrorCode` and `GetErrorMessage` are the **error path**: a successful load and a
+successful run touch about twenty members of the call table and prove all of them, and leave those
+three unproven until the moment something needs reporting. So they are called once, deliberately,
+while nothing is wrong and the answer is known.
+
+The check was written, it passed, and it was **wrong in the way that only a control could show**. The
+control for a transcribed ABI is to break the transcription: two same-width members swapped, which
+leaves `size_of` identical and so is invisible to the cheap test. With `get_error_code` and
+`get_error_message` exchanged, the round-trip did not refuse — it took `STATUS_ACCESS_VIOLATION`.
+
+The reason is a one-line ordering mistake. It read the code and the message in the same block and
+compared afterwards, so a reordered table meant calling `CStr::from_ptr` on the integer `2`. **An
+`i32` that comes back wrong can be inspected; a `*const c_char` that comes back wrong cannot.** The
+fix is to check the integer first and return before the pointer is ever dereferenced, and the control
+then fails as it should — *"a status made with code 2 read back as -239558972 … Nothing was
+dereferenced"* — on all eleven tests, with no crash.
+
+Worth recording as a coverage finding rather than only as a bug, because of what it says about the
+*shape* of the evidence. The crate had twenty tests and every refusal among them; eleven of those ran
+against a real library and asserted arithmetic. All of it passed with the defect present, because the
+defect is only reachable when the transcription is already wrong — and the transcription was right.
+**A check on a thing that never fails is a check nobody has run**, which is `CONTRIBUTING.md`'s rule,
+and this is the clearest instance of it in the repository: the control was not a formality confirming
+a finished check, it was the only thing in the session that read the check at all.
+
+### F16 — §47.6's pool hands a policy pixels and no shape.
+
+The pool header carries a stream name, a slot count and a slot size. It carries **no width, height or
+format**, so a policy given its bytes cannot decode them from the pool alone.
+
+That is not an omission, and the fix is not a wire change: the shape is a property of the **body**, and
+§44's embodiment descriptor is where a body describes itself — the MuJoCo driver and the LeRobot bridge
+each declare `width`, `height` and `modality` per sensor there. A policy resolved against an embodiment
+is resolved against those numbers.
+
+What it obliges is a refusal when the two disagree, which is now `Hold::FrameShape`: a frame whose byte
+length is not `width * height * components` is held on rather than read at whatever stride happens to
+fit. A frame read at the wrong stride is not an error — it is a picture of something else.
+
+### F17 — a model that reads a quantity the body does not measure holds for ever, and the gate found it.
+
+The cross-process vision test failed on its first run, and the reason was the design working: §24 has a
+driver write `NaN` for a quantity it does not measure, `Observation::default` is `NaN` throughout for
+exactly that reason, and the LeRobot bridge reports relative encoder positions and no velocity. A model
+reading position **and** velocity therefore holds on every cycle — correctly, with the channel named,
+and uselessly.
+
+The fix is that a model declares what it reads: `"reads": ["position"]` in the artefact, required with
+no default. A default of position-and-velocity is the tempting one and is the wrong answer for the
+reason §80 keeps giving — it would let a model load against a body it can never run on, and deliver the
+reason as a hold on every cycle instead of as a refusal at load.
+
+Worth recording as a coverage finding rather than only as a fix: the crate had eighteen tests covering
+every refusal it could reach, and it took **a fake body with a real driver's honesty about what it does
+not measure** to find this. That is the argument for the loop existing, arriving one level up from F11's.
+
+### F18 — `revoke_loans` cannot be wired, and the available signal is worse than none.
+
+Found by the doc-comment check below. Its documentation said *"called by the runtime when a policy's
+process exits"*, which described the design and not the tree: nothing calls it, and no process that
+holds a `Writer` has a **sound** signal that the reader is gone.
+
+The signal that looks available is not one. `handoff::Port` could keep the accepted stream and revoke on
+its end-of-file — but `SCM_RIGHTS` **duplicated** the descriptors, so a policy may close the socket and
+keep the mapping. Revoking there would take a slot out from under a live reader, which is the one
+property §47.6 exists to provide.
+
+What is sound is the process being gone: a `pidfd` on it, or the supervisor that launched the unit
+saying so. `skynetd` has the second and does not hold the pool; the process that holds the pool has
+neither. Raised rather than closed, because it is a decision about which process owns the fact — and
+until it is made, a crashed policy costs the pool the slots it held and `stats()` reports the drops.
+
+### F19 — three counts in `Summary` had no surface, and one of them is the number §23.3 is about.
+
+`skynet-policy-host` computes `overruns`, `stale_holds` and `unbudgeted` per turn, and `skynetp` printed
+none of them. That is the fifth instance of this repository's four-times defect — a value that is
+correct, tested and reached by nothing anybody reads.
+
+`overruns` is the one that matters. §23.3's rule is *"a design where a 40 ms inference spike delays a
+torque command is a design that falls over"*, and this is the number that says whether a backend is
+holding to the period it was given. The loop deliberately does **not** act on it (the fourth rule in
+`run.rs`: a late command is published and counted, not dropped), which makes printing it the only thing
+that makes it visible at all. The gate's *"zero overruns on either side"* is a claim that could not have
+been made before this session, because half of it was unprintable.
+
 ### F10 — §36.1's operator notification is `Transition::warning`, four defects later.
 
 Found by draining the baseline, and the clearest vindication of 0.2 so far.
@@ -237,8 +396,10 @@ Buys no coverage. Everything after it is unsafe without it.
 | 0.1 | Pin what dry evidence awards, as a test | **Done** — 2 tests in `certification.rs`, positive control verified |
 | 0.1b | CI invariant: the bench suite cannot shrink | **Done, as the same test** — see below |
 | 0.2 | CI check: every capability has a production caller | **Done** — `tools/check-production-callers.mjs`, wired into `ci.yml` |
+| 0.2b | ... and no unreached one claims a caller in its own documentation | **Done** — the same tool, second half. Found two live: F18 and `asks_for_us` |
 | 0.3 | `virtual-robot.sh` as the harness of record | **Done by this document** — it already runs on every push; this is the record saying it is the one |
 | 0.4 | Limit provenance | **Already built — F3** |
+| 0.5 | A runner for the checks the pre-PR gate does not contain | **Done** — `tools/run-ci-job.mjs`, and F14 is why it exists |
 
 **0.1b did not become a `ci.yml` grep, deliberately.** The Rust test runs in the blocking `rust` job
 and names the test that moved when it fails, so a grep over the same source line would be a second
@@ -264,15 +425,30 @@ A dry build multiplies this failure mode, because a fake is easier to satisfy th
 
 ## Phase 1 — close the loop, dry
 
-| Work | Dry substrate | Note |
+| Work | Dry substrate | State |
 |---|---|---|
-| Capture backend | Synthetic — PNG sequence or MuJoCo render — behind the trait V4L2 and GenICam will share | Deterministic, so frames are replayable and corpus-able. V4L2 cannot be dry-verified at all |
-| Inference backend (§23.3) | ONNX Runtime, CPU | Runs in CI, deterministic. This workspace's first third-party dependency, **allowed by the owner on 2026-09-16** under the narrow terms in *Decisions* 5 |
+| Capture backend | Synthetic, behind the trait V4L2 and GenICam will share | **Done** — `Source`, `Synthetic` and `pump` in `skynet-capture`; F11 is what writing it cost |
+| Inference **decision layer** (§23.3) | A `Session` seam, and a dependency-free feed-forward runner behind it | **Done** — `skynet-infer`, `backend::Inference`, `skynetp --backend inference --policy <file>` |
+| Inference **runner** (§23.3's own answer) | ONNX Runtime, CPU | **Done** — `skynet-ort`, by `dlopen` (*Decisions* 12). 20 tests, 11 against a real ONNX Runtime 1.30.0; F20 is what building it found |
 
-**Gate:** `skynetk` offers the frame pool, `skynetp` maps it, an ONNX policy closes the loop against
-the MuJoCo driver for N cycles with zero overruns, then the sealed window is read back and replayed
-through the kernel to identical verdicts. `skynet-blackbox` already does read → assemble → replay,
-so the last step is a proof rather than a smoke test.
+**Gate: met, 2026-09-16.** `make -C drivers/python-host check-loop`. `skynetk` reads the LeRobot
+bridge's fake wrist camera through the real ABI, publishes into §47.6's pool and offers it with both
+rings; `skynetp` maps all three and runs a model whose weights make each setpoint *be* a pooled cell
+of the image; the sealed window is read back and every recorded cycle replays to the same verdict.
+Measured: 51 frames pooled, 199 of 200 turns shown a frame, 248 of 250 kernel cycles finding a
+command, **zero overruns on either side**, and *"all 249 evaluated cycles reproduced"* with every
+field the replay evaluates present on every cycle (§26.4).
+
+Two departures from the gate as written, both stated rather than absorbed. The driver is the LeRobot
+fake rather than MuJoCo — the same ABI, one `pip install` away from being the other, and the pipeline
+under test is identical. And the policy is not an ONNX one, because there is no ONNX runner: F15.
+
+> **The second departure is closed as of the seventh session.** `skynet-ort` exists, `skynetp` runs a
+> `kind: "onnx"` artefact, and the two refusals that gate it were exercised through the binary against
+> a real library. What has *not* been re-run is `check-loop` itself with an ONNX policy in place of the
+> `mlp` one — the loop needs a body, the body needs Linux, and the machine that built the runner is
+> Windows. So the gate's measurement above still stands as taken, with the `mlp` runner, and the ONNX
+> runner's own evidence is its 20 tests rather than a closed loop. Two claims, kept apart.
 
 ---
 
@@ -299,7 +475,8 @@ Highest coverage-per-effort item, and the most dry-verifiable, because it is con
 corpus plus eight editions plus the TypeScript oracle is exactly that machinery.
 
 **Requires a specification change** (a descriptor field and new transport methods), so it starts as
-an issue, not a branch — and **Decisions* 6 defers it behind Phase 1's gate rather than opening one now.
+an issue, not a branch. *Decisions* 6 deferred it behind Phase 1's gate; **that gate is now met**, so
+the deferral has expired and this is unblocked.
 
 Order matters, and the repo has already paid for the lesson: **write the corpus cases before the
 editions.** Doing it that way on §47.6 found the specified rule and the reference disagreeing about
@@ -433,6 +610,50 @@ re-opening it. Where a decision produced work, it is in *Next*.
     tests to save lines, and the tests were not improved by it. A design change to §73 is still an
     issue; the numbers in it are not.
 
+The two below were the last items standing as *the owner's call*. Both were delegated on 2026-09-16
+with *"decide yourself on these 2"*, and one of them turned out to rest on a fact nobody had checked.
+
+11. **`power_refusal` is deleted.** The unreached `Runtime::power_refusal` read the power gauge itself
+    and then delegated to `power_refusal_from`. Two lines, and the wrong two: the reconcile pass at
+    `runtime.rs:1757` already carries a comment saying that a pass has two consumers of one
+    measurement and that *"reading the gauge separately for each would let a skill be refused a lease
+    for a battery level its own precondition had just cleared."* An unreached public function whose
+    only behaviour is the thing the code beside it warns against is not neutral — it is the
+    convenient call for the next person wiring up a surface, and the defect it produces is a robot
+    refusing work for a reading it had just accepted.
+
+    Deleting rather than wiring, and rather than leaving it allow-listed: the allow-list is for
+    functions whose absence of a caller is *explained*, and "this one is a trap" is not an
+    explanation, it is a reason to remove it. §36.1's enforcement is untouched —
+    `power_refusal_from` is the live spelling and sits on the reconcile pass. What it inherited is
+    the deleted function's documentation: the §64 argument for naming *which* of §36's two reasons
+    withholds a lease was the substantive half, and it now sits on the function that survives.
+    A caller that genuinely holds no reading calls `read_power` first, on its own line, where the
+    second measurement is visible to whoever reads the pass.
+
+12. **§23.3's runner takes the `dlopen` route, and the carve-out stays unspent.** *Decisions* 5
+    granted one narrow third-party dependency and F15 argued neither route fit its terms. F15's
+    correction block above retracts half of that: ONNX Runtime's C API is entered through one
+    exported symbol, the struct layout is the one the caller *requests*, and an unsupported request
+    returns a null pointer rather than a misaligned struct. The hazard that made `dlopen` look worse
+    than a dependency tree is therefore a refusal, not a silent misdispatch.
+
+    So the comparison is no longer close, and the route that needs no rule changed wins on its own
+    merits: no Cargo dependency, `Cargo.lock` stays exactly the workspace members, `CONTRIBUTING.md`
+    line 89 stands unedited, and `ci.yml`'s dependency check is neither narrowed nor switched off.
+    Worth being exact about what that rule is, because this plan has been sloppy about it: *"no
+    third-party Rust dependencies"* is **`CONTRIBUTING.md`'s own rule and a CI check**, listed under
+    *enforced, not requested*. Calling it the owner's preference — as F15 and *Decisions* 5 both do —
+    attributed a repository rule to a person, which is how a rule gets waived by somebody who never
+    set it.
+
+    **Not built here, deliberately.** The remaining risk is transcription error inside a known
+    layout, and the only thing that retires it is running the result against a real library and a
+    real model. This machine has neither. Writing several hundred function-pointer entries that
+    cannot be executed is precisely the shape F15 was right to refuse, so the route is recorded and
+    the work waits for a machine with ONNX Runtime on it. The `Session` seam means that costs
+    nothing else.
+
 ## Next
 
 Everything below is decided and unblocked. In order.
@@ -446,30 +667,43 @@ Everything below is decided and unblocked. In order.
 2. **`notifies_operator`** (*Decisions* 2). Corpus first, as Phase 3 argues and §47.6 proved: the
    TypeScript oracle, then the 28 power cases, then the four complete editions, then the CLI.
 
-3. **Phase 1** (*Decisions* 5), of which the capture backend is **done** — `Source`, `Synthetic`
-   and `pump` in `skynet-capture`, and F11 is what writing it cost. Three steps left, in order:
-   1. **Wire `pump` into `skynet-kernel-host`'s `step_observing`.** The one allow-list entry with a
-      date attached to its removal. It needs a dependency edge that crate does not have and a
-      lifetime for the distributor and the source, which is why it is a step rather than a line.
-   2. **The inference backend** (§23.3), now permitted. One crate, a feature off by default,
-      `ci.yml`'s `Cargo.lock` check narrowed to that package rather than switched off, and the
-      safety kernel untouched — the terms in *Decisions* 5, which are narrower than "yes".
-   3. **The gate the plan already states**: `skynetk` offers the frame pool, `skynetp` maps it, a
-      policy closes the loop against the MuJoCo driver for N cycles with no overruns, and the sealed
-      window is read back and replayed to identical verdicts.
+3. ~~**Phase 1**~~ — **complete**, 2026-09-16. Its gate was met in the fifth session; the last row of
+   its table was filled in the seventh.
+   * ~~**§23.3's own runner: an ONNX Runtime session.**~~ **Built** — `skynet-ort`, the `dlopen` route
+     from *Decisions* 12. No Cargo dependency, no `CONTRIBUTING.md` waiver, no change to `ci.yml`'s
+     dependency check: `Cargo.lock` still holds exactly the 26 workspace members. The residual risk
+     the decision named — transcription inside a known struct layout — was retired the way it said it
+     had to be, by executing it against ONNX Runtime 1.30.0, and it found a real defect on the way
+     (F20). What remains unbuilt is LibTorch and any provider but CPU, both deliberate.
 
-4. **Bench evidence from a virtual robot** (*Decisions* 4). The one item that would move the dry
-   ceiling off `none`, and the only one here that changes what this plan is allowed to claim.
-   `packaging/virtual-robot.sh` already produces the machine; what does not exist is a conformance
-   run against it that is recorded as `bench` for `offline.control.independent` and for nothing else
-   it has not earned.
+4. **Bench evidence from a virtual robot** (*Decisions* 4). Still the one item that would move the dry
+   ceiling off `none`, and this session sharpened what is missing. It is **not the measurement**:
+   `make -C drivers/python-host check-offline` now runs the whole loop inside a network namespace
+   holding only loopback — no route, no resolver, nothing to reach — and it closes, which is §11's
+   invariant measured on a machine rather than argued about.
 
-5. **A check on doc comments that name a caller** (F9). Two of the twenty-three reasons had to be
-   written against the function's own documentation. The production-caller check already knows which
-   functions have no caller; refusing a doc comment on one of them that says *"for the CLI"* or
-   *"called by"* is a small addition to a check that has the data in front of it.
+   What is missing is **the record**. §12 binds a result to the digest of the bytes it was taken
+   against, and nothing in this workspace produces or consumes such a thing: `skynet driver check`
+   measures the `sim` suite and says so, and `CertificationInput` has nowhere for a bench result to
+   come from. So the next step is a format and two ends for it, and until it exists a green
+   `check-offline` is a property demonstrated and not evidence recorded. Both scripts say so on every
+   run rather than leaving it to be assumed.
 
-Phases 2 and 5 are unchanged and unstarted. Phase 3 waits on Phase 1 (*Decisions* 6).
+5. ~~**A check on doc comments that name a caller**~~ (F9). **Done** — the same tool, and it found two
+   live claims on its first run: `revoke_loans` said *"called by the runtime"* (F18) and `asks_for_us`
+   said *"for the responder half"* while the responder had moved to a finer question. Eight controls,
+   including two negative ones, hold the line between a claim and a purpose: a **definite** article in
+   front of something in this workspace is checkable, an indefinite one is not, so *"for a report"*
+   passes and *"for the responder"* does not. There is deliberately no allow-list for this half — F9
+   records what one costs.
+
+6. **`revoke_loans`' signal** (F18). A `pidfd` on the policy's process, or the supervisor that launched
+   the unit telling the process that holds the pool. Small either way; the decision is which process
+   owns the fact, and the convenient signal is unsound.
+
+Phases 2 and 5 are unchanged and unstarted. **Phase 3's blocker is cleared** — *Decisions* 6 deferred
+its specification fields behind Phase 1's gate, and the gate is met — so motion primitives are now the
+next thing that is only waiting for somebody to open the issue.
 
 ## Progress log
 
@@ -766,3 +1000,263 @@ failed, clippy clean, and every shell step of `invariants` green.
 Controls, each failing its check or test and each reverted: dropping the fetch's early credential
 refusal; dropping the push's; a `delta_ms` field on the guard report; a literal zero intervention
 count; an `unwrap_or(0)` on it; and the previous `skill.rs` against both F13 tests.
+
+### 2026-09-16 (fifth session) — Phase 1's gate met, and the check that reads CI
+
+Windows 11 with WSL2 Ubuntu beside it, as the fourth session. Rust 1.98.1 on Windows (CI's
+toolchain), 1.93.1 in WSL, Node 26, gcc, make, python3; no MuJoCo, no ONNX Runtime, and `sudo` in
+WSL wants a password, so `packaging/virtual-robot.sh` did not run. **Nothing pushed, no commits.**
+
+**Audited.** The four commits the fourth session's entry does not cover (`a059778`, `feeb0fc`,
+`13d5f63`, `dba6417` — the loader's `describe()` length, the Python host's POSIX request, and the
+two halves of wiring the camera into the control loop); §23.3 and what it names; `docs/status.md`'s
+claims about the producer end; `check.rs`'s account of what `skynet driver check` measures;
+`robot_cmd.rs`'s replay path; the doc comment of all thirty-one unreached `pub fn`; every `run:`
+step of `ci.yml`'s `invariants` job, run one at a time; `drivers/python-host`'s Makefile and what
+`check-capture` already does; and one uncommitted change from a previous session
+(`Library::address`, added for an ONNX loader that does not exist — reverted, F15).
+
+**Found.** F14–F19. In order of how much they change: **Phase 1's gate is met** and the two
+departures from it as written are F15 and the driver; `main` was red on `invariants` again by exactly
+F12's mechanism (F14); §23.3's runner cannot be built under *Decisions* 5's terms as written (F15);
+a model reading a quantity the body does not measure holds for ever, which the gate test found by
+failing (F17); `revoke_loans` has no sound signal and the convenient one is worse than none (F18);
+and three counts §25 keeps had no surface, one of them the number §23.3's own rule is about (F19).
+
+**Changed.**
+
+| File | What |
+|---|---|
+| `crates/skynet-infer/` | **New crate.** §23.3's decision layer: a `Session` seam, a dependency-free feed-forward runner reading a JSON artefact, `Policy` with seven named holds, and §47.6's frame average-pooled into a declared grid. 20 tests, every refusal among them |
+| `crates/skynet-policy-host/src/backend.rs` | `Inference<S>` — the adapter from `Body` and `Sight` to that layer, and the first backend in the workspace whose command depends on a pixel |
+| `crates/skynet-policy-host/src/main.rs` | `--backend inference --policy <file>`; the model loaded and checked against the lease **before** a socket is touched; F19's three counts printed; the per-reason hold tally printed |
+| `crates/skynet-policy-host/tests/handoff.rs` | A joint command that is a function of a pixel, across two processes. Two controls, both reverted |
+| `drivers/python-host/loop.sh`, `Makefile` | `check-loop` and `check-offline` — the gate, and the gate with no network at all |
+| `.github/workflows/ci.yml` | Both new steps in `abi`, the second probing for a network namespace the way the daemon step probes for systemd. The caller-check step renamed to what it now checks |
+| `tools/check-production-callers.mjs` | Second half: an unreached `pub fn` may not claim a caller in its own documentation. No allow-list, for F9's reason |
+| `tools/run-ci-job.mjs` | **New.** Runs a CI job's steps, read out of `ci.yml`. F14 |
+| `CONTRIBUTING.md` | The pre-PR gate says that it is not everything CI runs, and how to run the rest |
+| `crates/skynet-kernel-host/src/main.rs` | F14's four literals given their `\` continuations back |
+| `crates/skynet-frames/src/lib.rs`, `skynet-mdns/src/service.rs` | The two doc comments the new check refused, corrected to what is true |
+| `tools/production-callers-allow.json` | Two reasons rewritten — `revoke_loans`' had gone stale in the direction that matters, and `asks_for_us`' sharpened |
+| `docs/skynet-os-architecture.md` | **The pinned specification.** §73: 139,000 → 141,000 lines, twenty-four → twenty-five crates. Both copies, re-pinned with `--pin`. *Decisions* 1 and 10 |
+| `docs/status.md` | §23.3 is no longer vacant, and what is still not built is named precisely. The closed loop, with the numbers |
+| `DRY-COVERAGE-PLAN.md` | This file |
+
+**Verified.** The full gate on Windows at CI's toolchain, and the Linux-only halves in WSL:
+
+```
+cargo fmt --all --check                              exit 0
+RUSTFLAGS="-D warnings" cargo clippy --all-targets   exit 0, 0 warnings
+cargo test --workspace                               1,810 passed, 0 failed  (Windows)
+cargo test --workspace                               1,905 passed, 0 failed  (WSL — Linux
+                                                     compiles the cfg(unix) suites Windows does not)
+node tools/run-ci-job.mjs invariants --wsl           53 of 53 steps pass
+node tools/check-production-callers.mjs              962 checked, 31 allow-listed
+node tools/scale-report.mjs --check                  §73 matches the tree
+node tools/check-mirrors.mjs                         the specification matches its pin
+node tools/check-contract-mirrors.mjs                every mirrored contract matches
+node tools/check-golden-path.mjs                     exit 0
+cargo test -p skynet-policy-host --test handoff      7 passed, 0 failed      (WSL)
+make -C drivers/python-host check-capture            51 frames read, 51 published, 0 overruns
+make -C drivers/python-host check-loop               the gate — see below
+make -C drivers/python-host check-offline            the same, in an empty network namespace
+```
+
+The gate's own numbers, from `check-loop`:
+
+```
+skynetk   250 cycles, 2 idle, 0 overruns · 51 of 51 sensor reads, 51 published to the pool
+skynetp   200 turns, 199 commanded, 1 held (no_frame, the turn before the first frame arrived)
+          0 overruns · 199 of 200 turns shown a frame (0 missed, 0 too old)
+replay    all 249 evaluated cycles reproduced
+          every field this replay evaluates was recorded on every cycle
+```
+
+Every check that changed was held to a positive control, and each was reverted:
+
+* **the doc-claim check** — eight cases. Four claim shapes fire (`called by the CLI`, `for the
+  daemon`, `The CLI calls this`, `The caller is skynetd`); the same claim with *"Nothing calls this
+  yet"* beside it passes; and two that must **not** fire do not — `for a daemon` (indefinite) and
+  `Called by the Hub and by a vendor driver` (outside this workspace).
+* **the vision-loop test** — the adapter made to drop the pixels fails it at the first assertion;
+  the two frames made the same picture fails it at the second. Two different lines, which is the pair
+  isolating *the frame reaches the model* from *which frame reaches the model*.
+* **the gate script** — the same dropped pixels turn `check-loop` red, and it names the reason:
+  `the model commanded on 0 of 200 turn(s) … no_frame 200`.
+* **F14's literals** — reproduced by running the `invariants` step before the fix and after.
+* **`run-ci-job.mjs`** — its first real run failed a step (`scale-report --check`, against a pin the
+  session had moved), which is a check that has failed for a true reason before being relied on.
+
+**Not verified, and not claimed.**
+
+* **No robot, and no simulator either.** The gate's body is the LeRobot bridge's fake and its camera is
+  a synthetic image. MuJoCo needs `pip install mujoco` and pip is absent here; CI runs the MuJoCo
+  driver's own suite, and joining it to `check-loop` is one line in that Makefile on a machine with it.
+* **No ONNX Runtime.** F15. `skynet-infer`'s runner is a feed-forward network of the workspace's own
+  arithmetic. Nothing in the tree calls it ONNX, and a policy file declaring `kind: "onnx"` is refused.
+* **`virtual-robot.sh` did not run.** `sudo` in this WSL wants a password. §33.1's units did not start
+  and the `#[ignore]`d driver-loading suites did not run — CI runs both.
+* **The replay's *divergence* branch was not exercised here.** The gate asserts agreement, and to make
+  it disagree the kernel would have to change between the run and the replay, which one pass cannot do.
+  `skynet-blackbox`'s own suite is what covers that branch.
+* **`check-offline` is a measurement and not evidence.** *Next* 4 says what is missing and why.
+
+**Still true, and this entry is mostly good news, so it bears repeating.** All 19 bench tests are
+`missing`. The dry ceiling is `none`, and nothing here moved it: a loop closing on a fake body is not a
+bench result, and §15's sentence about a runner reporting `pass` for a test it did not perform is the
+one to keep holding the work to. `proximity` is inert on every robot, so even a Host-tier robot under
+this plan does not enforce distance to a person. Nothing has been signed by a Hub.
+
+### 2026-09-16 (sixth session) — the last two owner's calls, and a rule this plan misattributed
+
+Windows 11, Rust 1.98.1 (CI's toolchain), Node 26. No WSL used, no robot, no ONNX Runtime.
+**Nothing pushed, no commits.** The two items still marked *the owner's call* were delegated with
+*"decide yourself on these 2"*, and answering the second required checking a fact rather than
+weighing a preference.
+
+**Audited.** `DRY-COVERAGE-PLAN.md` against the tree, item by item, to answer whether the plan is
+implemented — Phase 0's five items, Phase 1's three rows, Phases 2–5, and all six of *Next*;
+`CONTRIBUTING.md`'s *enforced, not requested* list and `ci.yml`'s dependency check, to find where the
+no-third-party rule actually lives; `Runtime::power_refusal` and `power_refusal_from` and every caller
+of `read_power`; `skynet-infer`'s `Session` seam and `mlp.rs`'s refusal of `kind: "onnx"`; and ONNX
+Runtime's own C API documentation for the ABI claim F15 rests on.
+
+**Found.** F15's second bullet is wrong, and the plan has been misattributing a repository rule.
+
+The ABI half is in F15's own correction block: `GetApi(version)` hands back the struct for the version
+*requested* and a null pointer when it cannot, so the "wrong by one field, calls the wrong function"
+failure F15 refused is a detectable refusal rather than a silent misdispatch. The route that needs no
+rule changed is therefore also the safer one, which is not how F15 read it.
+
+The attribution half is smaller and worse. F15 and *Decisions* 5 both open by saying *the owner*
+allowed or forbade a dependency. **`CONTRIBUTING.md` line 89 is where that rule lives**, under
+*enforced, not requested*, with `ci.yml` asserting `Cargo.lock` holds exactly the workspace members.
+Asked about it, the owner did not recognise the rule as theirs — correctly. A repository rule
+described as a person's preference is a rule that can be waived by somebody who never set it, and
+this document did that twice.
+
+**Changed.**
+
+| File | What |
+|---|---|
+| `crates/skynetd-io/src/runtime.rs` | `power_refusal` deleted. Its §36/§64 rationale — the argument for naming *which* reason withholds a lease — moves onto `power_refusal_from`, together with why the gauge is not read here and what a caller with no reading does instead |
+| `tools/production-callers-allow.json` | Its entry removed. 31 entries → 30 |
+| `reference/reports/scale.json` | Regenerated, and **required**: `scale-report --check` holds the pin to a run, so deleting Rust moves it. 141,269 lines, 25 crates, 196 files |
+| `DRY-COVERAGE-PLAN.md` | F15's correction block; *Decisions* 11 and 12; the Phase 1 runner row; *Next* 3; this entry |
+
+**Not changed, and the point of the exercise.** `docs/skynet-os-architecture.md` and both mirror
+digests. The rounded §73 figures are unchanged at 141,000 lines and 25 crates, so *Decisions* 1's
+maintenance did not arise — and *Decisions* 12 chose the route that needs no edit to `CONTRIBUTING.md`
+and none to `ci.yml`'s dependency check, so the carve-out *Decisions* 5 granted is still unspent.
+
+**Verified.** On Windows at CI's toolchain:
+
+```
+cargo fmt --all --check                              exit 0
+RUSTFLAGS="-D warnings" cargo clippy --all-targets   exit 0, 0 warnings
+cargo test --workspace                               1,810 passed, 0 failed  (59 suites)
+node tools/check-production-callers.mjs              961 checked, 30 allow-listed
+node tools/scale-report.mjs --check                  §73 matches the tree
+node tools/check-mirrors.mjs                         the specification matches its pin
+```
+
+`1,810` is the same figure the fifth session recorded on Windows, which is the check that matters for
+a deletion: nothing in the suite was reaching `power_refusal`, so no test went with it.
+
+Held to a positive control, and reverted: re-adding `pub fn power_refusal` fails
+`check-production-callers.mjs`, naming `crates/skynetd-io/src/runtime.rs:1928` — the declaration's own
+line, which is also F9's line-number fix still holding.
+
+**Not verified, and not claimed.** No robot, virtual or physical; `virtual-robot.sh` needs systemd as
+PID 1 and this is Windows, so §33.1's units and the `#[ignore]`d driver-loading suites did not run,
+and neither did the Linux-only halves of the suite or `run-ci-job.mjs`'s shell steps — CI runs all of
+them. Nothing here went near ONNX Runtime: *Decisions* 12 records a **route**, and a route is not an
+implementation. Nothing in this session moved the dry ceiling off `none`, all 19 bench tests are still
+`missing`, `proximity` is still inert on every robot, and nothing has been signed by a Hub.
+
+### 2026-09-16 (seventh session) — §23.3's runner built, and Phase 1 finished
+
+Windows 11, Rust 1.98.1 (CI's toolchain), Node 26, Python 3.14 with pip — which is the difference
+between this entry and *Decisions* 12's "not built here". **ONNX Runtime 1.30.0 and `onnx` install in
+under a minute**, so the library and a real model were both available, and the thing the decision said
+could not be verified on that machine was verified on this one. F3a's lesson arriving a third time.
+**Nothing pushed, no commits.**
+
+**Audited.** `skynet-infer`'s `Session` seam, `mlp.rs`'s artefact loader and where the two overlap;
+`skynet-dl`'s surface and what it was missing for a library that is not a driver; `skynetp`'s model
+load and backend arms; `ci.yml`'s `unsafe` allow-list step and its no-third-party-dependency step, to
+find what a new crate owes each; `CONTRIBUTING.md`'s *enforced, not requested* list; and
+`onnxruntime_c_api.h` at tag `v1.30.0` — 401 KB of it, parsed rather than read.
+
+**Built.**
+
+| File | What |
+|---|---|
+| `crates/skynet-ort/src/api.rs` | **New.** `OrtApiBase`, and members 0–100 of `OrtApi` in header order with each index in a comment. Real signatures for the 24 this crate calls, `Opaque` for the rest — a wrong signature on a function nobody calls cannot hurt anyone, and 46 unnecessary ones are 46 chances to be wrong |
+| `crates/skynet-ort/src/lib.rs` | **New.** `Ort::open` (load, negotiate the API version, round-trip), `Onnx` implementing `skynet_infer::Session`, six named refusals, hand-written `Drop` so handles are released before the library unloads |
+| `crates/skynet-ort/src/tests.rs` | **New.** 20 tests in two halves: 9 need no library and run on every commit, 11 need a real one and are `#[ignore]`d |
+| `crates/skynet-ort/tests/make-fixtures.py` + `tests/fixtures/*.onnx` | **New.** Six models, 129–225 bytes, each with an output a test predicts. Committed with the generator, because a fixture nobody can regenerate is a fixture nobody can check |
+| `crates/skynet-dl/src/lib.rs` | `Library::address` — safe to call, because producing a raw pointer is safe and every hazard is in the use. This is F15's reverted `Library::address`, back with the caller it was missing |
+| `crates/skynet-infer/src/lib.rs` | `read_artefact` and `kind_of`, and `read_inputs` moved here from `mlp.rs`. **One parser for the `inputs` block**, because two would agree until one gained a field and then produce plausible numbers |
+| `crates/skynet-infer/src/mlp.rs` | Loses its own `kind`/`version`/`inputs` preamble to the above. Its crate docs stop saying the production runner does not exist |
+| `crates/skynet-policy-host/src/main.rs` | `Runner`, an enum over the two sessions, and `load_runner`. **The file's `kind` picks**, never a flag — two records of that fact would disagree exactly once |
+| `ci.yml`, `CONTRIBUTING.md` | `skynet-ort` added to the `unsafe` allow-list with its argument written out, as that check requires. Both texts now say *two* loaders |
+| `tools/scale-report.mjs` | `NUMBER_WORDS` filled to forty. It had been extended one entry at a time and `eleven`–`fourteen` were missing outright, so a document saying twelve of anything would have read as malformed rather than as an incomplete tool |
+| `docs/skynet-os-architecture.md` | **The pinned specification.** §73: 141,000 → 143,000 lines, twenty-five → twenty-six crates. Both copies, re-pinned with `--pin`. *Decisions* 1 and 10 |
+| `docs/status.md` | §23.3's runner is built; what is checked about the transcription rather than trusted; and what is still not built (LibTorch, any provider but CPU) |
+
+**Found.** F20 — the round-trip crashed rather than refused, and every test passed with the defect in
+place because it is only reachable once the transcription is already wrong. The control was the only
+thing that read it.
+
+**What the route cost, and what it did not.** *Decisions* 12 chose `dlopen` to keep
+`CONTRIBUTING.md`'s no-third-party rule intact, and that held exactly: **`Cargo.lock` holds 26 entries
+and all 26 are workspace members.** No dependency, no waiver, no narrowing of that check. What it did
+cost is one crate on the `unsafe` allow-list — the seventh — and the allow-list is where such a cost is
+admitted rather than hidden. `skynet-infer`, which decides what a joint is told to do, is on the other
+side of that edge and still `#![forbid(unsafe_code)]`; so is the kernel, four crates away.
+
+**Verified.** On Windows at CI's toolchain:
+
+```
+cargo fmt --all --check                                  exit 0
+RUSTFLAGS="-D warnings" cargo clippy --all-targets       exit 0, 0 warnings
+cargo test --workspace                                   1,819 passed, 0 failed (61 suites)
+cargo test -p skynet-ort -- --include-ignored            20 passed, 0 failed
+node tools/check-production-callers.mjs                  966 checked, 30 allow-listed
+node tools/scale-report.mjs --check                      §73 matches the tree
+node tools/check-mirrors.mjs                             the specification matches its pin
+node tools/check-contract-mirrors.mjs                    every mirrored contract matches
+node tools/check-golden-path.mjs / check-rhal-flags.mjs  exit 0
+Cargo.lock vs workspace members                          26 and 26, exact
+the unsafe allow-list                                    7 allowed, 19 forbid it
+```
+
+And through the binary rather than the library, which is the part a unit test cannot claim:
+`skynetp run --backend inference --policy <onnx artefact>` loads the model, reads its width off the
+real graph, and then refuses for the right reason — *"commands 2 channel(s) and this lease grants 3"*
+against `--channels 3`, and the `--ring-socket` refusal against a correct lease. The width in that
+first message came out of ONNX Runtime.
+
+Controls, each failing and each reverted:
+
+* **Two same-width members swapped** — the case `size_of` cannot see. Crashed before F20's fix;
+  refuses cleanly after it, naming the code it read back and saying nothing was dereferenced.
+* **A member inserted** — `size_of` fails with no library present, `left: 816, right: 808`.
+* **The size test's own wording** was corrected rather than left: it claimed to catch a reorder, and it
+  cannot. Two checks, two different failure modes, and each now says which one it covers.
+
+**Not verified, and not claimed.**
+
+* **No robot, and no simulator.** `virtual-robot.sh` needs systemd as PID 1 and this is Windows.
+* **`check-loop` has not run with an ONNX policy.** The gate's measurement in the Phase 1 table stands
+  as taken, with the `mlp` runner. Joining the two is one line in that Makefile on a Linux machine with
+  ONNX Runtime, and until somebody runs it the ONNX runner's evidence is its 20 tests.
+* **One library, one version, one platform.** ONNX Runtime 1.30.0, C API 30, Windows x86-64. The
+  transcription is `extern "system"` so 32-bit Windows is handled by construction rather than by
+  measurement, and no aarch64 or Linux build of the library was loaded here. CI does not run these
+  tests either — they are `#[ignore]`d and no job installs ONNX Runtime, which is a gap worth naming
+  rather than a thing that was done.
+* **Nothing here moved the dry ceiling off `none`.** A runner is not a bench result. All 19 bench tests
+  are still `missing`, `proximity` is still inert on every robot, and nothing has been signed by a Hub.

@@ -169,12 +169,59 @@ Still not built: most of the **producer** end. One capture backend fills a strea
 2026-09-16 — a sensor the driver renders, read through `read_sensor` by the control loop at a
 declared rate and published into §47.6's pool — and V4L2 and GenICam, which the runtime would read
 itself, do not exist. The pool is built in both halves: the **loan**, reproduced by three editions,
-and the Linux **mapping** (§47.6c). What is not built is the inference backend §23.3 leaves vacant,
-so nothing turns a frame into a command, and nothing records a frame, because there is no encoder. So the ring the host reads is
-empty on every cycle and the kernel holds on every cycle, which is not a degenerate case being
-tolerated: it is exactly the state §33.1 calls the property that makes the rest of the OS possible,
-and it can now be watched rather than only argued about. The frames the assembler builds are still
-ones the corpus handed it.
+and the Linux **mapping** (§47.6c). Nothing records a frame, because there is no encoder.
+
+§23.3's inference backend is no longer vacant, and it is worth being exact about which part of it is
+not: `skynet-infer` is the **decision layer** — position and velocity per channel and a pooled frame
+in, a setpoint per channel out, seven named refusals rather than a guess — behind a `Session` seam,
+with a dependency-free feed-forward runner that reads its weights out of a JSON artefact. `skynetp
+run --backend inference --policy <file>` selects it. So something does now turn a frame into a
+command, and `Inference` is the first backend in the workspace for which §47's whole path changes
+what a joint is told to do.
+
+**And §23.3's production runner is now built too**, in `skynet-ort`: an ONNX Runtime session behind
+the same seam, reached by `dlopen` rather than by a Cargo dependency, so `CONTRIBUTING.md`'s
+no-third-party rule stays a check rather than being narrowed until it admits a transitive tree
+(`DRY-COVERAGE-PLAN.md` *Decisions* 12). A policy file declaring `kind: "onnx"` is now run by it; the
+file's own `kind` picks the runner, and each runner still refuses the other's bytes by name.
+
+What that route costs is a transcription of the first 101 members of a C struct **whose field order is
+its ABI**, and the honest thing to report is how much of that is checked rather than trusted. Four
+things: the order was extracted mechanically from the pinned `v1.30.0` header rather than read off it;
+the API version is requested by number, so a library that cannot serve it returns null instead of a
+shifted struct; a `size_of` test fails if the transcribed prefix ever changes length; and every load
+runs a status round-trip through ONNX Runtime's **error** path — the members a successful run never
+touches, and which would otherwise be unproven at the exact moment something needed reporting.
+
+Measured, not asserted: 20 tests, of which 11 run against a real ONNX Runtime 1.30.0 and assert
+arithmetic the fixtures encode — `setpoint[0] = in[0] + 0.5`, `setpoint[1] = 2·in[1] − 1` — so a pass
+means the right function was called and the numbers came back right. The suite's other half needs no
+library and covers every refusal reachable before one is loaded. Both halves were held to controls: a
+reordered call table is refused with *"nothing was dereferenced"*, and an inserted member fails the
+size test with no library present.
+
+**Still not built:** LibTorch, which §23.3 names as the alternative, and any provider but CPU. A CUDA
+session is a later deliberate decision rather than a missing piece — a policy process that silently
+picked a GPU would have timing that depends on what else is on the machine, which is the opposite of
+what §23.3's rule about inference spikes is asking for.
+
+**The loop has closed on a camera**, which is the sentence this section could not write before.
+`make -C drivers/python-host check-loop` starts `skynetk` against the LeRobot bridge's fake through
+the real ABI — a C shim, a forked interpreter, `read_sensor` at 10 Hz — and `skynetp` beside it
+running the inference backend, and requires the whole path to move: 51 frames pooled, 199 of 200
+turns shown a frame, 199 setpoints published, 248 of 250 kernel cycles finding a command rather than
+an empty ring, and **no overrun on either side**. Then the window `skynetk` seals on the way out is
+read back and all 249 evaluated cycles reproduce their verdicts through the same kernel, with every
+field the replay evaluates present on every cycle (§26.4).
+
+That is a pipeline and not a robot. The body is a fake, the image is synthetic, and nothing in it is
+evidence about a machine — every bench test in §15 is still `missing`. What it does settle is that
+no step between a driver's sensor and a guard's verdict is missing.
+
+The ring the host reads is still empty until something is producing into it, and the kernel holds on
+every cycle when it is — which is not a degenerate case being tolerated: it is exactly the state
+§33.1 calls the property that makes the rest of the OS possible, and it can now be watched rather
+than only argued about. The frames the assembler builds are still ones the corpus handed it.
 
 The on-robot console has now been opened in a browser, which found two things no test was watching
 for: `GET /plan` answered two different shapes and the reconcile panel had never once rendered, and

@@ -361,6 +361,164 @@ fn a_frame_pool_crosses_with_the_rings_and_the_policy_reads_its_shape_from_it() 
     pool.publish(2, 6_000, b"again").expect("the slot is free");
 }
 
+/// **A joint command that is a function of a pixel, across two processes.**
+///
+/// `DRY-COVERAGE-PLAN.md`'s Phase 1 gate, less the driver: the frames here are published by this
+/// process rather than rendered by a simulator, and what that costs is stated at the end of this
+/// comment. Everything between the pool and the ring is the real thing.
+///
+/// Until this test there was no point in the workspace where §47's path changed what a joint was told
+/// to do. `Camera` published frames and `PolicyHost` copied them out and handed them to a backend,
+/// and every backend that existed ignored them: `Trajectory` reads the clock, `Approach` reads the
+/// body. So the pool could have been filled with zeros and every test would have passed.
+///
+/// The model makes the assertion arithmetic rather than a demonstration. Its one weight row is
+/// `[0, 1, 0, 0, 0]`: the joint position is multiplied by zero, and the second input — the **top-left
+/// cell of the pooled frame** — is multiplied by one. So the commanded setpoint *is* the mean
+/// intensity of the top-left quadrant of the image, and a frame of `51`s must command `0.2` while a
+/// frame of `204`s must command `0.8`.
+///
+/// # What this does not do
+///
+/// No driver and no simulator. `skynetk` reads a camera through `read_sensor` and publishes it into
+/// this same pool — `drivers/python-host`'s `check-capture` target is that half, against the LeRobot
+/// fake's wrist camera through the real ABI — and joining the two into one run needs a machine with
+/// the driver's interpreter and a `skynetk` process, which is `make -C drivers/python-host
+/// check-loop`. What is asserted here is the half that can be asserted from `cargo test`: the pool
+/// crosses, a policy in another process reads it, and the pixels reach the ring as a number.
+#[test]
+fn a_command_in_another_process_is_a_function_of_a_pixel_this_one_published() {
+    use skynet_frames::{Geometry, Writer};
+
+    let path = socket_path("vision-loop");
+    let (commands, body, mut port) = Port::open(&path, 16, 16).expect("the runtime's rings");
+    let observations = skynet_obs::Ring::open(body.words()).expect("the observation ring");
+    observations.producer().publish(&at(0.0)).expect("publish");
+
+    // A 4x4 RGB frame, 48 bytes, pooled into four cells of 2x2 pixels each.
+    let mut pool = Writer::create(
+        "wrist",
+        Geometry {
+            slots: 3,
+            slot_bytes: 48,
+        },
+    )
+    .expect("a pool");
+
+    // `reads: ["position"]` and not position-and-velocity, because `at()` above publishes what a real
+    // position-only driver publishes: §24's `NaN` for the velocity it does not measure. A model that
+    // read one would hold on every cycle, correctly — which is the case `Inputs::reads` exists for.
+    let model = std::env::temp_dir().join(format!("skynet-vision-{}.json", std::process::id()));
+    std::fs::write(
+        &model,
+        r#"{
+  "kind": "mlp",
+  "version": 1,
+  "inputs": {
+    "channels": 1,
+    "reads": ["position"],
+    "vision": { "width": 4, "height": 4, "components": 3, "pool": 2 }
+  },
+  "layers": [
+    { "activation": "identity", "weights": [[0.0, 1.0, 0.0, 0.0, 0.0]], "bias": [0.0] }
+  ]
+}"#,
+    )
+    .expect("the model file");
+
+    // Dim, then bright. Only the top-left quadrant is read, so the rest of each frame is filled with
+    // the complement — a policy reading the wrong cell, or the frame at the wrong stride, lands on it.
+    let dim = quadrant_frame(51, 204);
+    let bright = quadrant_frame(204, 51);
+    pool.publish(1, 5_000, &dim).expect("published");
+
+    let mut policy = Command::new(env!("CARGO_BIN_EXE_skynetp"))
+        .args([
+            "run",
+            "--hz",
+            "200",
+            "--cycles",
+            "600",
+            "--channels",
+            "1",
+            "--backend",
+            "inference",
+            "--policy",
+            model.to_str().expect("a utf-8 path"),
+            "--ring-socket",
+            path.to_str().expect("a utf-8 path"),
+        ])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("skynetp starts");
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while port.handed() == 0 && Instant::now() < deadline {
+        port.offer(&commands, &body, Some(&pool));
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(port.handed(), 1, "the policy never took the descriptors");
+
+    let ring = commands.ring().expect("the command ring");
+    let mut consumer = ring.consumer();
+
+    let dark = settle_at(&mut consumer, 0.2, deadline);
+    assert!(
+        dark.is_some(),
+        "no command carrying the dim frame's top-left mean (0.2) ever arrived",
+    );
+
+    // The frame changes, and the command has to change with it. This is the assertion the whole file
+    // was building toward: the number moved because a different process read a pixel this one wrote.
+    pool.publish(2, 6_000, &bright).expect("published");
+    let lit = settle_at(&mut consumer, 0.8, deadline);
+    assert!(
+        lit.is_some(),
+        "the frame changed and the command did not follow it to 0.8",
+    );
+
+    let _ = policy.kill();
+    let output = policy.wait_with_output().expect("skynetp exits");
+    let said = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        said.contains("skynetp: model — mlp[1x5 identity] from"),
+        "the policy did not report the model it loaded. It said:\n{said}",
+    );
+
+    let _ = std::fs::remove_file(&model);
+}
+
+/// A 4x4 RGB frame whose top-left 2x2 quadrant is `inside` and whose other three are `outside`.
+fn quadrant_frame(inside: u8, outside: u8) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(4 * 4 * 3);
+    for y in 0..4 {
+        for x in 0..4 {
+            let value = if y < 2 && x < 2 { inside } else { outside };
+            frame.extend_from_slice(&[value, value, value]);
+        }
+    }
+    frame
+}
+
+/// Read until a commanded slot carries `wanted`, within a tolerance a byte-to-float mean allows.
+fn settle_at(
+    consumer: &mut skynet_ring::Consumer<'_>,
+    wanted: f32,
+    deadline: Instant,
+) -> Option<f32> {
+    let mut got = RingCommand::default();
+    while Instant::now() < deadline {
+        if consumer.read(&mut got) == Reading::Fresh
+            && got.mask[0] != 0
+            && (got.values[0] - wanted).abs() < 2e-3
+        {
+            return Some(got.values[0]);
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    None
+}
+
 /// A runtime with no pool hands over two descriptors, and the policy says nothing about frames.
 ///
 /// The other half of the count being the announcement. Without this, "four descriptors means a

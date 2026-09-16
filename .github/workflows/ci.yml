@@ -164,6 +164,38 @@ jobs:
         working-directory: drivers/python-host
         run: make check-capture PYTHON=python3
 
+      # §23.3's inference backend, in the loop, against that camera — `DRY-COVERAGE-PLAN.md`'s Phase 1
+      # gate. The step above is the producer half with nothing reading the pool; this starts `skynetp`
+      # beside `skynetk` and requires the whole path to move: a frame the driver renders is pooled,
+      # crosses `SCM_RIGHTS`, reaches a model in another process, comes back as a setpoint the kernel's
+      # guards evaluate, and the window sealed on the way out replays to the same verdicts.
+      #
+      # It is here rather than in the `rust` job for the reason the two steps above it are: it needs a
+      # C compiler and an interpreter. What it does **not** need is a robot, a GPU or a package — the
+      # LeRobot bridge runs against its own fake, and the step's own output says so rather than letting
+      # a green tick imply a machine.
+      - name: A camera becomes a command, and the sealed window replays
+        working-directory: drivers/python-host
+        run: make check-loop PYTHON=python3
+
+      # And the same loop with nothing to reach. §11 says no control decision may require a network
+      # round trip; §15 makes that `offline.control.independent`, a **bench** test, because it needs a
+      # machine rather than a model. A network namespace holding only loopback is that machine, and if
+      # any step between a sensor and a verdict reaches out it cannot succeed in there.
+      #
+      # Probed rather than assumed, the way the daemon step probes for systemd: a runner without
+      # unprivileged user namespaces reports this as **not run**, never as passed. It is also not a
+      # recorded bench result — nothing in this workspace produces one — and the run says so at the end
+      # rather than letting a green tick imply §15 evidence.
+      - name: The loop closes with no network at all
+        working-directory: drivers/python-host
+        run: |
+          if unshare -rn /bin/true 2>/dev/null; then
+            make check-offline PYTHON=python3
+          else
+            echo "::warning::no unprivileged network namespace on this runner — §11's measurement is reported as not run"
+          fi
+
       # The MuJoCo simulator driver (§70), against real physics. `libosmesa6` is the software GL
       # implementation that makes the camera path exercisable on a machine with no display; without
       # it the driver correctly declares no sensors, which is a real branch and a weaker test.
@@ -492,7 +524,15 @@ jobs:
       # It matters more now than it did. DRY-COVERAGE-PLAN.md commits to driver and runtime work
       # with no physical robot, and hardware is what usually catches a path nobody wired up — by not
       # moving. Taking it out of the loop takes that with it.
-      - name: Every pub fn is reached by something that is not a test
+      #
+      # The same tool now refuses a second thing, for the same reason and one level up: an unreached
+      # function whose **own documentation** says something calls it. Two of the reasons in the
+      # allow-list had to be written against the function's comment rather than against the code —
+      # `tier_profile_to_json` said it was "rendered for a surface that has to explain it" and there
+      # is no such surface, and it was nearly deleted on the strength of that sentence. A comment
+      # asserting a caller is the same defect as a figure asserting a measurement, which is what
+      # `scale-report.mjs` above is for; this is that check for a claim about callers.
+      - name: Every pub fn is reached by something that is not a test, and none claims a caller it lacks
         if: ${{ !cancelled() }}
         run: node tools/check-production-callers.mjs
 
@@ -558,7 +598,7 @@ jobs:
       # genuinely needs it — turning an `mmap` into that slice — is one call, and it belongs to the
       # mapping layer rather than to the protocol. The protocol is the part where a mistake is a
       # moving robot, and it is the part the compiler checks.
-      - name: Everything but the ABI, the loader and the three syscall crates forbids unsafe
+      - name: Everything but the ABI, the two loaders and the three syscall crates forbids unsafe
         if: ${{ !cancelled() }}
         run: |
           # An allow-list of the six, and every *other* crate in the workspace is required to
@@ -566,7 +606,7 @@ jobs:
           # check covers the next crate somebody adds instead of the ones somebody remembered. The
           # previous version listed the crates that must forbid it, which is the same check with the
           # default pointing the wrong way: a new crate joined the workspace unwatched.
-          allowed="skynet-rhal skynet-cli skynet-dl skynet-ring-shm skynet-claim skynet-statfs"
+          allowed="skynet-rhal skynet-cli skynet-dl skynet-ort skynet-ring-shm skynet-claim skynet-statfs"
 
           # A crate's root is `src/lib.rs`, or `src/main.rs` for one that is only a binary. Written
           # out because the version before this one looked only for `lib.rs`, and `skynet-cli` does
@@ -610,6 +650,22 @@ jobs:
           # workspace after this check was written and the check has never run, so nothing caught
           # it. §73 already calls it "the loader `unsafe`, extracted so it has one home and two
           # callers" — the same argument `skynet-cli` is here for, in the crate that now holds it.
+          #
+          # `skynet-ort` is the seventh and the newest, and it is here for the same reason as
+          # `skynet-dl` one library along: §23.3's inference runner is ONNX Runtime, and
+          # DRY-COVERAGE-PLAN.md *Decisions* 12 reaches it by `dlopen` rather than by a Cargo
+          # dependency — so that the "no third-party dependencies" check below stays a check rather
+          # than being narrowed until it admits a transitive tree. The cost of that choice is a
+          # transcription of part of a C API whose *field order is its ABI*, and this list is where
+          # the cost is admitted rather than hidden: one crate, whose whole surface is "load ONNX
+          # Runtime, run one tensor through it", and which `skynet-infer` — the crate that decides
+          # what a joint is told — does not depend on. The kernel is four crates away from it.
+          #
+          # What makes that transcription checkable rather than trusted is in the crate: the field
+          # order was extracted mechanically from the pinned header, the requested API version is
+          # asked for by number (so a library that cannot serve it returns null instead of a shifted
+          # struct), a `size_of` test fails if the prefix ever changes length, and every load runs a
+          # status round-trip through the *error* path — the members a successful run never touches.
           for crate in $allowed; do
             grep -q 'unsafe' "$(root "$crate")" || {
               echo "::error::crates/$crate is on the unsafe allow-list and its root file does not"

@@ -274,11 +274,23 @@ function claims(m) {
   ]
 }
 
+// Filled to forty on 2026-09-16, rather than to whatever the current crate count is.
+//
+// This table had been extended one entry at a time, in front of the figure that needed it, and it
+// showed: `eleven` through `fourteen` were simply **missing** — so a document stating twelve of
+// anything would have been reported as "not a number word this check can read", which reads like a
+// malformed document rather than an incomplete tool. `twenty-six` is what this session actually
+// needed; the rest are here so the next person adding a crate is not editing this file at all. A
+// lookup table of English number words is finished knowledge, not a list of things in the tree, so
+// completing it is not the unreached-surface problem `check-production-callers.mjs` exists for.
 const NUMBER_WORDS = {
   none: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,
-  nine: 9, ten: 10,
+  nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14,
   fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
   'twenty-one': 21, 'twenty-two': 22, 'twenty-three': 23, 'twenty-four': 24, 'twenty-five': 25,
+  'twenty-six': 26, 'twenty-seven': 27, 'twenty-eight': 28, 'twenty-nine': 29, thirty: 30,
+  'thirty-one': 31, 'thirty-two': 32, 'thirty-three': 33, 'thirty-four': 34, 'thirty-five': 35,
+  'thirty-six': 36, 'thirty-seven': 37, 'thirty-eight': 38, 'thirty-nine': 39, forty: 40,
 }
 
 /**

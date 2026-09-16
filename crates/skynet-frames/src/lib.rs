@@ -394,16 +394,36 @@ impl Writer {
 
     /// Drop every loan, because the reader that took them is gone.
     ///
-    /// Called by the runtime when a policy's process exits, and by nothing else. A loan is released
-    /// by the reader in the ordinary case; this is for the case where there is no reader left to
-    /// release it, and without it a policy that crashed while holding a frame would cost the pool
-    /// that slot for the life of the robot (see [`Loans`] for why the generation does not save it).
+    /// A loan is released by the reader in the ordinary case; this is for the case where there is no
+    /// reader left to release it, and without it a policy that crashed while holding a frame would
+    /// cost the pool that slot for the life of the robot (see [`Loans`] for why the generation does
+    /// not save it).
     ///
     /// It is deliberately **not** a timeout. §47.6 puts no bound on how long a policy may hold a
-    /// frame — several milliseconds of inference is the case loans exist for — so any deadline
-    /// short enough to reclaim a crashed reader's slot promptly is short enough to take a working
-    /// reader's frame out from under it. The runtime launched the unit and knows when it is gone,
-    /// which is a fact rather than an estimate.
+    /// frame — several milliseconds of inference is the case loans exist for — so any deadline short
+    /// enough to reclaim a crashed reader's slot promptly is short enough to take a working reader's
+    /// frame out from under it.
+    ///
+    /// # Nothing calls this, and the missing piece is not the call
+    ///
+    /// It read *"called by the runtime when a policy's process exits"* until 2026-09-16, which was a
+    /// description of the design and not of the tree: no runtime calls it, and none can yet, because
+    /// **no process that holds a `Writer` has a sound signal that the reader is gone.**
+    ///
+    /// The signal that looks available is not one. `skynet_kernel_host::handoff::Port` accepts a
+    /// connection, sends the descriptors and drops the stream; keeping the stream and revoking on
+    /// its end-of-file would revoke on the socket closing, and `SCM_RIGHTS` **duplicated** the
+    /// descriptors — a policy may close the socket and keep the mapping. Revoking there would take a
+    /// slot out from under a live reader, which is the one rule §47.6 exists to provide, so the
+    /// convenient signal is worse than none.
+    ///
+    /// What is sound is the process being gone: a `pidfd` on it, or the supervisor that launched the
+    /// unit saying so. `skynetd` has the second and does not hold the pool; the process that holds
+    /// the pool has neither. That gap is recorded in `DRY-COVERAGE-PLAN.md` rather than closed here,
+    /// because choosing between those two is a design decision about which process owns the fact.
+    ///
+    /// Until then a crashed policy costs the pool the slots it held, `stats()` reports the drops, and
+    /// nothing pretends otherwise.
     pub fn revoke_loans(&mut self) {
         let loans = Loans::of(&self.loans, self.geometry.slots);
         for slot in 0..self.geometry.slots {

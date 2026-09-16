@@ -32,7 +32,7 @@ else
   endif
 endif
 
-.PHONY: all check check-lerobot check-mujoco check-capture clean
+.PHONY: all check check-lerobot check-mujoco check-capture check-loop check-offline clean
 
 all: $(LIB)
 
@@ -77,6 +77,22 @@ check-capture: $(LIB)
 	cat $(CAPTURE_OUT).txt
 	grep -Eq '^published +[1-9][0-9]* to the pool' $(CAPTURE_OUT).txt
 	rm -f $(CAPTURE_OUT).sock
+
+# The loop, closed on that camera. `check-capture` above is the producer half with nothing reading the
+# pool; this starts `skynetp` beside it running §23.3's inference backend, so a frame the driver
+# rendered becomes a setpoint the kernel's guards evaluate. It is DRY-COVERAGE-PLAN.md's Phase 1 gate,
+# and `loop.sh` is where the assertions and the reason for each of them are written down.
+#
+# A script rather than a recipe, because it starts two processes and has to wait for a socket between
+# them, and `make` gives each recipe line a shell of its own.
+check-loop: $(LIB)
+	LIB=$(LIB) PYTHON=$(PYTHON) sh ./loop.sh
+# The same loop with no network at all, in a namespace holding only loopback. §11 says no control
+# decision may require a network round trip, and §15 makes that a bench test because it needs a machine
+# rather than a model — this is the machine. It is not a recorded bench *result*: nothing in this
+# workspace produces one, which `loop.sh` says at the end of a run rather than leaving to be assumed.
+check-offline: $(LIB)
+	SKYNET_LOOP_OFFLINE=1 LIB=$(LIB) PYTHON=$(PYTHON) sh ./loop.sh
 
 clean:
 	rm -f $(LIB) skynet_python_host.dll libskynet_python_host.dylib libskynet_python_host.so

@@ -23,6 +23,17 @@ path = "src/main.rs"
 # and describes its own shape, so nothing about its geometry is configured here.
 skynet-frames = { path = "../skynet-frames" }
 
+# §23.3's decision layer, which is below this crate rather than in it. `Inference` in `backend.rs` is
+# the adapter that turns a `Body` and a `Sight` into its arguments; the reason for the split is in
+# that crate's manifest, and it is one Cargo enforces — a session linking a real inference library
+# has to be usable from `skynetp`, and `skynetp` is a binary in *this* package.
+skynet-infer = { path = "../skynet-infer" }
+
+# §23.3's *production* runner, and the reason the split above is load-bearing rather than tidy: this
+# is the crate that loads ONNX Runtime, and it is depended on by the `skynetp` binary in this package
+# and by nothing else in the workspace. The kernel, the guards and `skynet-infer`'s decision layer are
+# all on the other side of that edge and stay `#![forbid(unsafe_code)]`.
+skynet-ort = { path = "../skynet-ort" }
 skynet-obs = { path = "../skynet-obs" }
 skynet-ring = { path = "../skynet-ring" }
 skynet-ring-shm = { path = "../skynet-ring-shm" }
