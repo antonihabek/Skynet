@@ -44,6 +44,16 @@
  * Licence: Apache-2.0.
  */
 
+/* `kill`, `fork`, `pipe` and `waitpid` are POSIX rather than C11, and `-std=c11` hides their
+ * declarations unless the program asks for them — before the first system header, or the request
+ * arrives too late. GCC 13 declared `kill` implicitly and warned; GCC 14 made an implicit
+ * declaration an error, and this file stopped building on a current distribution with nothing in
+ * it changed. The Makefile now passes `-Werror=implicit-function-declaration` so an older compiler
+ * refuses the same thing rather than guessing a signature. */
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
