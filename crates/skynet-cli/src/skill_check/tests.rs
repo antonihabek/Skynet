@@ -423,7 +423,8 @@ fn the_derived_vocabulary_separates_the_os_names_from_the_body_and_cell_names() 
     ] {
         assert!(
             addressable(path, &vocabulary),
-            "{path} names something the descriptor or the cell decides, which this command has not              been given"
+            "{path} names something the descriptor or the cell decides, which this command has not \
+             been given"
         );
     }
 

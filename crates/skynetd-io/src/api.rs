@@ -663,7 +663,10 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     homing_block.set(
         "source",
         Json::from(
-            "§24's two-bit homing field in the flags word of the newest control cycle in §13's              ring. Zero is `unreported` and not `pending`: both hold the robot, and only one of              them means somebody should go and home the machine. A cycle whose body read failed              carries the previous cycle's flags (§26.4), so its field is a fill and is refused.",
+            "§24's two-bit homing field in the flags word of the newest control cycle in §13's \
+             ring. Zero is `unreported` and not `pending`: both hold the robot, and only one of \
+             them means somebody should go and home the machine. A cycle whose body read failed \
+             carries the previous cycle's flags (§26.4), so its field is a fill and is refused.",
         ),
     );
     out.set("homing", homing_block);
@@ -689,7 +692,12 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     guard_hold.set(
         "source",
         Json::from(
-            "the guard verdict on the newest control cycle in §13's ring. Unlike `rhal` and              `stop` it is readable on a cycle whose body read failed: §26.4's fill replaces what              the driver reported, and the kernel's decision on that cycle is not a fill. §27's              condition is true only for a hold that was enforced — §7.4 lets a tier that cannot              promise a clamp forward the command anyway, and a robot reporting `HOLD` while its              command went through would be describing a robot that does not exist.",
+            "the guard verdict on the newest control cycle in §13's ring. Unlike `rhal` and \
+             `stop` it is readable on a cycle whose body read failed: §26.4's fill replaces what \
+             the driver reported, and the kernel's decision on that cycle is not a fill. §27's \
+             condition is true only for a hold that was enforced — §7.4 lets a tier that cannot \
+             promise a clamp forward the command anyway, and a robot reporting `HOLD` while its \
+             command went through would be describing a robot that does not exist.",
         ),
     );
     out.set("guard_hold", guard_hold);
@@ -717,7 +725,11 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     guard_set.set(
         "source",
         Json::from(
-            "§7.6's resolved partition on this daemon, merged with §45.5's calibration expiry —              the two lists the condition can come from, and neither is the ring. It says which              guards *can* run given what the body declares and what a calibration still believes,              never which the kernel had inputs for last cycle: §80's `inert` state exists because              those differ, and a declared sensor that fails at runtime is not visible here.",
+            "§7.6's resolved partition on this daemon, merged with §45.5's calibration expiry — \
+             the two lists the condition can come from, and neither is the ring. It says which \
+             guards *can* run given what the body declares and what a calibration still believes, \
+             never which the kernel had inputs for last cycle: §80's `inert` state exists because \
+             those differ, and a declared sensor that fails at runtime is not visible here.",
         ),
     );
     out.set("guards", guard_set);
@@ -732,7 +744,11 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     policy_block.set(
         "source",
         Json::from(
-            "this daemon's own store and the unit it launched (§33.5, §37.1). Two of §27's three              policy values are exactly knowable from those — nothing to run, and something that              is not ready — and the third asserts §25.2's lease, which the Safety Kernel grants              and this process cannot read. So a robot whose plan resolves and whose unit is              running reports this condition unobserved and is taken at `held`, never at `ready`.",
+            "this daemon's own store and the unit it launched (§33.5, §37.1). Two of §27's three \
+             policy values are exactly knowable from those — nothing to run, and something that \
+             is not ready — and the third asserts §25.2's lease, which the Safety Kernel grants \
+             and this process cannot read. So a robot whose plan resolves and whose unit is \
+             running reports this condition unobserved and is taken at `held`, never at `ready`.",
         ),
     );
     out.set("policy", policy_block);
@@ -755,7 +771,8 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
             warning.set(
                 "last_detail",
                 Json::Str(
-                    "no transition on this robot has yet required a warning (§49.1), so nothing                      has been attempted"
+                    "no transition on this robot has yet required a warning (§49.1), so nothing \
+                     has been attempted"
                         .to_string(),
                 ),
             );

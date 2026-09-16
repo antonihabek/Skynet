@@ -221,7 +221,9 @@ pub fn composition_fault(id: &str, manifest: &Json) -> Option<CompositionFault> 
 /// The sentence a refusal carries, naming the path (§64).
 pub fn composition_refusal(id: &str, fault: &CompositionFault) -> String {
     format!(
-        "`{id}` declares a call graph §54.5 refuses: {} — {}. A composition system without depth          and cycle limits is a way to exhaust a robot, and the graph is walked at install so that          nothing discovers it at runtime with leases held and a deadline running.",
+        "`{id}` declares a call graph §54.5 refuses: {} — {}. A composition system without depth \
+         and cycle limits is a way to exhaust a robot, and the graph is walked at install so that \
+         nothing discovers it at runtime with leases held and a deadline running.",
         fault.code.as_str(),
         fault.path.join(" → "),
     )

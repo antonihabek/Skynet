@@ -465,13 +465,20 @@ impl BusReading {
     pub fn note(self) -> &'static str {
         match self {
             BusReading::Unobserved => {
-                "nothing has read the bus: §26.2 gives a supervisor's ring the event channel and                  a control loop the cycle channels, so a robot running no control loop records no                  cycle for §36.4 to read. A state of `normal` here means the gauge agrees, not                  that the bus does"
+                "nothing has read the bus: §26.2 gives a supervisor's ring the event channel and \
+                 a control loop the cycle channels, so a robot running no control loop records no \
+                 cycle for §36.4 to read. A state of `normal` here means the gauge agrees, not \
+                 that the bus does"
             }
             BusReading::Healthy => {
-                "the newest control cycle read the RHAL and it was not degraded, so §36.4's                  override does not apply and `normal` means both the gauge and the bus"
+                "the newest control cycle read the RHAL and it was not degraded, so §36.4's \
+                 override does not apply and `normal` means both the gauge and the bus"
             }
             BusReading::Degraded { .. } => {
-                "the newest control cycle reported `RHAL_DEGRADED`. Whether that is a voltage sag                  is decided by matching the vendor's fault code against the descriptor's                  `brownout_fault_codes` — §24 forbids this OS interpreting a code it was not given                  the meaning of"
+                "the newest control cycle reported `RHAL_DEGRADED`. Whether that is a voltage sag \
+                 is decided by matching the vendor's fault code against the descriptor's \
+                 `brownout_fault_codes` — §24 forbids this OS interpreting a code it was not given \
+                 the meaning of"
             }
         }
     }

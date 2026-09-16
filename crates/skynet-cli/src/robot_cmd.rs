@@ -381,7 +381,10 @@ fn print_releases(document: &Json) {
     if version.is_empty() {
         println!(
             "{}",
-            term::dim("this robot's desired state names no OS version, so there is no release to                        ask about.")
+            term::dim(
+                "this robot's desired state names no OS version, so there is no release to \
+                 ask about."
+            )
         );
         return;
     }
@@ -2263,7 +2266,8 @@ fn print_cell(document: &Json) {
     println!(
         "  {}",
         term::dim(&format!(
-            "{volumes} allowed volume(s) — computed, and not applied: the workspace guard is the              kernel's (§33.1)"
+            "{volumes} allowed volume(s) — computed, and not applied: the workspace guard is the \
+             kernel's (§33.1)"
         ))
     );
 
@@ -2949,7 +2953,9 @@ fn print_blackbox(document: &Json) {
                 // ordinary case on a metered link, and it is the *bytes* that are worth a number:
                 // §34.3's wait is about the size of them.
                 println!(
-                    "{pending} window(s), {} bytes, are on this robot and nowhere else.                      `skynet blackbox get <name>` reads one here; the daemon sends them when an                      unmetered link is up (§34.3, §79.3).",
+                    "{pending} window(s), {} bytes, are on this robot and nowhere else. \
+                     `skynet blackbox get <name>` reads one here; the daemon sends them when an \
+                     unmetered link is up (§34.3, §79.3).",
                     count("pending_bytes")
                 );
             }

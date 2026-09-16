@@ -144,7 +144,8 @@ impl Recorder {
                 .map_err(|e| io_error("opening", &path, e))?;
                 let ring = Ring::open(&store).map_err(|error| {
                     std::io::Error::other(format!(
-                        "{holder} holds this black box directory and the ring it created cannot be                          opened here: {error:?}"
+                        "{holder} holds this black box directory and the ring it created cannot be \
+                         opened here: {error:?}"
                     ))
                 })?;
                 let writership = attaching
@@ -517,7 +518,8 @@ impl Recorder {
     pub fn seal(&self, reason: Reason, mono_ns: u64) -> std::io::Result<(Sealed, PathBuf)> {
         if !self.writership.may_seal() {
             return Err(std::io::Error::other(
-                "this process attached to a black box another process created, and the creator is                  the one that seals it (§26.2). Ask it to seal, or read the window it writes.",
+                "this process attached to a black box another process created, and the creator is \
+                 the one that seals it (§26.2). Ask it to seal, or read the window it writes.",
             ));
         }
         let store = self.read()?;

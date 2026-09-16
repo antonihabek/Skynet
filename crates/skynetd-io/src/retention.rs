@@ -506,7 +506,12 @@ pub fn report(layout: &Layout, free: Free, floor_bytes: u64) -> Json {
         out.set(
             "detail",
             Json::Str(
-                "This machine's volume could not be measured — §33.6's `storage_headroom` is \n                 absent for the same reason, and `skynet-statfs` needs 64-bit Linux and \n                 refuses a reading that cannot describe a filesystem — so §80's reclaim \n                 does not run and every sealed window is kept. That is the safe direction \n                 and it is not a state to stay in: a robot that seals daily will \n                 eventually fill this volume, and the operator is the party who finds out."
+                "This machine's volume could not be measured — §33.6's `storage_headroom` is \
+                 absent for the same reason, and `skynet-statfs` needs 64-bit Linux and \
+                 refuses a reading that cannot describe a filesystem — so §80's reclaim \
+                 does not run and every sealed window is kept. That is the safe direction \
+                 and it is not a state to stay in: a robot that seals daily will \
+                 eventually fill this volume, and the operator is the party who finds out."
                     .to_string(),
             ),
         );

@@ -3858,12 +3858,14 @@ fn a_failed_profile_signature_raises_an_incident() {
     // now to an event in the past.
     assert!(
         queued[0].body.contains("\"generation\""),
-        "an incident that does not say which generation it happened on can only be dated by          whenever it arrived: {:?}",
+        "an incident that does not say which generation it happened on can only be dated by \
+         whenever it arrived: {:?}",
         queued[0].body
     );
     assert!(
         queued[0].body.contains("\"state\""),
-        "§27's state at the fault says whether the robot had already stopped or was still moving:          {:?}",
+        "§27's state at the fault says whether the robot had already stopped or was still moving: \
+         {:?}",
         queued[0].body
     );
 }
@@ -5302,7 +5304,8 @@ fn the_capacity_is_read_or_refused_and_never_estimated() {
                 Some(Json::Null) => {}
                 Some(Json::Num(mb)) => assert!(
                     *mb > 1.0,
-                    "{mb} MB free is a reading being misinterpreted, not a machine that runs this                      daemon",
+                    "{mb} MB free is a reading being misinterpreted, not a machine that runs this \
+                     daemon",
                 ),
                 other => panic!("disk_mb is megabytes or nothing: {other:?}"),
             }
@@ -9003,7 +9006,8 @@ mod ota {
         assert_eq!(
             transfer.get("total_declared_by").and_then(Json::as_str),
             Some("manifest"),
-            "whose number it is, because a publisher's signed size and a server's claim about its              own file are different kinds of statement"
+            "whose number it is, because a publisher's signed size and a server's claim about its \
+             own file are different kinds of statement"
         );
         assert_eq!(transfer.get("received").and_then(Json::as_f64), Some(10.0));
     }
@@ -9071,7 +9075,8 @@ mod ota {
         assert_eq!(
             asks.lock().unwrap().as_slice(),
             [0],
-            "a partial cannot be larger than what it is part of, so the transfer starts again              rather than resuming into bytes from another image"
+            "a partial cannot be larger than what it is part of, so the transfer starts again \
+             rather than resuming into bytes from another image"
         );
     }
 
@@ -11956,7 +11961,8 @@ mod cell {
         assert_eq!(
             body.get("workspace"),
             Some(&Json::Null),
-            "an unreadable volume is not an empty layer: an empty layer forbids every frame it              names, and this cell named one"
+            "an unreadable volume is not an empty layer: an empty layer forbids every frame it \
+             names, and this cell named one"
         );
         let codes: Vec<&str> = body
             .arr_or_empty("faults")
