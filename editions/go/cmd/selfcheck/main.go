@@ -12,8 +12,9 @@
 //
 //  2. **The runner's own accounting**, over synthetic corpora built here. The four buckets a report
 //     prints are the sentence §31.4 asks this edition for, and no corpus case exercises them: every
-//     real run has the same 1,199 cases and cannot show what happens when a handler is missing, or
-//     declines, or panics.
+//     real run has the same cases in the same buckets and cannot show what happens when a handler
+//     is missing, or declines, or panics. The count is deliberately not written here — it is a
+//     figure nothing on this path could check, and it went stale the first time the corpus grew.
 //
 //  3. **The canonical writer at its edges.** The round trip in cmd/roundtrip proves the writer
 //     against every number the corpus holds, which is a strong statement about the numbers that
