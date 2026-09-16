@@ -415,9 +415,20 @@ pub struct Distributor<const N: usize> {
 
 /// What one captured frame cost, once both consumers had seen it.
 ///
-/// Every handle that left the pipeline is in here. A caller that releases
-/// [`displaced`](Delivered::displaced) and [`not_recorded`](Delivered::not_recorded) has released
-/// everything this call took ownership of and nothing it still holds.
+/// Every handle that left the pipeline is in here — but **they are not all released the same way**,
+/// and this doc said they were until 2026-09-16, when the first backend was written against it.
+///
+/// [`displaced`](Delivered::displaced) is a frame the slot gave up, so one holder fewer: release it.
+/// [`not_recorded`](Delivered::not_recorded) is **the frame that was just published**, handed back
+/// only to say the recorder refused it — and [`LatestSlot::publish`] always accepts, so the slot is
+/// holding that very buffer as this call returns. Releasing it hands a live buffer back to the
+/// device, which is a corrupted recording rather than a stopped one, and is the worse of the two
+/// directions §47.3's rule can break in.
+///
+/// The underlying fact is that §47.4 gives one frame to two consumers, so a buffer has up to two
+/// holders and no lend-and-return scheme can say when it is free. What answers it is a reference
+/// count — see [`source::Source::retain`], and [`source::pump`] for the four lines that keep it
+/// balanced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Delivered {
     /// The frame the policy had not read yet, overwritten by this one.
@@ -466,6 +477,8 @@ impl<const N: usize> Distributor<N> {
         }
     }
 }
+
+pub mod source;
 
 #[cfg(test)]
 mod tests;
