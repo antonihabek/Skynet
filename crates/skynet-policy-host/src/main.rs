@@ -47,7 +47,87 @@
 use std::sync::atomic::AtomicU32;
 use std::time::{Duration, Instant};
 
-use skynet_policy_host::backend::{Approach, Commanding, Hold, Trajectory};
+use skynet_policy_host::backend::{Approach, Commanding, Hold, Inference, Trajectory};
+
+/// The model runners `--policy` can name, chosen by the artefact's own `kind`.
+///
+/// An enum rather than `Box<dyn Session>` for the reason [`skynet_infer::session::Session`] takes an
+/// output slice: this is a per-control-period path, and a virtual call plus an allocation per cycle
+/// is exactly the kind of cost §23.3 warns about. It is also the honest shape — the set of runners
+/// this build has is closed and known at compile time, and `skynet_infer::KINDS` is the one list of
+/// them.
+enum Runner {
+    /// `kind: "mlp"` — dense feed-forward, in `skynet-infer`, no library needed.
+    Mlp(skynet_infer::Mlp),
+    /// `kind: "onnx"` — §23.3's production runner, an ONNX Runtime session loaded at run time.
+    Onnx(skynet_ort::Onnx),
+}
+
+impl skynet_infer::Session for Runner {
+    fn input_width(&self) -> usize {
+        match self {
+            Runner::Mlp(inner) => inner.input_width(),
+            Runner::Onnx(inner) => inner.input_width(),
+        }
+    }
+
+    fn output_width(&self) -> usize {
+        match self {
+            Runner::Mlp(inner) => inner.output_width(),
+            Runner::Onnx(inner) => inner.output_width(),
+        }
+    }
+
+    fn run(&mut self, input: &[f32], output: &mut [f32]) -> Result<(), skynet_infer::SessionError> {
+        match self {
+            Runner::Mlp(inner) => inner.run(input, output),
+            Runner::Onnx(inner) => inner.run(input, output),
+        }
+    }
+
+    fn describe(&self) -> &str {
+        match self {
+            Runner::Mlp(inner) => inner.describe(),
+            Runner::Onnx(inner) => inner.describe(),
+        }
+    }
+}
+
+/// Read an artefact and open whichever runner its `kind` names.
+///
+/// The **file** chooses, not a flag. A `--runner onnx` beside a file saying `mlp` would be two
+/// records of one fact, and the failure when they disagreed would be a model run by something that
+/// was not asked to run it — which is precisely what each runner's `kind` check exists to prevent.
+///
+/// `path` is the artefact's own path, and its parent is what a relative `model` resolves against, so
+/// a policy directory can be moved or mounted without editing what is inside it.
+fn load_runner(
+    label: &str,
+    text: &str,
+    path: &std::path::Path,
+) -> Result<(Runner, skynet_infer::Inputs), String> {
+    // Peeked rather than consumed: each runner re-reads the whole document and checks `kind` itself,
+    // so a file that reached the wrong one is still refused by the runner rather than only here.
+    match skynet_infer::kind_of(label, text)?.as_str() {
+        "mlp" => {
+            let (session, inputs) = skynet_infer::Mlp::load(label, text)?;
+            Ok((Runner::Mlp(session), inputs))
+        }
+        "onnx" => {
+            let beside = path.parent().unwrap_or(std::path::Path::new("."));
+            let (session, inputs) =
+                skynet_ort::Onnx::load(label, text, beside).map_err(|error| error.to_string())?;
+            Ok((Runner::Onnx(session), inputs))
+        }
+        // `kind_of` only returns a name in `skynet_infer::KINDS`, so this arm is reached only by
+        // adding an entry there and not here. Named rather than `unreachable!()`: the next runner is
+        // somebody's afternoon, and a panic in `skynetp` is a robot's policy process exiting.
+        other => Err(format!(
+            "{label} declares kind `{other}`, which `skynet_infer::KINDS` lists and this binary has \
+             no arm for. That is a defect in skynetp rather than in the file"
+        )),
+    }
+}
 use skynet_policy_host::rendezvous;
 use skynet_policy_host::run::{PolicyHost, Summary, SystemClock, Tick};
 use skynet_ring::{mode, words_for, Ring, MAX_CHANNELS};
@@ -73,6 +153,7 @@ struct Options {
     target: Vec<f32>,
     gain: f32,
     ring_socket: Option<std::path::PathBuf>,
+    policy: Option<std::path::PathBuf>,
     quiet: bool,
 }
 
@@ -166,6 +247,18 @@ fn check(options: &Options) -> Result<(), String> {
                 );
             }
         }
+        // §23.3's in-process backend. What it eats — how many channels, and the camera's shape when
+        // it takes one — is declared by the model file rather than by a flag, so there is exactly one
+        // artefact and no way for two flags to disagree about what order the floats arrive in.
+        "inference" => {
+            if options.policy.is_none() {
+                return Err(
+                    "--backend inference wants --policy, which is the model to run. It declares \
+                     its own channel count and frame shape, so there is nothing else to pass"
+                        .to_string(),
+                );
+            }
+        }
         other => return Err(format!("`{other}` is not a backend this build has")),
     }
 
@@ -183,6 +276,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         target: Vec::new(),
         gain: 0.1,
         ring_socket: None,
+        policy: None,
         quiet: false,
     };
 
@@ -254,6 +348,10 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 options.ring_socket = Some(std::path::PathBuf::from(value("--ring-socket")?));
                 index += 2;
             }
+            "--policy" => {
+                options.policy = Some(std::path::PathBuf::from(value("--policy")?));
+                index += 2;
+            }
             "--quiet" => {
                 options.quiet = true;
                 index += 1;
@@ -274,9 +372,16 @@ fn run(args: &[String]) -> i32 {
                 "skynetp — the producer for the Safety Kernel's command ring (§25).\n\n\
                  usage: skynetp run [--hz 100] [--cycles N] [--channels N]\n\
                  \x20                  [--mode position|velocity|torque]\n\
-                 \x20                  [--backend hold|trajectory|approach]\n\
+                 \x20                  [--backend hold|trajectory|approach|inference]\n\
                  \x20                  [--setpoints \"0:0.1;40:0.3\"] [--target 0.1,0.2] [--gain 0.1]\n\
+                 \x20                  [--policy <model.json>]\n\
                  \x20                  [--ring-socket <path>] [--quiet]\n\n\
+                 --backend inference runs §23.3's in-process model. --policy is the only thing it\n\
+                 takes: the file declares how many channels it commands and, when it reads a\n\
+                 camera, the frame shape and the grid it is pooled into. The file's own `kind`\n\
+                 picks the runner — `mlp` is a dense network needing nothing, `onnx` is §23.3's\n\
+                 production runner and loads ONNX Runtime at run time. SKYNET_ORT_LIBRARY names\n\
+                 that library when it is not where the system loader looks.\n\n\
                  --ring-socket takes both rings from a runtime that is offering them\n\
                  (`skynetk run --policy-socket <path>`): the command ring this process writes\n\
                  and the observation ring it reads. Without it the ring is this process's own,\n\
@@ -322,15 +427,66 @@ fn run(args: &[String]) -> i32 {
         return fail(&problem);
     }
 
+    // §23.3's model, read before anything is mapped.
+    //
+    // Loaded here rather than where the backend is built so that a file which disagrees with the ring
+    // is refused before a socket is touched: a policy that mapped a robot's command ring and *then*
+    // discovered its model commands a different number of joints has already announced itself to the
+    // runtime as the commanding process.
+    let inference = match (options.backend.as_str(), options.policy.as_deref()) {
+        ("inference", Some(path)) => {
+            let label = path.display().to_string();
+            let text = match std::fs::read_to_string(path) {
+                Ok(text) => text,
+                Err(error) => return fail(&format!("{label} could not be read: {error}")),
+            };
+            let (session, inputs) = match load_runner(&label, &text, path) {
+                Ok(loaded) => loaded,
+                Err(why) => return fail(&why),
+            };
+            if inputs.channels != options.channels {
+                // Refused rather than reconciled in either direction. Narrowing the model would run
+                // it on a shorter input than it was trained on; widening the lease would grant a
+                // policy authority over a joint §6's transport plan did not resolve for it.
+                return fail(&format!(
+                    "{label} commands {} channel(s) and this lease grants {}. --channels comes from \
+                     the runtime that offered the ring (or from SKYNET_RING_CHANNELS), and a model \
+                     is run against the body it was resolved for or not at all",
+                    inputs.channels, options.channels
+                ));
+            }
+            match skynet_infer::Policy::new(session, inputs) {
+                Ok(policy) => Some(policy),
+                Err(why) => return fail(&why),
+            }
+        }
+        _ => None,
+    };
+
     let lease = Commanding {
-        channels: options.channels,
-        // No ring is attached, so nothing would be checked against a budget.
+        // No flag declares either budget, so §25.1's staleness check has nothing to check against and
+        // every closed-loop cycle is counted `unbudgeted`. That is the honest state rather than a
+        // permissive default: the budgets belong to a policy's *declared observation requirements*,
+        // which arrive with a package (§8) rather than on the command line of a binary run by hand.
         observation_budget_ms: None,
         frame_budget_ms: None,
+        channels: options.channels,
         mode: options.mode,
     };
     if !lease.valid() {
         return fail("the lease is not one this ring can carry");
+    }
+
+    if options.backend == "inference" && options.ring_socket.is_none() {
+        // Same refusal as `approach`, for the same reason and one step further: a model reads the
+        // body on every cycle, and one that takes a camera reads §47.6's pool as well. Neither
+        // arrives without the hand-off, so a run with no `--ring-socket` would hold on every cycle
+        // and look like a policy that had decided to.
+        return fail(
+            "--backend inference reads the body, and a model that declares a camera reads the \
+             frame pool too. Both arrive over --ring-socket from a runtime that is offering them \
+             (`skynetk run --policy-socket <path>`); without it there is nothing to read",
+        );
     }
 
     if options.backend == "approach" {
@@ -437,12 +593,16 @@ fn run(args: &[String]) -> i32 {
     // The observation and the frame pool reach the backend through here, which is why the closure
     // takes them rather than capturing them: `approach` is a function of the body and the other two
     // are not, and a consumer captured by one of them would be a borrow held for the life of the run.
+    //
+    // The third element is §23.3's per-reason count, and it is `None` for every backend that is not
+    // a model. Not zeroes: a `Trajectory` that held has held for its own reason, and reporting it as
+    // `no_body: 0` would be a line about a question it was never asked.
     type Turn<'a> = Box<
         dyn FnMut(
                 &mut skynet_ring::Producer<'_>,
                 Option<&mut skynet_obs::Consumer<'_>>,
                 Option<&skynet_frames::Reader>,
-            ) -> (Tick, Summary)
+            ) -> (Tick, Summary, Option<skynet_infer::Counts>)
             + 'a,
     >;
     let mut host: Turn<'_> = match options.backend.as_str() {
@@ -459,7 +619,11 @@ fn run(args: &[String]) -> i32 {
                 period_ns,
             );
             Box::new(move |producer, body, frames| {
-                (inner.turn_seeing(producer, body, frames), inner.summary())
+                (
+                    inner.turn_seeing(producer, body, frames),
+                    inner.summary(),
+                    None,
+                )
             })
         }
         // The closed-loop one, and the only backend whose command on cycle n is a function of what
@@ -474,13 +638,58 @@ fn run(args: &[String]) -> i32 {
                 period_ns,
             );
             Box::new(move |producer, body, frames| {
-                (inner.turn_seeing(producer, body, frames), inner.summary())
+                (
+                    inner.turn_seeing(producer, body, frames),
+                    inner.summary(),
+                    None,
+                )
+            })
+        }
+        // §23.3's, and the first backend here whose command depends on a pixel. Everything it decides
+        // is in `skynet-infer`; `Inference` is the adapter, and this arm is the one place a session
+        // is chosen — which is why a real inference library, when there is one, is selected here and
+        // changes nothing else.
+        "inference" => {
+            let policy = match inference {
+                Some(policy) => policy,
+                // Unreachable: `check` refuses `--backend inference` with no `--policy`, and the load
+                // above returns rather than falling through. Said out loud because the alternative is
+                // an `unwrap` in the one arm that has a file in it.
+                None => return fail("--backend inference has no model loaded, which is a defect"),
+            };
+            if !options.quiet {
+                println!("skynetp: model — {}", policy.describe());
+            }
+            let mut inner = PolicyHost::new(
+                Inference::over(policy),
+                SystemClock::default(),
+                lease,
+                period_ns,
+            );
+            let quiet = options.quiet;
+            // Said once, when it first happens, rather than kept for the end: a session that refuses
+            // tends to refuse identically at the control rate, and an operator watching a robot that
+            // will not move wants the reason now.
+            let mut said = false;
+            Box::new(move |producer, body, frames| {
+                let tick = inner.turn_seeing(producer, body, frames);
+                if !said && !quiet {
+                    if let Some(why) = inner.backend().first_refusal() {
+                        eprintln!("skynetp: the model refused — {why}");
+                        said = true;
+                    }
+                }
+                (tick, inner.summary(), Some(inner.backend().counts()))
             })
         }
         _ => {
             let mut inner = PolicyHost::new(Hold, SystemClock::default(), lease, period_ns);
             Box::new(move |producer, body, frames| {
-                (inner.turn_seeing(producer, body, frames), inner.summary())
+                (
+                    inner.turn_seeing(producer, body, frames),
+                    inner.summary(),
+                    None,
+                )
             })
         }
     };
@@ -490,6 +699,7 @@ fn run(args: &[String]) -> i32 {
     let mut refused = 0u64;
     let mut turns = 0u64;
     let mut summary = Summary::default();
+    let mut model = None;
 
     loop {
         if let Some(limit) = options.cycles {
@@ -498,8 +708,9 @@ fn run(args: &[String]) -> i32 {
             }
         }
         let started = Instant::now();
-        let (tick, so_far) = host(&mut producer, observations.as_mut(), frames.as_ref());
+        let (tick, so_far, counts) = host(&mut producer, observations.as_mut(), frames.as_ref());
         summary = so_far;
+        model = counts;
         match tick {
             Tick::Published(_) => published += 1,
             Tick::Held(_) => held += 1,
@@ -527,12 +738,50 @@ fn run(args: &[String]) -> i32 {
         println!(
             "skynetp: {turns} turn(s) — {published} commanded, {held} held, {refused} refused"
         );
+        // The three counts §25 keeps that nothing was reporting.
+        //
+        // `overruns` is the one that matters most and is the one that had no surface at all: §23.3
+        // says inference is never in the real-time path, and this is the number that says whether a
+        // backend is holding to the period it was given. It is deliberately not acted on — the fourth
+        // rule in `run.rs` — which makes printing it the *only* thing that makes it visible.
+        //
+        // `stale_holds` and `unbudgeted` are §25.1's two halves: cycles held because the body reading
+        // was older than the lease allowed, and cycles where nothing could say whether it was. The
+        // second is zero on a run with no observation ring, and on a run with one it is every cycle
+        // until a package declares a budget.
+        println!(
+            "skynetp: {} overrun(s) past the {:.1} ms period, {} hold(s) on a stale body, \
+             {} cycle(s) with no budget to check one against",
+            summary.overruns,
+            period_ns as f64 / 1_000_000.0,
+            summary.stale_holds,
+            summary.unbudgeted
+        );
         // Only when a pool came with the rings: a policy that printed a frame line on every robot
         // would be claiming a camera that is not there.
         if frames.is_some() {
             println!(
                 "skynetp: {} of {turns} turn(s) were shown a frame ({} missed, {} too old)",
                 summary.frames, summary.frames_missed, summary.stale_frames
+            );
+        }
+        // Why the model held, per reason, and only when there was a model. Every reason is printed
+        // whether it fired or not, because a zero beside its six siblings is a fact and a line that
+        // omitted the zeros would leave a reader unable to tell "never happened" from "not reported".
+        if let Some(counts) = model {
+            println!(
+                "skynetp: the model commanded on {} of {turns} turn(s) and held on {} — \
+                 no_body {}, body_too_narrow {}, no_frame {}, frame_shape {}, \
+                 input_not_finite {}, session_refused {}, output_not_finite {}",
+                counts.commanded,
+                counts.held(),
+                counts.no_body,
+                counts.body_too_narrow,
+                counts.no_frame,
+                counts.frame_shape,
+                counts.input_not_finite,
+                counts.session_refused,
+                counts.output_not_finite
             );
         }
         // What became of the commands, and the two answers are not the same sentence. A private

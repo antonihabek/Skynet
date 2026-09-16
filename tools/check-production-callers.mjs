@@ -1,5 +1,6 @@
 /**
- * Every `pub fn` in the workspace is reached by something that is not a test.
+ * Every `pub fn` in the workspace is reached by something that is not a test — and no unreached
+ * one claims, in its own documentation, that something calls it.
  *
  * # Why this exists
  *
@@ -44,6 +45,25 @@
  * check fails on anything new. Seeding it is not an amnesty: it is the same arrangement as the
  * editions' `--min-passed` floors, where the number is a fact about history and lowering it is a
  * decision somebody makes in a diff rather than something that happens quietly.
+ *
+ * # The second claim: a doc comment that names a caller it does not have
+ *
+ * Two of the reasons in that file had to be written **against the function's own documentation**.
+ * `check_code` and `tier_profile_to_json` each described a consumer that does not exist — the second
+ * said it was *"rendered for a surface that has to explain it"* and there is no such surface — and
+ * both were nearly deleted on the strength of it. A comment asserting a caller is the same defect as
+ * a figure asserting a measurement, and this half of the check is the same remedy `scale-report.mjs`
+ * is for a figure: the claim is held to what the tree can be measured to contain.
+ *
+ * It runs only over the unreached names, because that is the set where a caller claim is
+ * **falsifiable by something already computed here**. On a reached function the claim may be
+ * imprecise; it cannot be wrong about whether anybody calls it at all.
+ *
+ * There is deliberately **no allow-list for this half.** F9 in `DRY-COVERAGE-PLAN.md` records what
+ * one costs: the remedy this check offers for a false positive is a name on a list, and that is how
+ * a function with a plain production caller came to be denied one in writing. The remedy here is to
+ * wire the function up, or to say in the comment that nothing calls it — both of which leave the
+ * next reader with something true.
  */
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
@@ -92,6 +112,120 @@ const UBIQUITOUS = new Set([
   'kind',
   'path',
 ])
+
+/**
+ * The things inside this workspace a doc comment might name as a caller.
+ *
+ * Two halves, and the first is **derived rather than listed** — every crate directory, in both the
+ * hyphenated spelling prose uses and the underscored one a `use` line does — so a claim about the
+ * next crate somebody adds is covered instead of the ones somebody remembered. The same argument the
+ * `unsafe` check in `ci.yml` makes for enumerating the workspace rather than keeping a list beside it.
+ *
+ * The second half is the role nouns this tree uses for its own parts, and it is a list because there
+ * is nowhere to read it from. It grows when somebody writes a claim in a word that is not here yet;
+ * that is a gap in the vocabulary and not a licence, and the honest failure direction is this one —
+ * a word missing here under-reports, which is the same direction the caller search itself leans.
+ *
+ * What is deliberately absent is every *outside* consumer: the Hub, a vendor, a driver author, an
+ * embedder, a third party's package, the tests. A doc comment naming one of those is making a claim
+ * this tool cannot check and has no business refusing — `write_response` is exposed for an embedder
+ * running its own loop, `from_flags` is the vendor ABI's own view, and both are correct to say so.
+ */
+const IN_WORKSPACE = [
+  ...readdirSync(join(ROOT, 'crates'))
+    .filter((entry) => statSync(join(ROOT, 'crates', entry)).isDirectory())
+    .flatMap((crate) => [crate, crate.replace(/-/g, '_')]),
+  // The three binaries, which prose names far more often than it names their crates.
+  'skynetk',
+  'skynetp',
+  'skynetd',
+  // Role nouns. Each is something in this repository, so "the <noun>" is a checkable claim.
+  'runtime',
+  'daemon',
+  'CLI',
+  'console',
+  'responder',
+  'reconciler',
+  'supervisor',
+  'launcher',
+  'control loop',
+  'recorder',
+  'safety kernel',
+  'kernel host',
+  'policy host',
+  'black box',
+  'blackbox',
+]
+
+// Longest first, so `skynetd-io` is not reported as `skynetd` with the rest of the name left off.
+// A regex alternation takes the first branch that matches, and the quote below goes in front of a
+// person deciding whether the claim is true — a truncated one sends them to the wrong crate.
+const SUBJECT = `(?:\`?(?:${IN_WORKSPACE.slice()
+  .sort((a, b) => b.length - a.length)
+  .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  .join('|')})\`?)`
+
+/**
+ * Constructions that assert a caller exists, as against ones that say what a function is *for*.
+ *
+ * The distinction the third pattern draws is the **article**, and it is not a nicety. *"rendered for
+ * a surface that has to explain it"* is a purpose: it says what the output is shaped for and asserts
+ * nothing about whether such a surface has been built. *"For the responder half"* is a claim: it
+ * says the responder — this repository's `Responder`, which is right there — is the consumer. The
+ * first is how `tier_profile_to_json` should always have read; the second is what `asks_for_us` said
+ * while the responder had moved on to a finer question and stopped asking this one.
+ *
+ * So a definite article in front of something in this workspace is a claim, and an indefinite one is
+ * not. That keeps the check off every honest sentence of the form *"for a report"*, *"for a caller
+ * running its own loop"*, *"for a driver assembling one"* — three real ones in the tree today.
+ */
+const CALLER_CLAIMS = [
+  ['called by or from', new RegExp(`\\b(?:is |are )?called\\s+(?:by|from)\\s+(?:the\\s+)?${SUBJECT}`, 'i')],
+  ['a named caller', new RegExp(`\\bthe\\s+${SUBJECT}\\s+(?:calls|consults|invokes)\\s+(?:this|it)\\b`, 'i')],
+  ['the caller named', new RegExp(`\\b(?:its|the)\\s+caller\\s+is\\s+(?:the\\s+)?${SUBJECT}`, 'i')],
+  ['for the (definite) consumer', new RegExp(`\\b(?:for|to)\\s+the\\s+${SUBJECT}\\b`, 'i')],
+]
+
+/**
+ * Sentences that say the caller is absent, which is what makes the claim above honest again.
+ *
+ * A vocabulary rather than a marker attribute, because both instances of it already in the tree were
+ * written by somebody explaining themselves in prose — *"# No surface calls this yet, and it is kept
+ * anyway"* on `tier_profile_to_json`, and *"The daemon does not consult this"* on
+ * `driver_may_activate`. A `#[doc(hidden)]`-style token would have been a thing to remember; a
+ * sentence is a thing a reader gets the benefit of.
+ */
+const DISCLAIMERS = [
+  /\bno\s+[\w-]+\s+(?:calls|consults|reads|renders)\s+(?:this|it)\b/i,
+  /\bnothing\s+(?:calls|consults|reads|uses|renders)\s+(?:this|it)\b/i,
+  /\bdoes not\s+(?:call|consult|read|use)\s+(?:this|it)\b/i,
+  /\bno\s+(?:production\s+|in-workspace\s+)?caller\b/i,
+  /\bunreached\b/i,
+  /\bnot reached by\b/i,
+  /\bbuilt ahead of its\b/i,
+  /\bnobody\s+(?:calls|asks|reads)\b/i,
+]
+
+/**
+ * The `///` lines immediately above a declaration, as one string.
+ *
+ * Read from the **raw** source, because `strip()` has taken the comments out by the time anything
+ * else here looks at a file — and read by line number, which is sound only because `strip()` keeps
+ * the newlines of everything it removes. That property is F9's fix, and this is the second thing
+ * standing on it: without it every doc comment collected here would belong to some other function.
+ */
+function docAbove(raw, line) {
+  const lines = raw.split('\n')
+  const doc = []
+  for (let k = line - 2; k >= 0; k--) {
+    const text = lines[k].trim()
+    if (text.startsWith('///')) doc.unshift(text.slice(3).trim())
+    // An attribute or an ordinary comment between the doc and the item does not end it.
+    else if (text.startsWith('#[') || text.startsWith('//')) continue
+    else break
+  }
+  return doc.join('\n')
+}
 
 /**
  * Remove comments and string literals so brace matching and name search see only code.
@@ -341,6 +475,26 @@ for (const [name, where] of declared) {
   if (!reached) unreached.push({ name, ...where })
 }
 
+/**
+ * Of the unreached, the ones whose own documentation says something calls them.
+ *
+ * Computed over every unreached name and not only the allow-listed ones, so a function that is new
+ * *and* claims a caller is reported for both faults rather than being fixed once and found again.
+ */
+const claiming = []
+for (const where of unreached) {
+  const doc = docAbove(readFileSync(where.declFile, 'utf8'), where.line)
+  if (!doc) continue
+  if (DISCLAIMERS.some((pattern) => pattern.test(doc))) continue
+  for (const [what, pattern] of CALLER_CLAIMS) {
+    const hit = pattern.exec(doc)
+    if (hit) {
+      claiming.push({ ...where, what, quote: hit[0] })
+      break
+    }
+  }
+}
+
 const allow = existsSync(ALLOW_PATH)
   ? JSON.parse(readFileSync(ALLOW_PATH, 'utf8'))
   : { note: '', allowed: {} }
@@ -390,9 +544,30 @@ if (stale.length > 0) {
   for (const name of stale) console.error(`  ${name}`)
 }
 
+if (claiming.length > 0) {
+  failed = true
+  console.error('::error::A pub fn with no caller says in its own documentation that it has one.')
+  console.error('')
+  console.error('A comment asserting a caller is the same defect as a figure asserting a')
+  console.error('measurement, and it costs more: the next reader believes it and stops looking.')
+  console.error('`tier_profile_to_json` was nearly deleted because its comment named a surface that')
+  console.error('does not exist, and the argument for keeping it had to be found in the body.')
+  console.error('')
+  console.error('Two remedies, and both leave something true behind:')
+  console.error('  * wire it into the path the comment names, or')
+  console.error('  * say in the comment that nothing calls it yet, and why it is here anyway.')
+  console.error('')
+  console.error('There is no list to add a name to. See the header of this file for why.')
+  console.error('')
+  for (const c of claiming) {
+    console.error(`  ${c.file}:${c.line}  ${c.name}`)
+    console.error(`      ${c.what}: "${c.quote}"`)
+  }
+}
+
 if (failed) process.exit(1)
 
 console.log(
-  `Every pub fn outside the allow-list has a production caller ` +
-    `(${declared.size} checked, ${allowed.size} allow-listed).`
+  `Every pub fn outside the allow-list has a production caller, and no unreached one ` +
+    `claims a caller in its documentation (${declared.size} checked, ${allowed.size} allow-listed).`
 )

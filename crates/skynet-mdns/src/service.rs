@@ -339,10 +339,21 @@ pub fn read(message: &Message, scope_id: Option<u32>) -> Vec<Discovered> {
     found
 }
 
-/// Whether a message is a query this robot should answer.
+/// Whether a message is a query this robot should answer: a `PTR` question for the service name, or
+/// an `ANY` question — both of which RFC 6763 browsers send.
 ///
-/// For the responder half. A `PTR` question for the service name, or an `ANY` question — both of
-/// which RFC 6763 browsers send.
+/// # The responder does not call this, and cannot
+///
+/// It said *"for the responder half"* until 2026-09-16, which was true when it was written and had
+/// stopped being so. [`crate::responder::Responder`] has to know **which** question matched — a
+/// shared record, a unique one, or one asking for a unicast answer, because §82.4 answers the three
+/// differently — so it asks its own per-question predicate and never the whole-message form. One
+/// `bool` over a message with several questions in it is a decision the responder has no way to act
+/// on, and no amount of wiring changes that: what would be needed is a different return type, at
+/// which point this is a different function.
+///
+/// So it is kept as the vocabulary a caller *outside* the responder wants — a monitor deciding
+/// whether a captured packet was aimed at this robot at all — and not as a step the responder skips.
 pub fn asks_for_us(message: &Message) -> bool {
     if message.is_response() {
         return false;

@@ -24,6 +24,8 @@ members = [
   "crates/skynet-ring-shm",
   "crates/skynet-capture",
   "crates/skynet-frames",
+  "crates/skynet-infer",
+  "crates/skynet-ort",
   "crates/skynet-kernel",
   "crates/skynet-kernel-host",
   "crates/skynet-policy-host",

@@ -86,7 +86,9 @@ pub mod backend;
 pub mod rendezvous;
 pub mod run;
 
-pub use backend::{Approach, Backend, Body, Commanding, Hold, Intent, Sight, Trajectory};
+pub use backend::{
+    Approach, Backend, Body, Commanding, Hold, Inference, Intent, Sight, Trajectory,
+};
 pub use rendezvous::{Adopted, Ready};
 pub use run::{Clock, PolicyHost, Refusal, StepClock, Summary, SystemClock, Tick};
 

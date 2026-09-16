@@ -44,6 +44,23 @@ node tools/check-mirrors.mjs
 
 If you changed an edition, run its line from [`editions/README.md`](editions/README.md).
 
+**Those four are not everything CI runs.** The `invariants` job is about fifty more checks — claims
+this repository makes about itself, each mechanical — and none of them is in the list above. Twice
+now a tree has passed that list and failed CI, once on a lint released after the local toolchain and
+once on four checks that had been red for up to thirteen days behind another red one. So there is a
+runner for the rest:
+
+```bash
+node tools/run-ci-job.mjs invariants          # every step, reported one line each
+node tools/run-ci-job.mjs invariants --wsl    # on Windows, shell steps through WSL
+node tools/run-ci-job.mjs invariants --list   # what it would run
+```
+
+It reads the steps out of `.github/workflows/ci.yml`, so there is nothing to keep in sync, and it
+runs every step whatever the one before it did. What it cannot reproduce is the runner — a toolchain,
+a `systemd` or a locale your machine does not have is exactly how the two disagreements above
+happened, so a green run here is the checks passing and not a promise that CI is green.
+
 ## What a good change looks like here
 
 **A bug fix comes with the test that would have caught it.** Where you can, show the test failing
@@ -70,8 +87,13 @@ other from review.
 These are CI checks. They exist because each one was broken once.
 
 * **No third-party Rust dependencies.** The kernel is `no_std` without `alloc`, and a vendor
-  building a driver years from now should not need a package registry to have survived.
-* **`unsafe` is forbidden** everywhere except the ABI, the driver loader and the syscall crates.
+  building a driver years from now should not need a package registry to have survived. This is why
+  §23.3's ONNX Runtime session loads the library at run time (`crates/skynet-ort`) instead of
+  binding to it: the rule stays a check rather than being narrowed until it admits a transitive
+  tree. See `DRY-COVERAGE-PLAN.md` *Decisions* 12 for what that trade cost.
+* **`unsafe` is forbidden** everywhere except the ABI, the two loaders and the syscall crates. Each
+  allow-listed crate states its own argument in its header, and CI checks the argument is still
+  there — a crate on that list whose header stops mentioning `unsafe` fails.
 * **The Safety Kernel links no allocator.**
 * **`SAFETY_CLAIM_RULE` is never shortened or paraphrased.** It is a constant in
   `crates/skynet-kernel`, and every surface that mentions the certified tier renders it in full.

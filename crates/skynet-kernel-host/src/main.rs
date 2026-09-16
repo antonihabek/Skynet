@@ -135,7 +135,8 @@ fn parse_frame_pool(text: &str) -> Result<FramePool, String> {
     })?;
     let (shape, hz) = shape.split_once('@').ok_or_else(|| {
         format!(
-            "--frame-pool wants a capture rate after the shape — `{shape}@<hz>` — because the              pool is now filled from the driver and a stream is read at a rate somebody declared"
+            "--frame-pool wants a capture rate after the shape — `{shape}@<hz>` — because the \
+             pool is now filled from the driver and a stream is read at a rate somebody declared"
         )
     })?;
     let hz: f64 = hz
@@ -189,7 +190,9 @@ fn sensor_declared(body: &mut Rhal, pool: &FramePool) -> Result<(), String> {
     let stream = &pool.stream;
     if !body.has_sensors() {
         return Err(format!(
-            "--frame-pool names `{stream}`, and this driver has no read_sensor entry point, so no              sensor can be read through the RHAL (§47.2). A camera read directly from V4L2 or              GenICam is a backend this build does not have."
+            "--frame-pool names `{stream}`, and this driver has no read_sensor entry point, so no \
+             sensor can be read through the RHAL (§47.2). A camera read directly from V4L2 or \
+             GenICam is a backend this build does not have."
         ));
     }
     let text = body.describe().map_err(|error| {
@@ -214,7 +217,8 @@ fn sensor_declared(body: &mut Rhal, pool: &FramePool) -> Result<(), String> {
             .map(|sensor| sensor.name.as_str())
             .collect();
         return Err(format!(
-            "--frame-pool names `{stream}` and the driver's descriptor declares {}. A pool for a              stream the body does not have would tell a policy it has a camera.",
+            "--frame-pool names `{stream}` and the driver's descriptor declares {}. A pool for a \
+             stream the body does not have would tell a policy it has a camera.",
             if names.is_empty() {
                 "no sensors".to_string()
             } else {
@@ -228,7 +232,8 @@ fn sensor_declared(body: &mut Rhal, pool: &FramePool) -> Result<(), String> {
         let needed = (width * height * 3.0) as usize;
         if needed > pool.geometry.slot_bytes {
             return Err(format!(
-                "`{stream}` is declared {width}x{height} RGB — {needed} bytes a frame — and the                  pool's slots hold {}. Declare slots of at least {needed} bytes.",
+                "`{stream}` is declared {width}x{height} RGB — {needed} bytes a frame — and the \
+                 pool's slots hold {}. Declare slots of at least {needed} bytes.",
                 pool.geometry.slot_bytes
             ));
         }

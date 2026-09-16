@@ -107,6 +107,37 @@ impl Library {
         // on every platform this targets.
         Ok(unsafe { std::mem::transmute::<*mut c_void, skynet_rhal::EntryFn>(address) })
     }
+
+    /// Look up a symbol and hand back its address, untyped.
+    ///
+    /// Safe to *call*, because producing a raw pointer cannot break anything — every hazard is in
+    /// what a caller does with it, which is why this returns an address rather than a function
+    /// pointer. [`Library::entry`] is the RHAL-shaped counterpart and is `unsafe` for exactly the
+    /// assertion this one refuses to make: that a symbol of some name has some signature.
+    ///
+    /// The address is valid while this `Library` is alive and dangles the moment it is dropped.
+    /// Nothing in the type system enforces that, so a caller that stores one stores the `Library`
+    /// beside it — `skynet-ort` keeps both in the same struct and never lets them separate.
+    ///
+    /// # Why this exists
+    ///
+    /// §23.3's inference runner is reached through a library that is not a driver and has no
+    /// `skr_driver` in it, so [`Library::entry`] cannot be the way in. What it needs is one symbol
+    /// (`OrtGetApiBase`) whose result is a struct of function pointers, and this is the narrowest
+    /// surface that provides it. `DRY-COVERAGE-PLAN.md` *Decisions* 12 is why the route is `dlopen`
+    /// rather than a Cargo dependency.
+    pub fn address(&self, symbol: &str) -> Result<*mut c_void, DlError> {
+        let name = CString::new(symbol).map_err(|_| DlError::MissingSymbol {
+            symbol: symbol.to_string(),
+        })?;
+        let address = platform::symbol(self.handle, name.as_ptr());
+        if address.is_null() {
+            return Err(DlError::MissingSymbol {
+                symbol: symbol.to_string(),
+            });
+        }
+        Ok(address)
+    }
 }
 
 impl Drop for Library {

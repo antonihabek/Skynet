@@ -1911,19 +1911,20 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     /// send half the operators to the wrong one (§64).
     ///
     /// A robot with no power subsystem wired up is `unmetered`, grants leases, and returns `None`
-    /// here — so wiring this in changes nothing on a body that declares no pack, which is what
-    /// every test in this suite and every development host is.
-    pub fn power_refusal(&mut self, now_ms: u64) -> Option<String> {
-        let reading = self.read_power(now_ms);
-        self.power_refusal_from(&reading)
-    }
-
-    /// The same refusal, over a reading the caller already took.
+    /// here — so this changes nothing on a body that declares no pack, which is what every test in
+    /// this suite and every development host is.
     ///
-    /// Split out because a pass has two consumers of one measurement — this and §54.2's
-    /// `battery_percent` — and taking the gauge twice would let a skill be refused a lease for a
-    /// battery level its own precondition had just cleared. It is the rule `Pass` states about the
-    /// health figure, applied to the two places that would otherwise disagree.
+    /// **Takes the reading rather than the gauge, and that is the whole interface.** A pass has two
+    /// consumers of one measurement — this and §54.2's `battery_percent` — and reading the gauge
+    /// twice would let a skill be refused a lease for a battery level its own precondition had just
+    /// cleared. It is the rule `Pass` states about the health figure, applied to the two places that
+    /// would otherwise disagree.
+    ///
+    /// A `power_refusal(now_ms)` that read the gauge itself sat here until 2026-09-16, reached by
+    /// nothing. It was deleted rather than wired, because the convenience it offered was exactly the
+    /// second read the paragraph above exists to prevent — see `DRY-COVERAGE-PLAN.md` *Decisions* 11.
+    /// A caller that genuinely holds no reading calls [`Runtime::read_power`] first, on its own line,
+    /// where the second measurement is visible to whoever reads the pass.
     pub fn power_refusal_from(&self, reading: &crate::power::Reading) -> Option<String> {
         let layout = self.store.layout().clone();
         let body = crate::embodiment::load(&layout);

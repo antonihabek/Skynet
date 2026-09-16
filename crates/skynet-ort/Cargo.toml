@@ -1,0 +1,17 @@
+[package]
+name = "skynet-ort"
+version = "0.1.0"
+edition = "2021"
+description = "§23.3's production inference runner: an ONNX Runtime session, loaded at run time"
+license = "Apache-2.0"
+
+# Three workspace crates and no third-party dependency — which is the whole point of this crate
+# existing in this shape rather than as a binding to a published ONNX Runtime wrapper. See the crate
+# documentation and DRY-COVERAGE-PLAN.md *Decisions* 12.
+#
+# `skynet-dl` is the loader, reused rather than re-written: a second `dlopen` in this workspace would
+# be a second copy of the only platform `unsafe` that is not about ONNX Runtime itself.
+[dependencies]
+skynet-dl = { path = "../skynet-dl" }
+skynet-infer = { path = "../skynet-infer" }
+skynet-json = { path = "../skynet-json" }

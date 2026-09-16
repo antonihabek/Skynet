@@ -384,6 +384,89 @@ impl Approach {
     }
 }
 
+/// §23.3's in-process inference backend, as a [`Backend`].
+///
+/// The decision — what reaches the model, what is refused, what an output becomes — lives in
+/// `skynet-infer`, one crate below this one, and this is the adapter that turns [`Body`] and
+/// [`Sight`] into its arguments. The layering is not decoration: a session that links a real
+/// inference library has to be selectable by `skynetp`, which is a binary **in this crate**, so a
+/// trait declared here could never be implemented by a crate that binary depends on.
+///
+/// # It is the first backend here that is a function of a frame
+///
+/// [`Trajectory`] ignores the body and [`Approach`] ignores the camera. This one reads both, and it
+/// is therefore the first thing in the workspace for which §47's whole path — a driver's
+/// `read_sensor`, §47.4's split, §47.6's pool, the loan, the copy — changes what a joint is told to
+/// do. Until it existed the pool was filled and read and nothing downstream depended on a pixel.
+///
+/// # Every hold is a hold, and the reason is counted rather than published
+///
+/// A refusal inside the policy becomes [`Intent::Hold`]: a live producer commanding nothing, which is
+/// §25.3's answer and keeps the watchdog satisfied while the robot does not move. Which of the seven
+/// reasons it was is in `skynet_infer::Counts`, because a `Tick` is what the ring saw and a policy's
+/// reason for holding is not something the ring can carry.
+#[derive(Debug)]
+pub struct Inference<S: skynet_infer::Session> {
+    policy: skynet_infer::Policy<S>,
+}
+
+impl<S: skynet_infer::Session> Inference<S> {
+    /// Run `policy` as a backend.
+    pub fn over(policy: skynet_infer::Policy<S>) -> Inference<S> {
+        Inference { policy }
+    }
+
+    /// What the policy did, cycle by cycle and reason by reason.
+    pub fn counts(&self) -> skynet_infer::Counts {
+        self.policy.counts()
+    }
+
+    /// The first thing the session refused, if it ever did.
+    pub fn first_refusal(&self) -> Option<&str> {
+        self.policy.first_refusal()
+    }
+
+    /// What the runner and the artefact are.
+    pub fn describe(&self) -> &str {
+        self.policy.describe()
+    }
+}
+
+impl<S: skynet_infer::Session> Backend for Inference<S> {
+    fn name(&self) -> &'static str {
+        "inference"
+    }
+
+    fn decide(&mut self, _tick: u64, _now_ns: u64, body: Body<'_>, sight: Sight<'_>) -> Intent {
+        // `joints` is what the driver declares it measures, and everything above it in the arrays is
+        // `NaN` by §24. Slicing to it is what lets the policy answer *the body is narrower than this
+        // model* rather than *joint 3 is unmeasured*, which are different things to go and look at.
+        let reading = match body {
+            Body::Fresh { observation, .. } => {
+                let joints = observation.joints.min(observation.position.len());
+                Some(skynet_infer::Reading {
+                    positions: &observation.position[..joints],
+                    velocities: &observation.velocity[..joints],
+                    efforts: &observation.effort[..joints],
+                })
+            }
+            Body::Empty | Body::Torn | Body::Detached => None,
+        };
+        let pixels = match sight {
+            Sight::Frame { pixels, .. } => Some(pixels),
+            // A frame the writer moved is not a frame, and neither is no camera. The runtime already
+            // counts which of the three it was, and re-deriving it here would be a second record of
+            // a fact that can only disagree with the first.
+            Sight::NoFrameYet | Sight::Missed | Sight::Blind => None,
+        };
+
+        match self.policy.decide(reading, pixels) {
+            skynet_infer::Decision::Command(values) => Intent::apply(values),
+            skynet_infer::Decision::Hold(_) => Intent::Hold,
+        }
+    }
+}
+
 impl Backend for Approach {
     fn name(&self) -> &'static str {
         "approach"
