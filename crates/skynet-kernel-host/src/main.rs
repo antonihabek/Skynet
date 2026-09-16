@@ -126,7 +126,8 @@ fn parse_frame_pool(text: &str) -> Result<(String, skynet_frames::Geometry), Str
     })?;
     if stream.is_empty() || stream.len() > skynet_frames::MAX_NAME {
         return Err(format!(
-            "`{stream}` is not a stream name: it must be between 1 and {} bytes, because the name              is written into the pool's header where a receiver reads it back",
+            "`{stream}` is not a stream name: it must be between 1 and {} bytes, because the name \
+             is written into the pool's header where a receiver reads it back",
             skynet_frames::MAX_NAME
         ));
     }
@@ -143,7 +144,8 @@ fn parse_frame_pool(text: &str) -> Result<(String, skynet_frames::Geometry), Str
         .map_err(|_| format!("`{}` is not a byte count", bytes.trim()))?;
     if slots == 0 || slot_bytes == 0 {
         return Err(
-            "a pool wants at least one slot of at least one byte; a pool of neither holds no              frames and offering it would tell a policy it has a camera"
+            "a pool wants at least one slot of at least one byte; a pool of neither holds no \
+             frames and offering it would tell a policy it has a camera"
                 .to_string(),
         );
     }
@@ -292,7 +294,8 @@ fn parse(args: &[String]) -> Result<Options, String> {
     // is serving frames and is not — §79.7's shape, at a smaller scale.
     if options.frame_pool.is_some() && options.policy_socket.is_none() {
         return Err(
-            "--frame-pool creates a region for a policy to map, and without --policy-socket there              is nobody to hand it to. Add --policy-socket <path>, or drop --frame-pool"
+            "--frame-pool creates a region for a policy to map, and without --policy-socket there \
+             is nobody to hand it to. Add --policy-socket <path>, or drop --frame-pool"
                 .to_string(),
         );
     }
@@ -496,7 +499,8 @@ fn run(args: &[String]) -> i32 {
                         Ok(pool) => {
                             if !options.quiet {
                                 println!(
-                                    "frames     pool \"{stream}\" offered with the rings, {} × {} B                                      — empty, because this build has no capture backend (§47.6)",
+                                    "frames     pool \"{stream}\" offered with the rings, {} × {} B \
+                                     — empty, because this build has no capture backend (§47.6)",
                                     geometry.slots, geometry.slot_bytes
                                 );
                                 println!();

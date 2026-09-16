@@ -425,7 +425,8 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                     // browsing a bench would read a label this machine does not answer to
                     // anywhere else.
                     skynetd_io::log_warn!(
-                        "not advertising on mDNS — this machine has no usable name and                          §82 will not invent one. Pass --advertise <label>."
+                        "not advertising on mDNS — this machine has no usable name and \
+                         §82 will not invent one. Pass --advertise <label>."
                     );
                     return None;
                 }

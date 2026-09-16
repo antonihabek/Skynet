@@ -1089,7 +1089,9 @@ fn grants_gate(
             return skipped(
                 id,
                 format!(
-                    "this robot resolves limits at the {} tier, where enforcement is {} — the mode                      gate trips and the command is forwarded anyway (§7.4). The test is about a                      gate that refuses, and a tier that cannot refuse has not passed it.",
+                    "this robot resolves limits at the {} tier, where enforcement is {} — the mode \
+                     gate trips and the command is forwarded anyway (§7.4). The test is about a \
+                     gate that refuses, and a tier that cannot refuse has not passed it.",
                     resolved.tier.as_str(),
                     resolved.enforcement.as_str(),
                 ),
@@ -1733,7 +1735,8 @@ mod tests {
         assert!(detail.contains("guest"), "{detail}");
         assert!(
             detail.contains("forwarded anyway"),
-            "the reason has to say that the command still goes out, not just that the tier is low:              {detail}",
+            "the reason has to say that the command still goes out, not just that the tier is low: \
+             {detail}",
         );
     }
 

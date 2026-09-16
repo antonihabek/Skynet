@@ -240,7 +240,8 @@ fn an_advisory_hold_forwards_the_command_it_would_have_withheld() {
     );
     assert!(
         decision.mask[..2].iter().any(|entry| *entry != 0),
-        "an advisory hold must forward the command: withholding it enforces at a tier that has          never claimed to enforce",
+        "an advisory hold must forward the command: withholding it enforces at a tier that has \
+         never claimed to enforce",
     );
     assert!(!decision.cut_power);
 }
@@ -990,7 +991,8 @@ fn a_second_writer_attaches_where_it_can_and_is_refused_where_it_cannot() {
                 );
                 assert!(
                     said.contains("Linux"),
-                    "and say that the missing shared counter is why, rather than implying the                      other process is at fault: {said}",
+                    "and say that the missing shared counter is why, rather than implying the \
+                     other process is at fault: {said}",
                 );
             }
             Err(other) => panic!("refused for the wrong reason: {other}"),

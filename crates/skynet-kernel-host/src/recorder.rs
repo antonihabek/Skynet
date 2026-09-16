@@ -97,7 +97,11 @@ impl std::fmt::Display for RecorderError {
                 wanted,
             } => write!(
                 f,
-                "{holder} created this black box with a ring shaped for {} joints and {} channels,                  and this loop records {} and {}. A record's size is a function of those counts, so                  a cycle does not fit — and replacing the ring would delete the window the other                  writer is still filling. Point this loop at another directory, or give the other                  writer this body's shape.",
+                "{holder} created this black box with a ring shaped for {} joints and {} channels, \
+                 and this loop records {} and {}. A record's size is a function of those counts, so \
+                 a cycle does not fit — and replacing the ring would delete the window the other \
+                 writer is still filling. Point this loop at another directory, or give the other \
+                 writer this body's shape.",
                 found.joints, found.channels, wanted.joints, wanted.channels,
             ),
             RecorderError::Io(error) => write!(f, "{error}"),
@@ -333,7 +337,8 @@ impl Recorder {
     pub fn seal(&self, reason: Reason, mono_ns: u64) -> Result<(Sealed, PathBuf), RecorderError> {
         if !self.writership.may_seal() {
             return Err(RecorderError::Geometry(
-                "this loop attached to a black box another process created, and the creator seals                  it (§26.2)"
+                "this loop attached to a black box another process created, and the creator seals \
+                 it (§26.2)"
                     .to_string(),
             ));
         }

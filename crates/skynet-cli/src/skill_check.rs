@@ -808,7 +808,8 @@ fn transport(report: &mut Report, manifest: &Json, body: Option<&Json>) {
         report.push(CheckResult::fail(
             ID,
             WHAT,
-            "`source_embodiment` is present and does not decode. That is not the same fact as              absent: an action space nobody could parse is a package nobody has checked.",
+            "`source_embodiment` is present and does not decode. That is not the same fact as \
+             absent: an action space nobody could parse is a package nobody has checked.",
         ));
         return;
     };
@@ -847,7 +848,8 @@ fn transport(report: &mut Report, manifest: &Json, body: Option<&Json>) {
             Outcome::Pass
         },
         format!(
-            "verdict `{verdict}` — §37.1 fails the install on `refused`, and anything below              `direct` is fidelity this skill loses on this body"
+            "verdict `{verdict}` — §37.1 fails the install on `refused`, and anything below \
+             `direct` is fidelity this skill loses on this body"
         ),
     ));
 }

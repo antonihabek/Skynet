@@ -215,7 +215,8 @@ fn run_check(rest: &[String]) -> i32 {
 fn write_descriptor(report: &check::Report, target: &Path) -> Result<(), String> {
     let Some(descriptor) = report.descriptor.as_ref() else {
         return Err(format!(
-            "this driver returned no descriptor that decodes, so there is nothing to write to {}.              The report below says why; `embodiment.descriptor.valid` is the line that matters.",
+            "this driver returned no descriptor that decodes, so there is nothing to write to {}. \
+             The report below says why; `embodiment.descriptor.valid` is the line that matters.",
             target.display()
         ));
     };

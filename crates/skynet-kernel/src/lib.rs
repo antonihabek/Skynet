@@ -1728,12 +1728,14 @@ pub fn can_start(
             WarningChannel::Ready => {}
             WarningChannel::Undeclared => {
                 return Err(
-                    "The certified tier requires an audible warning before autonomous motion and                      no warning channel is declared on this robot.",
+                    "The certified tier requires an audible warning before autonomous motion and \
+                     no warning channel is declared on this robot.",
                 )
             }
             WarningChannel::Failed => {
                 return Err(
-                    "The certified tier requires an audible warning before autonomous motion and                      this robot's declared warning channel did not sound.",
+                    "The certified tier requires an audible warning before autonomous motion and \
+                     this robot's declared warning channel did not sound.",
                 )
             }
         }
