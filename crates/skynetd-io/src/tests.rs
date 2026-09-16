@@ -7229,6 +7229,43 @@ mod skills {
         );
     }
 
+    /// …and a recording that **comes back** does not undo that.
+    ///
+    /// The case the test above does not reach, because its hole is on the last pass. Until
+    /// 2026-09-16 an uncounted pass set the count to `None` and the next counted one revived it from
+    /// zero, so an invocation with a hole in the middle reported the passes after the hole as its
+    /// whole — here, a clean zero over an interval nobody watched.
+    #[test]
+    fn a_recording_that_returns_does_not_turn_a_floor_back_into_a_total() {
+        let episode = episode_with(Some(0), &[None, Some(0)]);
+        assert!(
+            episode.get("interventions").is_none(),
+            "a hole in the middle leaves the episode unmeasured: {}",
+            episode.to_canonical().unwrap_or_default()
+        );
+        assert_eq!(
+            episode
+                .get("metadata")
+                .and_then(|metadata| metadata.get("interventions_measured")),
+            Some(&Json::Bool(false))
+        );
+    }
+
+    /// A count wider than the episode's field saturates, and never wraps to a clean run.
+    ///
+    /// The ring counts in `u64` and the episode carries `u32`. The cast that joined them was `as`,
+    /// which keeps the low bits — so 2³² interventions arrived as **zero**, the one value a
+    /// marketplace reads as a perfect run. Unreachable from a working ring, and exactly what a
+    /// corrupt one would produce.
+    #[test]
+    fn a_count_too_wide_for_the_episode_saturates_rather_than_wrapping_to_zero() {
+        let episode = episode_with(Some(0), &[Some(1 << 32)]);
+        assert_eq!(
+            episode.get("interventions").and_then(Json::as_f64),
+            Some(f64::from(u32::MAX))
+        );
+    }
+
     /// The whole ladder, one pass at a time, on a skill that does everything right.
     #[test]
     fn an_invocation_walks_the_diagram_and_ends_with_one_episode() {

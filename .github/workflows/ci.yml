@@ -1308,8 +1308,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           grep -q 'pub interventions_since: Option<u64>' crates/skynetd-io/src/skill.rs
-          grep -q 'interventions: Option<u32>' crates/skynetd-io/src/skill.rs
+          grep -q 'interventions: InterventionCount,' crates/skynetd-io/src/skill.rs
           grep -q '"interventions_measured", Json::Bool(false)' crates/skynetd-io/src/skill.rs
+          # And an unmeasured pass stays unmeasured. The `Option` this replaced forgot a hole as
+          # soon as the next pass was counted, which is a partial sum wearing a total's field name.
+          grep -q '(InterventionCount::Unmeasured, _) | (_, None) => InterventionCount::Unmeasured' \
+            crates/skynetd-io/src/skill.rs
           if grep -nE 'set\("interventions",[[:space:]]*Json::Num\(0|interventions(_since)?\.unwrap_or' \
               crates/skynetd-io/src/skill.rs; then
             echo "::error::an episode can report an intervention count nobody measured."
