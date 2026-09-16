@@ -184,7 +184,7 @@ pub fn send_fds(socket: core::ffi::c_int, fds: &[core::ffi::c_int]) -> Result<()
     if fds.is_empty() || fds.len() > sys::MAX_FDS {
         return Err(ShmError::NoDescriptor);
     }
-    let mut payload = [b'R'];
+    let mut payload = *b"R";
     let mut iov = sys::IoVec {
         base: payload.as_mut_ptr() as *mut core::ffi::c_void,
         len: payload.len(),

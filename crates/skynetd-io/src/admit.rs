@@ -127,6 +127,26 @@ impl Report {
         }
     }
 
+    /// Whether a driver carrying this report may be activated (§19).
+    ///
+    /// Two refusals, and only one of them is about the signature. The state is asked through
+    /// [`SignatureState::admits`], which is where §19's rule is written and where a stranger's
+    /// perfectly valid signature is refused — the case the rule exists for, as against the unsigned
+    /// case everybody assumes it exists for. **A report that never ran also refuses**, which is this
+    /// function's own contribution and not the contract's: admission that could not be assessed is
+    /// not admission that passed.
+    ///
+    /// The daemon does not consult this. `runtime.rs`'s activation arm re-derives the same verdict
+    /// from the trust store because it never builds a `Report`, and the two agreed by care until
+    /// the predicate moved onto `SignatureState`. That much is now one fact; the two paths deciding
+    /// activation separately is the larger duplication, and it is still here.
+    pub fn driver_may_activate(&self) -> bool {
+        match self {
+            Report::NotRun { .. } => false,
+            Report::Ran { signature, .. } => signature.state.admits(),
+        }
+    }
+
     /// Every error finding.
     ///
     /// Was `actionable_errors`, and the name carried an exception: it filtered out the one
@@ -141,18 +161,6 @@ impl Report {
                 .iter()
                 .filter(|f| f.severity == Severity::Error)
                 .collect(),
-        }
-    }
-
-    /// Whether a driver carrying this report may be activated (§19).
-    ///
-    /// Only a `verified` signature admits a driver. Not `untrusted` — a stranger's valid signature
-    /// on native code is the case this rule exists for — and not `absent`, which is the case
-    /// everybody assumes it exists for.
-    pub fn driver_may_activate(&self) -> bool {
-        match self {
-            Report::NotRun { .. } => false,
-            Report::Ran { signature, .. } => signature.state == SignatureState::Verified,
         }
     }
 }

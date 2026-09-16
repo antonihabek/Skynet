@@ -12,7 +12,7 @@
         },
         "observation": {}
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"reason\":\"no_pack\",\"remaining_wh\":null,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"declared_energy\",\"payload\",\"distance_to_safe_state\"],\"wh\":null},\"shed\":[],\"state\":\"unmetered\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"no_pack\",\"remaining_wh\":null,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"declared_energy\",\"payload\",\"distance_to_safe_state\"],\"wh\":null},\"shed\":[],\"state\":\"unmetered\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     },
     {
       "id": "gauge-silent",
@@ -30,7 +30,7 @@
         },
         "observation": {}
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[{\"code\":\"gauge_silent\",\"detail\":\"this body declares a pack and nothing on this robot read one. The state is reported as unmetered rather than critical — §36.4 overrides the gauge on a positive reading from the bus, and a missing reading is not one — and no new task lease is granted until something answers for the pack (§36.1).\"}],\"grants_new_leases\":false,\"reason\":\"no_reading\",\"remaining_wh\":null,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"unmetered\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[{\"code\":\"gauge_silent\",\"detail\":\"this body declares a pack and nothing on this robot read one. The state is reported as unmetered rather than critical — §36.4 overrides the gauge on a positive reading from the bus, and a missing reading is not one — and no new task lease is granted until something answers for the pack (§36.1).\"}],\"grants_new_leases\":false,\"notifies_operator\":false,\"reason\":\"no_reading\",\"remaining_wh\":null,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"unmetered\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     },
     {
       "id": "capacity-undeclared",
@@ -49,7 +49,7 @@
           "state_of_charge": 0.5
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[{\"code\":\"capacity_undeclared\",\"detail\":\"the gauge reports a fraction and this body declares no `pack_capacity_wh` to turn it into watt-hours, so there is nothing to compare against the reserve. Declare the capacity, or report `energy_remaining_wh` from the gauge (§36.2).\"}],\"grants_new_leases\":false,\"reason\":\"no_capacity\",\"remaining_wh\":null,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"unmetered\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[{\"code\":\"capacity_undeclared\",\"detail\":\"the gauge reports a fraction and this body declares no `pack_capacity_wh` to turn it into watt-hours, so there is nothing to compare against the reserve. Declare the capacity, or report `energy_remaining_wh` from the gauge (§36.2).\"}],\"grants_new_leases\":false,\"notifies_operator\":false,\"reason\":\"no_capacity\",\"remaining_wh\":null,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"unmetered\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     },
     {
       "id": "reserve-undeclared",
@@ -68,7 +68,7 @@
           "state_of_charge": 0.5
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[{\"code\":\"reserve_undeclared\",\"detail\":\"this body declares a pack and no `safe_stop_energy_wh`, so §36.2's reserve cannot be computed and the four states have no boundary. It is the figure `power.safe_state.reachable` measures, and the one that decides when this robot stops.\"}],\"grants_new_leases\":false,\"reason\":\"no_reserve\",\"remaining_wh\":250,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"declared_energy\",\"payload\",\"distance_to_safe_state\"],\"wh\":null},\"shed\":[],\"state\":\"unmetered\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[{\"code\":\"reserve_undeclared\",\"detail\":\"this body declares a pack and no `safe_stop_energy_wh`, so §36.2's reserve cannot be computed and the four states have no boundary. It is the figure `power.safe_state.reachable` measures, and the one that decides when this robot stops.\"}],\"grants_new_leases\":false,\"notifies_operator\":false,\"reason\":\"no_reserve\",\"remaining_wh\":250,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"declared_energy\",\"payload\",\"distance_to_safe_state\"],\"wh\":null},\"shed\":[],\"state\":\"unmetered\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     },
     {
       "id": "charge-out-of-range",
@@ -88,7 +88,7 @@
           "state_of_charge": 1.4
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[{\"code\":\"charge_out_of_range\",\"detail\":\"the gauge reports a state of charge of 1.4, and a state of charge is a fraction between 0 and 1. The reading is discarded rather than clamped: a clamped 1.4 is a full battery, and this one is a gauge nobody should be trusting yet (§36.1).\"}],\"grants_new_leases\":false,\"reason\":\"reading_unusable\",\"remaining_wh\":null,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"unmetered\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[{\"code\":\"charge_out_of_range\",\"detail\":\"the gauge reports a state of charge of 1.4, and a state of charge is a fraction between 0 and 1. The reading is discarded rather than clamped: a clamped 1.4 is a full battery, and this one is a gauge nobody should be trusting yet (§36.1).\"}],\"grants_new_leases\":false,\"notifies_operator\":false,\"reason\":\"reading_unusable\",\"remaining_wh\":null,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"unmetered\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     }
   ]
 }

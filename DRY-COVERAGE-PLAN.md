@@ -70,7 +70,7 @@ So there is a real question: is that test `bench` because it needs *hardware*, o
 **This plan does not answer it.** CONTRIBUTING.md is explicit that a specification change is an
 issue a maintainer carries to both repositories, never a pull request against the pinned document —
 and reclassifying a bench test to `sim` is precisely the move Phase 0.1b exists to prevent anyone
-making quietly. Raised, not resolved. See *Open for the owner* below.
+making quietly. Raised, not resolved — and **resolved as 4 under *Decisions*** below, which keeps it `bench`.
 
 ### F3 — Phase 0.4 (limit provenance) is already built. Twice.
 
@@ -103,6 +103,14 @@ A corpus case is the right fix and it cannot be produced here. Two independent b
   Regenerating the corpus under the wrong one risks a diff nobody asked for.
 
 Left undone deliberately rather than half-done. It is the first item in *Next* below.
+
+> **Done, 2026-09-16, and both blockers above were wrong.** Zig 0.16.0, Node 24 and .NET 8 all
+> install in minutes on a machine that is not this one, so the three cases exist and all eight
+> editions were run against them. The claim that `edition-report.mjs --check` re-runs *every*
+> edition is also wrong — it re-runs the four complete ones, and Zig is held by its own ratchet.
+> What genuinely blocks a corpus case is F8: §73 states the case count exactly. Kept rather than
+> rewritten, because a blocker that turned out to be a property of one laptop is worth being able
+> to recognise the next time one is written down.
 
 ### F4 — Most of Phase 0.1's proposed machinery already exists as an invariant.
 
@@ -141,6 +149,82 @@ at 71 added lines and **136,498 total.**
 
 **Two lines of headroom.** The next person to add Rust will trip this, and the honest resolution then
 is the §73 edit rather than more compression.
+
+### F7 — `main` was red on three counts when Phase 0 was written, and the gate did not say so.
+
+The 2026-09-16 entry below records the full pre-PR gate passing. It did pass. CI on the same commit
+(run 60, `682d9b0`) failed three jobs, and none of the three is reachable by the gate
+`CONTRIBUTING.md` asks for:
+
+| Job | Failure | Why the gate missed it |
+|---|---|---|
+| `rust` | `clippy::byte_char_slices` on `skynet-ring-shm/src/pass.rs:187` | The lint landed in clippy 1.98. The machine that ran the gate had stable at 1.94 |
+| `invariants` | `TS4104` on `tools/unicode-case.ts:643` | The oracle type-check is a CI step; the gate has no TypeScript in it |
+| `corpus` | the Go edition's fusion self-check | The gate has no edition in it either — `editions/README.md` is a separate instruction, conditioned on *"if you changed an edition"*, and nobody had |
+
+All three are fixed. The general lesson is the first row: **a pre-PR gate is only as current as the
+toolchain under it**, and a clippy release can turn a green tree red with no commit in between.
+
+The Go one is worth its own line, because the check was right and the fact was wrong. Go does not
+contract `x*y + z` on amd64 at *any* `GOAMD64` level — v1, v2, v3 and v4 all emit `MULSD` then
+`ADDSD` — so `fusingTargets` had been claiming a fusion the compiler has no rule for, and the scan
+refused the target rather than reporting a listing it could not see into. The row survives because
+an explicit `math.FMA` still reaches an amd64 binary as `VFMADD231SD`, which is a single rounding by
+definition and exactly what §31.2 forbids; `fusionprobe.Intrinsic` is now its positive control, and
+on that target the scan is a check for the call rather than redundant cover for the other five.
+
+### F8 — F3a named two blockers, and neither was the binding one.
+
+Zig and Node 24 were real on the machine that wrote the plan and are not properties of the work.
+Both installed here in under a minute, along with .NET 8, so **all eight editions and the corpus
+generator ran on one machine for the first time.**
+
+What actually blocks a corpus case is one line of the pinned specification. §73 states the corpus
+size *exactly* — `a corpus of 80 files and 1,199 cases` — and `scale-report.mjs --check` holds the
+document to a measurement of the tree, refusing with *"correct the document, not this check."* So
+**every corpus case anyone adds, ever, requires an edit to `docs/skynet-os-architecture.md`.** F6
+predicted this arriving through Rust lines; it arrives through the corpus as well, and more often,
+because cases are added more freely than crates.
+
+Also worth recording against F3a's own text: `edition-report.mjs --check` re-runs the **four
+complete** editions, not every edition. Zig is held by its own `--min-passed` ratchet in CI and is
+not on that file at all — which is the refusal inside `edition-report.mjs` working as designed.
+
+### F9 — 0.2's own check had two defects, and the second one lies.
+
+Both found by opening a file a finding named and not seeing the function there.
+
+* **Wrong line, 18 times out of 38.** `strip()` removed comments and string literals *including
+  their newlines*, and every line number is counted off the stripped text, so each block comment
+  above a declaration shifted it upward by its own height. `upload_target` was reported at
+  `upload.rs:545` and is declared at 742.
+* **Blind to 500 lines, and one caller.** `strip()` had no case for a character literal, so `'"'` at
+  `upload.rs:230` opened a string the scan closed at the next quote far below, swallowing the call
+  site at `upload.rs:389` whole. `upload_target` **has** a production caller and was allow-listed as
+  though it did not, with a reason written to fit.
+
+The second is the one that matters. A false positive on this check is an argument somebody has to
+write down; **a false negative is an answer nobody goes and checks** — and the remedy the check
+offers for a false positive is to add a name to a list, which is how a real caller got denied in
+writing. Five other files spell `'"'`; none happened to hide another sole caller, so the count moved
+by exactly one.
+
+### F10 — §36.1's operator notification is `Transition::warning`, four defects later.
+
+Found by draining the baseline, and the clearest vindication of 0.2 so far.
+
+A power state derives three facts. `power_to_json` serialises `requires_safe_state` and
+`stops_immediately`, and the CLI renders both. **`notifies_operator` is in neither the document the
+daemon serves nor the daemon itself** — nothing under `crates/skynetd-io/src` or
+`crates/skynetd/src` matches on `PowerState::Low`, `Reserve` or `Critical` at all. The row that says
+an operator is told is computed, tested, and told to nobody.
+
+The good half, because it changes what the finding means: §36.1's *withholding of new task leases*
+**is** enforced, by `power_refusal_from` on the reconcile pass (`runtime.rs:1761`). A robot below its
+reserve stops taking work. What it does not do is say so to a person.
+
+Closing it is a wire change — a field on the power document, the TypeScript oracle, the corpus's 28
+power cases and four editions — so it was raised rather than done. **Decided as 2 under *Decisions*:** wired.
 
 ---
 
@@ -183,7 +267,7 @@ A dry build multiplies this failure mode, because a fake is easier to satisfy th
 | Work | Dry substrate | Note |
 |---|---|---|
 | Capture backend | Synthetic — PNG sequence or MuJoCo render — behind the trait V4L2 and GenICam will share | Deterministic, so frames are replayable and corpus-able. V4L2 cannot be dry-verified at all |
-| Inference backend (§23.3) | ONNX Runtime, CPU | Runs in CI, deterministic. **Would be this workspace's first third-party dependency — see *Open for the owner*** |
+| Inference backend (§23.3) | ONNX Runtime, CPU | Runs in CI, deterministic. This workspace's first third-party dependency, **allowed by the owner on 2026-09-16** under the narrow terms in *Decisions* 5 |
 
 **Gate:** `skynetk` offers the frame pool, `skynetp` maps it, an ONNX policy closes the loop against
 the MuJoCo driver for N cycles with zero overruns, then the sealed window is read back and replayed
@@ -215,7 +299,7 @@ Highest coverage-per-effort item, and the most dry-verifiable, because it is con
 corpus plus eight editions plus the TypeScript oracle is exactly that machinery.
 
 **Requires a specification change** (a descriptor field and new transport methods), so it starts as
-an issue, not a branch. See *Open for the owner*.
+an issue, not a branch — and **Decisions* 6 defers it behind Phase 1's gate rather than opening one now.
 
 Order matters, and the repo has already paid for the lesson: **write the corpus cases before the
 editions.** Doing it that way on §47.6 found the specified rule and the reference disagreeing about
@@ -280,46 +364,112 @@ could ship.
 
 ---
 
-## Open for the owner
+## Decisions, and who made them
 
-Four decisions this plan deliberately does not make.
+The owner answered item 5 and delegated the rest on 2026-09-16. What follows is what each was
+decided as and why, kept in place of the questions so the next reader sees the ruling rather than
+re-opening it. Where a decision produced work, it is in *Next*.
 
-1. **Is `offline.control.independent` witnessable on a virtual robot?** (F1, F2.) It is the single
-   test between dry evidence and a guest award, it needs a machine rather than a body, and
-   `virtual-robot.sh` is a machine. A specification change either way, so: an issue carried to both
-   repositories, never a patch here.
-2. **ONNX Runtime as the inference backend breaks "no third-party Rust dependencies."** That rule is
-   CI-enforced and its stated reason is that a vendor building a driver years from now should not
-   need a package registry to have survived. An inference backend is not the kernel and not a
-   driver, so the rule may not have been written with it in mind — but it is written, and Phase 1
-   cannot start until this is settled.
-3. **Phase 3 needs a descriptor field and new transport methods**, both in the pinned specification.
-4. **How a dry-only award is rendered.** `none` is correct and is also what a robot with a broken
-   driver gets. Whether an operator should be able to tell "no evidence yet" from "evidence, and it
-   failed" is a surface question with the same shape as §80's `inert` decision — where folding a
-   third state into an existing one was the tempting simplification and the wrong answer, because
-   the two send a person to do different things.
-5. **Which copy of §19's driver-activation rule survives** (F5) — `driver_may_activate`, or the
-   inline check in `runtime.rs:519`.
-6. **Whether `skynet blackbox` should report replay completeness** (F5) — `verdict_inputs_all_recorded`
-   exists and is called by nothing.
-7. **§73's line count** (F6). Two lines of headroom. The next addition needs the figure moved, which
-   is a specification edit.
+1. **The §73 corpus figure edit stands.** §73's own paragraph says every figure in it is *measured,
+   and checked*, and `scale-report --check` refuses with *"correct the document, not this check."* A
+   count of what is in the tree is a derived fact, not a design statement, so bringing it up to date
+   is maintenance. It was done in both copies and re-pinned with `--pin`, which refuses unless the
+   two agree, so the mechanism that the rule exists to protect did its job. See 10 for the general
+   case.
 
----
+2. **`notifies_operator` gets a surface.** Its two siblings are serialised and rendered and this one
+   is not, and the argument that `requires_safe_state` already covers it does not survive §36.1
+   having written three rows rather than two. A robot that has stopped taking work and a robot that
+   has stopped taking work *and owes somebody a phone call* are different situations. Wired, oracle
+   first, then the corpus, then the editions.
+
+3. **Both functions whose comments name absent callers are deleted.** `check_code` is a third
+   spelling of a check the CLI and the daemon each already make directly; `tier_profile_to_json`
+   renders a model for a surface nobody built. Deleting is the answer that leaves no claim behind:
+   building a surface to justify a function is the tail wagging the dog, and a comment asserting a
+   caller is the same defect as a figure asserting a measurement.
+
+4. **`offline.control.independent` stays a `bench` test.** F2 asked whether it is `bench` because it
+   needs *hardware* or because it needs *a machine rather than a model*, and the answer is the
+   second — but that is an argument for letting a virtual robot **produce bench evidence** for it,
+   not for reclassifying it as `sim`. Reclassifying would let a run against a pure fake claim it,
+   which is the opposite of what the distinction is for. No specification change; the work is in
+   *Next* instead, and it is the one item that would move the dry ceiling off `none`.
+
+5. **ONNX Runtime is allowed, narrowly. — the owner's call.** The no-third-party-dependency rule
+   protects a stated thing: a vendor building a driver years from now should not need a package
+   registry to have survived. An inference backend is neither the kernel nor a driver, so the
+   carve-out is written to that shape rather than as a general relaxation: the dependency lives in
+   one crate, behind a feature that is off by default, the safety kernel stays `no_std` with no
+   allocator and no dependency, and `ci.yml`'s check is narrowed to permit exactly that package and
+   nothing else rather than switched off.
+
+6. **Phase 3's specification fields wait for Phase 1.** Motion primitives are real design, not a
+   count, and designing new transport surface ahead of a loop that has never closed is how a
+   specification acquires fields nobody needs. Revisit when Phase 1's gate is met.
+
+7. **"No evidence" and "evidence, and it failed" are rendered apart.** §80's `inert` precedent is
+   the one on point: folding a third state into an existing one was the tempting simplification and
+   the wrong answer, because the two send a person to do different things. The verdict already
+   carries the distinction — `missing` non-empty with `failures` empty is one, `failures` non-empty
+   is the other — so this is a rendering fix and not a wire change.
+
+8. **§19's driver-activation rule gets one named spelling, and the accessor goes.** The enforcement
+   point is the inline check in `runtime.rs`; `driver_may_activate` reads the same fact off a report
+   that `main.rs` builds to *print* rather than to gate. Neither copy survives as it stands: the
+   predicate moves onto `SignatureState` in the contracts crate, where it is one named fact, and the
+   accessor that duplicated it is deleted.
+
+9. **`skynet blackbox` reports replay completeness.** Same class as 2, and the plainest instance of
+   it in the tree: the black box can already tell whether a sealed window recorded every field a
+   replay evaluates, and presents a replay of a partial window exactly like a replay of a whole one.
+   A replay is evidence, and evidence that will not say how complete it is has the shape §15 calls
+   the most damaging thing this platform could ship.
+
+10. **Figures in §73 are maintained, not negotiated.** The general rule behind 1: they are
+    measurements of the tree, they go stale whenever the tree changes, and updating them in both
+    copies and re-pinning is the maintenance that keeps the check meaningful. **Compressing code to
+    avoid moving a figure is the thing not to do** — F6 records 0.1 doing exactly that, rewriting
+    tests to save lines, and the tests were not improved by it. A design change to §73 is still an
+    issue; the numbers in it are not.
 
 ## Next
 
-In order, and the first is the one that most needs a machine this one is not.
+Everything below is decided and unblocked. In order.
 
-1. **The sim-only corpus case (F3a)** — holds all eight editions to F1 rather than only Rust. Needs
-   Zig installed and Node 24 for the corpus job.
-2. **Drain the 0.2 baseline.** Thirty-eight names, of which twelve are answered — the signer behind
-   `test-signing`, `skynet-capture`'s producer side waiting on a capture backend, and the vendor ABI
-   view — and twenty-six are untriaged debt in `tools/production-callers-allow.json`.
-3. **Phase 1**, once the ONNX question in *Open for the owner* is settled.
+1. **The small ones, together** — *Decisions* 3, 7, 8 and 9. Delete `check_code` and
+   `tier_profile_to_json`; name §19's activation rule once on `SignatureState` and drop the
+   accessor; make `skynet blackbox` say whether the window it replayed was complete; render "no
+   evidence" apart from "evidence, and it failed". Four small changes, one concern each, all inside
+   the reference edition.
 
----
+2. **`notifies_operator`** (*Decisions* 2). Corpus first, as Phase 3 argues and §47.6 proved: the
+   TypeScript oracle, then the 28 power cases, then the four complete editions, then the CLI.
+
+3. **Phase 1** (*Decisions* 5), of which the capture backend is **done** — `Source`, `Synthetic`
+   and `pump` in `skynet-capture`, and F11 is what writing it cost. Three steps left, in order:
+   1. **Wire `pump` into `skynet-kernel-host`'s `step_observing`.** The one allow-list entry with a
+      date attached to its removal. It needs a dependency edge that crate does not have and a
+      lifetime for the distributor and the source, which is why it is a step rather than a line.
+   2. **The inference backend** (§23.3), now permitted. One crate, a feature off by default,
+      `ci.yml`'s `Cargo.lock` check narrowed to that package rather than switched off, and the
+      safety kernel untouched — the terms in *Decisions* 5, which are narrower than "yes".
+   3. **The gate the plan already states**: `skynetk` offers the frame pool, `skynetp` maps it, a
+      policy closes the loop against the MuJoCo driver for N cycles with no overruns, and the sealed
+      window is read back and replayed to identical verdicts.
+
+4. **Bench evidence from a virtual robot** (*Decisions* 4). The one item that would move the dry
+   ceiling off `none`, and the only one here that changes what this plan is allowed to claim.
+   `packaging/virtual-robot.sh` already produces the machine; what does not exist is a conformance
+   run against it that is recorded as `bench` for `offline.control.independent` and for nothing else
+   it has not earned.
+
+5. **A check on doc comments that name a caller** (F9). Two of the twenty-three reasons had to be
+   written against the function's own documentation. The production-caller check already knows which
+   functions have no caller; refusing a doc comment on one of them that says *"for the CLI"* or
+   *"called by"* is a small addition to a check that has the data in front of it.
+
+Phases 2 and 5 are unchanged and unstarted. Phase 3 waits on Phase 1 (*Decisions* 6).
 
 ## Progress log
 
@@ -380,3 +530,171 @@ because five functions reached only from that file had been counted as reached.
 needs Linux with systemd as PID 1 and this is Windows. So `skynetd-io`'s end-to-end systemd run and
 the `#[ignore]`d driver-loading suites did not execute here — CI runs both. The three tests added
 prove an arithmetic property of the award function, not that any robot reports it.
+
+### 2026-09-16 (second session) — Next 1 and 2 done, on a machine that could run all of it
+
+Carried out on Linux with every edition toolchain present, which is the difference between this
+entry and the one above. Branch `claude/magical-darwin-igdkl1`, rebased onto `main` at `682d9b0`.
+**Nothing pushed**, in either repository.
+
+**Audited.** CI runs 55–60 on `main` and the logs of all three failing jobs; `CONTRIBUTING.md`'s
+gate against what CI actually runs; `certification.rs` and the TypeScript oracle's `conformance.ts`;
+`corpus/certification/award.json`; `tools/corpus-gen/generate.ts`; `scale-report.mjs` and
+`edition-report.mjs` and what each of them pins; `docs/README.md`'s mirror procedure and both copies
+of the specification; `editions/go/cmd/selfcheck` and `internal/fusionprobe`; `strip()` in
+`check-production-callers.mjs`; and the declaration and call sites of all 23 untriaged names.
+
+**Found.** F7–F10. In order of how much they change: `main` was **red the whole time** and the gate
+could not have said so (F7); 0.2's check reported the wrong line 18 times in 38 and was blind to a
+real caller it had already denied in writing (F9); §36.1's operator notification is built on both
+sides and joined by nothing (F10); and F3a's two blockers were properties of a laptop rather than of
+the work, while the real one is a single exact figure in the pinned specification (F8).
+
+**Changed.** Six commits here, one in the Hub.
+
+| File | What |
+|---|---|
+| `crates/skynet-ring-shm/src/pass.rs` | `[b'R']` → `*b"R"`. clippy 1.98's `byte_char_slices`, the first of three reasons `main` was red |
+| `tools/unicode-case.ts` | `rows()` takes `readonly string[]`; it reads `.length` and `.slice` and nothing else. The second |
+| `editions/go/internal/fusionprobe/probe.go` | A second control, `Intrinsic`, calling `math.FMA`. The third |
+| `editions/go/cmd/selfcheck/main.go` | `fusingTargets` re-measured and its comment corrected; the finding message names both remedies, because the listing cannot say which route produced the instruction |
+| `tools/corpus-gen/generate.ts` | +3 cases. `sim-only-awards-none`, `sim-only-plus-the-one-bench-test`, `sim-only-claiming-host-still-reads-guest` |
+| `corpus/certification/award.json` | Regenerated. 20 cases → 23, purely additive, no existing case perturbed |
+| `ci.yml`, `editions/{cpp,go}/Makefile` | The three complete-edition ratchets, 1199 → 1202. The four partial editions' floors are unchanged, which is what they are separate for |
+| `reference/reports/{editions,scale}.json` | Regenerated. Rust is still 136,498 lines, so F6's two-line headroom is untouched — nothing here added Rust |
+| `docs/skynet-os-architecture.md` | **The pinned specification.** One figure, in both repositories, re-pinned with `--pin`. Ratified as *Decisions* 1 |
+| `docs/status.md` | 1,199 → 1,202, twice |
+| `tools/check-production-callers.mjs` | Removed spans keep their newlines; character literals are consumed as units |
+| `tools/production-callers-allow.json` | 38 entries → 37. `upload_target` removed because it was never unreached; the 23 baseline entries replaced with arguments |
+
+**Verified.** The whole gate, on the final state, at CI's own toolchain — stable moved 1.94 → 1.98
+here first, which is what made F7's first row reproducible rather than theoretical:
+
+```
+cargo fmt --all --check                          exit 0
+RUSTFLAGS="-D warnings" cargo clippy             exit 0, 0 warnings
+cargo test --workspace                           1,857 passed, 0 failed
+npx tsc -p .                                     exit 0
+node tools/check-mirrors.mjs                     the specification matches its pin
+node tools/check-contract-mirrors.mjs            every mirrored contract matches
+node tools/check-golden-path.mjs                 exit 0
+node tools/check-rhal-flags.mjs                  exit 0
+node tools/check-production-callers.mjs          942 checked, 37 allow-listed
+node tools/scale-report.mjs --check              exit 0  (§73 matches the tree)
+node tools/edition-report.mjs --check            4 editions, 1202 cases each
+node tools/corpus-gen/generate.ts                regenerates the committed corpus byte for byte
+```
+
+And **all eight editions**, which is the thing the machine above could not do:
+
+```
+rust    1202/1202      python  1202/1202      cpp   1202/1202      go     1202/1202
+c        354 passed    zig      315 passed    java   315 passed    csharp  315 passed
+```
+
+Every check that changed was held to a positive control, per `CONTRIBUTING.md`:
+
+* **clippy** — reproduced at 1.98.1 before the fix, clean after.
+* **tsc** — TS4104 reproduced before, clean after.
+* **the fusion scan** — a planted `math.FMA` under `internal/` is refused on all six targets; a
+  planted `x*y + z` on five and **not on amd64**, which is the same measurement arriving from the
+  other direction. Both reverted.
+* **the corpus cases** — the Python edition mutated to treat an absent `offline.control.independent`
+  as satisfied, which is the defect these cases exist for, fails `sim-only-awards-none` at byte 12
+  — where `none` and `guest` differ — while `sim-only-plus-the-one-bench-test` keeps passing because
+  its bench result is present. The pair isolating the row rather than the suite. Reverted.
+* **the line-number fix** — 18 of 38 reported lines did not open their own declaration before, 0
+  after, with the same 38 findings both times.
+* **the character-literal fix** — the ratchet itself was the control: with the scan able to see,
+  `upload_target` gained a production caller and the check failed until the name came off the list.
+
+**Not verified, and not claimed.** No robot, virtual or physical. `packaging/virtual-robot.sh` needs
+systemd as PID 1 and PID 1 here is a container supervisor, so §33.1's units never started, the
+`#[ignore]`d driver-loading suites did not run, and `skynetd-io`'s end-to-end systemd run did not
+either — CI runs all three and they are green there. The three corpus cases prove that four
+independent implementations compute the same award from the same evidence; they say nothing about
+any robot reporting it, and F1's ceiling is still arithmetic rather than a measurement of a machine.
+
+**Still true, and worth repeating because this entry is mostly good news.** All 19 bench tests are
+`missing`. `proximity` is inert on every robot. Nothing has been signed by a Hub. The dry ceiling is
+`none`, and three more editions now agree about it — which is a stronger statement that the number
+is right and not a weaker one that it is high enough.
+
+### 2026-09-16 (third session) — the decisions taken, and Phase 1's capture half
+
+The owner answered *Open for the owner* 5 — **ONNX allowed, narrowly** — and delegated the other
+nine. That section is now *Decisions, and who made them*. Six more commits here, one in the Hub,
+**nothing pushed**.
+
+**Changed.**
+
+| Decision | What happened |
+|---|---|
+| 3 | `check_code` deleted. **`tier_profile_to_json` kept** — see below |
+| 7 | The `no tier` headline says which of the two causes it is, extracted so the four shapes are testable |
+| 8 | §19's activation predicate moved onto `SignatureState::admits`; the report accessor stays for the `NotRun` arm it alone carries |
+| 9 | `skynet blackbox` reports whether the window it replayed was complete |
+| 2 | `notifies_operator` reaches the power document and then a surface — oracle, 28 corpus cases, four editions, CLI |
+| 5 | Phase 1's **capture half** built. The inference half is unstarted |
+| 1, 10 | §73's Rust figure moved 136,000 → 137,000 in both copies, as maintenance rather than as a negotiation |
+
+**Two decisions were wrong when made, and reading the code is what corrected them.**
+
+*Decision 3 said delete both.* `tier_profile_to_json` is **the only place in the workspace that
+renders `SAFETY_CLAIM_RULE` into an output** — the kernel declares the sentence, CI checks its text
+is intact, and nothing else emits it. Deleting it would have left CONTRIBUTING.md's rule with
+nothing implementing it and no check able to notice, which is a safety claim quietly weakened by a
+tidy-up. Its comment named a surface that does not exist; the comment was the defect.
+
+*Decision 8 said fold two copies into one.* They are not two copies. `driver_may_activate` also
+refuses a report that never ran, which `SignatureState` cannot express and which is not the same
+fact. The **predicate** was the duplicate and is now written once; the structural duplication —
+`runtime.rs` deciding activation without ever building a `Report` — is still there and is a larger
+refactor than §78's remedy asked for.
+
+### F11 — the first capture backend found the release rule wrong, in the worse direction.
+
+`Delivered` told a caller to release `displaced` **and** `not_recorded`, and said that was
+*"everything this call took ownership of and nothing it still holds"*. It is wrong about the second.
+`LatestSlot::publish` always accepts, so `not_recorded` is the frame that was **just published** —
+handed back only to report that the recorder refused it, while the slot holds that very buffer as
+the call returns. A backend following the documentation hands a live buffer back to the device.
+
+The two failure directions are not symmetric and this is the bad one. A pool that runs dry stops
+capture and looks like a driver fault, which somebody investigates; a buffer freed while a consumer
+reads it is a policy acting on a frame something else is writing, on a zero-copy path with nothing
+to catch it, three hours in.
+
+The fact underneath is that §47.4 gives one frame to two consumers, so a buffer has up to two
+holders and **no lend-and-return scheme can say when it is free**. A reference count answers it,
+which is what `dmabuf` does with an fd refcount and what V4L2 with a GPU and an encoder on one
+buffer does underneath. `Source::retain` now says so in the trait.
+
+Worth recording as a coverage finding rather than only as a bug: this crate had seventeen tests, a
+`no_std` discipline, and a doc comment for every public item — and the defect was in **what the
+documentation told the first caller to do**, which nothing that existed could have caught, because
+there was no caller. It is the exact argument 0.2's check makes, arriving one level up.
+
+**Verified.** The full gate at CI's toolchain, and all eight editions on the corpus:
+
+```
+cargo fmt --all --check / clippy -D warnings / cargo test    1,866 passed, 0 failed
+npx tsc -p .                                                 exit 0
+check-mirrors / check-contract-mirrors / golden-path         exit 0
+check-rhal-flags / check-production-callers                  944 checked, 33 allow-listed
+scale-report --check                                         §73 matches the tree
+rust python cpp go   1202/1202      c 354   zig 315   java 315   csharp 315
+Cargo.lock                                                   24 packages, all workspace members
+```
+
+Controls, each failing the suite and each reverted: `Untrusted` made to admit a driver; releasing
+the refused frame; forgetting the recorder's retain; leaking the displaced frame. The corpus's
+power cases were re-derived from the oracle rather than edited, and the four complete editions were
+each brought to them separately.
+
+**Not verified, and not claimed.** Still no robot, virtual or physical — PID 1 here is a container
+supervisor, so `virtual-robot.sh` did not run and neither did the `#[ignore]`d driver-loading
+suites. The capture backend has never seen a camera and does not claim to: what it demonstrates is
+the §47.4 discipline, which is a claim about frames and not about pixels. **No policy has closed a
+loop**, so Phase 1's gate is not met and nothing here moves the dry ceiling off `none`.
+

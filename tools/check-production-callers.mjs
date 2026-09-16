@@ -93,11 +93,29 @@ const UBIQUITOUS = new Set([
   'path',
 ])
 
-/** Remove comments and string literals so brace matching and name search see only code. */
+/**
+ * Remove comments and string literals so brace matching and name search see only code.
+ *
+ * What is removed is replaced by **the newlines it spanned**, never by nothing. Every line number
+ * this file prints is counted off the stripped text, so a block comment or a multi-line string
+ * swallowed whole moves every declaration after it: `upload_target` was reported at
+ * `skynetd-io/src/upload.rs:545` and is declared at 742, because two hundred lines of module
+ * documentation sit between the two. A line number that opens the wrong line is worse than no line
+ * number at all, because a reader believes it and goes looking for a defect at the place it names.
+ *
+ * A separating space goes in as well, so `a/**\/b` and `foo"bar"baz` do not fuse into one token
+ * that the declaration pattern could read as a name.
+ */
 function strip(src) {
   let out = ''
   let i = 0
   const n = src.length
+  /** The newlines between two offsets, so removing a span costs its text and not its lines. */
+  const spanned = (from, to) => {
+    let newlines = ''
+    for (let k = from; k < to; k++) if (src[k] === '\n') newlines += '\n'
+    return newlines
+  }
   while (i < n) {
     const c = src[i]
     const d = src[i + 1]
@@ -108,6 +126,7 @@ function strip(src) {
     }
     // Block comment, nested as Rust allows.
     if (c === '/' && d === '*') {
+      const start = i
       let depth = 1
       i += 2
       while (i < n && depth > 0) {
@@ -119,6 +138,7 @@ function strip(src) {
           i += 2
         } else i++
       }
+      out += ' ' + spanned(start, i)
       continue
     }
     // Raw string: r"..." / r#"..."# / r##"..."## — replaced by a space, never scanned.
@@ -130,19 +150,52 @@ function strip(src) {
         j++
       }
       if (src[j] === '"') {
+        const start = i
         const terminator = '"' + '#'.repeat(hashes)
         const end = src.indexOf(terminator, j + 1)
         i = end === -1 ? n : end + terminator.length
-        out += ' '
+        out += ' ' + spanned(start, i)
         continue
       }
     }
-    // Byte or char literal, and ordinary strings. Escapes are honoured.
+    // Character literal — `'a'`, `'\n'`, `'\\'`, `'\''`, `'\u{1F600}'`, and the byte form `b'R'`.
+    //
+    // This is here because of `'"'`. Without it the quote inside that literal opens a string, and
+    // the scan runs to the next quote in the file taking real code with it: `upload.rs:230` spells
+    // `c == '"'` and five hundred lines below it `upload_target` is called, so this check reported
+    // a function with a plain production caller as having none, and it was allow-listed with a
+    // reason invented to fit. A false negative here is worse than a false positive, because
+    // the answer it gives is the one nobody goes and checks.
+    //
+    // A lifetime is the thing not to eat: `'a` and `'static` are a quote that no quote closes, so a
+    // literal is only recognised when the closing one is where a literal would put it.
+    if (c === "'") {
+      let j = i + 1
+      if (src[j] === '\\') {
+        j++
+        if (src[j] === 'u' && src[j + 1] === '{') {
+          const brace = src.indexOf('}', j)
+          j = brace === -1 ? j + 1 : brace + 1
+        } else j++
+      } else {
+        // One scalar value, which is two UTF-16 units above the basic plane.
+        const point = src.codePointAt(j)
+        j += point !== undefined && point > 0xffff ? 2 : 1
+      }
+      if (src[j] === "'") {
+        out += ' ' + spanned(i, j + 1)
+        i = j + 1
+        continue
+      }
+      // Not a literal, so a lifetime or a loop label. Fall through and emit the quote.
+    }
+    // Ordinary strings. Escapes are honoured.
     if (c === '"') {
+      const start = i
       i++
       while (i < n && src[i] !== '"') i += src[i] === '\\' ? 2 : 1
       i++
-      out += ' '
+      out += ' ' + spanned(start, i)
       continue
     }
     out += c
