@@ -8,7 +8,11 @@
 # No dependencies beyond a C11 compiler and whichever interpreter you point it at.
 
 CC      ?= cc
-CFLAGS  ?= -std=c11 -O2 -Wall -Wextra -Wpedantic -fPIC -I../../bindings/c
+# `-Werror=implicit-function-declaration` because GCC 14 made it an error and GCC 13 — what CI ran
+# when this was written — only warns. A function used without its declaration is called with a
+# guessed signature, and a build that is only broken on the newer compiler is broken on the next CI
+# image rather than today.
+CFLAGS  ?= -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror=implicit-function-declaration -fPIC -I../../bindings/c
 PYTHON  ?= python3
 CARGO   ?= cargo
 
