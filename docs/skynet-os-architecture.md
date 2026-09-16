@@ -5521,7 +5521,7 @@ miniature, and currently trivial to fix.
 | Limits, and what is not true | §59–61 | Stated | — |
 
 **Built** means running, tested code: **136,000 lines of Rust** across **twenty-four crates**, held by a
-corpus of 80 files and 1,199 cases to **14,000 lines** of the TypeScript reference edition and
+corpus of 80 files and 1,202 cases to **14,000 lines** of the TypeScript reference edition and
 **16,000 lines** of the Python edition, with **5,000 lines** of drivers and **9,000 lines** in the
 Hub's mirror of the shared contracts.
 
