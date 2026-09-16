@@ -251,4 +251,56 @@ fn a_conforming_drivers_descriptor_is_read() {
         .expect("a driver that returns its length has returned a descriptor");
     assert!(text.starts_with('{'), "{text}");
     assert!(text.contains("\"robot_slug\":\"mock-arm\""), "{text}");
+    assert!(
+        !body.has_sensors(),
+        "and the mock declares no read_sensor, which the next test relies on"
+    );
+}
+
+/// A frame pool for a body with no sensors is refused before anything is offered.
+///
+/// A pool offered for a stream the body cannot produce tells a policy it has a camera. The mock
+/// has no `read_sensor`, so the refusal names that — and names it before a socket or a mapping has
+/// been made, which is why this runs on any host with a C compiler.
+#[test]
+#[ignore = "needs a C compiler; run explicitly with --ignored (the abi CI job does)"]
+fn a_frame_pool_for_a_body_with_no_sensors_is_refused() {
+    let library = build_mock("no-sensors");
+    let socket = std::env::temp_dir().join("skynet-kernel-host-no-sensors.sock");
+
+    let output = skynetk(&[
+        "run",
+        "--driver",
+        library.to_str().unwrap(),
+        "--policy-socket",
+        socket.to_str().unwrap(),
+        "--frame-pool",
+        "wrist:2x64@10",
+        "--cycles",
+        "1",
+    ]);
+    assert!(!output.status.success());
+    let said = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(said.contains("no read_sensor entry point"), "{said}");
+    assert!(
+        !socket.exists(),
+        "refused before the socket was made, so nothing was offered"
+    );
+}
+
+/// A frame pool declared without a rate is refused, naming the missing part.
+#[test]
+fn a_frame_pool_with_no_capture_rate_is_refused() {
+    let output = skynetk(&[
+        "run",
+        "--driver",
+        "unused",
+        "--policy-socket",
+        "unused.sock",
+        "--frame-pool",
+        "wrist:2x64",
+    ]);
+    assert!(!output.status.success());
+    let said = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(said.contains("capture rate"), "{said}");
 }

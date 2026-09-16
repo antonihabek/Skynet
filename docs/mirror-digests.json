@@ -1,6 +1,6 @@
 {
   "note": "sha256 of each document shared with the Hub (Robot Overflow), pinned so a divergence is caught with one checkout — which is what CI has. Written by tools/check-mirrors.mjs --sync (take their copies, then pin) or --pin (move nothing, pin what already agrees). A document the two trees differ on keeps its last agreed digest rather than being re-pinned or dropped. Never edit by hand: a digest somebody updated to match a local edit is a check that has been switched off.",
   "digests": {
-    "docs/skynet-os-architecture.md": "222a098bcb547aef2b2d6e73ccdff218e88da48f089d03957a07caca6eb23783"
+    "docs/skynet-os-architecture.md": "1bf9f9d6f53a0a551565c7579072533543b6ebe8671e5a2d95201d7d593caa4e"
   }
 }

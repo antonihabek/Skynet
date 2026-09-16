@@ -45,6 +45,8 @@
 //!
 //! # Structure
 //!
+//! [`capture`] is §47's half that only this process can do — a sensor read through the driver it
+//! already holds — and it turns inside the cycle, after the write.
 //! [`cycle`] is pure: one command in, one decision out, no clock and no I/O, so the awkward cases —
 //! the ramp, the escalation, the mask — are reachable from a test rather than from a robot.
 //! [`driver`] is the RHAL behind a trait, so the loop can be driven against a fake with no shared
@@ -53,6 +55,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod capture;
 pub mod cycle;
 pub mod driver;
 

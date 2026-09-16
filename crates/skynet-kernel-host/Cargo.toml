@@ -15,6 +15,10 @@ path = "src/main.rs"
 [dependencies]
 skynet-blackbox = { path = "../skynet-blackbox" }
 
+# §47.4's split and §47.2's source shape. This process owns the driver, and §47.2's fourth backend is
+# a sensor only the driver can reach, so the one capture loop that can read it is the one here.
+skynet-capture = { path = "../skynet-capture" }
+
 # So a sealed window can be written down beside the limits it was recorded under. `skynetk`
 # resolves those limits and nothing else on the machine knows them: the daemon resolves its own
 # from the descriptor and a transport plan, which on a bench are not what the loop ran with. A

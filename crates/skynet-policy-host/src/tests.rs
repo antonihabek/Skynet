@@ -13,7 +13,7 @@
 use skynet_kernel::fixed::FixedVec;
 use skynet_kernel::{Enforcement, Envelope, Guard, ResolvedLimits, Tier};
 use skynet_kernel_host::driver::Fake;
-use skynet_kernel_host::run::Host;
+use skynet_kernel_host::run::{Attached, Host};
 use skynet_ring::{mode, words_for, Ring, MAX_CHANNELS};
 use std::sync::atomic::AtomicU32;
 
@@ -833,7 +833,10 @@ fn the_body_reaches_the_policy_and_the_policy_moves_the_body() {
             &mut commands_in,
             &limits,
             None::<&Envelope<'_>>,
-            Some(&mut bodies_out),
+            Attached {
+                observations: Some(&mut bodies_out),
+                camera: None,
+            },
         );
 
         // The policy reads that body and decides.
@@ -847,7 +850,10 @@ fn the_body_reaches_the_policy_and_the_policy_moves_the_body() {
             &mut commands_in,
             &limits,
             None::<&Envelope<'_>>,
-            Some(&mut bodies_out),
+            Attached {
+                observations: Some(&mut bodies_out),
+                camera: None,
+            },
         );
         assert_eq!(u64::from(turn.cycle.command_seq), cycle + 1);
         commanded.push(robot.position[0]);
@@ -929,7 +935,10 @@ fn a_clamped_command_comes_back_as_the_body_the_robot_actually_reached() {
         &mut commands_in,
         &limits,
         None::<&Envelope<'_>>,
-        Some(&mut bodies_out),
+        Attached {
+            observations: Some(&mut bodies_out),
+            camera: None,
+        },
     );
     policy.turn(&mut commands_out, Some(&mut bodies_in));
     let turn = kernel.step_observing(
@@ -938,7 +947,10 @@ fn a_clamped_command_comes_back_as_the_body_the_robot_actually_reached() {
         &mut commands_in,
         &limits,
         None::<&Envelope<'_>>,
-        Some(&mut bodies_out),
+        Attached {
+            observations: Some(&mut bodies_out),
+            camera: None,
+        },
     );
 
     assert!(
@@ -959,7 +971,10 @@ fn a_clamped_command_comes_back_as_the_body_the_robot_actually_reached() {
         &mut commands_in,
         &limits,
         None::<&Envelope<'_>>,
-        Some(&mut bodies_out),
+        Attached {
+            observations: Some(&mut bodies_out),
+            camera: None,
+        },
     );
     assert_eq!(bodies_in.read(&mut seen), skynet_obs::Reading::Fresh);
     assert!(

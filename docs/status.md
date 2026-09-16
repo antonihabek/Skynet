@@ -165,13 +165,12 @@ Cat 0 and records that it did**, since escalating silently would have an operato
 stop as the one the guard demanded; and an **advisory verdict is not enforced**, because a guest tier
 that withheld a command the kernel said to forward would be enforcing where it has never claimed to.
 
-Still not built: the **producer** end. No capture backend fills a stream — `skynet-capture` moves
-handles a V4L2 or GenICam backend would produce, and neither exists — nothing maps a frame into a
-policy's address space, and nothing turns a frame into an inference and a command. §47.6's pool
-narrowed that list by one on 2026-09-07: the **loan** is built and reproduced by three editions, so
-what a policy may hold and for how long is decided rather than pending. Two things behind it are
-not: mapping the named slot read-only into another address space, which is per-OS code no contract
-can express, and the inference backend §23.3 leaves vacant. So the ring the host reads is
+Still not built: most of the **producer** end. One capture backend fills a stream since
+2026-09-16 — a sensor the driver renders, read through `read_sensor` by the control loop at a
+declared rate and published into §47.6's pool — and V4L2 and GenICam, which the runtime would read
+itself, do not exist. The pool is built in both halves: the **loan**, reproduced by three editions,
+and the Linux **mapping** (§47.6c). What is not built is the inference backend §23.3 leaves vacant,
+so nothing turns a frame into a command, and nothing records a frame, because there is no encoder. So the ring the host reads is
 empty on every cycle and the kernel holds on every cycle, which is not a degenerate case being
 tolerated: it is exactly the state §33.1 calls the property that makes the rest of the OS possible,
 and it can now be watched rather than only argued about. The frames the assembler builds are still
