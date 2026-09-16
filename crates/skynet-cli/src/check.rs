@@ -76,6 +76,13 @@ pub struct CheckResult {
     pub outcome: Outcome,
     /// The measured value or the reason, for anything that is not a plain pass.
     pub detail: String,
+    /// The number, for the one test §15 marks quantitative and this command can measure.
+    ///
+    /// `None` on every other check, and that is not laziness: §15 marks eight bench tests and one
+    /// sim test as quantitative, and a boolean where a number belongs is precisely what §15 means
+    /// by *"a driver returning success is not evidence"*. The field exists because the number was
+    /// being computed and then spent on a sentence — see [`with_value`](CheckResult::with_value).
+    pub value: Option<f64>,
 }
 
 impl CheckResult {
@@ -91,7 +98,20 @@ impl CheckResult {
             what: what.into(),
             outcome,
             detail: detail.into(),
+            value: None,
         }
+    }
+
+    /// The same result, carrying the number it measured.
+    ///
+    /// Added when `skynet driver check --results` was written and its own reader refused the
+    /// document: `embodiment.roles.coverage` is the only quantitative test in the sim suite, this
+    /// command has computed the percentage since it was written, and the percentage reached a
+    /// sentence and stopped. A results document that carried a bare `pass` for it would be one
+    /// `award_certification` accepted and nobody could check.
+    pub fn with_value(mut self, value: f64) -> Self {
+        self.value = Some(value);
+        self
     }
 
     /// Measured, and it holds. A pass carries no detail: there is nothing to explain.
@@ -152,7 +172,7 @@ impl Report {
     ///
     /// One id is exercised by several checks here — `rhal.abi.version` covers the export, the
     /// version, the entry points and the open — and the id passes only if all of them do.
-    fn outcome_for(&self, id: &str) -> Option<Outcome> {
+    pub fn outcome_for(&self, id: &str) -> Option<Outcome> {
         let mut worst: Option<Outcome> = None;
         for result in self.results.iter().filter(|result| result.id == id) {
             worst = Some(match (worst, result.outcome) {
@@ -671,22 +691,25 @@ fn descriptor_checks(
             } else {
                 100.0 * with_roles as f64 / descriptor.joints.len() as f64
             };
-            report.push(CheckResult::new(
-                "embodiment.roles.coverage",
-                "joints carry a parseable canonical role",
-                if with_roles == descriptor.joints.len() {
-                    Outcome::Pass
-                } else {
-                    Outcome::Fail
-                },
-                format!(
+            report.push(
+                CheckResult::new(
+                    "embodiment.roles.coverage",
+                    "joints carry a parseable canonical role",
+                    if with_roles == descriptor.joints.len() {
+                        Outcome::Pass
+                    } else {
+                        Outcome::Fail
+                    },
+                    format!(
                     "{coverage:.0}% ({with_roles} of {}). A joint with no parseable role can only \
                      ever be matched by exact name, so it cannot participate in cross-body \
                      remapping — which is truthful, and is also the ceiling on what this body can \
                      run.",
-                    descriptor.joints.len()
-                ),
-            ));
+                        descriptor.joints.len()
+                    ),
+                )
+                .with_value(coverage),
+            );
 
             report.push(CheckResult::new(
                 "embodiment.descriptor.signed",

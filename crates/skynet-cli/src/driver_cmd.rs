@@ -2,6 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
+use skynet_contracts::bench::{results_from_json, results_to_json, ResultsDocument};
+use skynet_contracts::certification::{SctsOutcome, SctsResult, SCTS_TESTS};
+
 use crate::args::{Args, Spec};
 use crate::check;
 use crate::scaffold;
@@ -25,6 +28,12 @@ skynet driver check <library> [--config <json>]
          --config <json>   passed verbatim to the driver's open(). Defaults to
                            an empty string.
 
+         --results <f>     write these results to <f> as a results document
+                           (§15), so the sim half of an award can be carried to
+                           wherever `skynet bench award` computes one. Until
+                           this existed the results were rendered for a person
+                           and kept.
+
          --descriptor <f>  write the body this driver describes to <f>, in the
                            canonical form §28 pins at state/embodiment.json. This
                            is how a bench robot is provisioned from its own
@@ -43,7 +52,7 @@ const NEW_SPEC: Spec = Spec {
 };
 
 const CHECK_SPEC: Spec = Spec {
-    values: &["config", "descriptor"],
+    values: &["config", "descriptor", "results"],
     switches: &[],
 };
 
@@ -193,8 +202,99 @@ fn run_check(rest: &[String]) -> i32 {
             return term::fail(&message);
         }
     }
+    if let Some(target) = args.value("results") {
+        if let Err(message) = write_results(&report, path, Path::new(target)) {
+            return term::fail(&message);
+        }
+    }
 
     check::print(&report)
+}
+
+/// Write what this run measured, as a results document (§15).
+///
+/// # Why this is worth a flag
+///
+/// The command computed a verdict per SCTS id and then rendered it for a person. That is this
+/// repository's four-times defect — a value that is correct, tested and reached by nothing anybody
+/// downstream reads — and it is the reason an award computed from a bench record would have had no
+/// sim half to compute it against. `skynet bench award` is the reader.
+///
+/// # What does not go in it
+///
+/// Only ids §15 has, and only those this run actually reached. `NOT_COVERED` is deliberately absent
+/// rather than written as `skipped`: those tests are properties of the runtime and of the edition,
+/// this command has said so by name on every run since it existed, and a document listing them
+/// would be this command reporting on tests it is not the runner for. An id with no entry here is
+/// `missing` to an award, which is exactly what it is.
+fn write_results(report: &check::Report, library: &Path, target: &Path) -> Result<(), String> {
+    let mut results: Vec<SctsResult> = Vec::new();
+    for test in SCTS_TESTS.iter().filter(|test| test.suite == "sim") {
+        let Some(outcome) = report.outcome_for(test.id) else {
+            continue;
+        };
+        let outcome = match outcome {
+            check::Outcome::Pass => SctsOutcome::Pass,
+            check::Outcome::Fail => SctsOutcome::Fail,
+            check::Outcome::NotApplicable => SctsOutcome::NotApplicable,
+            // §15's own word for it, and the one `award_certification` reads as `missing`. A check
+            // this command could not run is not a check that passed.
+            check::Outcome::Missing => SctsOutcome::Skipped,
+        };
+        let ran_at = if outcome == SctsOutcome::Skipped {
+            String::new()
+        } else {
+            now()
+        };
+        results.push(SctsResult {
+            test_id: test.id.to_string(),
+            outcome,
+            // §15 marks one sim test quantitative, and `CheckResult::with_value` is where the
+            // number survives the sentence it used to be spent on.
+            value: report
+                .results
+                .iter()
+                .find(|result| result.id == test.id && result.value.is_some())
+                .and_then(|result| result.value),
+            ran_at,
+            detail: report
+                .results
+                .iter()
+                .find(|result| result.id == test.id && !result.detail.is_empty())
+                .map(|result| result.detail.clone()),
+        });
+    }
+    if results.is_empty() {
+        return Err(format!(
+            "this run reached no SCTS test at all, so there is nothing to write to {}. The report \
+             below says why — a driver that will not load is the usual reason.",
+            target.display()
+        ));
+    }
+
+    let document = results_to_json(&ResultsDocument {
+        source: format!("skynet driver check {}", library.display()),
+        results,
+    });
+    // Read back by the reader that will judge it, for `bench_cmd`'s reason: a writer that can emit
+    // a file its own parser refuses is two implementations of one format.
+    results_from_json(&document)
+        .map_err(|err| format!("this document would not read back: {err}"))?;
+    let text = document
+        .to_canonical()
+        .map_err(|error| format!("the results could not be serialised: {error:?}"))?;
+    std::fs::write(target, format!("{text}\n"))
+        .map_err(|err| format!("{}: {err}", target.display()))
+}
+
+/// Now, RFC 3339, from the one clock this workspace reads.
+fn now() -> String {
+    skynetd_io::audit::rfc3339(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_millis() as u64)
+            .unwrap_or(0),
+    )
 }
 
 /// Write the descriptor the driver returned, in the canonical form §28 pins.

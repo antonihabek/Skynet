@@ -1,8 +1,13 @@
 //! Terminal output.
 //!
-//! Colour when stderr is a terminal and `NO_COLOR` is unset, and never in a pipe — a report
-//! captured into a file with escape codes in it is a report somebody has to clean up. The check is
+//! Colour when the environment says a terminal is there and `NO_COLOR` is unset. The check is
 //! deliberately conservative: when in doubt, no colour.
+//!
+//! **It cannot see a pipe.** There is no `isatty` without libc, so `TERM` is the whole of the
+//! evidence, and `TERM` is set for the pipe as much as for the terminal it came from — a report
+//! captured into a file therefore keeps its escape codes, which is a report somebody has to clean
+//! up. A caller that will grep its own output sets `NO_COLOR=1`; `drivers/python-host/loop.sh`
+//! does, and the reason it has to is here rather than only there.
 
 use std::io::Write;
 use std::sync::OnceLock;
