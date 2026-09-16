@@ -290,6 +290,38 @@ pub fn rfc3339(unix_ms: u64) -> String {
     format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
 
+/// The day number an RFC 3339 timestamp falls on, counting from the Unix epoch.
+///
+/// The inverse of [`rfc3339`]'s calendar half, and beside it for that reason: one calendar in one
+/// file. Two implementations of a date conversion disagree exactly once — on a leap day, years
+/// after either was written.
+///
+/// Only the `YYYY-MM-DD` prefix is read. Everything after it is a time of day, and §15 measures a
+/// bench result's age in days, so an hour would be precision the answer does not have.
+///
+/// `None` for anything that is not a date: a caller asking how old a result is must be able to tell
+/// *"three hundred days"* from *"this record does not say"*, and a zero for the second would be a
+/// year-old bench pass reading as fresh.
+pub fn day_number(timestamp: &str) -> Option<i64> {
+    let date = timestamp.get(..10)?;
+    let mut parts = date.split('-');
+    let year: i64 = parts.next()?.parse().ok()?;
+    let month: i64 = parts.next()?.parse().ok()?;
+    let day: i64 = parts.next()?.parse().ok()?;
+    if parts.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+
+    // Howard Hinnant's days-from-civil, the exact inverse of the civil-from-days above.
+    let year = year - i64::from(month <= 2);
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let shifted_month = if month > 2 { month - 3 } else { month + 9 };
+    let day_of_year = (153 * shifted_month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    Some(era * 146_097 + day_of_era - 719_468)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -460,6 +492,44 @@ mod tests {
             (2_082_758_399_000, "2035-12-31T23:59:59Z"),
         ] {
             assert_eq!(rfc3339(unix_ms), expected, "at {unix_ms}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod day_number_tests {
+    use super::{day_number, rfc3339};
+
+    /// The two halves of the calendar are each other's inverse, checked across two leap rules and
+    /// a century boundary rather than on one convenient date.
+    #[test]
+    fn the_two_directions_agree() {
+        for day in [0_i64, 1, 59, 60, 11_016, 20_000, 25_000, 30_000, 40_000] {
+            let stamp = rfc3339(day as u64 * 86_400_000);
+            assert_eq!(day_number(&stamp), Some(day), "{stamp}");
+        }
+    }
+
+    #[test]
+    fn known_days_are_the_known_numbers() {
+        assert_eq!(day_number("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(day_number("2000-02-29T12:00:00Z"), Some(11_016));
+        assert_eq!(day_number("2026-09-16"), Some(20_712));
+    }
+
+    /// A date this cannot read is `None` and never a zero, because a caller measuring an age would
+    /// read a zero as *today* — which turns an unreadable date into the freshest evidence there is.
+    #[test]
+    fn nothing_that_is_not_a_date_becomes_one() {
+        for bad in [
+            "",
+            "yesterday",
+            "2026-13-01",
+            "2026-09-99",
+            "2026/09/16",
+            "2026-09",
+        ] {
+            assert_eq!(day_number(bad), None, "{bad}");
         }
     }
 }

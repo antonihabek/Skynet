@@ -35,10 +35,15 @@
 # resolver, no Hub. If any step between a driver's sensor and a guard's verdict reaches out, it cannot
 # succeed there, and the assertions below fail.
 #
-# It is **not** recorded as bench evidence, and this script has no way to record any: §12 binds a
-# result to the digest of the bytes it was taken against, and nothing in this workspace produces or
-# consumes such a record. So this measures the property and says it measured it; the dry ceiling stays
-# where `DRY-COVERAGE-PLAN.md`'s F1 puts it.
+# And then it is **recorded**, which for three sessions it could not be. §12 binds a result to the
+# digest of the bytes it was taken against; `skynet bench record` is what binds one, and the run ends
+# by writing a record over the three binaries that decided and reading it back through
+# `skynet bench award`. The award is `none` and is expected to be — the sim half of guest is not in
+# evidence on this path — so what the run asserts is the one thing it changed: the bench test §15
+# requires from guest is no longer among the missing.
+#
+# The witness is this machine and nobody, which `DRY-COVERAGE-PLAN.md` *Decisions* 4 allows for this
+# test and for no other: `offline.control.independent` needs a real machine rather than a real body.
 set -eu
 
 # Re-executed rather than wrapped per command, so the namespace covers the interpreter, the shim and
@@ -50,7 +55,13 @@ if [ "${SKYNET_LOOP_OFFLINE:-}" = "1" ] && [ "${SKYNET_LOOP_REEXEC:-}" != "1" ];
     echo "which is the failure §15 spends a rule on. Install util-linux, or drop the variable."
     exit 1
   fi
-  SKYNET_LOOP_REEXEC=1 exec unshare -rn "$0" "$@"
+  # Through `sh` rather than `exec unshare -rn "$0"`, which needs this file's execute bit — and this
+  # file was committed without one. `make check-offline` runs it as `sh ./loop.sh`, so the missing
+  # bit was invisible until the re-exec tried to run it directly and every offline run on a
+  # checkout with real file modes died as `unshare: failed to execute ./loop.sh: Permission
+  # denied`. The bit is set now as well; running through the interpreter is what makes it stop
+  # mattering, on a zip, a Windows checkout or a filesystem that does not carry modes at all.
+  SKYNET_LOOP_REEXEC=1 exec unshare -rn /bin/sh "$0" "$@"
 fi
 
 cd "$(dirname "$0")"
@@ -71,16 +82,36 @@ mkdir -p "$(dirname "$OUT")" "$OUT.box"
 # What the network looks like from in here, said before anything runs. In offline mode the namespace is
 # required to be empty — a run that reported "offline" with a default route would be measuring the
 # opposite of what it claims.
-routes=$(ip route show 2>/dev/null | wc -l || echo unknown)
+#
+# Read out of `/proc`, which is the kernel's own answer, rather than out of `ip route show`. That is
+# not a preference: `ip` is `iproute2` and is absent from plenty of minimal images, `command not
+# found` writes nothing to stdout, and `wc -l` of nothing is **0** — so the guard below reported an
+# empty namespace on a machine with a default route and no `iproute2`, and passed. A check that
+# cannot fail for the reason it exists is the exact shape §15 spends a rule on, and this one was
+# guarding the sentence that says so.
+#
+# Two facts rather than one, because they fail independently: a namespace with a route in it was
+# never created, and an interface other than `lo` is something to reach even before a route exists.
+if [ ! -r /proc/net/route ] || [ ! -r /proc/net/dev ]; then
+  echo "::error::/proc/net/route or /proc/net/dev is unreadable, so this script cannot say whether"
+  echo "the network is up. Refusing rather than counting zero: an unmeasured network reported as"
+  echo "absent is §11 measured with the network up (§15)."
+  exit 1
+fi
+routes=$(awk 'NR > 1 { n++ } END { print n + 0 }' /proc/net/route)
+links=$(awk -F: 'NR > 2 { gsub(/ /, "", $1); if ($1 != "lo") n++ } END { print n + 0 }' /proc/net/dev)
 if [ "${SKYNET_LOOP_OFFLINE:-}" = "1" ]; then
-  if [ "$routes" != "0" ]; then
-    echo "::error::SKYNET_LOOP_OFFLINE=1 and this namespace has $routes route(s)."
-    echo "The namespace was not created, so §11 would be measured with the network up."
+  if [ "$routes" != "0" ] || [ "$links" != "0" ]; then
+    echo "::error::SKYNET_LOOP_OFFLINE=1 and this namespace has $routes route(s) and $links"
+    echo "non-loopback interface(s). The namespace was not created, so §11 would be measured with"
+    echo "the network up."
     exit 1
   fi
-  echo "== network: none — $routes route(s) in this namespace, so §11 is measured rather than assumed"
+  echo "== network: none — $routes route(s) and $links non-loopback interface(s) in this namespace,"
+  echo "   so §11 is measured rather than assumed"
 else
-  echo "== network: as this machine has it ($routes route(s)) — set SKYNET_LOOP_OFFLINE=1 for §11"
+  echo "== network: as this machine has it ($routes route(s), $links non-loopback interface(s)) —"
+  echo "   set SKYNET_LOOP_OFFLINE=1 for §11"
 fi
 
 echo "== building the host and the three binaries"
@@ -231,6 +262,73 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
+# ── and then the record, which is what makes the offline run evidence ────────
+#
+# Everything above this line is a measurement. §12's rule is that a result is bound to the digest of
+# the bytes it was taken against, and `skynet bench record` is what binds one — so the artefacts are
+# named here, hashed there, and the result travels with them or not at all.
+#
+# The subject is the three things that decide: the kernel host that turns §7's guards, the policy
+# host that produces the setpoints, and the C shim that is the driver from the ABI's side. The
+# interpreter and the Python bridge are the body, and a body is not what §11 is about.
+#
+# Witnessed by the **machine**, not by a person, and that is the one carve-out `DRY-COVERAGE-PLAN.md`
+# *Decisions* 4 makes: `offline.control.independent` needs a real machine rather than a real body, so
+# a machine may witness it and the record says which it was.
+if [ "${SKYNET_LOOP_OFFLINE:-}" = "1" ]; then
+  echo ""
+  echo "── skynet bench record ──────────────────────────────────────────────────"
+  case "$TARGET" in
+    "$REPO"/*)
+      RECORD="$OUT.bench.json"
+      rm -f "$RECORD"
+      RELTARGET=${TARGET#"$REPO"/}
+      "$TARGET/debug/skynet" bench record \
+        "$RELTARGET/debug/skynetk" \
+        "$RELTARGET/debug/skynetp" \
+        "drivers/python-host/$LIB" \
+        --root "$REPO" \
+        --what "the control loop that closed with no network: skynetk, skynetp and the C host" \
+        --test offline.control.independent \
+        --outcome pass \
+        --machine "$(uname -sr) $(uname -m)" \
+        --detail "250 kernel cycles and 200 policy turns inside a network namespace holding only loopback — 0 routes, 0 non-loopback interfaces — with 0 overruns on either side and every recorded cycle reproduced by a replay." \
+        --out "$RECORD" ||
+        say "the bench record could not be written, so this run measured §11 and recorded nothing."
+
+      if [ "$fail" -eq 0 ]; then
+        echo ""
+        echo "── skynet bench award ───────────────────────────────────────────────────"
+        # Exit code ignored on purpose: the award is `none` and is *expected* to be, because the sim
+        # half of guest is not in evidence here. What is asserted is narrower and is the only thing
+        # this run changed — the bench test §15 requires from guest is no longer among the missing.
+        # `NO_COLOR=1` because this output is grepped below, and `term` colours whenever `TERM` is
+        # set — it has no `isatty` to tell a pipe from a terminal. An escape code between the
+        # indent and the word `missing` is the difference between an assertion and a no-op.
+        NO_COLOR=1 "$TARGET/debug/skynet" bench award "$RECORD" --claim guest --root "$REPO" \
+          > "$OUT.a.txt" 2>&1 || true
+        cat "$OUT.a.txt"
+        grep -Eq '^ *missing' "$OUT.a.txt" ||
+          say "the award reported nothing missing, which cannot be right with no sim evidence here."
+        if grep -E '^ *missing' "$OUT.a.txt" | grep -Fq 'offline.control.independent'; then
+          say "offline.control.independent is still missing after the record was written. The record did not reach the award."
+        fi
+      fi
+      ;;
+    *)
+      echo "CARGO_TARGET_DIR is outside the repository ($TARGET), and a record's artefact paths are"
+      echo "relative to one root. No record was written — re-run with the default target directory."
+      ;;
+  esac
+  echo "─────────────────────────────────────────────────────────────────────────"
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo ""
+  echo "the run measured §11 and did not record it. The lines above are what to read."
+  exit 1
+fi
+
 echo ""
 echo "The loop closed: a camera the driver rendered reached a policy in another process, the setpoints"
 echo "it produced reached the kernel's guards with neither side missing its period, and the sealed"
@@ -238,11 +336,15 @@ echo "window replayed to the same verdicts through the same kernel."
 if [ "${SKYNET_LOOP_OFFLINE:-}" = "1" ]; then
   echo ""
   echo "And it closed with **no network at all** — no route, no resolver, nothing to reach. That is"
-  echo "§11's invariant measured on a machine rather than argued about. It is still not §15's"
-  echo "\`offline.control.independent\`: that is a bench result, and nothing here can record one,"
-  echo "because §12 binds a result to the digest of the bytes it was taken against and no producer or"
-  echo "consumer of such a record exists yet. See DRY-COVERAGE-PLAN.md."
+  echo "§11's invariant measured on a machine rather than argued about, and it is now **recorded**:"
+  echo "$RECORD is a bench record bound to the digest of the three binaries that decided, and"
+  echo "\`skynet bench award\` reads it back only against those same bytes. Rebuild any of them and"
+  echo "the record stops applying, which is §12's rule and the whole of the mechanism."
+  echo ""
+  echo "It is witnessed by this machine and by nobody, which is legitimate for exactly this test and"
+  echo "for no other (DRY-COVERAGE-PLAN.md Decisions 4). Nothing signed it: §19 forbids a robot"
+  echo "holding a key, so the Hub awards and this is a report (§15.1)."
 fi
 echo ""
 echo "What this is not: a robot. The body is the LeRobot bridge's fake and the image is synthetic, so"
-echo "every bench test in §15 is still \`missing\` and the dry ceiling is unchanged."
+echo "the other 18 bench tests in §15 are still \`missing\` and no tier is awarded here."

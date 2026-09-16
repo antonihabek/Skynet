@@ -41,6 +41,7 @@
 extern crate alloc;
 
 pub mod admission;
+pub mod bench;
 pub mod birth;
 pub mod bundle;
 pub mod calibration;
