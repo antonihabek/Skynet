@@ -368,10 +368,21 @@ func numberEdges() int {
 // same sequence of correctly rounded operations producing the same bits everywhere. A fused
 // operation is a different sequence.
 //
-// The list is measured, not remembered: each of the six fuses `x*y + z` into one instruction, and
-// mips64, 386 and wasm fuse nothing. amd64 is here at v3 only; at its default level there is no FMA
-// instruction to fuse into, which is why every corpus run on a developer's x86 machine passes and
-// why this check has to compile for machines other than the one it runs on. A Jetson is arm64.
+// The list is measured, not remembered, and on 2026-09-16 re-measuring it moved a row. Five of the
+// six contract `x*y + z` into one instruction; mips64, 386 and wasm produce nothing to find.
+//
+// amd64 is the exception, and it is not the one this comment used to claim. The compiler does not
+// contract there at *any* GOAMD64 level — v1, v2, v3 and v4 each emit MULSD then ADDSD under
+// go1.24 — so the entry stood for a year describing a fusion that never happened, and the scan did
+// exactly what it is built to do: it refused the target rather than reporting a clean listing it
+// could not see into. The row survives because a fused instruction still reaches an amd64 binary by
+// the other route, an explicit math.FMA, which fusionprobe.Intrinsic now controls for and which the
+// scan refuses there. The level stays v3 because that is where the instruction is emitted
+// unconditionally, without the runtime feature test v1 compiles around it.
+//
+// Contraction is still the risk this check exists for, and it is not on the machine most of this is
+// written on: a developer's x86 corpus run passes whatever the arithmetic does, which is why the
+// scan compiles for machines other than the one it runs on. A Jetson is arm64.
 var fusingTargets = []struct {
 	goarch string
 	level  string
@@ -468,8 +479,15 @@ func fusionScan() int {
 		}
 		sort.Strings(sites)
 		for _, site := range sites {
-			failures += fail("%s: %s on %s — a product fused into an add; round it with float64(…) "+
-				"where it is formed, or where the helper that inlines it receives it", site, fused[site], name)
+			// The listing cannot say which of the two routes produced the instruction, so the
+			// remedy names both. Before amd64 had a control this only ever fired on a contraction
+			// and only the first half was written, which would have sent a reader to add a
+			// float64(…) around a call that has no product in it to round.
+			failures += fail("%s: %s on %s — a fused multiply-add, which this edition may not "+
+				"contain. If the optimiser folded a product into an add, round it with float64(…) "+
+				"where the product is formed, or where the helper that inlines it receives it; if "+
+				"the line calls math.FMA, spell the multiply and the add out instead",
+				site, fused[site], name)
 		}
 	}
 	fmt.Printf("fusion       %d architectures, each with its positive control\n", len(fusingTargets))
