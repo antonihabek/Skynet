@@ -111,7 +111,7 @@ function hex(value: number): string {
 }
 
 /** Rows of `items`, `perLine` to a line, each already rendered. */
-function rows(items: string[], perLine: number, indent = '    '): string {
+function rows(items: readonly string[], perLine: number, indent = '    '): string {
   const lines: string[] = []
   for (let at = 0; at < items.length; at += perLine) {
     lines.push(indent + items.slice(at, at + perLine).join(', ') + ',')
