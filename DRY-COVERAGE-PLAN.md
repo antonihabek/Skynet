@@ -446,11 +446,17 @@ Everything below is decided and unblocked. In order.
 2. **`notifies_operator`** (*Decisions* 2). Corpus first, as Phase 3 argues and §47.6 proved: the
    TypeScript oracle, then the 28 power cases, then the four complete editions, then the CLI.
 
-3. **Phase 1** (*Decisions* 5). Capture backend before inference backend, because the capture half
-   needs no dependency, reaches six allow-list entries on its own, and is what the inference half
-   consumes. Then the gate the plan already states: `skynetk` offers the frame pool, `skynetp` maps
-   it, a policy closes the loop against the MuJoCo driver for N cycles with no overruns, and the
-   sealed window is read back and replayed to identical verdicts.
+3. **Phase 1** (*Decisions* 5), of which the capture backend is **done** — `Source`, `Synthetic`
+   and `pump` in `skynet-capture`, and F11 is what writing it cost. Three steps left, in order:
+   1. **Wire `pump` into `skynet-kernel-host`'s `step_observing`.** The one allow-list entry with a
+      date attached to its removal. It needs a dependency edge that crate does not have and a
+      lifetime for the distributor and the source, which is why it is a step rather than a line.
+   2. **The inference backend** (§23.3), now permitted. One crate, a feature off by default,
+      `ci.yml`'s `Cargo.lock` check narrowed to that package rather than switched off, and the
+      safety kernel untouched — the terms in *Decisions* 5, which are narrower than "yes".
+   3. **The gate the plan already states**: `skynetk` offers the frame pool, `skynetp` maps it, a
+      policy closes the loop against the MuJoCo driver for N cycles with no overruns, and the sealed
+      window is read back and replayed to identical verdicts.
 
 4. **Bench evidence from a virtual robot** (*Decisions* 4). The one item that would move the dry
    ceiling off `none`, and the only one here that changes what this plan is allowed to claim.
@@ -613,4 +619,82 @@ any robot reporting it, and F1's ceiling is still arithmetic rather than a measu
 `missing`. `proximity` is inert on every robot. Nothing has been signed by a Hub. The dry ceiling is
 `none`, and three more editions now agree about it — which is a stronger statement that the number
 is right and not a weaker one that it is high enough.
+
+### 2026-09-16 (third session) — the decisions taken, and Phase 1's capture half
+
+The owner answered *Open for the owner* 5 — **ONNX allowed, narrowly** — and delegated the other
+nine. That section is now *Decisions, and who made them*. Six more commits here, one in the Hub,
+**nothing pushed**.
+
+**Changed.**
+
+| Decision | What happened |
+|---|---|
+| 3 | `check_code` deleted. **`tier_profile_to_json` kept** — see below |
+| 7 | The `no tier` headline says which of the two causes it is, extracted so the four shapes are testable |
+| 8 | §19's activation predicate moved onto `SignatureState::admits`; the report accessor stays for the `NotRun` arm it alone carries |
+| 9 | `skynet blackbox` reports whether the window it replayed was complete |
+| 2 | `notifies_operator` reaches the power document and then a surface — oracle, 28 corpus cases, four editions, CLI |
+| 5 | Phase 1's **capture half** built. The inference half is unstarted |
+| 1, 10 | §73's Rust figure moved 136,000 → 137,000 in both copies, as maintenance rather than as a negotiation |
+
+**Two decisions were wrong when made, and reading the code is what corrected them.**
+
+*Decision 3 said delete both.* `tier_profile_to_json` is **the only place in the workspace that
+renders `SAFETY_CLAIM_RULE` into an output** — the kernel declares the sentence, CI checks its text
+is intact, and nothing else emits it. Deleting it would have left CONTRIBUTING.md's rule with
+nothing implementing it and no check able to notice, which is a safety claim quietly weakened by a
+tidy-up. Its comment named a surface that does not exist; the comment was the defect.
+
+*Decision 8 said fold two copies into one.* They are not two copies. `driver_may_activate` also
+refuses a report that never ran, which `SignatureState` cannot express and which is not the same
+fact. The **predicate** was the duplicate and is now written once; the structural duplication —
+`runtime.rs` deciding activation without ever building a `Report` — is still there and is a larger
+refactor than §78's remedy asked for.
+
+### F11 — the first capture backend found the release rule wrong, in the worse direction.
+
+`Delivered` told a caller to release `displaced` **and** `not_recorded`, and said that was
+*"everything this call took ownership of and nothing it still holds"*. It is wrong about the second.
+`LatestSlot::publish` always accepts, so `not_recorded` is the frame that was **just published** —
+handed back only to report that the recorder refused it, while the slot holds that very buffer as
+the call returns. A backend following the documentation hands a live buffer back to the device.
+
+The two failure directions are not symmetric and this is the bad one. A pool that runs dry stops
+capture and looks like a driver fault, which somebody investigates; a buffer freed while a consumer
+reads it is a policy acting on a frame something else is writing, on a zero-copy path with nothing
+to catch it, three hours in.
+
+The fact underneath is that §47.4 gives one frame to two consumers, so a buffer has up to two
+holders and **no lend-and-return scheme can say when it is free**. A reference count answers it,
+which is what `dmabuf` does with an fd refcount and what V4L2 with a GPU and an encoder on one
+buffer does underneath. `Source::retain` now says so in the trait.
+
+Worth recording as a coverage finding rather than only as a bug: this crate had seventeen tests, a
+`no_std` discipline, and a doc comment for every public item — and the defect was in **what the
+documentation told the first caller to do**, which nothing that existed could have caught, because
+there was no caller. It is the exact argument 0.2's check makes, arriving one level up.
+
+**Verified.** The full gate at CI's toolchain, and all eight editions on the corpus:
+
+```
+cargo fmt --all --check / clippy -D warnings / cargo test    1,866 passed, 0 failed
+npx tsc -p .                                                 exit 0
+check-mirrors / check-contract-mirrors / golden-path         exit 0
+check-rhal-flags / check-production-callers                  944 checked, 33 allow-listed
+scale-report --check                                         §73 matches the tree
+rust python cpp go   1202/1202      c 354   zig 315   java 315   csharp 315
+Cargo.lock                                                   24 packages, all workspace members
+```
+
+Controls, each failing the suite and each reverted: `Untrusted` made to admit a driver; releasing
+the refused frame; forgetting the recorder's retain; leaking the displaced frame. The corpus's
+power cases were re-derived from the oracle rather than edited, and the four complete editions were
+each brought to them separately.
+
+**Not verified, and not claimed.** Still no robot, virtual or physical — PID 1 here is a container
+supervisor, so `virtual-robot.sh` did not run and neither did the `#[ignore]`d driver-loading
+suites. The capture backend has never seen a camera and does not claim to: what it demonstrates is
+the §47.4 discipline, which is a claim about frames and not about pixels. **No policy has closed a
+loop**, so Phase 1's gate is not met and nothing here moves the dry ceiling off `none`.
 
