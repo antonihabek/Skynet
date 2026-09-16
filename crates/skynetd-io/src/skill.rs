@@ -322,10 +322,12 @@ impl Invocation {
     /// duration exists — still produces one. That row is not training data, and a consumer has to
     /// be able to tell it apart from a skill that tried. The reason is what tells them.
     ///
-    /// **`interventions` is absent rather than zero** when nothing on this robot counts them.
-    /// §54.4 asks for the number; this edition has no kernel channel and therefore no source for
-    /// it, and a zero would be consumed by a marketplace as evidence of a clean run. §74.3 states
-    /// the general rule: zero and unmeasured are opposite facts.
+    /// **`interventions` is absent rather than zero** when nothing counted them. §54.4 asks for the
+    /// number and the module header says where it comes from — §13's ring, read by the caller —
+    /// and why a pass may still leave it unmeasured: no recording to read, or more than one
+    /// invocation sharing the interval. A zero in either case would be consumed by a marketplace as
+    /// evidence of a clean run. §74.3 states the general rule: zero and unmeasured are opposite
+    /// facts.
     ///
     /// **`recorded_at` is when it happened, not when it was sent.** §34.4's queue holds episodes
     /// through an outage, so a Hub stamping arrival time would file a week of work at the minute

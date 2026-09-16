@@ -170,6 +170,9 @@ jobs:
         run: MUJOCO_GL=osmesa make check-mujoco PYTHON=python3
 
   # The corpus, and the property that makes multiple editions survivable.
+  #
+  # Every step runs whatever the one before it did, for the reason the `invariants` job gives: each
+  # edition is an independent exam, and a C++ divergence must not hide a Go one behind it.
   corpus:
     runs-on: ubuntu-latest
     steps:
@@ -191,12 +194,14 @@ jobs:
         with:
           dotnet-version: '8.0'
       - name: Toolchain
+        if: ${{ !cancelled() }}
         run: rustup toolchain install stable --profile minimal
 
       # Regenerating must be a no-op. If it is not, the reference implementation's behaviour changed
       # without the corpus being updated in the same commit — which is precisely the state §31.4
       # forbids, because it means the editions are being measured against a stale specification.
       - name: The corpus is up to date with the reference
+        if: ${{ !cancelled() }}
         run: |
           node tools/corpus-gen/generate.ts
           git diff --exit-code --stat corpus/ || {
@@ -211,6 +216,7 @@ jobs:
       # opening up again is the ratchet each step below carries, and the report at the end of the job,
       # which refuses any edition with a single case unanswered.
       - name: Rust edition reproduces the corpus
+        if: ${{ !cancelled() }}
         run: cargo test -p skynet-corpus -- --nocapture
 
       # `--min-passed` is the ratchet, and it is here rather than in the runner's default because
@@ -220,6 +226,7 @@ jobs:
       # that reads as honest progress. Raise it when the edition grows; lowering it is a decision
       # somebody makes in a diff rather than something that happens quietly.
       - name: Python edition reproduces the corpus
+        if: ${{ !cancelled() }}
         run: python3 editions/python/run_corpus.py --min-passed 1202
 
       # The traps the corpus structurally cannot reach, and the checks on the runner itself.
@@ -228,6 +235,7 @@ jobs:
       # generator that writes through `JSON.stringify` cannot write an infinity at all. Neither
       # absence is a gap in the corpus, and neither is a reason to leave the branch unchecked.
       - name: The Python edition's own checks
+        if: ${{ !cancelled() }}
         run: python3 editions/python/self_check.py
 
       # The third edition (§31.3: C++, Certified ceiling, Full standing). `make check` is the round
@@ -242,6 +250,7 @@ jobs:
       # The scan compiles every unit with FMA made available and fails on any fused instruction; the
       # Makefile's `FP_FLAGS` is what keeps there being none.
       - name: C++ edition reproduces the corpus
+        if: ${{ !cancelled() }}
         run: make -C editions/cpp check
 
       # The fourth edition (§31.3: Go, Guest ceiling, Full standing) — §42's L2, like the two above
@@ -257,6 +266,7 @@ jobs:
       # loong64 the observation contract's rounding helper was being fused after inlining, and every
       # corpus run here passed.
       - name: Go edition reproduces the corpus
+        if: ${{ !cancelled() }}
         run: make -C editions/go check
 
       # The fifth edition (§31.3: C, Certified ceiling, Full standing) — §42's L2, and **partial**.
@@ -278,6 +288,7 @@ jobs:
       # probe is compiled with `fast` explicitly, because at the default it would not fuse on GCC 13
       # and the scan would report that it could not see one.
       - name: C edition reproduces the corpus it answers
+        if: ${{ !cancelled() }}
         run: make -C editions/c check
 
       # The sixth edition (§31.3: Zig, Host ceiling, Community standing) — §42's L2, and **partial**, at its own
@@ -290,6 +301,7 @@ jobs:
       # arithmetic differ from the reference's on every machine with an FMA. It cross-compiles for aarch64 and
       # x86-64 v3, which takes a minute on a cold cache.
       - name: Zig edition reproduces the corpus it answers
+        if: ${{ !cancelled() }}
         run: zig build --build-file editions/zig/build.zig check
 
       # The seventh edition (§31.3: Java / Kotlin, Guest ceiling, Community standing) — §42's L2, partial, same
@@ -304,6 +316,7 @@ jobs:
       # `file.encoding` UTF-8 and left the console streams on the platform's native encoding, and this runner
       # prints the report `edition-report.mjs` parses.
       - name: Java edition reproduces the corpus it answers
+        if: ${{ !cancelled() }}
         run: make -C editions/java check
 
       # The eighth edition (§31.3: C# / .NET, Guest ceiling, Community standing) — §42's L2, partial, same
@@ -319,6 +332,7 @@ jobs:
       # because the CLI's first-run banner goes to stdout and this runner prints the report
       # `edition-report.mjs` parses to stdout too.
       - name: C# edition reproduces the corpus it answers
+        if: ${{ !cancelled() }}
         run: make -C editions/csharp check
 
       # The published figure, held to the run that produces it. This is the last step in the job
@@ -333,6 +347,7 @@ jobs:
       # cannot catch a stale exact figure — only re-deriving it can — and the number was published
       # on a page for as long as nobody happened to run this tool by hand.
       - name: The published edition figures are what running the editions produces
+        if: ${{ !cancelled() }}
         run: node tools/edition-report.mjs --check
 
   # Six editions' case tables — C, C#, C++, Go, Java and Zig — are read out of the JavaScript engine the
@@ -353,6 +368,14 @@ jobs:
 
   # Claims this repository makes about itself, checked mechanically. Each of these is a sentence
   # somewhere in the specification that would otherwise decay quietly.
+  #
+  # **Every step runs, whatever the step before it did** (`if: ${{ !cancelled() }}`), and the job
+  # still fails if any of them failed. The steps are independent claims, and a job that stops at the
+  # first red one reports one defect and hides the rest. That is not hypothetical: on 2026-09-16 the
+  # oracle's type-check was fixed as the reason this job was red, and four steps behind it had been
+  # failing for up to thirteen days — a string-literal hole, three curl spawns outside the one module
+  # allowed them, and two checks gone stale against code that had moved on. Fixing one failure at a
+  # time, a CI run apiece, is how "fixed" turns into "revealed the next one" five times over.
   invariants:
     runs-on: ubuntu-latest
     steps:
@@ -366,9 +389,11 @@ jobs:
       # test in `console.rs` still green. This is the only check that can catch it, and a blank
       # console is a robot whose stop button is gone.
       - name: The console's script parses
+        if: ${{ !cancelled() }}
         run: node --check crates/skynetd-io/console/console.js
 
       - name: The console fixture's server parses
+        if: ${{ !cancelled() }}
         run: node --check crates/skynetd-io/console/fixture-serve.mjs
 
       # §31.4 makes the reference TypeScript the oracle every edition is measured against, and
@@ -381,6 +406,7 @@ jobs:
       # Installed rather than committed, so a checkout still has no `node_modules` and running the
       # oracle still needs nothing. See `tsconfig.json`.
       - name: The reference oracle type-checks
+        if: ${{ !cancelled() }}
         run: |
           npm install --no-save --no-audit --no-fund typescript @types/node
           npx tsc -p .
@@ -403,6 +429,7 @@ jobs:
       # `lib/skynet/os/safety.ts` fell six behind, and nothing could see it: the corpus holds the
       # Rust edition and the reference to each other, and the Hub's copies are outside it.
       - name: The shared documents and contracts have not diverged
+        if: ${{ !cancelled() }}
         run: |
           node tools/check-mirrors.mjs
           node tools/check-contract-mirrors.mjs
@@ -415,6 +442,7 @@ jobs:
       # counts anybody could recount and rounded to the nearest thousand about line counts, so a
       # reflow or a hundred new lines does not fail a build.
       - name: The specification still states the size of the thing it specifies
+        if: ${{ !cancelled() }}
         run: node tools/scale-report.mjs --check
 
       # §31.2 keeps the RHAL ABI single-source, and three mechanisms already enforce that for
@@ -425,6 +453,7 @@ jobs:
       # would put "ready to command" on the console of a robot whose brakes are on, with both
       # halves looking correct in isolation.
       - name: §24's flag values agree in all four places they are written
+        if: ${{ !cancelled() }}
         run: node tools/check-rhal-flags.mjs
 
       # §65 promises that a vendor engineer reaches a moving robot without reading Parts II
@@ -434,6 +463,7 @@ jobs:
       # into another, and the README keeps saying what it said — confidently, to somebody with no
       # way to tell it is wrong. Nothing else in this workflow reads a README.
       - name: The golden path still describes this repository
+        if: ${{ !cancelled() }}
         run: node tools/check-golden-path.mjs
 
       # A function that exists, is correct, is tested, and is called by nothing a robot runs.
@@ -454,12 +484,14 @@ jobs:
       # with no physical robot, and hardware is what usually catches a path nobody wired up — by not
       # moving. Taking it out of the loop takes that with it.
       - name: Every pub fn is reached by something that is not a test
+        if: ${{ !cancelled() }}
         run: node tools/check-production-callers.mjs
 
       # §7.4. The sentence the product is not allowed to shorten. It lives in the kernel as a
       # constant, and a surface that mentions the certified tier without it is a surface making a
       # claim nobody sanctioned.
       - name: The safety claim rule is intact
+        if: ${{ !cancelled() }}
         run: |
           grep -q "It does not certify a machine" crates/skynet-kernel/src/lib.rs
           grep -q "performed by a notified" crates/skynet-kernel/src/lib.rs
@@ -467,11 +499,13 @@ jobs:
       # §8.3. A policy is always sandboxed — no flag, no override. An escape hatch here would
       # quietly undo the invariant the whole safety argument rests on.
       - name: Only a driver may run native
+        if: ${{ !cancelled() }}
         run: grep -q 'manifest.kind != "driver" && manifest.isolation == "native"' crates/skynet-contracts/src/admission.rs
 
       # §23.1. "This never allocates" is a compile-time property or it is a promise, and a promise
       # is what code review produces on a good day.
       - name: The kernel links no allocator
+        if: ${{ !cancelled() }}
         run: |
           grep -q '#!\[no_std\]' crates/skynet-kernel/src/lib.rs
           ! grep -q 'extern crate alloc' crates/skynet-kernel/src/lib.rs
@@ -481,6 +515,7 @@ jobs:
       # rule is a property of the code rather than of a default, so the check is that the emitter
       # writes a literal null and nothing else can reach the field.
       - name: A generated descriptor never carries an envelope
+        if: ${{ !cancelled() }}
         run: |
           grep -q '\.set("envelope", Json::Null)' crates/skynet-urdf/src/descriptor.rs
           if grep -n 'set("envelope"' crates/skynet-urdf/src/descriptor.rs | grep -v 'Json::Null'; then
@@ -496,6 +531,7 @@ jobs:
       # corpus holds both to the oracle's answers; this is the check that the rule was not quietly
       # removed from either place while the corpus cases were removed with it.
       - name: A simulated body is capped at guest
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'input.simulator && (best == "host" || best == "certified")' \
             crates/skynet-contracts/src/certification.rs
@@ -514,6 +550,7 @@ jobs:
       # mapping layer rather than to the protocol. The protocol is the part where a mistake is a
       # moving robot, and it is the part the compiler checks.
       - name: Everything but the ABI, the loader and the three syscall crates forbids unsafe
+        if: ${{ !cancelled() }}
         run: |
           # An allow-list of the six, and every *other* crate in the workspace is required to
           # forbid it — enumerated from the directory rather than from a list kept beside it, so the
@@ -588,6 +625,7 @@ jobs:
       # Long literals only, and not the ones with embedded JSON: a short string may legitimately
       # align a column of CLI output, and a test fixture may pretty-print an object.
       - name: No string literal has a hole punched in it
+        if: ${{ !cancelled() }}
         run: |
           # `-o`, so the space test is applied to the **literal** and not to the source line. The
           # first version of this check matched a line's own indentation and fired on forty
@@ -610,6 +648,7 @@ jobs:
       # step in quietly acquiring the ability to write a joint, so the edge is asserted absent
       # rather than remembered absent.
       - name: skynetd cannot reach the RHAL
+        if: ${{ !cancelled() }}
         run: |
           # Both halves. §33.1 is a property of the *daemon*: "it never touches an actuator" stops
           # being true the moment either crate can, and the I/O half is the one that can actually
@@ -645,6 +684,7 @@ jobs:
       # rather than remembered: the brain does not read a clock, open a socket, spawn a process or
       # touch the filesystem. Everything that does lives in `skynetd-io`.
       - name: The reconciler stays a pure function
+        if: ${{ !cancelled() }}
         run: |
           if grep -rnE 'std::(fs|net|process|thread)|SystemTime|Instant::now|std::os::' crates/skynetd/src/; then
             echo "::error::skynetd reached for I/O."
@@ -660,6 +700,7 @@ jobs:
       # covering the fault that made the hole, and refusing to produce it would destroy the only
       # evidence at the moment it is worth something.
       - name: An incomplete recording is still sealed, and still says it is incomplete
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'pub fn complete' crates/skynet-blackbox/src/seal.rs
           if grep -nE 'return .*(Err|None).*incomplete|if !continuity.complete\(\)' \
@@ -680,6 +721,7 @@ jobs:
       # change that would take it away is somebody making `attest` fallible in a refactor and
       # threading a `?` through the callers — which reads like tightening and is the whole loss.
       - name: An attestation with a hole in it is still reported
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'pub fn attest' crates/skynet-contracts/src/identity.rs
           if grep -nE 'pub fn attest\(.*\) -> (Option|Result)' \
@@ -702,6 +744,7 @@ jobs:
       # agree about the vocabulary and says nothing about the direction of the test, so the
       # direction is checked here.
       - name: A device credential's scopes are an allow-list
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'pub const DEVICE_SCOPES' crates/skynet-contracts/src/identity.rs
           grep -q '!DEVICE_SCOPES.contains(&scope.as_str())' \
@@ -729,6 +772,7 @@ jobs:
       # this daemon spawns curl.** Two callers with the same rule is two places for the rule to be
       # lost, and the second one is always written by somebody copying the first.
       - name: No secret reaches a command line
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'pub fn post_json' crates/skynetd-io/src/connectivity.rs
           grep -q '"--config"' crates/skynetd-io/src/connectivity.rs
@@ -769,6 +813,7 @@ jobs:
       # every test in the suite, because every test asserts the file's *contents* rather than when
       # they were decided.
       - name: A pulled desired state is decoded before it is written
+        if: ${{ !cancelled() }}
         run: |
           file=crates/skynetd-io/src/intent.rs
           grep -q 'if verdict.adopt && verdict.changed' "$file"
@@ -785,6 +830,7 @@ jobs:
       # reached out to a Hub would be one — and would let anyone holding an observer credential make
       # this robot talk to the internet. The reconcile loop pulls; the route reports what it did.
       - name: Reading the intent does not pull
+        if: ${{ !cancelled() }}
         run: |
           if grep -nE '(intent|releases)::pull' crates/skynetd-io/src/api.rs; then
             echo "::error::a local API route pulls from the Hub."
@@ -802,6 +848,7 @@ jobs:
       # disk is never replaced under its own version, and the check is for the *refusal*, because
       # the edit that loses it is somebody making the pull idempotent by writing unconditionally.
       - name: A release manifest is not rewritten under its own version
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'different manifest for release' crates/skynetd-io/src/releases.rs || {
             echo "::error::the release pull no longer refuses a changed manifest."
@@ -817,6 +864,7 @@ jobs:
       # without one — which is what happened to the pairing exchange before it was moved into
       # `post_json`, and would have happened again to the pull.
       - name: Every curl gets its credential on stdin
+        if: ${{ !cancelled() }}
         run: |
           file=crates/skynetd-io/src/connectivity.rs
           spawns=$(grep -c 'Command::new("curl")' "$file")
@@ -836,6 +884,7 @@ jobs:
       # The change that breaks it looks like a fix: a fleet console shows a robot as behind, somebody
       # traces it to the check-in, and the obvious edit is to report the number the Hub sent.
       - name: A check-in reports the generation the robot applied
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'pub fn claim_for' crates/skynet-contracts/src/checkin.rs
           if grep -nE 'generation: desired' crates/skynet-contracts/src/checkin.rs; then
@@ -851,11 +900,17 @@ jobs:
       # duplicates. Grepped for the shape rather than asserted, because the addition that breaks it
       # is one field somebody adds to make a dashboard nicer.
       - name: A check-in carries no history
+        if: ${{ !cancelled() }}
         run: |
           # `-H` so a single-file grep still prints the name, which is what the comment filter
           # anchors on. Without it the filter silently matches nothing and the module's own header —
           # which contains the word this looks for — trips the check.
-          if grep -nHEi 'since_last|_since_|delta_|history|events:' \
+          #
+          # `delta_` is anchored to the start of an identifier. Unanchored it matched
+          # `max_delta_per_cycle` from a61bacf on — the guard report's jerk **ceiling**, which is a
+          # configured limit and exactly the statement about now this step wants — and the job was
+          # red for it behind an earlier failing step, so nothing said so.
+          if grep -nHEi 'since_last|_since_|(^|[^[:alnum:]_])delta_|history|events:' \
               crates/skynet-contracts/src/checkin.rs \
               | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|///|/\*|[*])'; then
             echo "::error::a check-in grew a field about the past."
@@ -875,6 +930,7 @@ jobs:
       # function name and the shorter one still compiles, still passes every assertion about the
       # sentence, and still renders correctly on every console.
       - name: A check-in carries the three digests, not only the sentence
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'attestation_to_json(&built.attestation)' crates/skynet-contracts/src/checkin.rs
           for measure in os_image policy embodiment; do
@@ -897,6 +953,7 @@ jobs:
       # the credential would be a bearer secret on a LAN listener, and the change that does it is
       # one field added to a JSON object by somebody making a check-in easier to write.
       - name: The identity document holds no credential
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'pub fn credential' crates/skynetd-io/src/layout.rs
           grep -q 'pub fn device' crates/skynetd-io/src/layout.rs
@@ -912,6 +969,7 @@ jobs:
       # subject, a formatted message as a code — is how a recorder becomes a log file and the
       # completeness guarantee stops meaning anything.
       - name: The black box event vocabulary stays closed
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'pub enum EventCode' crates/skynet-blackbox/src/record.rs
           grep -q 'A closed enum rather than a free string' crates/skynet-blackbox/src/record.rs
@@ -922,6 +980,7 @@ jobs:
       # editions — and the two channels of a redundant pair — disagree about a clamp, and the
       # disagreement would present as a specification dispute rather than as a build change.
       - name: The kernel computes its own transcendentals
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'pub fn sin' crates/skynet-kernel/src/real.rs
           grep -q 'pub fn cos' crates/skynet-kernel/src/real.rs
@@ -948,6 +1007,7 @@ jobs:
       # guard reported as running because a document asserted it could is the most damaging form of
       # the failure §7.2 exists to prevent.
       - name: The pose guards ask for evidence and not for a claim
+        if: ${{ !cancelled() }}
         run: |
           if grep -nE 'available\.(solvers|collision_model)' crates/skynet-kernel/src/lib.rs; then
             echo "::error::a pose guard is gated on a descriptor's self-assessment again."
@@ -964,6 +1024,7 @@ jobs:
       # reported itself unavailable, naming the frame" into "the robot holds still every cycle for
       # the life of the lease" — the same outcome with the reason removed.
       - name: Unreachable frames are refused at lease time, not every cycle
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'pub fn statically_resolvable' crates/skynet-kernel/src/kinematics.rs
           grep -q 'statically_resolvable' crates/skynet-kernel/src/lib.rs
@@ -973,6 +1034,7 @@ jobs:
       # it because no corpus *input* carried a capability token or a separation distance. A corpus
       # grows a hole wherever an input field is missing, not only where an implementation is.
       - name: Every guard the kernel implements appears in the corpus
+        if: ${{ !cancelled() }}
         run: |
           for field in capability nearest_person_m; do
             grep -q "$field" corpus/fuzz/cycle.json || {
@@ -997,6 +1059,7 @@ jobs:
       # kernel's ceilings also raise the claim that somebody had checked them. The decoder must
       # never read that key; only a signature verified on the robot may set it.
       - name: A profile cannot assert its own verification
+        if: ${{ !cancelled() }}
         run: |
           if grep -nE 'get\("verified"\)|string\(raw, "verified"\)' crates/skynetd/src/desired.rs; then
             echo "::error::the desired-state decoder read a `verified` key from the document."
@@ -1012,6 +1075,7 @@ jobs:
       # consequential moment. Losing it would leave a report that says `signature_untrusted` next to
       # a robot that loaded the code anyway.
       - name: A driver does not activate without a trusted signature
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'fn driver_signature_refusal' crates/skynetd-io/src/runtime.rs
           grep -q 'driver_signature_refusal' crates/skynetd-io/src/runtime.rs
@@ -1026,6 +1090,7 @@ jobs:
       # it could not parse would make adding a key a way to delete the entry somebody is trying to
       # find. The store therefore keeps every unusable line verbatim and re-emits it in place.
       - name: A trust store rewrite preserves what it could not parse
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'raw: entry.clone()' crates/skynetd-io/src/trust.rs
           grep -A6 'pub fn to_json' crates/skynetd-io/src/trust.rs \
@@ -1040,6 +1105,7 @@ jobs:
       # `--by` records nobody rather than whatever `\$USER` happens to say, because an environment
       # variable is not an identity and a confidently wrong provenance is worse than an absent one.
       - name: Provenance is never guessed from the environment
+        if: ${{ !cancelled() }}
         run: |
           if grep -rnE 'env::var\("(USER|SUDO_USER|LOGNAME|USERNAME)"\)' crates/skynetd-io/src/; then
             echo "::error::something read a username out of the environment for an audit record."
@@ -1054,6 +1120,7 @@ jobs:
       # edge of a phone — with the *status* panel among the things hanging over it. A page that
       # scrolls sideways puts the stop button's own row off screen.
       - name: The console cannot be widened by one panel
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'main > \* { min-width: 0; }' crates/skynetd-io/console/console.css
           grep -q 'overflow-x: auto' crates/skynetd-io/console/console.css
@@ -1063,6 +1130,7 @@ jobs:
       # counted `unavailable` or `elsewhere` as "not a failure, therefore fine" would produce a
       # robot cleared to run a policy on the strength of three checks out of eight.
       - name: A self-test that could not run is not a self-test that passed
+        if: ${{ !cancelled() }}
         run: |
           grep -A4 'pub fn may_run' crates/skynetd-io/src/post.rs \
             | grep -q 'check.outcome == Outcome::Pass' || {
@@ -1083,6 +1151,7 @@ jobs:
       # is resetting the processor — turns a watchdog reset into a fall. Rewriting this as a ceiling
       # would silently permit exactly the configuration it exists to refuse.
       - name: A coasting body is refused host and nothing else
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'fn host_blocked_by_command_loss' crates/skynet-contracts/src/watchdog.rs
           grep -q 'Some("coast") => Some' crates/skynet-contracts/src/watchdog.rs
@@ -1101,6 +1170,7 @@ jobs:
       # strict, and an undeclared window is reported rather than skipped — a nesting report that
       # ignored the window it could not get would be reporting on a chain it had not established.
       - name: The watchdog windows nest strictly
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'if inner < outer {' crates/skynet-contracts/src/watchdog.rs
           grep -q 'fn equal_windows_do_not_nest' crates/skynet-contracts/src/watchdog.rs
@@ -1113,6 +1183,7 @@ jobs:
       # `victim()` being allowed to evict upwards, which would let a flood of telemetry take out
       # the incident it is supposed to make room beside.
       - name: An incident is never dropped to make room
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'fn droppable' crates/skynetd-io/src/outbound.rs
           grep -q 'self != Class::Incident' crates/skynetd-io/src/outbound.rs
@@ -1127,6 +1198,7 @@ jobs:
       # the thundering herd smeared rather than broken up. The delay must be uniform over
       # [0, exponential], and the cap must survive a jitter nobody clamped.
       - name: Backoff jitter is full and the cap holds
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'jitter.clamp(0.0, 1.0)' crates/skynetd-io/src/outbound.rs
           grep -q 'min(BACKOFF_CAP_MS)' crates/skynetd-io/src/outbound.rs
@@ -1138,6 +1210,7 @@ jobs:
       # table that maps a parameter set to the guards it feeds is §45.2's deliverable, and a guard
       # spelled wrongly in it disables nothing while reading as though it disabled something.
       - name: Every calibrated parameter set names real guards
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'fn the_guard_table_names_only_guards_the_kernel_has' \
             crates/skynet-contracts/src/calibration.rs
@@ -1150,6 +1223,7 @@ jobs:
       # tempting `if let Some(current)` that skips the check on a missing input is how that gets
       # quietly inverted.
       - name: A missing reading expires a calibration rather than extending it
+        if: ${{ !cancelled() }}
         run: |
           for reason in age joint_travel temperature; do
             grep -q "reason: \"$reason\"" crates/skynet-contracts/src/calibration.rs || {
@@ -1169,6 +1243,7 @@ jobs:
       # `[dev-dependencies]` is the supported arrangement, and naming it anywhere else puts a
       # non-constant-time signer into a binary that runs on a machine that can move.
       - name: The signer is not in anything that ships
+        if: ${{ !cancelled() }}
         run: |
           fail=0
           for manifest in Cargo.toml crates/*/Cargo.toml; do
@@ -1204,6 +1279,7 @@ jobs:
       # deciding an outcome it is not entitled to, which is the one thing this section exists to
       # prevent and would look entirely reasonable in a diff.
       - name: The runtime never decides a skill succeeded
+        if: ${{ !cancelled() }}
         run: |
           if grep -nE 'SkillOutcome::(Success|Failure)' crates/skynetd-io/src/skill.rs; then
             echo "::error::the skill runtime named a success or a failure directly."
@@ -1213,21 +1289,33 @@ jobs:
           fi
           grep -q 'judge_success' crates/skynetd-io/src/skill.rs
 
-      # §54.4 asks the episode to carry an intervention count, and this edition has no source for
-      # one: §33.1 keeps the daemon off the actuator path, so nothing counts. A zero would be
-      # consumed by a marketplace as evidence of a clean run.
+      # §54.4 asks the episode to carry an intervention count. The daemon reads it off §13's ring
+      # (§33.1 keeps it off the actuator path, and it does not need to be on it: the kernel wrote
+      # down what it did), and a pass it cannot attribute — nothing counted, or two invocations
+      # sharing the interval — leaves the count unmeasured. A zero there would be consumed by a
+      # marketplace as evidence of a clean run.
       #
       # The switch is asserted present rather than the absence asserted, because the failure mode is
       # somebody deleting the `Option` to make a field always appear — which is a one-line change
       # that makes every episode claim a number nobody measured.
+      #
+      # Rewritten on 2026-09-16. The first line used to require `pub guards_observable: bool`, which
+      # aed1306 replaced with `interventions_since: Option<u64>` on 2026-09-03 — deliberately, and
+      # for §7.2's reason — so this step failed from that commit on. Nobody saw it because an earlier
+      # step in this job was failing too. The zero check also named `intervention_count`, which the
+      # episode stopped writing when it took the route's field names, so it could not fail at all.
       - name: An intervention count is absent rather than zero
+        if: ${{ !cancelled() }}
         run: |
-          grep -q 'pub guards_observable: bool' crates/skynetd-io/src/skill.rs
+          grep -q 'pub interventions_since: Option<u64>' crates/skynetd-io/src/skill.rs
           grep -q 'interventions: Option<u32>' crates/skynetd-io/src/skill.rs
-          if grep -nE 'intervention_count.*Json::Num\(0' crates/skynetd-io/src/skill.rs; then
-            echo "::error::an episode reported an intervention count of zero."
-            echo "§33.1: nothing on this robot counts interventions, so the honest episode omits"
-            echo "the field. A zero is a number a marketplace reads as a clean run."
+          grep -q '"interventions_measured", Json::Bool(false)' crates/skynetd-io/src/skill.rs
+          if grep -nE 'set\("interventions",[[:space:]]*Json::Num\(0|interventions(_since)?\.unwrap_or' \
+              crates/skynetd-io/src/skill.rs; then
+            echo "::error::an episode can report an intervention count nobody measured."
+            echo "§54.4 and §74.3: zero and unmeasured are opposite facts. An interval nothing counted"
+            echo "omits the field and says so in metadata; a zero is a number a marketplace reads as"
+            echo "a clean run."
             exit 1
           fi
 
@@ -1237,6 +1325,7 @@ jobs:
       # resolves, so the clause is answered instead of refused, and a robot with no battery sensor
       # starts every skill that asked about its battery.
       - name: The live context has no nulls in it
+        if: ${{ !cancelled() }}
         run: |
           if grep -n 'Json::Null' crates/skynet-contracts/src/live.rs; then
             echo "::error::the live precondition context can emit a null."
@@ -1257,6 +1346,7 @@ jobs:
       # has passed a bench test at some point" is satisfied by every robot the gate exists to
       # protect.
       - name: OTA is not a route around certification
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'CERTIFICATION_GATED' crates/skynet-contracts/src/ota.rs
           if ! grep -q '!OS_COMPONENTS.contains(&component)' crates/skynet-contracts/src/ota.rs; then
@@ -1277,6 +1367,7 @@ jobs:
       # §12's second rule. A health check that could confirm a slot it had not been told about
       # replaces an unattended recovery with a race, so absence of evidence must never confirm.
       - name: A boot nobody has checked is never confirmed
+        if: ${{ !cancelled() }}
         run: |
           grep -q 'post_passed: Option<bool>' crates/skynet-contracts/src/ota.rs
           if grep -nE 'post_passed.*unwrap_or\(true\)|packages_healthy.*unwrap_or\(true\)|converged.*unwrap_or\(true\)' \
@@ -1291,6 +1382,7 @@ jobs:
       # able to build this with no network, and the kernel cannot reach most of the ecosystem
       # anyway.
       - name: No third-party dependencies
+        if: ${{ !cancelled() }}
         run: |
           # Cargo.lock is the resolved graph, so this catches a transitive dependency as readily as
           # a direct one. Every package in it must be a workspace member, and the member list is
