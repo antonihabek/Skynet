@@ -32,7 +32,7 @@ else
   endif
 endif
 
-.PHONY: all check check-lerobot check-mujoco check-capture check-loop check-offline clean
+.PHONY: all check check-lerobot check-mujoco check-capture check-loop check-loop-mujoco check-offline clean
 
 all: $(LIB)
 
@@ -87,6 +87,17 @@ check-capture: $(LIB)
 # them, and `make` gives each recipe line a shell of its own.
 check-loop: $(LIB)
 	LIB=$(LIB) PYTHON=$(PYTHON) sh ./loop.sh
+
+# The same gate with a physics simulator on the other side of the same ABI, rendering its own wrist
+# camera offscreen rather than drawing a pattern. DRY-COVERAGE-PLAN.md's fifth session recorded the
+# LeRobot fake as a departure from the gate as written and said joining MuJoCo to it was "one line in
+# that Makefile on a machine with it" — it was this line plus the body block in `loop.sh`, because
+# the camera's geometry is on `skynetk`'s command line and in the model, and the two are deliberately
+# separate statements (F16).
+#
+# Needs `pip install mujoco` and an offscreen GL: MUJOCO_GL=osmesa with libosmesa6 installed, or egl.
+check-loop-mujoco: $(LIB)
+	BODY=mujoco LIB=$(LIB) PYTHON=$(PYTHON) sh ./loop.sh
 # The same loop with no network at all, in a namespace holding only loopback. §11 says no control
 # decision may require a network round trip, and §15 makes that a bench test because it needs a machine
 # rather than a model — this is the machine. It is not a recorded bench *result*: nothing in this
