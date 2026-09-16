@@ -48,6 +48,9 @@ impl ReadFailure {
             DriverError::Absent(_) => -38,
             DriverError::Open(code) => *code,
             DriverError::Load(_) | DriverError::Rejected(_) => -19,
+            // `-EPROTO`, §24's "the device answered, and the answer was not valid": the call
+            // succeeded and what came back cannot be used as given.
+            DriverError::Malformed { .. } => -71,
         };
         ReadFailure {
             // A driver that returned zero and called it an error is a driver disagreeing with §24.
