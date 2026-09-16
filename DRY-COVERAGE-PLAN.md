@@ -341,6 +341,15 @@ not measure** to find this. That is the argument for the loop existing, arriving
 
 ### F18 — `revoke_loans` cannot be wired, and the available signal is worse than none.
 
+> **Closed, 2026-09-16 (eighth session), and the finding's last paragraph was the thing to doubt.**
+> It said *"what is sound is the process being gone: a `pidfd` on it, or the supervisor that
+> launched the unit saying so"*, and then that *"the process that holds the pool has neither"* — so
+> the work was framed as choosing between two owners and building a channel. Neither was needed.
+> `SO_PEERPIDFD` exists precisely because `SO_PEERCRED` plus `pidfd_open` is racy, and it hands the
+> **descriptor** straight to whoever holds the accepted socket. The process that holds the pool is
+> the process that accepts, so it has had the sound signal available since Linux 6.5 and the finding
+> did not know to ask. Kept rather than rewritten, for F3a's reason.
+
 Found by the doc-comment check below. Its documentation said *"called by the runtime when a policy's
 process exits"*, which described the design and not the tree: nothing calls it, and no process that
 holds a `Writer` has a **sound** signal that the reader is gone.
@@ -385,6 +394,78 @@ reserve stops taking work. What it does not do is say so to a person.
 Closing it is a wire change — a field on the power document, the TypeScript oracle, the corpus's 28
 power cases and four editions — so it was raised rather than done. **Decided as 2 under *Decisions*:** wired.
 
+### F21 — *Next* 4 was called "the one item that would move the dry ceiling off `none`". It is one of three.
+
+Built and then measured, which is the only way this could have been settled. With
+`offline.control.independent` recorded and applied, `skynet bench award --claim guest` reports:
+
+```
+missing  rhal.abi.version, rhal.state.completeness, rhal.command.rejection,
+         embodiment.descriptor.valid, safety.kernel.parity, safety.policy.isolation,
+         package.signature.required, package.grants.gate, security.credential.scope
+guest: 0 failing, 9 unmeasured.
+```
+
+Nine, all `sim`. The bench blocker is gone and the ceiling did not move, because guest requires ten
+tests and only one of them was ever the bench one. The other nine split three ways, and only the
+first is an absence of plumbing:
+
+* **Four are measured by `skynet driver check` and had no way out of it** — that is what
+  `--results` is, and with both files on one command line the award folds them together. So this
+  half is now closed for a driver; it is not closed for the loop, whose subject is three binaries
+  rather than a shared object, and which has no driver-facing sim run at all.
+* **Four are the runtime's**, and `skynetd-io::conformance` runs them — on a robot, over a socket.
+  There is no producer that writes them to a file, so they cannot reach an award computed anywhere
+  else. Named rather than built: it is `GET /conformance` plus a `--results` flag on
+  `skynet conformance`, and it needs a robot to be worth having.
+* **`package.signature.required` fails**, and §15.1 spends a paragraph saying so on purpose: §37.1's
+  admit stage reports rather than gates for every package kind but a driver, an unsigned package
+  installs, and the platform's own suite says so about it. A failure is not an absence, and nothing
+  in *this* plan closes it.
+
+So the dry ceiling is `none` for **three** independent reasons and the plan has been counting one.
+The correction matters in the direction that always matters here: *Next* 4 was the item the plan
+said would end the `none`, and finishing it ends nothing. What it does do is make the first reason
+the *only* one that is about plumbing rather than about a robot or a decision — which is a smaller
+claim and a true one.
+
+### F22 — `make check-offline` had never run on a checkout with file modes, and its network guard could not fail.
+
+Two defects in one script, found by running it. The fifth session's entry records `check-offline`
+green; that was WSL, where a Windows filesystem reports every file executable.
+
+* **`loop.sh` is committed `100644`** and the offline path does `exec unshare -rn "$0"`, which needs
+  the execute bit. Every offline run on a real Linux checkout died as
+  `unshare: failed to execute ./loop.sh: Permission denied`, before a single assertion. The bit is
+  set now, and the re-exec goes through `/bin/sh` so that the mode stops being load-bearing — a zip,
+  a Windows checkout or a filesystem without modes all behave the same way.
+* **The network probe was `ip route show 2>/dev/null | wc -l`.** `ip` is `iproute2` and is absent
+  from minimal images; a command that is not found writes nothing to stdout, and `wc -l` of nothing
+  is `0`. So *"this namespace has 0 route(s)"* was also what a machine with a default route and no
+  `iproute2` reported — and the guard passed, on the sentence whose own comment says *"a run that
+  reported offline with a default route would be measuring the opposite of what it claims"*.
+
+The second is the one worth keeping. It is F9's asymmetry again: a false positive is an argument
+somebody writes down, a false negative is an answer nobody goes and checks. The reading now comes
+from `/proc/net/route` and `/proc/net/dev` — the kernel's own tables, present on every Linux, empty
+in a fresh namespace — and an unreadable one is a refusal rather than a zero. Held to a control: run
+with `SKYNET_LOOP_REEXEC=1` so no namespace is made, and it refuses with *"2 route(s) and 3
+non-loopback interface(s)"* where the old probe said zero and continued.
+
+### F23 — the sim suite's one quantitative test threw its number away.
+
+§15 marks nine tests quantitative and exactly one of them is `sim`:
+`embodiment.roles.coverage`, measured in %. `skynet driver check` has computed that percentage since
+the command was written, interpolated it into a sentence, and kept nothing. The fifth instance of
+this repository's four-times defect and the first found by a *reader* rather than by an audit: the
+results document refuses a quantitative pass with no `value`, `--results` was written, and the
+command's own output would not load.
+
+`CheckResult::with_value` is the fix and it is one call site. Worth recording because of what it
+says about the cost of the refusal: the rule exists for `safety.estop.latency`, where §15 says in
+its own words that a driver returning success is not evidence — and the first thing it caught was a
+number this workspace already had.
+
 ---
 
 ## Phase 0 — the dry-mode contract
@@ -400,6 +481,7 @@ Buys no coverage. Everything after it is unsafe without it.
 | 0.3 | `virtual-robot.sh` as the harness of record | **Done by this document** — it already runs on every push; this is the record saying it is the one |
 | 0.4 | Limit provenance | **Already built — F3** |
 | 0.5 | A runner for the checks the pre-PR gate does not contain | **Done** — `tools/run-ci-job.mjs`, and F14 is why it exists |
+| 0.6 | A wire form for bench evidence, bound to its subject | **Done** — `skynet_contracts::bench`, `skynet bench record` / `award`. *Next* 4, and F21–F23 are what building it found |
 
 **0.1b did not become a `ci.yml` grep, deliberately.** The Rust test runs in the blocking `rust` job
 and names the test that moved when it fails, so a grep over the same source line would be a second
@@ -676,18 +758,17 @@ Everything below is decided and unblocked. In order.
      had to be, by executing it against ONNX Runtime 1.30.0, and it found a real defect on the way
      (F20). What remains unbuilt is LibTorch and any provider but CPU, both deliberate.
 
-4. **Bench evidence from a virtual robot** (*Decisions* 4). Still the one item that would move the dry
-   ceiling off `none`, and this session sharpened what is missing. It is **not the measurement**:
-   `make -C drivers/python-host check-offline` now runs the whole loop inside a network namespace
-   holding only loopback — no route, no resolver, nothing to reach — and it closes, which is §11's
-   invariant measured on a machine rather than argued about.
+4. ~~**Bench evidence from a virtual robot**~~ (*Decisions* 4). **Done**, 2026-09-16 (eighth session).
+   `skynet_contracts::bench` is the format — a record bound to the digest of the artefacts it was
+   taken against, §12's `BenchPassStale` in general form — and `skynet bench record` and
+   `skynet bench award` are the two ends. `check-offline` writes one over the three binaries that
+   decided and reads it back, so the offline run is evidence recorded rather than a property
+   demonstrated, and `offline.control.independent` is no longer among an award's `missing`.
 
-   What is missing is **the record**. §12 binds a result to the digest of the bytes it was taken
-   against, and nothing in this workspace produces or consumes such a thing: `skynet driver check`
-   measures the `sim` suite and says so, and `CertificationInput` has nowhere for a bench result to
-   come from. So the next step is a format and two ends for it, and until it exists a green
-   `check-offline` is a property demonstrated and not evidence recorded. Both scripts say so on every
-   run rather than leaving it to be assumed.
+   **It did not move the dry ceiling, and F21 is why.** The item was described here as the one that
+   would, and that was wrong by two: guest needs ten tests, one was the bench one, and of the nine
+   `sim` tests left four have no producer that writes to a file and one *fails* by design. The
+   remaining work is named in F21 rather than implied.
 
 5. ~~**A check on doc comments that name a caller**~~ (F9). **Done** — the same tool, and it found two
    live claims on its first run: `revoke_loans` said *"called by the runtime"* (F18) and `asks_for_us`
@@ -697,9 +778,19 @@ Everything below is decided and unblocked. In order.
    passes and *"for the responder"* does not. There is deliberately no allow-list for this half — F9
    records what one costs.
 
-6. **`revoke_loans`' signal** (F18). A `pidfd` on the policy's process, or the supervisor that launched
-   the unit telling the process that holds the pool. Small either way; the decision is which process
-   owns the fact, and the convenient signal is unsound.
+6. ~~**`revoke_loans`' signal**~~ (F18). **Done**, 2026-09-16 (eighth session). The decision was
+   which process owns the fact, and the answer turned out to be neither of the two the finding
+   named: **the kernel owns it**. `SO_PEERPIDFD` (Linux 6.5) on the accepted socket returns a
+   *descriptor* for the peer, so the process that holds the pool learns the fact directly, about the
+   process that actually received the descriptors, with no cross-daemon channel and no pid to be
+   reused. `pass::peer_pidfd`, `Port::reap_departed`, `Camera::revoke_pool_loans`, and `skynetk`
+   calls it on that answer and no other.
+
+   The rule is all-or-nothing — the loans region carries one claim per slot and **no owner**, so
+   there is no revoking one reader's — and a hand-over the kernel would not name disables it for the
+   run, which `skynetk` prints rather than leaving to be inferred from a pool that never recovers a
+   slot. Held to two controls: `any` in place of `all` fails the middle assertion, and forgetting to
+   forget the generation fails the last.
 
 Phases 2 and 5 are unchanged and unstarted. **Phase 3's blocker is cleared** — *Decisions* 6 deferred
 its specification fields behind Phase 1's gate, and the gate is met — so motion primitives are now the

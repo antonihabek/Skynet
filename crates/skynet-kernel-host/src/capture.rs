@@ -322,6 +322,23 @@ impl Camera {
         self.pool.as_ref()
     }
 
+    /// Drop every loan in the pool, because every policy that held one has exited.
+    ///
+    /// `true` when there was a pool to do it to. The caller decides **when**, and there is exactly
+    /// one condition under which it may: `handoff::Port::reap_departed`, which answers from a pidfd
+    /// the kernel gave it. Calling this while a reader is alive takes a slot out from under it,
+    /// which is the one property §47.6 exists to provide — so this deliberately reads nothing and
+    /// decides nothing, and every word of the argument lives at the two ends that have the facts.
+    pub fn revoke_pool_loans(&mut self) -> bool {
+        match self.pool.as_mut() {
+            Some(pool) => {
+                pool.revoke_loans();
+                true
+            }
+            None => false,
+        }
+    }
+
     /// The sensor's counts.
     pub fn sensor(&self) -> &RhalSensor {
         &self.sensor

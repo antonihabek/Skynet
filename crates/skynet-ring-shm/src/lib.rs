@@ -88,6 +88,14 @@ pub enum ShmError {
     /// socket worked and the peer sent something that was not a ring. A policy that treated it as a
     /// transport error would retry for ever against a runtime that is never going to send one.
     NoDescriptor,
+    /// The kernel would not name the process on the other end of a socket, with its `errno`.
+    ///
+    /// Its own variant, because the only useful reaction to it is to stop asking. `ENOPROTOOPT` is
+    /// a kernel older than `SO_PEERPIDFD` (Linux 6.5), which is a property of the machine rather
+    /// than of the call — and the caller's next move is not to retry but to do without the signal,
+    /// which for [`pass::peer_pidfd`]'s one caller means never revoking a loan rather than
+    /// revoking one on a guess.
+    NoPeerIdentity(i32),
 }
 
 impl ShmError {
@@ -104,6 +112,7 @@ impl ShmError {
             ShmError::Send(_) => "send",
             ShmError::Receive(_) => "receive",
             ShmError::NoDescriptor => "no-descriptor",
+            ShmError::NoPeerIdentity(_) => "no-peer-identity",
         }
     }
 }
@@ -123,6 +132,13 @@ impl core::fmt::Display for ShmError {
             ShmError::NoDescriptor => write!(
                 f,
                 "the peer on this socket sent no descriptor, so there is no ring here to map"
+            ),
+            ShmError::NoPeerIdentity(e) => write!(
+                f,
+                "the kernel would not name this socket's peer process: errno {e}. On errno 92 \
+                 (ENOPROTOOPT) this kernel is older than SO_PEERPIDFD (Linux 6.5), and there is no \
+                 race-free way to ask — so the caller does without the signal rather than guessing \
+                 at one"
             ),
         }
     }

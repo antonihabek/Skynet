@@ -750,6 +750,7 @@ fn run(args: &[String]) -> i32 {
     let mut recorder_failed = false;
     let mut camera_failed = false;
 
+    let mut loans_revoked = 0u64;
     let mut cycle = 0u64;
     loop {
         if let Some(limit) = options.cycles {
@@ -771,6 +772,23 @@ fn run(args: &[String]) -> i32 {
                     None => "took the rings",
                 };
                 println!("policy     {took} ({} so far)", port.handed());
+            }
+        }
+
+        // §47.6's loans, given back on behalf of a reader that cannot give them back itself. The
+        // port answers `true` only when every policy that took the pool has exited — a pidfd from
+        // the kernel, not the socket closing — and a slot reclaimed while a reader is alive is the
+        // one thing the pool exists to prevent, so the condition is all-or-nothing and its argument
+        // is in `Port::reap_departed`.
+        if let (Some(port), Some(camera)) = (port.as_mut(), camera.as_mut()) {
+            if port.reap_departed() && camera.revoke_pool_loans() {
+                loans_revoked += 1;
+                if !options.quiet {
+                    println!(
+                        "policy     every policy that took the frame pool has exited — its loans \
+                         are revoked (§47.6)"
+                    );
+                }
             }
         }
 
@@ -839,6 +857,25 @@ fn run(args: &[String]) -> i32 {
 
     if let Some(camera) = camera.as_mut() {
         camera_failed |= report_camera(camera);
+    }
+
+    // §47.6's loans, and whether this run could ever have given one back. Printed even at zero,
+    // for `report_camera`'s reason: a run in which no policy ever exited and a run in which the
+    // kernel could not tell would otherwise print the same thing, and they are opposite facts.
+    if let Some(port) = port.as_ref() {
+        if port.handed() > 0 {
+            println!("loans revoked   {loans_revoked} (§47.6, on a policy's last process exiting)");
+            if port.unidentified() > 0 {
+                println!(
+                    "                {} of {} policies could not be named by the kernel, so no \
+                     loan was ever revocable on this run. A kernel older than 6.5 has no \
+                     SO_PEERPIDFD, and there is no race-free substitute — a crashed policy keeps \
+                     the slots it held, and `published` above counts what that cost",
+                    port.unidentified(),
+                    port.handed()
+                );
+            }
+        }
     }
 
     // Sealed on the way out, because a window nobody sealed is a ring the next run overwrites.
