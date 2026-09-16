@@ -222,6 +222,27 @@ impl Report {
     }
 }
 
+/// Why a driver reached no tier, in the words each cause deserves.
+///
+/// Kept apart from its caller so the four shapes can be tested without building a report, which is
+/// also what makes it possible to assert the thing that matters: that no two of them read alike.
+fn no_tier_detail(failed: usize, unmeasured: usize) -> String {
+    match (failed, unmeasured) {
+        // Neither. The ceiling is something this command does not measure at all — the runtime and
+        // edition properties in NOT_COVERED — so naming a count here would invent one.
+        (0, 0) => "this driver does not yet reach guest tier".to_string(),
+        (0, n) => format!(
+            "nothing here failed — {n} guest-tier test(s) have no result yet, and absence is not \
+             a pass (§15)"
+        ),
+        (n, 0) => format!("{n} guest-tier test(s) failed"),
+        (n, m) => format!(
+            "{n} guest-tier test(s) failed and {m} more have no result — two different problems, \
+             and both cap the tier"
+        ),
+    }
+}
+
 /// Tiers, weakest first.
 const TIERS: [&str; 3] = ["guest", "host", "certified"];
 
@@ -1145,10 +1166,26 @@ pub fn print(report: &Report) -> i32 {
     let (tier, blockers) = report.attainable_tier();
     let _ = writeln!(out);
     if tier == "none" {
+        // §80's `inert` decision, applied to an award. "Nothing was measured" and "something was
+        // measured and failed" both arrive here as `none`, and folding them into one sentence is
+        // the tempting simplification and the wrong answer, for the reason §80 gives: the two send
+        // a vendor to do different things. One goes and runs the suite; the other reads their code.
+        //
+        // The per-test blockers printed underneath have always carried the distinction. The
+        // headline did not, and the headline is the line that gets read.
+        let failed = blockers
+            .iter()
+            .filter(|(_, outcome)| *outcome == Outcome::Fail)
+            .count();
+        let unmeasured = blockers
+            .iter()
+            .filter(|(_, outcome)| *outcome == Outcome::Missing)
+            .count();
         let _ = writeln!(
             out,
-            "  {} — this driver does not yet reach guest tier",
-            term::bad("no tier")
+            "  {} — {}",
+            term::bad("no tier"),
+            no_tier_detail(failed, unmeasured)
         );
     } else {
         let _ = writeln!(
@@ -1239,4 +1276,35 @@ fn pose_guard_summary(graph: &FrameGraph) -> Option<(bool, String)> {
         ));
     }
     Some((placeable == set.len() && bodies >= 2, out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The four causes of `none`, and that no two of them render the same sentence.
+    ///
+    /// The pair that matters is the middle two: a driver whose tests merely have no result must not
+    /// be told something failed, and a driver with real failures must not be offered "nothing here
+    /// failed". Both were true of the single sentence this replaced.
+    #[test]
+    fn no_evidence_and_a_failure_do_not_read_alike() {
+        let nothing = no_tier_detail(0, 0);
+        let unmeasured = no_tier_detail(0, 3);
+        let failed = no_tier_detail(2, 0);
+        let both = no_tier_detail(2, 3);
+
+        assert!(unmeasured.contains("nothing here failed"), "{unmeasured}");
+        assert!(unmeasured.contains("no result yet"), "{unmeasured}");
+        assert!(failed.contains("2 guest-tier test(s) failed"), "{failed}");
+        assert!(!failed.contains("nothing here failed"), "{failed}");
+        assert!(both.contains('2') && both.contains('3'), "{both}");
+
+        let all = [&nothing, &unmeasured, &failed, &both];
+        for (i, a) in all.iter().enumerate() {
+            for b in all.iter().skip(i + 1) {
+                assert_ne!(a, b, "two causes rendering one sentence");
+            }
+        }
+    }
 }
