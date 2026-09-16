@@ -712,21 +712,9 @@ pub fn post_json(
 ) -> Result<Posted, String> {
     use std::io::Write;
 
-    // A credential that could break out of the config's quoting is not one this robot will present.
-    // Refused rather than escaped: the escape set curl's parser accepts is small and version-
-    // dependent, and a credential containing a quote is a Hub doing something nobody designed.
-    if let Some(credential) = credential {
-        if credential
-            .chars()
-            .any(|c| c == '"' || c == '\\' || c.is_control())
-        {
-            return Err(
-                "this robot holds a credential containing a character it will not put in a curl \
-                 config — a quote, a backslash or a control character. Nothing has been sent."
-                    .to_string(),
-            );
-        }
-    }
+    // Asked before the body is staged, so a refused credential leaves nothing on the disk. [`curl`]
+    // asks again, which is what makes the rule impossible to skip rather than easy to remember.
+    presentable(credential)?;
 
     std::fs::create_dir_all(scratch)
         .map_err(|error| format!("{} could not be created: {error}", scratch.display()))?;
@@ -755,10 +743,7 @@ pub fn post_json(
 }
 
 fn run_curl(url: &str, credential: Option<&str>, body: &Path) -> Result<Posted, String> {
-    use std::io::Write;
-
-    let mut command = std::process::Command::new("curl");
-    command.args([
+    let mut arguments = curl_arguments([
         "--silent",
         "--show-error",
         "--request",
@@ -789,7 +774,68 @@ fn run_curl(url: &str, credential: Option<&str>, body: &Path) -> Result<Posted, 
         "\n%{http_code}",
         "--data-binary",
     ]);
-    command.arg(format!("@{}", body.display()));
+    arguments.push(format!("@{}", body.display()).into());
+    posted(url, curl(&arguments, credential, url)?)
+}
+
+/// A credential this robot will not put in a curl config, refused by name.
+///
+/// The credential travels inside a quoted string in curl's own config, so one that could break out
+/// of the quoting is not one this robot will present. Refused rather than escaped: the escape set
+/// curl's parser accepts is small and version-dependent, and a credential containing a quote is a
+/// Hub doing something nobody designed.
+///
+/// Public so a caller with work to do before its request — a body to stage, a slice of a recording
+/// to copy out — can refuse before doing it. [`curl`] asks it again regardless.
+pub fn presentable(credential: Option<&str>) -> Result<(), String> {
+    match credential {
+        Some(credential)
+            if credential
+                .chars()
+                .any(|c| c == '"' || c == '\\' || c.is_control()) =>
+        {
+            Err(
+                "this robot holds a credential containing a character it will not put in a curl \
+                 config — a quote, a backslash or a control character. Nothing has been sent."
+                    .to_string(),
+            )
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Owned arguments from literals, for [`curl`].
+pub fn curl_arguments<const N: usize>(literals: [&str; N]) -> Vec<std::ffi::OsString> {
+    literals.iter().map(std::ffi::OsString::from).collect()
+}
+
+/// **The one function in this daemon that spawns curl**, and CI holds it to that.
+///
+/// Every outbound request goes through here — [`post_json`] and [`get_json`] beside it,
+/// [`crate::bundle`]'s ranged fetch, and [`crate::upload`]'s probe and push. Each caller builds its
+/// own `arguments`, because what each asks curl to do genuinely differs. None of them decides how
+/// the credential travels, because that is the one thing they must not differ on, and until
+/// 2026-09-16 three of the five wrote it out for themselves: the same eight lines in three files,
+/// each correct, and each one edit away from being the copy that was not.
+///
+/// So `arguments` carries **nothing about the credential and not the URL**. This function refuses
+/// an unpresentable credential, adds `--config -` when there is one, puts the URL last, writes the
+/// one line that carries the secret onto stdin — the only channel curl has that is not
+/// `/proc/<pid>/cmdline` — closes it, and waits.
+///
+/// What comes back is the process's output, uninterpreted: a status, a body, a trailer written by
+/// `--write-out`. Reading those is the caller's, since each asked for a different trailer.
+pub fn curl(
+    arguments: &[std::ffi::OsString],
+    credential: Option<&str>,
+    url: &str,
+) -> Result<std::process::Output, String> {
+    use std::io::Write;
+
+    presentable(credential)?;
+
+    let mut command = std::process::Command::new("curl");
+    command.args(arguments);
     if credential.is_some() {
         command.args(["--config", "-"]);
     }
@@ -810,6 +856,8 @@ fn run_curl(url: &str, credential: Option<&str>, body: &Path) -> Result<Posted, 
     if let Some(stdin) = child.stdin.as_mut() {
         if let Some(credential) = credential {
             // The one line that carries the secret, on the one channel that is not world-readable.
+            // A failed write is not swallowed so much as reported by what follows it: curl then has
+            // no header, the receiver answers 401, and that is the status the caller reads.
             let _ = stdin
                 .write_all(format!("header = \"Authorization: Bearer {credential}\"\n").as_bytes());
         }
@@ -818,10 +866,15 @@ fn run_curl(url: &str, credential: Option<&str>, body: &Path) -> Result<Posted, 
     // nobody closed.
     drop(child.stdin.take());
 
-    let output = child
+    child
         .wait_with_output()
-        .map_err(|error| format!("curl did not finish: {error}"))?;
+        .map_err(|error| format!("curl did not finish: {error}"))
+}
 
+/// A JSON exchange's answer: the body, then the status on a line of its own.
+///
+/// The trailer [`post_json`] and [`get_json`] both ask for with `--write-out "\n%{http_code}"`.
+fn posted(url: &str, output: std::process::Output) -> Result<Posted, String> {
     let combined = String::from_utf8_lossy(&output.stdout).to_string();
     let (payload, status) = match combined.rsplit_once('\n') {
         Some((payload, status)) => (payload.to_string(), status.trim().to_string()),
@@ -843,14 +896,12 @@ fn run_curl(url: &str, credential: Option<&str>, body: &Path) -> Result<Posted, 
 
 /// The one place in this daemon that makes an outbound HTTPS **read**.
 ///
-/// The sibling of [`post_json`] and it carries the credential the same way and for the same reason:
-/// `/proc/<pid>/cmdline` is world-readable, so the credential goes into curl's own config on stdin
-/// and nothing about it is ever an argument.
+/// The sibling of [`post_json`], and it carries the credential the same way because both hand it
+/// to [`curl`], which is the only place the argv rule is written.
 ///
 /// There is no body, so there is no file. That is the whole of the *intended* difference between
-/// the two, and it is why they are two functions rather than one with an `Option<&str>` body — a
-/// reader looking for the argv rule should find it twice in eight lines rather than once behind a
-/// branch.
+/// the two, and it is why they are two functions rather than one with an `Option<&str>` body: the
+/// flags each passes are then side by side on the page rather than split across a branch.
 ///
 /// The unintended difference was `--location`, and the sentence above is what hid it: two functions
 /// side by side, described as differing in one way, differing in two. [`post_json`] gained the flag
@@ -860,23 +911,7 @@ fn run_curl(url: &str, credential: Option<&str>, body: &Path) -> Result<Posted, 
 /// Hub that adds a trailing slash was one that could not be told what to run and could not be told
 /// there was an update, and reported both as *the Hub answered HTTP 308*.
 pub fn get_json(url: &str, credential: Option<&str>) -> Result<Posted, String> {
-    use std::io::Write;
-
-    if let Some(credential) = credential {
-        if credential
-            .chars()
-            .any(|c| c == '"' || c == '\\' || c.is_control())
-        {
-            return Err(
-                "this robot holds a credential containing a character it will not put in a curl \
-                 config — a quote, a backslash or a control character. Nothing has been sent."
-                    .to_string(),
-            );
-        }
-    }
-
-    let mut command = std::process::Command::new("curl");
-    command.args([
+    let arguments = curl_arguments([
         "--silent",
         "--show-error",
         "--request",
@@ -892,52 +927,7 @@ pub fn get_json(url: &str, credential: Option<&str>) -> Result<Posted, String> {
         "--write-out",
         "\n%{http_code}",
     ]);
-    if credential.is_some() {
-        command.args(["--config", "-"]);
-    }
-    command.arg(url);
-
-    let mut child = command
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|error| {
-            format!(
-                "`curl` could not be started ({error}). §34.2's outbound path is HTTPS and this \
-                 edition has no TLS stack of its own, so the image needs curl."
-            )
-        })?;
-
-    if let Some(stdin) = child.stdin.as_mut() {
-        if let Some(credential) = credential {
-            let _ = stdin
-                .write_all(format!("header = \"Authorization: Bearer {credential}\"\n").as_bytes());
-        }
-    }
-    drop(child.stdin.take());
-
-    let output = child
-        .wait_with_output()
-        .map_err(|error| format!("curl did not finish: {error}"))?;
-
-    let combined = String::from_utf8_lossy(&output.stdout).to_string();
-    let (payload, status) = match combined.rsplit_once('\n') {
-        Some((payload, status)) => (payload.to_string(), status.trim().to_string()),
-        None => (String::new(), combined.trim().to_string()),
-    };
-
-    if !output.status.success() {
-        return Err(format!(
-            "curl could not reach {url}: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-
-    Ok(Posted {
-        status: status.parse().unwrap_or(0),
-        body: payload,
-    })
+    posted(url, curl(&arguments, credential, url)?)
 }
 
 /// §34.2's outbound path: the queue, drained to the Hub this robot was paired with.

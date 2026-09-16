@@ -10311,6 +10311,78 @@ mod checkin {
             assert!(error.contains("will not put in a curl config"), "{error}");
         }
     }
+
+    /// The rule above, reached from every module that makes a request — not only from the one it is
+    /// written in.
+    ///
+    /// Until 2026-09-16 `bundle` and `upload` each spawned their own curl and each carried their own
+    /// copy of this check, which CI's *one caller* rule exists to prevent and which nothing had
+    /// noticed. They go through `connectivity::curl` now, and this is what says the refusal
+    /// travelled with them. A refused push also has to refuse **before** copying its slice out:
+    /// the copy is a piece of a recording on the disk §28 reserves for recordings.
+    #[test]
+    fn every_request_refuses_the_same_credential_before_it_does_anything() {
+        use crate::bundle::Fetcher;
+        use crate::upload::Uploader;
+
+        let scratch = TempRoot::new("every-caller-quoting");
+        let state = scratch.layout().state();
+        let window = state.join("window");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::write(&window, b"sealed bytes").unwrap();
+
+        for bad in ["skd_a\"b", "skd_a\\b", "skd_a\nb"] {
+            let partial = state.join("partial/image");
+            let slice = crate::bundle::CurlFetcher.slice(&crate::bundle::Ask {
+                url: "https://hub.example/image".to_string(),
+                credential: Some(bad.to_string()),
+                from: 0,
+                into: partial.clone(),
+                budget_s: 1,
+            });
+            let said = slice
+                .error
+                .expect("a fetch with that credential is refused");
+            assert!(said.contains("will not put in a curl config"), "{said}");
+            assert!(
+                !partial.parent().unwrap().exists(),
+                "refused before the partial's directory was made"
+            );
+
+            let probed = crate::upload::CurlUploader.probe(&crate::upload::Probe {
+                url: "https://hub.example/blackbox".to_string(),
+                credential: Some(bad.to_string()),
+                budget_s: 1,
+            });
+            let said = probed
+                .error
+                .expect("a probe with that credential is refused");
+            assert!(said.contains("will not put in a curl config"), "{said}");
+
+            // In a directory of its own, because the slice file is removed after every push whatever
+            // happened — its absence afterwards proves nothing. `extract` makes the directory, so
+            // its absence says the copy was never started.
+            let slice_file = state.join("slices/slice");
+            let pushed = crate::upload::CurlUploader.push(&crate::upload::Push {
+                url: "https://hub.example/blackbox".to_string(),
+                credential: Some(bad.to_string()),
+                from: 0,
+                len: 12,
+                total: 12,
+                file: window.clone(),
+                scratch: slice_file.clone(),
+                budget_s: 1,
+            });
+            let said = pushed
+                .error
+                .expect("a push with that credential is refused");
+            assert!(said.contains("will not put in a curl config"), "{said}");
+            assert!(
+                !slice_file.parent().unwrap().exists(),
+                "refused before any of the recording was copied"
+            );
+        }
+    }
 }
 
 /// §11's pull on a real machine.
