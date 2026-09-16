@@ -158,7 +158,38 @@ function strip(src) {
         continue
       }
     }
-    // Byte or char literal, and ordinary strings. Escapes are honoured.
+    // Character literal — `'a'`, `'\n'`, `'\\'`, `'\''`, `'\u{1F600}'`, and the byte form `b'R'`.
+    //
+    // This is here because of `'"'`. Without it the quote inside that literal opens a string, and
+    // the scan runs to the next quote in the file taking real code with it: `upload.rs:230` spells
+    // `c == '"'` and five hundred lines below it `upload_target` is called, so this check reported
+    // a function with a plain production caller as having none, and it was allow-listed with a
+    // reason invented to fit. A false negative here is worse than a false positive, because
+    // the answer it gives is the one nobody goes and checks.
+    //
+    // A lifetime is the thing not to eat: `'a` and `'static` are a quote that no quote closes, so a
+    // literal is only recognised when the closing one is where a literal would put it.
+    if (c === "'") {
+      let j = i + 1
+      if (src[j] === '\\') {
+        j++
+        if (src[j] === 'u' && src[j + 1] === '{') {
+          const brace = src.indexOf('}', j)
+          j = brace === -1 ? j + 1 : brace + 1
+        } else j++
+      } else {
+        // One scalar value, which is two UTF-16 units above the basic plane.
+        const point = src.codePointAt(j)
+        j += point !== undefined && point > 0xffff ? 2 : 1
+      }
+      if (src[j] === "'") {
+        out += ' ' + spanned(i, j + 1)
+        i = j + 1
+        continue
+      }
+      // Not a literal, so a lifetime or a loop label. Fall through and emit the quote.
+    }
+    // Ordinary strings. Escapes are honoured.
     if (c === '"') {
       const start = i
       i++
