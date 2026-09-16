@@ -698,3 +698,71 @@ suites. The capture backend has never seen a camera and does not claim to: what 
 the §47.4 discipline, which is a claim about frames and not about pixels. **No policy has closed a
 loop**, so Phase 1's gate is not met and nothing here moves the dry ceiling off `none`.
 
+
+### 2026-09-16 (fourth session) — `invariants` was still red, and Phase 1 resumed
+
+Carried out on Windows 11 with WSL2 Ubuntu 26.04 beside it — **systemd is PID 1 in that WSL**,
+which is the first machine in this log that has it. Rust 1.98.1 on Windows (the CI toolchain), 1.93.1
+in WSL, Node 26, Go, .NET, JDK 25; no Zig and no Node 24. **Nothing pushed.** *In progress — this entry
+is updated as the session goes.*
+
+**Audited.** Every step of `ci.yml`'s `invariants` job, run locally one by one — the shell steps under
+WSL's GNU tools, the Node steps on Windows — rather than the pre-PR gate, because F7's lesson is that
+the gate is not what CI runs. Then the `rust` job's Linux half in WSL, clippy at 1.98 against
+`aarch64-unknown-linux-gnu` from Windows (which type-checks every `cfg(target_os = "linux")` path at
+CI's lint level), and the kernel's `thumbv7em-none-eabihf` build.
+
+### F12 — F7 fixed the first red step in `invariants`, and four more were behind it.
+
+F7 recorded `main` red on three counts and all three fixed. The `invariants` job's first failure was
+the oracle type-check, and **a GitHub job stops at its first failing step** — so everything behind it
+had been unobserved for as long as anything in front of it was red. Run step by step, four more failed
+on the commit F7 called green:
+
+| Step | Failing since | What it was |
+|---|---|---|
+| No string literal has a hole punched in it | 2026-09-04 | **Real.** 38 literals in 16 files, two of them the Safety Kernel's own `can_start` refusals |
+| No secret reaches a command line | 2026-09-02 | **Real.** `bundle` and `upload` each spawned their own curl with their own copy of the credential rule |
+| A check-in carries no history | 2026-09-03 | **Stale check.** `delta_` matched `max_delta_per_cycle`, a jerk *ceiling* |
+| An intervention count is absent rather than zero | 2026-09-03 | **Stale check.** It required a field aed1306 deliberately removed, and its zero test named a field the episode no longer writes, so that half could not fail at all |
+
+The mechanism is the finding, more than the four: a job that stops at its first red step reports one
+defect per CI run, and "fixed" becomes "revealed the next one". Every `run:` step in `invariants` and
+`corpus` now carries `if: ${{ !cancelled() }}` — each is an independent claim, so each runs whatever
+the one before it did, and the job still fails if any did.
+
+Nothing here could see CI itself: the repository is private and `gh` is not installed on this
+machine. "Failing since" is the date the offending line entered the tree against the date the check
+did, not an observed run.
+
+### F13 — an episode's intervention count forgot a hole as soon as the next pass was counted.
+
+Found while rewriting F12's fourth check. A pass nothing could count set the invocation's count to
+`None`, and the next counted pass revived it with `get_or_insert(0)` — so an invocation with an
+unwatched interval in the middle reported the passes after it as its whole. The existing test put its
+hole on the **last** pass, which is the one ordering the defect cannot reach. §74.3's rule is that
+zero and unmeasured are opposite facts; a partial sum is worse than either, because it is a number
+quietly smaller than the truth in the field that means the truth.
+
+The same line cast the ring's `u64` count to the episode's `u32` with `as`, so 2³² interventions
+arrived as **zero** — the one value a marketplace reads as a perfect run — and two large counts would
+have panicked the daemon under the release profile's overflow checks.
+
+**Changed so far.**
+
+| Commit | What |
+|---|---|
+| `c04f57a` | 38 string literals given their `\` continuations back. No corpus bytes move; none is pinned by an edition |
+| `7635741` | `connectivity::curl` is the only spawner; `presentable` is the credential rule, asked before any disk work and again inside `curl`. One test reaches the refusal from all three modules |
+| `e043eb6` | The two stale checks measure the code again; `!cancelled()` on every `invariants` and `corpus` step; `episode()`'s doc loses the sentence aed1306 said it had retracted |
+| `8b59c0b` | F13. `InterventionCount` — no pass yet, counted, unmeasured — with unmeasured terminal; saturating on both casts |
+
+**Verified so far.** On Windows at 1.98.1: `cargo fmt --check`, clippy `-D warnings` for the host
+**and** for `aarch64-unknown-linux-gnu`, `cargo test --workspace` (1,778 before any change here —
+Windows compiles fewer tests than Linux), the kernel, ring and capture for `thumbv7em-none-eabihf`,
+`tsc -p .`, and all eight Node checks. In WSL at 1.93.1: `cargo test --workspace` 1,868 passed and 0
+failed, clippy clean, and every shell step of `invariants` green.
+
+Controls, each failing its check or test and each reverted: dropping the fetch's early credential
+refusal; dropping the push's; a `delta_ms` field on the guard report; a literal zero intervention
+count; an `unwrap_or(0)` on it; and the previous `skill.rs` against both F13 tests.
