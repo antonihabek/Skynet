@@ -70,7 +70,7 @@ So there is a real question: is that test `bench` because it needs *hardware*, o
 **This plan does not answer it.** CONTRIBUTING.md is explicit that a specification change is an
 issue a maintainer carries to both repositories, never a pull request against the pinned document —
 and reclassifying a bench test to `sim` is precisely the move Phase 0.1b exists to prevent anyone
-making quietly. Raised, not resolved. See *Open for the owner* below.
+making quietly. Raised, not resolved — and **resolved as 4 under *Decisions*** below, which keeps it `bench`.
 
 ### F3 — Phase 0.4 (limit provenance) is already built. Twice.
 
@@ -224,7 +224,7 @@ The good half, because it changes what the finding means: §36.1's *withholding 
 reserve stops taking work. What it does not do is say so to a person.
 
 Closing it is a wire change — a field on the power document, the TypeScript oracle, the corpus's 28
-power cases and four editions — so it is raised rather than done. See *Open for the owner*.
+power cases and four editions — so it was raised rather than done. **Decided as 2 under *Decisions*:** wired.
 
 ---
 
@@ -267,7 +267,7 @@ A dry build multiplies this failure mode, because a fake is easier to satisfy th
 | Work | Dry substrate | Note |
 |---|---|---|
 | Capture backend | Synthetic — PNG sequence or MuJoCo render — behind the trait V4L2 and GenICam will share | Deterministic, so frames are replayable and corpus-able. V4L2 cannot be dry-verified at all |
-| Inference backend (§23.3) | ONNX Runtime, CPU | Runs in CI, deterministic. **Would be this workspace's first third-party dependency — see *Open for the owner*** |
+| Inference backend (§23.3) | ONNX Runtime, CPU | Runs in CI, deterministic. This workspace's first third-party dependency, **allowed by the owner on 2026-09-16** under the narrow terms in *Decisions* 5 |
 
 **Gate:** `skynetk` offers the frame pool, `skynetp` maps it, an ONNX policy closes the loop against
 the MuJoCo driver for N cycles with zero overruns, then the sealed window is read back and replayed
@@ -299,7 +299,7 @@ Highest coverage-per-effort item, and the most dry-verifiable, because it is con
 corpus plus eight editions plus the TypeScript oracle is exactly that machinery.
 
 **Requires a specification change** (a descriptor field and new transport methods), so it starts as
-an issue, not a branch. See *Open for the owner*.
+an issue, not a branch — and **Decisions* 6 defers it behind Phase 1's gate rather than opening one now.
 
 Order matters, and the repo has already paid for the lesson: **write the corpus cases before the
 editions.** Doing it that way on §47.6 found the specified rule and the reference disagreeing about
@@ -364,93 +364,106 @@ could ship.
 
 ---
 
-## Open for the owner
+## Decisions, and who made them
 
-Ten decisions this plan deliberately does not make. The first three are new, and the first of them
-is the only thing in this plan that has already touched the pinned specification.
+The owner answered item 5 and delegated the rest on 2026-09-16. What follows is what each was
+decided as and why, kept in place of the questions so the next reader sees the ruling rather than
+re-opening it. Where a decision produced work, it is in *Next*.
 
-1. **The §73 corpus figure was edited, and needs ratifying or reverting.** (F8.) Adding the three
-   sim-only cases made the corpus 1,202, and §73 states the number exactly, so `scale-report --check`
-   went red on the document. The edit was made — `1,199 cases` → `1,202 cases`, one line, no prose
-   touched — in **both** repositories, per the procedure in `docs/README.md`, and re-pinned with
-   `check-mirrors.mjs --pin`, which refuses unless the two copies agree. `reference/reports/
-   editions.json` is mirrored too and was synced the same way.
+1. **The §73 corpus figure edit stands.** §73's own paragraph says every figure in it is *measured,
+   and checked*, and `scale-report --check` refuses with *"correct the document, not this check."* A
+   count of what is in the tree is a derived fact, not a design statement, so bringing it up to date
+   is maintenance. It was done in both copies and re-pinned with `--pin`, which refuses unless the
+   two agree, so the mechanism that the rule exists to protect did its job. See 10 for the general
+   case.
 
-   The argument for doing it rather than raising it: §73's own paragraph says every figure in it is
-   *measured, and checked*, so this is a derived fact about the tree and not a design statement, and
-   the check's refusal names the document as the thing to correct. The argument against is F2's and
-   F6's, which the owner has already made twice: the specification is a maintainer's to carry. Both
-   commits are local and nothing is pushed, so reverting costs one `git revert` in each tree and the
-   corpus cases can wait behind an issue instead. **This is the one call in this session's work that
-   is not obviously the plan's to make.**
+2. **`notifies_operator` gets a surface.** Its two siblings are serialised and rendered and this one
+   is not, and the argument that `requires_safe_state` already covers it does not survive §36.1
+   having written three rows rather than two. A robot that has stopped taking work and a robot that
+   has stopped taking work *and owes somebody a phone call* are different situations. Wired, oracle
+   first, then the corpus, then the editions.
 
-2. **`notifies_operator` — should §36.1's third row reach a surface?** (F10.) The predicate exists
-   and nothing consumes it, while its two siblings are serialised and rendered. The cheap fix is a
-   field on the power document, which costs the oracle, 28 corpus cases and four editions. The other
-   answer is that a robot withholding leases is already visible through `requires_safe_state` and the
-   row needs no separate output — in which case the function should go, rather than sit in the
-   contract implying an output that does not exist.
+3. **Both functions whose comments name absent callers are deleted.** `check_code` is a third
+   spelling of a check the CLI and the daemon each already make directly; `tier_profile_to_json`
+   renders a model for a surface nobody built. Deleting is the answer that leaves no claim behind:
+   building a surface to justify a function is the tail wagging the dog, and a comment asserting a
+   caller is the same defect as a figure asserting a measurement.
 
-3. **Two functions whose doc comments name callers that do not exist** — `check_code` ("for the
-   CLI's `--check`") and `tier_profile_to_json` ("a surface that has to explain it"). Delete, or
-   build the surface. A comment claiming a caller is the same failure as a figure claiming a
-   measurement, and this repository has a check for the second and not the first.
+4. **`offline.control.independent` stays a `bench` test.** F2 asked whether it is `bench` because it
+   needs *hardware* or because it needs *a machine rather than a model*, and the answer is the
+   second — but that is an argument for letting a virtual robot **produce bench evidence** for it,
+   not for reclassifying it as `sim`. Reclassifying would let a run against a pure fake claim it,
+   which is the opposite of what the distinction is for. No specification change; the work is in
+   *Next* instead, and it is the one item that would move the dry ceiling off `none`.
 
-4. **Is `offline.control.independent` witnessable on a virtual robot?** (F1, F2.) It is the single
-   test between dry evidence and a guest award, it needs a machine rather than a body, and
-   `virtual-robot.sh` is a machine. A specification change either way, so: an issue carried to both
-   repositories, never a patch here.
-5. **ONNX Runtime as the inference backend breaks "no third-party Rust dependencies."** That rule is
-   CI-enforced and its stated reason is that a vendor building a driver years from now should not
-   need a package registry to have survived. An inference backend is not the kernel and not a
-   driver, so the rule may not have been written with it in mind — but it is written, and Phase 1
-   cannot start until this is settled.
-6. **Phase 3 needs a descriptor field and new transport methods**, both in the pinned specification.
-7. **How a dry-only award is rendered.** `none` is correct and is also what a robot with a broken
-   driver gets. Whether an operator should be able to tell "no evidence yet" from "evidence, and it
-   failed" is a surface question with the same shape as §80's `inert` decision — where folding a
-   third state into an existing one was the tempting simplification and the wrong answer, because
-   the two send a person to do different things.
-8. **Which copy of §19's driver-activation rule survives** (F5) — `driver_may_activate`, or the
-   inline check in `runtime.rs:519`.
-9. **Whether `skynet blackbox` should report replay completeness** (F5) — `verdict_inputs_all_recorded`
-   exists and is called by nothing.
-10. **§73's line count** (F6). Two lines of headroom. The next addition needs the figure moved, which
-   is a specification edit.
+5. **ONNX Runtime is allowed, narrowly. — the owner's call.** The no-third-party-dependency rule
+   protects a stated thing: a vendor building a driver years from now should not need a package
+   registry to have survived. An inference backend is neither the kernel nor a driver, so the
+   carve-out is written to that shape rather than as a general relaxation: the dependency lives in
+   one crate, behind a feature that is off by default, the safety kernel stays `no_std` with no
+   allocator and no dependency, and `ci.yml`'s check is narrowed to permit exactly that package and
+   nothing else rather than switched off.
 
----
+6. **Phase 3's specification fields wait for Phase 1.** Motion primitives are real design, not a
+   count, and designing new transport surface ahead of a loop that has never closed is how a
+   specification acquires fields nobody needs. Revisit when Phase 1's gate is met.
+
+7. **"No evidence" and "evidence, and it failed" are rendered apart.** §80's `inert` precedent is
+   the one on point: folding a third state into an existing one was the tempting simplification and
+   the wrong answer, because the two send a person to do different things. The verdict already
+   carries the distinction — `missing` non-empty with `failures` empty is one, `failures` non-empty
+   is the other — so this is a rendering fix and not a wire change.
+
+8. **§19's driver-activation rule gets one named spelling, and the accessor goes.** The enforcement
+   point is the inline check in `runtime.rs`; `driver_may_activate` reads the same fact off a report
+   that `main.rs` builds to *print* rather than to gate. Neither copy survives as it stands: the
+   predicate moves onto `SignatureState` in the contracts crate, where it is one named fact, and the
+   accessor that duplicated it is deleted.
+
+9. **`skynet blackbox` reports replay completeness.** Same class as 2, and the plainest instance of
+   it in the tree: the black box can already tell whether a sealed window recorded every field a
+   replay evaluates, and presents a replay of a partial window exactly like a replay of a whole one.
+   A replay is evidence, and evidence that will not say how complete it is has the shape §15 calls
+   the most damaging thing this platform could ship.
+
+10. **Figures in §73 are maintained, not negotiated.** The general rule behind 1: they are
+    measurements of the tree, they go stale whenever the tree changes, and updating them in both
+    copies and re-pinning is the maintenance that keeps the check meaningful. **Compressing code to
+    avoid moving a figure is the thing not to do** — F6 records 0.1 doing exactly that, rewriting
+    tests to save lines, and the tests were not improved by it. A design change to §73 is still an
+    issue; the numbers in it are not.
 
 ## Next
 
-The first two items of the previous list are done; what is left is one blocked item and the work the
-findings above turned up.
+Everything below is decided and unblocked. In order.
 
-1. **Phase 1, still waiting on the ONNX question** (*Open for the owner* 5). Genuinely blocked, not
-   deferred: `ci.yml`'s `invariants` job requires every package in `Cargo.lock` to be a workspace
-   member, so adding an inference backend is not a change that can be made and reviewed — it fails
-   the build until the rule changes.
+1. **The small ones, together** — *Decisions* 3, 7, 8 and 9. Delete `check_code` and
+   `tier_profile_to_json`; name §19's activation rule once on `SignatureState` and drop the
+   accessor; make `skynet blackbox` say whether the window it replayed was complete; render "no
+   evidence" apart from "evidence, and it failed". Four small changes, one concern each, all inside
+   the reference edition.
 
-   **Phase 1's other half is not blocked.** The capture backend is a synthetic source behind the
-   trait V4L2 and GenICam will share, and it needs no dependency. It also reaches six of the seven
-   remaining allow-list entries — `estimated`, `is_full`, `close_gap`, `open_gap`, `deliver` and
-   `revoke_loans` — which are all §47.4's producer side waiting on exactly this. It is the largest
-   piece of coverage available without an owner decision, and it was left alone here because the
-   plan gates Phase 1 as a whole.
+2. **`notifies_operator`** (*Decisions* 2). Corpus first, as Phase 3 argues and §47.6 proved: the
+   TypeScript oracle, then the 28 power cases, then the four complete editions, then the CLI.
 
-2. **Decide the three new owner items**, in that order. The first is the only one holding a change
-   that is already in a commit.
+3. **Phase 1** (*Decisions* 5). Capture backend before inference backend, because the capture half
+   needs no dependency, reaches six allow-list entries on its own, and is what the inference half
+   consumes. Then the gate the plan already states: `skynetk` offers the frame pool, `skynetp` maps
+   it, a policy closes the loop against the MuJoCo driver for N cycles with no overruns, and the
+   sealed window is read back and replayed to identical verdicts.
 
-3. **`notifies_operator`, if item 2 says a field** (F10). Corpus first, as Phase 3 argues and §47.6
-   proved: the oracle, then the 28 power cases, then the four complete editions.
+4. **Bench evidence from a virtual robot** (*Decisions* 4). The one item that would move the dry
+   ceiling off `none`, and the only one here that changes what this plan is allowed to claim.
+   `packaging/virtual-robot.sh` already produces the machine; what does not exist is a conformance
+   run against it that is recorded as `bench` for `offline.control.independent` and for nothing else
+   it has not earned.
 
-4. **A check on doc comments that name a caller** (F9, *Open for the owner* 3). Two of the
-   twenty-three reasons had to be written against the function's own documentation. The
-   production-caller check already knows which functions have no caller; a rule that a doc comment
-   on one of them may not say *"for the CLI"* or *"called by"* is a small addition to a check that
-   has the data in front of it.
+5. **A check on doc comments that name a caller** (F9). Two of the twenty-three reasons had to be
+   written against the function's own documentation. The production-caller check already knows which
+   functions have no caller; refusing a doc comment on one of them that says *"for the CLI"* or
+   *"called by"* is a small addition to a check that has the data in front of it.
 
-Everything after those is the plan as written: Phases 2 through 5, in the order given, none of them
-newly blocked and none of them newly unblocked.
+Phases 2 and 5 are unchanged and unstarted. Phase 3 waits on Phase 1 (*Decisions* 6).
 
 ## Progress log
 
@@ -543,7 +556,7 @@ the work, while the real one is a single exact figure in the pinned specificatio
 | `corpus/certification/award.json` | Regenerated. 20 cases → 23, purely additive, no existing case perturbed |
 | `ci.yml`, `editions/{cpp,go}/Makefile` | The three complete-edition ratchets, 1199 → 1202. The four partial editions' floors are unchanged, which is what they are separate for |
 | `reference/reports/{editions,scale}.json` | Regenerated. Rust is still 136,498 lines, so F6's two-line headroom is untouched — nothing here added Rust |
-| `docs/skynet-os-architecture.md` | **The pinned specification.** One figure, in both repositories, re-pinned with `--pin`. See *Open for the owner* 1 |
+| `docs/skynet-os-architecture.md` | **The pinned specification.** One figure, in both repositories, re-pinned with `--pin`. Ratified as *Decisions* 1 |
 | `docs/status.md` | 1,199 → 1,202, twice |
 | `tools/check-production-callers.mjs` | Removed spans keep their newlines; character literals are consumed as units |
 | `tools/production-callers-allow.json` | 38 entries → 37. `upload_target` removed because it was never unreached; the 23 baseline entries replaced with arguments |
