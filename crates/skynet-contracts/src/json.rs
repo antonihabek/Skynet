@@ -31,7 +31,7 @@ use crate::calibration::{
 };
 use crate::certification::*;
 use crate::embodiment::*;
-use crate::live::{BasePose, CalibrationFact, JointReading, LiveInputs};
+use crate::live::{BasePose, CalibrationFact, DriveState, JointReading, LiveInputs};
 use crate::opstate::OperatingState;
 use crate::ota::{BenchPass, BootEvidence, BundleManifest, UpdateSubject, DEFAULT_BOOT_BUDGET_MS};
 use crate::power::PowerProfile;
@@ -1259,6 +1259,11 @@ fn joints_from_json(value: Option<&Json>) -> Vec<JointReading> {
                 .get("position")
                 .and_then(Json::as_f64)
                 .unwrap_or(f64::NAN),
+            // `None` and `Some(NaN)` reach the builder as the same fact — the body does not
+            // measure it — and both omit the path. They are kept apart here only because the
+            // canonical form cannot carry a `NaN`, so a case spells it `null`.
+            velocity: opt_f64(entry, "velocity"),
+            effort: opt_f64(entry, "effort"),
         });
     }
     readings
@@ -1283,6 +1288,17 @@ fn calibration_facts_from_json(value: Option<&Json>) -> Vec<CalibrationFact> {
 pub fn live_inputs_from_json(value: &Json) -> LiveInputs {
     LiveInputs {
         joints: joints_from_json(value.get_present("joints")),
+        drive: value.get_present("drive").map(|drive| DriveState {
+            estop: flag(drive, "estop"),
+            degraded: flag(drive, "degraded"),
+            braked: flag(drive, "braked"),
+            homing: drive
+                .get("homing")
+                .and_then(Json::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            fault_code: opt_f64(drive, "fault_code"),
+        }),
         gripper: opt_f64(value, "gripper"),
         battery_percent: opt_f64(value, "battery_percent"),
         base_pose: value.get_present("base_pose").and_then(base_pose_from_json),

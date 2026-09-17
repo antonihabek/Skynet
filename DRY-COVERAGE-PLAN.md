@@ -589,6 +589,56 @@ The resolution is in the driver and not in the check: `read_state` waits for a n
 the period this session negotiated rather than by a guess. A caller faster than the robot is slowed
 to the robot, which is the only honest thing a driver in that position can do.
 
+### F28 — §24's facts had no path, so four of the first clauses anybody writes could run on no body at all.
+
+Phase 4's second item asks for a measurement — *"every unresolvable path is a body the skill cannot
+reach, so this is directly measurable: how many bodies a fixed skill set admits on, before and
+after"* — and the measurement is starker than the phrasing suggests. §54.2 **refuses** a skill whose
+precondition names a path that does not resolve, so a clause about an unpublished fact is not a
+degraded skill. It is a skill that no robot can run.
+
+Four such clauses are on anybody's first day:
+
+| Clause | Path | Before |
+|---|---|---|
+| *only when the stop is clear* | `robot.state.estop` | unresolvable |
+| *not while the brakes are on* | `robot.state.braked` | unresolvable |
+| *refuse on an unhomed body* | `robot.state.homing` | unresolvable |
+| *only when nothing is moving* | `robot.state.velocity.<joint>` | unresolvable |
+
+Every one of those is a fact a driver reports **on every cycle**, through §24's state flags and the
+state struct, and none of them had a path. `robot.state.*` carried positions, gripper, battery, base
+pose and §27's operating state, and stopped.
+
+Three things about the widening are worth keeping.
+
+* **It is where §24's NaN rule finally bites.** A driver that does not measure velocity writes `NaN`,
+  not zero — the LeRobot bridge reports relative encoder positions and no velocity at all — and a
+  `NaN` produces an **absent path**, so a precondition asking about it refuses the skill and names
+  the path. A zero would read as *this joint is still*, which is the one answer that is both wrong
+  and reassuring. The rule has been in the ABI since §24 was written; this is the first surface where
+  a person can be misled by breaking it.
+* **Velocity and effort are read before the position check, and separately from it.** A joint whose
+  encoder is dead and whose drive still reports current has an unreadable position and a readable
+  effort, and folding them would lose the half that is working — which is exactly the state somebody
+  is diagnosing when they look.
+* **A zero `fault_code` is published**, and it is the one field in `live.rs` where the module's own
+  rule points the other way. Zero is what a healthy drive reports, so it is a measurement rather than
+  an absence; a driver that does not fill the field at all still omits the path. Two cases in the
+  corpus keep them apart, because an edition that collapsed them would make *no fault* and *nobody
+  asked* the same value.
+
+**No robot produces them yet, and that is §33.1 rather than an omission.** §24's flags are a
+*driver's* facts and the daemon is structurally kept off the path that holds one — the same reason
+`guards_active` is `None` there, documented in the same place and now beside it. `skynet skill check`
+populates them, because a publisher asking *"is this path addressable"* is asking about the OS's
+vocabulary rather than about one robot, and the answer to that is yes. What closes the last step is
+§26.2's cycle channels reaching the supervisor's side.
+
+Held to a control: renaming `estop` to `estopp` in the builder fails the addressability test in
+`skynet skill check` **and** three corpus files at once, which is the four-edition machinery doing
+what it is for.
+
 ---
 
 ## Phase 0 — the dry-mode contract
@@ -752,10 +802,15 @@ Ends fully dry-verified, because there was never a clamping claim to verify.
 ## Phase 4 — skills coverage
 
 1. Route `execute({ skill, arguments })` to a command-level driver. §59.2 makes this the only path
-   that applies to the largest installed base.
-2. Widen the live precondition context per driver. Every unresolvable path is a body the skill
-   cannot reach, so this is directly measurable: how many bodies a fixed skill set admits on,
-   before and after.
+   that applies to the largest installed base. **Blocked behind Phase 3's amendment, and blocked
+   twice.** A motion has to exist in the descriptor before anything can be routed to one — that is
+   `docs/issues/motion-action-space.md` — and §33.1 keeps `skynetd` off the path that holds a
+   driver, so the *destination* is `skynetk`'s and there is no channel from the supervisor to it.
+   The second is a design decision of the same weight as the first and belongs in the same issue.
+2. ~~Widen the live precondition context per driver.~~ **Done**, 2026-09-16 (eighth session).
+   Five branches added under `robot.state` — `velocity.<joint>`, `effort.<joint>`, `estop`,
+   `degraded`, `braked`, `homing`, `fault_code` — through the oracle, eight new corpus cases, and
+   all four complete editions. F28 is what it measured and what it found.
 3. Capability token vocabulary and `extensions`. Pure contract, pure corpus.
 
 `skynet skill check` stays the workstation gate it already is.

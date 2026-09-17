@@ -5479,6 +5479,99 @@ liveCase('a-calibration-age-declared-and-not-known',
   + 'shape a serialiser produces and the shape nothing had.',
   { calibration: [{ set: 'joint_zeros', validity: { state: 'valid', checked: [] }, age_s: null }] })
 
+// ── §24's facts, which had no path until a driver was asked for them ─────────
+//
+// Every case below is a fact a driver reports on **every cycle** and that no precondition could
+// read. §54.2 refuses a clause naming an unresolvable path, so each of them was a skill that could
+// not run on any body — *"only when the stop is clear"*, *"not while the brakes are on"*, *"refuse
+// on an unhomed body"*, *"only when nothing is moving"*. Widening the context is therefore
+// measurable in exactly the way `DRY-COVERAGE-PLAN.md` Phase 4 asks for: it is the number of bodies
+// a fixed skill set admits on.
+
+liveCase('a-body-that-measures-its-velocity',
+  'Velocity and effort per joint, beside the positions. Two more branches under robot.state, keyed '
+  + 'by joint name for the reason the positions are: the question about a joint is its value, and a '
+  + 'list cannot answer that.',
+  {
+    joints: [
+      { name: 'shoulder_pan', position: 0.25, velocity: 0.0, effort: 12.5 },
+      { name: 'elbow', position: -1.5, velocity: -0.03, effort: -4.0 },
+    ],
+  })
+
+liveCase('a-body-that-does-not-measure-velocity',
+  '§24\'s NaN rule arriving in the context, and the case this branch exists for. A driver that does '
+  + 'not measure velocity writes NaN, not zero — the LeRobot bridge reports relative encoder '
+  + 'positions and no velocity at all — so robot.state.velocity is **absent** and a precondition '
+  + 'asking about it refuses the skill and names the path. A zero would read as *this joint is '
+  + 'still*, which is the one answer that is both wrong and reassuring.',
+  {
+    joints: [
+      { name: 'shoulder_pan', position: 0.25, velocity: Number.NaN, effort: Number.NaN },
+      { name: 'elbow', position: -1.5, velocity: Number.NaN, effort: Number.NaN },
+    ],
+  })
+
+liveCase('one-joint-measures-velocity-and-another-does-not',
+  'The mixed body, which is the common one: a wrist with a load cell and five joints without. The '
+  + 'branch is present and holds the joints that answered, so `exists` on the one that did not is '
+  + 'false and the precondition about it is refused — rather than the whole branch disappearing '
+  + 'because one joint could not be read.',
+  {
+    joints: [
+      { name: 'shoulder_pan', position: 0.25, velocity: 0.1 },
+      { name: 'wrist', position: 0.0, velocity: Number.NaN, effort: 2.0 },
+    ],
+  })
+
+liveCase('a-joint-whose-encoder-is-dead-and-whose-drive-still-answers',
+  'Position unreadable, effort readable, and they are **separate facts about one joint**. The joint '
+  + 'is named in `unreadable` — which is what an operator is shown, and it is about the position — '
+  + 'and its effort is still published, because a drive reporting current through a dead encoder is '
+  + 'exactly the state somebody is diagnosing. Folding the two would lose the half that is working.',
+  { joints: [{ name: 'elbow', position: Number.NaN, effort: 7.25 }] })
+
+liveCase('a-drive-that-reports-its-flags',
+  '§24\'s state flags, whole. Four booleans-worth of fact that a precondition could not read: the '
+  + 'stop, the degraded bit, the brakes, and the two-bit homing field by name. `homing` is four '
+  + 'values rather than a boolean because `unreported` and `pending` send an operator to different '
+  + 'parts of the building — a driver that has never heard of the question, against a robot that '
+  + 'has not been homed — and a `homed: false` would be both.',
+  {
+    joints: [{ name: 'elbow', position: 0 }],
+    drive: { estop: false, degraded: false, braked: true, homing: 'complete', fault_code: 0 },
+  })
+
+liveCase('a-drive-nobody-has-read',
+  'The branch absent as a group. A context assembled by something that has not read a driver '
+  + 'supplies nothing here, and an `estop: false` from it would be a claim rather than an '
+  + 'observation — the same distinction `robot.guards.active` draws between an empty list and an '
+  + 'absent one, one branch along.',
+  { joints: [{ name: 'elbow', position: 0 }] })
+
+liveCase('a-drive-that-has-faulted',
+  'Degraded, stopped, and carrying the vendor code. A **zero** `fault_code` is published too — see '
+  + 'the case below — because zero is what a healthy drive reports and is therefore a measurement '
+  + 'rather than an absence. This is the one field in the branch where the module\'s own rule '
+  + 'points the other way, and it points that way because §24 gives the field a meaning at zero.',
+  {
+    joints: [{ name: 'elbow', position: 0 }],
+    drive: {
+      estop: true, degraded: true, braked: false, homing: 'unreported', fault_code: 0x8042,
+    },
+  })
+
+liveCase('a-drive-that-reports-no-fault-code-at-all',
+  'And the absence, which is a different fact from a zero. A driver that does not fill the field '
+  + 'leaves `robot.state.fault_code` unresolvable, so a precondition asking about it refuses the '
+  + 'skill; a driver reporting zero answers *no fault*. Every other field in this branch omits on '
+  + 'a null and this one does too — what it does not do is treat a zero as a null, because §24 '
+  + 'gives zero a meaning and the two would then be the same value.',
+  {
+    joints: [{ name: 'elbow', position: 0 }],
+    drive: { estop: false, degraded: false, braked: false, homing: 'not_required', fault_code: null },
+  })
+
 liveCase('a-tier-that-is-an-empty-string',
   'A tier of `\'\'` is **published**. The test is `typeof === \'string\'` rather than a truthiness '
   + 'test, and the distinction is §54.2\'s: an empty string is a value somebody supplied, and the '

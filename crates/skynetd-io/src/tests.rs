@@ -13197,10 +13197,7 @@ mod context_omissions {
         let mut runtime = crate::skill::Runtime::new();
         pass(
             &mut runtime,
-            vec![JointReading {
-                name: "shoulder_pitch".to_string(),
-                position: f64::NAN,
-            }],
+            vec![JointReading::at("shoulder_pitch", f64::NAN)],
         );
 
         let omissions = runtime.omissions();
@@ -13218,10 +13215,7 @@ mod context_omissions {
         // §54.2 addresses members with dots, so a joint whose own name contains one cannot be
         // written in a precondition at all. Nothing here can be done about it — the body chose the
         // name — which is exactly why it has to be said out loud rather than silently dropped.
-        let omissions = omissions_for(vec![JointReading {
-            name: "arm.wrist".to_string(),
-            position: 0.5,
-        }]);
+        let omissions = omissions_for(vec![JointReading::at("arm.wrist", 0.5)]);
         assert_eq!(omissions.len(), 1);
         assert!(omissions[0].contains("carries a dot"), "{}", omissions[0]);
     }
@@ -13231,13 +13225,7 @@ mod context_omissions {
         // The half that keeps the rule above from becoming noise. A healthy robot must produce an
         // empty list, or an operator learns to skim the one place this information appears.
         let mut runtime = crate::skill::Runtime::new();
-        pass(
-            &mut runtime,
-            vec![JointReading {
-                name: "shoulder_pitch".to_string(),
-                position: 0.25,
-            }],
-        );
+        pass(&mut runtime, vec![JointReading::at("shoulder_pitch", 0.25)]);
         assert!(runtime.omissions().is_empty());
         assert!(runtime.to_json().str_arr("context_omissions").is_empty());
     }
@@ -13250,20 +13238,11 @@ mod context_omissions {
         let mut runtime = crate::skill::Runtime::new();
         pass(
             &mut runtime,
-            vec![JointReading {
-                name: "shoulder_pitch".to_string(),
-                position: f64::NAN,
-            }],
+            vec![JointReading::at("shoulder_pitch", f64::NAN)],
         );
         assert_eq!(runtime.omissions().len(), 1);
 
-        pass(
-            &mut runtime,
-            vec![JointReading {
-                name: "shoulder_pitch".to_string(),
-                position: 0.25,
-            }],
-        );
+        pass(&mut runtime, vec![JointReading::at("shoulder_pitch", 0.25)]);
         assert!(runtime.omissions().is_empty(), "the sensor recovered");
     }
 }

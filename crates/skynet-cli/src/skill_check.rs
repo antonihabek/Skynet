@@ -57,7 +57,9 @@ use skynet_contracts::calibration::Validity;
 use skynet_contracts::digest::{check_path, version_digest, DigestFile};
 use skynet_contracts::embodiment::FrameFault;
 use skynet_contracts::json::{descriptor_from_json, manifest_from_json};
-use skynet_contracts::live::{live_context, BasePose, CalibrationFact, JointReading, LiveInputs};
+use skynet_contracts::live::{
+    live_context, BasePose, CalibrationFact, DriveState, JointReading, LiveInputs,
+};
 use skynet_contracts::opstate::OperatingState;
 use skynet_contracts::predicate::{evaluate, Outcome as Verdict, UnevaluableReason};
 use skynet_contracts::skill::{
@@ -255,7 +257,16 @@ fn probe_context(name: &str) -> Json {
         joints: vec![JointReading {
             name: name.to_string(),
             position: 0.0,
+            velocity: Some(0.0),
+            effort: Some(0.0),
         }],
+        drive: Some(DriveState {
+            estop: false,
+            degraded: false,
+            braked: false,
+            homing: "complete".to_string(),
+            fault_code: Some(0.0),
+        }),
         gripper: Some(0.0),
         battery_percent: Some(100.0),
         base_pose: Some(BasePose {
