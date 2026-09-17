@@ -639,6 +639,46 @@ Held to a control: renaming `estop` to `estopp` in the builder fails the address
 `skynet skill check` **and** three corpus files at once, which is the four-edition machinery doing
 what it is for.
 
+### F29 — the plan is named for a constraint that stopped being the binding one three phases ago.
+
+The document's first line says what it is about: *"coverage work carried out **without a physical
+robot**"*, and every phase after it is framed against that. Working through Phases 3, 4 and 5 in one
+session produced a different answer, and it is worth stating plainly because it changes what to do
+next.
+
+**Of the eleven items in Phases 3, 4 and 5, seven are blocked on a decision about the specification
+and none of the seven is blocked on hardware.**
+
+| Phase | Item | Blocked on |
+|---|---|---|
+| 3.1–3.3 | motion action space | §18/§59.2 amendment — `docs/issues/motion-action-space.md` |
+| 3.4 | mock program-level controller | *nothing* — **built**, `drivers/pendant` |
+| 4.1 | route `execute` to a command-level driver | the same amendment, **and** a second decision: §33.1 keeps `skynetd` off the path that holds a driver, so the destination is `skynetk`'s and no channel exists |
+| 4.2 | widen the live precondition context | *nothing* — **built**, F28 |
+| 4.3 | capability token vocabulary | §8 amendment — `docs/issues/capability-token-vocabulary.md`. §5.0 says *"the token vocabulary is §8's"* and **§8 does not have one** |
+| 5.1–5.4 | the class gates | §43, which says in its own words *"deliberately deferred rather than half-designed"*, and §58.3 lists three of the four again under *What is still not designed* |
+
+The plan called Phase 5 *"all contract-shaped, all dry-verifiable"*. The second half is true and the
+first is the trap: each of them is contract-shaped **once designed**, and the design is the part
+nobody has done. Reading them as implementation work is how a session spends a day building a
+descriptor field that turns out to encode a decision the owner had deliberately not made.
+
+**And the specification cannot be edited from here**, which is what turned this from an observation
+into a wall. `docs/skynet-os-architecture.md` is edited in both copies or in neither; this session's
+harness permits the *figure* maintenance §73 requires — it took five of those without complaint — and
+refuses to write a new section into the Hub's checkout. A one-copy edit is then the only thing
+available and it is precisely what the rule forbids, so `check-mirrors` was left reporting both
+copies matching their pin, which is the state to leave it in.
+
+So `docs/issues/` exists: three amendments written out in the form they would take, each with the
+implementation order it unblocks, so that ratifying one is an edit in each repository and a re-pin
+rather than a session's design work done again.
+
+**What this does not change.** Everything the plan says about hardware is still true — all 19 bench
+tests are `missing`, `proximity` is inert on every robot, nothing has been signed by a Hub. The
+correction is narrower and it is about *sequencing*: the dry constraint is what limits Phases 0, 1
+and 2, and it is not what limits 3, 4 and 5.
+
 ---
 
 ## Phase 0 — the dry-mode contract
@@ -820,6 +860,12 @@ Ends fully dry-verified, because there was never a clamping claim to verify.
 ## Phase 5 — the class-gating open items
 
 Each unlocks a robot class rather than a feature. All contract-shaped, all dry-verifiable.
+
+> **Blocked on design, not on a robot — F29.** §43 introduces all four with *"deliberately deferred
+> rather than half-designed"*, and §58.3 lists three of them again under *What is still not
+> designed*. They are contract-shaped once designed, and the design is the missing part.
+> `docs/issues/phase-5-class-gates.md` records what each one has to settle — as questions rather
+> than as a design, because proposing one would be the half-designing §43 declined to do.
 
 | Item | Gates | §ers |
 |---|---|---|
