@@ -595,6 +595,11 @@ def resolve_limits(params: dict[str, Any]) -> dict[str, Any]:
         "min_control_hz": _or_none(_field(transport, "min_control_hz")),
         "max_delta_per_cycle": max_delta,
         "per_channel": _or_default(_field(transport, "per_channel"), {}),
+        # §86.3. The mode each bound joint is commanded in, from the transport plan. Without it the
+        # two whole-body figures above could not be applied to a joint at all — nothing at this
+        # layer knew whether a channel carried radians per second or newton-metres — so they were
+        # resolved, reported, and never enforced.
+        "joint_modes": _or_default(_field(transport, "joint_modes"), {}),
         "proximity": _or_none(_field(profile, "proximity")),
         "frames": _or_none(params.get("frames", _ABSENT)),
         "workspace": _or_default(_field(profile, "workspace"), []),
@@ -1028,12 +1033,26 @@ def _check_self_collision(
 
 
 def _ceiling_for(channel: str, limits: dict[str, Any]) -> float | None:
-    per_channel = _field(limits["per_channel"], channel)
-    if per_channel is not _ABSENT:
-        return per_channel
+    """The ceiling that applies to one channel.
+
+    Three sources, and they **compose by narrowing** (§86.3). The per-channel figure is the joint's
+    own rating carried by the transport plan. ``base`` is the reserved whole-body channel. The third
+    is the joint's mode, which says which of the two whole-body figures is in its units — a step that
+    was impossible before §86, so both were resolved through four layers and applied to nothing.
+
+    Position is deliberately not in the table: travel is a per-joint bound with two ends and one
+    magnitude cannot express it, so the plan's per-channel entry is all there is.
+    """
+    mode = _field(limits["joint_modes"], channel)
     if channel == "base":
-        return limits["base_velocity_max_m_s"]
-    return None
+        whole_body = limits["base_velocity_max_m_s"]
+    elif mode == "velocity":
+        whole_body = limits["joint_velocity_max_rad_s"]
+    elif mode == "torque":
+        whole_body = limits["joint_torque_max_nm"]
+    else:
+        whole_body = None
+    return _narrowest(_or_none(_field(limits["per_channel"], channel)), whole_body)
 
 
 def can_start(plan: dict[str, Any], limits: dict[str, Any]) -> dict[str, Any]:
@@ -1080,6 +1099,9 @@ def _shape_limits(limits: dict[str, Any]) -> Any:
         # the margin in force cannot tell a robot holding 5 cm from one holding at contact.
         "self_collision_margin_m": _nullable(limits["self_collision_margin_m"]),
         "per_channel": limits["per_channel"],
+        # §86.3. Absent — not empty — on a body no joint of which is bound, so every limits document
+        # written before this section is the same bytes.
+        **({"joint_modes": limits["joint_modes"]} if len(limits["joint_modes"]) > 0 else {}),
         "active_guards": limits["active_guards"],
         "unavailable_guards": [
             {"guard": entry["guard"], "missing": entry["missing"]}

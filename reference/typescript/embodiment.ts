@@ -240,7 +240,24 @@ export interface EmbodimentDescriptor {
   end_effectors: EmbodimentEndEffector[]
   sensors: EmbodimentSensor[]
   control: {
+    /**
+     * Every mode this body accepts on some joint — the **union**, not the intersection (§86.1).
+     *
+     * A body whose arm is position-only and whose wheels are velocity-only declares both, and
+     * which joint takes which is the joints' own `control_modes`. Before §86 this had to be the
+     * intersection, because a command carried one mode for the whole body, and such a body
+     * therefore declared nothing at all and could not be commanded.
+     */
     modes: ControlMode[]
+    /**
+     * Whether this driver reads the per-joint `modes` array on a command (§86.1).
+     *
+     * A descriptor field rather than an ABI version, for §24's homing precedent: a driver written
+     * before §86 omits it, reads as exactly what it is, and keeps working. What it costs such a
+     * body is that a plan mixing modes across its joints has every channel outside the first mode
+     * blocked, because there is no way to deliver them in one command.
+     */
+    per_joint_modes?: boolean
     rate_hz_max?: number
     rate_hz_min?: number
     /**
@@ -981,6 +998,14 @@ export interface ChannelBinding {
   scale: number
   /** Hard ceiling for this channel in the target's units, handed to the Safety Kernel. */
   limit: number | null
+  /**
+   * The control mode this binding commands its target joint in (§86.2), or `null` for a binding
+   * that commands no joint — a gripper, a base, a retarget, a drop.
+   *
+   * Present on a blocked binding too, because *which mode was asked for* is what a reader needs in
+   * order to fix it, and a blocked binding is the one that is read most.
+   */
+  mode: ControlMode | null
   /** English, for logs. A UI translates from `method` plus the subjects. */
   reason: string
 }
@@ -1042,6 +1067,9 @@ export const TRANSPORT_WARNING_CODES = [
   'action_space_mismatch',
   'action_space_ambiguous',
   'motion_parameter_unused',
+  // §86.
+  'joint_mode_conflict',
+  'mixed_modes_unsupported',
 ] as const
 
 export type TransportWarningCode = (typeof TRANSPORT_WARNING_CODES)[number]
@@ -1091,6 +1119,13 @@ export interface TransportClamp {
   min_control_hz?: number
   /** Per-channel ceilings, keyed by target joint name. */
   per_channel: Record<string, number>
+  /**
+   * The mode each bound joint is commanded in (§86.3), keyed by joint name.
+   *
+   * This is what lets the Safety Kernel read a ceiling in the joint's own units. Absent — rather
+   * than empty — on a plan that binds no joint.
+   */
+  joint_modes?: Record<string, ControlMode>
   /** Where the envelope figures came from. A limit with no provenance is a rumour. */
   source?: string
 }
@@ -1277,8 +1312,14 @@ export function resolveTransport(
   // decided first, and every channel on such a chain is then marked together.
   const retargetChains = decideRetargetChains(source, index, target, options, warnings)
 
+  // §86.2's record of which joint is already commanded in which mode, filled as the channels bind
+  // and read by the binder that would be the second onto a joint.
+  const bound = new Map<string, ControlMode>()
   for (const channel of source.action_channels) {
-    bindings.push(bindChannel(channel, source, target, index, retargetChains, warnings))
+    bindings.push(bindChannel(
+      channel, source, target, index, retargetChains, warnings, bound,
+      target.control.per_joint_modes === true,
+    ))
   }
 
   const observations = bindObservations(source.observations, target, warnings)
@@ -1535,12 +1576,18 @@ function bindChannel(
   index: TargetIndex,
   retargetChains: Set<CanonicalChain>,
   warnings: TransportWarning[],
+  bound: Map<string, ControlMode>,
+  perJointModes: boolean,
 ): ChannelBinding {
   const parsed = parseRole(channel.role)
 
+  // `mode` on the base rather than on each literal below: a binding that commands no joint has no
+  // mode (§86.2), and there are eleven places that produce one. A default on the shared object is
+  // the only arrangement where adding a twelfth cannot forget it.
   const base = {
     source_index: channel.index,
     source_role: channel.role,
+    mode: null,
   }
 
   // Non-joint channels are matched against the body's own facilities rather than its joints.
@@ -1552,7 +1599,11 @@ function bindChannel(
   //    happens, so it outranks role matching.
   if (channel.joint) {
     const exact = index.byName.get(channel.joint)
-    if (exact) return finishJointBinding(base, channel, exact, 'direct', 'Joint name matches exactly.', warnings)
+    if (exact) {
+      return finishJointBinding(
+        base, channel, exact, 'direct', 'Joint name matches exactly.', warnings, bound, perJointModes,
+      )
+    }
   }
 
   // 2. Canonical role. This is the mechanism that makes bodies interoperable at all.
@@ -1561,7 +1612,7 @@ function bindChannel(
     if (byRole) {
       return finishJointBinding(
         base, channel, byRole, 'remap',
-        `Mapped by role ${roleKey(parsed)} to "${byRole.name}".`, warnings,
+        `Mapped by role ${roleKey(parsed)} to "${byRole.name}".`, warnings, bound, perJointModes,
       )
     }
 
@@ -1604,7 +1655,7 @@ function bindChannel(
 
 function bindNonJointChannel(
   channel: ActionChannel,
-  base: { source_index: number; source_role: string | null },
+  base: { source_index: number; source_role: string | null; mode: null },
   target: EmbodimentDescriptor,
 ): ChannelBinding {
   if (channel.kind === 'gripper') {
@@ -1674,12 +1725,14 @@ function bindNonJointChannel(
 }
 
 function finishJointBinding(
-  base: { source_index: number; source_role: string | null },
+  base: { source_index: number; source_role: string | null; mode: null },
   channel: ActionChannel,
   joint: EmbodimentJoint,
   method: TransportMethod,
   reason: string,
   warnings: TransportWarning[],
+  bound: Map<string, ControlMode>,
+  perJointModes: boolean,
 ): ChannelBinding {
   const rating = ratingFor(channel.kind, joint.limits)
   const scale = scaleFor(channel.peak, rating)
@@ -1692,9 +1745,60 @@ function finishJointBinding(
       target: joint.name,
       scale: 1,
       limit: rating,
+      mode,
       reason: `"${joint.name}" does not accept ${mode} commands.`,
     }
   }
+
+  // §86.2. One joint, one mode, per cycle. A second channel onto a joint already bound in another
+  // mode is blocked rather than bound, because the two would meet as one entry in `values` and one
+  // in `modes` and the command would carry whichever was written last — a position setpoint
+  // delivered as a torque, or the reverse. Which of the two is blocked is the order the policy
+  // declared them in, and that is deliberate: first-wins is what §84.3's binder does with a
+  // repeated motion, for the same reason — the alternative is a plan whose meaning depends on how
+  // far down the list a reader got.
+  const already = mode ? bound.get(joint.name) : undefined
+  if (mode && already !== undefined && already !== mode) {
+    warnings.push({
+      code: 'joint_mode_conflict',
+      message: `"${joint.name}" is already bound in ${already}; a joint carries one mode per cycle, so this ${mode} channel is blocked.`,
+      subjects: [joint.name],
+    })
+    return {
+      ...base,
+      method: 'blocked',
+      target: joint.name,
+      scale: 1,
+      limit: rating,
+      mode,
+      reason: `"${joint.name}" is commanded in ${already} by an earlier channel, and a joint takes one mode per cycle.`,
+    }
+  }
+  // §86.1's other half. A driver that does not read the per-joint array takes one mode for the
+  // whole command, so a channel in a second mode cannot be delivered to it *at all* — not on this
+  // joint and not on any other. Blocked, and named: the alternative an integration reaches for is
+  // to command the joints that share the majority mode and drop the rest, and a body that accepted
+  // a position command and silently moved two thirds of itself is the failure §24's shape exists to
+  // make impossible. A required channel blocked here refuses the plan, which is the right outcome.
+  const elsewhere = mode ? [...bound.values()].find(other => other !== mode) : undefined
+  if (mode && elsewhere !== undefined && !perJointModes) {
+    warnings.push({
+      code: 'mixed_modes_unsupported',
+      message: `This body is already commanded in ${elsewhere} and its driver reads one mode per command, so the ${mode} channel on "${joint.name}" cannot be delivered.`,
+      subjects: [joint.name],
+    })
+    return {
+      ...base,
+      method: 'blocked',
+      target: joint.name,
+      scale: 1,
+      limit: rating,
+      mode,
+      reason: `This driver does not declare per-joint modes (§86.1), and the body is already commanded in ${elsewhere}.`,
+    }
+  }
+
+  if (mode) bound.set(joint.name, mode)
 
   if (scale < 1) {
     warnings.push({
@@ -1710,7 +1814,7 @@ function finishJointBinding(
     })
   }
 
-  return { ...base, method, target: joint.name, scale, limit: rating, reason }
+  return { ...base, method, target: joint.name, scale, limit: rating, mode, reason }
 }
 
 /**
@@ -1844,12 +1948,24 @@ function buildClamp(
 ): TransportClamp | null {
   const envelope = target.envelope
   const perChannel: Record<string, number> = {}
+  const jointModes: Record<string, ControlMode> = {}
 
   for (const binding of bindings) {
+    // A blocked binding commands nothing, so it contributes neither a ceiling nor a mode. It is
+    // the one place these two loops could have been written as one and must not be: a blocked
+    // binding carries `limit` — the rating of the joint it could not command — precisely so a
+    // reader can see what was on offer.
+    if (binding.method === 'blocked') continue
     if (binding.target && binding.limit !== null) perChannel[binding.target] = binding.limit
+    // §86.3. The kernel cannot read a ceiling in the right units without this: a whole-body
+    // velocity figure and a whole-body torque figure are different numbers, and until this map
+    // existed neither was ever applied to a joint.
+    if (binding.target && binding.mode !== null) jointModes[binding.target] = binding.mode
   }
 
-  if (!envelope && Object.keys(perChannel).length === 0) return null
+  if (!envelope && Object.keys(perChannel).length === 0 && Object.keys(jointModes).length === 0) {
+    return null
+  }
 
   const watchdogMs = envelope?.watchdog_ms
   return {
@@ -1858,6 +1974,9 @@ function buildClamp(
     ...(envelope?.base_velocity_max_m_s !== undefined && { base_velocity_max_m_s: envelope.base_velocity_max_m_s }),
     ...(watchdogMs !== undefined && watchdogMs > 0 && { min_control_hz: 1000 / watchdogMs }),
     per_channel: perChannel,
+    // Absent from a plan that commands no joint, so a motion plan (§84) and a plan over a gripper
+    // and a base are the same bytes they were before this section.
+    ...(Object.keys(jointModes).length > 0 && { joint_modes: jointModes }),
     ...(envelope?.source !== undefined && { source: envelope.source }),
   }
 }

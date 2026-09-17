@@ -204,10 +204,12 @@ export type CapabilityDomain = (typeof CAPABILITY_DOMAINS)[number]
  * Standard Robot Interface's tokens are not all two segments — `sensing.camera.rgb` is three — so a
  * length rule would have refused tokens robots have been registered with for months.
  *
- * `control.motion` is §84's: the named motions a program-level controller executes. `hri.speech`
- * and `hri.warning` are §49.1's, and the second is reserved — a token nobody may be granted, which
- * `RESERVED_CAPABILITIES` says separately, because *is this a token* and *may anybody have it* are
- * two questions.
+ * Four are the OS's own, because this document gates a rule on each and the interface has no word
+ * for any of them: `control.motion` is §84's named motions, `hri.speech` and `hri.warning` are
+ * §49.1's, and `sensing.audio` is §49.2's microphone (DRY-COVERAGE-PLAN.md F35 — a vocabulary
+ * without it would have refused the token §49.2's privacy rule is written about). `hri.warning` is
+ * reserved on top of being canonical — a token nobody may be granted, which `RESERVED_CAPABILITIES`
+ * says separately, because *is this a token* and *may anybody have it* are two questions.
  */
 export const CAPABILITY_TOKENS = [
   'locomotion.walk',
@@ -232,6 +234,7 @@ export const CAPABILITY_TOKENS = [
   'sensing.tactile',
   'sensing.joint_state',
   'sensing.odometry',
+  'sensing.audio',
   'control.position',
   'control.velocity',
   'control.torque',

@@ -897,8 +897,11 @@ Ends fully dry-verified, because there was never a clamping claim to verify.
 ## Phase 4 — skills coverage
 
 1. Route `execute({ skill, arguments })` to a command-level driver. §59.2 makes this the only path
-   that applies to the largest installed base. **Blocked behind Phase 3's amendment, and blocked
-   twice.** A motion has to exist in the descriptor before anything can be routed to one — that is
+   that applies to the largest installed base. **Unblocked, and not built.** The first of its two
+   blockers is gone — §84 gives a motion a place in the descriptor — and the second stands: §33.1
+   keeps `skynetd` off the path that holds a driver, so the destination is `skynetk`'s and there is
+   no channel from the supervisor to it. `motion-action-space.md` records that half as §88, which is
+   unwritten. Previously read: **Blocked behind Phase 3's amendment, and blocked twice.** A motion has to exist in the descriptor before anything can be routed to one — that is
    `docs/issues/motion-action-space.md` — and §33.1 keeps `skynetd` off the path that holds a
    driver, so the *destination* is `skynetk`'s and there is no channel from the supervisor to it.
    The second is a design decision of the same weight as the first and belongs in the same issue.
@@ -906,7 +909,11 @@ Ends fully dry-verified, because there was never a clamping claim to verify.
    Five branches added under `robot.state` — `velocity.<joint>`, `effort.<joint>`, `estop`,
    `degraded`, `braked`, `homing`, `fault_code` — through the oracle, eight new corpus cases, and
    all four complete editions. F28 is what it measured and what it found.
-3. Capability token vocabulary and `extensions`. Pure contract, pure corpus.
+3. ~~Capability token vocabulary and `extensions`.~~ **Done**, 2026-09-17 — §85. Thirty-eight tokens
+   in seven domains, four classes, `capability_unknown` from both directions, thirty `admission/tokens`
+   cases, eleven `admission/vocabulary` cases and three closed sets across all eight editions. Both
+   workstation gates report a token by class before a robot has to. F34 is what building it found and
+   F35 is what auditing it against the document found.
 
 `skynet skill check` stays the workstation gate it already is.
 
@@ -1121,6 +1128,91 @@ The gate is a Hub test whose fixture is typed `{ [K in keyof Required<SourceEmbo
 so a field added to the mirrored contract fails the Hub's type-check until the fixture names it, and
 then fails the assertion until the reader carries it. Held to a control: the reader as it stood before
 this session fails the new test, and the current one passes.
+
+### F34 — the vocabulary §85 was written to create already existed, with users, in the other repository.
+
+`docs/issues/capability-token-vocabulary.md` proposed seven domains — `manipulation`, `locomotion`,
+`sensing`, `hri`, `compute`, `network`, `storage` — a two-segment grammar, and an enumeration per
+domain. It was a reasonable list and it was the wrong one, for a reason no reading of the
+specification could have surfaced: **the Hub has enforced a different list since before §8 was
+written.** `lib/skynet/robots/interface.ts` refuses a robot registration naming a token outside its
+`CAPABILITY_TOKENS`, `POST /v1/robots` has been calling it for months, and every robot in the
+registry carries those spellings.
+
+So ratifying the issue as proposed would have produced two vocabularies for one thing — which is the
+precise failure the section exists to prevent, arrived at by writing the section. §85 adopts the
+interface's list instead, plus the tokens this document gates a rule on and the interface has no word
+for. What the issue's own draft cost is visible in the corpus: `a-domain-the-issue-proposed` pins
+`compute.accelerator` as a **vendor** token, and `a-modality-is-not-a-token` pins `sensing.rgb` —
+§5's modality spelling, and the one a reader reaches for — as `unknown` rather than canonical,
+because the interface spells it `sensing.camera.rgb`.
+
+**The mechanical half is the part worth keeping.** The two lists are now one vocabulary written in
+two files, because the Hub's carries a label per token that the OS contract has no use for, and the
+digest mirror cannot see a second file. `lib/__tests__/skynet-os-mirrors.test.ts` holds them to each
+other token for token *and in order*, and a second case refuses a token with no label — the way an
+operator ends up choosing between `sensing.audio` and a sentence.
+
+The proposal's two-segment grammar was the same mistake one level down: `sensing.camera.rgb` has
+three segments and has been a registered capability for months, so a length rule would have refused
+tokens robots already carry. Membership in the list is the whole rule, and the first pass of the
+editions had written the length rule into all seven of them — Go, C++ and Python failed 35 cases each
+the moment the reference was corrected, which is what the corpus is for.
+
+### F35 — the vocabulary as first built refused the token §49.2's privacy rule is written about.
+
+§49.2 is a page about microphones: *"`sensing.audio` is a capability token gated like any other […]
+the default is denied and the grant is explicit and audit-logged"*, and §81 re-states it. The
+interface has no microphone token, so the list adopted from it had none either, and admission would
+have refused any manifest declaring one — making the rule §49.2 states unreachable by the only route
+that reaches it.
+
+Found by scanning the specification for every backticked string shaped like a token and comparing the
+result against the enumeration, which took one command and should be the reflex whenever a closed set
+is adopted from somewhere else rather than derived from the document. Three of the four strings it
+found were already in the list; the fourth was this one.
+
+`sensing.audio` is now canonical, and it is the fourth token §85 adds to the interface's list for the
+same reason as the other three: this document gates a rule on it. The corpus case names §49.2, so the
+next person to prune the vocabulary has to argue with the section rather than with a list.
+
+### F36 — a per-channel ceiling took precedence over the whole-body one, and §86 is what made it reachable.
+
+`ceiling_for` read `per_channel` first and returned it, falling back to the base-velocity figure for
+the reserved `base` channel and to nothing otherwise. So a joint rated 2 rad/s on a robot whose
+operator had narrowed the body to 1.5 was clamped at **2** — the wider of the two — which is the one
+thing `narrowest` exists everywhere else in the kernel to prevent.
+
+It had never been wrong, because it had never been reachable: the whole-body figures reached no
+channel at all, and the comment beside the function said why (*"nothing at this layer knows whether a
+given channel carries radians per second or newton-metres"*). §86.3 gives that layer the units, and
+the moment it does, precedence becomes a live defect. The two now compose by narrowing, and
+`a-velocity-joint-takes-the-narrower-of-the-two` is the case that fails without it.
+
+**The general shape is worth more than the fix.** A number that is resolved, rendered and applied to
+nothing is not inert — it is a defect waiting for somebody to connect it, and it reads as enforcement
+on every surface in the meantime. `joint_velocity_max_rad_s` and `joint_torque_max_nm` were narrowed
+through four layers, shown on the limits page, and reached no joint; an operator who tightened a
+robot's velocity ceiling in a profile changed a number on a screen. The audit that would find the
+next one is not "which functions are unreached" — which this repository already checks — but *which
+resolved values are unread*.
+
+### F37 — the mock driver's own suite had been commanding a position-only joint in torque.
+
+`drivers/mock` declares three joints, and `J3` is `"control_modes":["position"]` while the other two
+take torque. Its selftest sent `mode = SKR_MODE_TORQUE` with all three joints unmasked, the driver
+accepted it, and the check was called *"accepts a well-formed command"*.
+
+It was not well formed. The mock is a **mixed-mode body** — the very thing §86 is about — and nothing
+noticed because §24 had no way to say so and the driver never compared a command's mode against its
+own `control_modes`. Two of its checks then passed for the wrong reason: the estop refusal was a
+refusal either way, and the clamp check was clamping a position setpoint against a torque rating,
+which is a number bounded in the wrong units.
+
+Found by building §86 rather than by reading the driver: the moment `write_command` checked the mode
+against each joint's own list, two checks went red on a driver that had been green for its whole
+existence. The suite now sends a per-joint command, and a body-wide torque command against this body
+is a case of its own — a control that fails if the check is removed.
 
 ## Next
 
@@ -1876,3 +1968,135 @@ this session fails F33's structural test.
 and §84 says what a program-level body *declares*; nothing here has sent a motion to a Fanuc, a KUKA or
 an ABB. Guest tier stays permanent for these bodies by §59.2, and no guard reads a motion. The six new
 Hub strings read in English in all 35 locales until a translation run is approved.
+
+### 2026-09-17 (tenth session) — the rest of Part XII
+
+A Linux container, and the first machine in this plan's history where **every toolchain CI names runs
+natively**: Rust 1.94.1, Node 22, Python 3.11, Go 1.24.7, GCC 13.3, Temurin 21, and — installed for
+this session under `~/.skytools` — Zig 0.16.0 and .NET 8.0. So the eight-edition and `invariants`
+lines below are runs rather than inferences, which is what F31 asked for and F7 before it.
+**Committed locally, nothing pushed**, on the owner's instruction. *Updated as the session goes.*
+
+The instruction was the ninth session's, continued: finish every section. The ninth ratified the
+amendments (*Decisions* 13) and built §84; this one carries the remaining three issues into Part XII
+and builds them, in the order the issues name.
+
+It opened on a tree the ninth session had left mid-flight: §85's implementation was committed across
+the reference, the Rust edition and the corpus, and the specification had no §85 in it, the plan had
+no entry for it, and seven editions failed thirty-five cases each against a rule the reference had
+corrected under them. F34 is why, and finishing it was the first work.
+
+#### Phase 4 item 3 — §85, the capability token vocabulary
+
+**Changed.**
+
+| | |
+|---|---|
+| `docs/skynet-os-architecture.md` | §85 written as built, in four subsections; §73's corpus figures moved to 84 files and 1,314 cases. Both copies, re-pinned |
+| `reference/typescript/package.ts` | `CAPABILITY_DOMAINS`, `CAPABILITY_TOKENS`, `TOKEN_CLASSES`, `classifyToken`, `capability_unknown` in the rejection codes, and both arms of the admission check. Synced into the Hub |
+| `tools/corpus-gen/generate.ts` | 30 cases in `admission/tokens.json`, 11 in `admission/vocabulary.json`, three closed sets. Written before any edition |
+| `crates/skynet-contracts` | The Rust edition of all of it |
+| `editions/{python,cpp,go}` | The three other complete editions; ratchets 1,270 → 1,314 in `ci.yml` and both Makefiles |
+| `editions/{c,zig,java,csharp}` | The three new closed sets; their set-count self-checks 76 → 79 |
+| `crates/skynet-cli` | `skynet skill check` gains `skill.capabilities.canonical`; `skynet driver check` folds the same test into `embodiment.descriptor.valid`, naming each token's class |
+| `reference/reports/{editions,scale}.json` | Regenerated |
+| `docs/issues/` | `capability-token-vocabulary.md` marked ratified, kept as the proposal it was — and it is the one the built form departs from most (F34) |
+| **The Hub** | `lib/skynet/os/package.ts` and the two pins synced; `lib/skynet/robots/interface.ts` gains §85's four additions and an `hri` group; both registration routes return each refused token **with its class**, because *unknown*, *vendor* and *malformed* have three different fixes; `lib/__tests__/skynet-os-mirrors.test.ts` holds the two lists to each other in order and refuses an unlabelled token. One catalogue key, synced into 34 locales at the English value — **not translated**, because running the translator needs the owner's approval in the conversation |
+
+**Verified.**
+
+```
+cargo fmt --all --check / clippy -D warnings --all-targets   exit 0
+cargo test --workspace                                       1,946 passed, 0 failed, 20 ignored
+corpus, eight editions                                       rust python cpp go 1314/1314
+                                                             c 359 · zig 320 · java 320 · csharp 320, 0 failed
+node tools/edition-report.mjs --check                        4 editions, 1,314 cases each
+node tools/scale-report.mjs --check                          §73 matches the tree
+node tools/run-ci-job.mjs invariants                         53 of 53
+node tools/check-mirrors.mjs / check-contract-mirrors.mjs    match
+Hub: vitest / tsc --noEmit / eslint                          2,279 passed · exit 0 · exit 0
+```
+
+Controls, each failing and each reverted: the first pass of the editions *is* the control for F34 —
+the two-segment rule the issue proposed, written into Go, C++ and Python, fails 35 admission cases
+each against a reference that enumerates `sensing.camera.rgb`; and the Hub's interface with
+`sensing.audio` removed fails the new order-and-membership test.
+
+**Not verified, and not claimed.** Nothing here has been run against a robot, and nothing here needs
+one — it is a closed set and a classifier. What it cannot do is decide whether a *vendor's* token is
+a good one: `acme.vacuum` classifies as `vendor` and nothing on this platform knows what it means,
+which is what `extensions` is and is not a gap. No token has been granted to a package on a machine
+that then used it. This session ran all eight editions on one container, including Zig 0.16.0 and
+.NET 8 installed for it, so the eight-edition line above is a run rather than an inference.
+
+#### §86 — the mode is a property of a joint
+
+The `per-joint-command-modes.md` amendment, ratified and built. It is the one issue that came out of
+a driver rather than out of reading the document, and the driver is what it changes back.
+
+**Changed.**
+
+| | |
+|---|---|
+| `docs/skynet-os-architecture.md` | §86 written as built, four subsections; §73's figures moved to 148,000 lines, 86 files, 1,332 cases. Both copies, re-pinned |
+| `bindings/c/skynet_rhal.h` | `skr_command.modes`, `flags` in place of `_pad[0]`, `SKR_JMODE_*`, `SKR_CMD_PER_JOINT_MODES`, and the three macros that keep the two numberings related in one place. **No ABI bump** — §27's homing precedent, one field along |
+| `bindings/{cpp,python}`, `crates/skynet-rhal` | The same layout in three more views, each with its own offset assertions, which is the three-sided check a moved field fails on |
+| `reference/typescript/{embodiment,safety,shape}.ts` | `mode` on a binding, `joint_modes` on the clamp and on `ResolvedLimits`, `per_joint_modes` on the descriptor, §86.2's two refusals, and `ceilingFor` narrowing rather than preferring (F36) |
+| `tools/corpus-gen/generate.ts` | The mobile-manipulator fixture in two forms, 11 cases in `transport/mode.json` and 7 in `cycle/modes.json`. **Written before any edition** |
+| `crates/skynet-{contracts,kernel,corpus}`, `skynetd-io` | The Rust edition, including the black box's replay path — a window sealed on a mixed body replays against the ceilings it was actually held to |
+| `editions/{python,cpp,go}` | The three other complete editions; ratchets 1,314 → 1,332 |
+| `editions/{c,zig,java,csharp}` | The two new warning codes in their closed sets |
+| `crates/skynet-{dl,kernel-host}` | `write_modal` and `ModalFrame`; the loop builds the per-joint array from the plan's own map, by channel name, and sends none when the joints agree |
+| `crates/skynet-cli` | `skynet transport` renders the mode beside each ceiling and a mode table when a plan mixes them; `driver check` gains `rhal.command.rejection`'s per-joint case, applicable only to a driver that declares it reads the array |
+| `drivers/mock` | Now honours the array, clamps in the mode's own units, and refuses two things it used to accept (F37). 30 checks |
+| `drivers/ros2_control` | The union rather than the intersection, `per_joint_modes`, and per-joint dispatch in `write_command`. `mixed_interfaces.urdf` is unchanged and its suite asserts the opposite of what it did |
+| **The Hub** | `lib/skynet/os/{embodiment,safety,shape}.ts` and both pins synced; the transport page renders a joint-mode table when a plan mixes modes. Three catalogue keys, synced into 34 locales at the English value — **not translated** |
+
+**Verified.**
+
+```
+cargo fmt --all --check / clippy -D warnings --all-targets   exit 0
+cargo test --workspace                                       1,948 passed, 0 failed, 20 ignored
+corpus, eight editions                                       rust python cpp go 1332/1332
+                                                             c 359 · zig 320 · java 320 · csharp 320, 0 failed
+node tools/edition-report.mjs --check                        4 editions, 1,332 cases each
+node tools/scale-report.mjs --check                          §73 matches the tree
+node tools/run-ci-job.mjs invariants                         53 of 53
+node tools/check-mirrors.mjs / check-contract-mirrors.mjs    match
+make -C drivers/mock check                                   30 checks, 0 failed
+make -C drivers/{pendant,canopen,ur_rtde} check              42 · 61 · 12 checks, 0 failed
+skynet driver check, mock                                    25 passed, 0 failed — including the per-joint rejection case
+Hub: vitest / tsc --noEmit / eslint                          2,279 passed · exit 0 · exit 0
+```
+
+Controls, each failing and each reverted: the mock's suite as it stood before this session fails on
+a body-wide torque command (F37, and it is the reason the section found anything); `ceilingFor`
+preferring the per-channel figure fails `a-velocity-joint-takes-the-narrower-of-the-two` (F36); the
+kernel loop sending the array unconditionally fails `a-single-mode-body-sends-no-per-joint-array`.
+
+**Not verified, and not claimed.** `drivers/ros2_control` **was not built or run**: ROS 2 is not
+installed on this container and its Makefile refuses rather than building half of itself, which is
+the right behaviour and means its 42 checks are unexercised here. That is the single largest gap in
+this entry, and it is exactly the row §86 was written for — the driver's changes are reviewed code
+and nothing more until somebody runs `make -C drivers/ros2_control check` on a machine with
+`ros2_control` on it. Everything else above ran. No robot: no per-joint command has reached a
+physical drive, the mock's mixed body is three joints in a struct, and §59.2's tier ruling is
+untouched.
+
+#### What this session did not reach
+
+Two sections of Part XII are unwritten, and both are the same shape as the three that are: a
+ratified amendment with an implementation order, blocked on nothing.
+
+* **§87 — Phase 5's four class gates** (`docs/issues/phase-5-class-gates.md`). The issue is written
+  **as questions**, deliberately, and *Decisions* 13 says ratifying it means answering them, each
+  answer recorded with the alternative it rejected. Four of them: multiple robots on one compute,
+  safe-state discovery for mobile robots, `on_command_loss` per chain, and the Hub-brokered console
+  relay. Nothing about them needs a robot.
+* **§88 — `execute({ skill, arguments })` to a command-level driver** (Phase 4 item 1, named as §88
+  by `motion-action-space.md`). §84 removed the first of its two blockers; the second is a design
+  decision of the same weight — §33.1 keeps `skynetd` off the path that holds a driver, so there is
+  no channel from the supervisor to the process that would route a skill.
+
+The plan's *Next* list and its Phase 4 and Phase 5 sections carry both, and neither is waiting on
+hardware. What is genuinely outside this plan is unchanged and listed under *What stays open*.

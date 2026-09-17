@@ -321,8 +321,17 @@ def resolve_transport(
     # a chain is then marked together.
     retarget_chains = _decide_retarget_chains(source, index, target, options, warnings)
 
+    # §86.2's record of which joint is already commanded in which mode, filled as the channels bind
+    # and read by the binder that would be the second onto a joint.
+    bound: dict[str, str] = {}
+    per_joint_modes = _field(target["control"], "per_joint_modes") is True
+
     for channel in source["action_channels"]:
-        bindings.append(_bind_channel(channel, target, index, retarget_chains, warnings))
+        bindings.append(
+            _bind_channel(
+                channel, target, index, retarget_chains, warnings, bound, per_joint_modes,
+            )
+        )
 
     observations = _bind_observations(source.get("observations") or [], target, warnings)
     control_hz = _resolve_control_hz(source, target, options, warnings)
@@ -611,9 +620,17 @@ def _bind_channel(
     index: dict[str, Any],
     retarget_chains: dict[str, None],
     warnings: list[dict[str, Any]],
+    bound: dict[str, str],
+    per_joint_modes: bool,
 ) -> dict[str, Any]:
     parsed = parse_role(channel.get("role"))
-    base = {"source_index": channel["index"], "source_role": _or_none(_field(channel, "role"))}
+    # `mode` on the base rather than on each literal below: a binding that commands no joint has no
+    # mode (§86.2), and there are eleven places that produce one.
+    base = {
+        "source_index": channel["index"],
+        "source_role": _or_none(_field(channel, "role")),
+        "mode": None,
+    }
 
     # Non-joint channels are matched against the body's own facilities rather than its joints.
     if channel["kind"] not in _JOINT_KINDS:
@@ -625,7 +642,8 @@ def _bind_channel(
         exact = index["by_name"].get(channel["joint"])
         if exact:
             return _finish_joint_binding(
-                base, channel, exact, "direct", "Joint name matches exactly.", warnings
+                base, channel, exact, "direct", "Joint name matches exactly.", warnings,
+                bound, per_joint_modes,
             )
 
     # 2. Canonical role. This is the mechanism that makes bodies interoperable at all.
@@ -640,6 +658,8 @@ def _bind_channel(
                 "remap",
                 f'Mapped by role {key} to "{by_role["name"]}".',
                 warnings,
+                bound,
+                per_joint_modes,
             )
 
         # 3. Task space, when the chain was granted it above.
@@ -787,6 +807,8 @@ def _finish_joint_binding(
     method: str,
     reason: str,
     warnings: list[dict[str, Any]],
+    bound: dict[str, str],
+    per_joint_modes: bool,
 ) -> dict[str, Any]:
     rating = _rating_for(channel["kind"], joint["limits"])
     peak = _field(channel, "peak")
@@ -800,8 +822,69 @@ def _finish_joint_binding(
             "target": joint["name"],
             "scale": 1,
             "limit": rating,
+            "mode": mode,
             "reason": f'"{joint["name"]}" does not accept {mode} commands.',
         }
+
+    # §86.2. One joint, one mode, per cycle. A second channel onto a joint already bound in another
+    # mode would meet it as one entry in `values` and one in `modes`, and the command would carry
+    # whichever was written last. First-wins, as §84.3's binder does with a repeated motion.
+    already = bound.get(joint["name"]) if mode else None
+    if mode and already is not None and already != mode:
+        warnings.append(
+            {
+                "code": "joint_mode_conflict",
+                "message": (
+                    f'"{joint["name"]}" is already bound in {already}; a joint carries one mode '
+                    f"per cycle, so this {mode} channel is blocked."
+                ),
+                "subjects": [joint["name"]],
+            }
+        )
+        return {
+            **base,
+            "method": "blocked",
+            "target": joint["name"],
+            "scale": 1,
+            "limit": rating,
+            "mode": mode,
+            "reason": (
+                f'"{joint["name"]}" is commanded in {already} by an earlier channel, and a joint '
+                "takes one mode per cycle."
+            ),
+        }
+
+    # §86.1's other half. A driver that does not read the per-joint array takes one mode for the
+    # whole command, so a channel in a second mode cannot be delivered to it at all. Blocked and
+    # named: the alternative an integration reaches for is to command the joints sharing the
+    # majority mode and drop the rest.
+    elsewhere = next((other for other in bound.values() if other != mode), None) if mode else None
+    if mode and elsewhere is not None and not per_joint_modes:
+        warnings.append(
+            {
+                "code": "mixed_modes_unsupported",
+                "message": (
+                    f"This body is already commanded in {elsewhere} and its driver reads one mode "
+                    f'per command, so the {mode} channel on "{joint["name"]}" cannot be delivered.'
+                ),
+                "subjects": [joint["name"]],
+            }
+        )
+        return {
+            **base,
+            "method": "blocked",
+            "target": joint["name"],
+            "scale": 1,
+            "limit": rating,
+            "mode": mode,
+            "reason": (
+                "This driver does not declare per-joint modes (\u00a786.1), and the body is "
+                f"already commanded in {elsewhere}."
+            ),
+        }
+
+    if mode:
+        bound[joint["name"]] = mode
 
     if scale < 1:
         warnings.append(
@@ -833,6 +916,7 @@ def _finish_joint_binding(
         "target": joint["name"],
         "scale": scale,
         "limit": rating,
+        "mode": mode,
         "reason": reason,
     }
 
@@ -1019,12 +1103,21 @@ def _resolve_control_hz(
 def _build_clamp(target: dict[str, Any], bindings: list[dict[str, Any]]) -> dict[str, Any] | None:
     envelope = target.get("envelope")
     per_channel: dict[str, Any] = {}
+    joint_modes: dict[str, str] = {}
 
     for binding in bindings:
+        # A blocked binding commands nothing, so it contributes neither a ceiling nor a mode. It
+        # carries `limit` — the rating of the joint it could not command — so a reader can see what
+        # was on offer, and that is the only thing it is for.
+        if binding["method"] == "blocked":
+            continue
         if binding["target"] and binding["limit"] is not None:
             per_channel[binding["target"]] = binding["limit"]
+        # §86.3. Without this the kernel cannot read a ceiling in the right units.
+        if binding["target"] and binding["mode"] is not None:
+            joint_modes[binding["target"]] = binding["mode"]
 
-    if not envelope and len(per_channel) == 0:
+    if not envelope and len(per_channel) == 0 and len(joint_modes) == 0:
         return None
 
     watchdog_ms = _field(envelope, "watchdog_ms")
@@ -1036,6 +1129,10 @@ def _build_clamp(target: dict[str, Any], bindings: list[dict[str, Any]]) -> dict
     if watchdog_ms is not _ABSENT and watchdog_ms > 0:
         clamp["min_control_hz"] = 1000 / watchdog_ms
     clamp["per_channel"] = per_channel
+    # Absent — not empty — on a plan that binds no joint, so a motion plan and a plan over a gripper
+    # and a base are the same bytes they were before §86.
+    if len(joint_modes) > 0:
+        clamp["joint_modes"] = joint_modes
     source = _field(envelope, "source")
     if source is not _ABSENT:
         clamp["source"] = source
@@ -1120,6 +1217,7 @@ def plan_to_json(case_input: dict[str, Any]) -> Any:
             "base_velocity_max_m_s": clamp.get("base_velocity_max_m_s", OMIT),
             "min_control_hz": clamp.get("min_control_hz", OMIT),
             "per_channel": clamp["per_channel"],
+            "joint_modes": clamp.get("joint_modes", OMIT),
             "source": clamp.get("source", OMIT),
         },
         "warnings": [

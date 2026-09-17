@@ -37,7 +37,7 @@ use skynet_ring::{Consumer, Reading};
 
 use crate::capture::{Camera, CaptureTurn};
 use crate::cycle::{decide, record, Decision, Observed, Posted, Stopping};
-use crate::driver::Actuator;
+use crate::driver::{Actuator, Write};
 
 /// A monotonic clock, so a test can drive the loop without waiting.
 ///
@@ -151,6 +151,9 @@ pub struct Summary {
 /// Everything the kernel deliberately does not keep. One per body.
 pub struct Host<'a> {
     channels: &'a [&'a str],
+    /// §86.1's per-joint mode array, rebuilt each cycle. Owned by the loop so the hot path never
+    /// allocates: `clear` keeps the capacity a body's joint count asked for on the first cycle.
+    modes: Vec<u8>,
     tick: u64,
     last_sequence: Option<u64>,
     stopping: Stopping,
@@ -170,6 +173,37 @@ pub struct Host<'a> {
     summary: Summary,
 }
 
+/// Whether a plan's joints disagree about mode (§86.1).
+///
+/// Empty and single-mode are the same answer here and deliberately so: on a body every joint of
+/// which is in one mode, the per-joint array would say what `mode` already says, and sending it
+/// would hand a v1 driver a flag it does not read for no gain.
+fn is_mixed(joint_modes: &[(&str, &str)]) -> bool {
+    let mut seen: Option<&str> = None;
+    for (_, mode) in joint_modes {
+        match seen {
+            None => seen = Some(mode),
+            Some(first) if first != *mode => return true,
+            Some(_) => {}
+        }
+    }
+    false
+}
+
+/// The §24 mode a plan's mode name means, or `None` for a name this ABI has no mode for.
+///
+/// `cartesian` and `trajectory` are in §5's control-mode vocabulary and are not §24 modes: they
+/// describe how a *policy* was trained, not how a joint is driven. A joint bound to one inherits
+/// rather than being given a code this wire does not define.
+fn mode_code(mode: &str) -> Option<skynet_rhal::Mode> {
+    match mode {
+        "position" => Some(skynet_rhal::Mode::Position),
+        "velocity" => Some(skynet_rhal::Mode::Velocity),
+        "torque" => Some(skynet_rhal::Mode::Torque),
+        _ => None,
+    }
+}
+
 impl<'a> Host<'a> {
     /// A host for a body with these channels, in transport-plan order.
     pub fn new(channels: &'a [&'a str]) -> Host<'a> {
@@ -178,6 +212,7 @@ impl<'a> Host<'a> {
             tick: 0,
             last_sequence: None,
             stopping: Stopping::No,
+            modes: Vec::with_capacity(channels.len()),
             previous: Vec::with_capacity(channels.len()),
             desired: Vec::with_capacity(channels.len()),
             state_position: Vec::with_capacity(channels.len()),
@@ -377,13 +412,40 @@ impl<'a> Host<'a> {
         self.stopping = decision.stopping;
 
         // ── Write what it allowed ────────────────────────────────────────────
+        //
+        // §86.1. The per-joint array is built only for a body whose plan says its joints disagree
+        // about mode — `modes` stays empty otherwise, and an empty array is the body-wide command
+        // every driver written before §86 understands. The lookup is by channel name because that
+        // is what `joint_modes` is keyed by and what the plan bound: a positional map would be a
+        // second ordering to keep in step with the first.
         let width = decision.channels;
+        self.modes.clear();
+        if is_mixed(limits.joint_modes) {
+            for channel in self.channels.iter().take(width) {
+                let mode = limits
+                    .joint_modes
+                    .iter()
+                    .find(|(name, _)| name == channel)
+                    .and_then(|(_, mode)| mode_code(mode));
+                // A channel the plan carries no mode for inherits, which is the one reading that
+                // cannot be wrong: it is whatever the command already says. The `SKR_JMODE_*`
+                // spelling comes from `Mode` rather than being assembled here, so the relation
+                // between the two numberings lives in one place (§86.1).
+                self.modes.push(match mode {
+                    Some(mode) => mode.as_joint_mode(),
+                    None => skynet_rhal::jmode::INHERIT,
+                });
+            }
+        }
         let rhal_result = body.command(
-            self.frame.stamp_ns,
-            self.frame.seq as u32,
-            decision.mode as u8,
-            &decision.values[..width],
-            &decision.mask[..width],
+            Write {
+                stamp_ns: self.frame.stamp_ns,
+                seq: self.frame.seq as u32,
+                mode: decision.mode as u8,
+                values: &decision.values[..width],
+                mask: &decision.mask[..width],
+                modes: &self.modes,
+            },
             now_ns,
         );
         if rhal_result != 0 {

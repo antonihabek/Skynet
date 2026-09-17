@@ -1,0 +1,367 @@
+{
+  "corpus": "cycle",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "a-velocity-joint-takes-the-velocity-ceiling",
+      "note": "A joint with no rating of its own is still commanded in a mode, and the mode says which whole-body figure is in its units. Before §86 this joint had no ceiling at all.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 1.5,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 1.5,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "shoulder": 3,
+              "wheel_r": 2
+            },
+            "joint_modes": {
+              "shoulder": "position",
+              "wheel_l": "velocity",
+              "wheel_r": "velocity"
+            },
+            "source": "https://example.invalid/mobile.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true,
+            "proximity_reading": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "wheel_l": 4
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"wheel_l\",\"from\":4,\"to\":1.5}],\"command\":{\"wheel_l\":1.5},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "a-velocity-joint-takes-the-narrower-of-the-two",
+      "note": "DRY-COVERAGE-PLAN.md F36. `wheel_r` is rated 2 rad/s and the body is held to 1.5, so 1.5 is what applies. A per-channel figure that took precedence over the whole-body one would let an operator narrow a robot on a screen and change nothing on the machine.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 1.5,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 1.5,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "shoulder": 3,
+              "wheel_r": 2
+            },
+            "joint_modes": {
+              "shoulder": "position",
+              "wheel_l": "velocity",
+              "wheel_r": "velocity"
+            },
+            "source": "https://example.invalid/mobile.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true,
+            "proximity_reading": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "wheel_r": 4
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"wheel_r\",\"from\":4,\"to\":1.5}],\"command\":{\"wheel_r\":1.5},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "a-position-joint-takes-no-whole-body-ceiling",
+      "note": "There is no whole-body position figure to fall back to: travel is a per-joint bound with two ends, and a single magnitude cannot express it. The joint's own rating is all there is.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 1.5,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 1.5,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "shoulder": 3,
+              "wheel_r": 2
+            },
+            "joint_modes": {
+              "shoulder": "position",
+              "wheel_l": "velocity",
+              "wheel_r": "velocity"
+            },
+            "source": "https://example.invalid/mobile.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true,
+            "proximity_reading": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "shoulder": 10
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"shoulder\",\"from\":10,\"to\":3}],\"command\":{\"shoulder\":3},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "a-torque-joint-takes-the-torque-ceiling",
+      "note": "The other half of the table, on the single-mode body every other cycle case uses.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {},
+            "source": "https://example.invalid/datasheet.pdf",
+            "joint_modes": {
+              "elbow": "torque"
+            }
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true,
+            "proximity_reading": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "elbow": 400
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"elbow\",\"from\":400,\"to\":80}],\"command\":{\"elbow\":80},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "a-joint-in-no-mode-is-unbounded-as-it-was",
+      "note": "A channel the plan carries no mode for reads exactly as it did before this section: the per-channel figure or nothing. A limits document written before §86 has no mode map, and reading its absence as a mode would be inventing one.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {},
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true,
+            "proximity_reading": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "elbow": 400
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{\"elbow\":400},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":null,\"tripped\":[]}"
+    },
+    {
+      "id": "the-mode-map-does-not-reach-the-base-channel",
+      "note": "The reserved `base` channel is whole-body translation and is not a joint. It keeps its own ceiling, and a mode map that happened to carry a `base` key would not change that.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 1.5,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 1.5,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "shoulder": 3,
+              "wheel_r": 2
+            },
+            "joint_modes": {
+              "shoulder": "position",
+              "wheel_l": "velocity",
+              "wheel_r": "velocity"
+            },
+            "source": "https://example.invalid/mobile.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true,
+            "proximity_reading": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "base": 9
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"base\",\"from\":9,\"to\":1.5}],\"command\":{\"base\":1.5},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "rate-limiting-reads-the-same-ceiling",
+      "note": "The jerk ceiling is a fraction of the magnitude ceiling, so §86.3 moves it too: a quarter of 1.5 rather than a quarter of nothing, which is what an unbounded channel falls back to.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 1.5,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 1.5,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "min_control_hz": 10,
+            "per_channel": {
+              "shoulder": 3,
+              "wheel_r": 2
+            },
+            "joint_modes": {
+              "shoulder": "position",
+              "wheel_l": "velocity",
+              "wheel_r": "velocity"
+            },
+            "source": "https://example.invalid/mobile.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true,
+            "proximity_reading": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "wheel_l": 1.5
+          },
+          "previous": {
+            "wheel_l": 0
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"wheel_l\",\"from\":1.5,\"to\":0.375}],\"command\":{\"wheel_l\":0.375},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"rate_limit\"]}"
+    }
+  ]
+}

@@ -62,18 +62,21 @@ CLOSED_SETS: Final[dict[str, tuple[str, ...]]] = {
     ),
     "reserved_capabilities": ('hri.warning',),
     "capability_domains": (
-        'manipulation', 'locomotion', 'sensing', 'hri', 'compute', 'network', 'storage'
+        'locomotion', 'manipulation', 'sensing', 'control', 'safety', 'platform', 'hri'
     ),
-    # §85.1's tokens, domain by domain. `sensing` is `embodiment_modalities` below, in its order.
+    # §85.1's tokens, in the order the section lists them. Not all two segments —
+    # `sensing.camera.rgb` is three — so nothing here may be derived from a length rule.
     "capability_tokens": (
-        'manipulation.arm', 'manipulation.grasp', 'manipulation.tool', 'manipulation.motion',
-        'locomotion.drive', 'locomotion.walk', 'locomotion.fly',
-        'sensing.rgb', 'sensing.depth', 'sensing.stereo', 'sensing.point_cloud', 'sensing.imu',
-        'sensing.force_torque', 'sensing.tactile', 'sensing.audio', 'sensing.joint_state',
-        'hri.speech', 'hri.light', 'hri.warning',
-        'compute.accelerator',
-        'network.outbound', 'network.lan',
-        'storage.shared'
+        'locomotion.walk', 'locomotion.velocity', 'locomotion.stairs', 'locomotion.turn_in_place',
+        'locomotion.stand', 'locomotion.fly', 'manipulation.arm', 'manipulation.dual_arm',
+        'manipulation.grasp', 'manipulation.dexterous_hand', 'manipulation.cartesian',
+        'manipulation.force_control', 'manipulation.mobile', 'sensing.camera.rgb',
+        'sensing.camera.depth', 'sensing.camera.stereo', 'sensing.lidar', 'sensing.imu',
+        'sensing.force_torque', 'sensing.tactile', 'sensing.joint_state', 'sensing.odometry',
+        'sensing.audio', 'control.position', 'control.velocity', 'control.torque',
+        'control.trajectory', 'control.realtime', 'control.motion', 'safety.estop',
+        'safety.collision_avoidance', 'safety.workspace_limits', 'platform.onboard_compute',
+        'platform.ros2', 'platform.teleop', 'platform.data_recording', 'hri.speech', 'hri.warning'
     ),
     "token_classes": ('canonical', 'unknown', 'vendor', 'malformed'),
     "transport_verdicts": ('direct', 'retargeted', 'degraded', 'refused'),
@@ -83,7 +86,9 @@ CLOSED_SETS: Final[dict[str, tuple[str, ...]]] = {
         'control_mode_unsupported', 'rate_unsupported', 'rate_below_watchdog', 'scaled_down',
         'unscalable_channel', 'retarget_without_solver', 'unmapped_roles', 'observation_missing',
         'observation_degraded', 'latency_undeclared', 'action_space_mismatch',
-        'action_space_ambiguous', 'motion_parameter_unused'
+        'action_space_ambiguous', 'motion_parameter_unused',
+        # §86, appended for the reason every other addition here is.
+        'joint_mode_conflict', 'mixed_modes_unsupported'
     ),
     "action_kinds": (
         'joint_position', 'joint_velocity', 'joint_torque', 'cartesian', 'base_velocity', 'gripper',

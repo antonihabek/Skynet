@@ -49,37 +49,58 @@ var PackageRejectionCodes = []string{
 }
 
 // CapabilityDomains is the domains a canonical capability token belongs to (§85.1), in the order
-// §85 lists them.
+// §85 lists them. The Standard Robot Interface's, which the Hub has validated robot registrations
+// against since before §8 was written, plus `hri` for §49.1's two tokens.
 var CapabilityDomains = []string{
-	"manipulation", "locomotion", "sensing", "hri", "compute", "network", "storage",
+	"locomotion", "manipulation", "sensing", "control", "safety", "platform", "hri",
 }
 
-// CanonicalCapabilities is each domain's canonical capabilities. `sensing` is EmbodimentModalities,
-// assigned in init below rather than retyped, because the reference imports it for the same reason.
-var CanonicalCapabilities = map[string][]string{
-	"manipulation": {"arm", "grasp", "tool", "motion"},
-	"locomotion":   {"drive", "walk", "fly"},
-	"hri":          {"speech", "light", "warning"},
-	"compute":      {"accelerator"},
-	"network":      {"outbound", "lan"},
-	"storage":      {"shared"},
+// CapabilityTokens is every canonical token (§85.1), in the order §85 lists them. Membership is the
+// whole rule: not all of them are two segments — `sensing.camera.rgb` is three — so nothing here may
+// be derived from a segment count.
+var CapabilityTokens = []string{
+	"locomotion.walk",
+	"locomotion.velocity",
+	"locomotion.stairs",
+	"locomotion.turn_in_place",
+	"locomotion.stand",
+	"locomotion.fly",
+	"manipulation.arm",
+	"manipulation.dual_arm",
+	"manipulation.grasp",
+	"manipulation.dexterous_hand",
+	"manipulation.cartesian",
+	"manipulation.force_control",
+	"manipulation.mobile",
+	"sensing.camera.rgb",
+	"sensing.camera.depth",
+	"sensing.camera.stereo",
+	"sensing.lidar",
+	"sensing.imu",
+	"sensing.force_torque",
+	"sensing.tactile",
+	"sensing.joint_state",
+	"sensing.odometry",
+	"sensing.audio",
+	"control.position",
+	"control.velocity",
+	"control.torque",
+	"control.trajectory",
+	"control.realtime",
+	"control.motion",
+	"safety.estop",
+	"safety.collision_avoidance",
+	"safety.workspace_limits",
+	"platform.onboard_compute",
+	"platform.ros2",
+	"platform.teleop",
+	"platform.data_recording",
+	"hri.speech",
+	"hri.warning",
 }
-
-// CapabilityTokens is every canonical token, domain by domain. Filled in init.
-var CapabilityTokens []string
 
 // TokenClasses is what a string in a capability list can be (§85.1).
 var TokenClasses = []string{"canonical", "unknown", "vendor", "malformed"}
-
-func init() {
-	CanonicalCapabilities["sensing"] = EmbodimentModalities
-	for _, domain := range CapabilityDomains {
-		for _, capability := range CanonicalCapabilities[domain] {
-			CapabilityTokens = append(CapabilityTokens, domain+"."+capability)
-		}
-	}
-	sets["capability_tokens"] = CapabilityTokens
-}
 
 // SignatureStates is what is known about a package's release signature. Deliberately not a boolean.
 var SignatureStates = []string{"verified", "failed", "untrusted", "absent", "unverifiable"}
@@ -127,6 +148,9 @@ var TransportWarningCodes = []string{
 	"action_space_mismatch",
 	"action_space_ambiguous",
 	"motion_parameter_unused",
+	// §86, appended for the reason every other addition here is.
+	"joint_mode_conflict",
+	"mixed_modes_unsupported",
 }
 
 // CanonicalMotions is §84.1's motion vocabulary, in the order the section lists it.
@@ -687,6 +711,7 @@ var sets = map[string][]string{
 	"isolation_modes":         IsolationModes,
 	"reserved_capabilities":   ReservedCapabilities,
 	"capability_domains":      CapabilityDomains,
+	"capability_tokens":       CapabilityTokens,
 	"token_classes":           TokenClasses,
 	"transport_verdicts":      TransportVerdicts,
 	"transport_methods":       TransportMethods,

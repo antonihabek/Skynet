@@ -594,7 +594,11 @@ type ChannelBinding struct {
 	// Scale multiplies the source value before it reaches the target; 1 is no scaling.
 	Scale float64
 	// Limit is the hard ceiling in the target's units, handed to the Safety Kernel.
-	Limit  maybeNumber
+	Limit maybeNumber
+	// Mode is the control mode this binding commands its target joint in (§86.2), empty for a
+	// binding that commands no joint — a gripper, a base, a retarget, a drop. Present on a blocked
+	// binding too: which mode was asked for is what a reader needs in order to fix it.
+	Mode   string
 	Reason string
 }
 
@@ -805,8 +809,12 @@ func ResolveTransport(source, target, options canonical.Value) TransportPlan {
 	retargetChains := decideRetargetChains(channels, index, target, options, warnAbout)
 
 	bindings := []ChannelBinding{}
+	bound := &boundModes{}
+	// §86.1. `=== true`, not truthiness: the reference compares to `true`, so a `1` is false here
+	// and would be true under a looser reading — the trap §5 records for `detects_people`.
+	perJointModes := isTrue(target.Field("control").Field("per_joint_modes"))
 	for _, channel := range channels {
-		bindings = append(bindings, bindChannel(channel, target, index, retargetChains, warnAbout))
+		bindings = append(bindings, bindChannel(channel, target, index, retargetChains, warnAbout, bound, perJointModes))
 	}
 
 	observations := bindObservations(source.Field("observations"), target, warnAbout)
@@ -952,6 +960,15 @@ func binding(channel actionChannel, method string, target string, hasTarget bool
 	}
 }
 
+// jointBinding is `binding` with §86.2's mode. Separate rather than a longer parameter list on
+// `binding`, because a non-joint channel has no mode and the eleven callers that produce one should
+// not have to write an empty string to say so.
+func jointBinding(channel actionChannel, method string, target string, scale float64, limit maybeNumber, mode, reason string) ChannelBinding {
+	out := binding(channel, method, target, true, scale, limit, reason)
+	out.Mode = mode
+	return out
+}
+
 // dropOrBlock is the two ends of a channel with no equivalent: dropped at scale 0 when the policy
 // declares it optional, refused otherwise. Named separately because dropping an optional channel is a
 // degradation an operator may accept and blocking a required one is a refusal.
@@ -965,6 +982,7 @@ func dropOrBlock(channel actionChannel, dropped, blocked string) ChannelBinding 
 func bindChannel(
 	channel actionChannel, target canonical.Value, index targetIndex, retargetChains map[string]bool,
 	warnAbout func(string, string, []string),
+	bound *boundModes, perJointModes bool,
 ) ChannelBinding {
 	if !containsString(jointActionKinds, channel.kind) {
 		return bindNonJointChannel(channel, target)
@@ -973,7 +991,7 @@ func bindChannel(
 	// 1. Exact wire name. Two vendors agreeing on a joint name is rare and unambiguous.
 	if js.Truthy(channel.joint) {
 		if exact, found := index.byName[channel.joint]; found {
-			return finishJointBinding(channel, exact, "direct", "Joint name matches exactly.", warnAbout)
+			return finishJointBinding(channel, exact, "direct", "Joint name matches exactly.", warnAbout, bound, perJointModes)
 		}
 	}
 
@@ -982,7 +1000,7 @@ func bindChannel(
 	if hasRole {
 		key := RoleKey(parsed)
 		if joint, found := index.byRole[key]; found {
-			return finishJointBinding(channel, joint, "remap", "Mapped by role "+key+" to \""+joint.name+"\".", warnAbout)
+			return finishJointBinding(channel, joint, "remap", "Mapped by role "+key+" to \""+joint.name+"\".", warnAbout, bound, perJointModes)
 		}
 		// 3. Task space, when the chain was granted it.
 		if retargetChains[parsed.Chain] {
@@ -1110,13 +1128,48 @@ func controlModeFor(kind string) (string, bool) {
 func finishJointBinding(
 	channel actionChannel, joint transportJoint, method, reason string,
 	warnAbout func(string, string, []string),
+	bound *boundModes, perJointModes bool,
 ) ChannelBinding {
 	rating := ratingFor(channel.kind, joint.limits)
 	scale := scaleFor(channel.peak, rating)
+	mode, hasMode := controlModeFor(channel.kind)
 
-	if mode, ok := controlModeFor(channel.kind); ok && !containsString(joint.controlModes, mode) {
-		return binding(channel, "blocked", joint.name, true, 1, rating,
+	if hasMode && !containsString(joint.controlModes, mode) {
+		return jointBinding(channel, "blocked", joint.name, 1, rating, mode,
 			"\""+joint.name+"\" does not accept "+mode+" commands.")
+	}
+
+	if hasMode {
+		// §86.2. One joint, one mode, per cycle. A second channel onto a joint already bound in
+		// another mode would meet it as one entry in `values` and one in `modes`, and the command
+		// would carry whichever was written last. First-wins, as §84.3's binder does with a motion.
+		already, hasAlready := bound.get(joint.name)
+		if hasAlready && already != mode {
+			warnAbout("joint_mode_conflict",
+				"\""+joint.name+"\" is already bound in "+already+
+					"; a joint carries one mode per cycle, so this "+mode+" channel is blocked.",
+				[]string{joint.name})
+			return jointBinding(channel, "blocked", joint.name, 1, rating, mode,
+				"\""+joint.name+"\" is commanded in "+already+
+					" by an earlier channel, and a joint takes one mode per cycle.")
+		}
+
+		// §86.1's other half. A driver that does not read the per-joint array takes one mode for
+		// the whole command, so a channel in a second mode cannot be delivered to it at all.
+		if elsewhere, found := bound.other(mode); found && !perJointModes {
+			warnAbout("mixed_modes_unsupported",
+				"This body is already commanded in "+elsewhere+
+					" and its driver reads one mode per command, so the "+mode+" channel on \""+
+					joint.name+"\" cannot be delivered.",
+				[]string{joint.name})
+			return jointBinding(channel, "blocked", joint.name, 1, rating, mode,
+				"This driver does not declare per-joint modes (\u00a786.1), and the body is already commanded in "+
+					elsewhere+".")
+		}
+
+		if !hasAlready {
+			bound.set(joint.name, mode)
+		}
 	}
 
 	if scale < 1 {
@@ -1128,7 +1181,43 @@ func finishJointBinding(
 			"\""+joint.name+"\" declares no rating for this control mode, so the policy's commands cannot be scaled to it.",
 			[]string{joint.name})
 	}
-	return binding(channel, method, joint.name, true, scale, rating, reason)
+	return jointBinding(channel, method, joint.name, scale, rating, mode, reason)
+}
+
+// boundModes is §86.2's record of which joint is already commanded in which mode, in binding order.
+// A slice rather than a map because the order decides which channel survives a conflict, and Go's
+// map iteration is deliberately random.
+type boundModes struct {
+	entries []struct {
+		joint string
+		mode  string
+	}
+}
+
+func (b *boundModes) get(joint string) (string, bool) {
+	for _, entry := range b.entries {
+		if entry.joint == joint {
+			return entry.mode, true
+		}
+	}
+	return "", false
+}
+
+// other is the first mode bound on any joint that is not `mode`.
+func (b *boundModes) other(mode string) (string, bool) {
+	for _, entry := range b.entries {
+		if entry.mode != mode {
+			return entry.mode, true
+		}
+	}
+	return "", false
+}
+
+func (b *boundModes) set(joint, mode string) {
+	b.entries = append(b.entries, struct {
+		joint string
+		mode  string
+	}{joint, mode})
 }
 
 // scaleFor is how far a channel must be scaled to stay inside a rating. 1 when either number is
@@ -1281,12 +1370,23 @@ func resolveControlHz(source, target, options canonical.Value, envelope optional
 // where there is neither an envelope nor a single bound channel.
 func buildClamp(envelope optionalObject, bindings []ChannelBinding) (canonical.Value, bool) {
 	perChannel := canonical.Object()
+	jointModes := canonical.Object()
 	for _, entry := range bindings {
+		// A blocked binding commands nothing, so it contributes neither a ceiling nor a mode. It
+		// carries `Limit` — the rating of the joint it could not command — so a reader can see what
+		// was on offer, and that is the only thing it is for.
+		if entry.Method == "blocked" {
+			continue
+		}
 		if entry.HasTarget && js.Truthy(entry.Target) && entry.Limit.present {
 			perChannel = perChannel.Set(entry.Target, canonical.Number(entry.Limit.value))
 		}
+		// §86.3. Without this the kernel cannot read a ceiling in the right units.
+		if entry.HasTarget && js.Truthy(entry.Target) && entry.Mode != "" {
+			jointModes = jointModes.Set(entry.Target, canonical.String(entry.Mode))
+		}
 	}
-	if !envelope.present && perChannel.Len() == 0 {
+	if !envelope.present && perChannel.Len() == 0 && jointModes.Len() == 0 {
 		return canonical.Null(), false
 	}
 
@@ -1304,6 +1404,11 @@ func buildClamp(envelope optionalObject, bindings []ChannelBinding) (canonical.V
 		}
 	}
 	clamp = clamp.Set("per_channel", perChannel)
+	// Absent — not empty — on a plan that binds no joint, so a motion plan and a plan over a gripper
+	// and a base are the same bytes they were before §86.
+	if jointModes.Len() > 0 {
+		clamp = clamp.Set("joint_modes", jointModes)
+	}
 	if envelope.present {
 		if value, present := presentNonNull(envelope.value, "source"); present {
 			clamp = clamp.Set("source", value)

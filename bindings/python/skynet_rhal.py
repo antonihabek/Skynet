@@ -53,6 +53,11 @@ __all__ = [
     "HOMING_PENDING",
     "HOMING_COMPLETE",
     "HOMING_NAMES",
+    "CMD_PER_JOINT_MODES",
+    "JMODE_INHERIT",
+    "JMODE_POSITION",
+    "JMODE_TORQUE",
+    "JMODE_VELOCITY",
     "MODE_POSITION",
     "MODE_VELOCITY",
     "MODE_TORQUE",
@@ -125,6 +130,41 @@ MODE_TORQUE = 2  #: values are Nm (or N)
 
 MODE_NAMES = {MODE_POSITION: "position", MODE_VELOCITY: "velocity", MODE_TORQUE: "torque"}
 
+# ── Per-joint control modes, §86.1 ────────────────────────────────────────────
+#
+# Deliberately not the ``MODE_*`` values. Zero is ``INHERIT`` because zero is what an unfilled array
+# holds, and a producer that allocated ``modes`` and forgot to fill it must read as *the mode the
+# command already carries* — which is exactly ABI 1 — rather than as "every joint on position". The
+# offset is what makes the mistake that invites loud: a bare ``MODE_TORQUE`` written into this array
+# is not a valid entry at all, so a driver refuses it instead of moving a joint in the wrong units.
+
+JMODE_INHERIT = 0x00  #: take ``Command.mode``
+JMODE_POSITION = 0x10
+JMODE_VELOCITY = 0x11
+JMODE_TORQUE = 0x12
+
+#: ``Command.flags``: ``modes`` is present and readable.
+CMD_PER_JOINT_MODES = 1 << 0
+
+
+def jmode_of(mode: int) -> int:
+    """The per-joint spelling of a ``MODE_*`` (§86.1)."""
+    return 0x10 | mode
+
+
+def mode_of_jmode(jmode: int) -> int | None:
+    """Decode one ``modes`` entry.
+
+    ``None`` for ``JMODE_INHERIT``. Raises for an entry this ABI does not define, because the value
+    it is most likely to be is a bare ``MODE_*`` written into the wrong array — the transcription
+    error the offset exists to catch, and one a driver reports as ``EINVAL`` rather than guessing.
+    """
+    if jmode == JMODE_INHERIT:
+        return None
+    if jmode not in (JMODE_POSITION, JMODE_VELOCITY, JMODE_TORQUE):
+        raise ValueError(f"not a per-joint control mode: {jmode:#04x} (§86.1)")
+    return jmode & 0x0F
+
 
 @dataclass
 class State:
@@ -168,22 +208,41 @@ class Command:
     between holding position and going limp. It is also where a ``drop`` binding from the transport
     plan meets the wire: a channel this body has no equivalent for becomes a masked joint rather
     than a fabricated value.
+
+    ``modes`` is §86.1's, and it is the mask's missing counterpart: the mask has always been per
+    joint and the mode was not. Empty means every joint takes ``mode``, which is every command
+    written before §86.
     """
 
     #: When the command was produced, not when it was sent.
     stamp_ns: int = 0
     #: Must advance. A repeat is treated as a stalled producer.
     seq: int = 0
-    #: One of ``MODE_POSITION`` / ``MODE_VELOCITY`` / ``MODE_TORQUE``.
+    #: One of ``MODE_POSITION`` / ``MODE_VELOCITY`` / ``MODE_TORQUE`` — the mode of every joint
+    #: that inherits.
     mode: int = MODE_POSITION
-    #: Units follow ``mode``.
+    #: Units follow this joint's mode.
     values: list[float] = field(default_factory=list)
     #: 0 = hold, non-zero = apply.
     mask: list[int] = field(default_factory=list)
+    #: ``JMODE_*`` per joint (§86.1), or empty for a body-wide command.
+    modes: list[int] = field(default_factory=list)
 
     @property
     def joint_count(self) -> int:
         return len(self.values)
+
+    @property
+    def flags(self) -> int:
+        """``CMD_*``: the per-joint flag is set exactly when ``modes`` is non-empty."""
+        return CMD_PER_JOINT_MODES if self.modes else 0
+
+    def mode_of(self, joint: int) -> int:
+        """The mode joint ``joint`` is commanded in, inheritance resolved (§86.1)."""
+        if not self.modes:
+            return self.mode
+        resolved = mode_of_jmode(self.modes[joint])
+        return self.mode if resolved is None else resolved
 
     def applied(self) -> list[tuple[int, float]]:
         """The ``(index, value)`` pairs this command actually asks for."""
@@ -494,10 +553,15 @@ class SkrCommand(ctypes.Structure):
         ("stamp_ns", ctypes.c_uint64),
         ("seq", ctypes.c_uint32),
         ("mode", ctypes.c_uint8),
-        ("_pad", ctypes.c_uint8 * 3),
+        # §86.1. Was `_pad[0]`, and zero in every ABI-1 command — §27's homing precedent one field
+        # along: no offset moves and the ABI version does not bump.
+        ("flags", ctypes.c_uint8),
+        ("_pad", ctypes.c_uint8 * 2),
         ("joint_count", ctypes.c_uint16),
         ("values", ctypes.POINTER(ctypes.c_float)),
         ("mask", ctypes.POINTER(ctypes.c_uint8)),
+        # [joint_count] of SKR_JMODE_*. Read only when `flags` carries SKR_CMD_PER_JOINT_MODES.
+        ("modes", ctypes.POINTER(ctypes.c_uint8)),
     ]
 
 
@@ -551,8 +615,8 @@ _EXPECTED_OFFSETS = {
         ("base_pose", 40), ("base_twist", 68), ("fault_code", 92),
     ],
     SkrCommand: [
-        ("stamp_ns", 0), ("seq", 8), ("mode", 12), ("_pad", 13),
-        ("joint_count", 16), ("values", 24), ("mask", 32),
+        ("stamp_ns", 0), ("seq", 8), ("mode", 12), ("flags", 13), ("_pad", 14),
+        ("joint_count", 16), ("values", 24), ("mask", 32), ("modes", 40),
     ],
     SkrFrame: [
         ("stamp_ns", 0), ("width", 8), ("height", 12), ("stride", 16),
