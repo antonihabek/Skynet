@@ -46,6 +46,8 @@ const std::map<std::string, Handler>& handlers() {
       {"telemetry", &contracts::telemetry},
       {"transfer", &contracts::transfer},
       {"power", &contracts::power},
+      {"relay", &contracts::relay},
+      {"execute", &contracts::execute},
       {"calibration", &contracts::calibration},
       {"identity", &contracts::identity},
       {"ota", &contracts::ota},

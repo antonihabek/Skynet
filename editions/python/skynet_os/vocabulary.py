@@ -143,8 +143,37 @@ CLOSED_SETS: Final[dict[str, tuple[str, ...]]] = {
     "cell_faults": (
         'unnamed', 'fact_key_unusable', 'fact_key_reserved', 'volume_frame_missing',
         'volume_shape_invalid', 'fixture_unnamed', 'duplicate_fixture', 'parking_channel_unnamed',
-        'duplicate_parking_channel'
+        'duplicate_parking_channel',
+        # §87.1, and all five apply only from the second robot.
+        'robot_unnamed', 'duplicate_robot', 'robot_unplaced', 'robot_unbounded', 'shared_volume'
     ),
+    # §87's four class gates. Eight sets, and every one is new words rather than new members of an
+    # existing list — which is what §43's "deliberately deferred rather than half-designed" meant.
+    "safe_state_bases": ('fixed', 'mapped_worst_case'),
+    "safe_state_faults": (
+        'basis_undeclared', 'basis_refused', 'basis_unknown', 'area_undeclared',
+        'mapped_on_a_fixed_base', 'figure_undeclared'
+    ),
+    "relay_routes": ('lan', 'relay'),
+    "console_roles": ('anonymous', 'observer', 'operator', 'admin'),
+    "console_actions": (
+        'stop_request', 'read_status', 'read_health', 'start_package', 'stop_package',
+        'grant_capability', 'revoke_capability', 'seal_blackbox', 'apply_update', 'pair',
+        'install_driver', 'change_profile', 'factory_reset'
+    ),
+    "session_states": ('live', 'expired', 'refused'),
+    "session_refusals": ('deadline_undeclared', 'route_unknown', 'role_unknown'),
+    "action_refusals": (
+        'role_insufficient', 'presence_required', 'session_expired', 'session_refused'
+    ),
+    # §88. Three sets, and the first is precedence rather than a list.
+    "motion_refusals": (
+        'no_lease', 'estop', 'not_active', 'busy', 'unknown_motion', 'deadline_undeclared',
+        'parameter_unknown', 'parameter_missing', 'parameter_not_finite',
+        'parameter_out_of_bounds'
+    ),
+    "motion_ready_states": ('running', 'degraded'),
+    "motion_progress": ('running', 'overdue'),
     "operating_states": ('safe', 'stopping', 'post', 'unhomed', 'hold', 'degraded', 'running'),
     "state_reasons": (
         'rhal_lost', 'safe_sticky', 'post_failed', 'stop_complete', 'stopping_watchdog',

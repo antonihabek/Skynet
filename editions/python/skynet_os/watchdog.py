@@ -47,6 +47,7 @@ __all__ = [
     "WINDOWS",
     "check_nesting",
     "host_blocked_by_command_loss",
+    "resolve_command_loss",
     "watchdog_to_json",
 ]
 
@@ -217,9 +218,117 @@ def _ms(value: float | int) -> str:
     return str(value)
 
 
-def watchdog_to_json(on_command_loss: Any, windows: dict[str, Any]) -> Any:
-    """``shapeWatchdog`` — the chain, the tier refusal, and the nesting report."""
+def resolve_command_loss(
+    body: Any, by_chain: Any, chains: list[str]
+) -> dict[str, Any]:
+    """§87.3's resolution: what each chain does when commands stop, and whether host is available.
+
+    **One answer about host, whichever way the body declared**, which is why this exists rather than
+    a second ``host_blocked_by_…``. §78 is the record of what two spellings of one fact cost, and
+    *"may this body attempt the host tier"* is exactly the kind of fact that acquires a second
+    spelling when a field gains a per-something variant. The body-wide rules stay in
+    :func:`host_blocked_by_command_loss` and this delegates to them.
+
+    The refusal order is the substance, and two of its steps were found by building it:
+
+    1. **Both declared** — §84.2's rule about two action spaces, for the same reason.
+    2. **A map on a body with no chains** — a body whose joints carry no parseable role is on *no*
+       chain, so a complete-looking map covers nothing.
+    3. **A chain the map does not cover** — refused, not inherited.
+    4. **An unrecognised behaviour, before a ``coast``.** ``coast`` is characterised; an
+       unrecognised word is not, which is strictly worse and does not rule out coasting either.
+    5. **``coast`` on any chain** — with every coasting chain named.
+    """
+    declared = isinstance(by_chain, dict)
+    mapping = by_chain if declared else {}
+
+    unknown = sorted(key for key in mapping if key not in chains) if declared else []
+
+    rows = [
+        {
+            "chain": chain,
+            "behaviour": (mapping.get(chain) if isinstance(mapping.get(chain), str) else None)
+            if declared
+            else (body if isinstance(body, str) else None),
+        }
+        for chain in chains
+    ]
+
+    report: dict[str, Any] = {
+        "body": body if isinstance(body, str) else None,
+        "per_chain": declared,
+        "chains": rows,
+        "unknown_chains": unknown,
+        "host_blocked": None,
+    }
+
+    if declared and isinstance(body, str):
+        report["host_blocked"] = (
+            "this body declares both `on_command_loss` and `on_command_loss_by_chain`, which are "
+            "two descriptions of one fact — redundant where they agree and a contradiction where "
+            "they do not. Delete the one this body does not mean (§87.3)"
+        )
+        return report
+
+    if not declared:
+        report["host_blocked"] = host_blocked_by_command_loss(body)
+        return report
+
+    if not chains:
+        report["host_blocked"] = (
+            "this body declares what its drives do per chain, and none of its joints carries a "
+            "role this vocabulary parses — so the declaration covers no joint at all. §5.1 permits "
+            "a body the vocabulary does not describe; what it cannot do is declare per chain. Give "
+            "the joints roles, or declare `on_command_loss` for the body (§87.3)"
+        )
+        return report
+
+    uncovered = next((row for row in rows if row["behaviour"] is None), None)
+    if uncovered is not None:
+        report["host_blocked"] = (
+            f"this body has a {uncovered['chain']} chain and its per-chain declaration does not "
+            "cover it. A missing chain is refused rather than inheriting a body-wide value, "
+            "because inheriting makes a partially declared body look fully declared (§87.3)"
+        )
+        return report
+
+    unrecognised = next(
+        (row for row in rows if row["behaviour"] not in COMMAND_LOSS_BEHAVIOURS), None
+    )
+    if unrecognised is not None:
+        report["host_blocked"] = (
+            f"this body declares `{unrecognised['chain']}: {unrecognised['behaviour']}`, which is "
+            "not one of hold, brake, fault or coast — so what that chain does while its processor "
+            "resets is not something anybody can read off the descriptor. An unrecognised "
+            "behaviour is refused before a `coast` is, because `coast` is characterised and this "
+            "is not (§46.2, §87.3)"
+        )
+        return report
+
+    coasting = [row["chain"] for row in rows if row["behaviour"] == "coast"]
+    if coasting:
+        report["host_blocked"] = (
+            f"this body's {', '.join(coasting)} drives coast when commands stop, and layer 3 of "
+            "the watchdog chain recovers by resetting the processor — which for those chains is a "
+            "fall. The sound configuration is the certified tier, where layer 4 cuts drive enable "
+            "independently of the processor (§46.2)"
+        )
+
+    return report
+
+
+def watchdog_to_json(
+    on_command_loss: Any,
+    windows: dict[str, Any],
+    by_chain: Any = None,
+    chains: list[str] | None = None,
+) -> Any:
+    """``shapeWatchdog`` — the chain, the tier refusal, the per-chain map and the nesting report."""
     report = check_nesting(windows)
+    # §87.3. One answer about host, whichever way the body declared: the resolver delegates to
+    # `host_blocked_by_command_loss` for the body-wide rules rather than restating them, so a
+    # document over a body with no map is byte-identical to the one this produced before §87.
+    loss = resolve_command_loss(on_command_loss, by_chain, list(chains or []))
     return {
         "chain": [
             {
@@ -233,7 +342,17 @@ def watchdog_to_json(on_command_loss: Any, windows: dict[str, Any]) -> Any:
             for layer in CHAIN
         ],
         "on_command_loss": on_command_loss if on_command_loss is not None else None,
-        "host_blocked": host_blocked_by_command_loss(on_command_loss),
+        # §87.3. Present on every document, because *"this body declares one behaviour"* and *"this
+        # body declares one behaviour per chain"* are two states a reader has to be able to tell
+        # apart without knowing which fields the descriptor happened to carry.
+        "per_chain": {
+            "declared": loss["per_chain"],
+            "chains": [
+                {"chain": row["chain"], "behaviour": row["behaviour"]} for row in loss["chains"]
+            ],
+            "unknown_chains": list(loss["unknown_chains"]),
+        },
+        "host_blocked": loss["host_blocked"],
         "nesting": {
             # An array, not an object: canonical JSON sorts an object's keys, and these four
             # windows mean nothing except in order. The object form renders them alphabetically,

@@ -449,7 +449,7 @@ fn vocabularies(a: Allocator) !void {
     // seventy-nine it holds. A set added to the reference and not to this table is a corpus failure; a
     // set removed from this table is a corpus failure too. This is the third case: the table and the
     // corpus agreeing on seventy-nine while this edition believes it holds some other number.
-    expectInt("seventy-nine sets", @intCast(names.len), 79);
+    expectInt("ninety sets", @intCast(names.len), 90);
 
     var duplicates: u32 = 0;
     for (names, 0..) |name, at| {

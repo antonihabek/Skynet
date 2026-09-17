@@ -507,7 +507,7 @@ static void vocabulary(sk_arena *arena)
      * seventy-nine it holds. A set added to the reference and not to this table is a corpus failure;
      * a set removed from this table is a corpus failure too. This is the third case: the table and
      * the corpus agreeing on seventy-nine while this edition believes it holds some other number. */
-    expect_int("seventy-nine sets", (long)count, 79);
+    expect_int("ninety sets", (long)count, 90);
 
     int duplicates = 0;
     for (size_t at = 0; at < count; at += 1) {

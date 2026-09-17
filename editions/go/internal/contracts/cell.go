@@ -96,6 +96,231 @@ func namedString(value canonical.Value) (string, bool) {
 	return text, isString && js.Trim(text) != ""
 }
 
+// ── §87.1's intersection test ────────────────────────────────────────────────
+
+// placedShape is a shape moved into the cell's frame by its robot's placement.
+//
+// Translation only. §44.4's transforms carry a rotation and this deliberately does not read one: a
+// rotated box is not a box, so the test would need an oriented-box routine whose disagreements
+// between eight editions would be in the last bits of a square root. A cell whose robots are mounted
+// at an angle is one whose operator draws axis-aligned volumes large enough to hold the rotation,
+// which over-reports sharing and never under-reports it.
+type placedShape struct {
+	Kind   string
+	Frame  string
+	Centre [3]float64
+	Radius float64
+	Min    [3]float64
+	Max    [3]float64
+}
+
+func triple(value canonical.Value) ([3]float64, bool) {
+	out := [3]float64{}
+	items := value.Items()
+	if value.Kind() != canonical.KindArray || len(items) != 3 {
+		return out, false
+	}
+	for axis, element := range items {
+		number, isNumber := element.Number()
+		if !isNumber || !canonical.Finite(number) {
+			return out, false
+		}
+		out[axis] = number
+	}
+	return out, true
+}
+
+// readPlacement is the placement, and not ok when the operator wrote none the arithmetic can use.
+func readPlacement(robot canonical.Value) ([3]float64, bool) {
+	return triple(robot.Field("at"))
+}
+
+// placeVolume is one usable volume of a placed robot, in the cell's frame.
+func placeVolume(volume canonical.Value, at [3]float64) (placedShape, bool) {
+	shape := volume.Field("shape")
+	kind, _ := shape.Field("kind").Str()
+	frame, _ := volume.Field("frame").Str()
+	if kind == "sphere" {
+		centre, ok := triple(shape.Field("centre"))
+		radius, isNumber := shape.Field("radius_m").Number()
+		if !ok || !isNumber {
+			return placedShape{}, false
+		}
+		for axis := 0; axis < 3; axis++ {
+			centre[axis] += at[axis]
+		}
+		return placedShape{Kind: "sphere", Frame: frame, Centre: centre, Radius: radius}, true
+	}
+	low, lowOk := triple(shape.Field("min"))
+	high, highOk := triple(shape.Field("max"))
+	if !lowOk || !highOk {
+		return placedShape{}, false
+	}
+	for axis := 0; axis < 3; axis++ {
+		low[axis] += at[axis]
+		high[axis] += at[axis]
+	}
+	return placedShape{Kind: "box", Frame: frame, Min: low, Max: high}, true
+}
+
+// boxPointDistanceSquared is the squared distance from a point to a box, zero inside.
+func boxPointDistanceSquared(low, high, point [3]float64) float64 {
+	total := 0.0
+	for axis := 0; axis < 3; axis++ {
+		outside := 0.0
+		if point[axis] < low[axis] {
+			outside = low[axis] - point[axis]
+		} else if point[axis] > high[axis] {
+			outside = point[axis] - high[axis]
+		}
+		// `float64(…)` around the product, and the self-check is what asks for it: Go's optimiser
+		// folds a multiply into the following add on six of the architectures it targets, and a
+		// fused multiply-add rounds once where the reference rounds twice. The difference is in the
+		// last bit of a distance, and the comparison it feeds is an equality against a sum of radii.
+		total += float64(outside * outside)
+	}
+	return total
+}
+
+// intersects is whether two placed shapes share a point.
+//
+// **Inclusive, and that is the decision rather than an off-by-one.** `margin` counts zero as inside
+// — a workspace trip is `margin < 0` — so two robots whose boxes meet on a face can each legally be
+// at the point where they meet. A strict test would call that configuration disjoint, and the
+// platform would have certified the one arrangement where both arms are allowed into the same
+// millimetre.
+func intersects(a, b placedShape) bool {
+	if a.Kind == "box" && b.Kind == "box" {
+		for axis := 0; axis < 3; axis++ {
+			if a.Min[axis] > b.Max[axis] || b.Min[axis] > a.Max[axis] {
+				return false
+			}
+		}
+		return true
+	}
+	if a.Kind == "sphere" && b.Kind == "sphere" {
+		reach := a.Radius + b.Radius
+		squared := 0.0
+		for axis := 0; axis < 3; axis++ {
+			difference := a.Centre[axis] - b.Centre[axis]
+			// Rounded for the reason above: two spheres exactly touching is a case in this corpus,
+			// and it is decided by the last bit of this sum.
+			squared += float64(difference * difference)
+		}
+		return squared <= reach*reach
+	}
+	box, sphere := a, b
+	if a.Kind == "sphere" {
+		box, sphere = b, a
+	}
+	return boxPointDistanceSquared(box.Min, box.Max, sphere.Centre) <= sphere.Radius*sphere.Radius
+}
+
+// placedVolumes is a robot's usable volumes, placed. A volume with no usable shape is not compared.
+func placedVolumes(robot canonical.Value) []placedShape {
+	at, ok := readPlacement(robot)
+	if !ok {
+		return nil
+	}
+	placed := []placedShape{}
+	for _, volume := range robot.Field("allowed").Items() {
+		if !shapeIsUsable(volume) {
+			continue
+		}
+		if shape, ok := placeVolume(volume, at); ok {
+			placed = append(placed, shape)
+		}
+	}
+	return placed
+}
+
+// robotFaults is §87.1's five faults, or none.
+//
+// Split out rather than inlined because all five are conditional on the same thing — **two or more
+// robots** — and a reader has to be able to see that condition once. One robot is §55.2's cell and
+// has no pair to be disjoint from; the placement rule would otherwise refuse every cell anybody has
+// ever written.
+//
+// Reported in declaration order, then the pairs in index order, so every edition names the same
+// fault first. The disjointness walk skips a robot that already has a fault of its own, for
+// ValidateCell's duplicate-fixture reason.
+func robotFaults(cell canonical.Value) []CellFault {
+	faults := []CellFault{}
+	fault := func(code string, subjects []string, detail string) {
+		faults = append(faults, CellFault{Code: code, Subjects: subjects, Detail: detail})
+	}
+
+	robots := cell.Field("robots").Items()
+	several := len(robots) >= 2
+	seen := map[string]bool{}
+	type comparableRobot struct {
+		Slug    string
+		Volumes []placedShape
+	}
+	comparable := []comparableRobot{}
+
+	for index, robot := range robots {
+		slug, named := namedString(robot.Field("slug"))
+		if !named {
+			fault("robot_unnamed", []string{"robots[" + js.NumberToString(float64(index)) + "]"},
+				"A robot a precondition cannot name is a robot no skill can ask about. "+
+					"`env.robot` is its slug.")
+			continue
+		}
+		if seen[slug] {
+			fault("duplicate_robot", []string{slug},
+				"Two entries with one slug: a precondition asking about it would be asking about "+
+					"whichever the reader happened to reach.")
+			continue
+		}
+		seen[slug] = true
+
+		// Everything below is about the pair, so a cell with one robot stops here.
+		if !several {
+			continue
+		}
+
+		if _, placed := readPlacement(robot); !placed {
+			fault("robot_unplaced", []string{slug},
+				"This cell holds more than one robot, and this one carries no `at`. Its volumes "+
+					"are in its own root frame (§44.2), so nothing can say whether they overlap "+
+					"another robot's until somebody says where it stands.")
+			continue
+		}
+		volumes := placedVolumes(robot)
+		if len(volumes) == 0 {
+			fault("robot_unbounded", []string{slug},
+				"This cell holds more than one robot, and this one draws no volume the workspace "+
+					"guard can evaluate. A robot that may be anywhere is not disjoint from "+
+					"anything.")
+			continue
+		}
+		comparable = append(comparable, comparableRobot{Slug: slug, Volumes: volumes})
+	}
+
+	for a := 0; a < len(comparable); a++ {
+		for b := a + 1; b < len(comparable); b++ {
+			first, second := comparable[a], comparable[b]
+			for _, one := range first.Volumes {
+				for _, other := range second.Volumes {
+					if !intersects(one, other) {
+						continue
+					}
+					fault("shared_volume",
+						[]string{first.Slug, second.Slug, one.Frame, other.Frame},
+						first.Slug+"'s "+one.Frame+" and "+second.Slug+"'s "+other.Frame+
+							" share a point once both robots are placed. §87.1 gives each robot "+
+							"its own kernel, so nothing on this machine evaluates the pair — the "+
+							"overlap is a claim the platform cannot enforce rather than a hazard "+
+							"it has measured.")
+				}
+			}
+		}
+	}
+
+	return faults
+}
+
 // ValidateCell is every fault in a cell descriptor — a list rather than the first one, because a
 // cell's problems are independent and an operator is editing it by hand.
 func ValidateCell(cell canonical.Value) []CellFault {
@@ -182,6 +407,9 @@ func ValidateCell(cell canonical.Value) []CellFault {
 		}
 		channels[channel] = true
 	}
+
+	faults = append(faults, robotFaults(cell)...)
+
 	return faults
 }
 
@@ -194,7 +422,7 @@ func cellName(cell canonical.Value) string {
 // CellEnvironment is the `env.*` branch of a precondition context: the operator's facts, then two
 // derived ones they may not shadow. A cell with faults still produces a context, because an
 // operator's typo in a fixture name must not take away the battery check as well.
-func CellEnvironment(cell canonical.Value) canonical.Value {
+func CellEnvironment(cell canonical.Value, subject string, hasSubject bool) canonical.Value {
 	environment := canonical.Object()
 	for _, member := range cell.Field("facts").Members() {
 		if usableKey(member.Key) && !vocabulary.Contains(vocabulary.DerivedFacts, member.Key) {
@@ -207,9 +435,71 @@ func CellEnvironment(cell canonical.Value) canonical.Value {
 			names = append(names, name)
 		}
 	}
+	// §87.1. `env.robot` answers *which robot does this cell say I am*, so a slug the cell has not
+	// been told about is reported as the empty string rather than echoed back: an edition that
+	// echoed it would let a precondition assert membership of a cell by asserting it.
+	declared := CellRobotSlugs(cell)
+	mine := ""
+	if hasSubject && vocabulary.Contains(declared, subject) {
+		mine = subject
+	}
 	return environment.
 		Set("cell", canonical.String(cellName(cell))).
-		Set("fixtures", canonical.Strings(names))
+		Set("fixtures", canonical.Strings(names)).
+		Set("robot", canonical.String(mine)).
+		Set("robots", canonical.Strings(declared))
+}
+
+// CellRobotSlugs is every slug the cell names, sorted and without the ones it got wrong (§87.1).
+//
+// Sorted for ValidateCell's reason one field along: a precondition asks `includes`, so order is not
+// semantic — but two editions emitting one list in two orders is a corpus failure, and sorted is the
+// order every edition can produce. A duplicate appears once, because `env.robots` answers *which
+// robots*, and `duplicate_robot` is where the document's mistake is reported.
+func CellRobotSlugs(cell canonical.Value) []string {
+	slugs := []string{}
+	for _, robot := range cell.Field("robots").Items() {
+		slug, named := namedString(robot.Field("slug"))
+		if !named || vocabulary.Contains(slugs, slug) {
+			continue
+		}
+		slugs = append(slugs, slug)
+	}
+	sort.SliceStable(slugs, func(left, right int) bool { return utf16Less(slugs[left], slugs[right]) })
+	return slugs
+}
+
+// CellRobotLayer is the layer one robot of a shared cell contributes, and not ok when it draws
+// nothing (§87.1).
+//
+// A **second** layer rather than a replacement for CellWorkspaceLayer, because §38.2's layers
+// compose by conjunction and two layers is how a cell-wide volume and a per-robot one both hold. The
+// volumes are **unplaced**, in the robot's own root frame, because that is the frame the `workspace`
+// guard resolves poses in (§44.2).
+func CellRobotLayer(cell canonical.Value, slug string) (canonical.Value, bool) {
+	if js.Trim(slug) == "" {
+		return canonical.Null(), false
+	}
+	for _, robot := range cell.Field("robots").Items() {
+		name, named := namedString(robot.Field("slug"))
+		if !named || name != slug {
+			continue
+		}
+		volumes := canonical.Array()
+		for _, volume := range robot.Field("allowed").Items() {
+			if _, named := namedString(volume.Field("frame")); !named || !shapeIsUsable(volume) {
+				continue
+			}
+			volumes = volumes.Push(shapeVolume(volume))
+		}
+		if volumes.Len() == 0 {
+			return canonical.Null(), false
+		}
+		return canonical.Object().
+			Set("name", canonical.String("cell:"+cellName(cell)+":"+slug)).
+			Set("volumes", volumes), true
+	}
+	return canonical.Null(), false
 }
 
 // CellWorkspaceLayer is the cell's contribution to the `workspace` guard, and not ok when it draws
@@ -267,7 +557,35 @@ func cellValidate(input canonical.Value) (canonical.Value, error) {
 func cellContext(input canonical.Value) (canonical.Value, error) {
 	cell := input.Field("cell")
 	layer, _ := CellWorkspaceLayer(cell)
+	// No subject slug: these cases predate §87.1 and are about a cell with one robot, so `env.robot`
+	// is the empty string and `env.robots` is empty — which is what every cell written before §87
+	// answers, and the property that makes the field additive.
 	return canonical.Object().
-		Set("env", CellEnvironment(cell)).
+		Set("env", CellEnvironment(cell, "", false)).
 		Set("layer", layer), nil
+}
+
+// cellRobots is §87.1's three projections of one document.
+//
+// One document rather than three, because they are one question — *what does this cell say about its
+// robots* — and an edition could agree about the disjointness arithmetic while disagreeing about
+// which layer a robot contributes, which is the half a workspace guard reads.
+func cellRobots(input canonical.Value) (canonical.Value, error) {
+	cell := input.Field("cell")
+	subject, hasSubject := input.Field("robot").Str()
+
+	layers := canonical.Array()
+	for _, robot := range cell.Field("robots").Items() {
+		slug, _ := robot.Field("slug").Str()
+		layer, _ := CellRobotLayer(cell, slug)
+		layers = layers.Push(canonical.Object().
+			Set("slug", canonical.String(slug)).
+			Set("layer", layer))
+	}
+
+	return canonical.Object().
+		Set("env", CellEnvironment(cell, subject, hasSubject)).
+		Set("slugs", canonical.Strings(CellRobotSlugs(cell))).
+		Set("layers", layers).
+		Set("faults", shapeCellFaults(ValidateCell(cell)).Field("faults")), nil
 }

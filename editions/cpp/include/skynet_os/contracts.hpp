@@ -92,6 +92,12 @@ namespace skynet::contracts {
 /// §36's power and thermal assessment: the state, and whether its number can be believed.
 [[nodiscard]] Json power(const std::string& label, const Json& input);
 
+/// §87.4's relay: the session's own verdict, and the whole permission table beside it.
+[[nodiscard]] Json relay(const std::string& label, const Json& input);
+
+/// §88: what admits a motion request on a program-level body, and whether one in flight is overdue.
+[[nodiscard]] Json execute(const std::string& label, const Json& input);
+
 /// §45's calibration validity, and the guards an expired set takes away.
 [[nodiscard]] Json calibration(const std::string& label, const Json& input);
 

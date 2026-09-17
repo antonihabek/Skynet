@@ -385,10 +385,103 @@ var CellFaults = []string{
 	"duplicate_fixture",
 	"parking_channel_unnamed",
 	"duplicate_parking_channel",
+	// §87.1, and all five apply only from the second robot.
+	"robot_unnamed",
+	"duplicate_robot",
+	"robot_unplaced",
+	"robot_unbounded",
+	"shared_volume",
 }
 
 // DerivedFacts is the fact keys a cell descriptor may not shadow.
-var DerivedFacts = []string{"cell", "fixtures"}
+var DerivedFacts = []string{"cell", "fixtures", "robot", "robots"}
+
+// ── §87's four class gates ──────────────────────────────────────────────────
+
+// SafeStateBases is how a `time_to_safe_state_s` was arrived at (§87.2). Two, and there is no third:
+// `live` is deliberately absent, because a figure a navigation stack supplies per cycle puts a
+// planner inside §36's reserve arithmetic and makes navigation a safety-relevant component with no
+// tier.
+var SafeStateBases = []string{"fixed", "mapped_worst_case"}
+
+// MobileBases is the base kinds that have somewhere to travel to. §5's list minus `fixed`.
+var MobileBases = []string{"wheeled", "tracked", "legged", "aerial", "rail"}
+
+// SafeStateFaults is what can be wrong with a safe-state declaration (§87.2). `basis_refused` is
+// separate from `basis_unknown` on purpose: a vendor who writes `live` has proposed the design the
+// section rejected, and a refusal reading *unknown basis* would send them to check their spelling.
+var SafeStateFaults = []string{
+	"basis_undeclared",
+	"basis_refused",
+	"basis_unknown",
+	"area_undeclared",
+	"mapped_on_a_fixed_base",
+	"figure_undeclared",
+}
+
+// RelayRoutes is how a console session reached the robot (§87.4). A route is not a role.
+var RelayRoutes = []string{"lan", "relay"}
+
+// ConsoleRoles is §39.1's table as a vocabulary, ordered least to most, with the unauthenticated
+// caller first because §39.1 puts it there.
+var ConsoleRoles = []string{"anonymous", "observer", "operator", "admin"}
+
+// ConsoleActions is what somebody may ask a console to do (§39.1, §87.4), in the order a console
+// draws them. `stop_request` is first and is §39.1's *stop* row renamed.
+var ConsoleActions = []string{
+	"stop_request",
+	"read_status",
+	"read_health",
+	"start_package",
+	"stop_package",
+	"grant_capability",
+	"revoke_capability",
+	"seal_blackbox",
+	"apply_update",
+	"pair",
+	"install_driver",
+	"change_profile",
+	"factory_reset",
+}
+
+// SessionStates is three rather than two, and the third is §80's `inert` precedent: a session
+// refused at open needs a deadline written into the profile and one that expired needs a
+// reconnection.
+var SessionStates = []string{"live", "expired", "refused"}
+
+// SessionRefusals is why a session holds nothing (§87.4).
+var SessionRefusals = []string{"deadline_undeclared", "route_unknown", "role_unknown"}
+
+// ActionRefusals is why one action is refused to a session that exists (§87.4).
+var ActionRefusals = []string{
+	"role_insufficient",
+	"presence_required",
+	"session_expired",
+	"session_refused",
+}
+
+// ── §88, a skill reaching a command-level driver ────────────────────────────
+
+// MotionRefusals is why a motion request was refused (§88.2), in evaluation order. Authority before
+// state, state before content.
+var MotionRefusals = []string{
+	"no_lease",
+	"estop",
+	"not_active",
+	"busy",
+	"unknown_motion",
+	"deadline_undeclared",
+	"parameter_unknown",
+	"parameter_missing",
+	"parameter_not_finite",
+	"parameter_out_of_bounds",
+}
+
+// MotionReadyStates is §27's states in which a body will run a program (§88.2).
+var MotionReadyStates = []string{"running", "degraded"}
+
+// MotionProgress is whether a motion in flight is still inside its deadline (§88.3).
+var MotionProgress = []string{"running", "overdue"}
 
 // ── opstate.ts ──────────────────────────────────────────────────────────────
 
@@ -740,6 +833,17 @@ var sets = map[string][]string{
 	"skill_outcomes":          SkillOutcomes,
 	"composition_faults":      CompositionFaults,
 	"cell_faults":             CellFaults,
+	"safe_state_bases":        SafeStateBases,
+	"safe_state_faults":       SafeStateFaults,
+	"relay_routes":            RelayRoutes,
+	"console_roles":           ConsoleRoles,
+	"console_actions":         ConsoleActions,
+	"session_states":          SessionStates,
+	"session_refusals":        SessionRefusals,
+	"action_refusals":         ActionRefusals,
+	"motion_refusals":         MotionRefusals,
+	"motion_ready_states":     MotionReadyStates,
+	"motion_progress":         MotionProgress,
 	"operating_states":        OperatingStates,
 	"state_reasons":           StateReasons,
 	"stop_causes":             StopCauses,

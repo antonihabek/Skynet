@@ -39,6 +39,7 @@ from .canonical import canonical
 from . import admission as admission_module
 from . import calibration as calibration_module
 from . import cell as cell_module
+from . import execute as execute_module
 from . import certification as certification_module
 from . import checkin as checkin_module
 from . import birth as birth_module
@@ -54,6 +55,7 @@ from . import observation as observation_module
 from . import opstate as opstate_module
 from . import ota as ota_module
 from . import power as power_module
+from . import relay as relay_module
 from . import predicate as predicate_module
 from . import provenance as provenance_module
 from . import readiness as readiness_module
@@ -297,14 +299,17 @@ def _calibration(label: str, case_input: dict[str, Any]) -> Any:
 
 
 def _cell(label: str, case_input: dict[str, Any]) -> Any:
-    """Two files, because the document has two consumers and an edition could agree about one while
-    disagreeing about the other: `validate` is what an operator sees when they save it, `context` is
-    what a precondition and the workspace guard read out of it afterwards.
+    """Three files, because the document has three consumers and an edition could agree about one
+    while disagreeing about the others: `validate` is what an operator sees when they save it,
+    `context` is what a precondition and the workspace guard read out of it afterwards, and
+    `robots` is §87.1's question about the pair nothing on the machine evaluates.
     """
     if label == "validate":
         return cell_module.validate_to_json(case_input)
     if label == "context":
         return cell_module.context_to_json(case_input)
+    if label == "robots":
+        return cell_module.robots_to_json(case_input)
     raise Unimplemented("cell", label)
 
 
@@ -357,8 +362,15 @@ def _ota(label: str, case_input: dict[str, Any]) -> Any:
     raise Unimplemented("ota", label)
 
 
-def _power(_label: str, case_input: dict[str, Any]) -> Any:
-    """Five files, one shape: §36's assessment plus every predicate a caller reads off it."""
+def _power(label: str, case_input: dict[str, Any]) -> Any:
+    """Six files, and the sixth is a different question.
+
+    Five are §36's assessment plus every predicate a caller reads off it. `safe-state` is §87.2's
+    question about the *document* rather than about a cycle: the other five all take an observation,
+    and this one has nothing to observe.
+    """
+    if label == "safe-state":
+        return power_module.safe_state_to_json(case_input)
     return power_module.power_to_json(case_input)
 
 
@@ -495,10 +507,35 @@ def _transport(_label: str, case_input: dict[str, Any]) -> Any:
     return transport_module.plan_to_json(case_input)
 
 
+def _relay(_label: str, case_input: dict[str, Any]) -> Any:
+    """One file, because the session verdict and the permission table are one question — *what may
+    this session do* — and an edition could agree that a lease had run out and disagree about
+    whether the stop survives it, which is the half §39.1 is about.
+    """
+    return relay_module.relay_to_json(case_input)
+
+
+def _execute(label: str, case_input: dict[str, Any]) -> Any:
+    """Two files, because one question is asked once per request and the other every cycle until the
+    controller answers.
+    """
+    if label == "motion":
+        return execute_module.motion_to_json(case_input)
+    if label == "progress":
+        return execute_module.progress_to_json(case_input)
+    raise Unimplemented("execute", label)
+
+
 def _watchdog(_label: str, case_input: dict[str, Any]) -> Any:
+    """Three files, one document. §87.3 added the per-chain block to it, and `chains` is the body's
+    own chain list rather than the map's keys — coverage is a property of the body, and a map that
+    named chains a body does not have would otherwise measure itself.
+    """
     return watchdog_module.watchdog_to_json(
         case_input.get("on_command_loss"),
         case_input.get("windows", {}),
+        case_input.get("on_command_loss_by_chain"),
+        case_input.get("chains"),
     )
 
 
@@ -528,6 +565,8 @@ HANDLERS: dict[str, Handler] = {
     "predicate": _predicate,
     "provenance": _provenance,
     "readiness": _readiness,
+    "relay": _relay,
+    "execute": _execute,
     "roles": _roles,
     "vocabulary": _vocabulary,
     "semver": _semver,

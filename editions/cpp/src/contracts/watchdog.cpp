@@ -41,8 +41,11 @@
 #include "skynet_os/js.hpp"
 #include "skynet_os/text.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace skynet::contracts {
@@ -153,6 +156,125 @@ Json host_blocked(const Json& on_command_loss) {
   return Json::null();
 }
 
+// ── Per chain (§87.3) ────────────────────────────────────────────────────────
+
+struct CommandLoss {
+  bool per_chain = false;
+  /// Each chain this body has, in the order `chains` was given, and what it does. The second is the
+  /// empty string and `declared` false where the declaration does not cover it.
+  std::vector<std::pair<std::string, std::optional<std::string>>> chains;
+  std::vector<std::string> unknown_chains;
+  Json host_blocked = Json::null();
+};
+
+/// §87.3's resolution: what each chain does when commands stop, and whether host is available.
+///
+/// **One answer about host, whichever way the body declared**, which is why this exists rather than
+/// a second `host_blocked…`: §78 is the record of what two spellings of one fact cost. The body-wide
+/// rules stay in `host_blocked` and this delegates to them.
+CommandLoss resolve_command_loss(const Json& body, const Json& by_chain, const Json& chain_list) {
+  CommandLoss out;
+  out.per_chain = by_chain.is_object();
+  const bool has_body = body.is_string();
+
+  std::vector<std::string> chains;
+  for (const Json& entry : chain_list.items()) {
+    if (entry.is_string()) {
+      chains.emplace_back(entry.string_or(""));
+    }
+  }
+
+  if (out.per_chain) {
+    for (const auto& entry : by_chain.entries()) {
+      if (std::find(chains.begin(), chains.end(), entry.first) == chains.end()) {
+        out.unknown_chains.push_back(entry.first);
+      }
+    }
+    std::sort(out.unknown_chains.begin(), out.unknown_chains.end(),
+              [](const std::string& left, const std::string& right) {
+                return js::utf16_less(left, right);
+              });
+  }
+
+  for (const std::string& chain : chains) {
+    std::optional<std::string> behaviour;
+    if (out.per_chain) {
+      const Json& value = by_chain[chain];
+      if (value.is_string()) {
+        behaviour = std::string(value.string_or(""));
+      }
+    } else if (has_body) {
+      behaviour = std::string(body.string_or(""));
+    }
+    out.chains.emplace_back(chain, behaviour);
+  }
+
+  if (out.per_chain && has_body) {
+    out.host_blocked = Json::string(
+        "this body declares both `on_command_loss` and `on_command_loss_by_chain`, which are two "
+        "descriptions of one fact — redundant where they agree and a contradiction where they "
+        "do not. Delete the one this body does not mean (§87.3)");
+    return out;
+  }
+
+  if (!out.per_chain) {
+    out.host_blocked = host_blocked(body);
+    return out;
+  }
+
+  if (chains.empty()) {
+    out.host_blocked = Json::string(
+        "this body declares what its drives do per chain, and none of its joints carries a role "
+        "this vocabulary parses — so the declaration covers no joint at all. §5.1 permits "
+        "a body the vocabulary does not describe; what it cannot do is declare per chain. Give the "
+        "joints roles, or declare `on_command_loss` for the body (§87.3)");
+    return out;
+  }
+
+  for (const auto& row : out.chains) {
+    if (!row.second.has_value()) {
+      out.host_blocked = Json::string(
+          "this body has a " + row.first +
+          " chain and its per-chain declaration does not cover it. A missing chain is refused "
+          "rather than inheriting a body-wide value, because inheriting makes a partially declared "
+          "body look fully declared (§87.3)");
+      return out;
+    }
+  }
+
+  for (const auto& row : out.chains) {
+    if (!is_command_loss_behaviour(*row.second)) {
+      out.host_blocked = Json::string(
+          "this body declares `" + row.first + ": " + *row.second +
+          "`, which is not one of hold, brake, fault or coast — so what that chain does while "
+          "its processor resets is not something anybody can read off the descriptor. An "
+          "unrecognised behaviour is refused before a `coast` is, because `coast` is characterised "
+          "and this is not (§46.2, §87.3)");
+      return out;
+    }
+  }
+
+  std::string coasting;
+  for (const auto& row : out.chains) {
+    if (*row.second == "coast") {
+      if (!coasting.empty()) {
+        coasting += ", ";
+      }
+      coasting += row.first;
+    }
+  }
+  if (!coasting.empty()) {
+    out.host_blocked = Json::string(
+        "this body's " + coasting +
+        " drives coast when commands stop, and layer 3 of the watchdog chain recovers by resetting "
+        "the processor — which for those chains is a fall. The sound configuration is the "
+        "certified tier, where layer 4 cuts drive enable independently of the processor "
+        "(§46.2)");
+  }
+
+  return out;
+}
+
 }  // namespace
 
 Json watchdog(const std::string& /*label*/, const Json& input) {
@@ -233,10 +355,36 @@ Json watchdog(const std::string& /*label*/, const Json& input) {
   // Every window is declared *and* every pair nests.
   nesting.set("complete", Json::boolean(faults.items().empty() && missing.empty()));
 
+  // §87.3. `chains` is the body's own chain list rather than the map's keys — coverage is a
+  // property of the body, and a map that named chains a body does not have would otherwise measure
+  // itself.
+  const CommandLoss loss = resolve_command_loss(
+      input["on_command_loss"], input["on_command_loss_by_chain"], input["chains"]);
+
+  Json per_chain_rows = Json::array();
+  for (const auto& row : loss.chains) {
+    Json entry = Json::object();
+    entry.set("chain", Json::string(row.first));
+    entry.set("behaviour", row.second.has_value() ? Json::string(*row.second) : Json::null());
+    per_chain_rows.push(entry);
+  }
+  Json unknown_rows = Json::array();
+  for (const std::string& chain : loss.unknown_chains) {
+    unknown_rows.push(Json::string(chain));
+  }
+  Json per_chain = Json::object();
+  per_chain.set("declared", Json::boolean(loss.per_chain));
+  per_chain.set("chains", per_chain_rows);
+  per_chain.set("unknown_chains", unknown_rows);
+
   Json out = Json::object();
   out.set("chain", layers);
   out.set("on_command_loss", input["on_command_loss"]);
-  out.set("host_blocked", host_blocked(input["on_command_loss"]));
+  // §87.3. Present on every document, because *"this body declares one behaviour"* and *"this body
+  // declares one behaviour per chain"* are two states a reader has to be able to tell apart without
+  // knowing which fields the descriptor happened to carry.
+  out.set("per_chain", per_chain);
+  out.set("host_blocked", loss.host_blocked);
   out.set("nesting", nesting);
   return out;
 }

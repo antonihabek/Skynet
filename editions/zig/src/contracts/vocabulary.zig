@@ -469,7 +469,120 @@ const sets = [_]ClosedSet{
             "duplicate_fixture",
             "parking_channel_unnamed",
             "duplicate_parking_channel",
+            // §87.1, and all five apply only from the second robot.
+            "robot_unnamed",
+            "duplicate_robot",
+            "robot_unplaced",
+            "robot_unbounded",
+            "shared_volume",
         },
+    },
+    .{
+        .name = "safe_state_bases",
+        .members = &.{
+            "fixed",
+            "mapped_worst_case",
+        },
+    },
+    .{
+        .name = "safe_state_faults",
+        .members = &.{
+            "basis_undeclared",
+            "basis_refused",
+            "basis_unknown",
+            "area_undeclared",
+            "mapped_on_a_fixed_base",
+            "figure_undeclared",
+        },
+    },
+    .{
+        .name = "relay_routes",
+        .members = &.{
+            "lan",
+            "relay",
+        },
+    },
+    .{
+        .name = "console_roles",
+        .members = &.{
+            "anonymous",
+            "observer",
+            "operator",
+            "admin",
+        },
+    },
+    .{
+        .name = "console_actions",
+        .members = &.{
+            "stop_request",
+            "read_status",
+            "read_health",
+            "start_package",
+            "stop_package",
+            "grant_capability",
+            "revoke_capability",
+            "seal_blackbox",
+            "apply_update",
+            "pair",
+            "install_driver",
+            "change_profile",
+            "factory_reset",
+        },
+    },
+    .{
+        .name = "session_states",
+        .members = &.{
+            "live",
+            "expired",
+            "refused",
+        },
+    },
+    .{
+        .name = "session_refusals",
+        .members = &.{
+            "deadline_undeclared",
+            "route_unknown",
+            "role_unknown",
+        },
+    },
+    .{
+        .name = "action_refusals",
+        .members = &.{
+            "role_insufficient",
+            "presence_required",
+            "session_expired",
+            "session_refused",
+        },
+    },
+    .{
+        .name = "motion_refusals",
+        .members = &.{
+            "no_lease",
+            "estop",
+            "not_active",
+            "busy",
+            "unknown_motion",
+            "deadline_undeclared",
+            "parameter_unknown",
+            "parameter_missing",
+            "parameter_not_finite",
+            "parameter_out_of_bounds",
+        },
+    },
+    .{
+        .name = "motion_ready_states",
+        .members = &.{
+            "running",
+            "degraded",
+        },
+    },
+    .{
+        .name = "motion_progress",
+        .members = &.{
+            "running",
+            "overdue",
+        },
+    },
     },
     .{
         .name = "operating_states",

@@ -26,7 +26,7 @@
 # Raise it whenever the edition reaches higher. Never lower it to make a build pass.
 
 GO ?= go
-MIN_PASSED ?= 1332
+MIN_PASSED ?= 1424
 
 # The corpus lives above this directory. Passed explicitly so the runner does not have to guess from
 # a working directory that `make -C` has already changed.
