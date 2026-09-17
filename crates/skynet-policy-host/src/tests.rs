@@ -1229,3 +1229,158 @@ fn a_frame_the_body_rendered_reaches_the_policy() {
         "the policy never pinned a slot"
     );
 }
+
+// ── §88: a policy that commands a motion, and the process that executes it ───
+
+/// §88.1, with both halves running: a policy emits a motion request into the ring it would post
+/// joint commands into, and the process holding the driver admits it and calls `extension()`.
+///
+/// This is the claim the section makes and the reason it says the second blocker **dissolves**
+/// rather than needing a bridge. Nothing here is a new channel: `skynetp` publishes into the same
+/// ring `Approach` publishes into two tests above, and `skynetk` reads it with the same consumer.
+/// What is new is that a motion is admitted by §88.2's ten refusals rather than by §7.1's eight
+/// guards, and that the arguments reach the controller in §84.1's declaration order.
+///
+/// The second turn is the control and it is what makes `Motion` a policy rather than a one-shot: it
+/// holds. A backend that re-asked would be a hundred requests for one movement, each refused `busy`
+/// after the first; one that went silent would present a correctly behaving policy to §7.1's
+/// watchdog as a crashed producer, which is the reading §88.3 says has no meaning here.
+#[test]
+fn a_policy_asks_for_a_motion_and_the_process_holding_the_driver_executes_it() {
+    use skynet_contracts::embodiment::{EmbodimentMotion, MotionParameter};
+    use skynet_kernel_host::motion::Authority;
+
+    let region = ring_words();
+    let ring = Ring::create(&region, SLOTS).expect("a command ring");
+    let mut out = ring.producer();
+    let mut into = Ring::open(&region).expect("the same ring").consumer();
+
+    let channels: [&str; 1] = ["shoulder"];
+    let per_channel: [(&str, f64); 1] = [("shoulder", 10.0)];
+    let mut active: FixedVec<Guard, 8> = FixedVec::new();
+    active.push(Guard::Envelope);
+    let limits = ResolvedLimits {
+        tier: Tier::Guest,
+        enforcement: Enforcement::Advisory,
+        joint_velocity_max_rad_s: Some(20.0),
+        joint_torque_max_nm: None,
+        base_velocity_max_m_s: None,
+        min_control_hz: Some(100.0),
+        max_delta_per_cycle: None,
+        proximity: None,
+        per_channel: &per_channel,
+        joint_modes: &[],
+        active_guards: active,
+        unavailable_guards: FixedVec::new(),
+        inert_guards: FixedVec::new(),
+        source: Some("the motion test"),
+        notices: FixedVec::new(),
+        grants: &[],
+        frames: None,
+        workspace: &[],
+        self_collision_margin_m: None,
+    };
+
+    let backend = crate::backend::Motion::asking(
+        "move_l",
+        "skill:pick",
+        4000.0,
+        // Reversed, so the assertion below is about §84.1's declaration order rather than about
+        // what this test happened to publish.
+        &[("speed", 0.1), ("pose", 0.4)],
+    )
+    .expect("the request fits the wire");
+    let mut policy = PolicyHost::new(backend, still(), lease(1), 10_000_000);
+
+    let mut kernel = Host::new(&channels);
+    kernel.authorise(Authority {
+        motions: vec![EmbodimentMotion {
+            name: "move_l".to_string(),
+            motion: Some("move_l".to_string()),
+            parameters: vec![
+                MotionParameter {
+                    name: "pose".to_string(),
+                    unit: Some("m".to_string()),
+                    required: Some(true),
+                    min: Some(0.0),
+                    max: Some(0.4),
+                },
+                MotionParameter {
+                    name: "speed".to_string(),
+                    unit: Some("m/s".to_string()),
+                    required: Some(false),
+                    min: None,
+                    max: None,
+                },
+            ],
+        }],
+        state: "running".to_string(),
+        lease_held_by: Some("skill:pick".to_string()),
+        token: Some("vendor.pendant.motion".to_string()),
+    });
+    let mut robot = Fake::new(1).with_extension("vendor.pendant.motion");
+
+    // The policy asks.
+    assert_eq!(
+        policy.turn(&mut out, None),
+        Tick::Published(1),
+        "a motion advances the sequence: it reached the ring",
+    );
+    assert_eq!(policy.summary().motions, 1);
+    assert_eq!(
+        policy.summary().published,
+        0,
+        "and it is not a joint command — `published` counts turns with a masked-in channel",
+    );
+
+    // The process holding the driver executes it.
+    let turn = kernel.step(
+        1_000_000,
+        &mut robot,
+        &mut into,
+        &limits,
+        None::<&Envelope<'_>>,
+    );
+    let motion = turn.motion.expect("the cycle carried a motion");
+    let verdict = motion.verdict.expect("admitted or refused on arrival");
+    assert!(verdict.accepted, "{}", verdict.detail);
+    assert_eq!(
+        robot.motions,
+        vec!["move_l pose=0.4 speed=0.1".to_string()],
+        "§84.1's declaration order, and `pose=0.4` rather than the seventeen digits an exact \
+         widening of the wire's f32 would produce — which is also above the declared maximum of \
+         0.4 and would have been refused (F39)",
+    );
+
+    // The control: the policy holds rather than re-asking or going quiet.
+    assert_eq!(policy.turn(&mut out, None), Tick::Held(2));
+    assert_eq!(policy.summary().motions, 1, "asked once");
+    let turn = kernel.step(
+        2_000_000,
+        &mut robot,
+        &mut into,
+        &limits,
+        None::<&Envelope<'_>>,
+    );
+    assert!(
+        turn.motion.is_some_and(|turn| turn.verdict.is_none()),
+        "the second cycle is about the motion in flight, not a second request",
+    );
+    assert_eq!(robot.motions.len(), 1, "and the controller was asked once");
+}
+
+/// A request the wire cannot carry is refused where it is built, not cut down.
+#[test]
+fn a_motion_name_longer_than_the_wire_is_refused_at_the_backend() {
+    assert!(
+        crate::backend::Motion::asking(&"m".repeat(200), "skill:pick", 1000.0, &[]).is_none(),
+        "half a motion name is a different motion",
+    );
+    let many: Vec<(&str, f64)> = (0..skynet_ring::MAX_MOTION_PARAMETERS + 1)
+        .map(|_| ("pose", 0.0))
+        .collect();
+    assert!(
+        crate::backend::Motion::asking("move_l", "skill:pick", 1000.0, &many).is_none(),
+        "a motion missing its last argument is one a controller will reject on a moving robot",
+    );
+}

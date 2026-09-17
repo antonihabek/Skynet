@@ -1855,7 +1855,13 @@ fn a_motion_held_past_its_deadline_is_aborted_on_a_cycle_with_no_request_on_it()
         &limits,
         None::<&Envelope<'_>>,
     );
-    assert!(turn.motion.expect("arrival").verdict.expect("decided").accepted);
+    assert!(
+        turn.motion
+            .expect("arrival")
+            .verdict
+            .expect("decided")
+            .accepted
+    );
 
     // 40 ms: inside the deadline, and the loop is reading the same slot it read before.
     let turn = host.step(

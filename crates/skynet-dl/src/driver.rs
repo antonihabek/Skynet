@@ -509,7 +509,9 @@ impl Driver {
             return ExtensionReply {
                 code: skynet_rhal::status::ENOSYS,
                 detail: String::from(
-                    "this driver implements no `extension`, so there is no route for a motion to                      reach its controller (§4, §88.1). A body commanded by named motions needs one.",
+                    "this driver implements no `extension`, so there is no route for a motion to \
+                     reach its controller (§4, §88.1). A body commanded by named motions \
+                     needs one.",
                 ),
             };
         };
@@ -676,7 +678,6 @@ impl ExtensionReply {
         self.code >= 0
     }
 }
-
 
 /// The widest command frame the ring carries, which is the most joints a probe can make room for.
 fn skynet_ring_max_channels() -> usize {
