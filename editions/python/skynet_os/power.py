@@ -40,6 +40,8 @@ from __future__ import annotations
 import math
 from typing import Any, Final
 
+from .js import js_trim as _js_trim
+
 __all__ = [
     "LOW_BAND",
     "NEVER_SHED",
@@ -47,7 +49,10 @@ __all__ = [
     "POWER_REASONS",
     "POWER_STATES",
     "RESERVE_BAND",
+    "MOBILE_BASES",
     "RESERVE_TERMS",
+    "SAFE_STATE_BASES",
+    "SAFE_STATE_FAULTS",
     "SHED_ORDER",
     "SUSTAINED_THROTTLE_MS",
     "THERMAL_PRESSURES",
@@ -59,8 +64,13 @@ __all__ = [
     "grants_new_leases",
     "power_to_json",
     "pressure",
+    "base_is_mobile",
+    "host_blocked_by_safe_state",
     "reserve",
     "reserve_complete",
+    "safe_state_basis",
+    "safe_state_to_json",
+    "validate_safe_state",
     "shed",
     "state_grants_new_leases",
     "state_notifies_operator",
@@ -70,6 +80,28 @@ __all__ = [
 
 #: §36.2's terms, in the order that section lists them.
 RESERVE_TERMS: Final = ("declared_energy", "payload", "distance_to_safe_state")
+
+#: The two bases a ``time_to_safe_state_s`` may be declared on (§87.2). There is no third.
+#:
+#: **``live`` is deliberately absent.** A figure the navigation stack supplies per cycle is the
+#: attractive design and §87.2 rejects it for two reasons that have nothing to do with accuracy: it
+#: puts a planner inside §36's reserve arithmetic, so a skill admitted at one instant is refused at
+#: the next for a reason nobody can audit afterwards; and it makes navigation a safety-relevant
+#: component with no tier.
+SAFE_STATE_BASES: Final = ("fixed", "mapped_worst_case")
+
+#: Base kinds that have somewhere to travel to. §5's base kinds minus ``fixed``.
+MOBILE_BASES: Final = ("wheeled", "tracked", "legged", "aerial", "rail")
+
+#: What can be wrong with a safe-state declaration (§87.2).
+SAFE_STATE_FAULTS: Final = (
+    "basis_undeclared",
+    "basis_refused",
+    "basis_unknown",
+    "area_undeclared",
+    "mapped_on_a_fixed_base",
+    "figure_undeclared",
+)
 
 #: Where the ``reserve`` band ends, as a multiple of the reserve. A quarter of a reserve wide,
 #: because §36.1's two rows are otherwise a single point and everything under it — and a gauge
@@ -193,24 +225,161 @@ def reserve_complete(res: dict[str, Any]) -> bool:
     return res["wh"] is not None and not res["unaccounted"]
 
 
-def reserve(profile: dict[str, Any]) -> dict[str, Any]:
+def base_is_mobile(base: Any) -> bool:
+    """Whether this base kind has a navigation problem between it and a safe state."""
+    return isinstance(base, str) and base in MOBILE_BASES
+
+
+def validate_safe_state(profile: dict[str, Any], base: Any) -> dict[str, Any] | None:
+    """§87.2's checks over the declaration, or ``None``.
+
+    The first fault in declaration order, like ``validate_motions`` next door and for the same
+    reason: the basis is read before the area, and the area before anything about the figure,
+    because a declaration whose basis is wrong is one whose other fields are being read against the
+    wrong rule.
+
+    The first rule is the one that keeps every descriptor written before §87 valid: **an absent
+    basis on a ``fixed`` base is ``fixed``.** A robot bolted to a bench should not have to declare
+    what it is not, which is §35.3's argument about ``simulator`` applied to the same shape. On a
+    mobile base the same silence is a rumour in §5.2's sense.
+    """
+    figure = _field(profile, "time_to_safe_state_s")
+    has_figure = figure is not _ABSENT and _is_finite(figure) and figure > 0
+
+    declaration = profile.get("safe_state")
+    if not isinstance(declaration, dict):
+        if not base_is_mobile(base):
+            return None
+        return {
+            "code": "basis_undeclared",
+            "detail": "A figure with no basis is a rumour (§5.2), and on a body that travels the "
+            "time to a safe state depends on where it is standing. Declare `fixed` if it stops "
+            "where it is, or `mapped_worst_case` with the area the worst case was taken over.",
+        }
+
+    basis = declaration.get("basis")
+    if basis == "live":
+        return {
+            "code": "basis_refused",
+            "detail": "A figure the navigation stack supplies per cycle is the design §87.2 "
+            "rejected: it puts a planner inside §36's reserve arithmetic, so a skill admitted at "
+            "one instant is refused at the next for a reason nobody can audit, and it makes "
+            "navigation a safety-relevant component with no tier. Declare a worst case over a "
+            "mapped area instead.",
+        }
+
+    if basis not in SAFE_STATE_BASES:
+        return {
+            "code": "basis_unknown",
+            "detail": f"`{'' if basis is None else basis}` is not one of fixed or "
+            "mapped_worst_case, so nothing can read how this figure was arrived at.",
+        }
+
+    if basis == "mapped_worst_case":
+        if not base_is_mobile(base):
+            return {
+                "code": "mapped_on_a_fixed_base",
+                "detail": "This base does not travel, so there is no mapped area to take a worst "
+                "case over. It is a claim about a navigation problem this body does not have, and "
+                "it arrives by copying a descriptor between machines.",
+            }
+        area = declaration.get("area")
+        if not isinstance(area, str) or _js_trim(area) == "":
+            return {
+                "code": "area_undeclared",
+                "detail": "A worst case over nothing is not a worst case. Name the area it was "
+                "taken over, so somebody reading the reserve later knows where the figure stops "
+                "being true.",
+            }
+
+    if not has_figure:
+        return {
+            "code": "figure_undeclared",
+            "detail": "A basis with no `time_to_safe_state_s` beside it describes how a number was "
+            "arrived at without carrying the number.",
+        }
+
+    return None
+
+
+def safe_state_basis(profile: dict[str, Any], base: Any) -> str | None:
+    """The basis the third reserve term may be accounted on, or ``None``.
+
+    ``fixed`` on a fixed base is the reading a bolted-down arm's silence always had, spelled out;
+    every other combination has to be declared and has to pass :func:`validate_safe_state`, because
+    accounting a term against a declaration with a fault in it would be the invented measurement
+    §5.2 forbids.
+    """
+    if validate_safe_state(profile, base) is not None:
+        return None
+    figure = _field(profile, "time_to_safe_state_s")
+    if figure is _ABSENT or not _is_finite(figure) or figure <= 0:
+        return None
+    declaration = profile.get("safe_state")
+    declared = declaration.get("basis") if isinstance(declaration, dict) else None
+    if declared == "mapped_worst_case":
+        return "mapped_worst_case"
+    if declared == "fixed":
+        return "fixed"
+    return None if base_is_mobile(base) else "fixed"
+
+
+def host_blocked_by_safe_state(profile: dict[str, Any], base: Any) -> str | None:
+    """Whether this body may attempt the host tier, given what it says about its safe state (§87.2).
+
+    The AMR-shaped sibling of §46.2's ``host_blocked_by_command_loss``, and it has the same shape
+    for the same reason: the tier is refused where the recovery path has not been established, and
+    the refusal names the fix. **A ``fixed`` base is never refused on this ground**, because it
+    never was the problem.
+    """
+    if not base_is_mobile(base):
+        return None
+    fault = validate_safe_state(profile, base)
+    if fault is None:
+        return None
+    # Two sentences rather than one, and neither is assembled out of the other. §64 makes a message
+    # that misdescribes what happened a defect, and a refusal built by splicing a clause in front of
+    # a detail that already opens with its own subject is exactly how one gets written.
+    return (
+        "§36.2 computes this body's reserve budget from the time it takes to reach a safe state, "
+        f"and this body travels, so that figure is one nothing can place ({fault['code']}). "
+        f"{fault['detail']} (§87.2)"
+    )
+
+
+def reserve(profile: dict[str, Any], base: Any = _ABSENT) -> dict[str, Any]:
     """Compute §36.2's reserve budget from what the body declares.
 
     The arithmetic is deliberately the identity: the reserve *is* ``safe_stop_energy_wh``, because
-    the other two terms §36.2 names have no source. Scaling it by a plausible payload factor would
-    have been one line and a number nobody could defend — and this is the number that decides when a
-    two-metre humanoid stops walking.
+    ``payload`` has no source. Scaling it by a plausible payload factor would have been one line and
+    a number nobody could defend — and this is the number that decides when a two-metre humanoid
+    stops walking.
+
+    ``base`` left out is *nobody said what this body stands on*, which gets the reading this
+    function had before §87 — term unaccounted, basis ``None``. "Nobody told me" and "it is bolted
+    down" are the two things §7.2 exists to keep apart.
     """
     unaccounted: list[str] = []
     declared = _field(profile, "safe_stop_energy_wh")
     usable = declared is not _ABSENT and _is_finite(declared) and declared > 0
     if not usable:
         unaccounted.append(RESERVE_TERMS[0])
-    # Neither exists on this platform. Appended unconditionally rather than looked up, so the day one
-    # of them arrives this is a visible place to change rather than a silent over-report.
+    # `payload` still has no source on this platform. Appended unconditionally rather than looked
+    # up, so the day one arrives this is a visible place to change rather than a silent over-report.
     unaccounted.append(RESERVE_TERMS[1])
-    unaccounted.append(RESERVE_TERMS[2])
-    return {"wh": declared if usable else None, "unaccounted": unaccounted}
+
+    # §87.2. The third term leaves `unaccounted` when the declaration is sound — which is not the
+    # same as the figure being measured, and `safe_state_basis` is what keeps the two
+    # distinguishable.
+    basis = None if base is _ABSENT else safe_state_basis(profile, base)
+    if basis is None:
+        unaccounted.append(RESERVE_TERMS[2])
+
+    return {
+        "wh": declared if usable else None,
+        "unaccounted": unaccounted,
+        "safe_state_basis": basis,
+    }
 
 
 def state_grants_new_leases(state: str) -> bool:
@@ -369,7 +538,9 @@ def _band_reason(remaining: float, budget: float) -> str:
     }.get(_band(remaining, budget), "above_reserve")
 
 
-def assess(profile: dict[str, Any], observation: dict[str, Any]) -> dict[str, Any]:
+def assess(
+    profile: dict[str, Any], observation: dict[str, Any], base: Any = _ABSENT
+) -> dict[str, Any]:
     """Assess §36 for one cycle.
 
     The order of the rules is the design, and the first one is what §36.4 is written for.
@@ -382,7 +553,7 @@ def assess(profile: dict[str, Any], observation: dict[str, Any]) -> dict[str, An
     4. **No reserve, or no capacity.** A reading arrived and cannot be compared against anything.
     5. **The bands.** The only rule that looks at a number, and last for that reason.
     """
-    budget = reserve(profile)
+    budget = reserve(profile, base)
     temperature = _field(observation, "temperature_c")
     thermal = pressure(profile, temperature)
     faults: list[dict[str, Any]] = []
@@ -569,6 +740,10 @@ def power_to_json(case_input: dict[str, Any]) -> Any:
             "wh": assessment["reserve"]["wh"],
             "unaccounted": list(assessment["reserve"]["unaccounted"]),
             "complete": reserve_complete(assessment["reserve"]),
+            # §87.2. Beside `unaccounted` rather than instead of it: the term leaving the list says
+            # the computation happened, and the basis says *how*, and a reader who can see only the
+            # first is reading a worst case over a warehouse as a measurement.
+            "safe_state_basis": assessment["reserve"]["safe_state_basis"],
         },
         "thermal": assessment["thermal"],
         "shed": list(assessment["shed"]),
@@ -582,4 +757,29 @@ def power_to_json(case_input: dict[str, Any]) -> Any:
         # it: the corpus can only hold editions to each other.
         "notifies_operator": state_notifies_operator(assessment["state"]),
         "budget_missed": budget_missed(declared, observed),
+    }
+
+
+def safe_state_to_json(case_input: dict[str, Any]) -> Any:
+    """``power/safe-state`` — §87.2's declaration, its consequence, and the reserve it moves.
+
+    The four together rather than the fault alone, because §87.2's whole argument is that a figure
+    and its provenance are one fact: a document carrying ``basis_undeclared`` and not carrying *"and
+    therefore host is refused and the reserve term is unaccounted"* would leave a reader to
+    re-derive the consequence, which is where two editions would disagree.
+    """
+    profile = case_input.get("profile") or {}
+    base = case_input.get("base")
+    fault = validate_safe_state(profile, base)
+    budget = reserve(profile, base)
+    return {
+        "base": base if isinstance(base, str) else None,
+        "fault": None if fault is None else {"code": fault["code"], "detail": fault["detail"]},
+        "basis": safe_state_basis(profile, base),
+        "host_blocked": host_blocked_by_safe_state(profile, base),
+        "reserve": {
+            "wh": budget["wh"],
+            "unaccounted": list(budget["unaccounted"]),
+            "safe_state_basis": budget["safe_state_basis"],
+        },
     }

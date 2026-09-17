@@ -63,8 +63,11 @@ __all__ = [
     "CELL_FAULTS",
     "DERIVED_FACTS",
     "cell_environment",
+    "cell_robot_layer",
+    "cell_robot_slugs",
     "cell_workspace_layer",
     "context_to_json",
+    "robots_to_json",
     "validate_cell",
     "validate_to_json",
 ]
@@ -73,7 +76,7 @@ __all__ = [
 #:
 #: A precondition reading ``env.cell`` must be reading the cell's name, on every robot, whatever
 #: somebody typed into their configuration.
-DERIVED_FACTS: Final = ("cell", "fixtures")
+DERIVED_FACTS: Final = ("cell", "fixtures", "robot", "robots")
 
 CELL_FAULTS: Final = (
     "unnamed",
@@ -85,6 +88,12 @@ CELL_FAULTS: Final = (
     "duplicate_fixture",
     "parking_channel_unnamed",
     "duplicate_parking_channel",
+    # §87.1, and all five apply only from the second robot.
+    "robot_unnamed",
+    "duplicate_robot",
+    "robot_unplaced",
+    "robot_unbounded",
+    "shared_volume",
 )
 
 
@@ -177,6 +186,195 @@ def _frame_is_named(volume: Any) -> bool:
         return False
     frame = volume.get("frame")
     return isinstance(frame, str) and _js_trim(frame) != ""
+
+
+# ── §87.1's intersection test ────────────────────────────────────────────────
+
+
+def _placed(shape: dict[str, Any], at: list[float]) -> dict[str, Any]:
+    """A shape moved into the cell's frame by its robot's placement.
+
+    Translation only. §44.4's transforms carry a rotation and this deliberately does not read one: a
+    rotated box is not a box, so the test would need an oriented-box routine whose disagreements
+    between eight editions would be in the last bits of a square root. A cell whose robots are
+    mounted at an angle is one whose operator draws axis-aligned volumes large enough to hold the
+    rotation, which over-reports sharing and never under-reports it.
+    """
+    if shape["kind"] == "sphere":
+        return {
+            "kind": "sphere",
+            "centre": [shape["centre"][axis] + at[axis] for axis in range(3)],
+            "radius_m": shape["radius_m"],
+        }
+    return {
+        "kind": "box",
+        "min": [shape["min"][axis] + at[axis] for axis in range(3)],
+        "max": [shape["max"][axis] + at[axis] for axis in range(3)],
+    }
+
+
+def _box_point_distance_squared(box: dict[str, Any], point: list[float]) -> float:
+    """Squared distance from a point to a box, zero inside."""
+    total = 0.0
+    for axis in range(3):
+        value = point[axis]
+        low = box["min"][axis]
+        high = box["max"][axis]
+        outside = low - value if value < low else value - high if value > high else 0.0
+        total += outside * outside
+    return total
+
+
+def _intersects(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """Whether two placed shapes share a point.
+
+    **Inclusive, and that is the decision rather than an off-by-one.** ``margin`` counts zero as
+    inside — a workspace trip is ``margin < 0`` — so two robots whose boxes meet on a face can each
+    legally be at the point where they meet. A strict test would call that configuration disjoint,
+    and the platform would have certified the one arrangement where both arms are allowed into the
+    same millimetre.
+    """
+    if a["kind"] == "box" and b["kind"] == "box":
+        return all(
+            a["min"][axis] <= b["max"][axis] and b["min"][axis] <= a["max"][axis]
+            for axis in range(3)
+        )
+    if a["kind"] == "sphere" and b["kind"] == "sphere":
+        reach = a["radius_m"] + b["radius_m"]
+        squared = sum(
+            (a["centre"][axis] - b["centre"][axis]) ** 2 for axis in range(3)
+        )
+        return squared <= reach * reach
+    box = a if a["kind"] == "box" else b
+    sphere = a if a["kind"] == "sphere" else b
+    return _box_point_distance_squared(box, sphere["centre"]) <= sphere["radius_m"] ** 2
+
+
+def _read_placement(robot: dict[str, Any]) -> list[float] | None:
+    """The placement, or ``None`` when the operator wrote none the arithmetic can use."""
+    at = _triple(robot.get("at"))
+    if at is None or not all(_finite(value) for value in at):
+        return None
+    return [float(value) for value in at]
+
+
+def _placed_volumes(robot: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """A robot's usable volumes, placed. A volume with no usable shape is not compared."""
+    at = _read_placement(robot)
+    if at is None:
+        return []
+    placed: list[tuple[str, dict[str, Any]]] = []
+    for volume in robot.get("allowed") or []:
+        if not _shape_is_usable(volume):
+            continue
+        shape = _shape(volume)
+        assert shape is not None
+        frame = volume.get("frame") if isinstance(volume, dict) else ""
+        placed.append((frame if isinstance(frame, str) else "", _placed(shape, at)))
+    return placed
+
+
+def _robot_slug(robot: Any) -> str:
+    """A robot's slug, or the empty string — ``_cell_name``'s rule, one level down."""
+    if not isinstance(robot, dict):
+        return ""
+    slug = robot.get("slug")
+    return slug if isinstance(slug, str) else ""
+
+
+def _robot_faults(cell: dict[str, Any]) -> list[dict[str, Any]]:
+    """§87.1's five faults, or none.
+
+    Split out rather than inlined because all five are conditional on the same thing — **two or more
+    robots** — and a reader has to be able to see that condition once. One robot is §55.2's cell and
+    has no pair to be disjoint from; the placement rule would otherwise refuse every cell anybody
+    has ever written.
+
+    Reported in declaration order, then the pairs in index order, so every edition names the same
+    fault first. The disjointness walk skips a robot that already has a fault of its own, for
+    :func:`validate_cell`'s duplicate-fixture reason.
+    """
+    robots = cell.get("robots") or []
+    faults: list[dict[str, Any]] = []
+    slugs: set[str] = set()
+    comparable: list[tuple[str, list[tuple[str, dict[str, Any]]]]] = []
+    several = len(robots) >= 2
+
+    for index, robot in enumerate(robots):
+        robot = robot if isinstance(robot, dict) else {}
+        slug = _robot_slug(robot)
+        if _js_trim(slug) == "":
+            faults.append(
+                _fault(
+                    "robot_unnamed",
+                    [f"robots[{index}]"],
+                    "A robot a precondition cannot name is a robot no skill can ask about. "
+                    "`env.robot` is its slug.",
+                )
+            )
+            continue
+        if slug in slugs:
+            faults.append(
+                _fault(
+                    "duplicate_robot",
+                    [slug],
+                    "Two entries with one slug: a precondition asking about it would be asking "
+                    "about whichever the reader happened to reach.",
+                )
+            )
+            continue
+        slugs.add(slug)
+
+        # Everything below is about the pair, so a cell with one robot stops here.
+        if not several:
+            continue
+
+        if _read_placement(robot) is None:
+            faults.append(
+                _fault(
+                    "robot_unplaced",
+                    [slug],
+                    "This cell holds more than one robot, and this one carries no `at`. Its "
+                    "volumes are in its own root frame (§44.2), so nothing can say whether they "
+                    "overlap another robot's until somebody says where it stands.",
+                )
+            )
+            continue
+        volumes = _placed_volumes(robot)
+        if not volumes:
+            faults.append(
+                _fault(
+                    "robot_unbounded",
+                    [slug],
+                    "This cell holds more than one robot, and this one draws no volume the "
+                    "workspace guard can evaluate. A robot that may be anywhere is not disjoint "
+                    "from anything.",
+                )
+            )
+            continue
+        comparable.append((slug, volumes))
+
+    for a in range(len(comparable)):
+        for b in range(a + 1, len(comparable)):
+            first_slug, first_volumes = comparable[a]
+            second_slug, second_volumes = comparable[b]
+            for one_frame, one_shape in first_volumes:
+                for other_frame, other_shape in second_volumes:
+                    if not _intersects(one_shape, other_shape):
+                        continue
+                    faults.append(
+                        _fault(
+                            "shared_volume",
+                            [first_slug, second_slug, one_frame, other_frame],
+                            f"{first_slug}'s {one_frame} and {second_slug}'s {other_frame} share "
+                            "a point once both robots are placed. §87.1 gives each robot its own "
+                            "kernel, so nothing on this machine evaluates the pair — the overlap "
+                            "is a claim the platform cannot enforce rather than a hazard it has "
+                            "measured.",
+                        )
+                    )
+
+    return faults
 
 
 def validate_cell(cell: dict[str, Any]) -> list[dict[str, Any]]:
@@ -301,10 +499,57 @@ def validate_cell(cell: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         seen_channels.add(channel)
 
+    faults.extend(_robot_faults(cell))
+
     return faults
 
 
-def cell_environment(cell: dict[str, Any]) -> dict[str, Any]:
+def cell_robot_slugs(cell: dict[str, Any]) -> list[str]:
+    """Every slug the cell names, sorted and without the ones it got wrong (§87.1).
+
+    Sorted for :func:`validate_cell`'s reason one field along: a precondition asks ``includes``, so
+    order is not semantic — but two editions emitting one list in two orders is a corpus failure,
+    and sorted is the order every edition can produce. A duplicate appears once, because
+    ``env.robots`` answers *which robots*, and ``duplicate_robot`` is where the document's mistake
+    is reported.
+    """
+    slugs: list[str] = []
+    for robot in cell.get("robots") or []:
+        slug = _robot_slug(robot)
+        if _js_trim(slug) == "" or slug in slugs:
+            continue
+        slugs.append(slug)
+    return sorted(slugs, key=_utf16_key)
+
+
+def cell_robot_layer(cell: dict[str, Any], slug: str) -> dict[str, Any] | None:
+    """The layer one robot of a shared cell contributes, or ``None`` (§87.1).
+
+    A **second** layer rather than a replacement for :func:`cell_workspace_layer`, because §38.2's
+    layers compose by conjunction and two layers is how a cell-wide volume and a per-robot one both
+    hold. A caller that substituted this for the cell's own would be letting a robot's own volume
+    *widen* what the cell allowed everything, which is the one thing a layer may not do.
+
+    The volumes are **unplaced**, in the robot's own root frame, because that is the frame the
+    ``workspace`` guard resolves poses in (§44.2).
+    """
+    if _js_trim(slug) == "":
+        return None
+    for robot in cell.get("robots") or []:
+        if _robot_slug(robot) != slug:
+            continue
+        volumes = [
+            volume
+            for volume in ((robot.get("allowed") if isinstance(robot, dict) else None) or [])
+            if _shape_is_usable(volume) and _frame_is_named(volume)
+        ]
+        if not volumes:
+            return None
+        return {"name": f"cell:{_cell_name(cell)}:{slug}", "volumes": volumes}
+    return None
+
+
+def cell_environment(cell: dict[str, Any], subject: str | None = None) -> dict[str, Any]:
     """The ``env.*`` branch of a precondition context (§54.2).
 
     Two derived facts and then the operator's own. Derived first and unshadowable, which
@@ -330,6 +575,12 @@ def cell_environment(cell: dict[str, Any]) -> dict[str, Any]:
         and isinstance(fixture.get("name"), str)
         and _js_trim(fixture["name"]) != ""
     ]
+    # §87.1. `env.robot` answers *which robot does this cell say I am*, so a slug the cell has not
+    # been told about is reported as the empty string rather than echoed back: an edition that
+    # echoed it would let a precondition assert membership of a cell by asserting it.
+    declared = cell_robot_slugs(cell)
+    environment["robot"] = subject if isinstance(subject, str) and subject in declared else ""
+    environment["robots"] = declared
     return environment
 
 
@@ -394,4 +645,42 @@ def context_to_json(case_input: dict[str, Any]) -> Any:
                 for volume in layer["volumes"]
             ],
         },
+    }
+
+
+def robots_to_json(case_input: dict[str, Any]) -> Any:
+    """``cell/robots`` — §87.1's three projections of one document.
+
+    One document rather than three, because they are one question — *what does this cell say about
+    its robots* — and an edition could agree about the disjointness arithmetic while disagreeing
+    about which layer a robot contributes, which is the half a workspace guard reads.
+    """
+    cell = case_input["cell"]
+    subject = case_input.get("robot")
+    layers = []
+    for robot in cell.get("robots") or []:
+        slug = _robot_slug(robot)
+        layer = cell_robot_layer(cell, slug)
+        layers.append(
+            {
+                "slug": slug,
+                "layer": None
+                if layer is None
+                else {
+                    "name": layer["name"],
+                    "volumes": [
+                        {"frame": volume["frame"], "shape": _shape_json(_shape(volume))}
+                        for volume in layer["volumes"]
+                    ],
+                },
+            }
+        )
+    return {
+        "env": cell_environment(cell, subject if isinstance(subject, str) else None),
+        "slugs": cell_robot_slugs(cell),
+        "layers": layers,
+        "faults": [
+            {"code": fault["code"], "subjects": list(fault["subjects"]), "detail": fault["detail"]}
+            for fault in validate_cell(cell)
+        ],
     }

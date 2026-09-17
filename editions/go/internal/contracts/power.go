@@ -101,6 +101,12 @@ type PowerReserve struct {
 	HasWH bool
 	// Unaccounted are §36.2's terms nothing on this robot supplies. Non-empty means WH is a floor.
 	Unaccounted []string
+	// SafeStateBasis is the basis `distance_to_safe_state` was accounted on, or empty (§87.2).
+	//
+	// The difference between a term **nobody supplied** and a term **bounded** over an area
+	// somebody walked, and a reader who cannot tell the two apart is reading a floor as a
+	// measurement.
+	SafeStateBasis string
 }
 
 // ReserveComplete reports whether every term §36.2 names was accounted for. False on every robot
@@ -115,7 +121,7 @@ func ReserveComplete(reserve PowerReserve) bool {
 // other two terms §36.2 names have no source. Scaling it by a plausible payload factor would have
 // been one line and a number nobody could defend — and this is the number that decides when a
 // two-metre humanoid stops walking.
-func ComputeReserve(profile canonical.Value) PowerReserve {
+func ComputeReserve(profile canonical.Value, base string, hasBase bool) PowerReserve {
 	reserve := PowerReserve{Unaccounted: []string{}}
 	declared, has := finiteNumber(profile.Field("safe_stop_energy_wh"))
 	if has && declared > 0 {
@@ -123,10 +129,199 @@ func ComputeReserve(profile canonical.Value) PowerReserve {
 	} else {
 		reserve.Unaccounted = append(reserve.Unaccounted, vocabulary.ReserveTerms[0])
 	}
-	// Neither exists on this platform. Appended unconditionally rather than looked up, so the day
-	// one of them arrives this is a visible place to change rather than a silent over-report.
-	reserve.Unaccounted = append(reserve.Unaccounted, vocabulary.ReserveTerms[1], vocabulary.ReserveTerms[2])
+	// `payload` still has no source on this platform. Appended unconditionally rather than looked
+	// up, so the day one arrives this is a visible place to change rather than a silent
+	// over-report.
+	reserve.Unaccounted = append(reserve.Unaccounted, vocabulary.ReserveTerms[1])
+
+	// §87.2. The third term leaves Unaccounted when the declaration is sound — which is not the
+	// same as the figure being measured, and SafeStateBasis is what keeps the two distinguishable.
+	// `hasBase` false is *nobody said what this body stands on*, which gets the reading this
+	// function had before §87: "nobody told me" and "it is bolted down" are the two things §7.2
+	// exists to keep apart.
+	if hasBase {
+		reserve.SafeStateBasis = SafeStateBasisOf(profile, base)
+	}
+	if reserve.SafeStateBasis == "" {
+		reserve.Unaccounted = append(reserve.Unaccounted, vocabulary.ReserveTerms[2])
+	}
 	return reserve
+}
+
+// ── §87.2, the safe state's provenance ──────────────────────────────────────
+
+// SafeStateFault is one thing wrong with a safe-state declaration (§87.2).
+type SafeStateFault struct {
+	Code   string
+	Detail string
+}
+
+// BaseIsMobile reports whether this base kind has a navigation problem between it and a safe state.
+func BaseIsMobile(base string, hasBase bool) bool {
+	return hasBase && containsString(vocabulary.MobileBases, base)
+}
+
+// ValidateSafeState is §87.2's checks over the declaration, and not ok when there is none.
+//
+// The first fault in declaration order, like ValidateMotions and for the same reason: the basis is
+// read before the area, and the area before anything about the figure, because a declaration whose
+// basis is wrong is one whose other fields are being read against the wrong rule.
+//
+// The first rule is the one that keeps every descriptor written before §87 valid: **an absent basis
+// on a `fixed` base is `fixed`.** A robot bolted to a bench should not have to declare what it is
+// not, which is §35.3's argument about `simulator` applied to the same shape.
+func ValidateSafeState(profile canonical.Value, base string, hasBase bool) (SafeStateFault, bool) {
+	figure, hasFigure := finiteNumber(profile.Field("time_to_safe_state_s"))
+	hasFigure = hasFigure && figure > 0
+
+	declaration := profile.Field("safe_state")
+	if declaration.Kind() != canonical.KindObject {
+		if !BaseIsMobile(base, hasBase) {
+			return SafeStateFault{}, false
+		}
+		return SafeStateFault{
+			Code: "basis_undeclared",
+			Detail: "A figure with no basis is a rumour (§5.2), and on a body that travels the " +
+				"time to a safe state depends on where it is standing. Declare `fixed` if it " +
+				"stops where it is, or `mapped_worst_case` with the area the worst case was taken " +
+				"over.",
+		}, true
+	}
+
+	basis, _ := declaration.Field("basis").Str()
+	if basis == "live" {
+		return SafeStateFault{
+			Code: "basis_refused",
+			Detail: "A figure the navigation stack supplies per cycle is the design §87.2 " +
+				"rejected: it puts a planner inside §36's reserve arithmetic, so a skill admitted " +
+				"at one instant is refused at the next for a reason nobody can audit, and it " +
+				"makes navigation a safety-relevant component with no tier. Declare a worst case " +
+				"over a mapped area instead.",
+		}, true
+	}
+
+	if !containsString(vocabulary.SafeStateBases, basis) {
+		return SafeStateFault{
+			Code: "basis_unknown",
+			Detail: "`" + basis + "` is not one of fixed or mapped_worst_case, so nothing can " +
+				"read how this figure was arrived at.",
+		}, true
+	}
+
+	if basis == "mapped_worst_case" {
+		if !BaseIsMobile(base, hasBase) {
+			return SafeStateFault{
+				Code: "mapped_on_a_fixed_base",
+				Detail: "This base does not travel, so there is no mapped area to take a worst " +
+					"case over. It is a claim about a navigation problem this body does not have, " +
+					"and it arrives by copying a descriptor between machines.",
+			}, true
+		}
+		area, _ := declaration.Field("area").Str()
+		if js.Trim(area) == "" {
+			return SafeStateFault{
+				Code: "area_undeclared",
+				Detail: "A worst case over nothing is not a worst case. Name the area it was " +
+					"taken over, so somebody reading the reserve later knows where the figure " +
+					"stops being true.",
+			}, true
+		}
+	}
+
+	if !hasFigure {
+		return SafeStateFault{
+			Code: "figure_undeclared",
+			Detail: "A basis with no `time_to_safe_state_s` beside it describes how a number was " +
+				"arrived at without carrying the number.",
+		}, true
+	}
+
+	return SafeStateFault{}, false
+}
+
+// SafeStateBasisOf is the basis the third reserve term may be accounted on, or empty.
+//
+// `fixed` on a fixed base is the reading a bolted-down arm's silence always had, spelled out; every
+// other combination has to be declared and has to pass ValidateSafeState, because accounting a term
+// against a declaration with a fault in it would be the invented measurement §5.2 forbids.
+func SafeStateBasisOf(profile canonical.Value, base string) string {
+	hasBase := base != ""
+	if _, faulty := ValidateSafeState(profile, base, hasBase); faulty {
+		return ""
+	}
+	figure, hasFigure := finiteNumber(profile.Field("time_to_safe_state_s"))
+	if !hasFigure || figure <= 0 {
+		return ""
+	}
+	declared, _ := profile.Field("safe_state").Field("basis").Str()
+	if declared == "mapped_worst_case" {
+		return "mapped_worst_case"
+	}
+	if declared == "fixed" {
+		return "fixed"
+	}
+	if BaseIsMobile(base, hasBase) {
+		return ""
+	}
+	return "fixed"
+}
+
+// HostBlockedBySafeState is whether this body may attempt the host tier, given what it says about
+// its safe state (§87.2). Empty when it may.
+//
+// The AMR-shaped sibling of §46.2's HostBlockedByCommandLoss, and it has the same shape for the same
+// reason: the tier is refused where the recovery path has not been established, and the refusal
+// names the fix. **A `fixed` base is never refused on this ground**, because it never was the
+// problem.
+func HostBlockedBySafeState(profile canonical.Value, base string, hasBase bool) string {
+	if !BaseIsMobile(base, hasBase) {
+		return ""
+	}
+	fault, faulty := ValidateSafeState(profile, base, hasBase)
+	if !faulty {
+		return ""
+	}
+	// Two sentences rather than one, and neither is assembled out of the other. §64 makes a message
+	// that misdescribes what happened a defect, and a refusal built by splicing a clause in front of
+	// a detail that already opens with its own subject is exactly how one gets written.
+	return "§36.2 computes this body's reserve budget from the time it takes to reach a safe " +
+		"state, and this body travels, so that figure is one nothing can place (" + fault.Code +
+		"). " + fault.Detail + " (§87.2)"
+}
+
+// safeStateCase is §87.2's declaration, its consequence, and the reserve it moves.
+//
+// The four together rather than the fault alone, because §87.2's whole argument is that a figure and
+// its provenance are one fact: a document carrying `basis_undeclared` and not carrying *"and
+// therefore host is refused and the reserve term is unaccounted"* would leave a reader to re-derive
+// the consequence, which is where two editions would disagree.
+func safeStateCase(input canonical.Value) (canonical.Value, error) {
+	profile := input.Field("profile")
+	base, hasBase := input.Field("base").Str()
+
+	faultValue := canonical.Null()
+	if fault, faulty := ValidateSafeState(profile, base, hasBase); faulty {
+		faultValue = canonical.Object().
+			Set("code", canonical.String(fault.Code)).
+			Set("detail", canonical.String(fault.Detail))
+	}
+
+	basis := ""
+	if hasBase {
+		basis = SafeStateBasisOf(profile, base)
+	}
+	blocked := HostBlockedBySafeState(profile, base, hasBase)
+	budget := ComputeReserve(profile, base, hasBase)
+
+	return canonical.Object().
+		Set("base", optionalString(base, hasBase)).
+		Set("fault", faultValue).
+		Set("basis", optionalString(basis, basis != "")).
+		Set("host_blocked", optionalString(blocked, blocked != "")).
+		Set("reserve", canonical.Object().
+			Set("wh", optionalNumber(budget.WH, budget.HasWH)).
+			Set("unaccounted", canonical.Strings(budget.Unaccounted)).
+			Set("safe_state_basis", optionalString(budget.SafeStateBasis, budget.SafeStateBasis != ""))), nil
 }
 
 // ClaimsAPack reports whether this body claims a battery at all.
@@ -241,8 +436,8 @@ func PowerDegraded(assessment PowerAssessment) bool {
 //     is what makes it distinguishable from rule 2.
 //  4. **No reserve, or no capacity.** A reading arrived and cannot be compared against anything.
 //  5. **The bands.** The only rule that looks at a number, and last for that reason.
-func AssessPower(profile, observation canonical.Value) PowerAssessment {
-	budget := ComputeReserve(profile)
+func AssessPower(profile, observation canonical.Value, base string, hasBase bool) PowerAssessment {
+	budget := ComputeReserve(profile, base, hasBase)
 	temperature, hasTemperature := finiteNumber(observation.Field("temperature_c"))
 	thermal := ThermalPressure(profile, temperature, hasTemperature)
 	faults := []PowerFault{}
@@ -437,7 +632,10 @@ func containsNumber(array canonical.Value, value float64) bool {
 func powerCase(input canonical.Value) (canonical.Value, error) {
 	profile := input.Field("profile")
 	observation := input.Field("observation")
-	assessment := AssessPower(profile, observation)
+	// §87.2's `hasBase` is *did the caller say what this body stands on*, and these cases do not: a
+	// cycle's power document is about a gauge, and a case that named a base would be asserting the
+	// safe-state rules from a file that is not about them.
+	assessment := AssessPower(profile, observation, "", false)
 
 	declared, hasDeclared := finiteNumber(input.Field("declared_budget_ms"))
 	observed, hasObserved := finiteNumber(input.Field("observed_inference_ms"))
@@ -457,7 +655,11 @@ func powerCase(input canonical.Value) (canonical.Value, error) {
 		Set("reserve", canonical.Object().
 			Set("wh", optionalNumber(assessment.Reserve.WH, assessment.Reserve.HasWH)).
 			Set("unaccounted", canonical.Strings(assessment.Reserve.Unaccounted)).
-			Set("complete", canonical.Bool(ReserveComplete(assessment.Reserve)))).
+			Set("complete", canonical.Bool(ReserveComplete(assessment.Reserve))).
+			// §87.2. Beside `unaccounted` rather than instead of it: the term leaving the list
+			// says the computation happened, and the basis says *how*.
+			Set("safe_state_basis", optionalString(assessment.Reserve.SafeStateBasis,
+				assessment.Reserve.SafeStateBasis != ""))).
 		Set("thermal", canonical.String(assessment.Thermal)).
 		Set("shed", canonical.Strings(assessment.Shed)).
 		Set("faults", faults).

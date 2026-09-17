@@ -63,7 +63,9 @@ namespace {
 
 /// Facts the cell derives, which its own `facts` may not shadow. A precondition reading `env.cell`
 /// must be reading the cell's name, on every robot, whatever somebody typed into a configuration.
-bool is_derived_fact(std::string_view key) { return key == "cell" || key == "fixtures"; }
+bool is_derived_fact(std::string_view key) {
+  return key == "cell" || key == "fixtures" || key == "robot" || key == "robots";
+}
 
 struct Fault {
   std::string code;
@@ -170,6 +172,194 @@ bool frame_is_named(const Json& volume) {
 
 /// Whether `value` is truthy in the JavaScript sense — the test the fixture volume needs.
 using js::truthy;
+
+// ── §87.1's intersection test ────────────────────────────────────────────────
+
+/// A shape moved into the cell's frame by its robot's placement, with the frame it constrains.
+///
+/// Translation only. §44.4's transforms carry a rotation and this deliberately does not read one: a
+/// rotated box is not a box, so the test would need an oriented-box routine whose disagreements
+/// between eight editions would be in the last bits of a square root. A cell whose robots are
+/// mounted at an angle is one whose operator draws axis-aligned volumes large enough to hold the
+/// rotation, which over-reports sharing and never under-reports it.
+struct Placed {
+  std::string frame;
+  Shape shape;
+};
+
+Shape place(const Shape& shape, const std::vector<double>& at) {
+  Shape out = shape;
+  for (std::size_t axis = 0; axis < 3; ++axis) {
+    out.a[axis] += at[axis];
+    if (out.kind == "box") {
+      out.b[axis] += at[axis];
+    }
+  }
+  return out;
+}
+
+/// The placement, or nothing when the operator wrote none the arithmetic can use.
+std::optional<std::vector<double>> read_placement(const Json& robot) {
+  const auto at = triple(robot["at"]);
+  if (!at.has_value()) {
+    return std::nullopt;
+  }
+  for (const double value : *at) {
+    if (!std::isfinite(value)) {
+      return std::nullopt;
+    }
+  }
+  return at;
+}
+
+/// Squared distance from a point to a box, zero inside.
+double box_point_distance_squared(const Shape& box, const std::vector<double>& point) {
+  double total = 0;
+  for (std::size_t axis = 0; axis < 3; ++axis) {
+    const double low = box.a[axis];
+    const double high = box.b[axis];
+    const double value = point[axis];
+    const double outside = value < low ? low - value : (value > high ? value - high : 0.0);
+    total += outside * outside;
+  }
+  return total;
+}
+
+/// Whether two placed shapes share a point.
+///
+/// **Inclusive, and that is the decision rather than an off-by-one.** `margin` counts zero as
+/// inside — a workspace trip is `margin < 0` — so two robots whose boxes meet on a face can each
+/// legally be at the point where they meet. A strict test would call that configuration disjoint,
+/// and the platform would have certified the one arrangement where both arms are allowed into the
+/// same millimetre.
+bool intersects(const Shape& a, const Shape& b) {
+  if (a.kind == "box" && b.kind == "box") {
+    for (std::size_t axis = 0; axis < 3; ++axis) {
+      if (a.a[axis] > b.b[axis] || b.a[axis] > a.b[axis]) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (a.kind == "sphere" && b.kind == "sphere") {
+    const double reach = a.radius_m + b.radius_m;
+    double squared = 0;
+    for (std::size_t axis = 0; axis < 3; ++axis) {
+      const double difference = a.a[axis] - b.a[axis];
+      squared += difference * difference;
+    }
+    return squared <= reach * reach;
+  }
+  const Shape& box = a.kind == "box" ? a : b;
+  const Shape& sphere = a.kind == "sphere" ? a : b;
+  return box_point_distance_squared(box, sphere.a) <= sphere.radius_m * sphere.radius_m;
+}
+
+/// A robot's usable volumes, placed. A volume with no usable shape is not compared.
+std::vector<Placed> placed_volumes(const Json& robot) {
+  std::vector<Placed> placed;
+  const auto at = read_placement(robot);
+  if (!at.has_value()) {
+    return placed;
+  }
+  for (const Json& volume : robot["allowed"].items()) {
+    if (!shape_is_usable(volume)) {
+      continue;
+    }
+    placed.push_back({std::string(volume["frame"].string_or("")), place(*shape_of(volume), *at)});
+  }
+  return placed;
+}
+
+/// A robot's slug, or the empty string — `cell_name`'s rule, one level down.
+std::string robot_slug(const Json& robot) {
+  return robot["slug"].is_string() ? std::string(robot["slug"].string_or("")) : "";
+}
+
+/// §87.1's five faults, or none.
+///
+/// Split out rather than inlined because all five are conditional on the same thing — **two or more
+/// robots** — and a reader has to be able to see that condition once. One robot is §55.2's cell and
+/// has no pair to be disjoint from; the placement rule would otherwise refuse every cell anybody has
+/// ever written.
+///
+/// Reported in declaration order, then the pairs in index order, so every edition names the same
+/// fault first. The disjointness walk skips a robot that already has a fault of its own, for
+/// `validate_cell`'s duplicate-fixture reason.
+std::vector<Fault> robot_faults(const Json& cell) {
+  std::vector<Fault> faults;
+  const auto& robots = cell["robots"].items();
+  const bool several = robots.size() >= 2;
+  std::set<std::string> seen;
+  std::vector<std::pair<std::string, std::vector<Placed>>> comparable;
+
+  std::size_t index = 0;
+  for (const Json& robot : robots) {
+    const std::string slug = robot_slug(robot);
+    const std::size_t at = index++;
+    if (js::trim(slug).empty()) {
+      faults.push_back({"robot_unnamed",
+                        {"robots[" + std::to_string(at) + "]"},
+                        "A robot a precondition cannot name is a robot no skill can ask about. "
+                        "`env.robot` is its slug."});
+      continue;
+    }
+    if (seen.count(slug) != 0) {
+      faults.push_back({"duplicate_robot",
+                        {slug},
+                        "Two entries with one slug: a precondition asking about it would be asking "
+                        "about whichever the reader happened to reach."});
+      continue;
+    }
+    seen.insert(slug);
+
+    // Everything below is about the pair, so a cell with one robot stops here.
+    if (!several) {
+      continue;
+    }
+
+    if (!read_placement(robot).has_value()) {
+      faults.push_back({"robot_unplaced",
+                        {slug},
+                        "This cell holds more than one robot, and this one carries no `at`. Its "
+                        "volumes are in its own root frame (§44.2), so nothing can say whether "
+                        "they overlap another robot's until somebody says where it stands."});
+      continue;
+    }
+    auto volumes = placed_volumes(robot);
+    if (volumes.empty()) {
+      faults.push_back({"robot_unbounded",
+                        {slug},
+                        "This cell holds more than one robot, and this one draws no volume the "
+                        "workspace guard can evaluate. A robot that may be anywhere is not "
+                        "disjoint from anything."});
+      continue;
+    }
+    comparable.emplace_back(slug, std::move(volumes));
+  }
+
+  for (std::size_t a = 0; a < comparable.size(); ++a) {
+    for (std::size_t b = a + 1; b < comparable.size(); ++b) {
+      for (const Placed& one : comparable[a].second) {
+        for (const Placed& other : comparable[b].second) {
+          if (!intersects(one.shape, other.shape)) {
+            continue;
+          }
+          faults.push_back(
+              {"shared_volume",
+               {comparable[a].first, comparable[b].first, one.frame, other.frame},
+               comparable[a].first + "'s " + one.frame + " and " + comparable[b].first + "'s " +
+                   other.frame +
+                   " share a point once both robots are placed. §87.1 gives each robot its "
+                   "own kernel, so nothing on this machine evaluates the pair — the overlap "
+                   "is a claim the platform cannot enforce rather than a hazard it has measured."});
+        }
+      }
+    }
+  }
+
+  return faults;
+}
 
 /// Every fault in a cell descriptor.
 ///
@@ -279,6 +469,9 @@ std::vector<Fault> validate_cell(const Json& cell) {
     seen_channels.insert(channel);
   }
 
+  const auto robots = robot_faults(cell);
+  faults.insert(faults.end(), robots.begin(), robots.end());
+
   return faults;
 }
 
@@ -303,41 +496,75 @@ Json shape_json(const Shape& shape) {
   return out;
 }
 
-}  // namespace
 
-Json cell(const std::string& label, const Json& input) {
-  const Json& document = input["cell"];
-
-  if (label.find("validate") != std::string::npos) {
-    Json rows = Json::array();
-    for (const Fault& fault : validate_cell(document)) {
-      Json row = Json::object();
-      row.set("code", Json::string(fault.code));
-      Json subjects = Json::array();
-      for (const std::string& subject : fault.subjects) {
-        subjects.push(Json::string(subject));
-      }
-      row.set("subjects", subjects);
-      row.set("detail", Json::string(fault.detail));
-      rows.push(row);
+/// Every slug the cell names, sorted and without the ones it got wrong (§87.1).
+///
+/// Sorted for `validate_cell`'s reason one field along: a precondition asks `includes`, so order is
+/// not semantic — but two editions emitting one list in two orders is a corpus failure, and sorted
+/// is the order every edition can produce. A duplicate appears once, because `env.robots` answers
+/// *which robots*, and `duplicate_robot` is where the document's mistake is reported.
+std::vector<std::string> cell_robot_slugs(const Json& cell) {
+  std::vector<std::string> slugs;
+  for (const Json& robot : cell["robots"].items()) {
+    const std::string slug = robot_slug(robot);
+    if (js::trim(slug).empty() ||
+        std::find(slugs.begin(), slugs.end(), slug) != slugs.end()) {
+      continue;
     }
-    Json out = Json::object();
-    out.set("faults", rows);
-    return out;
+    slugs.push_back(slug);
   }
+  std::sort(slugs.begin(), slugs.end(), [](const std::string& left, const std::string& right) {
+    return js::utf16_less(left, right);
+  });
+  return slugs;
+}
 
-  if (label.find("context") == std::string::npos) {
-    throw Unimplemented("cell", label);
+/// The volumes of one layer, on the wire. Shared by the cell's own layer and each robot's.
+Json layer_volumes(const Json& allowed) {
+  Json volumes = Json::array();
+  for (const Json& volume : allowed.items()) {
+    if (shape_is_usable(volume) && frame_is_named(volume)) {
+      Json row = Json::object();
+      row.set("frame", volume["frame"]);
+      row.set("shape", shape_json(*shape_of(volume)));
+      volumes.push(row);
+    }
   }
+  return volumes;
+}
 
-  // The `env.*` branch of a precondition context (§54.2): two derived facts and then the operator's
-  // own. Derived first and unshadowable, which `validate_cell` enforces rather than this function
-  // silently arbitrating: a cell whose facts overwrote its own name would answer a precondition
-  // truthfully about the wrong thing.
-  //
-  // A cell with faults still produces a context. Refusing to would mean an operator's typo in a
-  // fixture name took away the battery check as well, and §54.2 already has an answer for a fact
-  // that cannot be read: the precondition naming it is refused, individually, with the path named.
+/// The layer one robot of a shared cell contributes, or null (§87.1).
+///
+/// A **second** layer rather than a replacement for the cell's own, because §38.2's layers compose
+/// by conjunction and two layers is how a cell-wide volume and a per-robot one both hold. The
+/// volumes are **unplaced**, in the robot's own root frame, because that is the frame the
+/// `workspace` guard resolves poses in (§44.2).
+Json cell_robot_layer(const Json& cell, const std::string& slug) {
+  if (js::trim(slug).empty()) {
+    return Json::null();
+  }
+  for (const Json& robot : cell["robots"].items()) {
+    if (robot_slug(robot) != slug) {
+      continue;
+    }
+    Json volumes = layer_volumes(robot["allowed"]);
+    if (volumes.items().empty()) {
+      return Json::null();
+    }
+    Json layer = Json::object();
+    layer.set("name", Json::string("cell:" + cell_name(cell) + ":" + slug));
+    layer.set("volumes", volumes);
+    return layer;
+  }
+  return Json::null();
+}
+
+/// The `env.*` branch of a precondition context (§54.2).
+///
+/// `subject` is which robot the context is being assembled for (§87.1); a slug the cell has not been
+/// told about is reported as the empty string rather than echoed back, because an edition that
+/// echoed it would let a precondition assert membership of a cell by asserting it.
+Json cell_environment(const Json& document, const std::string& subject, bool has_subject) {
   Json environment = Json::object();
   for (const auto& entry : document["facts"].entries()) {
     if (usable_key(entry.first) && !is_derived_fact(entry.first)) {
@@ -353,6 +580,80 @@ Json cell(const std::string& label, const Json& input) {
   }
   environment.set("fixtures", fixture_names);
 
+  const auto declared = cell_robot_slugs(document);
+  const bool mine = has_subject &&
+                    std::find(declared.begin(), declared.end(), subject) != declared.end();
+  environment.set("robot", Json::string(mine ? subject : ""));
+  Json robots = Json::array();
+  for (const std::string& slug : declared) {
+    robots.push(Json::string(slug));
+  }
+  environment.set("robots", robots);
+  return environment;
+}
+
+Json fault_rows(const std::vector<Fault>& faults) {
+  Json rows = Json::array();
+  for (const Fault& fault : faults) {
+    Json row = Json::object();
+    row.set("code", Json::string(fault.code));
+    Json subjects = Json::array();
+    for (const std::string& subject : fault.subjects) {
+      subjects.push(Json::string(subject));
+    }
+    row.set("subjects", subjects);
+    row.set("detail", Json::string(fault.detail));
+    rows.push(row);
+  }
+  return rows;
+}
+
+}  // namespace
+
+Json cell(const std::string& label, const Json& input) {
+  const Json& document = input["cell"];
+
+  if (label.find("validate") != std::string::npos) {
+    Json out = Json::object();
+    out.set("faults", fault_rows(validate_cell(document)));
+    return out;
+  }
+
+  // §87.1's three projections of one document. One document rather than three, because they are one
+  // question — *what does this cell say about its robots* — and an edition could agree about the
+  // disjointness arithmetic while disagreeing about which layer a robot contributes, which is the
+  // half a workspace guard reads.
+  if (label.find("robots") != std::string::npos) {
+    Json layers = Json::array();
+    for (const Json& robot : document["robots"].items()) {
+      const std::string slug = robot_slug(robot);
+      Json row = Json::object();
+      row.set("slug", Json::string(slug));
+      row.set("layer", cell_robot_layer(document, slug));
+      layers.push(row);
+    }
+    Json slugs = Json::array();
+    for (const std::string& slug : cell_robot_slugs(document)) {
+      slugs.push(Json::string(slug));
+    }
+    Json out = Json::object();
+    out.set("env", cell_environment(document, std::string(input["robot"].string_or("")),
+                                    input["robot"].is_string()));
+    out.set("slugs", slugs);
+    out.set("layers", layers);
+    out.set("faults", fault_rows(validate_cell(document)));
+    return out;
+  }
+
+  if (label.find("context") == std::string::npos) {
+    throw Unimplemented("cell", label);
+  }
+
+  // No subject slug: these cases predate §87.1 and are about a cell with one robot, so `env.robot`
+  // is the empty string and `env.robots` is empty — which is what every cell written before §87
+  // answers, and the property that makes the field additive.
+  Json environment = cell_environment(document, "", false);
+
   // One layer of §38.2's stack, named after the cell so an operator reading a workspace trip can
   // tell which layer stopped the robot. Layers compose by conjunction — a frame must be inside at
   // least one volume of *every* layer that names it — so adding this one can only narrow what the
@@ -361,15 +662,7 @@ Json cell(const std::string& label, const Json& input) {
   // **A cell that draws nothing adds no layer**, and that is not the same as a cell that allows
   // nothing. An empty layer would forbid every frame it named, and a site that has not yet measured
   // its cell would find the robot refusing to move with no volume anywhere to explain why.
-  Json volumes = Json::array();
-  for (const Json& volume : document["allowed"].items()) {
-    if (shape_is_usable(volume) && frame_is_named(volume)) {
-      Json row = Json::object();
-      row.set("frame", volume["frame"]);
-      row.set("shape", shape_json(*shape_of(volume)));
-      volumes.push(row);
-    }
-  }
+  Json volumes = layer_volumes(document["allowed"]);
 
   Json layer = Json::null();
   if (!volumes.items().empty()) {

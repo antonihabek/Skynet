@@ -150,9 +150,194 @@ std::string band_reason(const std::string& band) {
   return "above_reserve";
 }
 
+/// Whether this base kind has a navigation problem between it and a safe state (§87.2).
+bool base_is_mobile(const Json& base) {
+  if (!base.is_string()) {
+    return false;
+  }
+  const std::string name(base.string_or(""));
+  for (const std::string_view known : vocabulary::members("mobile_bases")) {
+    if (known == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+struct SafeStateFault {
+  std::string code;
+  std::string detail;
+};
+
+/// §87.2's checks over the declaration, or nothing.
+///
+/// The first fault in declaration order, like `validate_motions` and for the same reason: the basis
+/// is read before the area, and the area before anything about the figure, because a declaration
+/// whose basis is wrong is one whose other fields are being read against the wrong rule.
+///
+/// The first rule is the one that keeps every descriptor written before §87 valid: **an absent basis
+/// on a `fixed` base is `fixed`.** A robot bolted to a bench should not have to declare what it is
+/// not, which is §35.3's argument about `simulator` applied to the same shape.
+std::optional<SafeStateFault> validate_safe_state(const Json& profile, const Json& base) {
+  const Json* figure = field(profile, "time_to_safe_state_s");
+  const bool has_figure = is_finite(figure) && figure->number_or(0) > 0;
+
+  const Json* declaration = field(profile, "safe_state");
+  if (declaration == nullptr || !declaration->is_object()) {
+    if (!base_is_mobile(base)) {
+      return std::nullopt;
+    }
+    return SafeStateFault{
+        "basis_undeclared",
+        "A figure with no basis is a rumour (§5.2), and on a body that travels the time to a "
+        "safe state depends on where it is standing. Declare `fixed` if it stops where it is, or "
+        "`mapped_worst_case` with the area the worst case was taken over."};
+  }
+
+  const std::string basis((*declaration)["basis"].string_or(""));
+  if (basis == "live") {
+    return SafeStateFault{
+        "basis_refused",
+        "A figure the navigation stack supplies per cycle is the design §87.2 rejected: it "
+        "puts a planner inside §36's reserve arithmetic, so a skill admitted at one instant is "
+        "refused at the next for a reason nobody can audit, and it makes navigation a "
+        "safety-relevant component with no tier. Declare a worst case over a mapped area instead."};
+  }
+
+  bool known = false;
+  for (const std::string_view candidate : vocabulary::members("safe_state_bases")) {
+    if (candidate == basis) {
+      known = true;
+    }
+  }
+  if (!known) {
+    return SafeStateFault{"basis_unknown",
+                          "`" + basis +
+                              "` is not one of fixed or mapped_worst_case, so nothing can read how "
+                              "this figure was arrived at."};
+  }
+
+  if (basis == "mapped_worst_case") {
+    if (!base_is_mobile(base)) {
+      return SafeStateFault{
+          "mapped_on_a_fixed_base",
+          "This base does not travel, so there is no mapped area to take a worst case over. It is "
+          "a claim about a navigation problem this body does not have, and it arrives by copying a "
+          "descriptor between machines."};
+    }
+    if (js::trim(std::string((*declaration)["area"].string_or(""))).empty()) {
+      return SafeStateFault{
+          "area_undeclared",
+          "A worst case over nothing is not a worst case. Name the area it was taken over, so "
+          "somebody reading the reserve later knows where the figure stops being true."};
+    }
+  }
+
+  if (!has_figure) {
+    return SafeStateFault{"figure_undeclared",
+                          "A basis with no `time_to_safe_state_s` beside it describes how a number "
+                          "was arrived at without carrying the number."};
+  }
+
+  return std::nullopt;
+}
+
+/// The basis the third reserve term may be accounted on, or the empty string.
+///
+/// `fixed` on a fixed base is the reading a bolted-down arm's silence always had, spelled out; every
+/// other combination has to be declared and has to pass `validate_safe_state`, because accounting a
+/// term against a declaration with a fault in it would be the invented measurement §5.2 forbids.
+std::string safe_state_basis(const Json& profile, const Json& base) {
+  if (validate_safe_state(profile, base).has_value()) {
+    return "";
+  }
+  const Json* figure = field(profile, "time_to_safe_state_s");
+  if (!is_finite(figure) || figure->number_or(0) <= 0) {
+    return "";
+  }
+  const Json* declaration = field(profile, "safe_state");
+  const std::string declared =
+      declaration == nullptr ? "" : std::string((*declaration)["basis"].string_or(""));
+  if (declared == "mapped_worst_case") {
+    return "mapped_worst_case";
+  }
+  if (declared == "fixed") {
+    return "fixed";
+  }
+  return base_is_mobile(base) ? "" : "fixed";
+}
+
+/// Whether this body may attempt the host tier, given what it says about its safe state (§87.2).
+///
+/// The AMR-shaped sibling of §46.2's command-loss refusal, and it has the same shape for the same
+/// reason. **A `fixed` base is never refused on this ground**, because it never was the problem.
+Json host_blocked_by_safe_state(const Json& profile, const Json& base) {
+  if (!base_is_mobile(base)) {
+    return Json::null();
+  }
+  const auto fault = validate_safe_state(profile, base);
+  if (!fault.has_value()) {
+    return Json::null();
+  }
+  // Two sentences rather than one, and neither is assembled out of the other. §64 makes a message
+  // that misdescribes what happened a defect, and a refusal built by splicing a clause in front of a
+  // detail that already opens with its own subject is exactly how one gets written.
+  return Json::string(
+      "§36.2 computes this body's reserve budget from the time it takes to reach a safe "
+      "state, and this body travels, so that figure is one nothing can place (" +
+      fault->code + "). " + fault->detail + " (§87.2)");
+}
+
 }  // namespace
 
-Json power(const std::string& /*label*/, const Json& input) {
+/// §87.2's declaration, its consequence, and the reserve it moves.
+///
+/// A file of its own because it is a question about the *document* rather than about a cycle: the
+/// four existing power files all take an observation, and this one has nothing to observe.
+Json safe_state(const Json& input) {
+  const Json& profile = input["profile"];
+  const Json& base = input["base"];
+
+  const auto fault = validate_safe_state(profile, base);
+  Json fault_row = Json::null();
+  if (fault.has_value()) {
+    fault_row = Json::object();
+    fault_row.set("code", Json::string(fault->code));
+    fault_row.set("detail", Json::string(fault->detail));
+  }
+
+  const std::string basis = base.is_string() ? safe_state_basis(profile, base) : std::string();
+
+  const Json* declared_energy = field(profile, "safe_stop_energy_wh");
+  const bool budget_usable = is_finite(declared_energy) && declared_energy->number_or(0) > 0;
+  const vocabulary::Set& reserve_terms = vocabulary::members("reserve_terms");
+  Json unaccounted = Json::array();
+  if (!budget_usable) {
+    unaccounted.push(Json::string(std::string(reserve_terms[0])));
+  }
+  unaccounted.push(Json::string(std::string(reserve_terms[1])));
+  if (basis.empty()) {
+    unaccounted.push(Json::string(std::string(reserve_terms[2])));
+  }
+
+  Json budget = Json::object();
+  budget.set("wh", budget_usable ? Json::number(declared_energy->number_or(0)) : Json::null());
+  budget.set("unaccounted", unaccounted);
+  budget.set("safe_state_basis", basis.empty() ? Json::null() : Json::string(basis));
+
+  Json out = Json::object();
+  out.set("base", base.is_string() ? base : Json::null());
+  out.set("fault", fault_row);
+  out.set("basis", basis.empty() ? Json::null() : Json::string(basis));
+  out.set("host_blocked", host_blocked_by_safe_state(profile, base));
+  out.set("reserve", budget);
+  return out;
+}
+
+Json power(const std::string& label, const Json& input) {
+  if (label.find("safe-state") != std::string::npos) {
+    return safe_state(input);
+  }
   const Json& profile = input["profile"];
   const Json& observation = input["observation"];
 
@@ -170,7 +355,11 @@ Json power(const std::string& /*label*/, const Json& input) {
   // Neither of the other two exists on this platform. Appended unconditionally rather than looked
   // up, so the day one of them arrives this is a visible place to change rather than a silent
   // over-report.
+  // `payload` still has no source on this platform.
   unaccounted.emplace_back(reserve_terms[1]);
+  // §87.2's `distance_to_safe_state`. These four files do not say what the body stands on — a
+  // cycle's power document is about a gauge — so the term is unaccounted here, which is exactly the
+  // reading this function had before §87.
   unaccounted.emplace_back(reserve_terms[2]);
 
   const Json* temperature = field(observation, "temperature_c");
@@ -364,6 +553,9 @@ Json power(const std::string& /*label*/, const Json& input) {
   budget.set("unaccounted", unaccounted_rows);
   // False on every robot today: two of §36.2's three terms have no source on this platform.
   budget.set("complete", Json::boolean(budget_usable && unaccounted.empty()));
+  // §87.2. Beside `unaccounted` rather than instead of it: the term leaving the list says the
+  // computation happened, and the basis says *how*. Null on this path, because no base was given.
+  budget.set("safe_state_basis", Json::null());
 
   // `unmetered` grants, and that is the whole reason the state exists: a bench arm on mains must
   // not be refused work because it has no battery to report on.
