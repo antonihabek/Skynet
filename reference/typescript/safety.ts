@@ -35,7 +35,7 @@
  */
 
 import type { SafetyEnvelope } from './types.ts'
-import type { TransportClamp, TransportPlan } from './embodiment.ts'
+import type { ControlMode, TransportClamp, TransportPlan } from './embodiment.ts'
 
 // ── Deployment tiers ─────────────────────────────────────────────────────────
 
@@ -287,6 +287,14 @@ export interface ResolvedLimits {
   min_control_hz: number | null
   max_delta_per_cycle: number | null
   per_channel: Record<string, number>
+  /**
+   * The mode each bound joint is commanded in (§86.3), from the transport plan.
+   *
+   * Without it the two whole-body figures above could not be applied to a joint at all — nothing at
+   * this layer knew whether a channel carried radians per second or newton-metres — so they were
+   * resolved, reported, and never enforced. See `ceilingFor`.
+   */
+  joint_modes: Record<string, ControlMode>
   /** Guards that will actually run, given what this robot can supply. */
   active_guards: Guard[]
   /** Guards specified but inoperable here, with the input that is missing. */
@@ -644,6 +652,7 @@ export function resolveLimits(params: ResolveLimitsParams): ResolvedLimits {
     min_control_hz: transport?.min_control_hz ?? null,
     max_delta_per_cycle: maxDelta,
     per_channel: transport?.per_channel ?? {},
+    joint_modes: transport?.joint_modes ?? {},
     proximity: profile?.proximity ?? null,
     frames: params.frames ?? null,
     workspace: profile?.workspace ?? [],
@@ -1118,11 +1127,40 @@ function checkSelfCollision(
   }
 }
 
+/**
+ * The ceiling that applies to one channel.
+ *
+ * Three sources, narrowest first, and the third is §86.3's. The per-channel figure is the joint's
+ * own rating carried by the transport plan and is the tightest thing anybody knows about that
+ * joint. `base` is the reserved whole-body channel. What is new is the fall-back: a joint with no
+ * rating of its own is still commanded in a **mode**, and the mode says which of the two whole-body
+ * figures is in its units.
+ *
+ * Until §86 that last step was impossible and the code said so — *"nothing at this layer knows
+ * whether a given channel carries radians per second or newton-metres"* — so
+ * `joint_velocity_max_rad_s` and `joint_torque_max_nm` were resolved through four layers, rendered
+ * on the limits page, and applied to nothing. An operator who narrowed a robot's velocity ceiling
+ * in a profile changed a number on a screen.
+ *
+ * **Position is deliberately not in the table.** There is no whole-body position ceiling to fall
+ * back to: travel is a per-joint bound with two ends, and the plan carries the wider of them as
+ * this joint's `per_channel` entry precisely because a single magnitude cannot express it.
+ *
+ * **The two compose by narrowing, they do not take precedence over one another** — DRY-COVERAGE-PLAN.md
+ * F36. `per_channel` first and the whole-body figure only as a fall-back would let a joint rated at
+ * 2 rad/s be commanded at 2 on a robot whose operator narrowed the body to 1.5, which is the one
+ * thing `narrowest` exists everywhere else in this file to prevent. It was unreachable before this
+ * section because the whole-body figure reached no joint at all.
+ */
 function ceilingFor(channel: string, limits: ResolvedLimits): number | null {
-  const perChannel = limits.per_channel[channel]
-  if (perChannel !== undefined) return perChannel
-  if (channel === 'base') return limits.base_velocity_max_m_s
-  return null
+  const wholeBody = channel === 'base'
+    ? limits.base_velocity_max_m_s
+    : limits.joint_modes[channel] === 'velocity'
+      ? limits.joint_velocity_max_rad_s
+      : limits.joint_modes[channel] === 'torque'
+        ? limits.joint_torque_max_nm
+        : null
+  return narrowest(limits.per_channel[channel], wholeBody)
 }
 
 /**

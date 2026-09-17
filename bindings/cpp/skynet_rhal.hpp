@@ -74,6 +74,7 @@ class Command {
 
   std::uint64_t stamp_ns() const { return raw_->stamp_ns; }
   std::uint32_t seq() const { return raw_->seq; }
+  // The mode of every joint that inherits (§86.1). `mode_of` is what a driver wants.
   std::uint8_t mode() const { return raw_->mode; }
   std::size_t joint_count() const { return raw_->joint_count; }
   Span<const float> values() const { return {raw_->values, raw_->joint_count}; }
@@ -82,6 +83,25 @@ class Command {
   // the difference between holding position and going limp under torque control.
   bool applies(std::size_t joint) const {
     return raw_->mask == nullptr || raw_->mask[joint] != 0;
+  }
+
+  // Whether this producer wrote the per-joint mode array (§86.1). A command from a producer that
+  // predates §86 does not have the field, so nothing below reads it unless this is true.
+  bool has_joint_modes() const {
+    return (raw_->flags & SKR_CMD_PER_JOINT_MODES) != 0 && raw_->modes != nullptr;
+  }
+
+  // The mode this joint is commanded in, inheritance resolved (§86.1).
+  //
+  // Returns -1 for an entry this ABI does not define, which a driver answers with SKR_EINVAL: the
+  // value it is most likely to be is a bare SKR_MODE_* written into the wrong array, and guessing
+  // would move a joint in the wrong units. Never silently defaults.
+  int mode_of(std::size_t joint) const {
+    if (!has_joint_modes()) return raw_->mode;
+    const std::uint8_t entry = raw_->modes[joint];
+    if (entry == SKR_JMODE_INHERIT) return raw_->mode;
+    if (!SKR_JMODE_VALID(entry)) return -1;
+    return SKR_MODE_OF_JMODE(entry);
   }
 
  private:

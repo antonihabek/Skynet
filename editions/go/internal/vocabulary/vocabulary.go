@@ -148,6 +148,9 @@ var TransportWarningCodes = []string{
 	"action_space_mismatch",
 	"action_space_ambiguous",
 	"motion_parameter_unused",
+	// §86, appended for the reason every other addition here is.
+	"joint_mode_conflict",
+	"mixed_modes_unsupported",
 }
 
 // CanonicalMotions is §84.1's motion vocabulary, in the order the section lists it.

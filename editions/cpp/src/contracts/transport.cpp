@@ -182,7 +182,33 @@ struct Binding {
   Json target = Json::null();
   double scale = 1;
   Json limit = Json::null();
+  /// The control mode this binding commands its target joint in (§86.2). Empty for a binding that
+  /// commands no joint — a gripper, a base, a retarget, a drop. Present on a blocked binding too:
+  /// which mode was asked for is what a reader needs in order to fix it.
+  std::string mode;
   std::string reason;
+};
+
+/// §86.2's record of which joint is already commanded in which mode, in binding order.
+///
+/// A vector rather than a map: the order decides which channel survives a conflict.
+struct BoundModes {
+  std::vector<std::pair<std::string, std::string>> entries;
+
+  const std::string* of(const std::string& joint) const {
+    for (const auto& entry : entries) {
+      if (entry.first == joint) return &entry.second;
+    }
+    return nullptr;
+  }
+
+  /// The first mode bound on any joint that is not `mode`.
+  const std::string* other(const std::string& mode) const {
+    for (const auto& entry : entries) {
+      if (entry.second != mode) return &entry.second;
+    }
+    return nullptr;
+  }
 };
 
 Binding simple(const Json& channel, std::string method, std::string reason, double scale) {
@@ -219,7 +245,8 @@ std::string derive_verdict(const std::vector<Binding>& bindings) {
 }
 
 Binding finish_joint_binding(const Json& channel, const Json& joint, const std::string& method,
-                             const std::string& reason, std::vector<Json>& warnings) {
+                             const std::string& reason, std::vector<Json>& warnings,
+                             BoundModes& bound, bool per_joint_modes) {
   const Json rating = rating_for(channel["kind"].string_or(""), joint["limits"]);
   const Json* peak = field(channel, "peak");
   const double scale = scale_for(peak, rating);
@@ -239,7 +266,54 @@ Binding finish_joint_binding(const Json& channel, const Json& joint, const std::
                            "\"" + joint_name + "\" does not accept " + mode + " commands.", 1);
       out.target = Json::string(joint_name);
       out.limit = rating;
+      out.mode = mode;
       return out;
+    }
+
+    // §86.2. One joint, one mode, per cycle. A second channel onto a joint already bound in another
+    // mode would meet it as one entry in `values` and one in `modes`, and the command would carry
+    // whichever was written last. First-wins, as §84.3's binder does with a repeated motion.
+    const std::string* already = bound.of(joint_name);
+    if (already != nullptr && *already != mode) {
+      warnings.push_back(warning_with(
+          "joint_mode_conflict",
+          "\"" + joint_name + "\" is already bound in " + *already +
+              "; a joint carries one mode per cycle, so this " + mode + " channel is blocked.",
+          {joint_name}));
+      Binding out = simple(channel, "blocked",
+                           "\"" + joint_name + "\" is commanded in " + *already +
+                               " by an earlier channel, and a joint takes one mode per cycle.",
+                           1);
+      out.target = Json::string(joint_name);
+      out.limit = rating;
+      out.mode = mode;
+      return out;
+    }
+
+    // §86.1's other half. A driver that does not read the per-joint array takes one mode for the
+    // whole command, so a channel in a second mode cannot be delivered to it at all.
+    const std::string* elsewhere = bound.other(mode);
+    if (elsewhere != nullptr && !per_joint_modes) {
+      warnings.push_back(warning_with(
+          "mixed_modes_unsupported",
+          "This body is already commanded in " + *elsewhere +
+              " and its driver reads one mode per command, so the " + mode + " channel on \"" +
+              joint_name + "\" cannot be delivered.",
+          {joint_name}));
+      Binding out =
+          simple(channel, "blocked",
+                 "This driver does not declare per-joint modes (\u00a786.1), and the body is "
+                 "already commanded in " +
+                     *elsewhere + ".",
+                 1);
+      out.target = Json::string(joint_name);
+      out.limit = rating;
+      out.mode = mode;
+      return out;
+    }
+
+    if (already == nullptr) {
+      bound.entries.emplace_back(joint_name, mode);
     }
   }
 
@@ -261,6 +335,7 @@ Binding finish_joint_binding(const Json& channel, const Json& joint, const std::
   Binding out = simple(channel, method, reason, scale);
   out.target = Json::string(joint_name);
   out.limit = rating;
+  out.mode = mode;
   return out;
 }
 
@@ -411,7 +486,7 @@ std::vector<std::string> decide_retarget_chains(const Json& source, const Target
 
 Binding bind_channel(const Json& channel, const Json& target, const TargetIndex& index,
                      const std::vector<std::string>& retarget_chains,
-                     std::vector<Json>& warnings) {
+                     std::vector<Json>& warnings, BoundModes& bound, bool per_joint_modes) {
   const std::optional<roles::ParsedRole> parsed = roles::parse(channel["role"]);
 
   // Non-joint channels are matched against the body's own facilities rather than its joints.
@@ -425,7 +500,7 @@ Binding bind_channel(const Json& channel, const Json& target, const TargetIndex&
   if (joint_name != nullptr && joint_name->is_string() && !joint_name->string_or("").empty()) {
     if (const Json* exact = index.named(std::string(joint_name->string_or(""))); exact != nullptr) {
       return finish_joint_binding(channel, *exact, "direct", "Joint name matches exactly.",
-                                  warnings);
+                                  warnings, bound, per_joint_modes);
     }
   }
 
@@ -436,7 +511,7 @@ Binding bind_channel(const Json& channel, const Json& target, const TargetIndex&
       return finish_joint_binding(
           channel, *by_role, "remap",
           "Mapped by role " + key + " to \"" + std::string((*by_role)["name"].string_or("")) + "\".",
-          warnings);
+          warnings, bound, per_joint_modes);
     }
 
     // 3. Task space, when the chain was granted it above.
@@ -601,15 +676,26 @@ Json build_clamp(const Json& target, const std::vector<Binding>& bindings) {
   const bool has_envelope = envelope != nullptr && !envelope->is_null();
 
   Json per_channel = Json::object();
+  Json joint_modes = Json::object();
   std::size_t channels = 0;
+  std::size_t modes = 0;
   for (const Binding& binding : bindings) {
+    // A blocked binding commands nothing, so it contributes neither a ceiling nor a mode. It
+    // carries `limit` — the rating of the joint it could not command — so a reader can see what was
+    // on offer, and that is the only thing it is for.
+    if (binding.method == "blocked") continue;
     if (!binding.target.is_null() && !binding.limit.is_null()) {
       per_channel.set(std::string(binding.target.string_or("")), binding.limit);
       ++channels;
     }
+    // §86.3. Without this the kernel cannot read a ceiling in the right units.
+    if (!binding.target.is_null() && !binding.mode.empty()) {
+      joint_modes.set(std::string(binding.target.string_or("")), Json::string(binding.mode));
+      ++modes;
+    }
   }
 
-  if (!has_envelope && channels == 0) {
+  if (!has_envelope && channels == 0 && modes == 0) {
     return Json::null();
   }
 
@@ -626,6 +712,11 @@ Json build_clamp(const Json& target, const std::vector<Binding>& bindings) {
     clamp.set("min_control_hz", Json::number(1000 / watchdog_ms->number_or(0)));
   }
   clamp.set("per_channel", per_channel);
+  // Absent — not empty — on a plan that binds no joint, so a motion plan and a plan over a gripper
+  // and a base are the same bytes they were before §86.
+  if (modes > 0) {
+    clamp.set("joint_modes", joint_modes);
+  }
   const Json* source = has_envelope ? field(*envelope, "source") : nullptr;
   if (source != nullptr) {
     clamp.set("source", *source);
@@ -871,6 +962,9 @@ Json shape_plan(const std::string& verdict, const Json& source, const Json& targ
       }
     }
     shaped.set("per_channel", clamp["per_channel"]);
+    if (clamp.has("joint_modes")) {
+      shaped.set("joint_modes", clamp["joint_modes"]);
+    }
     if (clamp.has("source")) {
       shaped.set("source", clamp["source"]);
     }
@@ -987,8 +1081,14 @@ Json resolve(const Json& source, const Json& target, const Json& options) {
   const std::vector<std::string> retarget_chains =
       decide_retarget_chains(source, index, target, options, warnings);
 
+  // §86.2's record of which joint is already commanded in which mode, filled as the channels bind.
+  BoundModes bound;
+  // `=== true`, not truthiness: the reference compares to `true`, so a `1` is false here.
+  const Json* per_joint = field(target["control"], "per_joint_modes");
+  const bool per_joint_modes = per_joint != nullptr && per_joint->is_true();
   for (const Json& channel : source["action_channels"].items()) {
-    bindings.push_back(bind_channel(channel, target, index, retarget_chains, warnings));
+    bindings.push_back(
+        bind_channel(channel, target, index, retarget_chains, warnings, bound, per_joint_modes));
   }
 
   const Json observations = bind_observations(source["observations"], target, warnings);

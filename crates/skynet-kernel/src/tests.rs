@@ -19,6 +19,10 @@ fn envelope() -> Envelope<'static> {
 
 const PER_CHANNEL: [(&str, f64); 2] = [("elbow", 80.0), ("shoulder", 60.0)];
 
+/// §86.3. Both joints are commanded in torque, which is what makes `joint_torque_max_nm` above
+/// reach them at all: before this section neither whole-body figure was applied to any channel.
+const JOINT_MODES: [(&str, &str); 2] = [("elbow", "torque"), ("shoulder", "torque")];
+
 fn clamp() -> TransportClamp<'static> {
     TransportClamp {
         joint_velocity_max_rad_s: Some(2.0),
@@ -26,6 +30,7 @@ fn clamp() -> TransportClamp<'static> {
         base_velocity_max_m_s: Some(1.5),
         min_control_hz: Some(10.0),
         per_channel: &PER_CHANNEL,
+        joint_modes: &JOINT_MODES,
         source: Some("https://example.invalid/datasheet.pdf"),
     }
 }

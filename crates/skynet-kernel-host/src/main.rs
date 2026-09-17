@@ -485,6 +485,9 @@ fn run(args: &[String]) -> i32 {
         base_velocity_max_m_s: None,
         min_control_hz: Some(options.hz),
         per_channel: &per_channel,
+        // §86.3. `skynetk --velocity-max` names a ceiling and no joint's mode, so there is no map
+        // to hand over: the per-channel figure is the whole of what this path knows.
+        joint_modes: &[],
         source: Some("skynetk command line"),
     });
 

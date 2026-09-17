@@ -134,6 +134,12 @@ type channelCeiling struct {
 	value   float64
 }
 
+// jointMode is one entry of §86.3's map: the mode a bound joint is commanded in.
+type jointMode struct {
+	joint string
+	mode  string
+}
+
 // ResolvedLimits is the single limit set the kernel enforces.
 type ResolvedLimits struct {
 	Tier          string
@@ -142,9 +148,13 @@ type ResolvedLimits struct {
 	JointTorque   maybeNumber
 	BaseVelocity  maybeNumber
 	// MinControlHz is `transport?.min_control_hz ?? null`.
-	MinControlHz        maybeNumber
-	MaxDelta            maybeNumber
-	PerChannel          []channelCeiling
+	MinControlHz maybeNumber
+	MaxDelta     maybeNumber
+	PerChannel   []channelCeiling
+	// JointModes is §86.3's map, from the transport plan. Without it the two whole-body figures
+	// above could not be applied to a joint at all — nothing at this layer knew whether a channel
+	// carried radians per second or newton-metres — so they were resolved and never enforced.
+	JointModes          []jointMode
 	Active              []string
 	Unavailable         []UnavailableGuard
 	Inert               []InertGuard
@@ -352,10 +362,17 @@ func ResolveLimits(params LimitsParams) ResolvedLimits {
 	}
 
 	perChannel := []channelCeiling{}
+	jointModes := []jointMode{}
 	if transport.present {
 		for _, member := range transport.value.Field("per_channel").Members() {
 			number, isNumber := member.Value.Number()
 			perChannel = append(perChannel, channelCeiling{channel: member.Key, value: js.BareNumber(true, number, isNumber)})
+		}
+		for _, member := range transport.value.Field("joint_modes").Members() {
+			text, isText := member.Value.Str()
+			if isText {
+				jointModes = append(jointModes, jointMode{joint: member.Key, mode: text})
+			}
 		}
 	}
 
@@ -390,6 +407,7 @@ func ResolveLimits(params LimitsParams) ResolvedLimits {
 		MinControlHz:        minControlHz,
 		MaxDelta:            maxDelta,
 		PerChannel:          perChannel,
+		JointModes:          jointModes,
 		Proximity:           proximity,
 		Frames:              params.Frames,
 		HasFrames:           params.HasFrames,
@@ -650,16 +668,42 @@ func jsSign(value float64) float64 {
 	return value
 }
 
+// ceilingFor is the ceiling that applies to one channel.
+//
+// Three sources, and they **compose by narrowing** (§86.3). The per-channel figure is the joint's
+// own rating carried by the transport plan. `base` is the reserved whole-body channel. The third is
+// the joint's mode, which says which of the two whole-body figures is in its units — a step that was
+// impossible before §86, so both were resolved through four layers and applied to nothing.
+//
+// Position is deliberately not in the table: travel is a per-joint bound with two ends and one
+// magnitude cannot express it, so the plan's per-channel entry is all there is.
 func ceilingFor(channel string, limits ResolvedLimits) maybeNumber {
+	perChannel := maybeNumber{}
 	for _, entry := range limits.PerChannel {
 		if entry.channel == channel {
-			return maybeNumber{value: entry.value, present: true}
+			perChannel = maybeNumber{value: entry.value, present: true}
+			break
 		}
 	}
+
+	wholeBody := maybeNumber{}
 	if channel == "base" {
-		return limits.BaseVelocity
+		wholeBody = limits.BaseVelocity
+	} else {
+		for _, entry := range limits.JointModes {
+			if entry.joint != channel {
+				continue
+			}
+			switch entry.mode {
+			case "velocity":
+				wholeBody = limits.JointVelocity
+			case "torque":
+				wholeBody = limits.JointTorque
+			}
+			break
+		}
 	}
-	return maybeNumber{}
+	return narrowest(perChannel, wholeBody)
 }
 
 func appendOnce(values []string, value string) []string {
@@ -952,6 +996,14 @@ func shapePerChannel(ceilings []channelCeiling) canonical.Value {
 	return out
 }
 
+func shapeJointModes(modes []jointMode) canonical.Value {
+	out := canonical.Object()
+	for _, entry := range modes {
+		out = out.Set(entry.joint, canonical.String(entry.mode))
+	}
+	return out
+}
+
 func shapeLimits(limits ResolvedLimits) canonical.Value {
 	unavailable := canonical.Array()
 	for _, entry := range limits.Unavailable {
@@ -975,6 +1027,9 @@ func shapeLimits(limits ResolvedLimits) canonical.Value {
 		Set("max_delta_per_cycle", limits.MaxDelta.nullable()).
 		Set("self_collision_margin_m", limits.SelfCollisionMargin.nullable()).
 		Set("per_channel", shapePerChannel(limits.PerChannel)).
+		// §86.3. Absent — not empty — on a body no joint of which is bound, so every limits document
+		// written before this section is the same bytes.
+		SetIf("joint_modes", shapeJointModes(limits.JointModes), len(limits.JointModes) > 0).
 		Set("active_guards", canonical.Strings(limits.Active)).
 		Set("unavailable_guards", unavailable).
 		Set("inert_guards", inert).

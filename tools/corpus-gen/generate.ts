@@ -297,6 +297,51 @@ const HUMANOID: EmbodimentDescriptor = {
   solvers: [],
 }
 
+/**
+ * §86's body: a mobile manipulator. The arm takes position, the wheels take velocity, and no mode
+ * is offered by every joint — which is one `<ros2_control>` element in every ROS 2 robot that has
+ * ever shipped, and had no representation here until §86.
+ *
+ * Two of them, differing in one field: `MOBILE_MANIPULATOR` declares `per_joint_modes`, and
+ * `MOBILE_MANIPULATOR_V1` is the same machine behind a driver written before §86. Every mixed case
+ * below is run against both, because the pair *is* the test: the same policy and the same body
+ * produce a plan on one and a named refusal on the other.
+ */
+const MOBILE_MANIPULATOR: EmbodimentDescriptor = {
+  schema_version: 1,
+  robot_slug: 'test-mobile-manipulator',
+  digest: 'sha256:mobile',
+  verified: true,
+  base: 'wheeled',
+  dof: 4,
+  joints: [
+    joint('shoulder', 'right_arm.shoulder.pitch', 80, ['position']),
+    joint('elbow', 'right_arm.elbow.flex', 60, ['position']),
+    joint('wheel_l', 'base.wheel#0', null, ['velocity']),
+    joint('wheel_r', 'base.wheel#1', null, ['velocity']),
+  ],
+  end_effectors: [],
+  sensors: [],
+  // The **union** (§86.1). Before §86 this had to be the intersection, which for this body is
+  // empty — a descriptor declaring no control modes at all, and a robot nothing could command.
+  control: {
+    modes: ['position', 'velocity'], per_joint_modes: true,
+    rate_hz_max: 100, rate_hz_min: 10, command_latency_ms: 6,
+  },
+  envelope: {
+    joint_velocity_max_rad_s: 1.5, joint_torque_max_nm: 60,
+    watchdog_ms: 100, estop: true, source: 'https://example.invalid/mobile.pdf',
+  },
+  solvers: [],
+}
+
+const MOBILE_MANIPULATOR_V1: EmbodimentDescriptor = {
+  ...MOBILE_MANIPULATOR,
+  robot_slug: 'test-mobile-manipulator-v1',
+  digest: 'sha256:mobile-v1',
+  control: { ...MOBILE_MANIPULATOR.control, per_joint_modes: false },
+}
+
 function channel(
   index: number, kind: string, role: string | null,
   extra: Partial<ActionChannel> = {},
@@ -500,6 +545,106 @@ transportCase('non-joint', 'cartesian-no-solver',
 transportCase('non-joint', 'discrete',
   'A discrete command carries no physical units, so nothing here can bound it.',
   policy([channel(0, 'discrete', null)]), ARM)
+
+// ── §86, a joint's mode ──────────────────────────────────────────────────────
+//
+// Written before any edition, for the reason F11 records. The body is the mobile manipulator above
+// and the pair of descriptors is the experiment: one driver reads the per-joint array and one does
+// not, and nothing else differs.
+
+transportCase('mode', 'mixed-body-commanded',
+  'The case §86 exists for: an arm on position and wheels on velocity, bound together. Before this '
+  + 'section the body declared no control modes at all and every channel was blocked.',
+  policy([
+    channel(0, 'joint_position', 'right_arm.shoulder.pitch'),
+    channel(1, 'joint_position', 'right_arm.elbow.flex'),
+    channel(2, 'joint_velocity', 'base.wheel#0'),
+    channel(3, 'joint_velocity', 'base.wheel#1'),
+  ], { control_mode: 'position', dof: 4 }), MOBILE_MANIPULATOR)
+
+transportCase('mode', 'mixed-body-on-a-v1-driver',
+  'The same policy and the same machine behind a driver that reads one mode per command. The two '
+  + 'velocity channels are blocked **by name** rather than dropped, so a required one refuses the '
+  + 'plan — the alternative an integration reaches for is to command the joints sharing the '
+  + 'majority mode and move two thirds of the robot.',
+  policy([
+    channel(0, 'joint_position', 'right_arm.shoulder.pitch'),
+    channel(1, 'joint_position', 'right_arm.elbow.flex'),
+    channel(2, 'joint_velocity', 'base.wheel#0'),
+    channel(3, 'joint_velocity', 'base.wheel#1'),
+  ], { control_mode: 'position', dof: 4 }), MOBILE_MANIPULATOR_V1)
+
+transportCase('mode', 'the-first-mode-is-the-one-that-survives',
+  'Declaration order decides on a v1 driver, not joint count: the same four channels with the two '
+  + 'wheels first leave the wheels commanded and the arm blocked.',
+  policy([
+    channel(0, 'joint_velocity', 'base.wheel#0'),
+    channel(1, 'joint_velocity', 'base.wheel#1'),
+    channel(2, 'joint_position', 'right_arm.shoulder.pitch'),
+    channel(3, 'joint_position', 'right_arm.elbow.flex'),
+  ], { control_mode: 'velocity', dof: 4 }), MOBILE_MANIPULATOR_V1)
+
+transportCase('mode', 'one-joint-in-two-modes',
+  'Two channels onto one joint in two modes is refused on any driver (§86.2): they would meet as '
+  + 'one entry in `values` and one in `modes`, and the command would carry whichever was written '
+  + 'last. First-wins, as §84.3 does with a repeated motion.',
+  policy([
+    channel(0, 'joint_position', 'right_arm.shoulder.pitch', { joint: 'shoulder' }),
+    channel(1, 'joint_velocity', 'right_arm.shoulder.pitch', { joint: 'shoulder' }),
+  ], { control_mode: 'position', dof: 4 }), MOBILE_MANIPULATOR)
+
+transportCase('mode', 'one-joint-in-two-modes-is-not-a-mixed-body',
+  'The same conflict on a body every joint of which is one mode. The refusal is §86.2\'s and not '
+  + '§86.1\'s: the joint itself cannot be in two modes, whatever the driver reads.',
+  policy([
+    channel(0, 'joint_torque', 'right_arm.elbow.flex', { joint: 'J2' }),
+    channel(1, 'joint_position', 'right_arm.elbow.flex', { joint: 'J2' }),
+  ]), ARM)
+
+transportCase('mode', 'one-joint-twice-in-one-mode',
+  'Not a conflict. The second channel binds the same joint in the same mode, which is a policy '
+  + 'with a redundant output and not a body being commanded two ways.',
+  policy([
+    channel(0, 'joint_position', 'right_arm.shoulder.pitch', { joint: 'shoulder' }),
+    channel(1, 'joint_position', 'right_arm.shoulder.pitch', { joint: 'shoulder' }),
+  ], { control_mode: 'position', dof: 4 }), MOBILE_MANIPULATOR)
+
+transportCase('mode', 'a-single-mode-plan-carries-its-modes-too',
+  'The map is not a mixed-body feature. Every plan that binds a joint carries the mode each one is '
+  + 'commanded in, because the kernel needs the units on a single-mode body exactly as much.',
+  policy([channel(0, 'joint_torque', 'right_arm.elbow.flex')]), ARM)
+
+transportCase('mode', 'a-blocked-channel-contributes-no-mode',
+  'A joint whose mode the body does not accept is blocked, and contributes neither a ceiling nor a '
+  + 'mode — the kernel must not read a ceiling in the units of a command that is not going out.',
+  policy([channel(0, 'joint_velocity', 'right_arm.wrist.roll', { joint: 'J3' })], {
+    control_mode: 'velocity',
+  }), ARM)
+
+transportCase('mode', 'a-body-with-no-joints-bound',
+  'A plan over a gripper alone carries no mode map at all, absent rather than empty, so the plans '
+  + 'written before §86 are the same bytes.',
+  policy([channel(0, 'gripper', 'right_hand.gripper.grip')]), ARM)
+
+transportCase('mode', 'optional-channels-drop-on-a-v1-driver',
+  'The v1 refusal respects `optional` exactly as every other block does: the two velocity channels '
+  + 'are still blocked and named, and the plan is refused because they are required. Marked '
+  + 'optional they would degrade instead — this is the required half, and the `degraded` half is '
+  + 'the case below.',
+  policy([
+    channel(0, 'joint_position', 'right_arm.shoulder.pitch'),
+    channel(1, 'joint_velocity', 'base.wheel#0'),
+  ], { control_mode: 'position', dof: 4 }), MOBILE_MANIPULATOR_V1)
+
+transportCase('mode', 'an-optional-second-mode-still-blocks',
+  'And it does **not** degrade. `optional` is consulted when no target exists on the body; here the '
+  + 'joint exists, accepts the mode, and cannot be reached in the same command — which is the '
+  + 'precedent a joint that refuses the mode already set (`mode-refused`). A channel silently '
+  + 'dropped is the failure this section is written against.',
+  policy([
+    channel(0, 'joint_position', 'right_arm.shoulder.pitch'),
+    channel(1, 'joint_velocity', 'base.wheel#0', { optional: true }),
+  ], { control_mode: 'position', dof: 4 }), MOBILE_MANIPULATOR_V1)
 
 transportCase('observation', 'exact',
   'Name and modality match.',
@@ -1159,6 +1304,78 @@ cycleCase('advisory', 'certified-tier',
 cycleCase('empty', 'no-channels',
   'An empty command is not an error.',
   hostParams(), cycle({}))
+
+// ── §86.3, the ceiling in the joint's own units ──────────────────────────────
+//
+// The whole-body velocity and torque figures reach a joint for the first time here. Until §86 the
+// kernel could not tell radians per second from newton-metres at this layer, so both were resolved
+// through four layers, rendered on the limits page, and applied to nothing.
+
+/** A mixed body's clamp: an arm on position, wheels on velocity, with a mode for each. */
+const MIXED_CLAMP = {
+  joint_velocity_max_rad_s: 1.5,
+  joint_torque_max_nm: 80,
+  base_velocity_max_m_s: 1.5,
+  min_control_hz: 10,
+  // `wheel_l` deliberately has **no** per-channel entry and `wheel_r` has one wider than the
+  // whole-body ceiling, because those are the two halves of what this section changed.
+  per_channel: { shoulder: 3, wheel_r: 2 },
+  joint_modes: {
+    shoulder: 'position' as const,
+    wheel_l: 'velocity' as const,
+    wheel_r: 'velocity' as const,
+  },
+  source: 'https://example.invalid/mobile.pdf',
+}
+
+function mixedParams(overrides: Partial<ResolveLimitsParams> = {}): ResolveLimitsParams {
+  return {
+    tier: 'host',
+    envelope: { ...ENVELOPE, joint_velocity_max_rad_s: 1.5 },
+    transport: MIXED_CLAMP,
+    profile: { name: 'cell-a', max_delta_per_cycle: 0.25 },
+    available: ALL_AVAILABLE,
+    ...overrides,
+  }
+}
+
+cycleCase('modes', 'a-velocity-joint-takes-the-velocity-ceiling',
+  'A joint with no rating of its own is still commanded in a mode, and the mode says which '
+  + 'whole-body figure is in its units. Before §86 this joint had no ceiling at all.',
+  mixedParams(), cycle({ wheel_l: 4 }))
+
+cycleCase('modes', 'a-velocity-joint-takes-the-narrower-of-the-two',
+  'DRY-COVERAGE-PLAN.md F36. `wheel_r` is rated 2 rad/s and the body is held to 1.5, so 1.5 is '
+  + 'what applies. A per-channel figure that took precedence over the whole-body one would let an '
+  + 'operator narrow a robot on a screen and change nothing on the machine.',
+  mixedParams(), cycle({ wheel_r: 4 }))
+
+cycleCase('modes', 'a-position-joint-takes-no-whole-body-ceiling',
+  'There is no whole-body position figure to fall back to: travel is a per-joint bound with two '
+  + 'ends, and a single magnitude cannot express it. The joint\'s own rating is all there is.',
+  mixedParams(), cycle({ shoulder: 10 }))
+
+cycleCase('modes', 'a-torque-joint-takes-the-torque-ceiling',
+  'The other half of the table, on the single-mode body every other cycle case uses.',
+  hostParams({
+    transport: { ...CLAMP, per_channel: {}, joint_modes: { elbow: 'torque' as const } },
+  }), cycle({ elbow: 400 }))
+
+cycleCase('modes', 'a-joint-in-no-mode-is-unbounded-as-it-was',
+  'A channel the plan carries no mode for reads exactly as it did before this section: the '
+  + 'per-channel figure or nothing. A limits document written before §86 has no mode map, and '
+  + 'reading its absence as a mode would be inventing one.',
+  hostParams({ transport: { ...CLAMP, per_channel: {} } }), cycle({ elbow: 400 }))
+
+cycleCase('modes', 'the-mode-map-does-not-reach-the-base-channel',
+  'The reserved `base` channel is whole-body translation and is not a joint. It keeps its own '
+  + 'ceiling, and a mode map that happened to carry a `base` key would not change that.',
+  mixedParams(), cycle({ base: 9 }))
+
+cycleCase('modes', 'rate-limiting-reads-the-same-ceiling',
+  'The jerk ceiling is a fraction of the magnitude ceiling, so §86.3 moves it too: a quarter of '
+  + '1.5 rather than a quarter of nothing, which is what an unbounded channel falls back to.',
+  mixedParams(), cycle({ wheel_l: 1.5 }, { previous: { wheel_l: 0 } }))
 
 // ── The two guards the reference could not previously exercise ──────────────
 //

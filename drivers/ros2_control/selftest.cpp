@@ -126,9 +126,26 @@ int main() {
   command.mode = 200;
   check(d->write_command(ctx, &command, 0) == SKR_EINVAL, "and an unknown mode is refused");
   command.mode = SKR_MODE_TORQUE;
-  check(d->write_command(ctx, &command, 0) == SKR_EINVAL,
+  check(d->write_command(ctx, &command, 0) == SKR_EPERM,
         "and a mode no joint offers is refused, rather than applied to none of them");
   command.mode = SKR_MODE_POSITION;
+
+  // §86.1's per-joint array, on a body whose joints happen to agree. Three cases and each is a
+  // different refusal or the absence of one.
+  uint8_t modes[2] = {SKR_JMODE_POSITION, SKR_JMODE_INHERIT};
+  command.flags = SKR_CMD_PER_JOINT_MODES;
+  command.modes = modes;
+  check(d->write_command(ctx, &command, 0) == SKR_OK,
+        "a per-joint command naming the mode each joint offers is accepted");
+  modes[1] = SKR_MODE_POSITION;
+  check(d->write_command(ctx, &command, 0) == SKR_EINVAL,
+        "a bare SKR_MODE_* in the per-joint array is refused, which is what its offset is for");
+  modes[1] = SKR_JMODE_TORQUE;
+  check(d->write_command(ctx, &command, 0) == SKR_EPERM,
+        "and a well-formed mode this joint does not offer is refused as EPERM, not EINVAL");
+  modes[1] = SKR_JMODE_INHERIT;
+  command.flags = 0;
+  command.modes = nullptr;
   float infinite[2] = {INFINITY, 0.0f};
   command.values = infinite;
   check(d->write_command(ctx, &command, 0) == SKR_EINVAL,
@@ -139,7 +156,7 @@ int main() {
   d->read_state(ctx, &state, 0);
   check((state.flags & SKR_FLAG_ESTOP) != 0, "and the next state says the stop is asserted");
   check(d->write_command(ctx, &command, 0) == SKR_EPERM, "and a command after it is refused");
-  check(ros2_commands_refused(ctx) == 5, "five refusals, which is what the cases above asked for");
+  check(ros2_commands_refused(ctx) == 7, "seven refusals, which is what the cases above asked for");
   check(d->close(ctx) == SKR_OK, "close()");
 
   // ── and the roles, when somebody supplies them ────────────────────────────
@@ -157,20 +174,44 @@ int main() {
         "and no joint is left unnamed when every one was given a role");
   d->close(named);
 
-  // ── the body §24 cannot command ───────────────────────────────────────────
+  // ── the body §86 made commandable ─────────────────────────────────────────
+  //
+  // This block is the amendment, inverted in place. Every assertion below used to say the opposite:
+  // no modes, an empty `modes` array in the descriptor, and a refusal for the one mode a joint did
+  // offer. The file it runs against has not changed a byte.
   std::printf("\nmixed_interfaces — position on one joint, velocity on the other\n");
   ctx = nullptr;
   check(d->open(config_for("mixed_interfaces.urdf").c_str(), &ctx) == SKR_OK,
         "the body comes up, because its joints are readable");
-  check(ros2_mode_count(ctx) == 0,
-        "and offers no control mode, because §24 carries one mode for the whole body");
+  check(ros2_mode_count(ctx) == 2,
+        "and offers both modes, because §86's command carries one per joint");
   const int mixed = d->describe(ctx, json, sizeof json);
   const std::string mixed_descriptor(json, static_cast<size_t>(mixed > 0 ? mixed : 0));
-  check(mixed_descriptor.find("\"modes\":[]") != std::string::npos,
-        "which the descriptor says rather than implies");
-  command.mode = SKR_MODE_POSITION;
-  check(d->write_command(ctx, &command, 0) == SKR_EINVAL,
-        "and a command in the mode one joint offers is still refused");
+  check(mixed_descriptor.find("\"modes\":[\"position\",\"velocity\"]") != std::string::npos,
+        "which the descriptor says as the union rather than the intersection");
+  check(mixed_descriptor.find("\"per_joint_modes\":true") != std::string::npos,
+        "and it declares that this driver reads the per-joint array");
+
+  float mixed_values[2] = {0.3f, 0.5f};
+  uint8_t mixed_mask[2] = {1, 1};
+  uint8_t mixed_modes[2] = {SKR_JMODE_POSITION, SKR_JMODE_VELOCITY};
+  skr_command mixed_command;
+  std::memset(&mixed_command, 0, sizeof mixed_command);
+  mixed_command.joint_count = 2;
+  mixed_command.mode = SKR_MODE_POSITION;
+  mixed_command.flags = SKR_CMD_PER_JOINT_MODES;
+  mixed_command.values = mixed_values;
+  mixed_command.mask = mixed_mask;
+  mixed_command.modes = mixed_modes;
+  check(d->write_command(ctx, &mixed_command, 0) == SKR_OK,
+        "a shoulder on position and an elbow on velocity, commanded in one frame");
+
+  // And the v1 shape against the same body: one mode for everything, which is what a producer that
+  // has never heard of §86 sends. It reaches a joint that does not offer it and is refused by name.
+  mixed_command.flags = 0;
+  mixed_command.modes = nullptr;
+  check(d->write_command(ctx, &mixed_command, 0) == SKR_EPERM,
+        "and a body-wide command is still refused, because one joint does not take that mode");
   d->close(ctx);
 
   // ── a URDF with nothing to command ────────────────────────────────────────

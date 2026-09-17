@@ -163,6 +163,58 @@ impl Mode {
             _ => None,
         }
     }
+
+    /// The per-joint spelling of this mode, `SKR_JMODE_*` (§86.1).
+    pub fn as_joint_mode(self) -> u8 {
+        jmode::OF_BASE | (self as u8)
+    }
+
+    /// Decode one entry of [`Command::modes`].
+    ///
+    /// `Ok(None)` is `SKR_JMODE_INHERIT` — take the command's own `mode`. `Err(())` is an entry
+    /// this ABI does not define, which a driver reports as `SKR_EINVAL` rather than guessing: the
+    /// value it is most likely to be is a bare `SKR_MODE_*` written into the wrong array, and that
+    /// is precisely the transcription error the offset exists to catch.
+    #[allow(clippy::result_unit_err)]
+    pub fn from_joint_mode(value: u8) -> Result<Option<Mode>, ()> {
+        if value == jmode::INHERIT {
+            return Ok(None);
+        }
+        if value & 0xf0 != jmode::OF_BASE {
+            return Err(());
+        }
+        Mode::from_u8(value & 0x0f).map(Some).ok_or(())
+    }
+}
+
+/// Per-joint control-mode values, mirroring `SKR_JMODE_*` (§86.1).
+///
+/// Deliberately not `SKR_MODE_*`: zero is `INHERIT` because zero is what a `calloc` gives you, and
+/// a producer that allocated the array and forgot to fill it must read as *the mode the command
+/// already carries* rather than as "every joint on position". The offset is what makes the mistake
+/// that arrangement invites loud — a bare `Mode` discriminant written here is not a valid entry at
+/// all, so it is refused instead of moving a joint in the wrong units.
+pub mod jmode {
+    /// Take [`super::Command::mode`].
+    pub const INHERIT: u8 = 0x00;
+    /// The high nibble every real mode carries.
+    pub const OF_BASE: u8 = 0x10;
+    /// Radians, or metres for a prismatic joint.
+    pub const POSITION: u8 = 0x10;
+    /// Radians per second, or metres per second.
+    pub const VELOCITY: u8 = 0x11;
+    /// Newton-metres, or newtons.
+    pub const TORQUE: u8 = 0x12;
+}
+
+/// Command flags, mirroring `SKR_CMD_*` (§86.1).
+pub mod cmd_flags {
+    /// [`super::Command::modes`] is present and readable.
+    ///
+    /// The byte this lives in was `_pad[0]` — explicit padding at a fixed offset, zero in every
+    /// command any producer has ever written — which is §27's homing precedent one field along: no
+    /// offset moves, the ABI version does not bump, and a v1 driver keeps working.
+    pub const PER_JOINT_MODES: u8 = 1 << 0;
 }
 
 /// Sensor frame pixel formats, mirroring `SKR_FMT_*`.
@@ -226,17 +278,25 @@ pub struct Command {
     pub stamp_ns: u64,
     /// Must advance. A repeat is treated as a stalled producer by the watchdog guard.
     pub seq: u32,
-    /// A [`Mode`] discriminant.
+    /// A [`Mode`] discriminant: the mode of every joint that inherits.
     pub mode: u8,
+    /// [`cmd_flags`]. Was `_pad[0]`, and zero in every ABI-1 command (§86.1).
+    pub flags: u8,
     /// Explicit padding, so the Rust and C layouts agree without relying on either compiler's
     /// choices.
-    pub _pad: [u8; 3],
-    /// Length of `values` and `mask`.
+    pub _pad: [u8; 2],
+    /// Length of `values`, `mask` and `modes`.
     pub joint_count: u16,
-    /// `[joint_count]`; units follow `mode`.
+    /// `[joint_count]`; units follow this joint's mode.
     pub values: *const f32,
     /// `[joint_count]`; 0 = hold, non-zero = apply.
     pub mask: *const u8,
+    /// `[joint_count]` of [`jmode`] values (§86.1).
+    ///
+    /// Read **only** when `flags` carries [`cmd_flags::PER_JOINT_MODES`]: a command from a producer
+    /// that predates §86 does not have this field, and reading it would be reading past the struct
+    /// that producer laid out.
+    pub modes: *const u8,
 }
 
 /// One sensor frame. Mirrors `skr_frame`.
@@ -411,14 +471,18 @@ mod tests {
             16 + 3 * size_of::<usize>() + 52
         );
 
-        // skr_command: u64, u32, u8, [u8;3], u16, then two pointers on their natural alignment.
+        // skr_command: u64, u32, u8, u8, [u8;2], u16, then three pointers on their natural
+        // alignment. §86.1 renamed the first padding byte to `flags` and appended `modes`, which
+        // moves nothing before it — the point of putting the flag in padding that already existed.
         assert_eq!(offset_of!(Command, stamp_ns), 0);
         assert_eq!(offset_of!(Command, seq), 8);
         assert_eq!(offset_of!(Command, mode), 12);
-        assert_eq!(offset_of!(Command, _pad), 13);
+        assert_eq!(offset_of!(Command, flags), 13);
+        assert_eq!(offset_of!(Command, _pad), 14);
         assert_eq!(offset_of!(Command, joint_count), 16);
         assert_eq!(offset_of!(Command, values), 24);
         assert_eq!(offset_of!(Command, mask), 24 + size_of::<usize>());
+        assert_eq!(offset_of!(Command, modes), 24 + 2 * size_of::<usize>());
 
         // skr_frame: u64, four u32, pointer, size_t
         assert_eq!(offset_of!(Frame, stamp_ns), 0);

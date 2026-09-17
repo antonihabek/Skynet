@@ -274,6 +274,15 @@ pub fn plan_to_json(plan: &TransportPlan) -> Json {
                     per_channel.set(name, Json::Num(*limit));
                 }
                 item.set("per_channel", per_channel);
+                // §86.3. Absent — not empty — on a plan that binds no joint, so a motion plan and a
+                // plan over a gripper and a base are the same bytes they were before this section.
+                if !clamp.joint_modes.is_empty() {
+                    let mut joint_modes = Json::obj();
+                    for (name, mode) in &clamp.joint_modes {
+                        joint_modes.set(name, Json::from(*mode));
+                    }
+                    item.set("joint_modes", joint_modes);
+                }
                 item.set_opt("source", opt_str(&clamp.source));
                 item
             }
@@ -499,6 +508,14 @@ pub fn descriptor_from_json(value: &Json) -> Result<EmbodimentDescriptor, Decode
         sensors,
         control: ControlProfile {
             modes: control.str_arr("modes"),
+            // §86.1. Tri-state, like `detects_people` and for the same reason: absent is a driver
+            // written before this field existed, `false` is a driver that was asked and does not,
+            // and only `true` lets a plan mix modes across this body's joints. A non-boolean reads
+            // as absent — the fail-safe direction, because the consequence of not declaring it is a
+            // narrower plan and never a wider one.
+            per_joint_modes: control
+                .get_present("per_joint_modes")
+                .and_then(Json::as_bool),
             rate_hz_max: opt_f64(&control, "rate_hz_max"),
             rate_hz_min: opt_f64(&control, "rate_hz_min"),
             command_latency_ms: opt_f64(&control, "command_latency_ms"),

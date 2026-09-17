@@ -368,6 +368,9 @@ Limits resolve_limits(const Params& params) {
   const Json* per_channel = field(transport, "per_channel");
   limits.per_channel = per_channel == nullptr || per_channel->is_null() ? Json::object()
                                                                        : *per_channel;
+  const Json* joint_modes = field(transport, "joint_modes");
+  limits.joint_modes = joint_modes == nullptr || joint_modes->is_null() ? Json::object()
+                                                                       : *joint_modes;
   limits.proximity = or_null(field(profile, "proximity"));
   const Json* workspace = field(profile, "workspace");
   limits.workspace = workspace == nullptr || workspace->is_null() ? Json::array() : *workspace;
@@ -549,15 +552,37 @@ bool independent_stop_path(const std::string& tier) { return tier == "certified"
 
 namespace {
 
+/// The ceiling that applies to one channel.
+///
+/// Three sources, and they **compose by narrowing** (§86.3). The per-channel figure is the joint's
+/// own rating carried by the transport plan. `base` is the reserved whole-body channel. The third is
+/// the joint's mode, which says which of the two whole-body figures is in its units — a step that
+/// was impossible before §86, so both were resolved through four layers and applied to nothing.
+///
+/// Position is deliberately not in the table: travel is a per-joint bound with two ends and one
+/// magnitude cannot express it, so the plan's per-channel entry is all there is.
 std::optional<double> ceiling_for(const std::string& channel, const Limits& limits) {
+  std::optional<double> per_channel;
   if (limits.per_channel.has(channel)) {
     const Json& held = limits.per_channel[channel];
-    return held.is_number() ? std::optional<double>(held.number_or(0)) : std::nullopt;
+    if (held.is_number()) per_channel = held.number_or(0);
   }
+
+  std::optional<double> whole_body;
   if (channel == "base") {
-    return limits.base_velocity_max_m_s;
+    whole_body = limits.base_velocity_max_m_s;
+  } else if (limits.joint_modes.has(channel)) {
+    const std::string_view mode = limits.joint_modes[channel].string_or("");
+    if (mode == "velocity") {
+      whole_body = limits.joint_velocity_max_rad_s;
+    } else if (mode == "torque") {
+      whole_body = limits.joint_torque_max_nm;
+    }
   }
-  return std::nullopt;
+
+  if (!per_channel.has_value()) return whole_body;
+  if (!whole_body.has_value()) return per_channel;
+  return std::min(*per_channel, *whole_body);
 }
 
 /// §7.1's fourth guard: every constrained frame inside its operator-defined volumes.
@@ -887,6 +912,11 @@ Json shape_limits(const safety::Limits& limits) {
   // margin in force cannot tell a robot holding 5 cm from one holding at contact.
   out.set("self_collision_margin_m", limits.self_collision_margin_m);
   out.set("per_channel", limits.per_channel);
+  // §86.3. Absent — not empty — on a body no joint of which is bound, so every limits document
+  // written before this section is the same bytes.
+  if (!limits.joint_modes.entries().empty()) {
+    out.set("joint_modes", limits.joint_modes);
+  }
 
   Json active = Json::array();
   for (const std::string& guard : limits.active_guards) {

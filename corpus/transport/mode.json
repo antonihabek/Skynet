@@ -1,0 +1,1301 @@
+{
+  "corpus": "transport",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "mixed-body-commanded",
+      "note": "The case §86 exists for: an arm on position and wheels on velocity, bound together. Before this section the body declared no control modes at all and every channel was blocked.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 4,
+          "control_mode": "position",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_position",
+              "role": "right_arm.shoulder.pitch"
+            },
+            {
+              "index": 1,
+              "kind": "joint_position",
+              "role": "right_arm.elbow.flex"
+            },
+            {
+              "index": 2,
+              "kind": "joint_velocity",
+              "role": "base.wheel#0"
+            },
+            {
+              "index": 3,
+              "kind": "joint_velocity",
+              "role": "base.wheel#1"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-mobile-manipulator",
+          "digest": "sha256:mobile",
+          "verified": true,
+          "base": "wheeled",
+          "dof": 4,
+          "joints": [
+            {
+              "name": "shoulder",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "elbow",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "wheel_l",
+              "role": "base.wheel#0",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": [
+                "velocity"
+              ]
+            },
+            {
+              "name": "wheel_r",
+              "role": "base.wheel#1",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": [
+                "velocity"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [
+              "position",
+              "velocity"
+            ],
+            "per_joint_modes": true,
+            "rate_hz_max": 100,
+            "rate_hz_min": 10,
+            "command_latency_ms": 6
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 1.5,
+            "joint_torque_max_nm": 60,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/mobile.pdf"
+          },
+          "solvers": []
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":3,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.shoulder.pitch to \\\"shoulder\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.shoulder.pitch\",\"target\":\"shoulder\"},{\"limit\":3,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"elbow\\\".\",\"scale\":1,\"source_index\":1,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"elbow\"},{\"limit\":2,\"method\":\"remap\",\"reason\":\"Mapped by role base.wheel#0 to \\\"wheel_l\\\".\",\"scale\":1,\"source_index\":2,\"source_role\":\"base.wheel#0\",\"target\":\"wheel_l\"},{\"limit\":2,\"method\":\"remap\",\"reason\":\"Mapped by role base.wheel#1 to \\\"wheel_r\\\".\",\"scale\":1,\"source_index\":3,\"source_role\":\"base.wheel#1\",\"target\":\"wheel_r\"}],\"clamp\":{\"joint_modes\":{\"elbow\":\"position\",\"shoulder\":\"position\",\"wheel_l\":\"velocity\",\"wheel_r\":\"velocity\"},\"joint_torque_max_nm\":60,\"joint_velocity_max_rad_s\":1.5,\"min_control_hz\":10,\"per_channel\":{\"elbow\":3,\"shoulder\":3,\"wheel_l\":2,\"wheel_r\":2},\"source\":\"https://example.invalid/mobile.pdf\"},\"control_hz\":50,\"control_mode\":\"position\",\"observations\":[],\"robot_slug\":\"test-mobile-manipulator\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:mobile\",\"verdict\":\"direct\",\"warnings\":[]}"
+    },
+    {
+      "id": "mixed-body-on-a-v1-driver",
+      "note": "The same policy and the same machine behind a driver that reads one mode per command. The two velocity channels are blocked **by name** rather than dropped, so a required one refuses the plan — the alternative an integration reaches for is to command the joints sharing the majority mode and move two thirds of the robot.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 4,
+          "control_mode": "position",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_position",
+              "role": "right_arm.shoulder.pitch"
+            },
+            {
+              "index": 1,
+              "kind": "joint_position",
+              "role": "right_arm.elbow.flex"
+            },
+            {
+              "index": 2,
+              "kind": "joint_velocity",
+              "role": "base.wheel#0"
+            },
+            {
+              "index": 3,
+              "kind": "joint_velocity",
+              "role": "base.wheel#1"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-mobile-manipulator-v1",
+          "digest": "sha256:mobile-v1",
+          "verified": true,
+          "base": "wheeled",
+          "dof": 4,
+          "joints": [
+            {
+              "name": "shoulder",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "elbow",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "wheel_l",
+              "role": "base.wheel#0",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": [
+                "velocity"
+              ]
+            },
+            {
+              "name": "wheel_r",
+              "role": "base.wheel#1",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": [
+                "velocity"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [
+              "position",
+              "velocity"
+            ],
+            "per_joint_modes": false,
+            "rate_hz_max": 100,
+            "rate_hz_min": 10,
+            "command_latency_ms": 6
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 1.5,
+            "joint_torque_max_nm": 60,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/mobile.pdf"
+          },
+          "solvers": []
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":3,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.shoulder.pitch to \\\"shoulder\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.shoulder.pitch\",\"target\":\"shoulder\"},{\"limit\":3,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"elbow\\\".\",\"scale\":1,\"source_index\":1,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"elbow\"},{\"limit\":2,\"method\":\"blocked\",\"reason\":\"This driver does not declare per-joint modes (§86.1), and the body is already commanded in position.\",\"scale\":1,\"source_index\":2,\"source_role\":\"base.wheel#0\",\"target\":\"wheel_l\"},{\"limit\":2,\"method\":\"blocked\",\"reason\":\"This driver does not declare per-joint modes (§86.1), and the body is already commanded in position.\",\"scale\":1,\"source_index\":3,\"source_role\":\"base.wheel#1\",\"target\":\"wheel_r\"}],\"clamp\":{\"joint_modes\":{\"elbow\":\"position\",\"shoulder\":\"position\"},\"joint_torque_max_nm\":60,\"joint_velocity_max_rad_s\":1.5,\"min_control_hz\":10,\"per_channel\":{\"elbow\":3,\"shoulder\":3},\"source\":\"https://example.invalid/mobile.pdf\"},\"control_hz\":50,\"control_mode\":\"position\",\"observations\":[],\"robot_slug\":\"test-mobile-manipulator-v1\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:mobile-v1\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"mixed_modes_unsupported\",\"message\":\"This body is already commanded in position and its driver reads one mode per command, so the velocity channel on \\\"wheel_l\\\" cannot be delivered.\",\"subjects\":[\"wheel_l\"]},{\"code\":\"mixed_modes_unsupported\",\"message\":\"This body is already commanded in position and its driver reads one mode per command, so the velocity channel on \\\"wheel_r\\\" cannot be delivered.\",\"subjects\":[\"wheel_r\"]}]}"
+    },
+    {
+      "id": "the-first-mode-is-the-one-that-survives",
+      "note": "Declaration order decides on a v1 driver, not joint count: the same four channels with the two wheels first leave the wheels commanded and the arm blocked.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 4,
+          "control_mode": "velocity",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_velocity",
+              "role": "base.wheel#0"
+            },
+            {
+              "index": 1,
+              "kind": "joint_velocity",
+              "role": "base.wheel#1"
+            },
+            {
+              "index": 2,
+              "kind": "joint_position",
+              "role": "right_arm.shoulder.pitch"
+            },
+            {
+              "index": 3,
+              "kind": "joint_position",
+              "role": "right_arm.elbow.flex"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-mobile-manipulator-v1",
+          "digest": "sha256:mobile-v1",
+          "verified": true,
+          "base": "wheeled",
+          "dof": 4,
+          "joints": [
+            {
+              "name": "shoulder",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "elbow",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "wheel_l",
+              "role": "base.wheel#0",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": [
+                "velocity"
+              ]
+            },
+            {
+              "name": "wheel_r",
+              "role": "base.wheel#1",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": [
+                "velocity"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [
+              "position",
+              "velocity"
+            ],
+            "per_joint_modes": false,
+            "rate_hz_max": 100,
+            "rate_hz_min": 10,
+            "command_latency_ms": 6
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 1.5,
+            "joint_torque_max_nm": 60,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/mobile.pdf"
+          },
+          "solvers": []
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":2,\"method\":\"remap\",\"reason\":\"Mapped by role base.wheel#0 to \\\"wheel_l\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"base.wheel#0\",\"target\":\"wheel_l\"},{\"limit\":2,\"method\":\"remap\",\"reason\":\"Mapped by role base.wheel#1 to \\\"wheel_r\\\".\",\"scale\":1,\"source_index\":1,\"source_role\":\"base.wheel#1\",\"target\":\"wheel_r\"},{\"limit\":3,\"method\":\"blocked\",\"reason\":\"This driver does not declare per-joint modes (§86.1), and the body is already commanded in velocity.\",\"scale\":1,\"source_index\":2,\"source_role\":\"right_arm.shoulder.pitch\",\"target\":\"shoulder\"},{\"limit\":3,\"method\":\"blocked\",\"reason\":\"This driver does not declare per-joint modes (§86.1), and the body is already commanded in velocity.\",\"scale\":1,\"source_index\":3,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"elbow\"}],\"clamp\":{\"joint_modes\":{\"wheel_l\":\"velocity\",\"wheel_r\":\"velocity\"},\"joint_torque_max_nm\":60,\"joint_velocity_max_rad_s\":1.5,\"min_control_hz\":10,\"per_channel\":{\"wheel_l\":2,\"wheel_r\":2},\"source\":\"https://example.invalid/mobile.pdf\"},\"control_hz\":50,\"control_mode\":\"velocity\",\"observations\":[],\"robot_slug\":\"test-mobile-manipulator-v1\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:mobile-v1\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"mixed_modes_unsupported\",\"message\":\"This body is already commanded in velocity and its driver reads one mode per command, so the position channel on \\\"shoulder\\\" cannot be delivered.\",\"subjects\":[\"shoulder\"]},{\"code\":\"mixed_modes_unsupported\",\"message\":\"This body is already commanded in velocity and its driver reads one mode per command, so the position channel on \\\"elbow\\\" cannot be delivered.\",\"subjects\":[\"elbow\"]}]}"
+    },
+    {
+      "id": "one-joint-in-two-modes",
+      "note": "Two channels onto one joint in two modes is refused on any driver (§86.2): they would meet as one entry in `values` and one in `modes`, and the command would carry whichever was written last. First-wins, as §84.3 does with a repeated motion.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 4,
+          "control_mode": "position",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_position",
+              "role": "right_arm.shoulder.pitch",
+              "joint": "shoulder"
+            },
+            {
+              "index": 1,
+              "kind": "joint_velocity",
+              "role": "right_arm.shoulder.pitch",
+              "joint": "shoulder"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-mobile-manipulator",
+          "digest": "sha256:mobile",
+          "verified": true,
+          "base": "wheeled",
+          "dof": 4,
+          "joints": [
+            {
+              "name": "shoulder",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "elbow",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "wheel_l",
+              "role": "base.wheel#0",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": [
+                "velocity"
+              ]
+            },
+            {
+              "name": "wheel_r",
+              "role": "base.wheel#1",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": [
+                "velocity"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [
+              "position",
+              "velocity"
+            ],
+            "per_joint_modes": true,
+            "rate_hz_max": 100,
+            "rate_hz_min": 10,
+            "command_latency_ms": 6
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 1.5,
+            "joint_torque_max_nm": 60,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/mobile.pdf"
+          },
+          "solvers": []
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":3,\"method\":\"direct\",\"reason\":\"Joint name matches exactly.\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.shoulder.pitch\",\"target\":\"shoulder\"},{\"limit\":2,\"method\":\"blocked\",\"reason\":\"\\\"shoulder\\\" does not accept velocity commands.\",\"scale\":1,\"source_index\":1,\"source_role\":\"right_arm.shoulder.pitch\",\"target\":\"shoulder\"}],\"clamp\":{\"joint_modes\":{\"shoulder\":\"position\"},\"joint_torque_max_nm\":60,\"joint_velocity_max_rad_s\":1.5,\"min_control_hz\":10,\"per_channel\":{\"shoulder\":3},\"source\":\"https://example.invalid/mobile.pdf\"},\"control_hz\":50,\"control_mode\":\"position\",\"observations\":[],\"robot_slug\":\"test-mobile-manipulator\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:mobile\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"3 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.elbow.flex\",\"base.wheel#0\",\"base.wheel#1\"]}]}"
+    },
+    {
+      "id": "one-joint-in-two-modes-is-not-a-mixed-body",
+      "note": "The same conflict on a body every joint of which is one mode. The refusal is §86.2's and not §86.1's: the joint itself cannot be in two modes, whatever the driver reads.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "right_arm.elbow.flex",
+              "joint": "J2"
+            },
+            {
+              "index": 1,
+              "kind": "joint_position",
+              "role": "right_arm.elbow.flex",
+              "joint": "J2"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-arm",
+          "digest": "sha256:arm",
+          "verified": true,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "J1",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J2",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J3",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":60,\"method\":\"direct\",\"reason\":\"Joint name matches exactly.\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J2\"},{\"limit\":3,\"method\":\"blocked\",\"reason\":\"\\\"J2\\\" is commanded in torque by an earlier channel, and a joint takes one mode per cycle.\",\"scale\":1,\"source_index\":1,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J2\"}],\"clamp\":{\"joint_modes\":{\"J2\":\"torque\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J2\":60},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"joint_mode_conflict\",\"message\":\"\\\"J2\\\" is already bound in torque; a joint carries one mode per cycle, so this position channel is blocked.\",\"subjects\":[\"J2\"]},{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.roll\"]}]}"
+    },
+    {
+      "id": "one-joint-twice-in-one-mode",
+      "note": "Not a conflict. The second channel binds the same joint in the same mode, which is a policy with a redundant output and not a body being commanded two ways.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 4,
+          "control_mode": "position",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_position",
+              "role": "right_arm.shoulder.pitch",
+              "joint": "shoulder"
+            },
+            {
+              "index": 1,
+              "kind": "joint_position",
+              "role": "right_arm.shoulder.pitch",
+              "joint": "shoulder"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-mobile-manipulator",
+          "digest": "sha256:mobile",
+          "verified": true,
+          "base": "wheeled",
+          "dof": 4,
+          "joints": [
+            {
+              "name": "shoulder",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "elbow",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "wheel_l",
+              "role": "base.wheel#0",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": [
+                "velocity"
+              ]
+            },
+            {
+              "name": "wheel_r",
+              "role": "base.wheel#1",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": [
+                "velocity"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [
+              "position",
+              "velocity"
+            ],
+            "per_joint_modes": true,
+            "rate_hz_max": 100,
+            "rate_hz_min": 10,
+            "command_latency_ms": 6
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 1.5,
+            "joint_torque_max_nm": 60,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/mobile.pdf"
+          },
+          "solvers": []
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":3,\"method\":\"direct\",\"reason\":\"Joint name matches exactly.\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.shoulder.pitch\",\"target\":\"shoulder\"},{\"limit\":3,\"method\":\"direct\",\"reason\":\"Joint name matches exactly.\",\"scale\":1,\"source_index\":1,\"source_role\":\"right_arm.shoulder.pitch\",\"target\":\"shoulder\"}],\"clamp\":{\"joint_modes\":{\"shoulder\":\"position\"},\"joint_torque_max_nm\":60,\"joint_velocity_max_rad_s\":1.5,\"min_control_hz\":10,\"per_channel\":{\"shoulder\":3},\"source\":\"https://example.invalid/mobile.pdf\"},\"control_hz\":50,\"control_mode\":\"position\",\"observations\":[],\"robot_slug\":\"test-mobile-manipulator\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:mobile\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"3 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.elbow.flex\",\"base.wheel#0\",\"base.wheel#1\"]}]}"
+    },
+    {
+      "id": "a-single-mode-plan-carries-its-modes-too",
+      "note": "The map is not a mixed-body feature. Every plan that binds a joint carries the mode each one is commanded in, because the kernel needs the units on a single-mode body exactly as much.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "right_arm.elbow.flex"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-arm",
+          "digest": "sha256:arm",
+          "verified": true,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "J1",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J2",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J3",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":60,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"J2\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J2\"}],\"clamp\":{\"joint_modes\":{\"J2\":\"torque\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J2\":60},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.roll\"]}]}"
+    },
+    {
+      "id": "a-blocked-channel-contributes-no-mode",
+      "note": "A joint whose mode the body does not accept is blocked, and contributes neither a ceiling nor a mode — the kernel must not read a ceiling in the units of a command that is not going out.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "velocity",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_velocity",
+              "role": "right_arm.wrist.roll",
+              "joint": "J3"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-arm",
+          "digest": "sha256:arm",
+          "verified": true,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "J1",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J2",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J3",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":2,\"method\":\"blocked\",\"reason\":\"\\\"J3\\\" does not accept velocity commands.\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.wrist.roll\",\"target\":\"J3\"}],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"velocity\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"control_mode_unsupported\",\"message\":\"This body does not accept velocity commands.\",\"subjects\":[\"velocity\"]},{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.elbow.flex\"]}]}"
+    },
+    {
+      "id": "a-body-with-no-joints-bound",
+      "note": "A plan over a gripper alone carries no mode map at all, absent rather than empty, so the plans written before §86 are the same bytes.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "gripper",
+              "role": "right_hand.gripper.grip"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-arm",
+          "digest": "sha256:arm",
+          "verified": true,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "J1",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J2",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J3",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":40,\"method\":\"remap\",\"reason\":\"Driven through the gripper \\\"hand\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_hand.gripper.grip\",\"target\":\"hand\"}],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"hand\":40},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"3 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.elbow.flex\",\"right_arm.wrist.roll\"]}]}"
+    },
+    {
+      "id": "optional-channels-drop-on-a-v1-driver",
+      "note": "The v1 refusal respects `optional` exactly as every other block does: the two velocity channels are still blocked and named, and the plan is refused because they are required. Marked optional they would degrade instead — this is the required half, and the `degraded` half is the case below.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 4,
+          "control_mode": "position",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_position",
+              "role": "right_arm.shoulder.pitch"
+            },
+            {
+              "index": 1,
+              "kind": "joint_velocity",
+              "role": "base.wheel#0"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-mobile-manipulator-v1",
+          "digest": "sha256:mobile-v1",
+          "verified": true,
+          "base": "wheeled",
+          "dof": 4,
+          "joints": [
+            {
+              "name": "shoulder",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "elbow",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "wheel_l",
+              "role": "base.wheel#0",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": [
+                "velocity"
+              ]
+            },
+            {
+              "name": "wheel_r",
+              "role": "base.wheel#1",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": [
+                "velocity"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [
+              "position",
+              "velocity"
+            ],
+            "per_joint_modes": false,
+            "rate_hz_max": 100,
+            "rate_hz_min": 10,
+            "command_latency_ms": 6
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 1.5,
+            "joint_torque_max_nm": 60,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/mobile.pdf"
+          },
+          "solvers": []
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":3,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.shoulder.pitch to \\\"shoulder\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.shoulder.pitch\",\"target\":\"shoulder\"},{\"limit\":2,\"method\":\"blocked\",\"reason\":\"This driver does not declare per-joint modes (§86.1), and the body is already commanded in position.\",\"scale\":1,\"source_index\":1,\"source_role\":\"base.wheel#0\",\"target\":\"wheel_l\"}],\"clamp\":{\"joint_modes\":{\"shoulder\":\"position\"},\"joint_torque_max_nm\":60,\"joint_velocity_max_rad_s\":1.5,\"min_control_hz\":10,\"per_channel\":{\"shoulder\":3},\"source\":\"https://example.invalid/mobile.pdf\"},\"control_hz\":50,\"control_mode\":\"position\",\"observations\":[],\"robot_slug\":\"test-mobile-manipulator-v1\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:mobile-v1\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"mixed_modes_unsupported\",\"message\":\"This body is already commanded in position and its driver reads one mode per command, so the velocity channel on \\\"wheel_l\\\" cannot be delivered.\",\"subjects\":[\"wheel_l\"]},{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.elbow.flex\",\"base.wheel#1\"]}]}"
+    },
+    {
+      "id": "an-optional-second-mode-still-blocks",
+      "note": "And it does **not** degrade. `optional` is consulted when no target exists on the body; here the joint exists, accepts the mode, and cannot be reached in the same command — which is the precedent a joint that refuses the mode already set (`mode-refused`). A channel silently dropped is the failure this section is written against.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 4,
+          "control_mode": "position",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_position",
+              "role": "right_arm.shoulder.pitch"
+            },
+            {
+              "index": 1,
+              "kind": "joint_velocity",
+              "role": "base.wheel#0",
+              "optional": true
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-mobile-manipulator-v1",
+          "digest": "sha256:mobile-v1",
+          "verified": true,
+          "base": "wheeled",
+          "dof": 4,
+          "joints": [
+            {
+              "name": "shoulder",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "elbow",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "wheel_l",
+              "role": "base.wheel#0",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": [
+                "velocity"
+              ]
+            },
+            {
+              "name": "wheel_r",
+              "role": "base.wheel#1",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": [
+                "velocity"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [
+              "position",
+              "velocity"
+            ],
+            "per_joint_modes": false,
+            "rate_hz_max": 100,
+            "rate_hz_min": 10,
+            "command_latency_ms": 6
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 1.5,
+            "joint_torque_max_nm": 60,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/mobile.pdf"
+          },
+          "solvers": []
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":3,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.shoulder.pitch to \\\"shoulder\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.shoulder.pitch\",\"target\":\"shoulder\"},{\"limit\":2,\"method\":\"blocked\",\"reason\":\"This driver does not declare per-joint modes (§86.1), and the body is already commanded in position.\",\"scale\":1,\"source_index\":1,\"source_role\":\"base.wheel#0\",\"target\":\"wheel_l\"}],\"clamp\":{\"joint_modes\":{\"shoulder\":\"position\"},\"joint_torque_max_nm\":60,\"joint_velocity_max_rad_s\":1.5,\"min_control_hz\":10,\"per_channel\":{\"shoulder\":3},\"source\":\"https://example.invalid/mobile.pdf\"},\"control_hz\":50,\"control_mode\":\"position\",\"observations\":[],\"robot_slug\":\"test-mobile-manipulator-v1\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:mobile-v1\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"mixed_modes_unsupported\",\"message\":\"This body is already commanded in position and its driver reads one mode per command, so the velocity channel on \\\"wheel_l\\\" cannot be delivered.\",\"subjects\":[\"wheel_l\"]},{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.elbow.flex\",\"base.wheel#1\"]}]}"
+    }
+  ]
+}

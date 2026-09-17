@@ -118,7 +118,7 @@
         },
         "options": {}
       },
-      "expected": "{\"bindings\":[{\"limit\":80,\"method\":\"direct\",\"reason\":\"Joint name matches exactly.\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J1\"}],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J1\":80},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.roll\"]}]}"
+      "expected": "{\"bindings\":[{\"limit\":80,\"method\":\"direct\",\"reason\":\"Joint name matches exactly.\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J1\"}],\"clamp\":{\"joint_modes\":{\"J1\":\"torque\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J1\":80},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.roll\"]}]}"
     },
     {
       "id": "role-remap",
@@ -236,7 +236,7 @@
         },
         "options": {}
       },
-      "expected": "{\"bindings\":[{\"limit\":60,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"J2\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J2\"}],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J2\":60},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.roll\"]}]}"
+      "expected": "{\"bindings\":[{\"limit\":60,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"J2\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J2\"}],\"clamp\":{\"joint_modes\":{\"J2\":\"torque\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J2\":60},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.roll\"]}]}"
     },
     {
       "id": "blocked-required",
@@ -588,7 +588,7 @@
         },
         "options": {}
       },
-      "expected": "{\"bindings\":[{\"limit\":20,\"method\":\"blocked\",\"reason\":\"\\\"J3\\\" does not accept torque commands.\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.wrist.roll\",\"target\":\"J3\"}],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J3\":20},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.elbow.flex\"]}]}"
+      "expected": "{\"bindings\":[{\"limit\":20,\"method\":\"blocked\",\"reason\":\"\\\"J3\\\" does not accept torque commands.\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.wrist.roll\",\"target\":\"J3\"}],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.elbow.flex\"]}]}"
     },
     {
       "id": "no-role-no-name",
@@ -824,7 +824,7 @@
         },
         "options": {}
       },
-      "expected": "{\"bindings\":[{\"limit\":3,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"J2\\\".\",\"scale\":0.5,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J2\"}],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J2\":3},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"position\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"scaled_down\",\"message\":\"Commands to \\\"J2\\\" are scaled to 50% because the policy was trained on a stronger joint.\",\"subjects\":[\"J2\"]},{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.roll\"]}]}"
+      "expected": "{\"bindings\":[{\"limit\":3,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"J2\\\".\",\"scale\":0.5,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J2\"}],\"clamp\":{\"joint_modes\":{\"J2\":\"position\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J2\":3},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"position\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"scaled_down\",\"message\":\"Commands to \\\"J2\\\" are scaled to 50% because the policy was trained on a stronger joint.\",\"subjects\":[\"J2\"]},{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.roll\"]}]}"
     },
     {
       "id": "duplicate-role-first-wins",
@@ -941,7 +941,7 @@
         },
         "options": {}
       },
-      "expected": "{\"bindings\":[{\"limit\":80,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"J1\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J1\"}],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J1\":80},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-duplicate-role\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"1 joint on this body is not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.wrist.roll\"]}]}"
+      "expected": "{\"bindings\":[{\"limit\":80,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"J1\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J1\"}],\"clamp\":{\"joint_modes\":{\"J1\":\"torque\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J1\":80},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-duplicate-role\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"1 joint on this body is not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.wrist.roll\"]}]}"
     }
   ]
 }

@@ -59,10 +59,14 @@ _Static_assert(offsetof(skr_state, fault_code) == 92, "skr_state.fault_code move
 _Static_assert(offsetof(skr_command, stamp_ns) == 0, "skr_command.stamp_ns moved");
 _Static_assert(offsetof(skr_command, seq) == 8, "skr_command.seq moved");
 _Static_assert(offsetof(skr_command, mode) == 12, "skr_command.mode moved");
-_Static_assert(offsetof(skr_command, _pad) == 13, "skr_command._pad moved");
+_Static_assert(offsetof(skr_command, flags) == 13, "skr_command.flags moved");
+_Static_assert(offsetof(skr_command, _pad) == 14, "skr_command._pad moved");
 _Static_assert(offsetof(skr_command, joint_count) == 16, "skr_command.joint_count moved");
 _Static_assert(offsetof(skr_command, values) == 24, "skr_command.values moved");
 _Static_assert(offsetof(skr_command, mask) == 32, "skr_command.mask moved");
+/* §86.1, appended: nothing before it moved, which is the point of putting the flag in padding that
+   already existed rather than bumping SKYNET_RHAL_ABI_VERSION. */
+_Static_assert(offsetof(skr_command, modes) == 40, "skr_command.modes moved");
 
 _Static_assert(offsetof(skr_frame, stamp_ns) == 0, "skr_frame.stamp_ns moved");
 _Static_assert(offsetof(skr_frame, width) == 8, "skr_frame.width moved");
@@ -96,6 +100,9 @@ struct skr_ctx {
   /* The last command actually applied, so a harness can check what got through. */
   float applied[MOCK_JOINTS];
   uint8_t applied_mask[MOCK_JOINTS];
+  /* The mode each joint was last commanded in, inheritance resolved (§86.1). A harness reads this
+     to check that a per-joint command reached the joints it named in the modes it named. */
+  uint8_t applied_mode[MOCK_JOINTS];
   uint32_t commands_accepted;
   uint32_t commands_rejected;
 };
@@ -108,6 +115,17 @@ static const char *const MOCK_JOINT_NAMES[MOCK_JOINTS] = {"J1", "J2", "J3"};
 /* Per-joint torque ratings, used to make the mock behave plausibly under a command. These are
  * *design* values on a mock. Note the descriptor still declares `envelope: null` — see below. */
 static const float MOCK_EFFORT_MAX[MOCK_JOINTS] = {80.0f, 60.0f, 20.0f};
+
+/* Travel, matching the descriptor. Used for the same reason as the ratings above and only since
+   §86: before it, every command was clamped against the effort rating whatever mode it carried,
+   which on a position command was a joint clamped in newton-metres against a setpoint in radians.
+   Harmless on a mock and exactly the class of defect per-joint modes exists to make visible. */
+static const float MOCK_POSITION_MAX[MOCK_JOINTS] = {3.14f, 2.6f, 6.28f};
+
+/* Which modes each joint accepts, matching `control_modes` in the descriptor. §86.1: J3 is
+   position-only on a body whose other two joints take torque, so this mock *is* a mixed-mode body
+   and the array below is the thing that makes it commandable. */
+static const int MOCK_TAKES_TORQUE[MOCK_JOINTS] = {1, 1, 0};
 
 static enum mock_fault parse_fault(const char *config) {
   if (config == NULL) return MOCK_FAULT_NONE;
@@ -223,8 +241,47 @@ static int mock_write_command(skr_ctx *ctx, const skr_command *cmd, uint64_t dea
     ctx->commands_rejected += 1;
     return SKR_EINVAL;
   }
+
+  /* §86.1. The array is read only when the producer says it wrote one, and every entry is checked
+   * before any joint moves — a command half applied is worse than one refused. The two refusals are
+   * different facts and take the two codes the header already defines for them: an entry outside
+   * the vocabulary is EINVAL (a malformed request, and most likely a bare SKR_MODE_* written into
+   * the wrong array), and a well-formed mode this joint does not offer is EPERM ("the command is
+   * not permitted in this mode"). */
+  const int per_joint = (cmd->flags & SKR_CMD_PER_JOINT_MODES) != 0 && cmd->modes != NULL;
+  uint8_t resolved[MOCK_JOINTS];
+  for (int j = 0; j < MOCK_JOINTS; ++j) {
+    uint8_t mode = cmd->mode;
+    if (per_joint) {
+      const uint8_t entry = cmd->modes[j];
+      if (!SKR_JMODE_VALID(entry)) {
+        ctx->commands_rejected += 1;
+        return SKR_EINVAL;
+      }
+      if (entry != SKR_JMODE_INHERIT) mode = SKR_MODE_OF_JMODE(entry);
+    }
+    /* A masked joint is not commanded, so the mode it was not commanded in is not checked: the
+     * mask is how the OS says nothing, and refusing a joint it said nothing about would make a
+     * body-wide hold impossible to express on a mixed body. */
+    const uint8_t apply = (cmd->mask == NULL) ? 1u : cmd->mask[j];
+    if (apply && mode == SKR_MODE_TORQUE && !MOCK_TAKES_TORQUE[j]) {
+      ctx->commands_rejected += 1;
+      return SKR_EPERM;
+    }
+    if (apply && mode == SKR_MODE_VELOCITY) {
+      ctx->commands_rejected += 1;
+      return SKR_EPERM; /* no joint on this body declares velocity */
+    }
+    resolved[j] = mode;
+  }
+
   /* A latched estop means commands are being ignored, and the driver says so rather than
-   * pretending to have applied them. */
+   * pretending to have applied them.
+   *
+   * After the mode check above, and the order is deliberate: the estop is already reported through
+   * `read_state`'s flags, and a malformed command is reported nowhere else. Answering EPERM for a
+   * request this driver could never accept would send an operator to the stop button for a defect
+   * in a manifest. */
   if (ctx->estop_latched) {
     ctx->commands_rejected += 1;
     return SKR_EPERM;
@@ -237,10 +294,15 @@ static int mock_write_command(skr_ctx *ctx, const skr_command *cmd, uint64_t dea
 
     float value = cmd->values[j];
     /* The drive itself refuses beyond its rating. This is the hardware behind the Safety Kernel,
-     * not a substitute for it: SCTS `safety.envelope.clamps` measures the joint, not the driver. */
-    if (value > MOCK_EFFORT_MAX[j]) value = MOCK_EFFORT_MAX[j];
-    if (value < -MOCK_EFFORT_MAX[j]) value = -MOCK_EFFORT_MAX[j];
+     * not a substitute for it: SCTS `safety.envelope.clamps` measures the joint, not the driver.
+     * §86.1: the rating is the one for the mode this joint is in, which is the whole point — a
+     * position setpoint bounded by a torque rating is a number clamped in the wrong units. */
+    const float ceiling =
+        (resolved[j] == SKR_MODE_TORQUE) ? MOCK_EFFORT_MAX[j] : MOCK_POSITION_MAX[j];
+    if (value > ceiling) value = ceiling;
+    if (value < -ceiling) value = -ceiling;
     ctx->applied[j] = value;
+    ctx->applied_mode[j] = resolved[j];
   }
   ctx->commands_accepted += 1;
   return SKR_OK;
@@ -309,7 +371,8 @@ static const char MOCK_DESCRIPTOR[] =
     "\"control_modes\":[\"position\"]}"
     "],"
     "\"end_effectors\":[],\"sensors\":[],"
-    "\"control\":{\"modes\":[\"position\",\"torque\"],\"rate_hz_max\":1000,"
+    "\"control\":{\"modes\":[\"position\",\"torque\"],\"per_joint_modes\":true,"
+    "\"rate_hz_max\":1000,"
     "\"rate_hz_min\":10,\"command_latency_ms\":1},"
     "\"envelope\":null,"
     "\"solvers\":[]}";
@@ -348,4 +411,6 @@ uint32_t mock_commands_accepted(const skr_ctx *ctx) { return ctx->commands_accep
 uint32_t mock_commands_rejected(const skr_ctx *ctx) { return ctx->commands_rejected; }
 float mock_applied(const skr_ctx *ctx, int joint) { return ctx->applied[joint]; }
 uint8_t mock_applied_mask(const skr_ctx *ctx, int joint) { return ctx->applied_mask[joint]; }
+/* §86.1: the mode the joint was last commanded in, inheritance resolved. */
+uint8_t mock_applied_mode(const skr_ctx *ctx, int joint) { return ctx->applied_mode[joint]; }
 const char *mock_joint_name(int joint) { return MOCK_JOINT_NAMES[joint]; }
