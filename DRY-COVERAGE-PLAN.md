@@ -549,6 +549,46 @@ Held to a control: `commandable` forced true puts the pendant back to *"no tier 
 test(s) failed"*, and the mock arm is unaffected in either direction because it declares two control
 modes and always did.
 
+### F27 — the UR driver was written against a controller, and three of its properties would not have been guessed.
+
+F15's rule, applied where it was meant to be: a protocol transcribed from memory and tested against a
+fake written from the same memory proves that two copies of one misunderstanding agree. So
+`universalrobots/ursim_e-series` was pulled, started, powered on through its dashboard, and **every
+byte of `drivers/ur_rtde` was measured against it** — UR's own controller software, URControl
+5.26.0.0. The plan's table asked for exactly this substrate and here it is.
+
+Three things came out of the measurement that a careful reading would not have produced, and each
+one is a defect a driver would have shipped with.
+
+* **`TEXT_MESSAGE` arrives unsolicited, in the middle of the handshake.** A fresh URSim's first words
+  are *"Safety Setup has not been confirmed yet"*, and a client that takes the next packet as its
+  reply is **off by one for the rest of the session**: the version reply read as the outputs reply,
+  the outputs reply as the inputs reply, and every one of them parses. The first probe did this, and
+  the symptom was a recipe id of zero and a types list of spaces — which looks like a controller
+  problem and is not.
+* **The output stream is a firehose, and a client that does not drain it reads the past.** Packets
+  come at the negotiated frequency whether or not anybody reads, and a socket buffer holds seconds
+  of them. The second probe commanded a motion, sampled every fortieth cycle, and concluded the arm
+  had not moved. It had moved; the packets being read were a second old. That is §47.6's latest-wins
+  rule arriving from a completely different direction — **for a control loop an old sample is not
+  data** — and `Rtde.newest` drains to the last complete packet for the same reason the frame pool
+  overwrites.
+* **`IN_USE` does not only mean "no such variable".** RTDE's general-purpose registers are allocated
+  to **one session at a time**, so a client reconnecting before the controller has released them is
+  told `IN_USE` about a recipe that worked moments earlier. The driver's refusal named the wrong
+  cause — *"this controller has no such variable"* — and a reader would have gone looking at
+  PolyScope versions. The suite caught it, because the suite opens a second session.
+
+And a fourth, which is about §15 rather than about UR. `rhal.state.completeness` requires the
+sequence to advance between two consecutive reads, and **this is the first driver here whose source
+has a clock of its own**: the mock computes a sample when asked, MuJoCo steps when asked, the LeRobot
+bridge reads when asked, and all of them are faster than whatever is calling. RTDE publishes at
+125 Hz whatever the caller does, so two reads microseconds apart genuinely have one sample between
+them — and returning the previous one, which is truthful, reads to that check as a stalled producer.
+The resolution is in the driver and not in the check: `read_state` waits for a new sample, bounded by
+the period this session negotiated rather than by a guess. A caller faster than the robot is slowed
+to the robot, which is the only honest thing a driver in that position can do.
+
 ---
 
 ## Phase 0 — the dry-mode contract
@@ -631,7 +671,7 @@ under test is identical. And the policy is not an ONNX one, because there is no 
 | `ros2_control` bridge | Fake `hardware_interface` | Adapter, resource-manager mapping, descriptor generation | Jitter under load |
 | **CANopen / CiA402** | ~~Linux `vcan`~~ **an in-process bus** + CiA402 slave sim | **Built** — `drivers/canopen`. 61 checks in its own suite, 24 of 24 through the real ABI, guest tier | Bus bandwidth at real joint × rate — and now also *everything `vcan` would have added*: see below |
 | EtherCAT / SOEM | Software slave stack | CiA402 state machine, frame encoding | **Distributed clocks and FSoE STO — the whole basis of its Certified ceiling** |
-| UR RTDE | URSim (UR's own controller, containerised) | Almost everything, against real vendor software | Servo timing |
+| **UR RTDE** | URSim (UR's own controller, containerised) | **Built** — `drivers/ur_rtde`. 35 checks, 24 of 24 through the real ABI, against URSim 5.26 | Servo timing |
 | Unitree SDK2 | SDK sim | Protocol, low-level mode mapping | Joint access at rate |
 | `libfranka` / FCI | Protocol fake from public docs | Encoding, state machine | 1 kHz torque, which is its entire claim |
 

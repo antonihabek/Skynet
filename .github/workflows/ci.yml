@@ -141,6 +141,15 @@ jobs:
         working-directory: drivers/canopen
         run: make check PYTHON=python3
 
+      # The UR driver's wire format, with no controller. Everything above it was measured against
+      # URSim — UR's own controller software, in a container — and that half needs a 3 GB image and
+      # a Java runtime, so it is not run here. The suite says which half ran on every invocation
+      # rather than reporting green for both.
+      - name: UR RTDE bridge, the wire format
+        if: ${{ !cancelled() }}
+        working-directory: drivers/ur_rtde
+        run: make selftest PYTHON=python3
+
       # The C header is the ABI. Anything that stops it being includable from plain C99 — a C11-only
       # construct, a compiler extension — narrows who can implement a driver.
       - name: The C header is C99-includable
