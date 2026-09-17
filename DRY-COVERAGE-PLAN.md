@@ -629,7 +629,7 @@ under test is identical. And the policy is not an ONNX one, because there is no 
 | Driver | Dry substrate | Dry-verifiable | Not dry-verifiable |
 |---|---|---|---|
 | `ros2_control` bridge | Fake `hardware_interface` | Adapter, resource-manager mapping, descriptor generation | Jitter under load |
-| CANopen / CiA402 | Linux `vcan` + CiA402 slave sim | Nearly all of it — best dry fit in the set | Bus bandwidth at real joint × rate |
+| **CANopen / CiA402** | ~~Linux `vcan`~~ **an in-process bus** + CiA402 slave sim | **Built** — `drivers/canopen`. 61 checks in its own suite, 24 of 24 through the real ABI, guest tier | Bus bandwidth at real joint × rate — and now also *everything `vcan` would have added*: see below |
 | EtherCAT / SOEM | Software slave stack | CiA402 state machine, frame encoding | **Distributed clocks and FSoE STO — the whole basis of its Certified ceiling** |
 | UR RTDE | URSim (UR's own controller, containerised) | Almost everything, against real vendor software | Servo timing |
 | Unitree SDK2 | SDK sim | Protocol, low-level mode mapping | Joint access at rate |
@@ -638,6 +638,39 @@ under test is identical. And the policy is not an ONNX one, because there is no 
 EtherCAT is the honest warning in this table: everything is dry-verifiable **except** the two
 properties that justify its ceiling. A green CI on that driver must not be allowed to imply
 otherwise.
+
+**The CANopen row's substrate changed, and the change is worth the sentence.** The table asked for
+`vcan`, and `vcan` is a kernel module: it needs `modprobe`, a kernel built with `CONFIG_CAN`, and a
+container with the privilege to load one. This machine has none of the three — `socket.AF_CAN`
+exists in CPython and the kernel answers `EAFNOSUPPORT` — and neither do most CI runners. So the
+driver runs against `LoopbackBus`, the identical protocol over a list.
+
+That is a smaller substrate than the table promised and the difference is stated rather than
+absorbed: **a loopback bus has no arbitration, no bit timing, no error frames and no bus-off.** It
+shows the encoding is right and shows nothing about the wire. `SocketCanBus` is the same driver
+against the real thing, is written, refuses to construct on a kernel without CAN rather than
+pretending, and `make check-vcan` exits non-zero where there is nothing to run against. What was one
+row in the *not dry-verifiable* column — bandwidth — is now that row plus the physical layer, and
+the driver's own suite prints the difference on every run instead of leaving it to be inferred from
+a green tick.
+
+### F26 — the CANopen driver reset every drive at open, which clears a latched fault.
+
+Found by a test, and by the one kind of test that finds this: a refusal with a control beside it.
+*"A drive that has latched a fault is refused, rather than commanded into one"* failed on its first
+run — because `open()` sent `NMT reset node` before reading anything, and a reset returns a CiA 402
+state machine to `switch on disabled`. The fault the test had just set was gone before the check
+looked.
+
+It is the shape this repository keeps finding and it is worse here than usual, because the erased
+thing is **evidence about why a robot stopped**. A driver that resets at open does it on every
+restart: an axis faults, an operator power-cycles the cell, the robot comes up clean, and the reason
+is in nobody's hands. The remedy is an ordering — NMT start and nothing else, then read the
+statusword, then refuse — and the refusal names `0x603F` so that whoever meets it can find out what
+happened before clearing it deliberately.
+
+Worth recording because the driver was *written* with the reset in it, deliberately, as the obvious
+way to get a drive into a known state. The obvious way was the defect.
 
 ---
 
