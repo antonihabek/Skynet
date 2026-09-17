@@ -4,7 +4,12 @@
 the reason `DRY-COVERAGE-PLAN.md` keeps its superseded findings; §84 is the text that holds, and it
 records where the built form departs from this one — a fourth warning, `motion_parameter_unused`; a
 fail-closed reading of `required`; and a match with a missing parameter blocked even on an optional
-motion. The second half of the Phase 4 paragraph at the end is §88.
+motion. The second half of the Phase 4 paragraph at the end is **§88, ratified 2026-09-17 and
+built** — and the answer it got is not the one this file expected. It names the second blocker as a
+missing channel from the supervisor to the process holding the driver; §88.1 finds that the channel
+was never needed, because a skill over a program-level body is a policy and the ring a policy
+already writes is the route. What was actually missing is the **admission rule** for a request
+arriving on one.
 
 It is the specification half of `DRY-COVERAGE-PLAN.md` Phase 3, whose *Decisions* 6 deferral expired
 when Phase 1's gate was met. The implementation half — the corpus cases, then the editions, then a
