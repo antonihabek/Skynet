@@ -79,6 +79,7 @@ fn body() -> EmbodimentDescriptor {
         }],
         control: ControlProfile {
             modes: vec!["position".to_string(), "torque".to_string()],
+            per_joint_modes: None,
             rate_hz_max: Some(200.0),
             rate_hz_min: Some(10.0),
             command_latency_ms: Some(4.0),

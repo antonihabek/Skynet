@@ -139,8 +139,20 @@ pub struct EmbodimentSensor {
 /// What the body will accept, and how fast.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ControlProfile {
-    /// Modes the body accepts at all.
+    /// Every mode this body accepts on some joint — the **union**, not the intersection (§86.1).
+    ///
+    /// A body whose arm is position-only and whose wheels are velocity-only declares both, and
+    /// which joint takes which is the joints' own `control_modes`. Before §86 this had to be the
+    /// intersection, because a command carried one mode for the whole body, and such a body
+    /// therefore declared nothing at all and could not be commanded.
     pub modes: Vec<String>,
+    /// Whether this driver reads the per-joint `modes` array on a command (§86.1).
+    ///
+    /// A descriptor field rather than an ABI version, for §24's homing precedent: a driver written
+    /// before §86 omits it, reads as exactly what it is, and keeps working. What it costs such a
+    /// body is that a plan mixing modes across its joints has every channel outside the first mode
+    /// blocked, because there is no way to deliver them in one command.
+    pub per_joint_modes: Option<bool>,
     /// Fastest loop the body will run.
     pub rate_hz_max: Option<f64>,
     /// Slowest loop the body will run.

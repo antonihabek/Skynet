@@ -470,6 +470,8 @@ pub struct TransportClamp<'a> {
     pub min_control_hz: Option<f64>,
     /// Per-channel ceilings, keyed by target joint name. Must be sorted by name.
     pub per_channel: &'a [(&'a str, f64)],
+    /// The mode each bound joint is commanded in (§86.3), keyed by joint name.
+    pub joint_modes: &'a [(&'a str, &'a str)],
     /// Provenance of the envelope figures.
     pub source: Option<&'a str>,
 }
@@ -657,6 +659,8 @@ pub struct ResolvedLimits<'a> {
     pub proximity: Option<Proximity>,
     /// Per-channel ceilings, borrowed from the transport clamp.
     pub per_channel: &'a [(&'a str, f64)],
+    /// The mode each bound joint is commanded in (§86.3), keyed by joint name.
+    pub joint_modes: &'a [(&'a str, &'a str)],
     /// Guards that will actually run.
     pub active_guards: FixedVec<Guard, MAX_TRIPPED>,
     /// Guards specified but inoperable here, with the input that is missing.
@@ -685,20 +689,44 @@ impl<'a> ResolvedLimits<'a> {
 
     /// The ceiling that applies to one channel.
     ///
-    /// Per-channel first, then the base-velocity ceiling for the reserved `base` channel. A
-    /// channel with neither has no ceiling here, and the kernel does not invent one: the
-    /// whole-body velocity and torque figures are not applied per channel because nothing at this
-    /// layer knows whether a given channel carries radians per second or newton-metres. That
-    /// knowledge lives in the transport plan, which is why the plan's `per_channel` is where a
-    /// joint's real ceiling comes from.
+    /// Three sources, and they **compose by narrowing**. The per-channel figure is the joint's own
+    /// rating carried by the transport plan and is the tightest thing anybody knows about that
+    /// joint. `base` is the reserved whole-body channel. The third is §86.3's: a joint is commanded
+    /// in a *mode*, and the mode says which of the two whole-body figures is in its units.
+    ///
+    /// Until §86 that last step was impossible and this comment said so — *"nothing at this layer
+    /// knows whether a given channel carries radians per second or newton-metres"* — so
+    /// `joint_velocity_max_rad_s` and `joint_torque_max_nm` were resolved through four layers,
+    /// rendered on the limits page, and applied to nothing.
+    ///
+    /// **Position is deliberately not in the table.** There is no whole-body position ceiling:
+    /// travel is a per-joint bound with two ends, and the plan carries the wider of them as this
+    /// joint's `per_channel` entry precisely because one magnitude cannot express it.
+    ///
+    /// Narrowing rather than precedence is DRY-COVERAGE-PLAN.md F36: a per-channel figure that won
+    /// outright would let a joint rated at 2 rad/s be commanded at 2 on a robot whose operator had
+    /// narrowed the body to 1.5.
     pub fn ceiling_for(&self, channel: &str) -> Option<f64> {
-        if let Some((_, limit)) = self.per_channel.iter().find(|(name, _)| *name == channel) {
-            return Some(*limit);
-        }
-        if channel == "base" {
-            return self.base_velocity_max_m_s;
-        }
-        None
+        let per_channel = self
+            .per_channel
+            .iter()
+            .find(|(name, _)| *name == channel)
+            .map(|(_, limit)| *limit);
+        let whole_body = if channel == "base" {
+            self.base_velocity_max_m_s
+        } else {
+            match self
+                .joint_modes
+                .iter()
+                .find(|(name, _)| *name == channel)
+                .map(|(_, mode)| *mode)
+            {
+                Some("velocity") => self.joint_velocity_max_rad_s,
+                Some("torque") => self.joint_torque_max_nm,
+                _ => None,
+            }
+        };
+        narrowest(&[per_channel, whole_body])
     }
 }
 
@@ -954,6 +982,7 @@ pub fn resolve_limits<'a>(params: &ResolveLimitsParams<'a>) -> ResolvedLimits<'a
         max_delta_per_cycle: max_delta,
         proximity: profile.and_then(|p| p.proximity),
         per_channel: transport.map(|t| t.per_channel).unwrap_or(&[]),
+        joint_modes: transport.map(|t| t.joint_modes).unwrap_or(&[]),
         active_guards: active,
         unavailable_guards: unavailable,
         inert_guards: inert,

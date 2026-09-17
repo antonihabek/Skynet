@@ -97,6 +97,12 @@ pub struct ChannelBinding {
     pub scale: f64,
     /// Hard ceiling for this channel in the target's units, handed to the Safety Kernel.
     pub limit: Option<f64>,
+    /// The control mode this binding commands its target joint in (§86.2), or `None` for a binding
+    /// that commands no joint — a gripper, a base, a retarget, a drop.
+    ///
+    /// Present on a blocked binding too: *which mode was asked for* is what a reader needs in order
+    /// to fix it, and a blocked binding is the one that is read most.
+    pub mode: Option<&'static str>,
     /// English, for logs. A UI translates from `method` plus the subjects.
     pub reason: String,
 }
@@ -196,6 +202,10 @@ pub enum TransportWarningCode {
     ActionSpaceAmbiguous,
     /// A motion binds, and a parameter the policy supplies is one the body's motion does not take.
     MotionParameterUnused,
+    /// Two channels command one joint in two modes (§86.2).
+    JointModeConflict,
+    /// The body is commanded in two modes and its driver reads one per command (§86.1).
+    MixedModesUnsupported,
 }
 
 impl TransportWarningCode {
@@ -219,6 +229,8 @@ impl TransportWarningCode {
             TransportWarningCode::ActionSpaceMismatch => "action_space_mismatch",
             TransportWarningCode::ActionSpaceAmbiguous => "action_space_ambiguous",
             TransportWarningCode::MotionParameterUnused => "motion_parameter_unused",
+            TransportWarningCode::JointModeConflict => "joint_mode_conflict",
+            TransportWarningCode::MixedModesUnsupported => "mixed_modes_unsupported",
         }
     }
 }
@@ -259,7 +271,7 @@ pub const TRANSPORT_VERDICTS: [TransportVerdict; 4] = [
 ];
 
 /// Every warning a plan can carry.
-pub const TRANSPORT_WARNING_CODES: [TransportWarningCode; 17] = [
+pub const TRANSPORT_WARNING_CODES: [TransportWarningCode; 19] = [
     TransportWarningCode::NoSourceEmbodiment,
     TransportWarningCode::UnverifiedEmbodiment,
     TransportWarningCode::NoTargetEnvelope,
@@ -278,6 +290,9 @@ pub const TRANSPORT_WARNING_CODES: [TransportWarningCode; 17] = [
     TransportWarningCode::ActionSpaceMismatch,
     TransportWarningCode::ActionSpaceAmbiguous,
     TransportWarningCode::MotionParameterUnused,
+    // §86, appended for the same reason.
+    TransportWarningCode::JointModeConflict,
+    TransportWarningCode::MixedModesUnsupported,
 ];
 
 impl TransportVerdict {
@@ -305,6 +320,11 @@ pub struct TransportClamp {
     pub min_control_hz: Option<f64>,
     /// Per-channel ceilings, keyed by target joint name.
     pub per_channel: Vec<(String, f64)>,
+    /// The mode each bound joint is commanded in (§86.3), keyed by joint name.
+    ///
+    /// What lets the Safety Kernel read a ceiling in the joint's own units. Empty on a plan that
+    /// binds no joint, and omitted from the wire in that case.
+    pub joint_modes: Vec<(String, &'static str)>,
     /// Where the envelope figures came from. A limit with no provenance is a rumour.
     pub source: Option<String>,
 }
@@ -595,6 +615,10 @@ pub fn resolve_transport(
     // decided first, and every channel on such a chain is then marked together.
     let retarget_chains = decide_retarget_chains(source, &index, target, options, &mut warnings);
 
+    // §86.2's record of which joint is already commanded in which mode, filled as the channels bind
+    // and read by the binder that would be the second onto a joint.
+    let mut bound: Vec<(String, &'static str)> = Vec::new();
+    let per_joint_modes = target.control.per_joint_modes == Some(true);
     for channel in &source.action_channels {
         bindings.push(bind_channel(
             channel,
@@ -602,6 +626,8 @@ pub fn resolve_transport(
             &index,
             &retarget_chains,
             &mut warnings,
+            &mut bound,
+            per_joint_modes,
         ));
     }
 
@@ -946,6 +972,8 @@ fn bind_channel(
     index: &TargetIndex<'_>,
     retarget_chains: &BTreeSet<String>,
     warnings: &mut Vec<TransportWarning>,
+    bound: &mut Vec<(String, &'static str)>,
+    per_joint_modes: bool,
 ) -> ChannelBinding {
     let parsed = parse_role(channel.role.as_deref());
 
@@ -964,6 +992,8 @@ fn bind_channel(
                 TransportMethod::Direct,
                 "Joint name matches exactly.".to_string(),
                 warnings,
+                bound,
+                per_joint_modes,
             );
         }
     }
@@ -979,6 +1009,8 @@ fn bind_channel(
                 TransportMethod::Remap,
                 reason,
                 warnings,
+                bound,
+                per_joint_modes,
             );
         }
 
@@ -991,6 +1023,7 @@ fn bind_channel(
                 target: None,
                 scale: 1.0,
                 limit: None,
+                mode: None,
                 reason: format!(
                     "Driven through task space on the {} chain; this body has no {}.",
                     parsed.chain, key
@@ -1008,6 +1041,7 @@ fn bind_channel(
             target: None,
             scale: 0.0,
             limit: None,
+            mode: None,
             reason: "No equivalent on this body, and the policy declares the channel optional."
                 .to_string(),
         };
@@ -1020,6 +1054,7 @@ fn bind_channel(
         target: None,
         scale: 1.0,
         limit: None,
+        mode: None,
         reason: match &parsed {
             Some(parsed) => format!(
                 "This body has no {} and the policy requires it.",
@@ -1045,6 +1080,8 @@ fn bind_non_joint_channel(
         target: target_name,
         scale,
         limit,
+        // A non-joint channel commands no joint, so it carries no mode (§86.2).
+        mode: None,
         reason,
     };
 
@@ -1174,6 +1211,8 @@ fn finish_joint_binding(
     method: TransportMethod,
     reason: String,
     warnings: &mut Vec<TransportWarning>,
+    bound: &mut Vec<(String, &'static str)>,
+    per_joint_modes: bool,
 ) -> ChannelBinding {
     let rating = rating_for(&channel.kind, &joint.limits);
     let scale = scale_for(channel.peak, rating);
@@ -1188,8 +1227,79 @@ fn finish_joint_binding(
                 target: Some(joint.name.clone()),
                 scale: 1.0,
                 limit: rating,
+                mode: Some(mode),
                 reason: format!("\"{}\" does not accept {mode} commands.", joint.name),
             };
+        }
+    }
+
+    // §86.2. One joint, one mode, per cycle. A second channel onto a joint already bound in another
+    // mode would meet it as one entry in `values` and one in `modes`, and the command would carry
+    // whichever was written last. First-wins, as §84.3's binder does with a repeated motion.
+    if let Some(mode) = mode {
+        let already = bound
+            .iter()
+            .find(|(name, _)| *name == joint.name)
+            .map(|(_, m)| *m);
+        if let Some(already) = already {
+            if already != mode {
+                warnings.push(TransportWarning {
+                    code: TransportWarningCode::JointModeConflict,
+                    message: format!(
+                        "\"{}\" is already bound in {already}; a joint carries one mode per cycle, so this {mode} channel is blocked.",
+                        joint.name
+                    ),
+                    subjects: Some(alloc::vec![joint.name.clone()]),
+                });
+                return ChannelBinding {
+                    source_index: channel.index,
+                    source_role: channel.role.clone(),
+                    method: TransportMethod::Blocked,
+                    target: Some(joint.name.clone()),
+                    scale: 1.0,
+                    limit: rating,
+                    mode: Some(mode),
+                    reason: format!(
+                        "\"{}\" is commanded in {already} by an earlier channel, and a joint takes one mode per cycle.",
+                        joint.name
+                    ),
+                };
+            }
+        }
+
+        // §86.1's other half. A driver that does not read the per-joint array takes one mode for
+        // the whole command, so a channel in a second mode cannot be delivered to it at all.
+        // Blocked and named: the alternative an integration reaches for is to command the joints
+        // sharing the majority mode and drop the rest, and a body that accepted a position command
+        // and silently moved two thirds of itself is what §24's shape exists to make impossible.
+        let elsewhere = bound.iter().map(|(_, m)| *m).find(|other| *other != mode);
+        if let Some(elsewhere) = elsewhere {
+            if !per_joint_modes {
+                warnings.push(TransportWarning {
+                    code: TransportWarningCode::MixedModesUnsupported,
+                    message: format!(
+                        "This body is already commanded in {elsewhere} and its driver reads one mode per command, so the {mode} channel on \"{}\" cannot be delivered.",
+                        joint.name
+                    ),
+                    subjects: Some(alloc::vec![joint.name.clone()]),
+                });
+                return ChannelBinding {
+                    source_index: channel.index,
+                    source_role: channel.role.clone(),
+                    method: TransportMethod::Blocked,
+                    target: Some(joint.name.clone()),
+                    scale: 1.0,
+                    limit: rating,
+                    mode: Some(mode),
+                    reason: format!(
+                        "This driver does not declare per-joint modes (\u{a7}86.1), and the body is already commanded in {elsewhere}."
+                    ),
+                };
+            }
+        }
+
+        if already.is_none() {
+            bound.push((joint.name.clone(), mode));
         }
     }
 
@@ -1221,6 +1331,7 @@ fn finish_joint_binding(
         target: Some(joint.name.clone()),
         scale,
         limit: rating,
+        mode,
         reason,
     }
 }
@@ -1372,8 +1483,15 @@ fn build_clamp(
 ) -> Option<TransportClamp> {
     let envelope = target.envelope.as_ref();
     let mut per_channel: Vec<(String, f64)> = Vec::new();
+    let mut joint_modes: Vec<(String, &'static str)> = Vec::new();
 
     for binding in bindings {
+        // A blocked binding commands nothing, so it contributes neither a ceiling nor a mode. It
+        // carries `limit` — the rating of the joint it could not command — so a reader can see what
+        // was on offer, and that is the only thing it is for.
+        if binding.method == TransportMethod::Blocked {
+            continue;
+        }
         if let (Some(name), Some(limit)) = (&binding.target, binding.limit) {
             match per_channel.iter_mut().find(|(key, _)| key == name) {
                 // A later binding on the same target overwrites, matching an object assignment.
@@ -1381,9 +1499,16 @@ fn build_clamp(
                 None => per_channel.push((name.clone(), limit)),
             }
         }
+        // §86.3. Without this the kernel cannot read a ceiling in the right units.
+        if let (Some(name), Some(mode)) = (&binding.target, binding.mode) {
+            match joint_modes.iter_mut().find(|(key, _)| key == name) {
+                Some(entry) => entry.1 = mode,
+                None => joint_modes.push((name.clone(), mode)),
+            }
+        }
     }
 
-    if envelope.is_none() && per_channel.is_empty() {
+    if envelope.is_none() && per_channel.is_empty() && joint_modes.is_empty() {
         return None;
     }
 
@@ -1394,6 +1519,7 @@ fn build_clamp(
         base_velocity_max_m_s: envelope.and_then(|e| e.base_velocity_max_m_s),
         min_control_hz: watchdog_ms.filter(|ms| *ms > 0.0).map(|ms| 1000.0 / ms),
         per_channel,
+        joint_modes,
         source: envelope.and_then(|e| e.source.clone()),
     })
 }

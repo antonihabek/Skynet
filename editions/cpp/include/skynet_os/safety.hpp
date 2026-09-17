@@ -54,6 +54,10 @@ struct Limits {
   Json min_control_hz = Json::null();
   std::optional<double> max_delta_per_cycle;
   Json per_channel = Json::object();
+  /// §86.3's map: the mode each bound joint is commanded in, from the transport plan. Without it
+  /// the two whole-body figures above could not be applied to a joint at all — nothing at this
+  /// layer knew whether a channel carried radians per second or newton-metres.
+  Json joint_modes = Json::object();
   Json proximity = Json::null();
   Json workspace = Json::array();
   Json self_collision_margin_m = Json::null();

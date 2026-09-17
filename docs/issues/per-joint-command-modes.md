@@ -1,6 +1,17 @@
 # Proposed amendment — §24 says what a body is commanded in; it cannot say what a *joint* is
 
-**Status: an issue, not a change.** See [`README.md`](README.md).
+**Status: ratified 2026-09-17 as §86 of the specification, and built.** Kept as the proposal it was.
+**Route A**, which this file recommends, is what was built.
+
+Three things §86 settled that this file left open, each recorded in the section that makes it. The
+per-joint values are **not** `RHAL_MODE_*` — they are a second numbering, `SKR_JMODE_*`, offset so
+that a bare mode constant written into the array is refused rather than silently meaning something
+else; `INHERIT` is nonetheless 0, because an unfilled array must read as ABI 1 and not as "every
+joint on position". The ABI version **does not bump**: the flag that says the array is present lives
+in a byte that was already padding, which is §27's homing precedent. And the cost this file put at
+*"every guard in §7.1 that reads units"* was smaller than it estimated and pointed somewhere else —
+the guards were already per channel, and what was missing was that two resolved whole-body figures
+had never been applied to any channel at all (`DRY-COVERAGE-PLAN.md` F36).
 
 It came out of `DRY-COVERAGE-PLAN.md` Phase 2's `ros2_control` row rather than from reading the
 document, which is why it is worth filing: the driver is built, it passes, and the thing it cannot

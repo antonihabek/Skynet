@@ -1,15 +1,23 @@
 <?xml version="1.0"?>
 <!--
-  The body §24 cannot command, and the reason this driver computes an intersection.
+  The body §24 could not command, and the file the amendment that fixed it was written from.
 
   `shoulder` takes `position`; `elbow` takes `velocity`. `ros2_control` is entirely happy with that
-  — command interfaces are per joint — and §24's command carries **one mode for the whole body**.
-  There is no mode in which both joints can be told anything, so the descriptor declares none, and
-  `write_command` refuses whatever it is handed.
+  — command interfaces are per joint — and §24's command used to carry **one mode for the whole
+  body**. There was no mode in which both joints could be told anything, so the descriptor declared
+  none and `write_command` refused whatever it was handed: a perfectly ordinary mobile manipulator,
+  uncommandable through this platform.
 
-  Commanding the joints that happen to match would be worse than refusing: a body half commanded in
-  position and half holding is a trajectory nobody asked for, which is §25.2's argument about two
-  policies arriving one layer down.
+  §86 is the amendment. The descriptor now declares the **union**, each joint carries its own mode,
+  and one `skr_command` commands both. **The robot below is unchanged** — every element, attribute
+  and value of it — and the suite that runs against it asserts the opposite of what it used to.
+  That is what ratifying an amendment looks like from inside a driver: the fixture stays put and
+  the expectations invert. Only this comment moved.
+
+  What has not changed is the rule underneath. Commanding only the joints that happen to match a
+  body-wide mode would still be worse than refusing — a body half commanded and half holding is a
+  trajectory nobody asked for, §25.2's argument one layer down — so a v1 command against this body
+  is refused by name rather than partly applied.
 -->
 <robot name="mixed_interfaces">
   <link name="base_link"/>

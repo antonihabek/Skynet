@@ -22,6 +22,7 @@ extern uint32_t mock_commands_accepted(const skr_ctx *ctx);
 extern uint32_t mock_commands_rejected(const skr_ctx *ctx);
 extern float mock_applied(const skr_ctx *ctx, int joint);
 extern uint8_t mock_applied_mask(const skr_ctx *ctx, int joint);
+extern uint8_t mock_applied_mode(const skr_ctx *ctx, int joint);
 
 static int failures = 0;
 static int checks = 0;
@@ -91,15 +92,20 @@ static int check_estop(const skr_driver *driver) {
   driver->read_state(ctx, &s, 0);
   int flagged = (s.flags & SKR_FLAG_ESTOP) != 0;
 
+  /* Per-joint (§86.1), so the refusal below is the estop's and not this body's wrist refusing a
+     torque it does not accept. A check that passes for the wrong reason has proved nothing. */
   float values[3] = {1.0f, 1.0f, 1.0f};
   uint8_t mask[3] = {1, 1, 1};
+  uint8_t modes[3] = {SKR_JMODE_INHERIT, SKR_JMODE_INHERIT, SKR_JMODE_POSITION};
   skr_command cmd;
   memset(&cmd, 0, sizeof cmd);
   cmd.seq = 1;
   cmd.mode = SKR_MODE_TORQUE;
+  cmd.flags = SKR_CMD_PER_JOINT_MODES;
   cmd.joint_count = 3;
   cmd.values = values;
   cmd.mask = mask;
+  cmd.modes = modes;
   int refused = driver->write_command(ctx, &cmd, 0) == SKR_EPERM;
 
   driver->close(ctx);
@@ -136,16 +142,23 @@ static int check_estop_zeroes(const skr_driver *driver) {
   skr_ctx *ctx = NULL;
   if (driver->open("", &ctx) != SKR_OK) return 0;
 
+  /* Per-joint, so the command is actually applied and the stop below has something to zero. */
   float values[3] = {10.0f, 5.0f, 1.0f};
   uint8_t mask[3] = {1, 1, 1};
+  uint8_t modes[3] = {SKR_JMODE_INHERIT, SKR_JMODE_INHERIT, SKR_JMODE_POSITION};
   skr_command cmd;
   memset(&cmd, 0, sizeof cmd);
   cmd.seq = 1;
   cmd.mode = SKR_MODE_TORQUE;
+  cmd.flags = SKR_CMD_PER_JOINT_MODES;
   cmd.joint_count = 3;
   cmd.values = values;
   cmd.mask = mask;
-  driver->write_command(ctx, &cmd, 0);
+  cmd.modes = modes;
+  if (driver->write_command(ctx, &cmd, 0) != SKR_OK) {
+    driver->close(ctx);
+    return 0;
+  }
 
   int ok = driver->emergency_stop(ctx) == SKR_OK;
   for (int j = 0; j < 3; ++j) {
@@ -208,19 +221,71 @@ int main(void) {
         driver->describe(ctx, tiny, sizeof tiny) == SKR_EINVAL);
 
   /* ── rhal.command.rejection ───────────────────────────────────────────── */
+  /*
+   * §86.1, and the command below is the section in one object. This body's J1 and J2 accept torque
+   * and its J3 accepts position only — which is a mixed-mode body, and until §86 there was no way
+   * to command one. The suite used to send `mode = TORQUE` with all three joints unmasked and the
+   * driver accepted it, so a position-only wrist was being handed newton-metres and nothing said
+   * so (DRY-COVERAGE-PLAN.md F37). It is now refused, and the check for that is below.
+   */
   float values[3] = {10.0f, 5.0f, 1.0f};
   uint8_t mask[3] = {1, 1, 1};
+  uint8_t modes[3] = {SKR_JMODE_INHERIT, SKR_JMODE_INHERIT, SKR_JMODE_POSITION};
   skr_command cmd;
   memset(&cmd, 0, sizeof cmd);
   cmd.stamp_ns = state.stamp_ns;
   cmd.seq = 1;
   cmd.mode = SKR_MODE_TORQUE;
+  cmd.flags = SKR_CMD_PER_JOINT_MODES;
   cmd.joint_count = 3;
   cmd.values = values;
   cmd.mask = mask;
+  cmd.modes = modes;
 
   CHECK("rhal.command.rejection", "accepts a well-formed command",
         driver->write_command(ctx, &cmd, 0) == SKR_OK);
+  /* Inheritance resolved: two joints took the command's own mode and the third took its own. */
+  CHECK("rhal.command.rejection", "a joint inherits the command's mode",
+        mock_applied_mode(ctx, 0) == SKR_MODE_TORQUE);
+  CHECK("rhal.command.rejection", "a joint's own mode overrides",
+        mock_applied_mode(ctx, 2) == SKR_MODE_POSITION);
+
+  /* The same command with the flag cleared is the body-wide one, and this body cannot take it: its
+   * wrist does not accept torque. EPERM rather than EINVAL — the request is well formed and this
+   * machine will not do it. */
+  cmd.flags = 0;
+  CHECK("rhal.command.rejection", "a body-wide mode no joint offers is refused",
+        driver->write_command(ctx, &cmd, 0) == SKR_EPERM);
+  cmd.flags = SKR_CMD_PER_JOINT_MODES;
+
+  /* A bare SKR_MODE_* written into the per-joint array. This is the transcription error the second
+   * numbering exists to catch, and catching it is what makes the offset worth its cost: without it
+   * `SKR_MODE_VELOCITY` (1) would be a legal-looking entry rather than a refusal. */
+  modes[2] = SKR_MODE_TORQUE;
+  CHECK("rhal.command.rejection", "a base mode value in the per-joint array is refused",
+        driver->write_command(ctx, &cmd, 0) == SKR_EINVAL);
+  modes[2] = SKR_JMODE_POSITION;
+
+  /* A well-formed per-joint mode this joint does not offer. */
+  modes[2] = SKR_JMODE_TORQUE;
+  CHECK("rhal.command.rejection", "a per-joint mode the joint does not offer is refused",
+        driver->write_command(ctx, &cmd, 0) == SKR_EPERM);
+  modes[2] = SKR_JMODE_POSITION;
+
+  /* And the masked half of that rule: a joint the command says nothing about is not checked, or a
+   * body-wide hold could not be expressed on a mixed body at all. */
+  {
+    uint8_t none[3] = {0, 0, 0};
+    uint8_t wrong[3] = {SKR_JMODE_INHERIT, SKR_JMODE_INHERIT, SKR_JMODE_TORQUE};
+    cmd.mask = none;
+    cmd.modes = wrong;
+    cmd.seq = 4;
+    CHECK("rhal.command.rejection", "a masked joint's mode is not checked",
+          driver->write_command(ctx, &cmd, 0) == SKR_OK);
+    cmd.mask = mask;
+    cmd.modes = modes;
+    cmd.seq = 1;
+  }
 
   cmd.joint_count = 9;
   CHECK("rhal.command.rejection", "rejects a wrong joint count",

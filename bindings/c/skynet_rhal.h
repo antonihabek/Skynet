@@ -107,6 +107,58 @@ extern "C" {
 #define SKR_MODE_VELOCITY  1   /* values are rad/s (or m/s) */
 #define SKR_MODE_TORQUE    2   /* values are Nm (or N) */
 
+/* ── Per-joint control modes, §86.1 ──────────────────────────────────────────
+ *
+ * §24's command carried one mode for the whole body while its mask was per joint, and the asymmetry
+ * had a cost nobody had written down: a mobile manipulator with the arm on position and the wheels
+ * on velocity is one body, is one `<ros2_control>` element in every ROS 2 robot that has ever
+ * shipped, and could not be expressed in one `skr_command`. Two commands in alternate cycles is not
+ * an answer — `seq` MUST advance and the watchdog reads a repeat as a stalled producer, so a driver
+ * splitting a frame in two would be sending two half-bodies at half rate.
+ *
+ * `skr_command.modes` is the array. These are its values, and **they are deliberately not
+ * `SKR_MODE_*`.**
+ *
+ *   0x00  SKR_JMODE_INHERIT    take `skr_command.mode`
+ *   0x10  SKR_JMODE_POSITION
+ *   0x11  SKR_JMODE_VELOCITY
+ *   0x12  SKR_JMODE_TORQUE
+ *
+ * Zero is `inherit` because zero is what a `calloc` gives you, and a producer that allocated the
+ * array and forgot to fill it must read as *the mode the command already carries* — which is
+ * exactly ABI 1 — rather than as "every joint on position", which would deliver velocity setpoints
+ * to position-controlled joints and look like success. That is the whole argument for the second
+ * numbering, and the offset is what makes the mistake it invites loud: writing `SKR_MODE_TORQUE`
+ * (2) into this array is not a valid entry at all, so a driver refuses it with SKR_EINVAL instead
+ * of moving a joint in the wrong units.
+ *
+ * `skr_command.flags` says whether the array is there to read. It was `_pad[0]` — three bytes of
+ * explicit padding at a fixed offset, zero in every command any producer has ever written — which
+ * is the §27 homing precedent one field along: no offset moves, SKYNET_RHAL_ABI_VERSION does not
+ * bump, and a v1 driver compiled in 2026 keeps loading and keeps working.
+ *
+ * A driver that reads the array declares `"control": { "per_joint_modes": true }` from describe().
+ * Transport refuses to mix modes across a body whose descriptor does not say so, so such a driver
+ * is never handed a command it would have to interpret. */
+#define SKR_JMODE_INHERIT   0x00u
+#define SKR_JMODE_POSITION  0x10u
+#define SKR_JMODE_VELOCITY  0x11u
+#define SKR_JMODE_TORQUE    0x12u
+
+/* The per-joint spelling of an `SKR_MODE_*`, and its inverse. Written as macros rather than left to
+ * each caller's arithmetic, because `0x10 | mode` appearing in five drivers is five places for the
+ * relation to be got wrong. */
+#define SKR_JMODE_OF(mode)  ((uint8_t)(0x10u | (unsigned)(mode)))
+#define SKR_MODE_OF_JMODE(jmode) ((uint8_t)((unsigned)(jmode) & 0x0fu))
+/* Whether a `modes` entry is one this ABI defines. Anything else is SKR_EINVAL. */
+#define SKR_JMODE_VALID(jmode) \
+  ((jmode) == SKR_JMODE_INHERIT || ((jmode) >= SKR_JMODE_POSITION && (jmode) <= SKR_JMODE_TORQUE))
+
+/* ── Command flags, §86.1 ─────────────────────────────────────────────────── */
+/* `modes` is present and readable. Absent — the zero this byte has always carried — means the
+ * command is one mode for the whole body, which is every command written before §86. */
+#define SKR_CMD_PER_JOINT_MODES  (1u << 0)
+
 typedef struct skr_ctx skr_ctx;
 
 /*
@@ -138,15 +190,23 @@ typedef struct {
  * between holding position and going limp. It is also where a `drop` binding from the transport
  * plan meets the wire: a channel this body has no equivalent for becomes a masked joint rather
  * than a fabricated value.
+ *
+ * `modes` is §86.1's, and it is the mask's missing counterpart: the mask has always been per joint
+ * and the mode was not. A driver reads it only when `flags` says it is there, and every joint whose
+ * entry is SKR_JMODE_INHERIT — or every joint at all, when the flag is clear — takes `mode`.
  */
 typedef struct {
   uint64_t       stamp_ns;    /* when the command was produced, not when it was sent */
   uint32_t       seq;         /* MUST advance; a repeat is treated as a stalled producer */
-  uint8_t        mode;        /* SKR_MODE_* */
-  uint8_t        _pad[3];
+  uint8_t        mode;        /* SKR_MODE_*; the mode of every joint that inherits */
+  uint8_t        flags;       /* SKR_CMD_*; was _pad[0], and zero in every ABI-1 command */
+  uint8_t        _pad[2];
   uint16_t       joint_count;
-  const float   *values;      /* [joint_count]; units follow `mode` */
+  const float   *values;      /* [joint_count]; units follow this joint's mode */
   const uint8_t *mask;        /* [joint_count]; 0 = hold, non-zero = apply */
+  /* [joint_count] of SKR_JMODE_*, §86.1. Read ONLY when SKR_CMD_PER_JOINT_MODES is set in
+   * `flags` — a command from a producer that predates §86 does not have this field. */
+  const uint8_t *modes;
 } skr_command;
 
 /* One sensor frame. `data` is driver-owned and valid until the next read of the same sensor. */

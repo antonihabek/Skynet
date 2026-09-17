@@ -352,6 +352,23 @@ impl Owned {
         out
     }
 
+    /// The mode each bound joint is commanded in (§86.3), sorted by name for the reason above.
+    fn joint_mode_refs(&self) -> Vec<(&str, &str)> {
+        let mut out: Vec<(&str, &str)> = self
+            .transport
+            .as_ref()
+            .map(|clamp| {
+                clamp
+                    .joint_modes
+                    .iter()
+                    .map(|(name, mode)| (name.as_str(), &mode[..]))
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.sort_by_key(|(name, _)| *name);
+        out
+    }
+
     /// Resolve, and hand the result to `f`.
     ///
     /// A closure because a resolved set borrows four separate views that have to outlive it and
@@ -366,6 +383,7 @@ impl Owned {
         f: impl FnOnce(&ResolvedLimits<'_>, Option<&Envelope<'_>>) -> T,
     ) -> T {
         let per_channel = self.per_channel_refs();
+        let joint_modes = self.joint_mode_refs();
         let frame_refs: Option<Vec<Frame<'_>>> = self.frames.as_ref().map(FlatFrames::frames);
         let volumes: Vec<Volume<'_>> = self
             .cell
@@ -386,6 +404,7 @@ impl Owned {
                 base_velocity_max_m_s: clamp.base_velocity_max_m_s,
                 min_control_hz: clamp.min_control_hz,
                 per_channel: &per_channel,
+                joint_modes: &joint_modes,
                 source: clamp.source.as_deref(),
             }),
             // §38.2's session layer. `None` here means either that none is set or that the one on
@@ -1439,6 +1458,7 @@ mod tests {
             // Deliberately out of order: the plan is a document with an order of its own and the
             // kernel's interface asks for sorted.
             per_channel: vec![("wrist".to_string(), 0.2), ("elbow".to_string(), 0.4)],
+            joint_modes: Vec::new(),
             source: Some("plan".to_string()),
         };
         let owned = bench.resolve(ROBOT_TIER).with_package("acme/walk", clamp);

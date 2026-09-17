@@ -65,6 +65,40 @@ impl ReadFailure {
     }
 }
 
+/// One command a [`Fake`] was given, kept so a test can assert what reached the wire.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Written {
+    /// The mode of every joint that inherits.
+    pub mode: u8,
+    /// The setpoints.
+    pub values: Vec<f32>,
+    /// 0 = hold, non-zero = apply.
+    pub mask: Vec<u8>,
+    /// `SKR_JMODE_*` per joint (§86.1), empty on a body-wide command.
+    pub modes: Vec<u8>,
+}
+
+/// One command the loop is about to write.
+///
+/// A struct rather than six arguments, and that is not only a lint: `values`, `mask` and `modes`
+/// are three arrays indexed by one joint count, two of them `&[u8]`, and passing them positionally
+/// is an invitation to swap the two whose meanings are unrelated.
+pub struct Write<'a> {
+    /// When the command was produced, not when it was sent.
+    pub stamp_ns: u64,
+    /// Must advance; a repeat is a stalled producer to the watchdog.
+    pub seq: u32,
+    /// The mode of every joint that inherits (§86.1).
+    pub mode: u8,
+    /// Setpoints, in each joint's own units.
+    pub values: &'a [f32],
+    /// 0 = hold, non-zero = apply.
+    pub mask: &'a [u8],
+    /// `SKR_JMODE_*` per joint (§86.1), or **empty** for a body commanded in one mode — which is
+    /// every body that predates the section, and every body whose joints agree.
+    pub modes: &'a [u8],
+}
+
 /// A body the loop can read and command.
 pub trait Actuator {
     /// How many joints, which is the width of every array crossing this trait.
@@ -81,15 +115,7 @@ pub trait Actuator {
     fn state(&self) -> (&[f32], &[f32], &[f32]);
 
     /// Write one command. The return is the driver's own code; negative is an `errno` (§24).
-    fn command(
-        &mut self,
-        stamp_ns: u64,
-        seq: u32,
-        mode: u8,
-        values: &[f32],
-        mask: &[u8],
-        now_ns: u64,
-    ) -> i32;
+    fn command(&mut self, write: Write<'_>, now_ns: u64) -> i32;
 
     /// Whether this body has an emergency stop at all.
     ///
@@ -165,22 +191,38 @@ impl Actuator for Rhal {
         )
     }
 
-    fn command(
-        &mut self,
-        stamp_ns: u64,
-        seq: u32,
-        mode: u8,
-        values: &[f32],
-        mask: &[u8],
-        now_ns: u64,
-    ) -> i32 {
+    fn command(&mut self, write: Write<'_>, now_ns: u64) -> i32 {
         // `-ENOSYS` on the one error this can return: a vtable with no `write_command`. `accepts`
         // rejects that before a context is opened, so it is unreachable through `Rhal::open` — and
         // it is given a code rather than a panic because the loop's contract is that a cycle always
         // produces a record, and a record of `-ENOSYS` is a true one.
-        self.driver
-            .write_command(stamp_ns, seq, mode, values, mask, now_ns)
-            .unwrap_or(-38)
+        //
+        // §86.1: an empty `modes` is a body-wide command and takes the entry point every driver
+        // written before §86 understands. The array is sent only when there is one, so a v1 driver
+        // is never handed a flag it does not read.
+        let result = if write.modes.is_empty() {
+            self.driver.write_command(
+                write.stamp_ns,
+                write.seq,
+                write.mode,
+                write.values,
+                write.mask,
+                now_ns,
+            )
+        } else {
+            self.driver.write_modal(
+                skynet_dl::driver::ModalFrame {
+                    stamp_ns: write.stamp_ns,
+                    seq: write.seq,
+                    mode: write.mode,
+                    values: write.values,
+                    mask: write.mask,
+                    modes: write.modes,
+                },
+                now_ns,
+            )
+        };
+        result.unwrap_or(-38)
     }
 
     fn has_stop(&self) -> bool {
@@ -221,7 +263,8 @@ pub struct Fake {
     /// Set to make the next [`Actuator::sample`] fail.
     pub read_fails: bool,
     /// Every command the loop wrote, as `(mode, values, mask)`.
-    pub written: Vec<(u8, Vec<f32>, Vec<u8>)>,
+    /// Every command this fake was given, in order.
+    pub written: Vec<Written>,
     /// The sample sequence, which advances on every read.
     pub seq: u32,
     /// Reported verbatim on every sample.
@@ -282,7 +325,7 @@ impl Fake {
     }
 
     /// The values of the last command written, or `None` if nothing has been written.
-    pub fn last(&self) -> Option<&(u8, Vec<f32>, Vec<u8>)> {
+    pub fn last(&self) -> Option<&Written> {
         self.written.last()
     }
 }
@@ -318,15 +361,10 @@ impl Actuator for Fake {
         (&self.position, &self.velocity, &self.effort)
     }
 
-    fn command(
-        &mut self,
-        _stamp_ns: u64,
-        _seq: u32,
-        mode: u8,
-        values: &[f32],
-        mask: &[u8],
-        _now_ns: u64,
-    ) -> i32 {
+    fn command(&mut self, write: Write<'_>, _now_ns: u64) -> i32 {
+        let Write {
+            mode, values, mask, ..
+        } = write;
         // A masked-out channel is one the OS said nothing about, so the fake holds it — which is
         // what §24 says a zero mask means, and modelling it as "commanded to `values[i]`" would let
         // a test pass over the exact bug the mask exists to prevent.
@@ -337,7 +375,12 @@ impl Actuator for Fake {
                 }
             }
         }
-        self.written.push((mode, values.to_vec(), mask.to_vec()));
+        self.written.push(Written {
+            mode,
+            values: values.to_vec(),
+            mask: mask.to_vec(),
+            modes: write.modes.to_vec(),
+        });
         self.write_result
     }
 

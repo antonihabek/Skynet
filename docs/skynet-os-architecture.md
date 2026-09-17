@@ -5524,8 +5524,8 @@ miniature, and currently trivial to fix.
 | Discovery — finding a robot on the link | §82 | **Built on both sides** — the DNS-SD wire format, RFC 6763's TXT convention, what a robot may advertise, a one-shot browse behind `skynet discover`, and §82.4's responder in `skynetd`: probing, defending, answering and refusing. 106 tests, and it has run between two daemons on one link | The **goodbye** has a caller since 2026-09-07: `POST /shutdown` withdraws the name, seals §13's window with `Reason::Shutdown` and exits, and the unit's `ExecStop=` is what calls it. A robot that loses power still sends nothing, which is what the TTL is for. The **browse** still cannot hold 5353 (§82.3), so it sees answers to its own question and never an unsolicited announcement — which is why there is no watch mode here and why §83.3's applications use their platform's resolver instead |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **147,000 lines of Rust** across **twenty-six crates**, held by a
-corpus of 84 files and 1,314 cases to **15,000 lines** of the TypeScript reference edition and
+**Built** means running, tested code: **148,000 lines of Rust** across **twenty-six crates**, held by a
+corpus of 86 files and 1,332 cases to **15,000 lines** of the TypeScript reference edition and
 **16,000 lines** of the Python edition, with **10,000 lines** of drivers and **9,000 lines** in the
 Hub's mirror of the shared contracts.
 
@@ -7186,3 +7186,183 @@ The corpus holds eight editions to it: thirty of `admission/tokens` — one stri
 the classification is where editions diverge and an admission case would hide which half of the
 decision did — eleven of `admission/vocabulary` for what admission does with the answer, and three
 closed sets.
+
+---
+
+## 86. Amendment to §7.1 and §24 — the mode is a property of a joint
+
+§24's command carries one mode for the whole body, and its mask is per joint:
+
+```c
+uint8_t  mode;            /* SKR_MODE_POSITION | _VELOCITY | _TORQUE */
+uint16_t joint_count;
+const float   *values;    /* [joint_count]; units follow `mode` */
+const uint8_t *mask;      /* [joint_count]; 0 = hold this joint at its current setpoint */
+```
+
+§24 explains the mask at length and for a good reason — *"the mask is how the OS says nothing rather
+than saying zero"* — and the asymmetry beside it went unremarked until a driver was written against
+a framework that does not share it.
+
+**A mixed-mode body had no representation.** A mobile manipulator with the arm on position and the
+wheels on velocity is one body, is one `<ros2_control>` element in every ROS 2 robot that has ever
+shipped, and could not be expressed in one `rhal_command`. Two commands in alternate cycles is not
+an answer: `seq` MUST advance and the watchdog reads a repeat as a stalled producer, so a driver
+splitting a frame in two would be sending the kernel two half-bodies at half rate, each holding the
+other half by mask.
+
+What it cost is on the record in `drivers/ros2_control`, which declared the **intersection** — the
+modes every joint offers — because that was the only truthful descriptor available:
+
+| URDF | `control.modes` |
+|---|---|
+| both joints `position` and `velocity` | `["position", "velocity"]` |
+| one `position`, one `velocity` | `[]` |
+
+A body whose joints share no mode was reported with no control modes at all, every `write_command`
+against it was refused, and `skynet driver check` read it exactly as it reads `drivers/pendant`
+(§59.2): the joints are reported, and there is no mode in which this driver commands them.
+Conservative, honest, and it meant a perfectly ordinary robot was uncommandable through this
+platform.
+
+The alternative is what an integration reaches for, and is the reason this is a section rather than
+a note: pick the mode most joints offer, command those, and drop the rest. **A body that accepted a
+position command and silently moved two thirds of itself is the exact failure §24's shape exists to
+make impossible**, and it presents as a robot that *mostly* works — the worst available symptom,
+because it survives a demonstration.
+
+### 86.1 The command carries a mode per joint
+
+`skr_command` gains **`modes`**, and the field beside it is the point:
+
+```c
+typedef struct {
+  uint64_t       stamp_ns;
+  uint32_t       seq;
+  uint8_t        mode;        /* SKR_MODE_*; the mode of every joint that inherits */
+  uint8_t        flags;       /* SKR_CMD_*; was _pad[0], and zero in every ABI-1 command */
+  uint8_t        _pad[2];
+  uint16_t       joint_count;
+  const float   *values;      /* [joint_count]; units follow this joint's mode */
+  const uint8_t *mask;        /* [joint_count]; 0 = hold, non-zero = apply */
+  const uint8_t *modes;       /* [joint_count] of SKR_JMODE_*; read only when the flag is set */
+} skr_command;
+```
+
+**`SKYNET_RHAL_ABI_VERSION` does not bump**, and that is §27's homing precedent one field along.
+`flags` was `_pad[0]` — explicit padding at a fixed offset, zero in every command any producer has
+ever written — so `SKR_CMD_PER_JOINT_MODES` occupies a bit nobody has ever set, no offset before
+`modes` moves, and a v1 driver compiled in 2026 keeps loading and keeps working. A driver reads the
+array only when the flag says a producer wrote one, which is what stops an ABI-2 driver reading past
+the end of an ABI-1 producer's struct.
+
+**The per-joint values are deliberately not `SKR_MODE_*`:**
+
+```
+0x00  SKR_JMODE_INHERIT    take skr_command.mode
+0x10  SKR_JMODE_POSITION
+0x11  SKR_JMODE_VELOCITY
+0x12  SKR_JMODE_TORQUE
+```
+
+Zero is `inherit` because zero is what an unfilled array holds. A producer that allocated `modes`
+and did not fill it must read as *the mode the command already carries* — which is exactly ABI 1 —
+rather than as "every joint on position", which would deliver velocity setpoints to
+position-controlled joints and look like success. That is the whole argument for a second numbering,
+and the offset is what makes the mistake it invites **loud**: writing `SKR_MODE_TORQUE` (2) into this
+array is not a valid entry at all, so a driver refuses it with `SKR_EINVAL` instead of moving a joint
+in the wrong units. `rhal.command.rejection` gains that case, and it is the only one §15 adds —
+*which* joint offers what is the descriptor's to say, and a conformance runner asserting a body's own
+table back at it would be measuring nothing.
+
+**A driver declares that it reads the array**, in the descriptor rather than through the ABI:
+
+```json
+"control": { "modes": ["position", "velocity"], "per_joint_modes": true }
+```
+
+A descriptor field for the reason §84's `motions` is one: JSON extends without an ABI implication,
+and a driver written before this section omits it and reads as exactly what it is. Absent is `false`,
+which is the direction that fails safe — the consequence of not declaring it is a narrower plan and
+never a wider one.
+
+**`control.modes` becomes the union, not the intersection.** Every mode some joint offers, with each
+joint's own list in its `control_modes`, which is where it always was. A mobile manipulator declares
+`["position", "velocity"]` and its wheels declare velocity; before this section it declared nothing.
+
+### 86.2 A plan binds a joint in one mode
+
+Two rules, and they refuse different things.
+
+**One joint, one mode, per cycle.** Two channels onto the same joint in two modes would meet as one
+entry in `values` and one in `modes`, and the command would carry whichever was written last — a
+position setpoint delivered as a torque, or the reverse. The second is `blocked` and the plan carries
+`joint_mode_conflict`. First-wins, as §84.3's binder does with a repeated motion, and for the same
+reason: the alternative is a plan whose meaning depends on how far down the list a reader got.
+
+**A body whose driver does not declare `per_joint_modes` takes one mode.** A channel in a second mode
+cannot be delivered to such a driver at all — not on this joint and not on any other — so it is
+`blocked` and the plan carries `mixed_modes_unsupported`. Blocked rather than dropped, and `optional`
+is not consulted: the joint exists, it accepts the mode, and it cannot be reached in the same command.
+That is the precedent a joint refusing a mode already set. A required channel blocked here refuses the
+plan, which is the right outcome — the robot is one a newer driver could command, and the fix is the
+driver.
+
+The plan carries **`joint_modes`** on its clamp: the mode each bound joint is commanded in, keyed by
+joint name. A blocked binding contributes neither a ceiling nor a mode, because it commands nothing;
+it still carries `limit`, which is the rating of the joint it could not command, so a reader can see
+what was on offer. The map is absent — not empty — from a plan that binds no joint, so a motion plan
+(§84) and a plan over a gripper and a base are the same bytes they were before this section.
+
+### 86.3 The kernel reads a ceiling in the joint's own units
+
+`joint_modes` reaches `ResolvedLimits`, and with it the Safety Kernel can do something it could not:
+
+> **The whole-body velocity and torque figures were resolved, reported, and applied to nothing.**
+
+`joint_velocity_max_rad_s` and `joint_torque_max_nm` are narrowed through four layers — envelope,
+transport, operator profile, session — rendered on the limits page, and never reached a channel,
+because nothing at that layer knew whether a given channel carried radians per second or
+newton-metres. An operator who narrowed a robot's velocity ceiling in a profile changed a number on a
+screen. The code said so in a comment for as long as it was true.
+
+A joint is commanded in a **mode**, and the mode says which figure is in its units. So the ceiling for
+a channel is now three things:
+
+| Source | What it is |
+|---|---|
+| `per_channel` | the joint's own rating, from the transport plan |
+| `base` | the reserved whole-body translation channel |
+| the mode's whole-body figure | velocity or torque, by `joint_modes` |
+
+**They compose by narrowing, not by precedence.** A per-channel figure that won outright would let a
+joint rated at 2 rad/s be commanded at 2 on a robot whose operator had narrowed the body to 1.5 —
+which is the one thing `narrowest` exists everywhere else in the kernel to prevent. It was unreachable
+before this section only because the whole-body figure reached no joint at all.
+
+**Position is deliberately not in the table.** There is no whole-body position ceiling to fall back
+to: travel is a per-joint bound with two ends, and the plan carries the wider of them as that joint's
+`per_channel` entry precisely because one magnitude cannot express it. A channel the plan carries no
+mode for reads exactly as it did before §86, which is the reading that cannot be wrong — a limits
+document written before this section has no mode map, and inferring one from its absence would be
+inventing it.
+
+### 86.4 What this does not change
+
+* **The mask.** Unchanged, and it is now the field `modes` is symmetric with rather than the field
+  that was oddly alone. A masked joint is not commanded, so the mode it was not commanded in is not
+  checked — otherwise a body-wide hold could not be expressed on a body whose joints disagree.
+* **§7.1's guards.** Eight, in the same order, evaluating the same things. What changed is the number
+  one of them clamps against.
+* **Tier.** Nothing here awards or withholds one. A mixed-mode body reaches exactly the tier its
+  evidence supports.
+* **§25.2's argument.** Commanding only the joints that happen to match a body-wide mode is still
+  worse than refusing, and a driver that cannot take the array still refuses rather than partly
+  applying. What §86 removes is the case where that refusal was the *only* outcome available.
+
+`drivers/ros2_control` declares the union and the flag, and `mixed_interfaces.urdf` — the fixture
+written to demonstrate a body this platform could not command — is unchanged and its suite now asserts
+the opposite. `drivers/mock` is a mixed body too, in miniature: two joints take torque and its wrist
+takes position only, which its own suite had been commanding in torque and the driver had been
+accepting. The corpus holds eight editions to it: eleven cases in `corpus/transport/mode.json`, seven
+in `corpus/cycle/modes.json`, and two new warning codes.

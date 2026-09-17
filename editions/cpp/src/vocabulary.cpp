@@ -52,7 +52,9 @@ const std::vector<std::pair<std::string_view, Set>>& table() {
         "control_mode_unsupported", "rate_unsupported", "rate_below_watchdog", "scaled_down",
         "unscalable_channel", "retarget_without_solver", "unmapped_roles", "observation_missing",
         "observation_degraded", "latency_undeclared", "action_space_mismatch",
-        "action_space_ambiguous", "motion_parameter_unused"}},
+        "action_space_ambiguous", "motion_parameter_unused",
+        // §86, appended for the reason every other addition here is.
+        "joint_mode_conflict", "mixed_modes_unsupported"}},
       {"action_kinds",
        {"joint_position", "joint_velocity", "joint_torque", "cartesian", "base_velocity", "gripper",
         "discrete"}},

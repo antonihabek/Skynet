@@ -235,6 +235,11 @@ fn print_plan(plan: &skynet_contracts::TransportPlan) {
             if let Some(limit) = binding.limit {
                 line.push_str(&format!("  ≤{limit}"));
             }
+            // §86.2. The mode is the units the number beside it is in, so a reader of a mixed plan
+            // can see that one joint's ceiling is radians per second and another's newton-metres.
+            if let Some(mode) = binding.mode {
+                line.push_str(&format!("  {}", term::dim(mode)));
+            }
             let _ = writeln!(out, "{line}");
             let _ = writeln!(
                 out,
@@ -267,6 +272,29 @@ fn print_plan(plan: &skynet_contracts::TransportPlan) {
         }
         if !parts.is_empty() {
             let _ = writeln!(out, "\n  {} {}", term::bold("Clamp"), parts.join(", "));
+        }
+
+        // §86.3. Printed only when the plan mixes modes, because on a single-mode body the map
+        // repeats what the line above already said and a column of identical words is noise.
+        let mixed = clamp
+            .joint_modes
+            .iter()
+            .any(|(_, mode)| Some(*mode) != clamp.joint_modes.first().map(|(_, first)| *first));
+        if mixed {
+            let modes: Vec<String> = clamp
+                .joint_modes
+                .iter()
+                .map(|(joint, mode)| format!("{joint} {mode}"))
+                .collect();
+            let _ = writeln!(out, "  {} {}", term::bold("Modes"), modes.join(", "));
+            let _ = writeln!(
+                out,
+                "      {}",
+                term::dim(
+                    "this body is commanded in more than one mode at once (§86), which needs a \
+                     driver that declares `control.per_joint_modes`"
+                )
+            );
         }
     }
 
