@@ -111,6 +111,16 @@ jobs:
         working-directory: drivers/mock
         run: make cpp-header-check
 
+      # The other kind of robot (§59.2): a body behind a program-level controller, which takes a
+      # program rather than a setpoint. Every check in its suite is a refusal or the control for
+      # one, because for that class of machine the refusals are the interface — and running it is
+      # how `rhal.command.rejection`'s acceptance assertion stays `not_applicable` for a body that
+      # declares no control modes rather than quietly becoming a failure again.
+      - name: Pendant robot, the refusals that are its interface
+        if: ${{ !cancelled() }}
+        working-directory: drivers/pendant
+        run: make check
+
       # The Python binding is the third view of the same ABI (§31.2). Its ctypes structs assert the
       # same offsets the Rust crate and the mock assert from their side, so a layout that moves
       # fails three suites rather than making one robot behave oddly.

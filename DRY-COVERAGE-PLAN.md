@@ -508,6 +508,47 @@ there and fails here. That is the honest state of a real-time assertion — §15
 `rhal.sensor.latency` a *bench* test for exactly this reason — and the script says which of the two
 it is rather than reporting a generic miss.
 
+### F25 — §15's suite refuses every robot §59.2 describes, and the document contradicts itself about it.
+
+Found by writing Phase 3's fourth item and running it. `drivers/pendant` is a body behind a
+program-level controller: joints that are reported and commanded in no mode, `write_command`
+answering `SKR_EPERM`, and motions reachable only through `extension()`. §59.2 says exactly what
+such a machine is entitled to:
+
+> These robots are **Guest tier permanently**, and not because of a missing feature — because the
+> architecture that makes them safe is somebody else's and is already there.
+
+`skynet driver check` awarded it **no tier at all.** `rhal.command.rejection` is required from
+`guest`, and one of the four assertions `check.rs` files under that id asks a driver to *accept* a
+well-formed joint command — which no robot §59.2 describes can do, by construction, and for no
+defect.
+
+Two things are wrong and only one of them is the code.
+
+* **The implementation over-reaches the test's own definition.** §15's entry for
+  `rhal.command.rejection` reads: *"The driver rejects a command naming a joint that does not exist,
+  rather than ignoring it."* Rejection. The acceptance assertion is a fourth property filed under an
+  id that does not name it, and it is the one that excludes the largest installed base of robots in
+  the world.
+* **So the document disagrees with itself.** §59.2 grants a tier in prose that §15's suite refuses
+  in arithmetic, and the code had been following the stricter one by accident — which is the worse
+  direction only because nobody had built the body that would show it.
+
+**No amendment is needed to fix it**, which is the part worth keeping. §15 already has the word:
+`not_applicable` is *"reserved for cases where inapplicability is a declared property of the body
+rather than a gap in the evidence"*, and a body declaring `control.modes: []` has declared exactly
+that. The acceptance assertion reports `not_applicable` there — which §15 counts as a pass — and
+the pendant now reaches guest, as §59.2 always said it should.
+
+The **three rejection assertions still run**, deliberately. A driver that ignores a short command
+reads past the end of the caller's array whether or not its machine takes commands, and a body that
+answered one code to everything would hide a real defect behind a true statement. `drivers/pendant`
+checks the command's shape *before* its permission for that reason, and its own suite asserts both.
+
+Held to a control: `commandable` forced true puts the pendant back to *"no tier — 1 guest-tier
+test(s) failed"*, and the mock arm is unaffected in either direction because it declares two control
+modes and always did.
+
 ---
 
 ## Phase 0 — the dry-mode contract
@@ -609,6 +650,16 @@ corpus plus eight editions plus the TypeScript oracle is exactly that machinery.
 an issue, not a branch. *Decisions* 6 deferred it behind Phase 1's gate; **that gate is now met**, so
 the deferral has expired and this is unblocked.
 
+> **Blocked on the specification, 2026-09-16 (eighth session), and blocked mechanically rather than
+> by judgement.** The amendment is designed and written out below, ready to file. It cannot be made
+> here: `docs/skynet-os-architecture.md` is edited *in both copies or in neither* and this session's
+> harness refuses to write to the Hub's checkout at all, so a one-copy edit is the only thing
+> available and it is the one thing the rule forbids. `check-mirrors.mjs` still reports both copies
+> matching their pin, which is the state to leave it in.
+>
+> So items 1-3 are unbuilt and item **4 is done** — a mock program-level controller needs no
+> normative change, because §59.2 already describes the machine it stands for.
+
 Order matters, and the repo has already paid for the lesson: **write the corpus cases before the
 editions.** Doing it that way on §47.6 found the specified rule and the reference disagreeing about
 which released slot a publish takes — a bug that would have cost a reader its frame on nearly every
@@ -617,7 +668,9 @@ cycle while presenting as a slow policy.
 1. Descriptor: action-space kind, named motions with parameters
 2. Transport bindings over motions rather than joint channels
 3. Corpus cases, then the editions
-4. A mock program-level controller driver — the teach-pendant analogue of `drivers/mock`
+4. ~~A mock program-level controller driver — the teach-pendant analogue of `drivers/mock`~~
+   **Done** — `drivers/pendant`. Thirty-seven checks, nearly all of them refusals, because for that
+   class of machine the refusals *are* the interface. It found F25 on its first conformance run.
 
 Ends fully dry-verified, because there was never a clamping claim to verify.
 
