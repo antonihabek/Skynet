@@ -39,8 +39,7 @@ use std::ffi::CString;
 
 use skynet_contracts::embodiment::EmbodimentMotion;
 use skynet_contracts::execute::{
-    admit_motion, motion_progress, MotionGate, MotionProgress, MotionRefusalCode, MotionRequest,
-    MotionVerdict,
+    admit_motion, motion_progress, MotionGate, MotionProgress, MotionRequest, MotionVerdict,
 };
 use skynet_ring::Motion as MotionFrame;
 
@@ -290,7 +289,12 @@ impl Motions {
     }
 
     /// A motion is in flight. Ask whether it is still inside its deadline (§88.3).
-    fn progress<A: Actuator>(&mut self, now_ms: f64, body: &mut A, flight: &InFlight) -> MotionTurn {
+    fn progress<A: Actuator>(
+        &mut self,
+        now_ms: f64,
+        body: &mut A,
+        flight: &InFlight,
+    ) -> MotionTurn {
         let report = motion_progress(flight.deadline_ms, flight.started_at_ms, now_ms);
         if report.progress == MotionProgress::Running {
             return MotionTurn {
@@ -401,18 +405,4 @@ fn render(motion: &str, verdict: &MotionVerdict) -> String {
         out.push_str(&skynet_contracts::json::number_text(*value));
     }
     out
-}
-
-/// Whether a verdict's refusal is one an operator can fix at the policy, rather than at the robot.
-///
-/// Used by the summary and by `skynetk`'s report. Authority and state are the robot's situation;
-/// everything from `unknown_motion` down is a property of what was asked for.
-pub fn is_content_refusal(refusal: MotionRefusalCode) -> bool {
-    !matches!(
-        refusal,
-        MotionRefusalCode::NoLease
-            | MotionRefusalCode::Estop
-            | MotionRefusalCode::NotActive
-            | MotionRefusalCode::Busy
-    )
 }

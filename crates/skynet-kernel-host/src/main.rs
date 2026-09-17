@@ -41,8 +41,8 @@ use skynet_kernel::{
 use skynet_kernel_host::capture::{Camera, Declared, RhalSensor};
 use skynet_kernel_host::driver::{Actuator, Rhal};
 use skynet_kernel_host::handoff;
-use skynet_kernel_host::recorder::{Recorder, DEFAULT_BUDGET};
 use skynet_kernel_host::motion::Authority;
+use skynet_kernel_host::recorder::{Recorder, DEFAULT_BUDGET};
 use skynet_kernel_host::run::{Attached, Host};
 use skynet_ring::{words_for, Ring};
 
@@ -637,7 +637,6 @@ fn run(args: &[String]) -> i32 {
         },
         frames: None,
     });
-
 
     if !options.quiet {
         println!("driver     {}", options.driver.display());

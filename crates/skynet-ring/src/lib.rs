@@ -934,15 +934,21 @@ mod tests {
         let ring = Ring::create(&words, 4).expect("create");
         let mut producer = ring.producer();
         producer
-            .publish_motion(7_000_000, 3, &motion("move_l", "skill:pick", &["pose", "speed"]), &[
-                0.4, 0.1,
-            ])
+            .publish_motion(
+                7_000_000,
+                3,
+                &motion("move_l", "skill:pick", &["pose", "speed"]),
+                &[0.4, 0.1],
+            )
             .expect("publish");
 
         let mut command = Command::default();
         let mut got = Motion::default();
         let mut consumer = ring.consumer();
-        assert_eq!(consumer.read_frame(&mut command, Some(&mut got)), Reading::Fresh);
+        assert_eq!(
+            consumer.read_frame(&mut command, Some(&mut got)),
+            Reading::Fresh
+        );
 
         assert_eq!(command.mode, mode::MOTION);
         assert_eq!(command.seq, 3);

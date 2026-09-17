@@ -137,6 +137,7 @@ dependencies = [
 name = "skynet-policy-host"
 version = "0.1.0"
 dependencies = [
+ "skynet-contracts",
  "skynet-frames",
  "skynet-infer",
  "skynet-kernel",

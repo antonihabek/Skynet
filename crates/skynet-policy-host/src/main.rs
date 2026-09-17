@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! skynetp run [--hz 100] [--cycles N] [--channels N] [--mode position|velocity|torque]
-//!             [--backend hold|trajectory|approach]
+//!             [--backend hold|trajectory|approach|motion]
 //!             [--setpoints "0:0.1,0.2;40:0.3,0.4"] [--target 0.4,-0.3] [--gain 0.05]
 //!             [--ring-socket <path>]
 //! ```
@@ -47,7 +47,9 @@
 use std::sync::atomic::AtomicU32;
 use std::time::{Duration, Instant};
 
-use skynet_policy_host::backend::{Approach, Commanding, Hold, Inference, Trajectory};
+use skynet_policy_host::backend::{
+    Approach, Commanding, Hold, Inference, Motion as MotionBackend, Trajectory,
+};
 
 /// The model runners `--policy` can name, chosen by the artefact's own `kind`.
 ///
@@ -154,7 +156,32 @@ struct Options {
     gain: f32,
     ring_socket: Option<std::path::PathBuf>,
     policy: Option<std::path::PathBuf>,
+    /// §88.1's request: the motion's name, who is asking, its deadline and its parameters.
+    motion: Option<String>,
+    holder: Option<String>,
+    deadline_ms: f32,
+    parameters: Vec<(String, f64)>,
     quiet: bool,
+}
+
+/// `"pose=0.4,speed=0.1"` — a parameter name, an equals sign, a number, commas between them.
+///
+/// Parsed strictly, for `parse_setpoints`' reason one section along: a parameter this cannot read is
+/// an error rather than a dropped one, and §88.2's eighth refusal exists precisely because a motion
+/// missing an argument is a command a controller will either reject on a moving robot or accept.
+fn parse_parameters(text: &str) -> Result<Vec<(String, f64)>, String> {
+    let mut out = Vec::new();
+    for pair in text.split(',').filter(|part| !part.trim().is_empty()) {
+        let (name, value) = pair
+            .split_once('=')
+            .ok_or_else(|| format!("a parameter wants `name=value`, and this is `{pair}`"))?;
+        let number: f64 = value
+            .trim()
+            .parse()
+            .map_err(|_| format!("`{}` is not a number for `{}`", value.trim(), name.trim()))?;
+        out.push((name.trim().to_string(), number));
+    }
+    Ok(out)
 }
 
 /// `"0:0.1,0.2;40:0.3,0.4"` — a tick, a colon, comma-separated values, semicolons between rows.
@@ -259,6 +286,39 @@ fn check(options: &Options) -> Result<(), String> {
                 );
             }
         }
+        // §88.1's, and the only backend here that does not command a joint. Everything it needs is
+        // on the command line rather than in a file, because a motion **is** the request: a name,
+        // who is asking, a bound and some arguments.
+        "motion" => {
+            if options.motion.is_none() {
+                return Err(
+                    "--backend motion wants --motion, which is the body's own name for it (§84.1)"
+                        .to_string(),
+                );
+            }
+            if options.holder.is_none() {
+                return Err(
+                    "--backend motion wants --holder, which §88.2 compares against the lease. \
+                     There is no default: a request from nobody is refused `no_lease`, and \
+                     supplying a name here would be this binary claiming a lease it does not hold"
+                        .to_string(),
+                );
+            }
+            if !(options.deadline_ms.is_finite() && options.deadline_ms > 0.0) {
+                return Err(
+                    "--backend motion wants --deadline-ms, a positive number. §7.1's watchdog has \
+                     nothing to watch while a motion runs (§88.3), so this is the bound that fires"
+                        .to_string(),
+                );
+            }
+            if options.parameters.len() > skynet_ring::MAX_MOTION_PARAMETERS {
+                return Err(format!(
+                    "--parameters names {} and this wire carries {}",
+                    options.parameters.len(),
+                    skynet_ring::MAX_MOTION_PARAMETERS
+                ));
+            }
+        }
         other => return Err(format!("`{other}` is not a backend this build has")),
     }
 
@@ -272,6 +332,13 @@ fn parse(args: &[String]) -> Result<Options, String> {
         channels: 0,
         mode: mode::POSITION,
         backend: "hold".to_string(),
+        motion: None,
+        holder: None,
+        // Zero, which §88.2's sixth rule refuses. A deadline is required and this binary will not
+        // supply one: a motion's bound is what replaces §7.1's watchdog on this path (§88.3), and a
+        // default would be this process choosing when a robot gives up on a movement.
+        deadline_ms: 0.0,
+        parameters: Vec::new(),
         setpoints: Vec::new(),
         target: Vec::new(),
         gain: 0.1,
@@ -338,6 +405,24 @@ fn parse(args: &[String]) -> Result<Options, String> {
                     .collect::<Result<Vec<f32>, String>>()?;
                 index += 2;
             }
+            "--motion" => {
+                options.motion = Some(value("--motion")?);
+                index += 2;
+            }
+            "--holder" => {
+                options.holder = Some(value("--holder")?);
+                index += 2;
+            }
+            "--deadline-ms" => {
+                options.deadline_ms = value("--deadline-ms")?
+                    .parse()
+                    .map_err(|_| "--deadline-ms wants a number".to_string())?;
+                index += 2;
+            }
+            "--parameters" => {
+                options.parameters = parse_parameters(&value("--parameters")?)?;
+                index += 2;
+            }
             "--gain" => {
                 options.gain = value("--gain")?
                     .parse()
@@ -372,10 +457,17 @@ fn run(args: &[String]) -> i32 {
                 "skynetp — the producer for the Safety Kernel's command ring (§25).\n\n\
                  usage: skynetp run [--hz 100] [--cycles N] [--channels N]\n\
                  \x20                  [--mode position|velocity|torque]\n\
-                 \x20                  [--backend hold|trajectory|approach|inference]\n\
+                 \x20                  [--backend hold|trajectory|approach|inference|motion]\n\
                  \x20                  [--setpoints \"0:0.1;40:0.3\"] [--target 0.1,0.2] [--gain 0.1]\n\
                  \x20                  [--policy <model.json>]\n\
+                 \x20                  [--motion move_l --holder skill:pick --deadline-ms 4000\n\
+                 \x20                   --parameters pose=0.4,speed=0.1]\n\
                  \x20                  [--ring-socket <path>] [--quiet]\n\n\
+                 --backend motion is §88.1's: it asks the body's controller for one named motion\n\
+                 and then holds. The four flags above are the request, and none of them has a\n\
+                 default — a deadline this binary chose would be it deciding when a robot gives\n\
+                 up on a movement, and a holder it supplied would be it claiming a lease. What\n\
+                 admits the request is `skynetk`, against the body's own declared table.\n\n\
                  --backend inference runs §23.3's in-process model. --policy is the only thing it\n\
                  takes: the file declares how many channels it commands and, when it reads a\n\
                  camera, the frame shape and the grid it is pooled into. The file's own `kind`\n\
@@ -637,6 +729,36 @@ fn run(args: &[String]) -> i32 {
                 lease,
                 period_ns,
             );
+            Box::new(move |producer, body, frames| {
+                (
+                    inner.turn_seeing(producer, body, frames),
+                    inner.summary(),
+                    None,
+                )
+            })
+        }
+        // §88.1's. One request, then a hold for ever — see `backend::Motion` for why re-asking
+        // every cycle would be a hundred requests for one movement and going silent would present
+        // a correctly behaving policy as a crashed producer.
+        "motion" => {
+            let parameters: Vec<(&str, f64)> = options
+                .parameters
+                .iter()
+                .map(|(name, value)| (name.as_str(), *value))
+                .collect();
+            let Some(backend) = MotionBackend::asking(
+                options.motion.as_deref().unwrap_or_default(),
+                options.holder.as_deref().unwrap_or_default(),
+                options.deadline_ms,
+                &parameters,
+            ) else {
+                return fail(
+                    "a name in this request is longer than the ring carries. It is refused rather \
+                     than cut down: half a motion name is a different motion, and on a body whose \
+                     controller has one by that shorter name it is a different command (§88.1)",
+                );
+            };
+            let mut inner = PolicyHost::new(backend, SystemClock::default(), lease, period_ns);
             Box::new(move |producer, body, frames| {
                 (
                     inner.turn_seeing(producer, body, frames),
