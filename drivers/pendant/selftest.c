@@ -17,6 +17,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "skynet_rhal.h"
@@ -157,21 +158,38 @@ int main(void) {
   check(strstr(reply, "at the controller") != NULL,
         "and the refusal says where to clear it, because nothing here can");
 
-  /* ── the table a descriptor cannot yet carry ───────────────────────────── */
+  /* ── the table, and the descriptor that carries it (§84.1) ─────────────── */
   check(pendant_motion_count() == 4, "the controller declares four motions");
   check(strcmp(pendant_motion_canonical(0), "move_linear") == 0,
         "and each names the canonical motion it is, where one exists");
   check(strcmp(pendant_joint_name(5), "A6") == 0, "the joint names are the controller's");
+
+  char described[4096];
+  int written = d->describe(ctx, described, sizeof described);
+  check(written > 0 && (size_t)written == strlen(described), "describe() returns what it wrote");
+  check(strstr(described, "\"motions\":[{\"name\":\"move_l\",\"motion\":\"move_linear\"") != NULL,
+        "the descriptor's motions are the table, in the table's order");
+  check(strstr(described, "{\"name\":\"speed\",\"unit\":\"m/s\",\"required\":false,\"min\":0.01") !=
+            NULL,
+        "an optional parameter says so, with the bounds the interpreter enforces");
+  check(strstr(described, "{\"name\":\"close_gripper\",\"motion\":\"grasp\",\"parameters\":[]}") !=
+            NULL,
+        "a motion with no parameters declares an empty list, not an absent one");
+  /* The control for the writer: one byte short of the document is a refusal, never a document
+   * that parses with its last motion missing. */
+  char *short_buffer = malloc((size_t)written);
+  check(short_buffer != NULL && d->describe(ctx, short_buffer, (size_t)written) == SKR_EINVAL,
+        "a buffer one byte short is refused rather than truncated");
+  free(short_buffer);
 
   check(d->close(ctx) == SKR_OK, "close()");
 
   printf("\n%d checks, %d failed\n", checks, failures);
   if (failures == 0) {
     printf(
-        "\nWhat this suite does not show: a transport plan that can express any of it. §59.2's\n"
-        "action space is a set of named motions and the descriptor has no field for one, so the\n"
-        "four motions above are reachable only through `extension()`, under a vendor token.\n"
-        "docs/issues/motion-action-space.md is the amendment that would change that.\n");
+        "\nWhat this suite does not show: a transport plan. §84's motions are in the descriptor,\n"
+        "and `skynet transport` and `skynet driver check` are what read them. What no suite here\n"
+        "shows is a controller: the interpolator above is this file's, not a vendor's.\n");
   }
   return failures == 0 ? 0 : 1;
 }

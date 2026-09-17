@@ -26,7 +26,14 @@ Json frames(const std::string& label, const Json& input) {
   throw Unimplemented("frames", label);
 }
 
-Json embodiment_descriptor(const std::string& /*label*/, const Json& input) {
+Json embodiment_descriptor(const std::string& label, const Json& input) {
+  // §84.1's motion list is a second question, and therefore a second file.
+  if (label == "motions") {
+    return embodiment::fault_to_json(embodiment::validate_motions(input["motions"]));
+  }
+  if (label != "detection") {
+    throw Unimplemented("embodiment", label);
+  }
   // §5's `detects_people`: one derived boolean, off a whole descriptor.
   Json out = Json::object();
   out.set("people_detection", Json::boolean(embodiment::has_people_detection(input)));

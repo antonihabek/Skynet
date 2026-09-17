@@ -656,6 +656,8 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
                 "embodiment_modalities" => contracts_embodiment::EMBODIMENT_MODALITIES.to_vec(),
                 "canonical_chains" => roles::CANONICAL_CHAINS.to_vec(),
                 "canonical_axes" => roles::CANONICAL_AXES.to_vec(),
+                "canonical_motions" => contracts_embodiment::CANONICAL_MOTIONS.to_vec(),
+                "motion_fault_codes" => contracts_embodiment::MOTION_FAULT_CODES.to_vec(),
                 "os_tiers" => skynet_kernel::OS_TIERS
                     .iter()
                     .map(|tier| tier.as_str())
@@ -1048,6 +1050,13 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
         // whole descriptor because the **parse** is half of what is pinned: a parser reading
         // `detects_people` with its ordinary optional-field helper folds an explicit `false` into
         // an absent one, which is right downstream and wrong in the descriptor.
+        // §84.1's motion list, as `embodiment.descriptor.valid` reads it.
+        "embodiment" if label.contains("motions") => {
+            json::motion_fault_to_json(&contracts_embodiment::validate_motions(
+                &json::motions_from_json(input).map_err(|e| e.to_string())?,
+            ))
+        }
+
         "embodiment" if label.contains("detection") => {
             let descriptor = json::descriptor_from_json(input).map_err(|e| e.to_string())?;
             let mut out = Json::obj();

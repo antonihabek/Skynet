@@ -287,6 +287,74 @@ fn the_warning_about_empty_control_modes_is_accurate() {
     assert!(!plan.status.success(), "a refused plan exits non-zero");
 }
 
+/// §84: a program-level body declares its motions, and `skynet transport` answers a motion policy
+/// motion by motion — and answers a joint policy against the same body with the one sentence that
+/// has a remedy, rather than a column of refusals.
+#[test]
+fn a_motion_policy_is_planned_against_a_program_level_body() {
+    let dir = scratch("motions");
+    let body = dir.join("pendant.json");
+    std::fs::write(
+        &body,
+        r#"{"schema_version":1,"robot_slug":"cell-arm","digest":null,"verified":false,
+            "base":"fixed","dof":1,
+            "joints":[{"name":"A1","role":"right_arm.shoulder.yaw","type":"revolute",
+                       "limits":{},"control_modes":[]}],
+            "end_effectors":[],"sensors":[],"control":{"modes":[]},"envelope":null,"solvers":[],
+            "motions":[{"name":"move_l","motion":"move_linear",
+                        "parameters":[{"name":"pose","unit":"m","required":true}]}]}"#,
+    )
+    .unwrap();
+
+    let motion_policy = dir.join("motions.json");
+    std::fs::write(
+        &motion_policy,
+        r#"{"control_mode":"trajectory","action_channels":[],
+            "motions":[{"name":"LIN","motion":"move_linear","parameters":["pose"]}]}"#,
+    )
+    .unwrap();
+    let plan = skynet(&[
+        "transport",
+        motion_policy.to_str().unwrap(),
+        "--robot",
+        body.to_str().unwrap(),
+    ]);
+    assert!(plan.status.success(), "{}", said(&plan));
+    let report = said(&plan);
+    assert!(report.contains("LIN → move_l"), "{report}");
+    assert!(
+        report.contains("remap — Mapped by motion move_linear"),
+        "{report}"
+    );
+    assert!(!report.contains("control_mode_unsupported"), "{report}");
+
+    let joint_policy = dir.join("joints.json");
+    std::fs::write(
+        &joint_policy,
+        r#"{"control_mode":"position","action_channels":[
+             {"index":0,"kind":"joint_position","role":"right_arm.shoulder.yaw"}]}"#,
+    )
+    .unwrap();
+    let refused = skynet(&[
+        "transport",
+        joint_policy.to_str().unwrap(),
+        "--robot",
+        body.to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(!refused.status.success(), "a mismatch is a refusal");
+    let json = stdout(&refused);
+    assert!(
+        json.contains("\"code\":\"action_space_mismatch\""),
+        "{json}"
+    );
+    assert!(json.contains("\"bindings\":[]"), "{json}");
+    assert!(
+        !json.contains("\"motions\""),
+        "a joint policy's plan carries no motions: {json}"
+    );
+}
+
 #[test]
 fn roles_parse_or_say_they_did_not() {
     let good = skynet(&["role", "left_arm.shoulder.pitch", "base.wheel#2"]);

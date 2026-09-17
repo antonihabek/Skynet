@@ -17,7 +17,7 @@
  * a safety envelope" is not "the safety envelope is null".
  */
 
-import type { FrameFault, TransportPlan } from './embodiment.ts'
+import type { FrameFault, MotionFault, TransportPlan } from './embodiment.ts'
 import type { AdmissionResult } from './package.ts'
 import type { CertificationVerdict } from './conformance.ts'
 import type { CheckResult, FleetReadiness, ReadinessReport } from './readiness.ts'
@@ -95,6 +95,17 @@ export function shapePlan(plan: TransportPlan): unknown {
       limit: nullable(binding.limit),
       reason: binding.reason,
     })),
+    // §84.3. Absent from a plan over joint channels rather than empty, so the plans every edition
+    // produced before motions existed are unchanged byte for byte.
+    ...(plan.motions !== undefined && {
+      motions: plan.motions.map(binding => ({
+        source_motion: binding.source_motion,
+        method: binding.method,
+        target: nullable(binding.target),
+        missing: binding.missing,
+        reason: binding.reason,
+      })),
+    }),
     observations: plan.observations.map(observation => ({
       required: observation.required,
       method: observation.method,
@@ -273,6 +284,17 @@ export function shapeSolved(frames: Frame[], solved: Solved): unknown {
  * `fault` is nullable rather than optional: "this graph is usable" is a fact worth stating, and a
  * consumer reading an absent key cannot tell it from a producer that forgot to run the check.
  */
+/**
+ * The wire shape of a motion-list verdict (§84.1), the same shape as a frame-graph verdict and for
+ * the same reason: `fault` is present-and-null when the list is usable, because a consumer reading
+ * an absent key cannot tell a usable list from a producer that forgot to check.
+ */
+export function shapeMotionFault(fault: MotionFault | null): unknown {
+  return {
+    fault: fault === null ? null : { code: fault.code, subjects: fault.subjects, detail: fault.detail },
+  }
+}
+
 export function shapeFrameFault(fault: FrameFault | null): unknown {
   return {
     fault: fault === null ? null : { code: fault.code, subjects: fault.subjects, detail: fault.detail },

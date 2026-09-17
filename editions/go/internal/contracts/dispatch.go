@@ -46,6 +46,7 @@ func Dispatch() corpus.Dispatch {
 		"cycle/workspace":        cycleEvaluate,
 		"digest/version":         versionDigest,
 		"embodiment/detection":   embodimentDetection,
+		"embodiment/motions":     embodimentMotions,
 		"frames/bindings":        framesBindings,
 		"frames/validate":        framesValidate,
 		// The fuzz files are the curated corpora's contracts fed inputs nobody chose by hand, so each
@@ -97,6 +98,7 @@ func Dispatch() corpus.Dispatch {
 		"transfer/upload":        transferUpload,
 		"transport/binding":      transportResolve,
 		"transport/declaration":  transportResolve,
+		"transport/motion":       transportResolve,
 		"transport/non-joint":    transportResolve,
 		"transport/observation":  transportResolve,
 		"transport/rate":         transportResolve,

@@ -1,0 +1,513 @@
+{
+  "corpus": "embodiment",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "the-pendant-program",
+      "note": "The pendant driver's four motions, as it declares them.",
+      "input": {
+        "motions": [
+          {
+            "name": "move_l",
+            "motion": "move_linear",
+            "parameters": [
+              {
+                "name": "pose",
+                "unit": "m",
+                "required": true,
+                "min": -1.5,
+                "max": 1.5
+              },
+              {
+                "name": "speed",
+                "unit": "m/s",
+                "required": false,
+                "min": 0.01,
+                "max": 0.25
+              }
+            ]
+          },
+          {
+            "name": "move_j",
+            "motion": "move_joint",
+            "parameters": [
+              {
+                "name": "pose",
+                "unit": "rad",
+                "required": true,
+                "min": -3.14,
+                "max": 3.14
+              },
+              {
+                "name": "speed",
+                "unit": "rad/s",
+                "required": false,
+                "min": 0.01,
+                "max": 1
+              }
+            ]
+          },
+          {
+            "name": "close_gripper",
+            "motion": "grasp",
+            "parameters": []
+          },
+          {
+            "name": "home",
+            "motion": "home",
+            "parameters": []
+          }
+        ]
+      },
+      "expected": "{\"fault\":null}"
+    },
+    {
+      "id": "no-motions",
+      "note": "A body not commanded this way declares nothing, and nothing is wrong.",
+      "input": {
+        "motions": []
+      },
+      "expected": "{\"fault\":null}"
+    },
+    {
+      "id": "an-unnamed-motion",
+      "note": "A name is what a command carries, so an empty one is refused before anything else about it.",
+      "input": {
+        "motions": [
+          {
+            "name": "",
+            "motion": "home",
+            "parameters": []
+          }
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"unnamed\",\"detail\":\"A motion has an empty name, and a name is what a command carries.\",\"subjects\":[]}}"
+    },
+    {
+      "id": "an-unnamed-parameter",
+      "note": "The same rule one level down, naming the motion.",
+      "input": {
+        "motions": [
+          {
+            "name": "move_l",
+            "motion": "move_linear",
+            "parameters": [
+              {
+                "name": "",
+                "unit": "m",
+                "required": true
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"unnamed\",\"detail\":\"Motion move_l has a parameter with an empty name.\",\"subjects\":[\"move_l\"]}}"
+    },
+    {
+      "id": "a-repeated-motion",
+      "note": "Transport reads a repeat as first-wins; the file is still wrong, and this is where it is said.",
+      "input": {
+        "motions": [
+          {
+            "name": "move_l",
+            "motion": "move_linear",
+            "parameters": [
+              {
+                "name": "pose",
+                "unit": "m",
+                "required": true,
+                "min": -1.5,
+                "max": 1.5
+              },
+              {
+                "name": "speed",
+                "unit": "m/s",
+                "required": false,
+                "min": 0.01,
+                "max": 0.25
+              }
+            ]
+          },
+          {
+            "name": "move_l",
+            "motion": "move_linear",
+            "parameters": []
+          }
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"duplicate_motion\",\"detail\":\"Two motions are named move_l, so a command naming it is ambiguous.\",\"subjects\":[\"move_l\"]}}"
+    },
+    {
+      "id": "an-unrecognised-canonical",
+      "note": "A vendor's own word in the canonical slot names both the motion and the word.",
+      "input": {
+        "motions": [
+          {
+            "name": "move_l",
+            "motion": "linear_move",
+            "parameters": []
+          }
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"unknown_motion\",\"detail\":\"Motion move_l says it is linear_move, which is not a canonical motion. Omit the field for a motion that is none of them.\",\"subjects\":[\"move_l\",\"linear_move\"]}}"
+    },
+    {
+      "id": "a-canonical-that-is-not-a-string",
+      "note": "A value of the wrong type declares nothing and reads as absent, as every edition's JSON layer reads an optional string it cannot use — so the list is usable and the motion has no canonical.",
+      "input": {
+        "motions": [
+          {
+            "name": "move_l",
+            "motion": 7,
+            "parameters": []
+          }
+        ]
+      },
+      "expected": "{\"fault\":null}"
+    },
+    {
+      "id": "a-null-canonical",
+      "note": "Null is the explicit spelling of absent.",
+      "input": {
+        "motions": [
+          {
+            "name": "move_l",
+            "motion": null,
+            "parameters": []
+          }
+        ]
+      },
+      "expected": "{\"fault\":null}"
+    },
+    {
+      "id": "a-canonical-in-capitals",
+      "note": "Exact, as transport reads it: `HOME` is a vendor word and not the canonical motion.",
+      "input": {
+        "motions": [
+          {
+            "name": "home",
+            "motion": "HOME",
+            "parameters": []
+          }
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"unknown_motion\",\"detail\":\"Motion home says it is HOME, which is not a canonical motion. Omit the field for a motion that is none of them.\",\"subjects\":[\"home\",\"HOME\"]}}"
+    },
+    {
+      "id": "a-repeated-parameter",
+      "note": "Subjects are dotted, motion then parameter.",
+      "input": {
+        "motions": [
+          {
+            "name": "move_l",
+            "motion": "move_linear",
+            "parameters": [
+              {
+                "name": "pose",
+                "unit": "m",
+                "required": true
+              },
+              {
+                "name": "pose",
+                "unit": "m",
+                "required": false
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"duplicate_parameter\",\"detail\":\"Motion move_l lists pose twice.\",\"subjects\":[\"move_l.pose\"]}}"
+    },
+    {
+      "id": "a-requirement-not-declared",
+      "note": "Missing `required` is read as required by transport and refused here, so the reading is never the only thing that knows.",
+      "input": {
+        "motions": [
+          {
+            "name": "probe",
+            "parameters": [
+              {
+                "name": "depth",
+                "unit": "m"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"required_undeclared\",\"detail\":\"Parameter probe.depth does not say whether it is required. It is read as required, which refuses plans that omit it; declare true or false.\",\"subjects\":[\"probe.depth\"]}}"
+    },
+    {
+      "id": "a-requirement-that-is-null",
+      "note": "Null is not an answer to a yes-or-no question.",
+      "input": {
+        "motions": [
+          {
+            "name": "probe",
+            "parameters": [
+              {
+                "name": "depth",
+                "unit": "m",
+                "required": null
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"required_undeclared\",\"detail\":\"Parameter probe.depth does not say whether it is required. It is read as required, which refuses plans that omit it; declare true or false.\",\"subjects\":[\"probe.depth\"]}}"
+    },
+    {
+      "id": "a-requirement-that-is-a-string",
+      "note": "`\"true\"` is a string. A typed reader refuses it rather than coercing it, in every edition.",
+      "input": {
+        "motions": [
+          {
+            "name": "probe",
+            "parameters": [
+              {
+                "name": "depth",
+                "unit": "m",
+                "required": "true"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"required_undeclared\",\"detail\":\"Parameter probe.depth does not say whether it is required. It is read as required, which refuses plans that omit it; declare true or false.\",\"subjects\":[\"probe.depth\"]}}"
+    },
+    {
+      "id": "a-requirement-that-is-a-number",
+      "note": "`1` is not `true`, which is the trap §5 records for `detects_people` and the one Python's `==` falls into.",
+      "input": {
+        "motions": [
+          {
+            "name": "probe",
+            "parameters": [
+              {
+                "name": "depth",
+                "unit": "m",
+                "required": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"required_undeclared\",\"detail\":\"Parameter probe.depth does not say whether it is required. It is read as required, which refuses plans that omit it; declare true or false.\",\"subjects\":[\"probe.depth\"]}}"
+    },
+    {
+      "id": "a-minimum-that-is-not-a-number",
+      "note": "The reference's type is a bare number, so the null this input carries is a non-finite value the format cannot spell (corpus/README.md) — and a bound that is not finite bounds nothing.",
+      "input": {
+        "motions": [
+          {
+            "name": "move_l",
+            "motion": "move_linear",
+            "parameters": [
+              {
+                "name": "pose",
+                "unit": "m",
+                "required": true,
+                "min": null,
+                "max": 1.5
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"bound_invalid\",\"detail\":\"Parameter move_l.pose declares min as a value that is not a finite number.\",\"subjects\":[\"move_l.pose\"]}}"
+    },
+    {
+      "id": "a-maximum-that-is-not-a-number",
+      "note": "The same, on the other end.",
+      "input": {
+        "motions": [
+          {
+            "name": "move_l",
+            "motion": "move_linear",
+            "parameters": [
+              {
+                "name": "pose",
+                "unit": "m",
+                "required": true,
+                "min": -1.5,
+                "max": null
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"bound_invalid\",\"detail\":\"Parameter move_l.pose declares max as a value that is not a finite number.\",\"subjects\":[\"move_l.pose\"]}}"
+    },
+    {
+      "id": "a-minimum-above-its-maximum",
+      "note": "No value satisfies it, so it is refused rather than read.",
+      "input": {
+        "motions": [
+          {
+            "name": "move_l",
+            "motion": "move_linear",
+            "parameters": [
+              {
+                "name": "speed",
+                "unit": "m/s",
+                "required": false,
+                "min": 0.5,
+                "max": 0.25
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"bound_invalid\",\"detail\":\"Parameter move_l.speed declares a minimum above its maximum, so no value satisfies it.\",\"subjects\":[\"move_l.speed\"]}}"
+    },
+    {
+      "id": "a-range-of-one-value",
+      "note": "Equal bounds are a range with one member, which is a legal declaration.",
+      "input": {
+        "motions": [
+          {
+            "name": "wait",
+            "motion": "wait",
+            "parameters": [
+              {
+                "name": "seconds",
+                "unit": "s",
+                "required": true,
+                "min": 2,
+                "max": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"fault\":null}"
+    },
+    {
+      "id": "bounds-on-one-side",
+      "note": "Either bound alone is a declaration about that side only.",
+      "input": {
+        "motions": [
+          {
+            "name": "move_j",
+            "motion": "move_joint",
+            "parameters": [
+              {
+                "name": "pose",
+                "unit": "rad",
+                "required": true,
+                "min": -3.14
+              },
+              {
+                "name": "speed",
+                "unit": "rad/s",
+                "required": false,
+                "max": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"fault\":null}"
+    },
+    {
+      "id": "the-first-fault-is-the-one-reported",
+      "note": "Faults are reported in declaration order: the second motion's bad canonical is behind the first motion's repeated parameter, and an edition that checked every name before any parameter would report the other one.",
+      "input": {
+        "motions": [
+          {
+            "name": "move_l",
+            "motion": "move_linear",
+            "parameters": [
+              {
+                "name": "pose",
+                "unit": "m",
+                "required": true
+              },
+              {
+                "name": "pose",
+                "unit": "m",
+                "required": true
+              }
+            ]
+          },
+          {
+            "name": "move_x",
+            "motion": "teleport",
+            "parameters": []
+          }
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"duplicate_parameter\",\"detail\":\"Motion move_l lists pose twice.\",\"subjects\":[\"move_l.pose\"]}}"
+    },
+    {
+      "id": "a-repeat-found-before-its-own-parameters",
+      "note": "The second `move_l` has a bad parameter too, and the repeat is what is reported: a motion is checked by name before anything inside it.",
+      "input": {
+        "motions": [
+          {
+            "name": "move_l",
+            "motion": "move_linear",
+            "parameters": []
+          },
+          {
+            "name": "move_l",
+            "motion": "move_linear",
+            "parameters": [
+              {
+                "name": "",
+                "unit": "m",
+                "required": true
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"duplicate_motion\",\"detail\":\"Two motions are named move_l, so a command naming it is ambiguous.\",\"subjects\":[\"move_l\"]}}"
+    },
+    {
+      "id": "a-canonical-found-before-its-parameters",
+      "note": "A bad canonical and a bad parameter on one motion: the canonical is reported, because it is read before the parameter list.",
+      "input": {
+        "motions": [
+          {
+            "name": "move_l",
+            "motion": "teleport",
+            "parameters": [
+              {
+                "name": "pose",
+                "unit": "m",
+                "required": true
+              },
+              {
+                "name": "pose",
+                "unit": "m",
+                "required": true
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"unknown_motion\",\"detail\":\"Motion move_l says it is teleport, which is not a canonical motion. Omit the field for a motion that is none of them.\",\"subjects\":[\"move_l\",\"teleport\"]}}"
+    },
+    {
+      "id": "a-requirement-found-before-its-bounds",
+      "note": "An undeclared requirement and an inverted range on one parameter: the requirement is reported.",
+      "input": {
+        "motions": [
+          {
+            "name": "move_l",
+            "motion": "move_linear",
+            "parameters": [
+              {
+                "name": "pose",
+                "unit": "m",
+                "min": 2,
+                "max": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "{\"fault\":{\"code\":\"required_undeclared\",\"detail\":\"Parameter move_l.pose does not say whether it is required. It is read as required, which refuses plans that omit it; declare true or false.\",\"subjects\":[\"move_l.pose\"]}}"
+    }
+  ]
+}

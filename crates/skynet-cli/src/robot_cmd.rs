@@ -1885,6 +1885,22 @@ fn print_transport_plan(document: &Json) {
                 .unwrap_or("nothing on this body"),
         );
     }
+    // §84.3's motions, by the same rule: a direct one is a number, anything else is a sentence.
+    for binding in plan.arr_or_empty("motions") {
+        let method = text(binding, "method");
+        if method == "direct" {
+            continue;
+        }
+        println!(
+            "  {:<10} {} → {}",
+            method,
+            text(binding, "source_motion"),
+            binding
+                .get("target")
+                .and_then(Json::as_str)
+                .unwrap_or("nothing on this body"),
+        );
+    }
     for warning in plan.arr_or_empty("warnings") {
         println!(
             "  {} {} {}",

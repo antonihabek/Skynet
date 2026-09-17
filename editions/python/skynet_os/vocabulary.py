@@ -67,7 +67,8 @@ CLOSED_SETS: Final[dict[str, tuple[str, ...]]] = {
         'no_source_embodiment', 'unverified_embodiment', 'no_target_envelope', 'dof_mismatch',
         'control_mode_unsupported', 'rate_unsupported', 'rate_below_watchdog', 'scaled_down',
         'unscalable_channel', 'retarget_without_solver', 'unmapped_roles', 'observation_missing',
-        'observation_degraded', 'latency_undeclared'
+        'observation_degraded', 'latency_undeclared', 'action_space_mismatch',
+        'action_space_ambiguous', 'motion_parameter_unused'
     ),
     "action_kinds": (
         'joint_position', 'joint_velocity', 'joint_torque', 'cartesian', 'base_velocity', 'gripper',
@@ -85,6 +86,14 @@ CLOSED_SETS: Final[dict[str, tuple[str, ...]]] = {
         'neck', 'head', 'base', 'tail', 'aux'
     ),
     "canonical_axes": ('pitch', 'yaw', 'roll', 'slide', 'flex', 'abduct', 'rotate', 'grip'),
+    "canonical_motions": (
+        'move_joint', 'move_linear', 'move_circular', 'grasp', 'release', 'home', 'wait',
+        'tool_change', 'io_set'
+    ),
+    "motion_fault_codes": (
+        'unnamed', 'duplicate_motion', 'unknown_motion', 'duplicate_parameter',
+        'required_undeclared', 'bound_invalid'
+    ),
     "os_tiers": ('guest', 'host', 'certified'),
     "enforcement_modes": ('advisory', 'enforcing', 'enforcing_redundant'),
     "guards": (

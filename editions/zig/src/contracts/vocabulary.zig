@@ -131,6 +131,9 @@ const sets = [_]ClosedSet{
             "observation_missing",
             "observation_degraded",
             "latency_undeclared",
+            "action_space_mismatch",
+            "action_space_ambiguous",
+            "motion_parameter_unused",
         },
     },
     .{
@@ -217,6 +220,31 @@ const sets = [_]ClosedSet{
             "abduct",
             "rotate",
             "grip",
+        },
+    },
+    .{
+        .name = "canonical_motions",
+        .members = &.{
+            "move_joint",
+            "move_linear",
+            "move_circular",
+            "grasp",
+            "release",
+            "home",
+            "wait",
+            "tool_change",
+            "io_set",
+        },
+    },
+    .{
+        .name = "motion_fault_codes",
+        .members = &.{
+            "unnamed",
+            "duplicate_motion",
+            "unknown_motion",
+            "duplicate_parameter",
+            "required_undeclared",
+            "bound_invalid",
         },
     },
     .{

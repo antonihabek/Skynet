@@ -33,12 +33,14 @@
 //     different sentence to whoever reads it.
 
 #include "skynet_os/contracts.hpp"
+#include "skynet_os/embodiment.hpp"
 #include "skynet_os/js.hpp"
 #include "skynet_os/roles.hpp"
 #include "skynet_os/transport.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 namespace skynet::transport {
 namespace {
@@ -631,12 +633,271 @@ Json build_clamp(const Json& target, const std::vector<Binding>& bindings) {
   return clamp;
 }
 
+// ── Transport over motions, §84.3 ────────────────────────────────────────────
+
+/// Which negotiation a plan is. See `actionSpaceOf` in the reference for the table.
+enum class Space { Joints, Motions, Ambiguous, MismatchMotions, MismatchJoints };
+
+Space action_space_of(const Json& source, const Json& target) {
+  const bool emits_motions = !source["motions"].items().empty();
+  const bool emits_channels = !source["action_channels"].items().empty();
+  const bool takes_motions = !target["motions"].items().empty();
+  const bool takes_joints = !target["control"]["modes"].items().empty();
+
+  if (emits_motions && emits_channels) return Space::Ambiguous;
+  if (emits_motions) return takes_motions ? Space::Motions : Space::MismatchMotions;
+  if (emits_channels && takes_motions && !takes_joints) return Space::MismatchJoints;
+  return Space::Joints;
+}
+
+Json action_space_warning(Space space, const Json& target) {
+  if (space == Space::Ambiguous) {
+    return warning("action_space_ambiguous",
+                   "The policy declares both joint channels and named motions. They are two "
+                   "architectures, and a package that claims both has not decided which machine it "
+                   "is for.");
+  }
+  return warning_with(
+      "action_space_mismatch",
+      space == Space::MismatchMotions
+          ? "The policy commands named motions and this body is not commanded that way."
+          : "The policy commands joint channels and this body accepts only named motions.",
+      {std::string(target["robot_slug"].string_or(""))});
+}
+
+/// The body's motions with a repeated name removed, first declaration winning (§5.1's rule).
+std::vector<const Json*> distinct_motions(const Json& target) {
+  std::vector<const Json*> out;
+  std::vector<std::string> seen;
+  for (const Json& motion : target["motions"].items()) {
+    const std::string name(motion["name"].string_or(""));
+    if (std::find(seen.begin(), seen.end(), name) != seen.end()) {
+      continue;
+    }
+    seen.push_back(name);
+    out.push_back(&motion);
+  }
+  return out;
+}
+
+Json string_list(const std::vector<std::string>& values) {
+  Json list = Json::array();
+  for (const std::string& value : values) {
+    list.push(Json::string(value));
+  }
+  return list;
+}
+
+std::string joined(const std::vector<std::string>& values) {
+  std::string out;
+  for (std::size_t at = 0; at < values.size(); ++at) {
+    out += (at == 0 ? "" : ", ") + values[at];
+  }
+  return out;
+}
+
+Json motion_row(const std::string& source_motion, const std::string& method, Json target_name,
+                const std::vector<std::string>& missing, const std::string& reason) {
+  Json row = Json::object();
+  row.set("source_motion", Json::string(source_motion));
+  row.set("method", Json::string(method));
+  row.set("target", std::move(target_name));
+  row.set("missing", string_list(missing));
+  row.set("reason", Json::string(reason));
+  return row;
+}
+
+Json finish_motion_binding(const Json& motion, const Json& body, const std::string& method,
+                           const std::string& reason, std::vector<Json>& warnings) {
+  const std::string motion_name(motion["name"].string_or(""));
+  const std::string body_name(body["name"].string_or(""));
+  std::vector<std::string> supplied;
+  for (const Json& name : motion["parameters"].items()) {
+    supplied.emplace_back(name.string_or(""));
+  }
+  const auto supplies = [&supplied](const std::string& name) {
+    return std::find(supplied.begin(), supplied.end(), name) != supplied.end();
+  };
+
+  // `required !== false`: only a boolean false releases a parameter.
+  std::vector<std::string> missing;
+  for (const Json& parameter : body["parameters"].items()) {
+    const Json& required = parameter["required"];
+    const bool released = required.is_bool() && !required.is_true();
+    const std::string name(parameter["name"].string_or(""));
+    if (!released && !supplies(name)) {
+      missing.push_back(name);
+    }
+  }
+  if (!missing.empty()) {
+    return motion_row(motion_name, "blocked", Json::string(body_name), missing,
+                      "\"" + body_name + "\" requires a parameter the policy does not supply: " +
+                          joined(missing) + ".");
+  }
+
+  std::vector<std::string> unused;
+  std::vector<std::string> seen;
+  for (const std::string& name : supplied) {
+    if (std::find(seen.begin(), seen.end(), name) != seen.end()) {
+      continue;
+    }
+    seen.push_back(name);
+    bool taken = false;
+    for (const Json& parameter : body["parameters"].items()) {
+      if (parameter["name"].string_or("") == name) {
+        taken = true;
+        break;
+      }
+    }
+    if (!taken) {
+      unused.push_back(name);
+    }
+  }
+  if (!unused.empty()) {
+    std::vector<std::string> subjects;
+    for (const std::string& name : unused) {
+      subjects.push_back(motion_name + "." + name);
+    }
+    warnings.push_back(warning_with(
+        "motion_parameter_unused",
+        "\"" + body_name + "\" takes no parameter named " + joined(unused) +
+            ", so the policy's value reaches nothing.",
+        subjects));
+  }
+
+  return motion_row(motion_name, method, Json::string(body_name), {}, reason);
+}
+
+Json bind_motion(const Json& motion, const Json& target, std::vector<Json>& warnings) {
+  const std::vector<const Json*> body = distinct_motions(target);
+  const std::string motion_name(motion["name"].string_or(""));
+
+  // 1. The controller's own name.
+  for (const Json* candidate : body) {
+    if ((*candidate)["name"].string_or("") == motion_name) {
+      return finish_motion_binding(motion, *candidate, "direct", "Motion name matches exactly.",
+                                   warnings);
+    }
+  }
+
+  // 2. The canonical motion, when exactly one body motion is it.
+  const std::optional<std::string> canonical = embodiment::canonical_motion(motion["motion"]);
+  std::vector<const Json*> same;
+  if (canonical.has_value()) {
+    for (const Json* candidate : body) {
+      if (embodiment::canonical_motion((*candidate)["motion"]) == canonical) {
+        same.push_back(candidate);
+      }
+    }
+  }
+  if (same.size() == 1) {
+    return finish_motion_binding(
+        motion, *same[0], "remap",
+        "Mapped by motion " + *canonical + " to \"" +
+            std::string((*same[0])["name"].string_or("")) + "\".",
+        warnings);
+  }
+
+  // 3. Optional motions may be dropped; required ones are a refusal.
+  std::string why;
+  if (!canonical.has_value()) {
+    why = "The motion declares no canonical motion, so it can only match a motion of the same "
+          "name, and none exists";
+  } else if (same.size() > 1) {
+    why = "This body has " + std::to_string(same.size()) + " " + *canonical +
+          " motions and none named \"" + motion_name + "\", so the vocabulary cannot choose one";
+  } else {
+    why = "This body has no " + *canonical + " motion";
+  }
+
+  if (motion["optional"].is_true()) {
+    return motion_row(motion_name, "drop", Json::null(), {},
+                      why + "; the policy declares the motion optional.");
+  }
+  return motion_row(motion_name, "blocked", Json::null(), {}, why + "; the policy requires it.");
+}
+
+std::string derive_motion_verdict(const Json& motions) {
+  bool dropped = false;
+  for (const Json& row : motions.items()) {
+    if (row["method"].string_or("") == "blocked") return "refused";
+    if (row["method"].string_or("") == "drop") dropped = true;
+  }
+  return dropped ? "degraded" : "direct";
+}
+
+/// The wire shape every path ends in, so a refused plan and a bound one cannot drift apart.
+Json shape_plan(const std::string& verdict, const Json& source, const Json& target,
+                const std::string& control_mode, const Json& control_hz,
+                const std::vector<Binding>& bindings, const Json* motions, const Json& observations,
+                const Json& clamp, const std::vector<Json>& warnings) {
+  Json out = Json::object();
+  out.set("verdict", Json::string(verdict));
+  out.set("robot_slug", target["robot_slug"]);
+  out.set("source_digest", or_null(field(source, "digest")));
+  out.set("target_digest", target["digest"]);
+  out.set("control_mode", Json::string(control_mode));
+  out.set("control_hz", control_hz);
+
+  Json binding_rows = Json::array();
+  for (const Binding& binding : bindings) {
+    Json row = Json::object();
+    row.set("source_index", binding.source_index);
+    row.set("source_role", binding.source_role);
+    row.set("method", Json::string(binding.method));
+    row.set("target", binding.target);
+    row.set("scale", Json::number(binding.scale));
+    row.set("limit", binding.limit);
+    row.set("reason", Json::string(binding.reason));
+    binding_rows.push(row);
+  }
+  out.set("bindings", binding_rows);
+  // §84.3 — absent from a joint plan, so every plan written before motions is unchanged.
+  if (motions != nullptr) {
+    out.set("motions", *motions);
+  }
+  out.set("observations", observations);
+
+  if (clamp.is_null()) {
+    out.set("clamp", Json::null());
+  } else {
+    Json shaped = Json::object();
+    // Each field is written only when the envelope declared it: an absent ceiling and a ceiling of
+    // null are different facts, and the clamp is read by the kernel.
+    for (const char* key : {"joint_velocity_max_rad_s", "joint_torque_max_nm",
+                            "base_velocity_max_m_s", "min_control_hz"}) {
+      if (clamp.has(key)) {
+        shaped.set(key, clamp[key]);
+      }
+    }
+    shaped.set("per_channel", clamp["per_channel"]);
+    if (clamp.has("source")) {
+      shaped.set("source", clamp["source"]);
+    }
+    out.set("clamp", shaped);
+  }
+
+  Json warning_rows = Json::array();
+  for (const Json& one : warnings) {
+    Json row = Json::object();
+    row.set("code", one["code"]);
+    row.set("message", one["message"]);
+    if (one.has("subjects") && !one["subjects"].is_null()) {
+      row.set("subjects", one["subjects"]);
+    }
+    warning_rows.push(row);
+  }
+  out.set("warnings", warning_rows);
+  return out;
+}
+
 }  // namespace
 
 Json resolve(const Json& source, const Json& target, const Json& options) {
   std::vector<Json> warnings;
   const TargetIndex index = index_target(target);
   std::vector<Binding> bindings;
+  const Space space = action_space_of(source, target);
 
   if (!target["verified"].is_true()) {
     warnings.push_back(warning_with(
@@ -645,7 +906,7 @@ Json resolve(const Json& source, const Json& target, const Json& options) {
         {std::string(target["robot_slug"].string_or(""))}));
   }
 
-  if (source["action_channels"].items().empty()) {
+  if (source["action_channels"].items().empty() && source["motions"].items().empty()) {
     warnings.push_back(warning(
         "no_source_embodiment",
         "The policy declares no action space, so nothing about its fit to this body can be "
@@ -678,7 +939,8 @@ Json resolve(const Json& source, const Json& target, const Json& options) {
       break;
     }
   }
-  if (!mode_supported) {
+  // A control mode is how a *joint* is commanded, so only a joint plan is asked about one.
+  if (space == Space::Joints && !mode_supported) {
     warnings.push_back(warning_with("control_mode_unsupported",
                                     "This body does not accept " + control_mode + " commands.",
                                     {control_mode}));
@@ -689,6 +951,33 @@ Json resolve(const Json& source, const Json& target, const Json& options) {
         "latency_undeclared",
         "This body declares no command latency, so loop stability at the policy rate cannot be "
         "predicted."));
+  }
+
+  // The two refusals that happen before anything is bound (§84.2, §84.3). Observations first and
+  // the rate second, as on every other path, so their warnings arrive in one order.
+  if (space == Space::Ambiguous || space == Space::MismatchMotions ||
+      space == Space::MismatchJoints) {
+    warnings.push_back(action_space_warning(space, target));
+    const Json observations = bind_observations(source["observations"], target, warnings);
+    const Json control_hz = resolve_control_hz(source, target, options, warnings);
+    const Json no_motions = Json::array();
+    const bool declared = !source["motions"].items().empty();
+    return shape_plan("refused", source, target, control_mode, control_hz, {},
+                      declared ? &no_motions : nullptr, observations, build_clamp(target, {}),
+                      warnings);
+  }
+
+  if (space == Space::Motions) {
+    Json motions = Json::array();
+    for (const Json& motion : source["motions"].items()) {
+      motions.push(bind_motion(motion, target, warnings));
+    }
+    const Json observations = bind_observations(source["observations"], target, warnings);
+    const Json control_hz = resolve_control_hz(source, target, options, warnings);
+    // No `unmapped_roles`: its sentence is that the controller *holds* the joints the policy does
+    // not drive, and on a program-level body the controller is running the motion.
+    return shape_plan(derive_motion_verdict(motions), source, target, control_mode, control_hz, {},
+                      &motions, observations, build_clamp(target, {}), warnings);
   }
 
   // Chains that cannot be satisfied joint-by-joint. Retargeting is a property of a whole kinematic
@@ -734,60 +1023,8 @@ Json resolve(const Json& source, const Json& target, const Json& options) {
         unmapped));
   }
 
-  Json out = Json::object();
-  out.set("verdict", Json::string(verdict));
-  out.set("robot_slug", target["robot_slug"]);
-  out.set("source_digest", or_null(field(source, "digest")));
-  out.set("target_digest", target["digest"]);
-  out.set("control_mode", Json::string(control_mode));
-  out.set("control_hz", control_hz);
-
-  Json binding_rows = Json::array();
-  for (const Binding& binding : bindings) {
-    Json row = Json::object();
-    row.set("source_index", binding.source_index);
-    row.set("source_role", binding.source_role);
-    row.set("method", Json::string(binding.method));
-    row.set("target", binding.target);
-    row.set("scale", Json::number(binding.scale));
-    row.set("limit", binding.limit);
-    row.set("reason", Json::string(binding.reason));
-    binding_rows.push(row);
-  }
-  out.set("bindings", binding_rows);
-  out.set("observations", observations);
-
-  if (clamp.is_null()) {
-    out.set("clamp", Json::null());
-  } else {
-    Json shaped = Json::object();
-    // Each field is written only when the envelope declared it: an absent ceiling and a ceiling of
-    // null are different facts, and the clamp is read by the kernel.
-    for (const char* key : {"joint_velocity_max_rad_s", "joint_torque_max_nm",
-                            "base_velocity_max_m_s", "min_control_hz"}) {
-      if (clamp.has(key)) {
-        shaped.set(key, clamp[key]);
-      }
-    }
-    shaped.set("per_channel", clamp["per_channel"]);
-    if (clamp.has("source")) {
-      shaped.set("source", clamp["source"]);
-    }
-    out.set("clamp", shaped);
-  }
-
-  Json warning_rows = Json::array();
-  for (const Json& one : warnings) {
-    Json row = Json::object();
-    row.set("code", one["code"]);
-    row.set("message", one["message"]);
-    if (one.has("subjects") && !one["subjects"].is_null()) {
-      row.set("subjects", one["subjects"]);
-    }
-    warning_rows.push(row);
-  }
-  out.set("warnings", warning_rows);
-  return out;
+  return shape_plan(verdict, source, target, control_mode, control_hz, bindings, nullptr,
+                    observations, clamp, warnings);
 }
 
 }  // namespace skynet::transport

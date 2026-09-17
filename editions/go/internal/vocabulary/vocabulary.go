@@ -88,6 +88,33 @@ var TransportWarningCodes = []string{
 	"observation_missing",
 	"observation_degraded",
 	"latency_undeclared",
+	// §84.3, appended — the order is part of what the corpus holds editions to.
+	"action_space_mismatch",
+	"action_space_ambiguous",
+	"motion_parameter_unused",
+}
+
+// CanonicalMotions is §84.1's motion vocabulary, in the order the section lists it.
+var CanonicalMotions = []string{
+	"move_joint",
+	"move_linear",
+	"move_circular",
+	"grasp",
+	"release",
+	"home",
+	"wait",
+	"tool_change",
+	"io_set",
+}
+
+// MotionFaultCodes is what can be wrong with a body's motion list (§84.1).
+var MotionFaultCodes = []string{
+	"unnamed",
+	"duplicate_motion",
+	"unknown_motion",
+	"duplicate_parameter",
+	"required_undeclared",
+	"bound_invalid",
 }
 
 // ActionKinds is what one channel of a policy output drives.
@@ -634,6 +661,8 @@ var sets = map[string][]string{
 	"embodiment_modalities":   EmbodimentModalities,
 	"canonical_chains":        CanonicalChains,
 	"canonical_axes":          CanonicalAxes,
+	"canonical_motions":       CanonicalMotions,
+	"motion_fault_codes":      MotionFaultCodes,
 	"os_tiers":                OSTiers,
 	"enforcement_modes":       EnforcementModes,
 	"guards":                  Guards,

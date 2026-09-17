@@ -106,6 +106,7 @@ fn body() -> EmbodimentDescriptor {
         watchdog: None,
         power: None,
         frames: None,
+        motions: Vec::new(),
     }
 }
 
@@ -135,6 +136,7 @@ fn policy(channels: Vec<ActionChannel>) -> SourceEmbodiment {
         control_hz: Some(50.0),
         action_channels: channels,
         observations: Vec::new(),
+        motions: Vec::new(),
     }
 }
 

@@ -8,7 +8,7 @@ the session record; this file is the plan and its progress log.
 > That is a decision the owner made, not an omission, and the plan's first job is to make it a
 > property of the build rather than a sentence in a README.
 
-**Held locally until asked for.** Everything through the seventh session sat on a local branch. The eighth session's work was **pushed on the owner's instruction**, to `claude/brave-albattani-cag2is` and a pull request; nothing is merged by this plan.
+**Held locally until asked for.** Everything through the seventh session sat on a local branch. The eighth session's work was **pushed on the owner's instruction**, to `claude/brave-albattani-cag2is` and a pull request; nothing is merged by this plan. The ninth session's work is **committed locally and not pushed**, on the owner's instruction of 2026-09-17.
 
 ---
 
@@ -859,6 +859,12 @@ corpus plus eight editions plus the TypeScript oracle is exactly that machinery.
 an issue, not a branch. *Decisions* 6 deferred it behind Phase 1's gate; **that gate is now met**, so
 the deferral has expired and this is unblocked.
 
+> **Done, 2026-09-17 (ninth session).** The amendment was ratified by the owner (*Decisions* 13) and is
+> §84 of the specification, in both copies and re-pinned. Items 1-3 are built in the order below —
+> the oracle, then 35 transport cases and 23 validation cases, then all eight editions — and
+> `skynet transport`, `skynet driver check`, `drivers/pendant` and the Hub's transport page read it.
+> What §84 settled that the issue did not is in §84.3's four rules; F32 is what building it found.
+
 > **Blocked on the specification, 2026-09-16 (eighth session), and blocked mechanically rather than
 > by judgement.** The amendment is designed and written out below, ready to file. It cannot be made
 > here: `docs/skynet-os-architecture.md` is edited *in both copies or in neither* and this session's
@@ -874,9 +880,12 @@ editions.** Doing it that way on §47.6 found the specified rule and the referen
 which released slot a publish takes — a bug that would have cost a reader its frame on nearly every
 cycle while presenting as a slow policy.
 
-1. Descriptor: action-space kind, named motions with parameters
-2. Transport bindings over motions rather than joint channels
-3. Corpus cases, then the editions
+1. ~~Descriptor: action-space kind, named motions with parameters~~ **Done** — §84.1, `motions` on the
+   descriptor and on the source embodiment, and `validateMotions` under `embodiment.descriptor.valid`
+2. ~~Transport bindings over motions rather than joint channels~~ **Done** — §84.3, `motions` on the plan
+3. ~~Corpus cases, then the editions~~ **Done** — `corpus/transport/motion.json` (35),
+   `corpus/embodiment/motions.json` (23), two closed sets; Rust, Python, C++ and Go reproduce all
+   1,270 cases, and C, Zig, Java and C# answer the two new sets at raised ratchets
 4. ~~A mock program-level controller driver — the teach-pendant analogue of `drivers/mock`~~
    **Done** — `drivers/pendant`. Thirty-seven checks, nearly all of them refusals, because for that
    class of machine the refusals *are* the interface. It found F25 on its first conformance run.
@@ -1057,6 +1066,61 @@ with *"decide yourself on these 2"*, and one of them turned out to rest on a fac
     cannot be executed is precisely the shape F15 was right to refuse, so the route is recorded and
     the work waits for a machine with ONNX Runtime on it. The `Session` seam means that costs
     nothing else.
+
+13. **The amendments in `docs/issues/` are ratified, and Phases 3, 4 and 5 are to be built.** The
+    owner's instruction of 2026-09-17 was to finish every section of this plan, and F29 had already
+    established that three of its phases wait on nothing but these decisions. A maintainer carrying
+    an issue to both copies is exactly what `CONTRIBUTING.md` asks for, and this session has both
+    checkouts writable — the mechanical block F29 met is gone. So each amendment is carried into both
+    copies of the specification as a section of **Part XII**, re-pinned with `--pin`, and built in the
+    order the issue names. Where building one settled something the issue left open, the section
+    says so rather than the issue being edited to look prescient.
+
+    Phase 5's issue was written **as questions**, deliberately, because answering them there would
+    have been §43's *half-designing*. Ratifying it means answering them, and each answer is a design
+    decision recorded in the section that makes it, with the alternative it rejected.
+
+### F31 — `main`'s corpus job had been red since the eighth session, and the reason given for it was a different one.
+
+The eighth session's entry reads *"`node tools/run-ci-job.mjs corpus` 9 of 12 — `zig` and `dotnet` are
+not installed on this machine, and the edition-figures check fails downstream of the two it could not
+measure."* The first half is true. The second is not: `edition-report.mjs --check` runs the four
+**complete** editions and never touches Zig or .NET (F8 already says so). It failed because
+`9037667` added eight `live` cases, moving the corpus from 1,202 to 1,210, and
+`reference/reports/editions.json` still said 1,202 — so the step compares a fresh run against a stale
+pin and refuses, on every machine, whatever is installed.
+
+It is F7's shape a third time — a failure attributed to the runner that was a fact about the tree —
+and the same remedy found it: the toolchains CI names, installed where the check runs. With Zig 0.16,
+Node 24, Go 1.24, a JDK 21 and .NET 8 in WSL, all eight editions ran and the stale pin was the only
+thing left to fail. Regenerated, it now says 1,270.
+
+### F32 — §73's corpus-file count was being read out of a stale row, and agreed by coincidence.
+
+`scale-report.mjs` takes the **first** `a corpus of N files` in §73. That was not the sentence under
+the table but a row inside it — *"two editions, Rust and Python, each passing all 1,148 cases of a
+corpus of 80 files"* — written when the corpus had 80 files and never updated. The corpus still had 80
+files, so the check read a stale row and passed. The first file this session added made the check
+fail against the row rather than against the sentence it exists for.
+
+The row was stale in three other ways — two editions where there are eight, 1,148 cases where there
+were 1,210, and a *"still missing"* column asking for a third edition that exists — and the fix is to
+rewrite it without restating any figure, so the sentence the check is written for is the only record.
+One fact, one place, which is §73's own argument for having the check at all.
+
+### F33 — the Hub reads a policy's declaration with its own parser, and nothing held it to the robot's.
+
+`lib/skynet/robots/transport.ts`'s `parseSourceEmbodiment` documents itself as reproducing
+`source_from_json` exactly — the Rust reader a robot runs at install — and it does, field by field. It
+is not a mirrored contract, so `check-contract-mirrors` cannot see it, and no corpus case passes
+through it. Adding `motions` to the Rust reader and the planner and not to this function would have
+produced a Hub that refuses a motion policy as *undeclared* while every robot binds it, with every
+check green.
+
+The gate is a Hub test whose fixture is typed `{ [K in keyof Required<SourceEmbodiment>]: unknown }`,
+so a field added to the mirrored contract fails the Hub's type-check until the fixture names it, and
+then fails the assertion until the reader carries it. Held to a control: the reader as it stood before
+this session fails the new test, and the current one passes.
 
 ## Next
 
@@ -1756,3 +1820,59 @@ skynet driver check, through dlopen                      24 · 24 · 23 of the s
   kernel without `AF_CAN`, and `make check-vcan` exits non-zero where there is nothing to run against.
 * **`drivers/ros2_control` has never met a plugin that blocks.** `mock_components` copies commands to
   states: no dynamics, no latency, no drive that can fault.
+
+### 2026-09-17 (ninth session) — the amendments ratified, and the phases they were holding
+
+Windows 11 with WSL2 Ubuntu 26.04 beside it. Rust 1.98.1 on Windows (CI's toolchain), 1.93.1 in WSL;
+Node 26 on Windows; and in WSL, installed for this session under `~/.skytools`, **every toolchain
+CI's `corpus` job names** — Node 24.21, Go 1.24.13, Zig 0.16.0, Temurin 21, .NET 8.0. So all eight
+editions run on one machine, which is what found F31. **Committed locally, nothing pushed**, on the
+owner's instruction. *Updated as the session goes.*
+
+The instruction was to finish every section. F29 had already shown that Phases 3, 4 and 5 wait on
+decisions rather than hardware, so the session opens with *Decisions* 13 and works through the
+issues in `docs/issues/`, each as a section of the specification's new Part XII.
+
+#### Phase 3 — §84, a motion action space
+
+**Changed.**
+
+| | |
+|---|---|
+| `docs/skynet-os-architecture.md` | Part XII opened; §84 written as built. §73's figures moved (147,000 lines of Rust, 82 files, 1,270 cases, 15,000 lines of reference) and its stale editions row rewritten (F32). Both copies, re-pinned |
+| `reference/typescript/embodiment.ts`, `shape.ts` | `motions` on both sides, `CANONICAL_MOTIONS`, `validateMotions` and six fault codes, the action-space decision, the motion binder, three warning codes appended. Synced into the Hub |
+| `tools/corpus-gen/generate.ts` | 35 cases in `transport/motion.json`, 23 in `embodiment/motions.json`, two closed sets. **Written before any edition** — every existing case unchanged except the closed set that grew |
+| `crates/skynet-contracts`, `skynet-corpus` | The Rust edition: types, decoder, planner arm, validator, runner arms |
+| `editions/{python,cpp,go}` | The three other complete editions; ratchets 1,210 → 1,270 in `ci.yml` and both Makefiles |
+| `editions/{c,zig,java,csharp}` | The two new closed sets and three new warning codes; their set-count self-checks 74 → 76; ratchets raised by two |
+| `crates/skynet-cli` | `skynet transport` renders motion bindings and says why a plan has none; `skynet driver check` validates the motion list and asks for a joint **or** a motion; `skynet limits`' plan printer lists them |
+| `drivers/pendant` | `describe()` serialises the motion table the interpreter enforces, and refuses a buffer one byte short rather than truncating. 42 checks |
+| `reference/reports/{editions,scale}.json` | Regenerated. `editions.json` had been stale since `9037667` (F31) |
+| `docs/issues/` | `motion-action-space.md` marked ratified, kept as the proposal it was |
+| **The Hub** | `lib/skynet/os/embodiment.ts` and the two pins synced; `parseSourceEmbodiment` reads `motions` by Rust's rules; the transport page renders a motion table and stops calling a refused or motion plan *"declares no action channels"*; six catalogue keys, synced into 34 locales at the English value — **not translated**, because running the translator needs the owner's approval in the conversation |
+
+**Verified.**
+
+```
+cargo fmt --all --check / clippy -D warnings --all-targets   exit 0
+cargo test --workspace                                       1,846 passed, 0 failed, 20 ignored (Windows)
+cargo test --workspace                                       1,945 passed, 0 failed, 20 ignored (WSL)
+corpus, eight editions                                       rust python cpp go 1270/1270
+                                                             c 356 · zig 317 · java 317 · csharp 317, 0 failed
+node tools/edition-report.mjs (WSL)                          4 editions, 1270 cases each
+node tools/run-ci-job.mjs invariants --wsl                   52 of 53, then 53 once scale.json was re-pinned
+node tools/check-mirrors.mjs / check-contract-mirrors.mjs    match
+make -C drivers/pendant check                                42 checks, 0 failed
+skynet driver check, pendant                                 23 passed, the motion list among them; guest
+Hub: vitest (4 suites) / tsc --noEmit / eslint               100 passed · exit 0 · exit 0
+```
+
+Controls, each failing and each reverted: first-wins made last-wins in the Rust binder fails
+`a-repeated-body-motion-first-wins` and `a-repeated-name-is-one-candidate`; `required` read as
+`== Some(true)` fails `an-undeclared-requirement-reads-as-required`; the Hub reader as it was before
+this session fails F33's structural test.
+
+**Not verified, and not claimed.** No controller. `drivers/pendant`'s interpreter is this repository's,
+and §84 says what a program-level body *declares*; nothing here has sent a motion to a Fanuc, a KUKA or
+an ABB. Guest tier stays permanent for these bodies by §59.2, and no guard reads a motion. The six new
+Hub strings read in English in all 35 locales until a translation run is approved.

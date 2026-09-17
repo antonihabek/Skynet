@@ -618,6 +618,10 @@ type TransportPlan struct {
 	HasMode      bool
 	ControlHz    maybeNumber
 	Bindings     []ChannelBinding
+	// Motions is present exactly when the policy declares motions (§84.3), and absent from a plan
+	// over joint channels so every plan written before §84 is unchanged.
+	Motions      []MotionBinding
+	HasMotions   bool
 	Observations []ObservationBinding
 	// Clamp is nil where the body declares no envelope and no binding carries a limit.
 	Clamp    canonical.Value
@@ -723,12 +727,14 @@ func ResolveTransport(source, target, options canonical.Value) TransportPlan {
 	slugText := js.ToString(slug, hasSlug)
 	control := target.Field("control")
 	envelope := objectField(target, "envelope")
+	space := actionSpaceOf(source, target)
+	sourceMotions := source.Field("motions").Items()
 
 	if !truthyValue(target.Field("verified")) {
 		warnAbout("unverified_embodiment",
 			"This body description is not signed by its vendor. Its joint ratings are unattested.", []string{slugText})
 	}
-	if len(channels) == 0 {
+	if len(channels) == 0 && len(sourceMotions) == 0 {
 		warn("no_source_embodiment",
 			"The policy declares no action space, so nothing about its fit to this body can be checked.")
 	}
@@ -747,12 +753,51 @@ func ResolveTransport(source, target, options canonical.Value) TransportPlan {
 	}
 	mode, hasMode := source.Get("control_mode")
 	modeText := js.ToString(mode, hasMode)
-	if !containsValue(control.Field("modes"), mode, hasMode) {
+	// A control mode is how a *joint* is commanded, so only a joint plan is asked about one.
+	if space == spaceJoints && !containsValue(control.Field("modes"), mode, hasMode) {
 		warnAbout("control_mode_unsupported", "This body does not accept "+modeText+" commands.", []string{modeText})
 	}
 	if !control.Has("command_latency_ms") {
 		warn("latency_undeclared",
 			"This body declares no command latency, so loop stability at the policy rate cannot be predicted.")
+	}
+
+	sourceDigest := canonical.Null()
+	if digest, present := presentNonNull(source, "digest"); present {
+		sourceDigest = digest
+	}
+	targetDigest := canonical.Null()
+	if digest, present := presentNonNull(target, "digest"); present {
+		targetDigest = digest
+	}
+
+	// The two refusals that happen before anything is bound (§84.2, §84.3), and the motion plan.
+	// Observations first and the rate second on both, as on the joint path, so their warnings
+	// arrive in one order whatever the plan concluded.
+	if space.refusesBeforeBinding() || space == spaceMotions {
+		verdict := "refused"
+		var motions []MotionBinding
+		if space.refusesBeforeBinding() {
+			warnings = append(warnings, actionSpaceWarning(space, slugText))
+			motions = []MotionBinding{}
+		} else {
+			for _, motion := range sourceMotions {
+				motions = append(motions, bindMotion(motion, target, warnAbout))
+			}
+			verdict = deriveMotionVerdict(motions)
+		}
+		observations := bindObservations(source.Field("observations"), target, warnAbout)
+		controlHz := resolveControlHz(source, target, options, envelope, warn)
+		clamp, hasClamp := buildClamp(envelope, nil)
+		// No `unmapped_roles` on either: its sentence is that the controller *holds* the joints the
+		// policy does not drive, and on a program-level body the controller is running the motion.
+		return TransportPlan{
+			Verdict: verdict, RobotSlug: slug, HasRobotSlug: hasSlug,
+			SourceDigest: sourceDigest, TargetDigest: targetDigest,
+			ControlMode: mode, HasMode: hasMode, ControlHz: controlHz,
+			Bindings: []ChannelBinding{}, Motions: motions, HasMotions: len(sourceMotions) > 0,
+			Observations: observations, Clamp: clamp, HasClamp: hasClamp, Warnings: warnings,
+		}
 	}
 
 	// Retargeting is a property of a whole kinematic chain, never of one joint: an elbow cannot go
@@ -797,15 +842,6 @@ func ResolveTransport(source, target, options canonical.Value) TransportPlan {
 		warnAbout("unmapped_roles",
 			js.NumberToString(float64(len(unmapped)))+" "+phrase+" not driven by the policy and will be held by the controller.",
 			unmapped)
-	}
-
-	sourceDigest := canonical.Null()
-	if digest, present := presentNonNull(source, "digest"); present {
-		sourceDigest = digest
-	}
-	targetDigest := canonical.Null()
-	if digest, present := presentNonNull(target, "digest"); present {
-		targetDigest = digest
 	}
 
 	return TransportPlan{
@@ -1343,6 +1379,7 @@ func shapeTransportPlan(plan TransportPlan) canonical.Value {
 		SetIf("control_mode", plan.ControlMode, plan.HasMode).
 		Set("control_hz", plan.ControlHz.nullable()).
 		Set("bindings", bindings).
+		SetIf("motions", shapeMotionBindings(plan.Motions), plan.HasMotions).
 		Set("observations", observations).
 		Set("clamp", clamp).
 		Set("warnings", warnings)

@@ -223,6 +223,22 @@ pub fn plan_to_json(plan: &TransportPlan) -> Json {
     }
     out.set("bindings", bindings);
 
+    // §84.3. Omitted from a plan over joint channels rather than written empty, so the plans every
+    // edition produced before motions existed are unchanged byte for byte.
+    if let Some(motions) = &plan.motions {
+        let mut list = Json::arr();
+        for binding in motions {
+            let mut item = Json::obj();
+            item.set("source_motion", Json::Str(binding.source_motion.clone()));
+            item.set("method", Json::from(binding.method.as_str()));
+            item.set("target", nullable_str(&binding.target));
+            item.set("missing", str_list(&binding.missing));
+            item.set("reason", Json::Str(binding.reason.clone()));
+            list.push(item);
+        }
+        out.set("motions", list);
+    }
+
     let mut observations = Json::arr();
     for observation in &plan.observations {
         let mut item = Json::obj();
@@ -523,7 +539,62 @@ pub fn descriptor_from_json(value: &Json) -> Result<EmbodimentDescriptor, Decode
                 .collect(),
         }),
         frames: frames_from_json(value.get("frames")),
+        motions: motions_from_json(value)?,
     })
+}
+
+/// Read a body's `motions` (§84.1). Absent reads as empty, which is a body not commanded this way.
+pub fn motions_from_json(value: &Json) -> Result<Vec<EmbodimentMotion>, DecodeError> {
+    let mut motions = Vec::new();
+    for item in value.arr_or_empty("motions") {
+        let mut parameters = Vec::new();
+        for parameter in item.arr_or_empty("parameters") {
+            parameters.push(MotionParameter {
+                name: req_str(parameter, "name")?,
+                unit: opt_string(parameter, "unit"),
+                // `as_bool` refuses a string, a number and a null rather than coercing any of them,
+                // so each reads as undeclared — which `validate_motions` names and transport reads
+                // as required.
+                required: parameter.get("required").and_then(Json::as_bool),
+                min: bound(parameter, "min"),
+                max: bound(parameter, "max"),
+            });
+        }
+        motions.push(EmbodimentMotion {
+            name: req_str(item, "name")?,
+            motion: opt_string(item, "motion"),
+            parameters,
+        });
+    }
+    Ok(motions)
+}
+
+/// A motion parameter's bound: absent is `None`, and a field that is present and not a number is
+/// `Some(NaN)`. The reference's type is a bare number, so a `null` there can only be a non-finite
+/// value JSON has no spelling for (`corpus/README.md`), and a bound that is not finite bounds
+/// nothing.
+fn bound(value: &Json, key: &str) -> Option<f64> {
+    value
+        .get(key)
+        .map(|found| found.as_f64().unwrap_or(f64::NAN))
+}
+
+/// The wire shape of a motion-list verdict: `fault` is present and null when the list is usable.
+pub fn motion_fault_to_json(fault: &Option<MotionFault>) -> Json {
+    let mut out = Json::obj();
+    match fault {
+        None => {
+            out.set("fault", Json::Null);
+        }
+        Some(fault) => {
+            let mut item = Json::obj();
+            item.set("code", Json::from(fault.code));
+            item.set("subjects", str_list(&fault.subjects));
+            item.set("detail", Json::Str(fault.detail.clone()));
+            out.set("fault", item);
+        }
+    }
+    out
 }
 
 /// The wire shape of a frame-graph verdict.
@@ -663,6 +734,16 @@ pub fn source_from_json(value: &Json) -> Result<SourceEmbodiment, DecodeError> {
         });
     }
 
+    let mut motions = Vec::new();
+    for item in value.arr_or_empty("motions") {
+        motions.push(SourceMotion {
+            name: req_str(item, "name")?,
+            motion: opt_string(item, "motion"),
+            parameters: item.str_arr("parameters"),
+            optional: flag(item, "optional"),
+        });
+    }
+
     Ok(SourceEmbodiment {
         robot_slug: opt_string(value, "robot_slug"),
         digest: opt_string(value, "digest"),
@@ -671,6 +752,7 @@ pub fn source_from_json(value: &Json) -> Result<SourceEmbodiment, DecodeError> {
         control_hz: opt_f64(value, "control_hz"),
         action_channels,
         observations,
+        motions,
     })
 }
 

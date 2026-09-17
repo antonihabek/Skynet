@@ -67,7 +67,8 @@ public final class Vocabulary {
         put("transport_warning_codes", "no_source_embodiment", "unverified_embodiment", "no_target_envelope",
                 "dof_mismatch", "control_mode_unsupported", "rate_unsupported", "rate_below_watchdog",
                 "scaled_down", "unscalable_channel", "retarget_without_solver", "unmapped_roles",
-                "observation_missing", "observation_degraded", "latency_undeclared");
+                "observation_missing", "observation_degraded", "latency_undeclared", "action_space_mismatch",
+                "action_space_ambiguous", "motion_parameter_unused");
         put("action_kinds", "joint_position", "joint_velocity", "joint_torque", "cartesian", "base_velocity",
                 "gripper", "discrete");
         put("control_modes", "position", "velocity", "torque", "trajectory", "cartesian");
@@ -78,6 +79,10 @@ public final class Vocabulary {
         put("canonical_chains", "left_arm", "right_arm", "left_leg", "right_leg", "left_hand", "right_hand",
                 "torso", "neck", "head", "base", "tail", "aux");
         put("canonical_axes", "pitch", "yaw", "roll", "slide", "flex", "abduct", "rotate", "grip");
+        put("canonical_motions", "move_joint", "move_linear", "move_circular", "grasp", "release", "home", "wait",
+                "tool_change", "io_set");
+        put("motion_fault_codes", "unnamed", "duplicate_motion", "unknown_motion", "duplicate_parameter",
+                "required_undeclared", "bound_invalid");
         put("os_tiers", "guest", "host", "certified");
         put("enforcement_modes", "advisory", "enforcing", "enforcing_redundant");
         put("guards", "watchdog", "envelope", "rate_limit", "workspace", "self_collision", "balance", "proximity",

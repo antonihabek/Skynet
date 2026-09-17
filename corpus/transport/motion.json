@@ -1,0 +1,4506 @@
+{
+  "corpus": "transport",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "name-matches-exactly",
+      "note": "A policy written for this controller spells its motion exactly and supplies what it requires.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                "pose",
+                "speed"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"direct\",\"missing\":[],\"reason\":\"Motion name matches exactly.\",\"source_motion\":\"move_l\",\"target\":\"move_l\"}],\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "remapped-through-the-vocabulary",
+      "note": "Another vendor's `LIN` and this controller's `move_l` are both move_linear, and exactly one body motion is — so the vocabulary relates them. The mechanism §5.1 gives roles, one level up.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "LIN",
+              "motion": "move_linear",
+              "parameters": [
+                "pose"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"remap\",\"missing\":[],\"reason\":\"Mapped by motion move_linear to \\\"move_l\\\".\",\"source_motion\":\"LIN\",\"target\":\"move_l\"}],\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "required-parameter-missing",
+      "note": "The name matched and the policy does not supply `pose`, which the controller requires. Blocked with the body's motion named and the missing parameter listed: this is the run-time rejection transport exists to move to install time.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                "speed"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"blocked\",\"missing\":[\"pose\"],\"reason\":\"\\\"move_l\\\" requires a parameter the policy does not supply: pose.\",\"source_motion\":\"move_l\",\"target\":\"move_l\"}],\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "required-parameter-missing-on-an-optional-motion",
+      "note": "The same miss on a motion the policy calls optional is still blocked, not dropped. A policy written for this vocabulary and wrong about it is a defect, and `optional` is not a licence to hide one — the precedent is a joint that matched and refuses the mode.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                "speed"
+              ],
+              "optional": true
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"blocked\",\"missing\":[\"pose\"],\"reason\":\"\\\"move_l\\\" requires a parameter the policy does not supply: pose.\",\"source_motion\":\"move_l\",\"target\":\"move_l\"}],\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "remap-with-a-required-parameter-missing",
+      "note": "A vocabulary match is a match: the missing parameter blocks it exactly as it would a name match, and names the body motion the policy was mapped to.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "MoveJ",
+              "motion": "move_joint",
+              "parameters": []
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"blocked\",\"missing\":[\"pose\"],\"reason\":\"\\\"move_j\\\" requires a parameter the policy does not supply: pose.\",\"source_motion\":\"MoveJ\",\"target\":\"move_j\"}],\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "optional-and-absent-is-dropped",
+      "note": "A vendor motion with no canonical meaning, marked optional, is dropped and the plan degrades.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "weld_seam",
+              "parameters": [
+                "length"
+              ],
+              "optional": true
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"drop\",\"missing\":[],\"reason\":\"The motion declares no canonical motion, so it can only match a motion of the same name, and none exists; the policy declares the motion optional.\",\"source_motion\":\"weld_seam\",\"target\":null}],\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"degraded\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "optional-false-is-required",
+      "note": "An explicit `false` is the default spelled out, and refuses exactly as an absent flag does.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "weld_seam",
+              "parameters": [
+                "length"
+              ],
+              "optional": false
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"blocked\",\"missing\":[],\"reason\":\"The motion declares no canonical motion, so it can only match a motion of the same name, and none exists; the policy requires it.\",\"source_motion\":\"weld_seam\",\"target\":null}],\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "required-and-nameless-is-blocked",
+      "note": "The same motion required: it declares no canonical motion, so only its own name could have matched, and the reason says so.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "weld_seam",
+              "parameters": [
+                "length"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"blocked\",\"missing\":[],\"reason\":\"The motion declares no canonical motion, so it can only match a motion of the same name, and none exists; the policy requires it.\",\"source_motion\":\"weld_seam\",\"target\":null}],\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "required-and-absent-is-blocked",
+      "note": "A canonical motion this body does not offer, required, refuses the plan and names the motion.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "circ",
+              "motion": "move_circular",
+              "parameters": [
+                "via",
+                "pose"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"blocked\",\"missing\":[],\"reason\":\"This body has no move_circular motion; the policy requires it.\",\"source_motion\":\"circ\",\"target\":null}],\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "two-candidates-is-no-remap",
+      "note": "Two body motions are move_linear and neither has the policy's name. Remapping to either would make the vocabulary choose which program runs, and it has no basis to — so the plan refuses and says how many candidates there were.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "LIN",
+              "motion": "move_linear",
+              "parameters": [
+                "pose"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-two-linears",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            },
+            {
+              "name": "move_l_fast",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true
+                }
+              ]
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"blocked\",\"missing\":[],\"reason\":\"This body has 2 move_linear motions and none named \\\"LIN\\\", so the vocabulary cannot choose one; the policy requires it.\",\"source_motion\":\"LIN\",\"target\":null}],\"observations\":[],\"robot_slug\":\"test-two-linears\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-two-linears\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-two-linears\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "two-candidates-optional-is-dropped",
+      "note": "The same ambiguity on an optional motion degrades instead, with the same count in the reason.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "LIN",
+              "motion": "move_linear",
+              "parameters": [
+                "pose"
+              ],
+              "optional": true
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-two-linears",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            },
+            {
+              "name": "move_l_fast",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true
+                }
+              ]
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"drop\",\"missing\":[],\"reason\":\"This body has 2 move_linear motions and none named \\\"LIN\\\", so the vocabulary cannot choose one; the policy declares the motion optional.\",\"source_motion\":\"LIN\",\"target\":null}],\"observations\":[],\"robot_slug\":\"test-two-linears\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"degraded\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-two-linears\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-two-linears\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "two-candidates-and-the-name-decides",
+      "note": "Two move_linear motions, and the policy names one of them. The name outranks the vocabulary, so the ambiguity never arises.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "move_l_fast",
+              "motion": "move_linear",
+              "parameters": [
+                "pose"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-two-linears",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            },
+            {
+              "name": "move_l_fast",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true
+                }
+              ]
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"direct\",\"missing\":[],\"reason\":\"Motion name matches exactly.\",\"source_motion\":\"move_l_fast\",\"target\":\"move_l_fast\"}],\"observations\":[],\"robot_slug\":\"test-two-linears\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-two-linears\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-two-linears\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "a-parameter-nothing-receives",
+      "note": "The controller takes `move_l` and has no `blend` or `zone`. Not a refusal, and not silent either: a policy that believes it sets a blend radius and does not is one nobody has characterised on this body. A repeated name is reported once, in the order the policy first gave it.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                "pose",
+                "blend",
+                "zone",
+                "blend"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"direct\",\"missing\":[],\"reason\":\"Motion name matches exactly.\",\"source_motion\":\"move_l\",\"target\":\"move_l\"}],\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"},{\"code\":\"motion_parameter_unused\",\"message\":\"\\\"move_l\\\" takes no parameter named blend, zone, so the policy's value reaches nothing.\",\"subjects\":[\"move_l.blend\",\"move_l.zone\"]}]}"
+    },
+    {
+      "id": "a-parameter-nothing-receives-after-a-remap",
+      "note": "The warning names the policy's motion in its subjects and the body's in its sentence, because after a remap those are different names and an operator needs both.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "LIN",
+              "motion": "move_linear",
+              "parameters": [
+                "pose",
+                "blend"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"remap\",\"missing\":[],\"reason\":\"Mapped by motion move_linear to \\\"move_l\\\".\",\"source_motion\":\"LIN\",\"target\":\"move_l\"}],\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"},{\"code\":\"motion_parameter_unused\",\"message\":\"\\\"move_l\\\" takes no parameter named blend, so the policy's value reaches nothing.\",\"subjects\":[\"LIN.blend\"]}]}"
+    },
+    {
+      "id": "a-blocked-motion-raises-no-unused-warning",
+      "note": "A binding refused for a missing parameter says nothing about the parameters it did get: the motion never runs, so there is no value to reach nothing.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                "blend"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"blocked\",\"missing\":[\"pose\"],\"reason\":\"\\\"move_l\\\" requires a parameter the policy does not supply: pose.\",\"source_motion\":\"move_l\",\"target\":\"move_l\"}],\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "required-false-is-not-needed",
+      "note": "`speed` is declared optional by the controller, so a policy that never sets it binds directly.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                "pose"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"direct\",\"missing\":[],\"reason\":\"Motion name matches exactly.\",\"source_motion\":\"move_j\",\"target\":\"move_j\"}],\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "an-undeclared-requirement-reads-as-required",
+      "note": "A parameter whose `required` is missing is read as required — the fail-closed direction, which refuses a plan somebody can read rather than shipping a command a controller rejects on a moving robot. `validateMotions` names the declaration; transport only reads it.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "probe",
+              "parameters": []
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-undeclared-requirement",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "probe",
+              "parameters": [
+                {
+                  "name": "depth",
+                  "unit": "m"
+                },
+                {
+                  "name": "force",
+                  "unit": "N",
+                  "required": null
+                },
+                {
+                  "name": "rate",
+                  "unit": "Hz",
+                  "required": false
+                }
+              ]
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"blocked\",\"missing\":[\"depth\",\"force\"],\"reason\":\"\\\"probe\\\" requires a parameter the policy does not supply: depth, force.\",\"source_motion\":\"probe\",\"target\":\"probe\"}],\"observations\":[],\"robot_slug\":\"test-undeclared-requirement\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-undeclared-requirement\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-undeclared-requirement\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "a-repeated-body-motion-first-wins",
+      "note": "Two body motions named `move_l`: the first requires `pose` and the second requires nothing. First-wins, as §5.1 rules for a repeated role, so the policy that supplies nothing is blocked — last-wins would have bound it directly and the difference is the whole case.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "parameters": []
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-repeated-motion",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"blocked\",\"missing\":[\"pose\"],\"reason\":\"\\\"move_l\\\" requires a parameter the policy does not supply: pose.\",\"source_motion\":\"move_l\",\"target\":\"move_l\"}],\"observations\":[],\"robot_slug\":\"test-repeated-motion\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-repeated-motion\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-repeated-motion\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "a-repeated-name-is-one-candidate",
+      "note": "The repeated `move_l` is one motion after first-wins, so a move_linear policy under another name has exactly one candidate and remaps, where counting declarations would have found two.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "LIN",
+              "motion": "move_linear",
+              "parameters": [
+                "pose"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-repeated-motion",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"remap\",\"missing\":[],\"reason\":\"Mapped by motion move_linear to \\\"move_l\\\".\",\"source_motion\":\"LIN\",\"target\":\"move_l\"}],\"observations\":[],\"robot_slug\":\"test-repeated-motion\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-repeated-motion\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-repeated-motion\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "an-unrecognised-canonical-reads-as-absent",
+      "note": "The body calls its motion `linear_move`, which is not in the vocabulary, so it can only be matched by name — and a move_linear policy under another name finds nothing.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "LIN",
+              "motion": "move_linear",
+              "parameters": [
+                "pose"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-vendor-canonical",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "linear_move",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true
+                }
+              ]
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"blocked\",\"missing\":[],\"reason\":\"This body has no move_linear motion; the policy requires it.\",\"source_motion\":\"LIN\",\"target\":null}],\"observations\":[],\"robot_slug\":\"test-vendor-canonical\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-vendor-canonical\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-vendor-canonical\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "canonical-is-exact",
+      "note": "A canonical token has one spelling. `MOVE_LINEAR` is not folded to it, because every normalisation this corpus has pinned is a place two editions disagreed.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "LIN",
+              "motion": "MOVE_LINEAR",
+              "parameters": [
+                "pose"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"blocked\",\"missing\":[],\"reason\":\"The motion declares no canonical motion, so it can only match a motion of the same name, and none exists; the policy requires it.\",\"source_motion\":\"LIN\",\"target\":null}],\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "a-canonical-that-is-not-a-string",
+      "note": "A number in the policy's canonical slot declares nothing, so the motion can only match by name — and the reason says it declares no canonical motion rather than naming a number.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "LIN",
+              "motion": 3,
+              "parameters": [
+                "pose"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"blocked\",\"missing\":[],\"reason\":\"The motion declares no canonical motion, so it can only match a motion of the same name, and none exists; the policy requires it.\",\"source_motion\":\"LIN\",\"target\":null}],\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "several-motions-in-the-policys-order",
+      "note": "Bindings come back in the order the policy declared its motions, and the verdict is the worst of them — one blocked motion refuses the plan however many bound.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            },
+            {
+              "name": "grip",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "weld_seam",
+              "parameters": [
+                "length"
+              ],
+              "optional": true
+            },
+            {
+              "name": "circ",
+              "motion": "move_circular",
+              "parameters": [
+                "via"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"direct\",\"missing\":[],\"reason\":\"Motion name matches exactly.\",\"source_motion\":\"home\",\"target\":\"home\"},{\"method\":\"remap\",\"missing\":[],\"reason\":\"Mapped by motion grasp to \\\"close_gripper\\\".\",\"source_motion\":\"grip\",\"target\":\"close_gripper\"},{\"method\":\"drop\",\"missing\":[],\"reason\":\"The motion declares no canonical motion, so it can only match a motion of the same name, and none exists; the policy declares the motion optional.\",\"source_motion\":\"weld_seam\",\"target\":null},{\"method\":\"blocked\",\"missing\":[],\"reason\":\"This body has no move_circular motion; the policy requires it.\",\"source_motion\":\"circ\",\"target\":null}],\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "no-control-mode-question-for-a-motion-plan",
+      "note": "The policy says `trajectory`, which this body does not accept — and a motion plan is not asked, because a control mode is how a joint is commanded. Asking would warn about every program-level body there is.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"direct\",\"missing\":[],\"reason\":\"Motion name matches exactly.\",\"source_motion\":\"home\",\"target\":\"home\"}],\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"}]}"
+    },
+    {
+      "id": "observations-then-rate-on-a-motion-plan",
+      "note": "A motion plan binds observations and resolves the rate in the same order a joint plan does, so the warnings arrive in one order whatever the action space.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "control_hz": 500,
+          "action_channels": [],
+          "observations": [
+            {
+              "name": "cell_cam",
+              "modality": "rgb"
+            }
+          ],
+          "motions": [
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":125,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"direct\",\"missing\":[],\"reason\":\"Motion name matches exactly.\",\"source_motion\":\"home\",\"target\":\"home\"}],\"observations\":[{\"method\":\"missing\",\"reason\":\"Not present on this body.\",\"required\":\"cell_cam\",\"target\":null}],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"},{\"code\":\"observation_missing\",\"message\":\"The policy reads a rgb stream called \\\"cell_cam\\\" and this body has none.\",\"subjects\":[\"cell_cam\"]},{\"code\":\"rate_unsupported\",\"message\":\"The policy runs at 500 Hz; this body accepts at most 125 Hz, so the loop is clamped.\"}]}"
+    },
+    {
+      "id": "both-action-spaces-is-refused",
+      "note": "Channels and motions in one policy: two architectures, not two spellings. One warning, no bindings of either kind, and an empty `motions` because the policy did declare some.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_position",
+              "role": "right_arm.elbow.flex"
+            }
+          ],
+          "observations": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                "pose"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-both-ways",
+          "digest": "sha256:arm",
+          "verified": true,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "J1",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J2",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J3",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[],\"observations\":[],\"robot_slug\":\"test-both-ways\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"action_space_ambiguous\",\"message\":\"The policy declares both joint channels and named motions. They are two architectures, and a package that claims both has not decided which machine it is for.\"}]}"
+    },
+    {
+      "id": "both-action-spaces-on-a-program-level-body",
+      "note": "The same policy on the pendant is refused for the same reason and only that one: ambiguity is decided before whether this body could have taken either half.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_position",
+              "role": "right_arm.elbow.flex"
+            }
+          ],
+          "observations": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                "pose"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[],\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"},{\"code\":\"action_space_ambiguous\",\"message\":\"The policy declares both joint channels and named motions. They are two architectures, and a package that claims both has not decided which machine it is for.\"}]}"
+    },
+    {
+      "id": "motions-onto-a-joint-body",
+      "note": "A motion policy on a body that declares no motions. The plan says *this robot is not commanded that way* once, rather than a refusal per motion describing a negotiation that never happened.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                "pose"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-arm",
+          "digest": "sha256:arm",
+          "verified": true,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "J1",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J2",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J3",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[],\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"action_space_mismatch\",\"message\":\"The policy commands named motions and this body is not commanded that way.\",\"subjects\":[\"test-arm\"]}]}"
+    },
+    {
+      "id": "joints-onto-a-program-level-body",
+      "note": "A joint policy on the pendant, which declares motions and no control mode. The same single warning from the other side, no `motions` key because the policy declared none, and no `control_mode_unsupported` beside it.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "position",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_position",
+              "role": "right_arm.elbow.flex"
+            },
+            {
+              "index": 1,
+              "kind": "joint_position",
+              "role": "right_arm.shoulder.pitch"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":50,\"control_mode\":\"position\",\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"},{\"code\":\"action_space_mismatch\",\"message\":\"The policy commands joint channels and this body accepts only named motions.\",\"subjects\":[\"test-pendant\"]}]}"
+    },
+    {
+      "id": "refused-plans-still-bind-observations",
+      "note": "A refused plan still reports its streams and its rate, observations first, because both are facts somebody choosing another robot wants.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "control_hz": 5,
+          "action_channels": [],
+          "observations": [
+            {
+              "name": "wrist_cam",
+              "modality": "rgb",
+              "width": 1920
+            }
+          ],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                "pose"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-arm",
+          "digest": "sha256:arm",
+          "verified": true,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "J1",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J2",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J3",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":5,\"control_mode\":\"trajectory\",\"motions\":[],\"observations\":[{\"method\":\"downscale\",\"reason\":\"Present but below the trained resolution or frame rate; frames are upscaled.\",\"required\":\"wrist_cam\",\"target\":\"wrist_cam\"}],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"action_space_mismatch\",\"message\":\"The policy commands named motions and this body is not commanded that way.\",\"subjects\":[\"test-arm\"]},{\"code\":\"observation_degraded\",\"message\":\"\\\"wrist_cam\\\" is lower resolution or slower than the stream the policy was trained on.\",\"subjects\":[\"wrist_cam\"]},{\"code\":\"rate_below_watchdog\",\"message\":\"At 5 Hz the controller's 100 ms watchdog fires between commands.\"}]}"
+    },
+    {
+      "id": "a-body-that-takes-both-plans-joints",
+      "note": "A body with control modes *and* motions is no mismatch for a joint policy. The plan is the one every edition produced before §84, with no `motions` key at all.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "right_arm.elbow.flex"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-both-ways",
+          "digest": "sha256:arm",
+          "verified": true,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "J1",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J2",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J3",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":60,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"J2\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J2\"}],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J2\":60},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-both-ways\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.roll\"]}]}"
+    },
+    {
+      "id": "a-body-that-takes-both-plans-motions",
+      "note": "The same body is no mismatch for a motion policy either.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "trajectory",
+          "action_channels": [],
+          "observations": [],
+          "motions": [
+            {
+              "name": "LIN",
+              "motion": "move_linear",
+              "parameters": [
+                "pose"
+              ]
+            }
+          ]
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-both-ways",
+          "digest": "sha256:arm",
+          "verified": true,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "J1",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J2",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J3",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":null,\"control_mode\":\"trajectory\",\"motions\":[{\"method\":\"remap\",\"missing\":[],\"reason\":\"Mapped by motion move_linear to \\\"move_l\\\".\",\"source_motion\":\"LIN\",\"target\":\"move_l\"}],\"observations\":[],\"robot_slug\":\"test-both-ways\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[]}"
+    },
+    {
+      "id": "an-uncommandable-body-is-not-a-program-level-one",
+      "note": "No control modes and no motions: a body nothing can command, which is §6's channel-by-channel refusal with each joint named — not the program-level sentence, because nothing here says this robot runs programs.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "position",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_position",
+              "role": "right_arm.elbow.flex"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-uncommandable",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": []
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":3,\"method\":\"blocked\",\"reason\":\"\\\"A3\\\" does not accept position commands.\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"A3\"}],\"clamp\":{\"per_channel\":{\"A3\":3}},\"control_hz\":50,\"control_mode\":\"position\",\"observations\":[],\"robot_slug\":\"test-uncommandable\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-uncommandable\"]},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-uncommandable\"]},{\"code\":\"control_mode_unsupported\",\"message\":\"This body does not accept position commands.\",\"subjects\":[\"position\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"},{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.yaw\",\"right_arm.shoulder.pitch\"]}]}"
+    },
+    {
+      "id": "an-empty-policy-is-still-a-joint-plan",
+      "note": "A policy declaring neither channels nor motions is the empty action space §6 already reports, and is not a mismatch against a program-level body.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "position",
+          "control_hz": 50,
+          "action_channels": [],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-pendant",
+          "digest": "sha256:pendant",
+          "verified": false,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "A1",
+              "role": "right_arm.shoulder.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A2",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            },
+            {
+              "name": "A3",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": []
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [],
+            "rate_hz_max": 125,
+            "rate_hz_min": 1
+          },
+          "envelope": null,
+          "solvers": [],
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[],\"clamp\":null,\"control_hz\":50,\"control_mode\":\"position\",\"observations\":[],\"robot_slug\":\"test-pendant\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:pendant\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"no_source_embodiment\",\"message\":\"The policy declares no action space, so nothing about its fit to this body can be checked.\"},{\"code\":\"no_target_envelope\",\"message\":\"No safety envelope has been declared for this robot. Per-joint ratings are the only ceilings available.\",\"subjects\":[\"test-pendant\"]},{\"code\":\"control_mode_unsupported\",\"message\":\"This body does not accept position commands.\",\"subjects\":[\"position\"]},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"},{\"code\":\"unmapped_roles\",\"message\":\"3 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.yaw\",\"right_arm.shoulder.pitch\",\"right_arm.elbow.flex\"]}]}"
+    },
+    {
+      "id": "an-empty-motion-list-is-a-joint-plan",
+      "note": "An empty `motions` is no motions: a joint policy that carries the key with nothing in it plans exactly as one without it, and gets no `motions` key back.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "right_arm.elbow.flex"
+            }
+          ],
+          "observations": [],
+          "motions": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-arm",
+          "digest": "sha256:arm",
+          "verified": true,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "J1",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J2",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J3",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":60,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"J2\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J2\"}],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J2\":60},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.roll\"]}]}"
+    }
+  ]
+}
