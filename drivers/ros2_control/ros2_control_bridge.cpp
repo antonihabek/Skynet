@@ -24,16 +24,21 @@
  * ROS 2 controllers. `ros2_control` allows one claim on a command interface, and this driver takes
  * it. That is the same exclusivity §25.2 gives a capability lease, arriving from the other side.
  *
- * ── The mapping, and the place the two models do not meet ──
+ * ── The mapping, and the place the two models used not to meet ──
  *
- * §24's command carries **one mode for the whole body**. `ros2_control` declares command interfaces
- * **per joint**, and nothing stops a URDF giving joint A `position` and joint B `velocity`.
+ * `ros2_control` declares command interfaces **per joint**, and nothing stops a URDF giving joint A
+ * `position` and joint B `velocity`. §24's command used to carry **one mode for the whole body**,
+ * so there was no honest way to command such a machine and this driver declared the
+ * **intersection**: the modes every joint offers. A mobile manipulator — an arm on position, wheels
+ * on velocity — shares none, so it was reported with no control modes at all and every command
+ * against it was refused. Truthful, and it meant a perfectly ordinary robot was uncommandable.
  *
- * There is no honest way to command such a body through §24, so the descriptor declares the
- * **intersection**: the modes every joint offers. A body whose joints share none is a body this
- * driver reports with no control modes at all — which is the truthful descriptor for it, and which
- * `skynet driver check` then reads exactly as it reads `drivers/pendant` (§59.2): the joints are
- * reported and there is no mode in which they are commanded.
+ * **§86 is the amendment that came out of this row.** The command now carries a mode per joint,
+ * `control.modes` is the **union**, each joint's `control_modes` is its own, and this driver
+ * declares `per_joint_modes` so transport knows the array will be read. `mixed_interfaces.urdf` was
+ * the regression test for "no mode, and refused" and is now the regression test for "both modes,
+ * and commanded" — the same file, asserting the opposite, which is what ratifying an amendment
+ * looks like from inside a driver.
  *
  * ── What it will not declare ──
  *
@@ -233,10 +238,12 @@ std::string build_descriptor(const skr_ctx& ctx) {
     emit("position_min_rad", joint.position_min);
     emit("position_max_rad", joint.position_max);
     emit("velocity_max_rad_s", joint.velocity_max);
+    // §86.1: the joint's own interfaces, with nothing intersected away. This was already the
+    // per-joint truth; what changed is that it is no longer filtered by what every *other* joint
+    // also offers.
     out << "},\"control_modes\":[";
     bool first_mode = true;
     for (const ModeMap& mode : MODES) {
-      if (!ctx.modes.count(mode.mode)) continue;
       if (!joint.command_interfaces.count(mode.interface)) continue;
       if (!first_mode) out << ",";
       first_mode = false;
@@ -244,6 +251,8 @@ std::string build_descriptor(const skr_ctx& ctx) {
     }
     out << "]}";
   }
+  // §86.1: the **union** — every mode some joint offers. `ctx.modes` is that union now; it used to
+  // be the intersection, and the difference is the whole amendment.
   out << "],\"end_effectors\":[],\"sensors\":[],\"control\":{\"modes\":[";
   bool first_mode = true;
   for (const ModeMap& mode : MODES) {
@@ -252,10 +261,12 @@ std::string build_descriptor(const skr_ctx& ctx) {
     first_mode = false;
     out << "\"" << mode.skynet_name << "\"";
   }
+  // This driver reads the per-joint array, so transport may mix modes across these joints.
+  out << "],\"per_joint_modes\":true";
   // The rates are the resource manager's update rate, which this driver sets and which a caller
   // may not exceed. Not a claim about the hardware behind the plugin: that is the plugin's, and
   // `ros2_control` does not publish it.
-  out << "],\"rate_hz_max\":1000,\"rate_hz_min\":1},"
+  out << ",\"rate_hz_max\":1000,\"rate_hz_min\":1},"
       // Null. Every rating a URDF carries is a design value (§63.4).
       << "\"envelope\":null,\"capabilities\":[],\"extensions\":[],\"solvers\":[]}";
   return out.str();
@@ -347,23 +358,21 @@ int bridge_open(const char* config_json, skr_ctx** out) {
     return SKR_ENODEV;
   }
 
-  // §24's one mode per body against `ros2_control`'s per-joint interfaces: the intersection, and
-  // the header says why there is no honest alternative.
+  // §86.1: the **union** — every mode some joint offers. The intersection was what §24 forced
+  // before a command could carry a mode per joint, and it made a mobile manipulator uncommandable.
   for (const ModeMap& mode : MODES) {
-    bool every = true;
     for (const BridgeJoint& joint : g_ctx.joints) {
-      if (!joint.command_interfaces.count(mode.interface)) {
-        every = false;
+      if (joint.command_interfaces.count(mode.interface)) {
+        g_ctx.modes.insert(mode.mode);
         break;
       }
     }
-    if (every) g_ctx.modes.insert(mode.mode);
   }
   if (g_ctx.modes.empty()) {
     say(
-        "no control mode is offered by every joint, so this body cannot be commanded through §24 "
-        "— which carries one mode for the whole body. The descriptor declares no control modes, "
-        "which is the truthful shape for it, and `write_command` refuses.");
+        "no joint declares a command interface this driver maps, so there is no mode in which this "
+        "body is commanded. The descriptor declares no control modes, which is the truthful shape "
+        "for it, and `write_command` refuses.");
   }
 
   try {
@@ -469,23 +478,47 @@ int bridge_write_command(skr_ctx* ctx, const skr_command* cmd, uint64_t deadline
     ctx->commands_refused += 1;
     return SKR_EINVAL;
   }
-  if (!ctx->modes.count(cmd->mode)) {
-    // A mode some joints offer and not all of them is refused rather than applied to the ones that
-    // can take it: a body half commanded in torque and half holding is a trajectory nobody asked
-    // for, which is §25.2's argument about two policies arriving one layer down.
-    ctx->commands_refused += 1;
-    return SKR_EINVAL;
+
+  // §86.1. Every joint's mode resolved and checked **before** any interface is claimed: a command
+  // half applied is worse than one refused, and this loop is the only place that can tell.
+  //
+  // The two refusals are different facts and take the two codes the header defines. An entry
+  // outside the vocabulary is EINVAL — a malformed request, most likely a bare SKR_MODE_* written
+  // into the per-joint array, which is the transcription error that array's offset exists to catch.
+  // A well-formed mode a joint does not offer is EPERM: the request is fine and this machine will
+  // not do it. Before §86 both were one `!ctx->modes.count(cmd->mode)` against the intersection,
+  // which refused the ordinary mixed body along with the genuinely wrong command.
+  const bool per_joint = (cmd->flags & SKR_CMD_PER_JOINT_MODES) != 0 && cmd->modes != nullptr;
+  std::vector<const char*> interfaces(ctx->joints.size(), nullptr);
+  for (size_t index = 0; index < ctx->joints.size(); ++index) {
+    uint8_t mode = cmd->mode;
+    if (per_joint) {
+      const uint8_t entry = cmd->modes[index];
+      if (!SKR_JMODE_VALID(entry)) {
+        ctx->commands_refused += 1;
+        return SKR_EINVAL;
+      }
+      if (entry != SKR_JMODE_INHERIT) mode = SKR_MODE_OF_JMODE(entry);
+    }
+    // A masked joint is not commanded, so the mode it was not commanded in is not checked: the
+    // mask is how the OS says nothing, and a body-wide hold has to stay expressible on a body whose
+    // joints disagree about mode.
+    if (cmd->mask != nullptr && cmd->mask[index] == 0) continue;
+    const char* interface = nullptr;
+    for (const ModeMap& candidate : MODES) {
+      if (candidate.mode == mode) interface = candidate.interface;
+    }
+    if (interface == nullptr || !ctx->joints[index].command_interfaces.count(interface)) {
+      ctx->commands_refused += 1;
+      return SKR_EPERM;
+    }
+    interfaces[index] = interface;
   }
+
   if (ctx->estop) {
     ctx->commands_refused += 1;
     return SKR_EPERM;
   }
-
-  const char* interface = nullptr;
-  for (const ModeMap& mode : MODES) {
-    if (mode.mode == cmd->mode) interface = mode.interface;
-  }
-  if (interface == nullptr) return SKR_EINVAL;
 
   for (size_t index = 0; index < ctx->joints.size(); ++index) {
     const uint8_t applied = cmd->mask == nullptr ? 1u : cmd->mask[index];
@@ -495,7 +528,7 @@ int bridge_write_command(skr_ctx* ctx, const skr_command* cmd, uint64_t deadline
       ctx->commands_refused += 1;
       return SKR_EINVAL;
     }
-    const std::string key = ctx->joints[index].name + "/" + interface;
+    const std::string key = ctx->joints[index].name + "/" + interfaces[index];
     try {
       auto loaned = ctx->resources->claim_command_interface(key);
       if (!loaned.set_value(static_cast<double>(value))) {

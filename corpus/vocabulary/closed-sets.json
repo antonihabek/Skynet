@@ -52,11 +52,11 @@
     },
     {
       "id": "capability_tokens",
-      "note": "Every canonical capability token (§85.1), domain by domain: the Standard Robot Interface the Hub has validated robots against, plus §84's `control.motion` and §49.1's two `hri` tokens.",
+      "note": "Every canonical capability token (§85.1), domain by domain: the Standard Robot Interface the Hub has validated robots against, plus the four this document gates a rule on and the interface has no word for — §84's `control.motion`, §49.1's two `hri` tokens and §49.2's `sensing.audio`.",
       "input": {
         "set": "capability_tokens"
       },
-      "expected": "[\"locomotion.walk\",\"locomotion.velocity\",\"locomotion.stairs\",\"locomotion.turn_in_place\",\"locomotion.stand\",\"locomotion.fly\",\"manipulation.arm\",\"manipulation.dual_arm\",\"manipulation.grasp\",\"manipulation.dexterous_hand\",\"manipulation.cartesian\",\"manipulation.force_control\",\"manipulation.mobile\",\"sensing.camera.rgb\",\"sensing.camera.depth\",\"sensing.camera.stereo\",\"sensing.lidar\",\"sensing.imu\",\"sensing.force_torque\",\"sensing.tactile\",\"sensing.joint_state\",\"sensing.odometry\",\"control.position\",\"control.velocity\",\"control.torque\",\"control.trajectory\",\"control.realtime\",\"control.motion\",\"safety.estop\",\"safety.collision_avoidance\",\"safety.workspace_limits\",\"platform.onboard_compute\",\"platform.ros2\",\"platform.teleop\",\"platform.data_recording\",\"hri.speech\",\"hri.warning\"]"
+      "expected": "[\"locomotion.walk\",\"locomotion.velocity\",\"locomotion.stairs\",\"locomotion.turn_in_place\",\"locomotion.stand\",\"locomotion.fly\",\"manipulation.arm\",\"manipulation.dual_arm\",\"manipulation.grasp\",\"manipulation.dexterous_hand\",\"manipulation.cartesian\",\"manipulation.force_control\",\"manipulation.mobile\",\"sensing.camera.rgb\",\"sensing.camera.depth\",\"sensing.camera.stereo\",\"sensing.lidar\",\"sensing.imu\",\"sensing.force_torque\",\"sensing.tactile\",\"sensing.joint_state\",\"sensing.odometry\",\"sensing.audio\",\"control.position\",\"control.velocity\",\"control.torque\",\"control.trajectory\",\"control.realtime\",\"control.motion\",\"safety.estop\",\"safety.collision_avoidance\",\"safety.workspace_limits\",\"platform.onboard_compute\",\"platform.ros2\",\"platform.teleop\",\"platform.data_recording\",\"hri.speech\",\"hri.warning\"]"
     },
     {
       "id": "token_classes",
@@ -88,7 +88,7 @@
       "input": {
         "set": "transport_warning_codes"
       },
-      "expected": "[\"no_source_embodiment\",\"unverified_embodiment\",\"no_target_envelope\",\"dof_mismatch\",\"control_mode_unsupported\",\"rate_unsupported\",\"rate_below_watchdog\",\"scaled_down\",\"unscalable_channel\",\"retarget_without_solver\",\"unmapped_roles\",\"observation_missing\",\"observation_degraded\",\"latency_undeclared\",\"action_space_mismatch\",\"action_space_ambiguous\",\"motion_parameter_unused\"]"
+      "expected": "[\"no_source_embodiment\",\"unverified_embodiment\",\"no_target_envelope\",\"dof_mismatch\",\"control_mode_unsupported\",\"rate_unsupported\",\"rate_below_watchdog\",\"scaled_down\",\"unscalable_channel\",\"retarget_without_solver\",\"unmapped_roles\",\"observation_missing\",\"observation_degraded\",\"latency_undeclared\",\"action_space_mismatch\",\"action_space_ambiguous\",\"motion_parameter_unused\",\"joint_mode_conflict\",\"mixed_modes_unsupported\"]"
     },
     {
       "id": "action_kinds",

@@ -119,6 +119,16 @@ pub fn limits_to_json(limits: &ResolvedLimits<'_>, profile_name: Option<&str>) -
     }
     out.set("per_channel", per_channel);
 
+    // §86.3. Absent — not empty — on a body no joint of which is bound, so every limits document
+    // written before this section is the same bytes.
+    if !limits.joint_modes.is_empty() {
+        let mut joint_modes = Json::obj();
+        for (name, mode) in limits.joint_modes {
+            joint_modes.set(name, Json::from(*mode));
+        }
+        out.set("joint_modes", joint_modes);
+    }
+
     out.set(
         "active_guards",
         Json::Arr(
@@ -496,6 +506,7 @@ pub struct OwnedLimits {
     max_delta_per_cycle: Option<f64>,
     self_collision_margin_m: Option<f64>,
     per_channel: Vec<(String, f64)>,
+    joint_modes: Vec<(String, String)>,
     active_guards: Vec<Guard>,
     unreconstructed: Vec<Unreconstructed>,
     source: Option<String>,
@@ -558,6 +569,11 @@ impl OwnedLimits {
             .iter()
             .map(|(name, value)| (name.as_str(), *value))
             .collect();
+        let joint_modes: Vec<(&str, &str)> = self
+            .joint_modes
+            .iter()
+            .map(|(name, mode)| (name.as_str(), mode.as_str()))
+            .collect();
         let mut active = FixedVec::new();
         for guard in &self.active_guards {
             active.push(*guard);
@@ -580,6 +596,7 @@ impl OwnedLimits {
             max_delta_per_cycle: self.max_delta_per_cycle,
             proximity: None,
             per_channel: &per_channel,
+            joint_modes: &joint_modes,
             active_guards: active,
             unavailable_guards: FixedVec::new(),
             inert_guards: FixedVec::new(),
@@ -645,6 +662,27 @@ pub fn limits_from_json(document: &Json) -> Result<OwnedLimits, LimitsError> {
             return Err(LimitsError::Malformed {
                 field: "per_channel",
             })
+        }
+    }
+
+    // §86.3, and optional in a way `per_channel` is not: a document written before this section
+    // carries no mode map, and a body no joint of which is bound carries none either. Absent reads
+    // as *no joint has a declared mode*, which is exactly how this replayed before §86 — the
+    // whole-body ceilings reached no channel. Reading its absence as a mode would be inventing one.
+    let mut joint_modes = Vec::new();
+    if let Some(value) = document.get_present("joint_modes") {
+        let Some(table) = value.as_obj() else {
+            return Err(LimitsError::Malformed {
+                field: "joint_modes",
+            });
+        };
+        for (name, mode) in table {
+            let Some(mode) = mode.as_str() else {
+                return Err(LimitsError::Malformed {
+                    field: "joint_modes",
+                });
+            };
+            joint_modes.push((name.clone(), mode.to_string()));
         }
     }
 
@@ -716,6 +754,7 @@ pub fn limits_from_json(document: &Json) -> Result<OwnedLimits, LimitsError> {
         max_delta_per_cycle: number(document, "max_delta_per_cycle"),
         self_collision_margin_m: number(document, "self_collision_margin_m"),
         per_channel,
+        joint_modes,
         active_guards,
         unreconstructed,
         envelope,

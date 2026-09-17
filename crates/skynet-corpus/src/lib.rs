@@ -263,7 +263,8 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             let frames = owned.frame_refs();
             let volumes = owned.volume_refs();
             let layers = owned.layer_refs(&volumes);
-            let params = owned.params(&per_channel, frames.as_deref(), &layers);
+            let joint_modes = owned.joint_mode_refs();
+            let params = owned.params(&per_channel, &joint_modes, frames.as_deref(), &layers);
             let grants = owned.grant_refs();
             let limits = skynet_kernel::resolve_limits(&params).with_grants(&grants);
             let (desired, previous) = cycle_owned.refs();
@@ -290,7 +291,8 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             let frames = owned.frame_refs();
             let volumes = owned.volume_refs();
             let layers = owned.layer_refs(&volumes);
-            let params = owned.params(&per_channel, frames.as_deref(), &layers);
+            let joint_modes = owned.joint_mode_refs();
+            let params = owned.params(&per_channel, &joint_modes, frames.as_deref(), &layers);
             let limits = skynet_kernel::resolve_limits(&params);
             skynet_contracts::safety::limits_to_json(&limits, owned.profile_name())
         }

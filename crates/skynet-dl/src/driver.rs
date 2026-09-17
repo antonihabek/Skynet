@@ -192,6 +192,26 @@ pub struct Driver {
     _library: Library,
 }
 
+/// One command whose joints are not all in the same mode (§86.1), for [`Driver::write_modal`].
+///
+/// The three arrays are indexed by the same joint count and the shortest decides it. `modes` holds
+/// one [`skynet_rhal::jmode`] value per joint, and [`skynet_rhal::jmode::INHERIT`] is how a joint
+/// says it takes `mode`.
+pub struct ModalFrame<'a> {
+    /// When the command was produced, not when it was sent.
+    pub stamp_ns: u64,
+    /// Must advance; a repeat is a stalled producer to the watchdog.
+    pub seq: u32,
+    /// The mode of every joint whose `modes` entry is `INHERIT`.
+    pub mode: u8,
+    /// Setpoints, in each joint's own units.
+    pub values: &'a [f32],
+    /// 0 = hold, non-zero = apply.
+    pub mask: &'a [u8],
+    /// `SKR_JMODE_*` per joint.
+    pub modes: &'a [u8],
+}
+
 impl Driver {
     /// Load a shared object, check its vtable, and open a context.
     ///
@@ -317,19 +337,72 @@ impl Driver {
         // this side created.
         let joints = values.len().min(mask.len());
 
+        // §86.1. This entry point takes one mode for the whole body and says so by leaving the
+        // flag clear and the array null — which is exactly what an ABI-1 command is, and what every
+        // driver written before §86 expects. A caller with a mixed body reaches for `write_modal`.
         let command = skynet_rhal::Command {
             stamp_ns,
             seq,
             mode,
-            _pad: [0; 3],
+            flags: 0,
+            _pad: [0; 2],
             joint_count: joints as u16,
             values: values.as_ptr(),
             mask: mask.as_ptr(),
+            modes: core::ptr::null(),
         };
 
         // SAFETY: `write_command` came from a vtable that passed `accepts`; `ctx` is live; and both
         // arrays address at least `joint_count` elements owned by the caller for the duration of
         // the call.
+        Ok(unsafe { write_command(self.ctx, &command, now_ns) })
+    }
+
+    /// Write one command whose joints are not all in the same mode (§86.1).
+    ///
+    /// Takes a [`ModalFrame`] rather than six arguments, which is not only a lint: three arrays
+    /// indexed by one joint count, passed positionally, is an invitation to swap `mask` and `modes`
+    /// — two `&[u8]` of the same length whose meanings are unrelated.
+    ///
+    /// `modes` is one [`skynet_rhal::jmode`] value per joint, and
+    /// [`skynet_rhal::jmode::INHERIT`] is how a joint says it takes `mode`. This is the entry point
+    /// for a mobile manipulator — an arm on position, wheels on velocity — which had no
+    /// representation at all before §86.
+    ///
+    /// **Only for a body whose descriptor declares `control.per_joint_modes`.** A driver written
+    /// before §86 does not read the array, so a command it cannot see would be applied body-wide in
+    /// whatever `mode` says, which is the silent half-commanded robot §86 exists to prevent.
+    /// Transport will not produce a mixed plan for such a body, so in the ordinary path this cannot
+    /// be reached with the wrong driver; this note is for the caller who builds a command by hand.
+    pub fn write_modal(&mut self, frame: ModalFrame<'_>, now_ns: u64) -> Result<i32, DriverError> {
+        let write_command = self
+            .vtable
+            .write_command
+            .ok_or(DriverError::Absent("write_command"))?;
+
+        // The minimum of all three, for the reason `write_command` takes the minimum of two: a
+        // driver reading `joint_count` entries out of the shortest array is an overrun this side
+        // created.
+        let joints = frame
+            .values
+            .len()
+            .min(frame.mask.len())
+            .min(frame.modes.len());
+
+        let command = skynet_rhal::Command {
+            stamp_ns: frame.stamp_ns,
+            seq: frame.seq,
+            mode: frame.mode,
+            flags: skynet_rhal::cmd_flags::PER_JOINT_MODES,
+            _pad: [0; 2],
+            joint_count: joints as u16,
+            values: frame.values.as_ptr(),
+            mask: frame.mask.as_ptr(),
+            modes: frame.modes.as_ptr(),
+        };
+
+        // SAFETY: as `write_command` above, and `modes` addresses at least `joint_count` entries
+        // for the duration of the call by the same argument.
         Ok(unsafe { write_command(self.ctx, &command, now_ns) })
     }
 

@@ -48,6 +48,7 @@ struct ClampOwned {
     base_velocity_max_m_s: Option<f64>,
     min_control_hz: Option<f64>,
     per_channel: Vec<(String, f64)>,
+    joint_modes: Vec<(String, String)>,
     source: Option<String>,
 }
 
@@ -109,12 +110,26 @@ impl LimitsOwned {
                         .collect()
                 })
                 .unwrap_or_default();
+            // §86.3. Absent on every case written before this section, and on every body no joint
+            // of which is bound.
+            let joint_modes = node
+                .get("joint_modes")
+                .and_then(Json::as_obj)
+                .map(|map| {
+                    map.iter()
+                        .filter_map(|(name, value)| {
+                            value.as_str().map(|mode| (name.clone(), mode.to_string()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             ClampOwned {
                 joint_velocity_max_rad_s: num(node, "joint_velocity_max_rad_s"),
                 joint_torque_max_nm: num(node, "joint_torque_max_nm"),
                 base_velocity_max_m_s: num(node, "base_velocity_max_m_s"),
                 min_control_hz: num(node, "min_control_hz"),
                 per_channel,
+                joint_modes,
                 source: text(node, "source"),
             }
         });
@@ -242,6 +257,20 @@ impl LimitsOwned {
             .unwrap_or_default()
     }
 
+    /// The mode each bound joint is commanded in, as the kernel wants them (§86.3).
+    pub fn joint_mode_refs(&self) -> Vec<(&str, &str)> {
+        self.transport
+            .as_ref()
+            .map(|clamp| {
+                clamp
+                    .joint_modes
+                    .iter()
+                    .map(|(name, mode)| (name.as_str(), mode.as_str()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// The profile's name, for rendering the widened-limits notice.
     pub fn profile_name(&self) -> Option<&str> {
         self.profile.as_ref().map(|profile| profile.name.as_str())
@@ -256,6 +285,7 @@ impl LimitsOwned {
     pub fn params<'a>(
         &'a self,
         per_channel: &'a [(&'a str, f64)],
+        joint_modes: &'a [(&'a str, &'a str)],
         frames: Option<&'a [Frame<'a>]>,
         layers: &'a [WorkspaceLayer<'a>],
     ) -> ResolveLimitsParams<'a> {
@@ -269,6 +299,7 @@ impl LimitsOwned {
                 base_velocity_max_m_s: clamp.base_velocity_max_m_s,
                 min_control_hz: clamp.min_control_hz,
                 per_channel,
+                joint_modes,
                 source: clamp.source.as_deref(),
             }),
             profile: self.profile.as_ref().map(|profile| OperatorProfile {

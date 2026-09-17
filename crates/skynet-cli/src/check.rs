@@ -454,12 +454,23 @@ pub fn run(library: &Library, config: &str) -> Report {
         .and_then(Json::as_arr)
         .map(|modes| !modes.is_empty())
         .unwrap_or(true);
+    // §86.1. Whether this driver reads the per-joint mode array, which decides whether the two
+    // checks below it apply. Absent reads as `false`: a driver written before §86 says nothing here
+    // and is not measured against a field it has never heard of.
+    let per_joint_modes = report
+        .descriptor
+        .as_ref()
+        .and_then(|json| json.get("control"))
+        .and_then(|control| control.get("per_joint_modes"))
+        .and_then(Json::as_bool)
+        .unwrap_or(false);
     command_checks(
         &mut report,
         write_command,
         ctx,
         expected_joints,
         commandable,
+        per_joint_modes,
     );
     estop_checks(&mut report, driver, read_state, ctx, expected_joints);
 
@@ -1116,6 +1127,7 @@ fn command_checks(
     ctx: *mut Ctx,
     expected_joints: Option<usize>,
     commandable: bool,
+    per_joint_modes: bool,
 ) {
     let Some(joints) = expected_joints.filter(|count| *count > 0) else {
         report.push(CheckResult::new(
@@ -1130,14 +1142,19 @@ fn command_checks(
     let values = vec![0.0f32; joints];
     let mask = vec![0u8; joints]; // every joint held: the safest command that is still well-formed
     let mut seq = 1u32;
+    // §86.1: no per-joint array and the flag clear, which is what a body-wide command is. This
+    // check measures whether a driver refuses a malformed command, and a mixed-mode body is not
+    // what it is about — `drivers/mock`'s own suite exercises the array, against a body it knows.
     let command = |mode: u8, joint_count: u16, seq: u32| Command {
         stamp_ns: 1,
         seq,
         mode,
-        _pad: [0; 3],
+        flags: 0,
+        _pad: [0; 2],
         joint_count,
         values: values.as_ptr(),
         mask: mask.as_ptr(),
+        modes: core::ptr::null(),
     };
 
     let well_formed = command(Mode::Position as u8, joints as u16, seq);
@@ -1199,6 +1216,56 @@ fn command_checks(
             status::EINVAL
         ),
     ));
+    seq += 1;
+
+    // ── §86.1's per-joint array ─────────────────────────────────────────────
+    //
+    // Only for a driver that says it reads the array. One case, and it is the one the second
+    // numbering exists for: a bare `SKR_MODE_*` written where an `SKR_JMODE_*` goes. A driver that
+    // accepts it has taken `SKR_MODE_TORQUE` (2) for a value in a vocabulary that starts at 0x10,
+    // and whatever it does next it is not what the caller asked for.
+    //
+    // There is deliberately no case here for *a mode this joint does not offer*. Which joint offers
+    // what is the descriptor's, this checker would be asserting a body's own table back at it, and
+    // a body all of whose joints share a mode has no such joint to name. `drivers/mock`'s suite
+    // covers it against a body it knows; §15 asks only that a malformed command be refused.
+    if !per_joint_modes {
+        report.push(CheckResult::new(
+            "rhal.command.rejection",
+            "rejects a base mode value in the per-joint array",
+            Outcome::NotApplicable,
+            "this driver does not declare `control.per_joint_modes`, so it never reads the array \
+             (§86.1) and a command carrying one is a command it is right to ignore."
+                .to_string(),
+        ));
+    } else {
+        let bad_modes = vec![Mode::Torque as u8; joints];
+        let malformed = Command {
+            stamp_ns: 1,
+            seq,
+            mode: Mode::Position as u8,
+            flags: skynet_rhal::cmd_flags::PER_JOINT_MODES,
+            _pad: [0; 2],
+            joint_count: joints as u16,
+            values: values.as_ptr(),
+            mask: mask.as_ptr(),
+            modes: bad_modes.as_ptr(),
+        };
+        // SAFETY: all three arrays are `joints` long and outlive the call; `joint_count` matches.
+        let rc = unsafe { write_command(ctx, &malformed, 0) };
+        report.push(CheckResult::assert(
+            "rhal.command.rejection",
+            "rejects a base mode value in the per-joint array",
+            rc == status::EINVAL,
+            format!(
+                "a `modes` array of SKR_MODE_TORQUE ({}) returned {rc}, and SKR_EINVAL ({}) was \
+                 expected. Per-joint modes are SKR_JMODE_* and start at 0x10 precisely so that this \
+                 transcription error is a refusal rather than a joint moving in the wrong units.",
+                Mode::Torque as u8,
+                status::EINVAL
+            ),
+        ));
+    }
 }
 
 fn estop_checks(

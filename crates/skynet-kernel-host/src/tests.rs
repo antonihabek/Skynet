@@ -24,6 +24,29 @@ use crate::run::Host;
 const CHANNELS: [&str; 2] = ["shoulder", "elbow"];
 const CEILINGS: [(&str, f64); 2] = [("shoulder", 1.0), ("elbow", 1.0)];
 
+// §86.3's map, which almost every case here wants empty. A `thread_local` rather than a parameter
+// on `limits`, because two tests care and adding an argument to a helper twenty cases call would
+// put an `&[]` in twenty places to say nothing.
+thread_local! {
+    static JOINT_MODES_CELL: core::cell::Cell<&'static [(&'static str, &'static str)]> =
+        const { core::cell::Cell::new(&[]) };
+}
+
+struct JointModes;
+
+impl JointModes {
+    fn get(&self) -> &'static [(&'static str, &'static str)] {
+        JOINT_MODES_CELL.with(core::cell::Cell::get)
+    }
+
+    /// Set for the rest of this test's thread. Tests run one per thread, so this does not leak.
+    fn set(&self, modes: &'static [(&'static str, &'static str)]) {
+        JOINT_MODES_CELL.with(|cell| cell.set(modes));
+    }
+}
+
+const JOINT_MODES: JointModes = JointModes;
+
 /// Limits over the two channels, with the guards and jerk fraction a case needs.
 fn limits<'a>(
     per_channel: &'a [(&'a str, f64)],
@@ -45,6 +68,7 @@ fn limits<'a>(
         max_delta_per_cycle: jerk,
         proximity: None,
         per_channel,
+        joint_modes: JOINT_MODES.get(),
         active_guards: active,
         unavailable_guards: FixedVec::new(),
         inert_guards: FixedVec::new(),
@@ -494,7 +518,7 @@ fn every_cycle_is_recorded_even_with_an_empty_ring() {
     assert!(
         body.written
             .iter()
-            .all(|(_, _, mask)| mask.iter().all(|entry| *entry == 0)),
+            .all(|written| written.mask.iter().all(|entry| *entry == 0)),
         "and every one of those writes is a mask of zeros",
     );
 }
@@ -546,6 +570,99 @@ fn a_posted_command_crosses_the_ring_and_reaches_the_body() {
         "the record carries what the policy asked for, not only what was sent",
     );
     assert!((body.position[0] - 0.4).abs() < 1e-6, "and the body moved");
+}
+
+/// §86.1: a body whose joints disagree about mode is commanded with a per-joint array.
+///
+/// The map is `ResolvedLimits`', which is the transport plan's, which is the body's — so the array
+/// the driver receives is derived from the descriptor rather than from anything this loop decided.
+/// The control is the case below it: the same body with both joints in one mode sends no array at
+/// all, because a v1 driver must not be handed a flag it does not read.
+#[test]
+fn a_mixed_mode_body_is_commanded_one_mode_per_joint() {
+    const MIXED: [(&str, &str); 2] = [("shoulder", "position"), ("elbow", "velocity")];
+    JOINT_MODES.set(&MIXED);
+
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+    let mut producer = ring.producer();
+    let mut consumer = Ring::open(&words).expect("the same ring").consumer();
+
+    let mut command = Command {
+        stamp_ns: 1_000_000,
+        seq: 1,
+        mode: mode::POSITION,
+        channels: 2,
+        ..Command::default()
+    };
+    command.values[0] = 0.4;
+    command.values[1] = -0.3;
+    command.mask[0] = 1;
+    command.mask[1] = 1;
+    producer.publish(&command).expect("the ring accepts it");
+
+    let mut body = Fake::new(2);
+    let limits = limits(&CEILINGS, &[Guard::Envelope], Some(1.0), &[]);
+    let mut host = Host::new(&CHANNELS);
+    host.step(
+        2_000_000,
+        &mut body,
+        &mut consumer,
+        &limits,
+        None::<&Envelope<'_>>,
+    );
+
+    let written = body.last().expect("the body was commanded");
+    assert_eq!(
+        written.modes,
+        &[skynet_rhal::jmode::POSITION, skynet_rhal::jmode::VELOCITY],
+        "each joint carries the mode the plan bound it in, not the command's own",
+    );
+
+    JOINT_MODES.set(&[]);
+}
+
+/// The control for the case above: joints that agree send no per-joint array.
+#[test]
+fn a_single_mode_body_sends_no_per_joint_array() {
+    const AGREED: [(&str, &str); 2] = [("shoulder", "position"), ("elbow", "position")];
+    JOINT_MODES.set(&AGREED);
+
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+    let mut producer = ring.producer();
+    let mut consumer = Ring::open(&words).expect("the same ring").consumer();
+
+    let mut command = Command {
+        stamp_ns: 1_000_000,
+        seq: 1,
+        mode: mode::POSITION,
+        channels: 2,
+        ..Command::default()
+    };
+    command.mask[0] = 1;
+    command.mask[1] = 1;
+    producer.publish(&command).expect("the ring accepts it");
+
+    let mut body = Fake::new(2);
+    let limits = limits(&CEILINGS, &[Guard::Envelope], Some(1.0), &[]);
+    let mut host = Host::new(&CHANNELS);
+    host.step(
+        2_000_000,
+        &mut body,
+        &mut consumer,
+        &limits,
+        None::<&Envelope<'_>>,
+    );
+
+    let written = body.last().expect("the body was commanded");
+    assert!(
+        written.modes.is_empty(),
+        "one mode for every joint is a body-wide command, and sending an array would hand a driver \
+         written before §86 a flag it does not read for no gain",
+    );
+
+    JOINT_MODES.set(&[]);
 }
 
 /// A channel the policy masks out is one it is not commanding, and never appears as a desired zero.
