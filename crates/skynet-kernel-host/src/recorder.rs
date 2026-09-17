@@ -45,11 +45,13 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use skynet_blackbox::record::{Cycle, CycleView, Entry, Shape};
+use skynet_blackbox::record::{Cycle, CycleView, Entry, EventCode, EventView, Shape};
 use skynet_blackbox::ring::{Geometry, Meta, Ring};
 use skynet_blackbox::seal::{seal, Reason, Sealed};
 use skynet_lock::ring_file;
 use skynet_lock::{Joining, Role, Writership};
+
+use crate::motion::MotionTurn;
 
 /// How many bytes the ring is preallocated with.
 ///
@@ -290,6 +292,27 @@ impl Recorder {
             effort: &cycle.effort,
         };
         self.write(mono_ns, Entry::Cycle(&view))
+    }
+
+    /// Append §88.3's record of one motion request and what was decided about it.
+    ///
+    /// Every request and every verdict, accepted and refused alike, because §26's completeness
+    /// argument is what makes an episode evidence: a recording that held only the motions which ran
+    /// could not tell *"the skill asked for nothing"* from *"the skill was refused ten times"*.
+    ///
+    /// The subject is the motion's own name and the detail is the sentence the turn produced, which
+    /// is the refusal's reason, the controller's reply, or §88.3's overdue bound. `skynetd` writes
+    /// its own events onto the same ring under §26.2's claim, which is why this goes through the
+    /// same `write` as a cycle does rather than opening anything of its own.
+    pub fn motion(&mut self, mono_ns: u64, turn: &MotionTurn) -> Result<u64, RecorderError> {
+        self.write(
+            mono_ns,
+            Entry::Event(&EventView {
+                code: EventCode::MotionRequest,
+                subject: &turn.motion,
+                detail: &turn.detail,
+            }),
+        )
     }
 
     fn write(&mut self, mono_ns: u64, entry: Entry<'_>) -> Result<u64, RecorderError> {

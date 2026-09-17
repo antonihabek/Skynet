@@ -623,6 +623,20 @@ pub enum EventCode {
     /// that happens, which is exactly the bar §41.1 sets — ordinary logging would have arrived as a
     /// free-string subject on an existing code, which is the shape that check refuses.
     SkillTransition = 15,
+    /// A motion request reached the process holding the driver, and what was decided (§88.3).
+    ///
+    /// §88.3: *"Every request and every verdict is a black box record, accepted and refused
+    /// alike."* That is not symmetry for its own sake. §26's completeness argument is what makes an
+    /// episode evidence, and a program-level body whose recording held only the motions that **ran**
+    /// could not distinguish *"the skill asked for nothing"* from *"the skill was refused ten
+    /// times"* — and the refusal is the more interesting record of the two.
+    ///
+    /// The subject is the motion's own name and the detail is the verdict: the refusal code where
+    /// there was one, the arguments where the controller took it, and the overdue bound where
+    /// §88.3's deadline fired. This is the sixteenth code and the vocabulary is still closed, on
+    /// [`EventCode::SkillTransition`]'s test: §88 names a specific thing that happens on a specific
+    /// path, rather than arriving as free text on a code that already existed.
+    MotionRequest = 16,
 }
 
 impl EventCode {
@@ -644,6 +658,7 @@ impl EventCode {
             13 => EventCode::ConfigChanged,
             14 => EventCode::Admission,
             15 => EventCode::SkillTransition,
+            16 => EventCode::MotionRequest,
             _ => return None,
         })
     }
@@ -666,6 +681,7 @@ impl EventCode {
             EventCode::ConfigChanged => "config_changed",
             EventCode::Admission => "admission",
             EventCode::SkillTransition => "skill_transition",
+            EventCode::MotionRequest => "motion_request",
         }
     }
 }

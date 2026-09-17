@@ -12,7 +12,7 @@
 //! the driver what shape the robot is would be a control loop that could change its mind about it
 //! mid-run. [`Rhal::describe`] exists for the moment before the loop, and is not on the trait.
 
-use skynet_dl::driver::{Buffers, Driver, DriverError, Sample, SensorFrame};
+use skynet_dl::driver::{Buffers, Driver, DriverError, ExtensionReply, Sample, SensorFrame};
 use std::ffi::CStr;
 use std::path::Path;
 
@@ -136,6 +136,21 @@ pub trait Actuator {
     /// No default. A body with no sensors answers `-ENOSYS` because it says so, not because a trait
     /// said it for it.
     fn read_sensor(&mut self, name: &CStr, into: &mut [u8]) -> Result<SensorFrame, ReadFailure>;
+
+    /// Whether this body has §4's vendor escape hatch, which is §88's motion route.
+    ///
+    /// Asked before it is needed, for [`Actuator::has_stop`]'s reason: a loop that discovered at
+    /// the moment a motion arrived that there was nowhere to send it would have admitted a request
+    /// it could not deliver, and the record would say the robot refused when the platform did.
+    fn has_extension(&self) -> bool;
+
+    /// Hand an admitted motion to the controller (§88.1).
+    ///
+    /// The token and the request's bytes are the vendor's (§4); what this platform owns is the
+    /// ordering of the arguments and the ten refusals that ran before the call. The reply comes
+    /// back whatever the code, because a controller's sentence about why it refused is the half an
+    /// integrator needs.
+    fn extension(&mut self, token: &CStr, request: &[u8]) -> ExtensionReply;
 }
 
 /// A driver loaded from a shared object.
@@ -240,6 +255,14 @@ impl Actuator for Rhal {
             .read_sensor(name, into)
             .map_err(|error| ReadFailure::from_driver(&error))
     }
+
+    fn has_extension(&self) -> bool {
+        self.driver.has_extension()
+    }
+
+    fn extension(&mut self, token: &CStr, request: &[u8]) -> ExtensionReply {
+        self.driver.extension(token, request)
+    }
 }
 
 /// A body made of arrays.
@@ -290,6 +313,12 @@ pub struct Fake {
     /// The ABI gives `read_sensor` no clock, so a driver stamps with its own. The fake's own clock
     /// is the one the loop last showed it, which is the nearest thing an array has to a sensor.
     pub last_ns: u64,
+    /// The extension token this fake answers, or `None` for a body with no escape hatch (§88.1).
+    pub extension_token: Option<String>,
+    /// Every request the loop handed the controller, in order, as the bytes that crossed §4.
+    pub motions: Vec<String>,
+    /// What the next [`Actuator::extension`] answers. `0` is *accepted*.
+    pub extension_result: i32,
 }
 
 impl Fake {
@@ -312,7 +341,16 @@ impl Fake {
             camera_fails: false,
             frames_after: Vec::new(),
             last_ns: 0,
+            extension_token: None,
+            motions: Vec::new(),
+            extension_result: 0,
         }
+    }
+
+    /// The same body, with §4's escape hatch under `token` — which is what makes it §88's.
+    pub fn with_extension(mut self, token: &str) -> Fake {
+        self.extension_token = Some(token.to_string());
+        self
     }
 
     /// The bytes the camera renders for its `frame`-th frame, counting from one.
@@ -435,5 +473,36 @@ impl Actuator for Fake {
             format: 0,
             len: bytes,
         })
+    }
+
+    fn has_extension(&self) -> bool {
+        self.extension_token.is_some()
+    }
+
+    fn extension(&mut self, token: &CStr, request: &[u8]) -> ExtensionReply {
+        let Some(offered) = self.extension_token.as_ref() else {
+            return ExtensionReply {
+                code: -38,
+                detail: "this fake has no escape hatch".to_string(),
+            };
+        };
+        if token.to_bytes() != offered.as_bytes() {
+            return ExtensionReply {
+                code: -38,
+                detail: format!("this fake offers `{offered}`"),
+            };
+        }
+        // Kept as the bytes that crossed §4 rather than as a parsed structure, because the order of
+        // the arguments is what §88.2 decides and a parsed map would throw it away.
+        self.motions
+            .push(String::from_utf8_lossy(request).into_owned());
+        ExtensionReply {
+            code: self.extension_result,
+            detail: if self.extension_result >= 0 {
+                "accepted".to_string()
+            } else {
+                "the fake was told to refuse this motion".to_string()
+            },
+        }
     }
 }
